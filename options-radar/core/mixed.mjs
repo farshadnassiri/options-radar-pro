@@ -101,16 +101,50 @@ export function analyzeMixed(legs, netCash, opt = {}) {
     }
   }
 
-  // ——— بیشترین سود و زیان از نمونه، به‌علاوه رفتار دو انتها ———
+  // ——— رفتار مجانبی دو انتها ———
+  //
+  // شیب را نمی‌شود از لبه پنجره رسم خواند. در دو برابر قیمت پایه، پای زنده
+  // هنوز ارزش زمانی دارد و شیب ظاهری صفر نیست. تقویمی خرید دقیقاً از همین‌جا
+  // «زیان نامحدود» می‌گرفت، در حالی که زیانش به بدهکار خالص محدود است — و
+  // چون مخرج بازده بیشترین زیان است، هر ردیف تقویمی از رتبه‌بندی می‌افتاد.
+  //
+  // پس شیب را جایی می‌سنجیم که ارزش زمانی پای زنده ته کشیده باشد: ده انحراف
+  // معیار لگاریتمی دورتر از قیمت پایه.
+  const maxSd = Math.max(0, ...optLegs.map((l) => {
+    const daysLeft = num(l.days, 0) - horizon;
+    return daysLeft > 0 ? sigma(l) * Math.sqrt(daysLeft / 365) : 0;
+  }));
+  const farUp = anchor * Math.exp(10 * maxSd + 2);
+  const farDn = Math.max(anchor * 1e-6, 1e-9);
+  const slopeAt = (S) => {
+    const h = Math.max(S * 1e-6, 1e-9);
+    return (value(S + h) - value(S - h)) / (2 * h);
+  };
+
+  // آستانه بی‌مقیاس نیست: شیب واحدِ «سهم» دارد، پس با اندازه موقعیت سنجیده
+  // می‌شود. EPS مطلق اینجا کار نمی‌کند چون باقیمانده عددی ارزش زمانی از آن
+  // بزرگ‌تر است.
+  const qtyScale = Math.max(1, ...legs.map((l) => Math.abs(signedQty(l))));
+  const flat = 1e-6 * qtyScale;
+
+  const slopeRight = slopeAt(farUp);
+  const slopeLeft = slopeAt(farDn);
+  const unlimitedProfit = slopeRight > flat;
+  const unlimitedLoss = slopeRight < -flat;
+
+  // ——— بیشترین سود و زیان ———
+  // نامزدها: نمونه‌های پنجره رسم، به‌علاوه دو انتهای واقعی. اگر تابع کراندار
+  // باشد، حد دو انتها خودش دست‌یافتنی است و باید دیده شود — پنجره رسم
+  // به‌تنهایی آن را از دست می‌دهد.
   let maxProfit = -Infinity, maxLoss = Infinity, atMaxProfit = NaN, atMaxLoss = NaN;
-  for (const p of pts) {
-    if (!ok(p.pnl)) continue;
-    if (p.pnl > maxProfit) { maxProfit = p.pnl; atMaxProfit = p.S; }
-    if (p.pnl < maxLoss) { maxLoss = p.pnl; atMaxLoss = p.S; }
-  }
-  const tailSlope = (pts[N].pnl - pts[N - 1].pnl) / (pts[N].S - pts[N - 1].S);
-  const unlimitedProfit = tailSlope > EPS;
-  const unlimitedLoss = tailSlope < -EPS;
+  const consider = (S, v) => {
+    if (!ok(v)) return;
+    if (v > maxProfit) { maxProfit = v; atMaxProfit = S; }
+    if (v < maxLoss) { maxLoss = v; atMaxLoss = S; }
+  };
+  for (const p of pts) consider(p.S, p.pnl);
+  consider(farDn, value(farDn));
+  if (!unlimitedProfit && !unlimitedLoss) consider(farUp, value(farUp));
 
   // ——— بازه‌های سود، برای احتمال سود ———
   const regions = [];
@@ -127,15 +161,16 @@ export function analyzeMixed(legs, netCash, opt = {}) {
     breakevens: breakevens.map((x) => Math.round(x * 1e6) / 1e6),
     maxProfit: unlimitedProfit ? Infinity : maxProfit,
     maxLoss: unlimitedLoss ? Infinity : (maxLoss === Infinity ? Infinity : -maxLoss),
-    maxLossSigned: maxLoss,
-    atMaxProfit, atMaxLoss,
-    atZero: value(1),
+    maxLossSigned: unlimitedLoss ? -Infinity : maxLoss,
+    atMaxProfit: unlimitedProfit ? Infinity : atMaxProfit,
+    atMaxLoss: unlimitedLoss ? Infinity : atMaxLoss,
+    atZero: value(farDn),
     nodes: pts.filter((_, i) => i % 8 === 0),
     points: pts,
     segments: null,
     regions,
-    slopeLeft: (pts[1].pnl - pts[0].pnl) / (pts[1].S - pts[0].S),
-    slopeRight: tailSlope,
+    slopeLeft,
+    slopeRight,
     strikes: ks,
     unlimitedProfit, unlimitedLoss,
     at: value,
