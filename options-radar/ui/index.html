@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>رصد استراتژی آپشن</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css">
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body data-theme="ledger">
+
+<header class="top">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">رصد استراتژی آپشن</span>
+    <span class="brand-sub">دفتر محاسبه، نه تابلوی تبلیغ</span>
+  </div>
+
+  <div class="health" id="health" role="status" aria-live="polite">
+    <span class="pill" id="h-market">—</span>
+    <span class="metric"><b id="h-age">—</b><i>سن عکس</i></span>
+    <span class="metric"><b id="h-rows">—</b><i>قرارداد</i></span>
+    <span class="metric"><b id="h-req">—</b><i>درخواست</i></span>
+    <span class="metric"><b id="h-cache">—</b><i>اصابت کش</i></span>
+    <span class="metric"><b id="h-err">—</b><i>خطا</i></span>
+    <span class="metric"><b id="h-ms">—</b><i>میلی‌ثانیه</i></span>
+    <button class="ghost" id="theme-btn" title="پوسته">پوسته</button>
+  </div>
+</header>
+
+<div class="shell">
+  <main class="stage" id="stage">
+    <div class="empty">
+      <h1>هیچ تبی باز نیست</h1>
+      <p>از ستون کنار، یک تب را انتخاب کن. تب‌ها تا باز نشوند نه داده می‌گیرند نه محاسبه می‌کنند.</p>
+    </div>
+  </main>
+
+  <nav class="rail" id="rail" aria-label="تب‌ها"></nav>
+</div>
+
+<script type="module" src="/ui/app.mjs"></script>
+</body>
+</html>
