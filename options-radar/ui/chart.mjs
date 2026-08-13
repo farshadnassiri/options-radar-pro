@@ -20,6 +20,42 @@ import { analyzeMixed, isSingleExpiry } from '/core/mixed.mjs';
 const money = (v) => (Number.isFinite(v) ? Math.round(v).toLocaleString('en-US') : '—');
 const MIN_SPAN = 1e-6;
 
+/** عدد کوتاه محور: میلیون و هزار خلاصه می‌شوند تا برچسب‌ها روی هم نیفتند. */
+function axisNum(v) {
+  if (!Number.isFinite(v)) return '—';
+  const a = Math.abs(v);
+  if (a >= 1e9) return `${(v / 1e9).toFixed(a >= 1e10 ? 0 : 1)}G`;
+  if (a >= 1e6) return `${(v / 1e6).toFixed(a >= 1e7 ? 0 : 1)}M`;
+  if (a >= 1e4) return `${Math.round(v / 1e3)}k`;
+  return money(v);
+}
+
+/**
+ * گام خوانا: ۱ ، ۲ ، ۵ در توان ده.
+ *
+ * قبلاً محور عمودی سه مقدار ثابت داشت — کف و صفر و سقف — و هر وقت صفر به
+ * یکی از دو سر نزدیک می‌شد، دو برچسب روی هم می‌افتادند. گام گرد این را حل
+ * می‌کند و عددهای محور را هم خواندنی می‌کند.
+ */
+function niceStep(span, count) {
+  if (!(span > 0)) return 1;
+  const raw = span / Math.max(1, count);
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const n = raw / mag;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * mag;
+}
+
+function ticksFor(lo, hi, count) {
+  if (!(hi > lo) || !Number.isFinite(lo) || !Number.isFinite(hi)) return [];
+  const step = niceStep(hi - lo, count);
+  const out = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) {
+    out.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+    if (out.length > 40) break;
+  }
+  return out;
+}
+
 /** موتور درست را انتخاب می‌کند و نقاط رسم را می‌دهد. */
 function seriesFor(legs, netCash, opt) {
   if (isSingleExpiry(legs)) {
@@ -40,7 +76,9 @@ function seriesFor(legs, netCash, opt) {
 function frame(points, analysis, opt, xMin, xMax) {
   const spot = opt.spot;
   const W = opt.width ?? 760, H = opt.height ?? 280;
-  const pad = { t: 16, r: 14, b: 32, l: 14 };
+  // حاشیه چپ جا برای برچسب محور عمودی باز می‌کند و حاشیه پایین برای دو ردیف
+  // برچسب: قیمت اعمال بالای محور، و مقیاس قیمت پایه زیر آن.
+  const pad = { t: 20, r: 16, b: 40, l: 54 };
 
   // فقط نقاط داخل بازه، به‌علاوه دو نقطه لبه که خط تا لبه قاب برسد
   const at = analysis.at;
@@ -69,24 +107,40 @@ function frame(points, analysis, opt, xMin, xMax) {
 
   const line = seq.map((p, i) => `${i ? 'L' : 'M'}${X(p.S).toFixed(1)},${Y(p.pnl).toFixed(1)}`).join(' ');
 
-  const strikes = analysis.strikes.filter((k) => k >= xMin && k <= xMax).map((k) => `
+  // ——— محور عمودی: گام گرد، برچسب سمت چپ، صفر جدا کشیده می‌شود ———
+  const yTicks = ticksFor(yMin, yMax, 4).filter((v) => Math.abs(Y(v) - y0) > 9 || v === 0);
+  const grid = yTicks.map((v) => `
+    <line class="grid-line" x1="${pad.l}" y1="${Y(v)}" x2="${W - pad.r}" y2="${Y(v)}"/>
+    <text x="${pad.l - 6}" y="${Y(v) + 3}" text-anchor="end">${axisNum(v)}</text>`).join('');
+
+  // ——— محور افقی: مقیاس قیمت پایه، زیر خط محور ———
+  // قیمت اعمال خودش برچسب دارد و اغلب دقیقاً روی یک گام گرد می‌افتد. اگر هر
+  // دو کشیده شوند، دو عدد یکسان زیر هم می‌نشینند. پس گامی که نزدیک یک قیمت
+  // اعمال است حذف می‌شود و برچسب دقیق‌تر — همان قیمت اعمال — می‌ماند.
+  const shownStrikes = analysis.strikes.filter((k) => k >= xMin && k <= xMax);
+  const xTicks = ticksFor(xMin, xMax, 6)
+    .filter((v) => !shownStrikes.some((k) => Math.abs(X(k) - X(v)) < 20))
+    .map((v) => `
+    <line class="grid-line" x1="${X(v)}" y1="${H - pad.b}" x2="${X(v)}" y2="${H - pad.b + 4}"/>
+    <text x="${X(v)}" y="${H - pad.b + 15}" text-anchor="middle">${axisNum(v)}</text>`).join('');
+
+  // قیمت اعمال بالای محور می‌نشیند تا با مقیاس قیمت پایه قاطی نشود
+  const strikes = shownStrikes.map((k) => `
     <line class="strike" x1="${X(k)}" y1="${pad.t}" x2="${X(k)}" y2="${H - pad.b}"/>
-    <text x="${X(k)}" y="${H - pad.b + 12}" text-anchor="middle">${money(k)}</text>`).join('');
+    <text class="lbl strike-lbl" x="${X(k)}" y="${H - pad.b - 5}" text-anchor="middle">${axisNum(k)}</text>`).join('');
 
   const bes = analysis.breakevens.filter((b) => b >= xMin && b <= xMax).map((b) => `
     <circle class="be" cx="${X(b)}" cy="${y0}" r="4"/>
-    <text class="lbl" x="${X(b)}" y="${y0 - 8}" text-anchor="middle">${money(b)}</text>`).join('');
+    <text class="lbl" x="${X(b)}" y="${y0 - 9}" text-anchor="middle">${money(b)}</text>`).join('');
 
   const spotLine = Number.isFinite(spot) && spot >= xMin && spot <= xMax
     ? `<line class="spot" x1="${X(spot)}" y1="${pad.t}" x2="${X(spot)}" y2="${H - pad.b}"/>
-       <text class="lbl" x="${X(spot)}" y="${pad.t - 4}" text-anchor="middle" style="fill:var(--warn)">پایه ${money(spot)}</text>` : '';
-
-  const ticks = [yMin + padY, 0, yMax - padY].map((v) => `
-    <line class="grid-line" x1="${pad.l}" y1="${Y(v)}" x2="${W - pad.r}" y2="${Y(v)}"/>
-    <text x="${W - pad.r}" y="${Y(v) - 3}" text-anchor="end">${money(v)}</text>`).join('');
+       <text class="lbl" x="${X(spot)}" y="${pad.t - 6}" text-anchor="middle" style="fill:var(--warn)">پایه ${money(spot)}</text>` : '';
 
   const svg = `<svg class="payoff" viewBox="0 0 ${W} ${H}" role="img" aria-label="نمودار بازده در سررسید">
-      ${ticks}${areas.join('')}${strikes}${spotLine}
+      ${grid}${areas.join('')}${strikes}${spotLine}
+      <line class="axis" x1="${pad.l}" y1="${H - pad.b}" x2="${W - pad.r}" y2="${H - pad.b}"/>
+      ${xTicks}
       <line class="zero" x1="${pad.l}" y1="${y0}" x2="${W - pad.r}" y2="${y0}"/>
       <path class="curve" d="${line}"/>${bes}
       <g class="cursor" hidden>

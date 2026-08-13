@@ -290,8 +290,12 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 .payoff .strike { stroke: var(--accent-2); stroke-width: 1; stroke-dasharray: 2 4; }
 .payoff .be { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
 .payoff .spot { stroke: var(--warn); stroke-width: 1.5; }
-.payoff text { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
-.payoff text.lbl { font-family: var(--sans); font-size: 10.5px; }
+/* عدد محور باید چپ‌به‌راست خوانده شود، وگرنه در صفحه راست‌به‌چپ علامت منفی
+   به انتهای عدد می‌پرد و «−۴۰M» به شکل «۴۰M−» دیده می‌شود. */
+.payoff text { font-family: var(--mono); font-size: 10px; fill: var(--muted); direction: ltr; unicode-bidi: bidi-override; }
+/* برچسب «پایه ۱۰۰٬۰۰۰» متن فارسی دارد، پس جهت طبیعی خودش را می‌خواهد */
+.payoff text.lbl { font-family: var(--sans); font-size: 10.5px; unicode-bidi: plaintext; }
+.payoff text.strike-lbl { font-family: var(--mono); font-size: 9.5px; fill: var(--accent-2); }
 
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 8px; }
 

@@ -13,7 +13,7 @@ import {
   coverage, strategyMargin, capitalBase, DEFAULT_PARAMS,
 } from '../core/margin.mjs';
 import { walkBook, resolvePrice, maxSize, bookCapacity } from '../core/exec.mjs';
-import { evaluate, profitRegions, probOfProfit } from '../core/evaluate.mjs';
+import { evaluate, profitRegions, probOfProfit, breakevenMetrics } from '../core/evaluate.mjs';
 import { CATALOG, buildLegs, byId } from '../strategies/catalog.mjs';
 import { defaults } from '../core/settings.mjs';
 import { buildChain, underlyingList, chainStats } from '../core/chain.mjs';
@@ -750,6 +750,44 @@ group('۱۶. موتور چند-سررسیدی — کرانداری');
   // ارزش در قیمت پایه نزدیک صفر: هر دو کال بی‌ارزش، پس همان بدهکار خالص
   check('ارزش در قیمت پایه صفر، بدهکار خالص است', near(a.atZero, -2_000_000, 1e-6),
     `${Math.round(a.atZero).toLocaleString()}`);
+}
+
+group('۱۷. سنجه‌های سربه‌سری');
+{
+  const S = 100000;
+  // یک سربه‌سری بالای پایه: پایه باید ۵٪ بالا برود
+  const up = breakevenMetrics([105000], S);
+  check('فاصله تا سربه‌سری بالاتر، مثبت است', near(up.beDistPct, 5, 1e-9), `${up.beDistPct}٪`);
+  check('نزدیک‌ترین سربه‌سری، همان تک نقطه است', up.beNear === 105000);
+
+  // یک سربه‌سری زیر پایه: علامت منفی است، ولی حاشیه امن بدون علامت
+  const dn = breakevenMetrics([92000], S);
+  check('فاصله تا سربه‌سری پایین‌تر، منفی است', near(dn.beDistPct, -8, 1e-9), `${dn.beDistPct}٪`);
+  check('حاشیه امن بدون علامت است', near(dn.beRoomPct, 8, 1e-9));
+
+  // استرادل: دو سربه‌سری. نزدیک‌ترین انتخاب می‌شود، نه اولی.
+  const strad = breakevenMetrics([94000, 108000], S);
+  check('از دو سربه‌سری، نزدیک‌ترین به پایه انتخاب شد', strad.beNear === 94000,
+    `${strad.beNear} در برابر ${strad.beHigh}`);
+  check('پایین و بالا درست تفکیک شدند', strad.beLow === 94000 && strad.beHigh === 108000);
+  check('پهنای سربه‌سری، درصد قیمت پایه است', near(strad.beWidthPct, 14, 1e-9), `${strad.beWidthPct}٪`);
+  check('شمار سربه‌سری', strad.beCount === 2);
+
+  // ترتیب ورودی نباید اثر بگذارد
+  const rev = breakevenMetrics([108000, 94000], S);
+  check('ترتیب ورودی اثر ندارد', rev.beNear === strad.beNear && rev.beLow === strad.beLow);
+
+  // بدون سربه‌سری یا بدون قیمت پایه، عدد ساختگی ساخته نمی‌شود
+  const none = breakevenMetrics([], S);
+  check('بی‌سربه‌سری، همه سنجه‌ها نامعتبرند',
+    !Number.isFinite(none.beNear) && !Number.isFinite(none.beDistPct) && none.beCount === 0);
+  check('قیمت پایه نامعتبر، سنجه نمی‌سازد', !Number.isFinite(breakevenMetrics([100], 0).beNear));
+
+  // تک سربه‌سری پهنا ندارد
+  check('تک سربه‌سری پهنا ندارد', !Number.isFinite(up.beWidthPct));
+  // مقدار بی‌معنی در فهرست، دور ریخته می‌شود
+  const dirty = breakevenMetrics([NaN, -5, 0, 103000], S);
+  check('سربه‌سری بی‌معنی کنار گذاشته شد', dirty.beCount === 1 && dirty.beNear === 103000);
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════
