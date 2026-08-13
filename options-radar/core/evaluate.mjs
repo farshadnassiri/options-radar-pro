@@ -203,6 +203,7 @@ export function evaluate({ legs, quotes, ctx }) {
 
     // سود و زیان
     breakevens: payoff.breakevens,
+    ...breakevenMetrics(payoff.breakevens, S),
     singleExpiry, payoffApprox: !!payoff.approx, horizonDays: payoff.horizonDays ?? days,
     maxProfit: payoff.maxProfit, maxLoss: payoff.maxLoss,
     unlimitedProfit: payoff.unlimitedProfit, unlimitedLoss: payoff.unlimitedLoss,
@@ -254,6 +255,40 @@ export function evaluate({ legs, quotes, ctx }) {
  *   fmt : money | pct | num | int | text | list
  *   heat: نام طیف رنگی، اگر ستون کمی و قابل مقایسه باشد
  */
+/**
+ * سنجه‌های سربه‌سری نسبت به قیمت پایه فعلی.
+ *
+ * «سربه‌سری ۹۶٬۲۲۳» به‌تنهایی چیزی نمی‌گوید تا وقتی ندانی پایه کجاست. آنچه
+ * قابل مقایسه است، فاصله نسبی است: پایه چند درصد باید حرکت کند تا به
+ * نزدیک‌ترین سربه‌سری برسد.
+ *
+ *   beNear      نزدیک‌ترین سربه‌سری به قیمت پایه
+ *   beDistPct   فاصله علامت‌دار تا آن، درصد قیمت پایه.
+ *               مثبت یعنی سربه‌سری بالای پایه است و پایه باید بالا برود.
+ *   beRoomPct   اندازه همان فاصله، بدون علامت — ستون مرتب‌سازی «حاشیه امن»
+ *   beLow       پایین‌ترین سربه‌سری ، beHigh  بالاترین
+ *   beWidthPct  فاصله دو سر، درصد قیمت پایه. برای استرادل و کندور معنی دارد.
+ */
+export function breakevenMetrics(bes, S) {
+  const list = (Array.isArray(bes) ? bes : []).filter((b) => ok(b) && b > 0);
+  if (!list.length || !(S > 0)) {
+    return { beNear: NaN, beDistPct: NaN, beRoomPct: NaN, beLow: NaN, beHigh: NaN, beWidthPct: NaN, beCount: list.length };
+  }
+  let near = list[0];
+  for (const b of list) if (Math.abs(b - S) < Math.abs(near - S)) near = b;
+  const lo = Math.min(...list);
+  const hi = Math.max(...list);
+  return {
+    beNear: near,
+    beDistPct: ((near - S) / S) * 100,
+    beRoomPct: (Math.abs(near - S) / S) * 100,
+    beLow: lo,
+    beHigh: hi,
+    beWidthPct: list.length > 1 ? ((hi - lo) / S) * 100 : NaN,
+    beCount: list.length,
+  };
+}
+
 export const COLUMNS = [
   { key: 'strategy', label: 'استراتژی', fmt: 'text', group: 'هویت', pin: true },
   { key: 'underlying', label: 'پایه', fmt: 'text', group: 'هویت', pin: true },
@@ -263,7 +298,14 @@ export const COLUMNS = [
   { key: 'grossCash', label: 'نقد ناخالص', fmt: 'money', group: 'جریان نقد' },
   { key: 'entryFee', label: 'کارمزد ورود', fmt: 'money', group: 'جریان نقد' },
   { key: 'netCash', label: 'نقد خالص', fmt: 'money', group: 'جریان نقد' },
+  { key: 'S', label: 'قیمت پایه', fmt: 'money', group: 'سود و زیان' },
   { key: 'breakevens', label: 'سربه‌سری', fmt: 'list', group: 'سود و زیان' },
+  { key: 'beNear', label: 'نزدیک‌ترین سربه‌سری', fmt: 'money', group: 'سود و زیان' },
+  { key: 'beDistPct', label: 'فاصله تا سربه‌سری ٪', fmt: 'pct', group: 'سود و زیان' },
+  { key: 'beRoomPct', label: 'حاشیه امن ٪', fmt: 'pct', group: 'سود و زیان', heat: 'prob' },
+  { key: 'beLow', label: 'سربه‌سری پایین', fmt: 'money', group: 'سود و زیان' },
+  { key: 'beHigh', label: 'سربه‌سری بالا', fmt: 'money', group: 'سود و زیان' },
+  { key: 'beWidthPct', label: 'پهنای سربه‌سری ٪', fmt: 'pct', group: 'سود و زیان' },
   { key: 'maxProfit', label: 'بیشترین سود', fmt: 'money', group: 'سود و زیان', heat: 'gain' },
   { key: 'maxLoss', label: 'بیشترین زیان', fmt: 'money', group: 'سود و زیان', heat: 'loss' },
   { key: 'staticPnl', label: 'سود اگر پایه ثابت بماند', fmt: 'money', group: 'سود و زیان' },

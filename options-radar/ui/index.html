@@ -30,14 +30,21 @@
 </header>
 
 <div class="shell">
+  <!-- فهرست استراتژی‌ها سمت راست است، همان سمتی که چشم در راست‌به‌چپ از آن شروع می‌کند -->
+  <nav class="rail" id="rail" aria-label="تب‌ها">
+    <div class="rail-search">
+      <input type="search" id="rail-q" placeholder="جست‌وجوی استراتژی…" autocomplete="off" aria-label="جست‌وجوی استراتژی">
+      <span class="rail-count" id="rail-count"></span>
+    </div>
+    <div class="rail-list" id="rail-list"></div>
+  </nav>
+
   <main class="stage" id="stage">
     <div class="empty">
       <h1>هیچ تبی باز نیست</h1>
       <p>از ستون کنار، یک تب را انتخاب کن. تب‌ها تا باز نشوند نه داده می‌گیرند نه محاسبه می‌کنند.</p>
     </div>
   </main>
-
-  <nav class="rail" id="rail" aria-label="تب‌ها"></nav>
 </div>
 
 <script type="module" src="/ui/app.mjs"></script>

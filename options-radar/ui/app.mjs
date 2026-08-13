@@ -125,27 +125,107 @@ for (const [key, label] of Object.entries(SGROUPS)) {
 TABS.push({ id: 'positions', title: 'موقعیت‌های من', section: 'موقعیت من', phase: 7, mod: '/ui/tabs/positions.mjs' });
 TABS.push({ id: 'roll', title: 'تحلیل رول', section: 'موقعیت من', phase: 7, mod: '/ui/tabs/roll.mjs' });
 
+// ————————————————————————————————— فهرست کناری —————————————————————————————————
+//
+// سی‌وچهار تب در یک ستون، بدون کمک، یعنی پیمایش. سه چیز آن را قابل استفاده
+// می‌کند: جست‌وجو که فهرست را کوتاه می‌کند، بخش‌های تاشو که آنچه امروز کار
+// نداری را جمع می‌کند، و برچسب جهت هر استراتژی که بدون باز کردن تب می‌گوید
+// صعودی است یا نزولی یا خنثی.
+//
+// حالت تاشو در حافظه مرورگر می‌ماند، وگرنه هر بار باز کردن صفحه از نو
+// همان کار دستی را می‌خواهد.
+
+const FOLD_KEY = 'rail:folded';
+const loadFolded = () => {
+  try { return new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || '[]')); }
+  catch { return new Set(); }
+};
+const folded = loadFolded();
+const saveFolded = () => {
+  try { localStorage.setItem(FOLD_KEY, JSON.stringify([...folded])); } catch { /* بی‌اهمیت */ }
+};
+
+/** جهت هر استراتژی، برای برچسب رنگی کنار نامش. */
+function dirTone(def) {
+  const d = String(def?.dir || '');
+  if (/صعودی/.test(d)) return ['صعودی', 'up'];
+  if (/نزولی/.test(d)) return ['نزولی', 'down'];
+  if (/خنثی|بی‌جهت/.test(d)) return ['خنثی', 'flat'];
+  if (/تلاطم/.test(d)) return ['تلاطم', 'vol'];
+  return [null, null];
+}
+
+const norm = (s) => String(s || '').replace(/[ي]/g, 'ی').replace(/[ك]/g, 'ک').replace(/‌/g, ' ').trim();
+
+let railQuery = '';
+
 function buildRail() {
-  const rail = el('rail');
+  const list = el('rail-list');
   const sections = [...new Set(TABS.map((t) => t.section))];
-  rail.innerHTML = '';
+  const q = norm(railQuery).toLowerCase();
+
+  const matches = (t) => {
+    if (!q) return true;
+    const hay = norm(`${t.title} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
+    return hay.includes(q);
+  };
+
+  let shown = 0;
+  list.innerHTML = '';
   for (const sec of sections) {
-    const h = document.createElement('h4');
-    h.textContent = sec;
-    rail.appendChild(h);
-    for (const t of TABS.filter((x) => x.section === sec)) {
+    const tabs = TABS.filter((x) => x.section === sec && matches(x));
+    if (!tabs.length) continue;
+    shown += tabs.length;
+
+    // جست‌وجو، تاشدگی را موقتاً باز می‌کند — وگرنه نتیجه پیدا شده پنهان می‌ماند
+    const isFolded = !q && folded.has(sec);
+
+    const grp = document.createElement('section');
+    grp.className = 'rail-group';
+    grp.dataset.folded = isFolded ? '1' : '0';
+
+    const head = document.createElement('button');
+    head.type = 'button';
+    head.className = 'rail-head';
+    head.setAttribute('aria-expanded', isFolded ? 'false' : 'true');
+    head.innerHTML = `<span class="caret" aria-hidden="true"></span>
+      <span class="rail-head-name">${sec}</span>
+      <span class="rail-head-n">${tabs.length}</span>`;
+    head.addEventListener('click', () => {
+      if (folded.has(sec)) folded.delete(sec); else folded.add(sec);
+      saveFolded();
+      buildRail();
+    });
+    grp.appendChild(head);
+
+    const items = document.createElement('div');
+    items.className = 'rail-items';
+    for (const t of tabs) {
       const b = document.createElement('button');
       b.className = 'tab-btn';
       b.type = 'button';
       b.dataset.tab = t.id;
       b.dataset.locked = t.mod ? '0' : '1';
-      const mark = t.def && !t.def.feasible ? '⃰' : '';
-      b.title = t.def && !t.def.feasible ? t.def.infeasibleWhy : (t.def?.note || t.def?.dir || t.title);
-      b.innerHTML = `<span>${t.title}${mark}</span><span class="phase">${t.def?.legs?.length ?? ''}${t.def ? ' پا' : ''}</span>`;
+      b.setAttribute('aria-current', current === t.id ? 'true' : 'false');
+      const infeasible = t.def && !t.def.feasible;
+      b.title = infeasible ? t.def.infeasibleWhy : (t.def?.note || t.def?.dir || t.title);
+      const [tone, cls] = dirTone(t.def);
+      b.innerHTML = `
+        <span class="tab-name">${t.title}</span>
+        ${infeasible ? '<span class="tab-flag" title="اجرا در تابلو ممکن نیست">⃰</span>' : ''}
+        ${tone ? `<span class="tone ${cls}">${tone}</span>` : ''}
+        ${t.def?.legs?.length ? `<span class="phase">${t.def.legs.length} پا</span>` : ''}`;
       b.addEventListener('click', () => open(t.id));
-      rail.appendChild(b);
+      items.appendChild(b);
     }
+    grp.appendChild(items);
+    list.appendChild(grp);
   }
+
+  if (!shown) {
+    list.innerHTML = '<p class="rail-none">چیزی پیدا نشد.</p>';
+  }
+  el('rail-count').textContent = q ? `${shown} از ${TABS.length}` : `${TABS.length} تب`;
 }
 
 let current = null;
@@ -181,6 +261,17 @@ function applyTheme(name) {
 }
 el('theme-btn').addEventListener('click', () => {
   applyTheme(document.body.dataset.theme === 'ledger' ? 'board' : 'ledger');
+});
+
+el('rail-q').addEventListener('input', (e) => {
+  railQuery = e.target.value;
+  buildRail();
+});
+// در فهرست فیلترشده، اینتر یعنی «همان یکی که مانده را باز کن»
+el('rail-q').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const first = el('rail-list').querySelector('.tab-btn');
+  if (first) open(first.dataset.tab);
 });
 
 // ————————————————————————————————— شروع —————————————————————————————————

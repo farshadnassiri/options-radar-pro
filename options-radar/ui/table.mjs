@@ -1,7 +1,11 @@
-// جدول مشترک — مجازی‌سازی‌شده، مرتب‌شدنی روی هر ستون، رنگی.
+// جدول مشترک — مجازی‌سازی‌شده، مرتب‌شدنی روی هر ستون، ستون‌هایش انتخابی.
 //
 // چرا مجازی‌سازی: ده هزار ردیف با پنجاه ردیف رسم‌شده. مرتب‌سازی روی شاخص
 // انجام می‌شود نه روی ردیف، و رسم فقط برای ردیف‌های داخل قاب.
+//
+// ستون‌ها ثابت نیستند. نمای آماده نقطه شروع است، نه قفس: هر ستونی از قرارداد
+// ستونی مشترک را می‌شود اضافه یا کم کرد و انتخاب هر جدول جدا در حافظه مرورگر
+// می‌ماند. سرستون همیشه بالای قاب می‌چسبد و روی هر ستون مرتب می‌شود.
 //
 // رنگ سه لایه دارد:
 //   طیف حرارتی روی ستون‌های کمی، مثل بازده و هزینه اجرا
@@ -28,48 +32,165 @@ const HEAT = {
   prob: ['--accent-soft', '--accent'],
 };
 
+const NUM_FMT = new Set(['money', 'pct', 'num', 'int']);
+
+/** انتخاب ستون هر جدول جدا می‌ماند، تا نمای تب سرمایه نمای تب یونانی را عوض نکند. */
+function loadPick(storeKey) {
+  if (!storeKey) return null;
+  try {
+    const raw = localStorage.getItem(`cols:${storeKey}`);
+    const arr = raw ? JSON.parse(raw) : null;
+    return Array.isArray(arr) && arr.length ? arr : null;
+  } catch { return null; }
+}
+function savePick(storeKey, keys) {
+  if (!storeKey) return;
+  try { localStorage.setItem(`cols:${storeKey}`, JSON.stringify(keys)); } catch { /* حافظه پر یا قفل */ }
+}
+function clearPick(storeKey) {
+  if (!storeKey) return;
+  try { localStorage.removeItem(`cols:${storeKey}`); } catch { /* بی‌اهمیت */ }
+}
+
 /**
  * جدول را می‌سازد و یک دسته کنترل برمی‌گرداند.
- *   cols: [{ key, label, fmt, heat, pin }]
+ *
+ *   cols     ستون‌های شروع  [{ key, label, fmt, heat, group, pin }]
+ *   opts.all همه ستون‌های ممکن، ورودی انتخابگر. اگر ندهی، انتخابگر نمی‌آید.
+ *   opts.storeKey  کلید ماندگاری انتخاب ستون در حافظه مرورگر
  */
 export function makeTable(host, cols, opts = {}) {
+  const all = opts.all && opts.all.length ? opts.all : cols;
+  const byKey = new Map(all.map((c) => [c.key, c]));
+  const baseKeys = cols.map((c) => c.key);
+
+  // انتخاب ذخیره‌شده فقط تا جایی معتبر است که ستون‌هایش هنوز وجود داشته باشند
+  const saved = loadPick(opts.storeKey)?.filter((k) => byKey.has(k));
+  let keys = saved?.length ? saved : baseKeys;
+
   // یک جدول واحد با سرستون چسبان. دو جدول جدا، ستون‌ها را هم‌تراز نمی‌کند،
   // و مجازی‌سازی با ردیف فاصله‌گذار انجام می‌شود نه با جابه‌جایی، تا عرض
   // ستون‌ها از محتوای واقعی بیاید.
   host.innerHTML = `
     <div class="tbl-wrap">
+      <div class="tbl-tools">
+        <button type="button" class="ghost tbl-cols-btn" ${all === cols ? 'hidden' : ''}>
+          ستون‌ها <b class="tbl-cols-n"></b>
+        </button>
+        <span class="tbl-sort"></span>
+        <span class="sp"></span>
+        <span class="tbl-count"></span>
+      </div>
+      <div class="col-panel" hidden></div>
       <div class="tbl-body" tabindex="0"><table class="data"><thead><tr></tr></thead><tbody></tbody></table></div>
-      <div class="tbl-foot"><span id="tbl-count"></span><span class="sp"></span><span id="tbl-sort"></span></div>
     </div>`;
 
+  const wrap = host.querySelector('.tbl-wrap');
   const headRow = host.querySelector('thead tr');
   const body = host.querySelector('.tbl-body');
   const tbody = host.querySelector('tbody');
-  const foot = host.querySelector('#tbl-count');
-  const sortLbl = host.querySelector('#tbl-sort');
+  const countLbl = host.querySelector('.tbl-count');
+  const sortLbl = host.querySelector('.tbl-sort');
+  const colsBtn = host.querySelector('.tbl-cols-btn');
+  const colsN = host.querySelector('.tbl-cols-n');
+  const panel = host.querySelector('.col-panel');
 
   let rows = [];
   let view = [];
-  let sortKey = opts.sortKey || cols[0].key;
+  let sortKey = opts.sortKey && byKey.has(opts.sortKey) ? opts.sortKey : keys[0];
   let sortDir = -1;
   const ranges = new Map();
 
-  for (const c of cols) {
-    const th = document.createElement('th');
-    th.textContent = c.label;
-    th.title = `مرتب‌سازی بر ${c.label}`;
-    th.dataset.key = c.key;
-    th.addEventListener('click', () => {
-      if (sortKey === c.key) sortDir = -sortDir;
-      else { sortKey = c.key; sortDir = -1; }
-      apply();
-    });
-    headRow.appendChild(th);
+  const active = () => keys.map((k) => byKey.get(k)).filter(Boolean);
+
+  // ——— سرستون: چسبان بالای قاب، و روی هر ستون مرتب می‌شود ———
+  function buildHead() {
+    headRow.innerHTML = '';
+    for (const c of active()) {
+      const th = document.createElement('th');
+      th.textContent = c.label;
+      th.title = `مرتب‌سازی بر ${c.label}`;
+      th.dataset.key = c.key;
+      if (NUM_FMT.has(c.fmt)) th.classList.add('n');
+      th.addEventListener('click', () => {
+        if (sortKey === c.key) sortDir = -sortDir;
+        else { sortKey = c.key; sortDir = -1; }
+        apply();
+      });
+      headRow.appendChild(th);
+    }
+    colsN.textContent = `${keys.length}/${all.length}`;
   }
+
+  // ——— انتخابگر ستون ———
+  function buildPanel() {
+    if (all === cols) return;
+    const groups = [...new Set(all.map((c) => c.group || 'دیگر'))];
+    panel.innerHTML = `
+      <div class="col-panel-head">
+        <span>هر ستونی را می‌شود اضافه یا کم کرد. انتخاب همین جدول ذخیره می‌ماند.</span>
+        <span class="sp"></span>
+        <button type="button" class="ghost" data-act="base">نمای آماده</button>
+        <button type="button" class="ghost" data-act="all">همه</button>
+        <button type="button" class="ghost" data-act="close">بستن</button>
+      </div>
+      <div class="col-groups">
+        ${groups.map((g) => `
+          <div class="col-group">
+            <h5>${g}</h5>
+            ${all.filter((c) => (c.group || 'دیگر') === g).map((c) => `
+              <label class="col-opt">
+                <input type="checkbox" data-key="${c.key}" ${keys.includes(c.key) ? 'checked' : ''}>
+                <span>${c.label}</span>
+              </label>`).join('')}
+          </div>`).join('')}
+      </div>`;
+
+    panel.querySelectorAll('input[data-key]').forEach((box) => {
+      box.addEventListener('change', () => {
+        const k = box.dataset.key;
+        if (box.checked) {
+          // ترتیب قرارداد ستونی حفظ می‌شود، نه ترتیب کلیک
+          keys = all.map((c) => c.key).filter((x) => x === k || keys.includes(x));
+        } else {
+          if (keys.length === 1) { box.checked = true; return; } // جدول بی‌ستون معنی ندارد
+          keys = keys.filter((x) => x !== k);
+        }
+        if (!keys.includes(sortKey)) sortKey = keys[0];
+        savePick(opts.storeKey, keys);
+        buildHead();
+        apply();
+      });
+    });
+
+    panel.querySelector('[data-act="close"]').addEventListener('click', togglePanel);
+    panel.querySelector('[data-act="all"]').addEventListener('click', () => setKeys(all.map((c) => c.key)));
+    panel.querySelector('[data-act="base"]').addEventListener('click', () => {
+      clearPick(opts.storeKey);
+      setKeys(baseKeys, true);
+    });
+  }
+
+  function setKeys(next, skipSave = false) {
+    keys = next.filter((k) => byKey.has(k));
+    if (!keys.length) keys = baseKeys;
+    if (!keys.includes(sortKey)) sortKey = keys[0];
+    if (!skipSave) savePick(opts.storeKey, keys);
+    buildHead();
+    buildPanel();
+    apply();
+  }
+
+  function togglePanel() {
+    const open = panel.hasAttribute('hidden');
+    panel.toggleAttribute('hidden', !open);
+    colsBtn?.setAttribute('aria-pressed', open ? 'true' : 'false');
+  }
+  colsBtn?.addEventListener('click', togglePanel);
 
   function computeRanges() {
     ranges.clear();
-    for (const c of cols) {
+    for (const c of active()) {
       if (!c.heat) continue;
       let lo = Infinity, hi = -Infinity;
       for (const r of view) {
@@ -117,13 +238,14 @@ export function makeTable(host, cols, opts = {}) {
     for (const th of headRow.children) {
       th.dataset.sorted = th.dataset.key === k ? (dir < 0 ? 'desc' : 'asc') : '';
     }
-    const col = cols.find((c) => c.key === k);
+    const col = byKey.get(k);
     sortLbl.textContent = `مرتب بر ${col?.label ?? k} ${dir < 0 ? '↓' : '↑'}`;
-    foot.textContent = `${view.length.toLocaleString('en-US')} ردیف`;
+    countLbl.textContent = `${view.length.toLocaleString('en-US')} ردیف`;
     draw();
   }
 
   function draw() {
+    const shown = active();
     const top = body.scrollTop;
     const h = body.clientHeight || 400;
     const first = Math.max(0, Math.floor(top / ROW_H) - OVER);
@@ -135,10 +257,10 @@ export function makeTable(host, cols, opts = {}) {
       const tr = document.createElement('tr');
       tr.className = rowClass(r);
       tr.dataset.i = i;
-      for (const c of cols) {
+      for (const c of shown) {
         const td = document.createElement('td');
         const v = r[c.key];
-        const isNum = c.fmt === 'money' || c.fmt === 'pct' || c.fmt === 'num' || c.fmt === 'int';
+        const isNum = NUM_FMT.has(c.fmt);
         td.className = isNum ? 'n' : '';
         td.textContent = (fmt[c.fmt] || fmt.text)(v);
         if (c.heat) td.style.cssText = heatStyle(c, v);
@@ -152,7 +274,7 @@ export function makeTable(host, cols, opts = {}) {
     if (first > 0) {
       const sp = document.createElement('tr');
       sp.style.height = `${first * ROW_H}px`;
-      sp.innerHTML = `<td colspan="${cols.length}"></td>`;
+      sp.innerHTML = `<td colspan="${shown.length}"></td>`;
       tbody.appendChild(sp);
     }
     tbody.appendChild(frag);
@@ -160,22 +282,28 @@ export function makeTable(host, cols, opts = {}) {
     if (rest > 0) {
       const sp = document.createElement('tr');
       sp.style.height = `${rest * ROW_H}px`;
-      sp.innerHTML = `<td colspan="${cols.length}"></td>`;
+      sp.innerHTML = `<td colspan="${shown.length}"></td>`;
       tbody.appendChild(sp);
     }
     if (!view.length) {
-      tbody.innerHTML = `<tr><td colspan="${cols.length}" style="padding:18px;color:var(--muted)">
+      tbody.innerHTML = `<tr><td colspan="${shown.length}" style="padding:18px;color:var(--muted)">
         ردیفی نمانده. نوار تشخیص بالا می‌گوید ترکیب‌ها کجا افتادند.</td></tr>`;
     }
   }
 
   body.addEventListener('scroll', () => requestAnimationFrame(draw), { passive: true });
 
+  buildHead();
+  buildPanel();
+
   return {
     set(next) { rows = next || []; apply(); },
     get() { return view; },
-    sortBy(key) { sortKey = key; sortDir = -1; apply(); },
+    sortBy(key) { if (byKey.has(key)) { sortKey = key; sortDir = -1; } apply(); },
+    setColumns(next) { setKeys(next); },
+    columns() { return [...keys]; },
     redraw: draw,
+    root: wrap,
   };
 }
 

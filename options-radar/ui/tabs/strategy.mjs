@@ -14,7 +14,7 @@ import { analyzePayoff, scenarioGrid } from '/core/payoff.mjs';
 import { analyzeMixed, isSingleExpiry } from '/core/mixed.mjs';
 import { makeTable, funnelBar, fmt } from '/ui/table.mjs';
 import { makePicker } from '/ui/picker.mjs';
-import { payoffSvg } from '/ui/chart.mjs';
+import { mountPayoff } from '/ui/chart.mjs';
 import { runScan, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 
 const VIEWS = {
@@ -159,6 +159,9 @@ export async function mount(root, { tab, state, api }) {
     const cols = VIEWS[view].map((k) => COLUMNS.find((c) => c.key === k)).filter(Boolean);
     table = makeTable(root.querySelector('#table'), cols, {
       sortKey: s().rankBy, onPick: showDetail,
+      // نما نقطه شروع است، نه قفس: هر ستون دیگری از قرارداد ستونی مشترک را
+      // می‌شود اضافه یا کم کرد، و انتخاب هر استراتژی و هر نما جدا می‌ماند.
+      all: COLUMNS, storeKey: `${def.id}:${view}`,
     });
     table.set(rows);
   }
@@ -184,6 +187,7 @@ export async function mount(root, { tab, state, api }) {
   }
 
   // ——— پانل جزئیات ———
+  let chart = null;
   function showDetail(r) {
     picked = r;
     const card = root.querySelector('#detail-card');
@@ -196,7 +200,6 @@ export async function mount(root, { tab, state, api }) {
       fees, spot: r.S, width: 720, height: 260,
       sigma: r.sigmaUse, rFree: s().rFree, divYield: s().divYield,
     };
-    const { svg } = payoffSvg(r.__legs, r.netCash, chartOpt);
     const an = single
       ? analyzePayoff(r.__legs, r.netCash, { fees })
       : analyzeMixed(r.__legs, r.netCash, { fees, spot: r.S, sigma: r.sigmaUse, rFree: s().rFree, divYield: s().divYield });
@@ -233,7 +236,7 @@ export async function mount(root, { tab, state, api }) {
 
     root.querySelector('#detail').innerHTML = `
       <div>
-        ${svg}
+        <div id="chart"></div>
         <div class="legend">
           ${an.approx ? `<span style="color:var(--warn)">${an.note}</span>` : ''}
           <span>سربه‌سری: ${an.breakevens.map((b) => Math.round(b).toLocaleString('en-US')).join(' , ') || '—'}</span>
@@ -282,6 +285,10 @@ export async function mount(root, { tab, state, api }) {
           <tbody>${scenRows}</tbody>
         </table>
       </div>`;
+
+    // نمودار بعد از نشستن قالب سوار می‌شود، چون به اندازه واقعی قاب نیاز دارد
+    chart?.destroy();
+    chart = mountPayoff(root.querySelector('#chart'), r.__legs, r.netCash, chartOpt);
   }
 
   // ——— اجرای اسکن ———
@@ -329,5 +336,5 @@ export async function mount(root, { tab, state, api }) {
   });
 
   setStatus();
-  return () => { offWatch(); offChain(); clearInterval(timer); };
+  return () => { offWatch(); offChain(); clearInterval(timer); chart?.destroy(); };
 }

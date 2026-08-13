@@ -10,6 +10,7 @@
 
 import { CATALOG, byId, buildLegs } from '/strategies/catalog.mjs';
 import { grossCash, entryFees, analyzePayoff, chartPoints } from '/core/payoff.mjs';
+import { mountPayoff } from '/ui/chart.mjs';
 import { evaluate, profitRegions } from '/core/evaluate.mjs';
 
 const fmt = {
@@ -129,53 +130,15 @@ export async function mount(root, { state }) {
   }
 
   // ——— نمودار ———
-  function drawChart(an, pts, spotPx) {
-    const W = 900, H = 320, pad = { t: 18, r: 16, b: 34, l: 16 };
-    const xs = pts.map((p) => p.S);
-    const ys = pts.map((p) => p.pnl).filter(Number.isFinite);
-    const xMin = Math.min(...xs), xMax = Math.max(...xs);
-    let yMin = Math.min(...ys, 0), yMax = Math.max(...ys, 0);
-    const padY = (yMax - yMin) * 0.12 || 1;
-    yMin -= padY; yMax += padY;
-
-    const X = (v) => pad.l + ((v - xMin) / (xMax - xMin || 1)) * (W - pad.l - pad.r);
-    const Y = (v) => pad.t + (1 - (v - yMin) / (yMax - yMin || 1)) * (H - pad.t - pad.b);
-    const y0 = Y(0);
-
-    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p.S).toFixed(1)},${Y(p.pnl).toFixed(1)}`).join(' ');
-
-    // ناحیه سود و ناحیه زیان، جدا و رنگ‌شده
-    const areas = [];
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i], b = pts[i + 1];
-      if (!Number.isFinite(a.pnl) || !Number.isFinite(b.pnl)) continue;
-      const cls = (a.pnl + b.pnl) / 2 >= 0 ? 'fill-gain' : 'fill-loss';
-      areas.push(`<path class="${cls}" d="M${X(a.S)},${y0} L${X(a.S)},${Y(a.pnl)} L${X(b.S)},${Y(b.pnl)} L${X(b.S)},${y0} Z"/>`);
-    }
-
-    const strikeLines = an.strikes.map((k) => `
-      <line class="strike" x1="${X(k)}" y1="${pad.t}" x2="${X(k)}" y2="${H - pad.b}"/>
-      <text x="${X(k)}" y="${H - pad.b + 13}" text-anchor="middle">${Math.round(k).toLocaleString('en-US')}</text>`).join('');
-
-    const beDots = an.breakevens
-      .filter((b) => b >= xMin && b <= xMax)
-      .map((b) => `<circle class="be" cx="${X(b)}" cy="${y0}" r="4"/>
-                   <text class="lbl" x="${X(b)}" y="${y0 - 9}" text-anchor="middle">${Math.round(b).toLocaleString('en-US')}</text>`).join('');
-
-    const spotLine = spotPx >= xMin && spotPx <= xMax
-      ? `<line class="spot" x1="${X(spotPx)}" y1="${pad.t}" x2="${X(spotPx)}" y2="${H - pad.b}"/>` : '';
-
-    const yTicks = [yMin + padY, 0, yMax - padY].map((v) => `
-      <line class="grid-line" x1="${pad.l}" y1="${Y(v)}" x2="${W - pad.r}" y2="${Y(v)}"/>
-      <text x="${W - pad.r}" y="${Y(v) - 3}" text-anchor="end">${fmt.money(v)}</text>`).join('');
-
-    root.querySelector('#chart').innerHTML = `
-      <svg class="payoff" viewBox="0 0 ${W} ${H}" role="img" aria-label="نمودار بازده در سررسید">
-        ${yTicks}${areas.join('')}${strikeLines}${spotLine}
-        <line class="zero" x1="${pad.l}" y1="${y0}" x2="${W - pad.r}" y2="${y0}"/>
-        <path class="curve" d="${line}"/>
-        ${beDots}
-      </svg>`;
+  // نمودار همان مؤلفه مشترک تب‌های دیگر است، پس زوم و خط راهنما را رایگان
+  // می‌گیرد و یک نسخه دوم از منطق رسم نگه داشته نمی‌شود.
+  let chart = null;
+  function drawChart(legs, net, fees, spotPx) {
+    chart?.destroy();
+    chart = mountPayoff(root.querySelector('#chart'), legs, net, {
+      fees, spot: spotPx, width: 900, height: 320, padPct: 0.4,
+      sigma: 0.6, rFree: state.settings.rFree, divYield: state.settings.divYield,
+    });
   }
 
   // ——— جدول‌ها ———
@@ -289,11 +252,11 @@ export async function mount(root, { state }) {
       `بازده در سررسید — ${reg.length} بازه سود، ${analysis.breakevens.length} نقطه سربه‌سری`;
 
     drawKpis(row, analysis);
-    drawChart(analysis, points, spot);
+    drawChart(legs, net, fees, spot);
     drawSegments(analysis);
     drawRow(row);
   }
 
   render(true);
-  return () => {};
+  return () => { chart?.destroy(); };
 }
