@@ -38,7 +38,6 @@
   --radius-md: 8px;
   --radius-lg: 14px;
   --radius-pill: 999px;
-  --ease: cubic-bezier(.4, 0, .2, 1);
   --transition-fast: .15s cubic-bezier(.4, 0, .2, 1);
   --transition-med: .25s cubic-bezier(.4, 0, .2, 1);
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
@@ -763,8 +762,12 @@ table.data thead th {
 table.data thead th:hover { color: var(--accent); }
 table.data tbody tr { transition: background var(--transition-fast); }
 table.data tbody tr:hover { background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
-table.data tbody tr:nth-child(even) { background: color-mix(in srgb, var(--panel-2) 30%, transparent); }
-table.data tbody tr:nth-child(even):hover { background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
+/* راه‌راه ملایم ردیف‌ها. ردیف‌های نشان‌دار (نزدیک‌به‌پول، نامزد انتخاب‌شده)
+   صریحاً کنار گذاشته می‌شوند: اولویت `tr:nth-child(even)` با `tr.atm` دقیقاً
+   برابر است، پس اگر فقط به ترتیب نوشتن تکیه کنیم، هر جابه‌جایی قواعد همان
+   باگ دورهای ۲۴ و ۴۶ را بی‌صدا برمی‌گرداند. */
+table.data tbody tr:nth-child(even):not(.atm):not(.picked) { background: color-mix(in srgb, var(--panel-2) 30%, transparent); }
+table.data tbody tr:nth-child(even):not(.atm):not(.picked):hover { background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
 /* ردیف نزدیک‌به‌پول دیده‌بان زنجیره (chain.mjs) قبلاً با style این‌لاین رنگ
    می‌گرفت که همیشه بر :hover بالا می‌زد — هاور روی همان ردیف هیچ بازخوردی
    نداشت، برخلاف بقیه ردیف‌های همان جدول. کلاس با اولویت برابر :hover را
@@ -1057,4 +1060,19 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
   margin: 8px 0 0; padding: 8px 10px;
   background: var(--warn-soft); border: 1px solid var(--warn);
   border-radius: var(--radius-md); font-size: 12.5px; color: var(--ink-2); line-height: 1.7;
+}
+
+/* ——— کاهش حرکت ———
+   بلوک‌های موضعی بالاتر فقط سه انیمیشن مشخص را خاموش می‌کنند. این قاعده
+   عمومی، ترنزیشن‌ها و جابه‌جایی‌های تازه (دکمه، چیپ، کارت، KPI) را هم
+   می‌پوشاند. آخر فایل است تا بر همه بالا بزند. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .btn:hover, .primary:hover, .ghost:hover, .chip:hover, .step-btn:hover,
+  .kpi:hover, .btn:active, .primary:active, .ghost:active { transform: none; }
 }
