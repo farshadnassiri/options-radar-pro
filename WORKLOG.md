@@ -26,6 +26,33 @@
 
 ## انجام‌شده
 
+### ۱۴۰۵/۰۵/۲۵ — مدرن‌سازی رابط کاربری (CSS)
+
+- **سیستم طراحی:** توکن‌های جدید `--radius-sm/md/lg/pill`، `--shadow-sm/md/lg`،
+  `--transition-fast/med`، `--ease` به هر دو پوسته (دفتر و تابلو) اضافه شدند.
+  `--radius` از ۶px به ۸px ارتقا یافت.
+- **نوار بالا:** اثر شیشه‌ای (glassmorphic) با `backdrop-filter: blur(14px)`،
+  مرز نیمه‌شفاف و سایه ملایم.
+- **دکمه‌ها:** `.btn`/`.primary` از gradient به رنگ جامد accent، گوشه `14px`،
+  hover با بالاآمدن ۲px و سایه عمیق‌تر، active با `scale(.97)`.
+  `.ghost` از gradient به `transparent` ساده، `.btn.sec` با hover accent.
+  `.step-btn` دایره‌ای (TradingView-style). `.chip` با `font-weight: 500` و
+  hover بالاآمدن ملایم.
+- **فیلدها:** `border-radius: 8px`، `padding: 8px 12px`، سایه داخلی ملایم،
+  حلقه فوکوس درخشان accent با `box-shadow: 0 0 0 3px`.
+- **کارت‌ها:** مرز نیمه‌شفاف، `box-shadow-md`، hover با سایه عمیق‌تر.
+- **جداول:** سرستون شیشه‌ای با `backdrop-filter`، zebra-striping ملایم،
+  مرز جداکننده ضخیم‌تر `2px`. ردیف‌ها با transition نرم‌تر.
+- **ناوبری کناری:** جست‌وجو با سایه داخلی و فوکوس درخشان، `.tab-btn` با
+  نوار فعال ۴px (از ۳px)، تراز بَج‌ها بزرگ‌تر و خواناتر.
+- **اسکرول‌بار:** سفارشی ۶px باریک با رنگ هماهنگ تم (هم webkit هم Firefox).
+- **تولتیپ:** شیشه‌ای با `backdrop-filter: blur(14px)` و سایه عمیق.
+- **KPI:** نوار کناری ۴px، hover با بالاآمدن و سایه. تگ‌ها با فضای بیشتر.
+- **سایر:** `::selection` رنگ accent، `text-rendering: optimizeLegibility`،
+  `.scan-progress-fill` با `border-radius` کپسولی.
+- سقف رنگ سخت‌کدشده CSS از ۱۴ به ۹ کاهش یافت (بدون شکستن نگهبان).
+- **معیار:** ۴۳۸ آزمون موتور و ۱۷ نگهبان، صفر رد.
+
 ### ۱۴۰۵/۰۵/۲۴ — قرارداد کار عامل‌ها، CI و نگهبان‌های قواعد
 
 - مخزن از این پس با کار **ترتیبی** چند عامل (Claude، Codex، Antigravity)

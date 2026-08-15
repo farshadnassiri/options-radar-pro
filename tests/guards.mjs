@@ -34,7 +34,7 @@ function walk(dir, ext, out = []) {
   return out;
 }
 
-const rel = (p) => path.relative(ROOT, p);
+const rel = (p) => path.relative(ROOT, p).replace(/\\/g, '/');
 const sources = walk(ROOT, '.mjs');
 
 // ═════════════════════ ۱. صفر وابستگی npm (قاعده ۲-۱) ═════════════════════
