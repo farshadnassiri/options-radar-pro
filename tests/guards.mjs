@@ -1,0 +1,145 @@
+// آزمون‌های نگهبان قواعد مخزن.
+//
+// این‌ها رفتار برنامه را نمی‌سنجند؛ قواعد `AGENTS.md` را می‌سنجند. متن یک
+// قاعده، خواهش است؛ آزمونش، قانون. هر عاملی که فایل قواعد را نخوانده باشد،
+// اینجا قرمز می‌شود.
+//
+// اجرا:  node tests/guards.mjs
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { fmt, faNum } from '../ui/fmt.mjs';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+let pass = 0, fail = 0;
+const results = [];
+
+function check(name, cond, detail = '') {
+  if (cond) { pass += 1; results.push(['✔', name, detail]); }
+  else { fail += 1; results.push(['✘', name, detail]); }
+}
+function group(t) { results.push(['—', t, '']); }
+
+const SKIP_DIRS = new Set(['.git', 'node_modules', '.cache']);
+
+function walk(dir, ext, out = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (SKIP_DIRS.has(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, ext, out);
+    else if (entry.name.endsWith(ext)) out.push(full);
+  }
+  return out;
+}
+
+const rel = (p) => path.relative(ROOT, p);
+const sources = walk(ROOT, '.mjs');
+
+// ═════════════════════ ۱. صفر وابستگی npm (قاعده ۲-۱) ═════════════════════
+group('۱. صفر وابستگی npm');
+{
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  const depFields = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
+  const found = depFields.filter((f) => pkg[f] && Object.keys(pkg[f]).length > 0);
+  check('package.json هیچ وابستگی اعلام نکرده', found.length === 0,
+    found.length ? `پیدا شد: ${found.join('، ')}` : '');
+
+  const locks = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml']
+    .filter((f) => fs.existsSync(path.join(ROOT, f)));
+  check('فایل قفل بسته ساخته نشده', locks.length === 0, locks.join('، '));
+
+  check('پوشه node_modules در مخزن نیست', !fs.existsSync(path.join(ROOT, 'node_modules')));
+  check('پروژه ESM اعلام شده', pkg.type === 'module', `type=${pkg.type}`);
+}
+
+// ═════════════════════ ۲. مسیر import (قاعده ۲-۱ و ۲-۲) ═════════════════════
+group('۲. هر import یا محلی است یا node:');
+{
+  const bare = [];
+  const IMPORT_RE = /(?:^|\n)\s*(?:import|export)[^'"\n]*?from\s*['"]([^'"]+)['"]|(?:^|\n)\s*import\s*['"]([^'"]+)['"]/g;
+  for (const file of sources) {
+    const src = fs.readFileSync(file, 'utf8');
+    for (const m of src.matchAll(IMPORT_RE)) {
+      const spec = m[1] || m[2];
+      if (!spec) continue;
+      // مسیر با `/` هم محلی است: فایل‌های ui از راه سرور محلی بار می‌شوند.
+      const ok = spec.startsWith('./') || spec.startsWith('../') || spec.startsWith('/')
+        || spec.startsWith('node:');
+      if (!ok) bare.push(`${rel(file)} → ${spec}`);
+    }
+  }
+  check('هیچ import از بسته بیرونی نیست', bare.length === 0, bare.slice(0, 3).join('، '));
+
+  const requires = sources
+    .filter((f) => rel(f) !== 'tests/guards.mjs')     // خود این فایل نام قاعده را می‌نویسد
+    .filter((f) => /\brequire\s*\(/.test(fs.readFileSync(f, 'utf8')));
+  check('هیچ require() در کد نیست', requires.length === 0, requires.map(rel).slice(0, 3).join('، '));
+}
+
+// ═════════════════════ ۳. رقم فارسی در خروجی نمایشی (قاعده ۲-۳) ═════════════════════
+group('۳. رقم نمایشی فارسی است');
+{
+  const hasLatinDigit = (s) => /[0-9]/.test(String(s));
+
+  check('faNum رقم لاتین را فارسی می‌کند', !hasLatinDigit(faNum('12345')), faNum('12345'));
+  check('fmt.num رقم لاتین بیرون نمی‌دهد', !hasLatinDigit(fmt.num(1234567)), String(fmt.num(1234567)));
+  check('fmt.num منفی هم رقم لاتین ندارد', !hasLatinDigit(fmt.num(-9876)), String(fmt.num(-9876)));
+  check('fmt.pct رقم لاتین ندارد', !hasLatinDigit(fmt.pct(12.34)), String(fmt.pct(12.34)));
+}
+
+// ═════════════════════ ۴. رنگ از توکن می‌آید (قاعده ۲-۶) ═════════════════════
+//
+// این دو نگهبان «جغجغه»‌اند: سقف امروز را نگه می‌دارند و اجازه بدترشدن
+// نمی‌دهند. هر بار که رنگی به توکن تبدیل شد، سقف را در همین‌جا پایین
+// بیاورید. هدف، رسیدن هر دو به صفر است.
+group('۴. رنگ سخت‌کدشده بیشتر نمی‌شود');
+{
+  const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|\brgba?\s*\([^)]*\)|\bhsla?\s*\([^)]*\)/g;
+  const countColors = (text) => (text.match(COLOR_RE) || []).length;
+
+  // ۴-۱ — جاوااسکریپت: رنگ اصلاً نباید در کد باشد.
+  const JS_CEILING = 18;
+  const jsHits = [];
+  for (const file of sources.filter((f) => rel(f).startsWith('ui/'))) {
+    const n = countColors(fs.readFileSync(file, 'utf8'));
+    if (n) jsHits.push([rel(file), n]);
+  }
+  const jsTotal = jsHits.reduce((a, [, n]) => a + n, 0);
+  check(`رنگ سخت‌کدشده در ui/*.mjs از ${JS_CEILING} بیشتر نشده`, jsTotal <= JS_CEILING,
+    `${jsTotal} مورد${jsHits.length ? ' — ' + jsHits.map(([f, n]) => `${f}:${n}`).join('، ') : ''}`);
+
+  // ۴-۲ — CSS: فقط داخل بلوک‌های توکن مجاز است.
+  const CSS_CEILING = 14;
+  let css = fs.readFileSync(path.join(ROOT, 'ui/style.css'), 'utf8');
+  css = css.replace(/\/\*[\s\S]*?\*\//g, '');                      // کامنت‌ها
+  css = css.replace(/:root\s*\{[\s\S]*?\n\}/, '');                 // بلوک توکن پوسته دفتر
+  css = css.replace(/body\[data-theme="board"\]\s*\{[\s\S]*?\n\}/, '');
+  const cssTotal = countColors(css);
+  check(`رنگ سخت‌کدشده بیرون بلوک توکن از ${CSS_CEILING} بیشتر نشده`, cssTotal <= CSS_CEILING,
+    `${cssTotal} مورد`);
+}
+
+// ═════════════════════ ۵. حافظه پروژه (قاعده ۴) ═════════════════════
+group('۵. فایل‌های قرارداد و حافظه سر جایشان هستند');
+{
+  for (const f of ['AGENTS.md', 'CLAUDE.md', 'WORKLOG.md', 'TASK_STATUS.md', 'README.md']) {
+    check(`${f} موجود است`, fs.existsSync(path.join(ROOT, f)));
+  }
+}
+
+// ═══════════════════════════ گزارش ═══════════════════════════
+const W = 62;
+console.log('\n' + '═'.repeat(W));
+console.log('  نگهبان قواعد مخزن');
+console.log('═'.repeat(W));
+for (const [mark, name, detail] of results) {
+  if (mark === '—') { console.log('\n' + name); continue; }
+  const pad = name.length > 46 ? name.slice(0, 46) : name.padEnd(46, ' ');
+  console.log(` ${mark} ${pad} ${detail}`);
+}
+console.log('\n' + '─'.repeat(W));
+console.log(`  قبول ${pass}   رد ${fail}`);
+console.log('─'.repeat(W) + '\n');
+process.exit(fail ? 1 : 0);
