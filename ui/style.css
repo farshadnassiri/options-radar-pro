@@ -30,7 +30,16 @@
   --cmp3: #1f6f8b;
   --cmp4: #5c7a29;
   --shadow: 0 1px 2px rgba(22, 32, 44, .06), 0 8px 24px rgba(22, 32, 44, .05);
-  --radius: 6px;
+  --shadow-sm: 0 1px 3px rgba(22, 32, 44, .08);
+  --shadow-md: 0 2px 6px rgba(22, 32, 44, .06), 0 8px 24px rgba(22, 32, 44, .07);
+  --shadow-lg: 0 4px 12px rgba(22, 32, 44, .08), 0 16px 40px rgba(22, 32, 44, .1);
+  --radius: 8px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --transition-fast: .15s cubic-bezier(.4, 0, .2, 1);
+  --transition-med: .25s cubic-bezier(.4, 0, .2, 1);
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --sans: Vazirmatn, "IRANSans", "Segoe UI", Tahoma, system-ui, sans-serif;
 }
@@ -58,6 +67,9 @@ body[data-theme="board"] {
   --cmp3: #5fb8d6;
   --cmp4: #a9c96e;
   --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, .35);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, .35), 0 16px 40px rgba(0, 0, 0, .3);
 }
 
 * { box-sizing: border-box; }
@@ -68,13 +80,27 @@ html, body {
   font-family: var(--sans);
   font-size: 14px; line-height: 1.65;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 html { direction: ltr; height: 100%; }
 body { direction: rtl; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
 
 b, strong { font-weight: 700; }
 code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* ——— اسکرول‌بار مدرن ——— */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink) 18%, transparent);
+  border-radius: var(--radius-pill);
+}
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--ink) 32%, transparent); }
+@supports (scrollbar-width: thin) {
+  * { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink) 18%, transparent) transparent; }
+}
 
 /* ——— نوار بالا ——— */
 .top {
@@ -82,15 +108,19 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   flex: none;
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 10px 18px;
-  background: var(--panel); border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.6);
+  -webkit-backdrop-filter: blur(14px) saturate(1.6);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 4%, transparent);
 }
 .brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .brand-mark {
-  width: 10px; height: 22px; border-radius: 2px; align-self: center;
+  width: 10px; height: 24px; border-radius: 3px; align-self: center;
   background: linear-gradient(180deg, var(--accent) 0 55%, var(--accent-2) 55% 100%);
 }
 .brand-name { font-weight: 800; letter-spacing: -.4px; font-size: 17px; }
-.brand-sub { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.brand-sub { color: var(--muted); font-size: 12px; white-space: nowrap; letter-spacing: .01em; }
 @media (max-width: 900px) { .brand-sub { display: none; } }
 
 .health { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -103,8 +133,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .warn-metric b { color: var(--loss); }
 
 .pill {
-  padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  padding: 4px 12px; border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 600;
   background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2);
+  letter-spacing: .02em;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 .pill.open { background: var(--gain-soft); border-color: var(--gain); color: var(--gain); }
 .pill.shut { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
@@ -153,15 +185,23 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   position: sticky; top: 0; z-index: 2;
   display: flex; align-items: center; gap: 8px;
   padding: 12px 12px 10px;
-  background: var(--panel); border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line-soft);
 }
 .rail-search input {
   flex: 1; min-width: 0;
   background: var(--panel-2); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 999px;
-  padding: 7px 13px; font: inherit; font-size: 13.5px;
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  padding: 8px 14px; font: inherit; font-size: 13.5px;
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.rail-search input:focus { border-color: var(--accent); outline: none; }
+.rail-search input:focus {
+  border-color: var(--accent); outline: none;
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent), 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .rail-search input::-webkit-search-cancel-button { cursor: pointer; }
 .rail-count { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
 
@@ -175,6 +215,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   background: none; border: 0; border-radius: var(--radius);
   color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 700;
   letter-spacing: .08em; text-transform: uppercase; text-align: start; cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
 .rail-head:hover { color: var(--ink-2); background: var(--panel-2); }
 .rail-head .caret {
@@ -195,11 +236,12 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 /* دو سطری: نام در سطر اول با قلم درشت‌تر، و سطر دوم برای نشان شکل بازده و
    برچسب‌های کوتاه. سطر دوم کم‌رنگ است تا نام همچنان اول خوانده شود. */
 .tab-btn {
-  display: flex; flex-direction: column; align-items: stretch; gap: 3px; width: 100%;
-  padding: 8px 11px; margin-bottom: 2px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%;
+  padding: 9px 12px; margin-bottom: 2px;
   background: none; border: 0; border-radius: var(--radius);
   color: var(--ink-2); font: inherit; font-size: 14.5px; text-align: start; cursor: pointer;
-  position: relative; transition: background .12s ease, color .12s ease;
+  position: relative;
+  transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 .tab-btn:hover { background: var(--panel-2); color: var(--ink); }
 .tab-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -211,18 +253,18 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 /* نشانگر انتخاب روی لبه رو به فهرست می‌نشیند، پس در راست‌به‌چپ سمت راست است */
 .tab-btn[aria-current="true"]::before {
   content: ""; position: absolute; inset-inline-start: 0; inset-block: 4px;
-  width: 3px; border-radius: 0 3px 3px 0; background: var(--accent);
+  width: 4px; border-radius: 0 4px 4px 0; background: var(--accent);
 }
 .tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-btn .phase {
   flex: none; font-family: var(--mono); font-size: 10.5px;
   color: var(--muted); background: var(--panel-2);
-  border: 1px solid var(--line-soft); border-radius: 3px; padding: 0 4px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0 5px;
 }
 .tab-btn .tab-flag { flex: none; color: var(--warn); font-weight: 700; }
 .tab-btn .tone {
-  flex: none; font-size: 10.5px; font-weight: 700; padding: 0 6px;
-  border-radius: 999px; border: 1px solid transparent; line-height: 1.6;
+  flex: none; font-size: 11px; font-weight: 700; padding: 1px 7px;
+  border-radius: var(--radius-pill); border: 1px solid transparent; line-height: 1.6;
 }
 .tone.up { background: var(--gain-soft); color: var(--gain); border-color: var(--gain); }
 .tone.down { background: var(--loss-soft); color: var(--loss); border-color: var(--loss); }
@@ -233,7 +275,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 /* برجستگی صفحه‌کلید (بالا/پایین در جست‌وجوی فهرست)، جدا از تب باز */
 .tab-btn[data-kbd-active="1"]:not([aria-current="true"]) {
   background: var(--panel-2);
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 .stage { padding: 20px 22px 60px; min-width: 0; min-height: 0; height: 100%; overflow: auto; direction: ltr; }
@@ -598,17 +640,19 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .page-head p { margin: 4px 0 0; color: var(--muted); max-width: 74ch; }
 
 .card {
-  background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius); box-shadow: var(--shadow);
+  background: var(--panel); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-md);
   padding: 16px; margin-bottom: 16px;
+  transition: box-shadow var(--transition-med), transform var(--transition-med);
 }
+.card:hover { box-shadow: var(--shadow-lg); }
 .card > h3 {
   margin: 0 0 2px; font-size: 13px; font-weight: 700;
   display: flex; align-items: center; gap: 8px;
 }
 .card > h3 .scope {
   font-family: var(--mono); font-size: 10px; font-weight: 500; color: var(--muted);
-  border: 1px solid var(--line); border-radius: 3px; padding: 0 4px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 0 5px;
 }
 .card > .note { margin: 0 0 14px; color: var(--muted); font-size: 12.5px; }
 
@@ -617,9 +661,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   position: sticky; top: 46px; z-index: 5;
   display: flex; flex-wrap: wrap; gap: 6px;
   padding: 10px; margin-bottom: 16px;
-  background: color-mix(in srgb, var(--ground) 88%, transparent);
-  backdrop-filter: blur(4px);
-  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--ground) 85%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--line-soft); border-radius: var(--radius-md);
 }
 .settings-card { scroll-margin-top: 108px; }
 .settings-card > h3 {
@@ -633,12 +678,16 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .field .hint { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
 .field input, .field select {
   background: var(--panel-2); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 4px;
-  padding: 6px 8px; font: inherit; font-size: 13px; width: 100%;
-  transition: border-color .12s ease;
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 8px 12px; font: inherit; font-size: 13px; width: 100%;
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .field input[type="number"] { font-family: var(--mono); direction: ltr; text-align: start; }
-.field input:focus, .field select:focus { border-color: var(--accent); }
+.field input:focus, .field select:focus {
+  border-color: var(--accent); outline: none;
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent), 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .field.row { flex-direction: row; align-items: center; gap: 8px; }
 .field.row input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .unit { font-size: 11px; color: var(--muted); font-family: var(--mono); }
@@ -646,44 +695,50 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .num-ctl { display: flex; align-items: center; gap: 4px; }
 .num-ctl input[type="number"] { text-align: center; }
 .step-btn {
-  flex: none; width: 26px; height: 28px; padding: 0;
-  background: linear-gradient(180deg, var(--panel), var(--panel-2)); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+  flex: none; width: 28px; height: 28px; padding: 0;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 50%;
   font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
-  box-shadow: 0 2px 5px rgba(22, 32, 44, .08); transition: transform .14s ease, background .14s ease, border-color .14s ease;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.step-btn:hover { background: var(--accent-soft); border-color: var(--accent); transform: translateY(-1px); }
-.step-btn:active { filter: brightness(.94); transform: translateY(0); }
+.step-btn:hover { background: var(--accent-soft); border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.step-btn:active { filter: brightness(.94); transform: translateY(0); box-shadow: none; }
 .num-range { width: 100%; margin-top: 2px; accent-color: var(--accent); }
 
 .scan-progress {
-  height: 4px; margin-top: 10px; border-radius: 2px; overflow: hidden;
+  height: 4px; margin-top: 10px; border-radius: var(--radius-pill); overflow: hidden;
   background: var(--line-soft);
 }
 .scan-progress-fill {
   height: 100%; width: 0%; background: var(--accent);
-  transition: width .25s ease, opacity .25s ease;
+  border-radius: var(--radius-pill);
+  transition: width var(--transition-med), opacity var(--transition-med);
 }
 
 .btn, .primary {
-  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 86%, #fff), var(--accent));
-  color: #fff; border: 1px solid color-mix(in srgb, var(--accent) 78%, #000); border-radius: 10px;
-  padding: 9px 17px; font: inherit; font-weight: 800; font-size: 13px; cursor: pointer;
-  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 22%, transparent), inset 0 1px 0 rgba(255,255,255,.22);
-  transition: transform .14s ease, filter .14s ease, box-shadow .14s ease;
+  background: var(--accent);
+  color: #fff; border: 1px solid color-mix(in srgb, var(--accent) 78%, #000); border-radius: var(--radius-lg);
+  padding: 9px 18px; font: inherit; font-weight: 800; font-size: 13px; cursor: pointer; letter-spacing: .02em;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.14);
+  transition: transform var(--transition-fast), filter var(--transition-fast), box-shadow var(--transition-fast);
 }
-.btn:hover, .primary:hover { filter: brightness(1.07); transform: translateY(-1px); box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 28%, transparent); }
-.btn:active, .primary:active { filter: brightness(.94); transform: translateY(1px); box-shadow: 0 2px 7px color-mix(in srgb, var(--accent) 20%, transparent); }
+.btn:hover, .primary:hover { filter: brightness(1.08); transform: translateY(-2px); box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255,255,255,.14); }
+.btn:active, .primary:active { filter: brightness(.95); transform: scale(.97); box-shadow: none; }
 .btn:disabled, .primary:disabled { opacity: .48; cursor: not-allowed; filter: none; transform: none; box-shadow: none; }
-.btn.sec { background: linear-gradient(180deg, var(--panel), var(--panel-2)); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 3px 9px rgba(22,32,44,.08); }
-.ghost {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, #fff), var(--panel-2));
-  border: 1px solid var(--line); color: var(--ink-2); box-shadow: 0 2px 6px rgba(22,32,44,.07);
-  border-radius: 9px; padding: 6px 12px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
-  transition: transform .14s ease, background .14s ease, border-color .14s ease, color .14s ease, box-shadow .14s ease;
+.btn.sec {
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+  box-shadow: var(--shadow-sm);
 }
-.ghost:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); box-shadow: 0 5px 12px rgba(22,32,44,.11); }
-.ghost:active { background: var(--accent-soft); transform: translateY(1px); }
-.ghost[aria-pressed="true"] { background: linear-gradient(135deg, var(--accent-soft), color-mix(in srgb, var(--accent-soft) 70%, var(--panel))); border-color: var(--accent); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent); }
+.btn.sec:hover { background: var(--panel-2); border-color: var(--accent); color: var(--accent); }
+.ghost {
+  background: var(--panel); border: 1px solid var(--line); color: var(--ink-2);
+  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-md); padding: 6px 12px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.ghost:hover { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.ghost:active { background: var(--accent-soft); transform: scale(.97); }
+.ghost[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); box-shadow: inset 0 1px 3px color-mix(in srgb, var(--accent) 14%, transparent); }
 .ghost:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; }
 .ghost:disabled:hover { border-color: var(--line); color: var(--ink-2); }
 .bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -693,16 +748,26 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 /* ——— جدول ——— */
 table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 table.data th, table.data td {
-  padding: 5px 8px; border-bottom: 1px solid var(--line-soft); text-align: start; white-space: nowrap;
+  padding: 6px 8px; border-bottom: 1px solid var(--line-soft); text-align: start; white-space: nowrap;
 }
 table.data thead th {
-  position: sticky; top: 46px; background: var(--panel-2); z-index: 2;
+  position: sticky; top: 46px; z-index: 2;
+  background: color-mix(in srgb, var(--panel-2) 92%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   font-size: 11px; font-weight: 700; color: var(--ink-2);
-  border-bottom: 1px solid var(--line); cursor: pointer; user-select: none;
+  border-bottom: 2px solid var(--line); cursor: pointer; user-select: none;
+  transition: color var(--transition-fast);
 }
 table.data thead th:hover { color: var(--accent); }
-table.data tbody tr { transition: background .1s ease; }
-table.data tbody tr:hover { background: var(--panel-2); }
+table.data tbody tr { transition: background var(--transition-fast); }
+table.data tbody tr:hover { background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
+/* راه‌راه ملایم ردیف‌ها. ردیف‌های نشان‌دار (نزدیک‌به‌پول، نامزد انتخاب‌شده)
+   صریحاً کنار گذاشته می‌شوند: اولویت `tr:nth-child(even)` با `tr.atm` دقیقاً
+   برابر است، پس اگر فقط به ترتیب نوشتن تکیه کنیم، هر جابه‌جایی قواعد همان
+   باگ دورهای ۲۴ و ۴۶ را بی‌صدا برمی‌گرداند. */
+table.data tbody tr:nth-child(even):not(.atm):not(.picked) { background: color-mix(in srgb, var(--panel-2) 30%, transparent); }
+table.data tbody tr:nth-child(even):not(.atm):not(.picked):hover { background: color-mix(in srgb, var(--panel-2) 70%, transparent); }
 /* ردیف نزدیک‌به‌پول دیده‌بان زنجیره (chain.mjs) قبلاً با style این‌لاین رنگ
    می‌گرفت که همیشه بر :hover بالا می‌زد — هاور روی همان ردیف هیچ بازخوردی
    نداشت، برخلاف بقیه ردیف‌های همان جدول. کلاس با اولویت برابر :hover را
@@ -727,7 +792,7 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 }
 .skel-row:nth-child(2n) .skel-bar { animation-delay: .15s; }
 @media (prefers-reduced-motion: reduce) { .skel-bar { animation: none; opacity: .6; } }
-.scroll { overflow: auto; max-height: 62vh; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+.scroll { overflow: auto; max-height: 62vh; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
 /* همان مشکل tbl-body: این جدول‌ها (دفتر بازه‌ها، رول، زنجیره، فهرست موقعیت‌ها)
    قاب پیمایش خودشان را دارند، نه کل صفحه. top:46px قاعده عمومی برای سرستونی
    است که زیر نوار بالای صفحه می‌چسبد؛ اینجا همان ۴۶ پیکسل سرستون را داخل قاب
@@ -741,8 +806,9 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 #chain thead th { position: static; }
 
 .tag {
-  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  display: inline-block; padding: 2px 7px; border-radius: var(--radius-sm);
   font-size: 11px; font-weight: 600; border: 1px solid transparent;
+  letter-spacing: .01em;
 }
 .tag.gain { background: var(--gain-soft); color: var(--gain); border-color: var(--gain); }
 .tag.loss { background: var(--loss-soft); color: var(--loss); border-color: var(--loss); }
@@ -759,11 +825,11 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 .kpis { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); margin-bottom: 16px; }
 .kpi {
   background: var(--panel); border: 1px solid var(--line);
-  border-inline-start: 3px solid var(--line);
-  border-radius: var(--radius); padding: 10px 12px;
-  transition: border-color .12s ease, box-shadow .12s ease;
+  border-inline-start: 4px solid var(--line);
+  border-radius: var(--radius-md); padding: 10px 12px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
-.kpi:hover { box-shadow: var(--shadow); }
+.kpi:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
 /* مرز رنگی سمت شروع، همان جهت سود/زیان کارت را از فاصله چشم می‌رساند،
    بی‌آنکه رنگ‌آمیزی کل کارت ادعای اجرا یا داده کیفی دیگر را رنگ کند. */
 .kpi:has(.v.gain) { border-inline-start-color: var(--gain); }
@@ -823,7 +889,7 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 11.5px; color: var(--muted); margin-top: 8px; }
 
 /* ——— نمودار تعامل‌پذیر ——— */
-.chart-box { position: relative; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+.chart-box { position: relative; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); overflow: hidden; }
 .chart-canvas { cursor: crosshair; touch-action: none; }
 .chart-canvas.dragging { cursor: grabbing; }
 .chart-canvas .payoff { user-select: none; }
@@ -837,8 +903,11 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 .chart-read b { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
 .chart-hover-tooltip {
   position: absolute; z-index: 8; display: grid; gap: 4px; width: max-content; max-width: 245px;
-  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
-  background: color-mix(in srgb, var(--panel) 95%, transparent); box-shadow: var(--shadow);
+  padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--line) 60%, transparent); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  box-shadow: var(--shadow-lg);
   color: var(--ink-2); font-size: 10px; line-height: 1.55; pointer-events: none;
 }
 .chart-hover-tooltip[hidden] { display: none; }
@@ -851,11 +920,11 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip {
-  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px;
-  padding: 3px 11px; font-size: 12px; cursor: pointer; color: var(--ink-2); font: inherit;
-  transition: background .12s ease, border-color .12s ease, color .12s ease;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-pill);
+  padding: 4px 12px; font-size: 12px; cursor: pointer; color: var(--ink-2); font: inherit; font-weight: 500;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
-.chip:hover:not([aria-pressed="true"]) { border-color: var(--accent); color: var(--accent); }
+.chip:hover:not([aria-pressed="true"]) { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
 dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; font-size: 12.5px; }
@@ -868,7 +937,7 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
    فاصله نوار بالای صفحه — پس سرستون این جدول ۴۶ پیکسل پایین‌تر می‌افتاد و
    دو ردیف اول زیرش پنهان می‌شد. انتخابگر اینجا با نام جدول بالا برده شده
    تا مشخصیتش قطعی باشد. */
-.tbl-wrap { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+.tbl-wrap { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); overflow: hidden; }
 .tbl-body table.data { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
 .tbl-body table.data thead th {
   position: sticky; top: 0; z-index: 3;
@@ -953,18 +1022,23 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .picker-tools input[type="search"] {
   flex: 1; min-width: 140px;
   background: var(--panel-2); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 4px;
-  padding: 5px 8px; font: inherit; font-size: 13px;
-  transition: border-color .12s ease;
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  padding: 8px 12px; font: inherit; font-size: 13px;
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.picker-tools input[type="search"]:focus { border-color: var(--accent); outline: none; }
+.picker-tools input[type="search"]:focus {
+  border-color: var(--accent); outline: none;
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent), 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
 .picker-list {
   max-height: 260px; overflow: auto; border: 1px solid var(--line);
-  border-radius: 4px; background: var(--panel-2);
+  border-radius: var(--radius-md); background: var(--panel-2);
 }
 .picker-row {
   display: grid; grid-template-columns: 22px 1fr auto auto auto; gap: 8px; align-items: center;
-  padding: 4px 8px; font-size: 12.5px; border-bottom: 1px solid var(--line-soft); cursor: pointer;
+  padding: 5px 8px; font-size: 12.5px; border-bottom: 1px solid var(--line-soft); cursor: pointer;
+  transition: background var(--transition-fast);
 }
 .picker-row:hover { background: var(--panel); }
 .picker-row[aria-selected="true"] { background: var(--accent-soft); }
@@ -985,5 +1059,20 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .funnel-hint {
   margin: 8px 0 0; padding: 8px 10px;
   background: var(--warn-soft); border: 1px solid var(--warn);
-  border-radius: 4px; font-size: 12.5px; color: var(--ink-2); line-height: 1.7;
+  border-radius: var(--radius-md); font-size: 12.5px; color: var(--ink-2); line-height: 1.7;
+}
+
+/* ——— کاهش حرکت ———
+   بلوک‌های موضعی بالاتر فقط سه انیمیشن مشخص را خاموش می‌کنند. این قاعده
+   عمومی، ترنزیشن‌ها و جابه‌جایی‌های تازه (دکمه، چیپ، کارت، KPI) را هم
+   می‌پوشاند. آخر فایل است تا بر همه بالا بزند. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .btn:hover, .primary:hover, .ghost:hover, .chip:hover, .step-btn:hover,
+  .kpi:hover, .btn:active, .primary:active, .ghost:active { transform: none; }
 }

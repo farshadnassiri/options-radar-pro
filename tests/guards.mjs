@@ -34,7 +34,7 @@ function walk(dir, ext, out = []) {
   return out;
 }
 
-const rel = (p) => path.relative(ROOT, p);
+const rel = (p) => path.relative(ROOT, p).replace(/\\/g, '/');
 const sources = walk(ROOT, '.mjs');
 
 // ═════════════════════ ۱. صفر وابستگی npm (قاعده ۲-۱) ═════════════════════
@@ -111,7 +111,7 @@ group('۴. رنگ سخت‌کدشده بیشتر نمی‌شود');
     `${jsTotal} مورد${jsHits.length ? ' — ' + jsHits.map(([f, n]) => `${f}:${n}`).join('، ') : ''}`);
 
   // ۴-۲ — CSS: فقط داخل بلوک‌های توکن مجاز است.
-  const CSS_CEILING = 14;
+  const CSS_CEILING = 9;
   let css = fs.readFileSync(path.join(ROOT, 'ui/style.css'), 'utf8');
   css = css.replace(/\/\*[\s\S]*?\*\//g, '');                      // کامنت‌ها
   css = css.replace(/:root\s*\{[\s\S]*?\n\}/, '');                 // بلوک توکن پوسته دفتر
