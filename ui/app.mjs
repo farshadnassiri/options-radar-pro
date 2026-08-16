@@ -3,7 +3,7 @@
 // قاعده تب تنبل: ماژول هر تب فقط لحظه اولین کلیک وارد می‌شود و اشتراک
 // عکس لحظه‌ای هم فقط برای تب باز برقرار می‌شود. تب بسته، هیچ هزینه‌ای ندارد.
 
-import { fmt, faDigits, faAgo, faClock, humanizeUpstreamError, pageTitle, normFa } from '/ui/fmt.mjs';
+import { fmt, faDigits, faAgo, faClock, pageTitle, normFa } from '/ui/fmt.mjs';
 import { defaults } from '/core/settings.mjs';
 import { CATALOG, GROUPS as SGROUPS } from '/strategies/catalog.mjs';
 
@@ -15,7 +15,7 @@ export const state = {
   // وضعیت اتصال جریان، برای نوار وضعیت. «آخرین دریافت» ساعت دیواری مرورگر
   // است نه زمان سرور، چون همان چیزی است که کاربر می‌خواهد بداند: از کی تا
   // حالا چیزی تازه نیامده.
-  link: { status: 'idle', since: Date.now(), lastData: null, drops: 0 },
+  link: { status: 'idle', since: Date.now(), lastData: null },
 };
 
 // ————————————————————————————————— تنظیمات —————————————————————————————————
@@ -53,7 +53,6 @@ export function subscribeWatch(fn) {
 
 function setLink(status) {
   if (state.link.status === status) return;
-  if (status === 'down' && state.link.status === 'live') state.link.drops += 1;
   state.link.status = status;
   state.link.since = Date.now();
   paintLink();
@@ -87,7 +86,6 @@ function openStream() {
 // ————————————————————————————————— نوار سلامت —————————————————————————————————
 
 const el = (id) => document.getElementById(id);
-let lastReq = null;
 
 const LINK_TEXT = {
   idle: ['بی‌اتصال', 'idle'],
@@ -145,21 +143,6 @@ async function tickHealth() {
     el('h-err').textContent = fmt.int(h.errors);
     errWrap.title = h.lastError || 'خطایی ثبت نشده';
 
-    // ——— شمارنده‌های فنی ———
-    const per = lastReq == null ? 0 : h.requests - lastReq;
-    lastReq = h.requests;
-    el('d-req').textContent = `${fmt.int(h.requests)}${per ? ` (+${faDigits(per)})` : ''}`;
-
-    const total = h.requests + h.cacheHits;
-    el('d-cache').textContent = total > 0 ? `${faDigits(Math.round((h.cacheHits / total) * 100))}٪` : '—';
-    el('d-ms').textContent = h.avgUpstreamMs ? `${faDigits(h.avgUpstreamMs)} میلی‌ثانیه` : '—';
-    el('d-age').textContent = h.watchAgeSec == null ? '—' : faAgo(h.watchAgeSec * 1000);
-    el('d-drops').textContent = faDigits(state.link.drops);
-    // متن خام جاوااسکریپت («TypeError: fetch failed») چیزی به کاربر فارسی‌زبان
-    // نمی‌گوید؛ نسخه خوانا در متن می‌آید، خام برای اشکال‌زدایی در tooltip می‌ماند
-    const dErr = el('d-err');
-    dErr.textContent = h.lastError ? humanizeUpstreamError(h.lastError) : 'هیچ';
-    dErr.title = h.lastError || '';
   } catch {
     const m = el('h-market');
     m.textContent = 'سرور در دسترس نیست';
@@ -390,13 +373,6 @@ function applyTheme(name) {
 }
 el('theme-btn').addEventListener('click', () => {
   applyTheme(document.body.dataset.theme === 'ledger' ? 'board' : 'ledger');
-});
-
-el('detail-btn').addEventListener('click', (e) => {
-  const panel = el('health-detail');
-  const open = panel.hasAttribute('hidden');
-  panel.toggleAttribute('hidden', !open);
-  e.currentTarget.setAttribute('aria-expanded', open ? 'true' : 'false');
 });
 
 el('rail-q').addEventListener('input', (e) => {
