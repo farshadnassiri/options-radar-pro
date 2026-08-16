@@ -159,6 +159,7 @@ const TABS = [
   { id: 'chain', title: 'دیده‌بان زنجیره اختیار', section: 'پایه', mod: '/ui/tabs/chain.mjs', phase: 3 },
   { id: 'history', title: 'تحلیل تاریخی استراتژی', section: 'پایه', mod: '/ui/tabs/history.mjs', phase: 3 },
   { id: 'backtest', title: 'بک‌تست سریع', section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },
+  { id: 'portfolio-backtest', title: 'آزمون همه استراتژی‌ها', section: 'پایه', mod: '/ui/tabs/portfolio-backtest.mjs', phase: 3 },
   { id: 'top', title: 'برترین موقعیت‌ها', section: 'پایه', mod: '/ui/tabs/top.mjs', phase: 3 },
 ];
 
