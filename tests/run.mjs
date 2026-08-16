@@ -5,6 +5,7 @@
 //
 // اجرا:  node tests/run.mjs
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { bsPrice, bsGreeks, impliedVol, probBelow, probAbove, histVol, npdf, d1d2, ncdf, ninv, priceQuantile } from '../core/bs.mjs';
 import { grossCash, entryFees, analyzePayoff, signedQty } from '../core/payoff.mjs';
@@ -1234,6 +1235,22 @@ group('۲۱. قالب‌بندی عدد فارسی');
         pageTitle('دیده‌بان زنجیره اختیار'));
   check('بدون تب باز، فقط برند تنها می‌ماند', pageTitle('') === 'رصد استراتژی آپشن');
   check('بدون تب باز (undefined)، فقط برند تنها می‌ماند', pageTitle() === 'رصد استراتژی آپشن');
+}
+
+// پنل شمارنده‌های فنی به درخواست کاربر از رابط حذف شده است. حضور هرکدام از
+// شناسه‌ها یا برچسب‌های آن یعنی بخشی از پنل ناخواسته برگشته است.
+{
+  const indexHtml = fs.readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const appSource = fs.readFileSync(new URL('../ui/app.mjs', import.meta.url), 'utf8');
+  const removedHealthPanel = [
+    'health-detail', 'detail-btn', 'درخواست بالادست', 'اصابت کش',
+    'تأخیر بالادست', 'سن عکس سرور', 'قطعی اتصال', 'آخرین خطا',
+  ];
+  check('پنل جزئیات فنی از پوسته رابط حذف مانده',
+    removedHealthPanel.every((text) => !indexHtml.includes(text)),
+    removedHealthPanel.filter((text) => indexHtml.includes(text)).join('، '));
+  check('کد پوسته دیگر به عناصر پنل حذف‌شده دسترسی ندارد',
+    !/\b(?:health-detail|detail-btn|d-req|d-cache|d-ms|d-age|d-drops|d-err)\b/.test(appSource));
 }
 
 // ═══════════════ ۲۲. چیدمان ستون: جابه‌جایی و افزودن ═══════════════
