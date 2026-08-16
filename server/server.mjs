@@ -18,6 +18,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
+import { normalizeTrades } from '../core/backtest.mjs';
 import { validIns, validCompactDate, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { watchBackoffSec } from './backoff.mjs';
@@ -318,13 +319,6 @@ const normalizeDailyRows = (rows) => rows.map((r) => ({
   // موتور تحلیل مقدار تقریبی «حجم × قیمت پایانی» را جداگانه می‌سازد و برچسب می‌زند.
   value: Number(r.qTotCap) || 0,
 })).sort((a, b) => a.date - b.date);
-
-const normalizeTrades = (rows) => rows.map((r) => ({
-  sequence: Number(r.nTran) || 0, time: Number(r.hEven) || 0,
-  quantity: Number(r.qTitTran) || 0, price: Number(r.pTran) || 0,
-  canceled: r.canceled === true || Number(r.canceled) === 1,
-})).filter((r) => r.price > 0 && r.time > 0)
-  .sort((a, b) => a.time - b.time || a.sequence - b.sequence);
 
 async function serveStatic(res, pathname) {
   const file = safeStaticPath(ROOT, pathname);

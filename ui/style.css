@@ -190,6 +190,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-chart polyline { stroke-width: 2.7; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
 .backtest-grid { stroke: color-mix(in srgb, var(--line) 80%, transparent); stroke-width: 1; }
 .backtest-zero { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 4 4; opacity: .55; }
+/* مرز تغییر مقیاس زمان: چپ آن هر نقطه یک روز است، راست آن یک معامله. */
+.backtest-split { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 2 5; opacity: .5; }
+.backtest-split-label { fill: var(--muted); font-size: 9.5px; }
 .backtest-hit { fill: transparent; cursor: crosshair; }
 .backtest-cursor line { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 3; }
 .backtest-cursor circle { stroke: var(--panel); stroke-width: 2; }

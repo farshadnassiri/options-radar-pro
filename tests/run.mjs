@@ -35,7 +35,7 @@ import {
   historyMarketMetrics, optimizeExitPolicy, rollingEntryMatrix, holdingPeriodProfile,
   replayTradeDetail,
 } from '../core/history.mjs';
-import { replayIntraday, combinedBacktestPath, tradeSecond, tradeTimeLabel } from '../core/backtest.mjs';
+import { replayIntraday, combinedBacktestPath, tradeSecond, tradeTimeLabel, normalizeTrades, canceledFlag } from '../core/backtest.mjs';
 
 let pass = 0, fail = 0;
 const results = [];
@@ -1829,6 +1829,34 @@ group('۳۲. بازپخش تاریخی استراتژی');
   check('قیمت پایه ریزمعامله به‌صورت مشاهده‌شده و درصدی نگه داشته می‌شود', intraday32[1].basePrice === 111 && near(intraday32[1].basePct, 11));
   check('مسیر ترکیبی روز آخر را با ریزمعامله جایگزین می‌کند', combinedBacktestPath(replay32, intraday32).filter((point) => point.granularity === 'trade').length === 2);
   check('تبدیل زمان ریزمعامله پایدار است', tradeSecond(90105) === 32465 && tradeTimeLabel(90105) === '09:01:05');
+
+  // ——— ابطال معامله: «باطل نشده» و «نمی‌دانیم» دو چیز متفاوت‌اند ———
+  check('پرچم ابطال از هر املای محتمل بالادست خوانده می‌شود',
+    canceledFlag({ canceled: true }) === true && canceledFlag({ cancelled: 1 }) === true
+    && canceledFlag({ isCanceled: false }) === false);
+  check('نبود میدان ابطال «باطل‌نشده» معنی نمی‌دهد، «نامعلوم» معنی می‌دهد',
+    canceledFlag({ pTran: 5 }) === null);
+  const trades32 = normalizeTrades([
+    { nTran: 2, hEven: 90100, qTitTran: 5, pTran: 7 },
+    { nTran: 1, hEven: 90000, qTitTran: 3, pTran: 6, canceled: true },
+    { nTran: 3, hEven: 85900, qTitTran: 1, pTran: 0 },
+  ]);
+  check('ریزمعامله بدون قیمت دور ریخته و بقیه بر پایه زمان مرتب می‌شود',
+    trades32.length === 2 && trades32[0].time === 90000 && trades32[1].time === 90100);
+  check('معامله باطل‌شده علامت می‌خورد و معلوم‌بودن وضعیتش گزارش می‌شود',
+    trades32[0].canceled === true && trades32[0].canceledKnown === true);
+  check('وقتی بالادست ساکت است، ابطال نامعلوم می‌ماند و ادعای پاکی نمی‌شود',
+    trades32[1].canceled === false && trades32[1].canceledKnown === false);
+  const cancelDropped32 = replayIntraday({
+    replay: replay32,
+    tradesByIns: {
+      11: [{ sequence: 1, time: 90000, price: 5, quantity: 3 }],
+      12: [{ sequence: 2, time: 90030, price: 6, quantity: 4, canceled: true }],
+    },
+    fees: args32.fees,
+  });
+  check('با پای باطل‌شده، همه پاها مشاهده‌شده نیستند و عدد مالی ساخته نمی‌شود',
+    cancelDropped32.length === 0, cancelDropped32.length);
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

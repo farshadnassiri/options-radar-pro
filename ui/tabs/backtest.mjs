@@ -80,9 +80,21 @@ function chart(host, points, series, { money = false } = {}) {
   const y = (value) => T + ((hi - value) / (hi - lo)) * (H - T - B);
   const label = (value) => money ? fmt.money(value) : fmt.pct(value);
   const ticks = Array.from({ length: 5 }, (_, index) => lo + ((hi - lo) * index) / 4);
-  host.innerHTML = `<div class="backtest-chart-legend">${series.map((item) => `<span style="--series:${item.color}"><i></i>${item.label}</span>`).join('')}</div><div class="backtest-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار تعاملی بک‌تست">
+  // یک خط منطقی می‌تواند بین دو نام میدان تقسیم شده باشد (سطر روزانه
+  // `baseCumulativePct`، سطر ریزمعامله `basePct`). آن‌ها هم‌رنگ‌اند چون یک
+  // چیزند؛ پس راهنما هم باید یک چیپ نشان دهد، نه دو چیپ هم‌رنگ با دو نام.
+  const legend = series.filter((item, index) => series.findIndex((other) => other.label === item.label) === index);
+
+  // مرز روز آخر. محور افقی بر پایه اندیس است، پس چند صد نقطه ریزمعامله
+  // بخش روزانه را باریک می‌کند. بدون این خط، کاربر نمی‌فهمد از کجا مقیاس
+  // زمان عوض شده و شیب تند انتهای نمودار را با حرکت چند روزه اشتباه می‌گیرد.
+  const firstTick = rows.findIndex((row) => row.granularity === 'trade');
+  const boundary = firstTick > 0 ? `<line x1="${x(firstTick)}" x2="${x(firstTick)}" y1="${T}" y2="${H - B}" class="backtest-split"/><text x="${x(firstTick)}" y="${H - B + 18}" text-anchor="middle" class="backtest-split-label">شروع ریزمعامله روز آخر</text>` : '';
+
+  host.innerHTML = `<div class="backtest-chart-legend">${legend.map((item) => `<span style="--series:${item.color}"><i></i>${item.label}</span>`).join('')}</div><div class="backtest-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار تعاملی بک‌تست">
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="backtest-grid"/><text x="${L - 10}" y="${y(value) + 4}" text-anchor="end">${label(value)}</text>`).join('')}
     <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="backtest-zero"/>
+    ${boundary}
     ${series.map((item) => `<polyline fill="none" stroke="${item.color}" points="${rows.map((row, index) => Number.isFinite(Number(row[item.key])) ? `${x(index)},${y(Number(row[item.key]))}` : '').filter(Boolean).join(' ')}"/>`).join('')}
     <g class="backtest-cursor" hidden><line y1="${T}" y2="${H - B}"/><g></g></g>
     <rect class="backtest-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
@@ -121,7 +133,7 @@ export async function mount(root, { state }) {
     <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><div id="bt-legs" class="backtest-legs"></div></section>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت روز ایجاد</h2></div></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت روز خروج</h2></div></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
-    <section class="card backtest-runbar"><div><p class="eyebrow">نمای مسیر</p><select id="bt-path-mode"><option value="combined">روزهای قبل + ریزمعامله روز آخر</option><option value="daily">فقط مسیر روزانه</option><option value="intraday">فقط ریزمعامله روز سنجش</option></select></div><p>ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست.</p><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button></section>
+    <section class="card backtest-runbar"><div><p class="eyebrow">نمای مسیر</p><select id="bt-path-mode"><option value="combined">روزهای قبل + ریزمعامله روز آخر</option><option value="daily">فقط مسیر روزانه</option><option value="intraday">فقط ریزمعامله روز سنجش</option></select></div><p id="bt-run-note">ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست.</p><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button></section>
     <section id="bt-result" hidden><div class="backtest-kpis" id="bt-kpis"></div>
       <div class="backtest-chart-grid"><section class="card"><div class="section-head"><h2>سود و زیان مبلغی</h2><span>ریال</span></div><div id="bt-money-chart" class="backtest-chart"></div></section><section class="card"><div class="section-head"><h2>بازده و تغییر نماد پایه</h2><span>درصد</span></div><div id="bt-return-chart" class="backtest-chart"></div></section></div>
       <section class="card"><div class="section-head"><div><p class="eyebrow">اثر هر پایه</p><h2>جزئیات پاهای استراتژی در روز سنجش</h2></div><span id="bt-final-source">—</span></div><div id="bt-leg-table" class="history-table-wrap"></div></section>
@@ -245,7 +257,7 @@ export async function mount(root, { state }) {
     ];
     $('bt-kpis').innerHTML = cards.map(([label, value, tone]) => `<article class="${tone}"><span>${label}</span><b>${value}</b></article>`).join('');
     chart($('bt-money-chart'), path, [{ key: 'netPnl', label: 'سود و زیان خالص', color: 'var(--accent)' }], { money: true });
-    chart($('bt-return-chart'), path, [{ key: 'returnPct', label: 'بازده استراتژی', color: 'var(--accent)' }, { key: 'basePct', label: 'تغییر پایه', color: 'var(--cmp1)' }, { key: 'baseCumulativePct', label: 'تغییر پایه روزانه', color: 'var(--cmp1)' }]);
+    chart($('bt-return-chart'), path, [{ key: 'returnPct', label: 'بازده استراتژی', color: 'var(--accent)' }, { key: 'basePct', label: 'تغییر پایه', color: 'var(--cmp1)' }, { key: 'baseCumulativePct', label: 'تغییر پایه', color: 'var(--cmp1)' }]);
     const finalLegs = lastTick?.perLeg || lastDaily?.perLeg || [];
     $('bt-final-source').textContent = lastTick ? `آخرین ریزمعامله کامل در ${faDigits(lastTick.timeLabel)}` : 'قیمت روزانه انتخاب‌شده';
     $('bt-leg-table').innerHTML = `<table class="history-table"><thead><tr><th>پا</th><th>جهت</th><th>قیمت ورود</th><th>قیمت سنجش</th><th>اثر ناخالص</th><th>کارمزد</th><th>اثر خالص</th><th>حجم/ارزش روز</th></tr></thead><tbody>${finalLegs.map((leg, index) => {
@@ -271,6 +283,14 @@ export async function mount(root, { state }) {
         rows = await Promise.all([...new Set([...legs.map((leg) => String(leg.ins)), String(ua.ins)])].map(async (ins) => [ins, await fetchTrades(ins, endDate)]));
       } catch (error) { setStatus(`مسیر روزانه آماده شد؛ ریز روز آخر در دسترس نبود: ${error.message}`, true); }
       const byIns = Object.fromEntries(rows);
+      // اگر بالادست وضعیت ابطال را نفرستد، ما نمی‌دانیم معامله‌ای باطل شده یا
+      // نه. سکوت در این حالت یعنی ادعای ضمنی «هیچ‌کدام باطل نشده» — پس صریح
+      // گفته می‌شود که نمی‌دانیم.
+      const allTrades = rows.flatMap(([, list]) => list);
+      const cancelUnknown = allTrades.length > 0 && allTrades.some((trade) => trade.canceledKnown === false);
+      $('bt-run-note').textContent = cancelUnknown
+        ? 'ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست. منبع داده وضعیت ابطال معامله را اعلام نکرده، پس معامله باطل‌شده احتمالی کنار گذاشته نشده است.'
+        : 'ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست. معامله باطل‌شده کنار گذاشته شده است.';
       intraday = replayIntraday({ replay, tradesByIns: byIns, baseTrades: byIns[String(ua.ins)] || [], fees: feesOf(state.settings) });
       $('bt-result').hidden = false; paintResult();
       if (intraday.length) setStatus(`${fmt.int(replay.summary.validDays)} روز و ${fmt.int(intraday.length)} نقطه ریزمعامله محاسبه شد.`);

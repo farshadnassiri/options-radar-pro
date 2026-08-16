@@ -9,6 +9,41 @@ import { EPS, num } from './num.mjs';
 
 const reverseSide = (side) => (side === 'buy' ? 'sell' : 'buy');
 
+// ═══════════════════ نرمال‌سازی ریزمعامله بالادست ═══════════════════
+//
+// معامله باطل‌شده «ارزش‌گذاری مشاهده‌شده» نیست و نباید در بازپخش بنشیند.
+//
+// هشدار: برخلاف بقیه نرمال‌سازها که نام میدان بالادست قطعی است
+// (`pDrCotVal`، `priceFirst`، `qTotTran5J`)، نام میدان ابطال در پاسخ واقعی
+// `ClosingPrice/GetTrade` تأیید نشده است. پس چند املای محتمل خوانده می‌شود
+// و — مهم‌تر — نتیجه در `canceledKnown` علامت می‌خورد: اگر بالادست هیچ‌کدام
+// را نفرستد یعنی ما از وضعیت ابطال بی‌خبریم، نه اینکه چیزی باطل نشده.
+// مصرف‌کننده باید همین ندانستن را به کاربر نشان دهد، نه اینکه سکوت کند.
+//
+// برای تأیید: یک پاسخ واقعی بگیرید و `Object.keys(rows[0])` را ببینید؛ اگر
+// نام دیگری بود همین‌جا اضافه شود.
+const CANCEL_KEYS = ['canceled', 'cancelled', 'isCanceled'];
+
+export function canceledFlag(row) {
+  for (const key of CANCEL_KEYS) {
+    if (row?.[key] === undefined || row?.[key] === null) continue;
+    return row[key] === true || Number(row[key]) === 1;
+  }
+  return null;                                   // بالادست چیزی نگفته است
+}
+
+export function normalizeTrades(rows = []) {
+  return rows.map((r) => {
+    const flag = canceledFlag(r);
+    return {
+      sequence: Number(r.nTran) || 0, time: Number(r.hEven) || 0,
+      quantity: Number(r.qTitTran) || 0, price: Number(r.pTran) || 0,
+      canceled: flag === true, canceledKnown: flag !== null,
+    };
+  }).filter((r) => r.price > 0 && r.time > 0)
+    .sort((a, b) => a.time - b.time || a.sequence - b.sequence);
+}
+
 /** زمان HHMMSS را به ثانیه از ابتدای روز تبدیل می‌کند. */
 export function tradeSecond(value) {
   const raw = String(Math.max(0, Math.trunc(num(value)))).padStart(6, '0').slice(-6);
