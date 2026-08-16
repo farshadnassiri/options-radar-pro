@@ -18,7 +18,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
-import { validIns, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
+import { validIns, validCompactDate, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { watchBackoffSec } from './backoff.mjs';
 
@@ -319,6 +319,13 @@ const normalizeDailyRows = (rows) => rows.map((r) => ({
   value: Number(r.qTotCap) || 0,
 })).sort((a, b) => a.date - b.date);
 
+const normalizeTrades = (rows) => rows.map((r) => ({
+  sequence: Number(r.nTran) || 0, time: Number(r.hEven) || 0,
+  quantity: Number(r.qTitTran) || 0, price: Number(r.pTran) || 0,
+  canceled: r.canceled === true || Number(r.canceled) === 1,
+})).filter((r) => r.price > 0 && r.time > 0)
+  .sort((a, b) => a.time - b.time || a.sequence - b.sequence);
+
 async function serveStatic(res, pathname) {
   const file = safeStaticPath(ROOT, pathname);
   if (!file) return send(res, 403, 'مسیر مجاز نیست', 'text/plain; charset=utf-8');
@@ -393,7 +400,7 @@ async function handle(req, res) {
     // کد ابزار مستقیم داخل مسیر بالادست می‌نشیند. بدون صحت‌سنجی، یک «..»
     // درخواست را به نقطه پایانی دیگری می‌برد.
     if (p === '/api/book' || p === '/api/info' || p === '/api/optionmeta'
-      || p === '/api/daily' || p === '/api/clienttype') {
+      || p === '/api/daily' || p === '/api/trades' || p === '/api/clienttype') {
       if (!validIns(ins)) return sendJson(res, 400, { error: 'کد ابزار باید فقط رقم باشد' });
     }
 
@@ -447,6 +454,13 @@ async function handle(req, res) {
         ins,
         rows: normalizeDailyRows(rows),
       });
+    }
+
+    if (p === '/api/trades') {
+      const date = u.searchParams.get('date');
+      if (!validCompactDate(date)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
+      const rows = firstList(await get(`/ClosingPrice/GetTrade/${ins}/${date}/false`, S.ttlDailySec, 6));
+      return sendJson(res, 200, { ins, date: Number(date), rows: normalizeTrades(rows) });
     }
 
     // تاریخچه دسته‌ای همه پاهای یک زنجیره. n=0 یعنی از اولین روز موجود.
