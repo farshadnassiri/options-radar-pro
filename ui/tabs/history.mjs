@@ -305,7 +305,7 @@ export async function mount(root, { state }) {
       </section>
 
       <div class="history-analysis-grid">
-        <section class="card"><div class="section-head"><h2>مقایسه ۱۶ مبنای ورود و خروج</h2></div><div id="h-basis-matrix" class="history-table-wrap"></div></section>
+        <section class="card"><div class="section-head"><h2>مقایسه ۲۵ مبنای ورود و خروج</h2></div><div id="h-basis-matrix" class="history-table-wrap"></div></section>
         <section class="card"><div class="section-head"><h2>حساسیت قیمت ورود هر پا</h2></div><div id="h-sensitivity" class="history-table-wrap"></div></section>
         <section class="card"><div class="section-head"><div><p class="eyebrow">روز ورود و هر روز بعد</p><h2>وجه تضمین و پوشش</h2></div></div><div id="h-margin" class="history-table-wrap"></div></section>
         <section class="card"><div class="section-head"><div><p class="eyebrow">خروج مشاهده‌شده و قاعده قابل‌تکرار</p><h2>بهینه‌سازی زمان و قیمت خروج</h2></div></div><div id="h-optimal"></div></section>

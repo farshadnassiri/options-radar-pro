@@ -23,7 +23,7 @@ import { scan as scanFn, scanAll, generateCombos, unexecutableReason } from '../
 import { markToMarket, rollAnalysis } from '../core/positions.mjs';
 import { timeMachine } from '../core/timemachine.mjs';
 import { jalaliToGregorian, gregorianToJalali, parseJalali, todayJalali } from '../core/jalali.mjs';
-import { validIns, parseInsList, safeStaticPath, readBody, BodyTooLarge } from '../server/guard.mjs';
+import { validIns, validCompactDate, parseInsList, safeStaticPath, readBody, BodyTooLarge } from '../server/guard.mjs';
 import { evictOldest } from '../server/cache.mjs';
 import { watchBackoffSec } from '../server/backoff.mjs';
 import { fmt as uiFmt, axisNum, toEnDigits, faAgo, faClock, humanizeUpstreamError, coverageInfo, kpiTone, signTone, pageTitle, normFa } from '../ui/fmt.mjs';
@@ -35,6 +35,7 @@ import {
   historyMarketMetrics, optimizeExitPolicy, rollingEntryMatrix, holdingPeriodProfile,
   replayTradeDetail,
 } from '../core/history.mjs';
+import { replayIntraday, combinedBacktestPath, tradeSecond, tradeTimeLabel, normalizeTrades, canceledFlag } from '../core/backtest.mjs';
 
 let pass = 0, fail = 0;
 const results = [];
@@ -1002,6 +1003,8 @@ group('۱۸. نگهبان مرز سرور');
   check('کد با فاصله رد می‌شود', !validIns(' 123'));
   check('کد بیش از حد بلند رد می‌شود', !validIns('9'.repeat(33)));
   check('عدد به‌جای رشته رد می‌شود', !validIns(123));
+  check('تاریخ فشرده معتبر برای مسیر ریزمعامله پذیرفته می‌شود', validCompactDate('20260802'));
+  check('تاریخ کوتاه یا غیررقمی برای مسیر ریزمعامله رد می‌شود', !validCompactDate('1405/05/11') && !validCompactDate('2026080x'));
 
   // ——— فهرست کد ———
   const list = parseInsList(' 111 , 222,۳۳۳,../x,333,111 , ');
@@ -1719,6 +1722,7 @@ group('۳۲. بازپخش تاریخی استراتژی');
   check('قیمت دستی در سود آفست اثر می‌گذارد', manual32.rows[1].netPnl === 15000, manual32.rows[1].netPnl);
 
   check('قیمت تاریخی صفر، داده معتبر ساخته نمی‌شود', Number.isNaN(historyPrice({ close: 0 }, 'CLOSE')));
+  check('قیمت اولین معامله روز در مبناهای تاریخی قابل انتخاب است', historyPrice({ first: 13 }, 'FIRST') === 13);
   check('قیمت دستی صفر پذیرفته می‌شود', historyPrice(null, 'MANUAL', 0) === 0);
   check('تاریخ شمسی سررسید به میلادی نرمال می‌شود', normalizeHistoryDate(14050529) === 20260820, normalizeHistoryDate(14050529));
   check('برچسب تاریخ، شمسی است', historyDateLabel(20260801) === '1405/05/10', historyDateLabel(20260801));
@@ -1732,7 +1736,7 @@ group('۳۲. بازپخش تاریخی استراتژی');
   check('بازده پایه در نتیجه جدول اصلی موجود است', near(summary32.last.baseCumulativePct, 10, 1e-9));
   check('اثر روزانه هر پا محاسبه می‌شود', Number.isFinite(replay32.rows[1].perLeg[0].pnlDelta));
   check('وجه تضمین کل و هر پای فروش در روز موجود است', Number.isFinite(replay32.rows[1].marginNet) && replay32.rows[1].marginPerLeg.length === 2);
-  check('ماتریس مبنای ورود و خروج هر شانزده حالت را دارد', basisMatrix(args32).length === 16);
+  check('ماتریس مبنای ورود و خروج هر بیست‌وپنج حالت را دارد', basisMatrix(args32).length === 25);
   check('حساسیت ورود برای هر پا و پنج شوک ساخته می‌شود', entrySensitivity(args32).length === 10);
 
   const units32 = replayHistory({ ...args32, units: 3 });
@@ -1810,6 +1814,49 @@ group('۳۲. بازپخش تاریخی استراتژی');
   check('افق مقاوم فقط از افق دارای نمونه کافی انتخاب می‌شود', profile32.best?.holdingTradingDays === 1);
   const detail32 = replayTradeDetail(matrixArgs32, 20260801, 20260802);
   check('کلیک خانه می‌تواند مسیر کامل و بهترین/بدترین نقطه را بازسازی کند', detail32.ok && detail32.path.length === 2 && detail32.best && detail32.worst && detail32.selected.date === 20260802);
+
+  const intraday32 = replayIntraday({
+    replay: replay32,
+    tradesByIns: {
+      11: [{ sequence: 1, time: 90000, price: 5, quantity: 3 }, { sequence: 3, time: 90100, price: 4, quantity: 2 }],
+      12: [{ sequence: 2, time: 90030, price: 6, quantity: 4 }],
+    },
+    baseTrades: [{ sequence: 1, time: 90010, price: 110, quantity: 20 }, { sequence: 2, time: 90040, price: 111, quantity: 5 }],
+    fees: args32.fees,
+  });
+  check('ریزمعامله تا پیش از مشاهده قیمت همه پاها عدد مالی نمی‌سازد', intraday32.length === 2 && intraday32[0].timeLabel === '09:00:30');
+  check('ارزش‌گذاری ریزمعامله اثر هر پا و سود کل را از موتور مشترک می‌سازد', intraday32[1].perLeg.length === 2 && intraday32[1].netPnl === 8000, intraday32[1].netPnl);
+  check('قیمت پایه ریزمعامله به‌صورت مشاهده‌شده و درصدی نگه داشته می‌شود', intraday32[1].basePrice === 111 && near(intraday32[1].basePct, 11));
+  check('مسیر ترکیبی روز آخر را با ریزمعامله جایگزین می‌کند', combinedBacktestPath(replay32, intraday32).filter((point) => point.granularity === 'trade').length === 2);
+  check('تبدیل زمان ریزمعامله پایدار است', tradeSecond(90105) === 32465 && tradeTimeLabel(90105) === '09:01:05');
+
+  // ——— ابطال معامله: «باطل نشده» و «نمی‌دانیم» دو چیز متفاوت‌اند ———
+  check('پرچم ابطال از هر املای محتمل بالادست خوانده می‌شود',
+    canceledFlag({ canceled: true }) === true && canceledFlag({ cancelled: 1 }) === true
+    && canceledFlag({ isCanceled: false }) === false);
+  check('نبود میدان ابطال «باطل‌نشده» معنی نمی‌دهد، «نامعلوم» معنی می‌دهد',
+    canceledFlag({ pTran: 5 }) === null);
+  const trades32 = normalizeTrades([
+    { nTran: 2, hEven: 90100, qTitTran: 5, pTran: 7 },
+    { nTran: 1, hEven: 90000, qTitTran: 3, pTran: 6, canceled: true },
+    { nTran: 3, hEven: 85900, qTitTran: 1, pTran: 0 },
+  ]);
+  check('ریزمعامله بدون قیمت دور ریخته و بقیه بر پایه زمان مرتب می‌شود',
+    trades32.length === 2 && trades32[0].time === 90000 && trades32[1].time === 90100);
+  check('معامله باطل‌شده علامت می‌خورد و معلوم‌بودن وضعیتش گزارش می‌شود',
+    trades32[0].canceled === true && trades32[0].canceledKnown === true);
+  check('وقتی بالادست ساکت است، ابطال نامعلوم می‌ماند و ادعای پاکی نمی‌شود',
+    trades32[1].canceled === false && trades32[1].canceledKnown === false);
+  const cancelDropped32 = replayIntraday({
+    replay: replay32,
+    tradesByIns: {
+      11: [{ sequence: 1, time: 90000, price: 5, quantity: 3 }],
+      12: [{ sequence: 2, time: 90030, price: 6, quantity: 4, canceled: true }],
+    },
+    fees: args32.fees,
+  });
+  check('با پای باطل‌شده، همه پاها مشاهده‌شده نیستند و عدد مالی ساخته نمی‌شود',
+    cancelDropped32.length === 0, cancelDropped32.length);
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

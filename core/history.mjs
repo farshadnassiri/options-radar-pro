@@ -11,6 +11,7 @@ import { strategyMargin, capitalBase } from './margin.mjs';
 import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
 
 export const HISTORY_BASES = [
+  ['FIRST', 'اولین'],
   ['LAST', 'آخرین'],
   ['CLOSE', 'پایانی'],
   ['LOW', 'کمترین'],
@@ -62,7 +63,7 @@ export function historyDayName(value) {
 export function historyPrice(row, basis, manual = NaN) {
   if (basis === 'MANUAL') return num(manual, NaN);
   if (!row) return NaN;
-  const key = { LAST: 'last', CLOSE: 'close', LOW: 'low', HIGH: 'high' }[basis];
+  const key = { FIRST: 'first', LAST: 'last', CLOSE: 'close', LOW: 'low', HIGH: 'high' }[basis];
   const value = key ? num(row[key], NaN) : NaN;
   return value > 0 ? value : NaN;
 }

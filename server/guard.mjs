@@ -15,6 +15,11 @@ export function validIns(x) {
   return typeof x === 'string' && /^\d{1,32}$/.test(x);
 }
 
+/** تاریخ میلادی فشرده‌ای که می‌تواند امن داخل مسیر بالادست قرار بگیرد. */
+export function validCompactDate(x) {
+  return typeof x === 'string' && /^(?:19|20)\d{6}$/.test(x);
+}
+
 /**
  * فهرست کد جداشده با ویرگول. هر چیزی که کد معتبر نیست دور ریخته می‌شود،
  * تکراری حذف می‌شود، و تعداد سقف می‌خورد.
