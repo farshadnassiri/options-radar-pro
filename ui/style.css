@@ -156,19 +156,6 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .pill.link::before { animation: none !important; } }
 
-/* شمارنده‌های فنی — حذف نشده‌اند، فقط پیش‌فرض بسته‌اند */
-.health-detail {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px 18px; padding: 12px 22px;
-  background: var(--panel-2); border-bottom: 1px solid var(--line);
-  font-size: 12px;
-}
-.health-detail > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.health-detail .wide { grid-column: 1 / -1; }
-.health-detail b { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.health-detail i { font-style: normal; font-size: 10.5px; color: var(--muted); }
-
 /* ——— قالب ———
    فهرست سمت راست است: در راست‌به‌چپ، ستون اول شبکه همان سمت راست است و
    چشم از همان‌جا شروع می‌کند. مرز جداکننده هم روی لبه رو به متن می‌نشیند. */
