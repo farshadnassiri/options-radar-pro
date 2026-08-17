@@ -19,7 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
-import { validIns, validCompactDate, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
+import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { watchBackoffSec } from './backoff.mjs';
 
@@ -453,7 +453,7 @@ async function handle(req, res) {
     if (p === '/api/trades') {
       const date = u.searchParams.get('date');
       if (!validCompactDate(date)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
-      const rows = firstList(await get(`/ClosingPrice/GetTrade/${ins}/${date}/false`, S.ttlDailySec, 6));
+      const rows = firstList(await get(historicalTradesPath(ins, date), S.ttlDailySec, 6));
       return sendJson(res, 200, { ins, date: Number(date), rows: normalizeTrades(rows) });
     }
 

@@ -20,6 +20,12 @@ export function validCompactDate(x) {
   return typeof x === 'string' && /^(?:19|20)\d{6}$/.test(x);
 }
 
+/** مسیر تاریخچه تک‌معامله؛ فقط پس از اعتبارسنجی اجزای مسیر ساخته می‌شود. */
+export function historicalTradesPath(ins, date) {
+  if (!validIns(ins) || !validCompactDate(date)) return null;
+  return `/Trade/GetTradeHistory/${ins}/${date}/true`;
+}
+
 /**
  * فهرست کد جداشده با ویرگول. هر چیزی که کد معتبر نیست دور ریخته می‌شود،
  * تکراری حذف می‌شود، و تعداد سقف می‌خورد.

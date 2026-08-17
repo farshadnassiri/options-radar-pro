@@ -37,7 +37,7 @@ function mountWheel(host, dates, selected, onChange) {
     host.dataset.value = String(value || '');
     host.querySelectorAll('[data-date]').forEach((button) => button.setAttribute('aria-selected', String(Number(button.dataset.date) === value)));
     const active = host.querySelector(`[data-date="${value}"]`);
-    active?.scrollIntoView({ block: 'center', behavior: notify ? 'smooth' : 'auto' });
+    active?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: notify ? 'smooth' : 'auto' });
     if (notify && value) onChange(value);
   };
   host.onclick = (event) => {
@@ -45,11 +45,11 @@ function mountWheel(host, dates, selected, onChange) {
     if (button) select(button.dataset.date);
   };
   host.onkeydown = (event) => {
-    if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) || !dates.length) return;
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !dates.length) return;
     event.preventDefault();
     const current = Math.max(0, dates.indexOf(Number(host.dataset.value)));
     const index = event.key === 'Home' ? 0 : event.key === 'End' ? dates.length - 1
-      : Math.max(0, Math.min(dates.length - 1, current + (event.key === 'ArrowDown' ? 1 : -1)));
+      : Math.max(0, Math.min(dates.length - 1, current + (event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? 1 : -1)));
     select(dates[index]);
     host.querySelector(`[data-date="${dates[index]}"]`)?.focus();
   };

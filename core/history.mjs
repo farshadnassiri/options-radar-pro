@@ -88,6 +88,22 @@ export function historyMarketMetrics(row) {
   return { volume, trades, value: estimated, valueEstimated: official <= 0 && estimated > 0 };
 }
 
+/** عکس قیمت و معاملات هر پای استراتژی در یک روز؛ پایه فقط اگر خودش پا باشد می‌آید. */
+export function strategyLegSnapshots(legs = [], seriesByIns = {}, date) {
+  const target = normalizeHistoryDate(date);
+  const indexes = new Map(Object.entries(seriesByIns || {}).map(([ins, rows]) => [String(ins), indexHistory(rows)]));
+  return legs.map((leg, index) => {
+    const row = indexes.get(String(leg.ins))?.get(target);
+    return {
+      index, ins: String(leg.ins), name: leg.name, kind: leg.kind, side: leg.side,
+      strike: leg.strike,
+      prices: Object.fromEntries(HISTORY_BASES.map(([basis]) => [basis, historyPrice(row, basis)])),
+      market: historyMarketMetrics(row),
+      missing: !row,
+    };
+  });
+}
+
 function passesLiquidity(row, minVolume = 0, minValue = 0) {
   const m = historyMarketMetrics(row);
   return m.volume >= Math.max(0, num(minVolume)) && m.value >= Math.max(0, num(minValue));

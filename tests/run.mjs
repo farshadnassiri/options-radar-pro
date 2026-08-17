@@ -23,7 +23,7 @@ import { scan as scanFn, scanAll, generateCombos, unexecutableReason } from '../
 import { markToMarket, rollAnalysis } from '../core/positions.mjs';
 import { timeMachine } from '../core/timemachine.mjs';
 import { jalaliToGregorian, gregorianToJalali, parseJalali, todayJalali } from '../core/jalali.mjs';
-import { validIns, validCompactDate, parseInsList, safeStaticPath, readBody, BodyTooLarge } from '../server/guard.mjs';
+import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from '../server/guard.mjs';
 import { evictOldest } from '../server/cache.mjs';
 import { watchBackoffSec } from '../server/backoff.mjs';
 import { fmt as uiFmt, axisNum, toEnDigits, faAgo, faClock, humanizeUpstreamError, coverageInfo, kpiTone, signTone, pageTitle, normFa } from '../ui/fmt.mjs';
@@ -33,7 +33,7 @@ import {
   historyPrice, normalizeHistoryDate, historyDateLabel, historyDayName,
   replayHistory, summarizeReplay, basisMatrix, entrySensitivity, generateHistoricalCombos,
   historyMarketMetrics, optimizeExitPolicy, rollingEntryMatrix, holdingPeriodProfile,
-  replayTradeDetail,
+  replayTradeDetail, strategyLegSnapshots,
 } from '../core/history.mjs';
 import { replayIntraday, combinedBacktestPath, tradeSecond, tradeTimeLabel, normalizeTrades, canceledFlag } from '../core/backtest.mjs';
 import { summarizePortfolio } from '../core/portfolio.mjs';
@@ -1006,6 +1006,8 @@ group('۱۸. نگهبان مرز سرور');
   check('عدد به‌جای رشته رد می‌شود', !validIns(123));
   check('تاریخ فشرده معتبر برای مسیر ریزمعامله پذیرفته می‌شود', validCompactDate('20260802'));
   check('تاریخ کوتاه یا غیررقمی برای مسیر ریزمعامله رد می‌شود', !validCompactDate('1405/05/11') && !validCompactDate('2026080x'));
+  check('مسیر ریزمعامله از endpoint تاریخی Trade ساخته می‌شود', historicalTradesPath('123456', '20260802') === '/Trade/GetTradeHistory/123456/20260802/true');
+  check('مسیر ریزمعامله با کد یا تاریخ نامعتبر ساخته نمی‌شود', historicalTradesPath('../info', '20260802') === null && historicalTradesPath('123', '14050511') === null);
 
   // ——— فهرست کد ———
   const list = parseInsList(' 111 , 222,۳۳۳,../x,333,111 , ');
@@ -1717,6 +1719,11 @@ group('۳۲. بازپخش تاریخی استراتژی');
   check('تغییر روزانه پایه محاسبه می‌شود', near(replay32.rows[1].baseDailyPct, 10, 1e-9), replay32.rows[1].baseDailyPct);
   check('تغییر تجمعی پایه از روز ورود محاسبه می‌شود', near(replay32.rows[2].baseCumulativePct, 5, 1e-9), replay32.rows[2].baseCumulativePct);
   check('نبود قیمت یک پا، ردیف را فاقد داده می‌کند', replay32.rows[2].status === 'missing' && replay32.rows[2].missingLegs[0] === 1);
+  const legSnapshots32 = strategyLegSnapshots(legs32, args32.seriesByIns, 20260801);
+  check('کارت قیمت بک‌تست برای هر پای استراتژی یک عکس مستقل می‌سازد', legSnapshots32.length === 2 && legSnapshots32[0].ins === '11' && legSnapshots32[1].ins === '12');
+  check('قیمت کارت پاها از قرارداد می‌آید، نه دارایی پایه', legSnapshots32[0].prices.CLOSE === 8 && legSnapshots32[1].prices.CLOSE === 10 && legSnapshots32.every((row) => row.prices.CLOSE !== 100));
+  const backtestSource32 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  check('رابط بک‌تست عکس قیمت را با پاهای انتخاب‌شده می‌سازد', backtestSource32.includes('strategyLegSnapshots(legs, seriesByIns, entry)') && !backtestSource32.includes('marketSnapshot(rowAt(ua?.ins'));
 
   const manual32 = replayHistory({ ...args32, manualEntry: { 0: 5, 1: 20 } });
   check('قیمت دستی هر پا مستقل و بیرون دامنه پذیرفته می‌شود', manual32.priced[0].price === 5 && manual32.priced[1].price === 20);
