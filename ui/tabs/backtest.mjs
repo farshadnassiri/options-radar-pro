@@ -4,7 +4,7 @@ import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, flattenActiveContracts, generateHistoricalCombos, historyDateLabel,
   historyDayName, historyMarketMetrics, historyPrice, normalizeHistoryDate,
-  replayHistory, rollingEntryMatrix, holdingPeriodProfile,
+  replayHistory, rollingEntryMatrix, holdingPeriodProfile, strategyLegSnapshots,
 } from '/core/history.mjs';
 import { replayIntraday, combinedBacktestPath } from '/core/backtest.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
@@ -37,7 +37,7 @@ function mountWheel(host, dates, selected, onChange) {
     const value = Number(date);
     host.querySelectorAll('[data-date]').forEach((button) => button.setAttribute('aria-selected', String(Number(button.dataset.date) === value)));
     const active = host.querySelector(`[data-date="${value}"]`);
-    active?.scrollIntoView({ block: 'center', behavior: notify ? 'smooth' : 'auto' });
+    active?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: notify ? 'smooth' : 'auto' });
     host.dataset.value = String(value || '');
     if (notify && value) onChange(value);
   };
@@ -46,11 +46,11 @@ function mountWheel(host, dates, selected, onChange) {
     if (button) select(button.dataset.date);
   };
   host.onkeydown = (event) => {
-    if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) || !dates.length) return;
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !dates.length) return;
     event.preventDefault();
     const current = Math.max(0, dates.indexOf(Number(host.dataset.value)));
     const index = event.key === 'Home' ? 0 : event.key === 'End' ? dates.length - 1
-      : Math.max(0, Math.min(dates.length - 1, current + (event.key === 'ArrowDown' ? 1 : -1)));
+      : Math.max(0, Math.min(dates.length - 1, current + (event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? 1 : -1)));
     select(dates[index]);
     host.querySelector(`[data-date="${dates[index]}"]`)?.focus();
   };
@@ -58,14 +58,13 @@ function mountWheel(host, dates, selected, onChange) {
   return select;
 }
 
-function marketSnapshot(row) {
-  if (!row) return '<p class="empty-note">برای این روز داده‌ای موجود نیست.</p>';
-  const market = historyMarketMetrics(row);
-  const prices = HISTORY_BASES.map(([basis, label]) => `<div><span>${label}</span><b>${fmt.money(historyPrice(row, basis))}</b></div>`).join('');
-  return `<div class="backtest-price-grid">${prices}</div><div class="backtest-market-strip">
-    <span>حجم <b>${fmt.int(market.volume)}</b></span><span>معامله <b>${fmt.int(market.trades)}</b></span>
-    <span>ارزش ${market.valueEstimated ? 'تقریبی' : 'رسمی'} <b>${fmt.money(market.value)}</b></span>
-  </div>`;
+function marketSnapshot(snapshots, selectedBasis) {
+  if (!snapshots?.length) return '<p class="empty-note">ابتدا یک ترکیب معتبر انتخاب کن.</p>';
+  return `<div class="backtest-leg-markets">${snapshots.map((snapshot) => {
+    const kind = snapshot.kind === 'call' ? 'اختیار خرید' : snapshot.kind === 'put' ? 'اختیار فروش' : 'نماد پایه';
+    const prices = HISTORY_BASES.map(([basis, label]) => `<div data-active="${basis === selectedBasis}"><span>${label}</span><b>${fmt.money(snapshot.prices[basis])}</b></div>`).join('');
+    return `<article><div class="backtest-leg-market-head"><div><small>پای ${fmt.int(snapshot.index + 1)} · ${snapshot.side === 'buy' ? 'خرید' : 'فروش'} ${kind}</small><b>${esc(nameOf(snapshot, `پای ${snapshot.index + 1}`))}</b></div><span>${snapshot.kind === 'underlying' ? 'دارایی پایه' : `اعمال ${fmt.int(snapshot.strike)}`}</span></div><div class="backtest-price-grid">${prices}</div><div class="backtest-market-strip"><span>حجم <b>${fmt.int(snapshot.market.volume)}</b></span><span>معامله <b>${fmt.int(snapshot.market.trades)}</b></span><span>ارزش ${snapshot.market.valueEstimated ? 'تقریبی' : 'رسمی'} <b>${fmt.money(snapshot.market.value)}</b></span></div></article>`;
+  }).join('')}</div>`;
 }
 
 function chart(host, points, series, { money = false } = {}) {
@@ -131,8 +130,8 @@ export async function mount(root, { state }) {
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود</h2></div><span>فقط روز دارای ترکیب معتبر</span></div><div class="backtest-wheel" id="bt-entry-date" role="listbox" tabindex="0"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ خروج آزمایشی</h2></div><span>فقط روز دارای قیمت همه پاها</span></div><div class="backtest-wheel" id="bt-exit-date" role="listbox" tabindex="0"></div></section></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><div id="bt-legs" class="backtest-legs"></div></section>
-    <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت روز ایجاد</h2></div></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت روز خروج</h2></div></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
+    <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت پاها در روز ایجاد</h2></div><span>هر کارت یک پای استراتژی</span></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت پاها در روز خروج</h2></div><span>همان قراردادهای ترکیب</span></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
     <section class="card backtest-runbar"><div><p class="eyebrow">نمای مسیر</p><select id="bt-path-mode"><option value="combined">روزهای قبل + ریزمعامله روز آخر</option><option value="daily">فقط مسیر روزانه</option><option value="intraday">فقط ریزمعامله روز سنجش</option></select></div><p id="bt-run-note">ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست.</p><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button></section>
     <section id="bt-result" hidden><div class="backtest-kpis" id="bt-kpis"></div>
       <div class="backtest-chart-grid"><section class="card"><div class="section-head"><h2>سود و زیان مبلغی</h2><span>ریال</span></div><div id="bt-money-chart" class="backtest-chart"></div></section><section class="card"><div class="section-head"><h2>بازده و تغییر نماد پایه</h2><span>درصد</span></div><div id="bt-return-chart" class="backtest-chart"></div></section></div>
@@ -169,7 +168,7 @@ export async function mount(root, { state }) {
       const row = rowAt(leg.ins, entryDate), market = historyMarketMetrics(row);
       return `<article><span>${faDigits(index + 1)} · ${leg.side === 'buy' ? 'خرید' : 'فروش'} ${leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'نماد پایه'}</span><b>${esc(nameOf(leg, 'پایه'))}</b><small>اعمال ${leg.kind === 'underlying' ? '—' : fmt.int(leg.strike)} · نسبت ${fmt.num(leg.ratio)} · اندازه ${fmt.int(leg.size)}</small><small>قیمت ورود ${fmt.money(historyPrice(row, basis))} · حجم ${fmt.int(market.volume)} · ارزش ${fmt.money(market.value)}</small></article>`;
     }).join('');
-    refreshExitDates(); paintSnapshots();
+    refreshExitDates();
   }
 
   function refreshCombos() {
@@ -191,12 +190,13 @@ export async function mount(root, { state }) {
     exitDates = result.ok ? result.rows.filter((row) => row.status === 'ok').map((row) => row.date) : [];
     const selected = exitDates.includes(Number($('bt-exit-date').dataset.value)) ? Number($('bt-exit-date').dataset.value) : exitDates[Math.min(exitDates.length - 1, 4)];
     mountWheel($('bt-exit-date'), exitDates, selected, () => paintSnapshots());
+    paintSnapshots();
   }
 
   function paintSnapshots() {
     const entry = Number($('bt-entry-date').dataset.value), exit = Number($('bt-exit-date').dataset.value);
-    $('bt-entry-market').innerHTML = marketSnapshot(rowAt(ua?.ins, entry));
-    $('bt-exit-market').innerHTML = marketSnapshot(rowAt(ua?.ins, exit));
+    $('bt-entry-market').innerHTML = marketSnapshot(strategyLegSnapshots(legs, seriesByIns, entry), entryRail.dataset.value || 'LAST');
+    $('bt-exit-market').innerHTML = marketSnapshot(strategyLegSnapshots(legs, seriesByIns, exit), exitRail.dataset.value || 'LAST');
   }
 
   async function findExecutableDates() {
@@ -278,22 +278,30 @@ export async function mount(root, { state }) {
     try {
       replay = replayHistory({ legs, seriesByIns, baseIns: String(ua.ins), startDate, endDate, entryBasis: entryRail.dataset.value, exitBasis: exitRail.dataset.value, units: Math.max(1, Math.trunc(Number($('bt-units').value) || 1)), fees: feesOf(state.settings), settings: state.settings });
       if (!replay.ok) throw new Error(replay.error);
-      let rows = [];
-      try {
-        rows = await Promise.all([...new Set([...legs.map((leg) => String(leg.ins)), String(ua.ins)])].map(async (ins) => [ins, await fetchTrades(ins, endDate)]));
-      } catch (error) { setStatus(`مسیر روزانه آماده شد؛ ریز روز آخر در دسترس نبود: ${error.message}`, true); }
+      const requestedCodes = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua.ins)])];
+      const fetched = await Promise.allSettled(requestedCodes.map(async (ins) => [ins, await fetchTrades(ins, endDate)]));
+      const rows = fetched.filter((item) => item.status === 'fulfilled').map((item) => item.value);
+      const failedCodes = fetched.map((item, index) => item.status === 'rejected' ? requestedCodes[index] : null).filter(Boolean);
+      const requiredCodes = new Set(legs.map((leg) => String(leg.ins)));
+      const failedRequired = failedCodes.filter((ins) => requiredCodes.has(ins));
+      const tradeWarning = failedCodes.length
+        ? (failedRequired.length ? `ریزمعامله ${fmt.int(failedRequired.length)} پای استراتژی دریافت نشد` : 'ریزمعامله نماد پایه دریافت نشد')
+        : '';
       const byIns = Object.fromEntries(rows);
       // اگر بالادست وضعیت ابطال را نفرستد، ما نمی‌دانیم معامله‌ای باطل شده یا
       // نه. سکوت در این حالت یعنی ادعای ضمنی «هیچ‌کدام باطل نشده» — پس صریح
       // گفته می‌شود که نمی‌دانیم.
       const allTrades = rows.flatMap(([, list]) => list);
       const cancelUnknown = allTrades.length > 0 && allTrades.some((trade) => trade.canceledKnown === false);
-      $('bt-run-note').textContent = cancelUnknown
-        ? 'ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست. منبع داده وضعیت ابطال معامله را اعلام نکرده، پس معامله باطل‌شده احتمالی کنار گذاشته نشده است.'
-        : 'ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست. معامله باطل‌شده کنار گذاشته شده است.';
+      $('bt-run-note').textContent = !allTrades.length
+        ? 'برای روز سنجش ریزمعامله‌ای دریافت نشد؛ مسیر روزانه معتبر است و عدد درون‌روزی ساخته نمی‌شود.'
+        : cancelUnknown
+          ? 'ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست. منبع داده وضعیت ابطال معامله را اعلام نکرده، پس معامله باطل‌شده احتمالی کنار گذاشته نشده است.'
+          : 'ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست. معامله باطل‌شده کنار گذاشته شده است.';
       intraday = replayIntraday({ replay, tradesByIns: byIns, baseTrades: byIns[String(ua.ins)] || [], fees: feesOf(state.settings) });
       $('bt-result').hidden = false; paintResult();
-      if (intraday.length) setStatus(`${fmt.int(replay.summary.validDays)} روز و ${fmt.int(intraday.length)} نقطه ریزمعامله محاسبه شد.`);
+      if (intraday.length) setStatus(`${fmt.int(replay.summary.validDays)} روز و ${fmt.int(intraday.length)} نقطه ریزمعامله محاسبه شد${tradeWarning ? `؛ ${tradeWarning}` : ''}.`, Boolean(tradeWarning));
+      else setStatus(`${fmt.int(replay.summary.validDays)} روز آماده شد؛ ${tradeWarning || 'در روز سنجش ریزمعامله کامل برای همه پاها پیدا نشد'}.`, Boolean(tradeWarning));
       $('bt-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { setStatus(errorText(error, 'بک‌تست اجرا نشد.'), true); } finally { $('bt-run').disabled = false; }
   }

@@ -65,5 +65,9 @@ export function todayJalali() {
 export function daysSinceJalali(text) {
   const d = parseJalali(text);
   if (!d) return null;
-  return Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+  // اختلاف «روز تقویمی» می‌خواهیم، نه ۲۴ ساعت سپری‌شده. نزدیک نیمه‌شب UTC
+  // ممکن است هنوز تاریخ محلی امروز باشد ولی از UTC ابتدای همان روز بیش از
+  // ۲۴ ساعت گذشته باشد؛ آن حالت نباید روز ورود امروز را یک روزه نشان دهد.
+  const today = parseJalali(todayJalali());
+  return Math.max(0, Math.round((today.getTime() - d.getTime()) / 86400000));
 }
