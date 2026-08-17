@@ -197,7 +197,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-chart-stage { position: relative; }
 .backtest-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .backtest-chart svg text { fill: var(--muted); font-family: inherit; font-size: 10px; direction: ltr; }
-.backtest-chart polyline { stroke-width: 2.7; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+.backtest-chart polyline, .backtest-chart path { stroke-width: 2.7; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
 .backtest-grid { stroke: color-mix(in srgb, var(--line) 80%, transparent); stroke-width: 1; }
 .backtest-zero { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 4 4; opacity: .55; }
 /* مرز تغییر مقیاس زمان: چپ آن هر نقطه یک روز است، راست آن یک معامله. */
@@ -218,6 +218,29 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-matrix-kpis article { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .backtest-matrix-kpis span { color: var(--muted); font-size: 10.5px; }
 .backtest-matrix-link p { margin: 13px 0 0; color: var(--muted); line-height: 1.9; }
+.backtest-intraday-panel { margin: 14px 0; border-top: 4px solid var(--accent); }
+.backtest-head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 12px; color: var(--muted); font-size: 11px; }
+.backtest-head-actions button { min-height: 34px; padding: 6px 11px; border: 1px solid var(--accent); border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent); font: inherit; font-weight: 800; cursor: pointer; }
+.backtest-intraday-panel > .backtest-chart-grid > section, .backtest-analysis-grid > section { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel-2) 70%, var(--panel)); }
+.backtest-intraday-panel > .backtest-chart-grid { margin-top: 14px; }
+.backtest-intraday-panel .backtest-chart { min-height: 250px; }
+.backtest-analysis-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 14px; margin-top: 14px; }
+.backtest-analysis-grid > * { min-width: 0; }
+.backtest-compact-table th, .backtest-compact-table td, .backtest-correlation th, .backtest-correlation td, .backtest-tape-table th, .backtest-tape-table td { white-space: nowrap; }
+/* ماتریس یک مربع کوچک است، نه جدول پهنِ تاریخچه. کف ۹۲۰ پیکسلیِ
+   history-table آن را در ستون باریکِ تحلیل همیشه افقی می‌کرد. دو کلاس لازم
+   است: قاعده history-table پایین‌تر در همین فایل می‌آید و با وزن برابر
+   برنده می‌شد. */
+.history-table.backtest-correlation { min-width: 0; }
+.backtest-correlation td { min-width: 72px; text-align: center; font-family: var(--mono); background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.backtest-correlation td.gain { color: var(--gain); background: color-mix(in srgb, var(--gain) 8%, transparent); }
+.backtest-correlation td.loss { color: var(--loss); background: color-mix(in srgb, var(--loss) 8%, transparent); }
+.backtest-table-note { margin: 9px 2px 0; color: var(--muted); font-size: 10.5px; line-height: 1.8; }
+.backtest-tape { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.backtest-tape .section-head p { margin-top: 4px; color: var(--muted); font-size: 10.5px; font-weight: 400; }
+.backtest-tape .history-table-wrap { max-height: 480px; }
+.backtest-tape-table tr[data-fresh="false"] { background: color-mix(in srgb, var(--warn) 5%, transparent); }
+.backtest-time-grid { stroke: color-mix(in srgb, var(--line) 55%, transparent); stroke-width: 1; stroke-dasharray: 2 6; }
 
 /* آزمون هم‌زمان همه استراتژی‌ها — گزارش فشرده، جزئیات روی تقاضا. */
 .portfolio-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; align-items: center; margin-bottom: 14px; padding: 24px; border: 1px solid var(--line); border-radius: 15px; background: linear-gradient(145deg, var(--panel), color-mix(in srgb, var(--accent) 8%, var(--panel))); }
@@ -284,7 +307,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .portfolio-sensitivity-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
-  .backtest-hero, .backtest-date-grid, .backtest-chart-grid { grid-template-columns: 1fr; display: grid; }
+  .backtest-hero, .backtest-date-grid, .backtest-chart-grid, .backtest-analysis-grid { grid-template-columns: 1fr; display: grid; }
   .backtest-hero > span { justify-self: start; }
   .backtest-form, .backtest-runbar { grid-template-columns: 1fr; }
   .backtest-kpis, .backtest-matrix-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }

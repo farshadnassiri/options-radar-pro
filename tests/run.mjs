@@ -35,7 +35,10 @@ import {
   historyMarketMetrics, optimizeExitPolicy, rollingEntryMatrix, holdingPeriodProfile,
   replayTradeDetail, strategyLegSnapshots,
 } from '../core/history.mjs';
-import { replayIntraday, combinedBacktestPath, tradeSecond, tradeTimeLabel, normalizeTrades, canceledFlag } from '../core/backtest.mjs';
+import {
+  replayIntraday, combinedBacktestPath, summarizeIntraday, tradeSecond, tradeTimeLabel,
+  normalizeTrades, canceledFlag, inIntradaySession,
+} from '../core/backtest.mjs';
 import { summarizePortfolio } from '../core/portfolio.mjs';
 
 let pass = 0, fail = 0;
@@ -1724,6 +1727,11 @@ group('۳۲. بازپخش تاریخی استراتژی');
   check('قیمت کارت پاها از قرارداد می‌آید، نه دارایی پایه', legSnapshots32[0].prices.CLOSE === 8 && legSnapshots32[1].prices.CLOSE === 10 && legSnapshots32.every((row) => row.prices.CLOSE !== 100));
   const backtestSource32 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
   check('رابط بک‌تست عکس قیمت را با پاهای انتخاب‌شده می‌سازد', backtestSource32.includes('strategyLegSnapshots(legs, seriesByIns, entry)') && !backtestSource32.includes('marketSnapshot(rowAt(ua?.ins'));
+  check('رابط بک‌تست تحلیل خط زمانی، اثر پاها، حجم و ماتریس هم‌حرکتی را رندر می‌کند',
+    backtestSource32.includes('summarizeIntraday(intraday)') && backtestSource32.includes('bt-intraday-leg-chart')
+    && backtestSource32.includes('bt-intraday-volume-chart') && backtestSource32.includes('bt-correlation-table'));
+  check('نمودارهای درون‌روزی روی ساعت واقعی و به‌شکل پله‌ای رسم می‌شوند',
+    backtestSource32.includes('timeScale: true, step: true') && backtestSource32.includes("`M ${values[0].x} ${values[0].y}`"));
 
   const manual32 = replayHistory({ ...args32, manualEntry: { 0: 5, 1: 20 } });
   check('قیمت دستی هر پا مستقل و بیرون دامنه پذیرفته می‌شود', manual32.priced[0].price === 5 && manual32.priced[1].price === 20);
@@ -1832,11 +1840,67 @@ group('۳۲. بازپخش تاریخی استراتژی');
     baseTrades: [{ sequence: 1, time: 90010, price: 110, quantity: 20 }, { sequence: 2, time: 90040, price: 111, quantity: 5 }],
     fees: args32.fees,
   });
-  check('ریزمعامله تا پیش از مشاهده قیمت همه پاها عدد مالی نمی‌سازد', intraday32.length === 2 && intraday32[0].timeLabel === '09:00:30');
-  check('ارزش‌گذاری ریزمعامله اثر هر پا و سود کل را از موتور مشترک می‌سازد', intraday32[1].perLeg.length === 2 && intraday32[1].netPnl === 8000, intraday32[1].netPnl);
+  check('ریزمعامله تا پیش از مشاهده قیمت همه پاها عدد مالی نمی‌سازد', intraday32.length === 3 && intraday32[0].timeLabel === '09:00:30');
+  check('رویداد نماد پایه هم روی خط زمانی مشترک می‌نشیند', intraday32[1].timeLabel === '09:00:40' && intraday32[1].basePrice === 111);
+  check('ارزش‌گذاری ریزمعامله اثر هر پا و سود کل را از موتور مشترک می‌سازد', intraday32[2].perLeg.length === 2 && intraday32[2].netPnl === 8000, intraday32[2].netPnl);
   check('قیمت پایه ریزمعامله به‌صورت مشاهده‌شده و درصدی نگه داشته می‌شود', intraday32[1].basePrice === 111 && near(intraday32[1].basePct, 11));
-  check('مسیر ترکیبی روز آخر را با ریزمعامله جایگزین می‌کند', combinedBacktestPath(replay32, intraday32).filter((point) => point.granularity === 'trade').length === 2);
+  check('مسیر ترکیبی روز آخر را با ریزمعامله جایگزین می‌کند', combinedBacktestPath(replay32, intraday32).filter((point) => point.granularity === 'trade').length === 3);
   check('تبدیل زمان ریزمعامله پایدار است', tradeSecond(90105) === 32465 && tradeTimeLabel(90105) === '09:01:05');
+  check('مرز جلسه درون‌روزی دقیقاً ۹ تا ۱۲:۳۰ است', !inIntradaySession(85959) && inIntradaySession(90000) && inIntradaySession(123000) && !inIntradaySession(123001));
+
+  const detailedIntraday32 = replayIntraday({
+    replay: replay32,
+    tradesByIns: {
+      11: [
+        { sequence: 1, time: 85959, price: 99, quantity: 90 },
+        { sequence: 2, time: 90000, price: 5, quantity: 3 },
+        { sequence: 3, time: 90000, price: 4, quantity: 2 },
+        { sequence: 4, time: 123001, price: 1, quantity: 80 },
+      ],
+      12: [{ sequence: 1, time: 90000, price: 6, quantity: 4 }, { sequence: 2, time: 90530, price: 7, quantity: 1 }],
+    },
+    fees: args32.fees,
+  });
+  check('چند معامله یک پا در یک ثانیه، یک نقطه با آخرین قیمت می‌سازد', detailedIntraday32.length === 2 && detailedIntraday32[0].perLeg[0].exitPrice === 4);
+  check('حجم همان ثانیه و حجم تجمعی هر پا جدا نگه داشته می‌شود', detailedIntraday32[0].perLeg[0].secondVolume === 5 && detailedIntraday32[1].perLeg[0].cumulativeVolume === 5);
+  check('سن آخرین قیمت هر پا روی خط زمانی مشترک مشخص است', detailedIntraday32[1].perLeg[0].ageSec === 330 && detailedIntraday32[1].maxAgeSec === 330 && !detailedIntraday32[1].allFresh);
+  const intradaySummary32 = summarizeIntraday(detailedIntraday32, { bucketSeconds: 60 });
+  check('خلاصه درون‌روزی بهترین، بدترین و افت از قله را می‌سازد', intradaySummary32.points === 2 && intradaySummary32.best && intradaySummary32.worst && intradaySummary32.maxDrawdown <= 0);
+  const observedIntervals32 = intradaySummary32.intervals.filter((row) => row.observations);
+  check('جدول بازه‌ای همه جلسه را بدون ساخت عدد برای شکاف‌ها نگه می‌دارد', intradaySummary32.intervals.length === 210 && intradaySummary32.intervals.some((row) => !row.observations && !Number.isFinite(row.openPnl)));
+  check('جدول بازه‌ای، تعداد مشاهده و حجم واقعی پاها را جمع می‌زند', observedIntervals32.length === 2 && observedIntervals32[0].volume === 9 && observedIntervals32[0].trades === 3);
+  check('خلاصه هر پا قیمت، اثر و فعالیت بازار را نگه می‌دارد', intradaySummary32.legs.length === 2 && intradaySummary32.legs[0].lastPrice === 4 && intradaySummary32.legs[1].tradeCount === 2);
+  check('ماتریس هم‌حرکتی به تعداد پاها و با قطر یک ساخته می‌شود', intradaySummary32.correlation.length === 2 && intradaySummary32.correlation[0][0] === 1 && intradaySummary32.correlation[1][1] === 1);
+
+  // ——— دو پا روی یک قرارداد: یک معامله فیزیکی، نه دو تا ———
+  // اگر جمع سطر از روی حجم پاها بسته شود، همان معامله دوبار شمرده می‌شود و
+  // عددی بیرون می‌آید که در تابلو وجود ندارد.
+  const sharedIns32 = replayIntraday({
+    replay: {
+      ...replay32,
+      priced: [replay32.priced[0], { ...replay32.priced[0], side: 'sell' }],
+    },
+    tradesByIns: { [String(replay32.priced[0].ins)]: [
+      { sequence: 1, time: 90000, price: 6, quantity: 100 },
+      { sequence: 2, time: 90100, price: 7, quantity: 50 },
+    ] },
+    fees: args32.fees,
+  });
+  check('حجم تجمعی سطر با دو پای هم‌قرارداد دوبار شمرده نمی‌شود',
+    sharedIns32.length === 2 && sharedIns32[0].cumulativeVolume === 100 && sharedIns32.at(-1).cumulativeVolume === 150,
+    sharedIns32.map((row) => row.cumulativeVolume).join('/'));
+  check('حجم تجمعی سطر همان جمع رویدادهای همان مسیر است',
+    sharedIns32.at(-1).cumulativeVolume === sharedIns32.reduce((sum, row) => sum + row.eventVolume, 0));
+  const chartSource32 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  check('برچسب سری نمودار نام قرارداد بالادست را فرار می‌دهد',
+    chartSource32.includes('const seriesLabel = (item) => esc(item.label);')
+    && !/\$\{item\.label\}/.test(chartSource32));
+  check('توضیح ماتریس هم‌حرکتی بیرون از جعبه پیمایش جدول می‌نشیند',
+    chartSource32.includes('id="bt-correlation-note"')
+    && !/backtest-correlation[\s\S]{0,2000}?<p class="backtest-table-note"/.test(chartSource32));
+  const styleSource32 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  check('ماتریس هم‌حرکتی کف پهنای جدول تاریخچه را نمی‌گیرد',
+    styleSource32.includes('.history-table.backtest-correlation { min-width: 0; }'));
 
   // ——— ابطال معامله: «باطل نشده» و «نمی‌دانیم» دو چیز متفاوت‌اند ———
   check('پرچم ابطال از هر املای محتمل بالادست خوانده می‌شود',
