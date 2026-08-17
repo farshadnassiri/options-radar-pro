@@ -106,6 +106,10 @@ function chart(host, points, series, { money = false, count = false, timeScale =
   // `baseCumulativePct`، سطر ریزمعامله `basePct`). آن‌ها هم‌رنگ‌اند چون یک
   // چیزند؛ پس راهنما هم باید یک چیپ نشان دهد، نه دو چیپ هم‌رنگ با دو نام.
   const legend = series.filter((item, index) => series.findIndex((other) => other.label === item.label) === index);
+  // برچسب سری تا امروز رشته ثابتِ خودِ کد بود؛ حالا نام قرارداد بالادست هم
+  // درونش می‌نشیند. هر جای دیگر این فایل نام را با esc می‌نویسد. اینجا هم
+  // باید — و در خودِ chart، تا فراخوان بعدی نتواند دوباره فراموشش کند.
+  const seriesLabel = (item) => esc(item.label);
 
   // مرز روز آخر. محور افقی بر پایه اندیس است، پس چند صد نقطه ریزمعامله
   // بخش روزانه را باریک می‌کند. بدون این خط، کاربر نمی‌فهمد از کجا مقیاس
@@ -121,7 +125,7 @@ function chart(host, points, series, { money = false, count = false, timeScale =
     return `<path fill="none" stroke="${item.color}" d="${d}"/>`;
   };
 
-  host.innerHTML = `<div class="backtest-chart-legend">${legend.map((item) => `<span style="--series:${item.color}"><i></i>${item.label}</span>`).join('')}</div><div class="backtest-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار تعاملی بک‌تست">
+  host.innerHTML = `<div class="backtest-chart-legend">${legend.map((item) => `<span style="--series:${item.color}"><i></i>${seriesLabel(item)}</span>`).join('')}</div><div class="backtest-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار تعاملی بک‌تست">
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="backtest-grid"/><text x="${L - 10}" y="${y(value) + 4}" text-anchor="end">${label(value)}</text>`).join('')}
     ${timeTicks.map((second) => `<line x1="${x({ second }, 0)}" x2="${x({ second }, 0)}" y1="${T}" y2="${H - B}" class="backtest-time-grid"/><text x="${x({ second }, 0)}" y="${H - B + 22}" text-anchor="middle">${faDigits(clockLabel(second).slice(0, 5))}</text>`).join('')}
     <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="backtest-zero"/>
@@ -137,7 +141,7 @@ function chart(host, points, series, { money = false, count = false, timeScale =
     cursor.querySelector('line').setAttribute('x1', px); cursor.querySelector('line').setAttribute('x2', px);
     cursor.querySelector('g').innerHTML = series.map((item) => Number.isFinite(Number(row[item.key])) ? `<circle cx="${px}" cy="${y(Number(row[item.key]))}" r="4" fill="${item.color}"/>` : '').join('');
     const when = row.granularity === 'trade' ? `${dateLabel(row.date)} · ${faDigits(row.timeLabel)}` : faDigits(row.dateLabel || historyDateLabel(row.date));
-    tip.innerHTML = `<b>${when}</b>${series.map((item) => Number.isFinite(Number(row[item.key])) ? `<span style="--series:${item.color}"><i></i>${item.label}: <strong class="${signTone(row[item.key])}">${label(row[item.key])}</strong></span>` : '').join('')}`;
+    tip.innerHTML = `<b>${when}</b>${series.map((item) => Number.isFinite(Number(row[item.key])) ? `<span style="--series:${item.color}"><i></i>${seriesLabel(item)}: <strong class="${signTone(row[item.key])}">${label(row[item.key])}</strong></span>` : '').join('')}`;
     tip.hidden = false;
     const box = host.getBoundingClientRect();
     tip.style.left = `${Math.max(8, Math.min(box.width - 190, clientX - box.left + 12))}px`;
@@ -177,7 +181,7 @@ export async function mount(root, { state }) {
       <section class="card backtest-intraday-panel"><div class="section-head"><div><p class="eyebrow">خط زمانی مشترک همه پاها</p><h2>تحلیل درون‌روزی ۹:۰۰ تا ۱۲:۳۰</h2></div><div class="backtest-head-actions"><span id="bt-intraday-source">—</span><button type="button" id="bt-export-intraday">خروجی همه نقاط</button></div></div><div id="bt-intraday-kpis" class="backtest-kpis"></div>
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>آفست لحظه‌ای موقعیت</h3><span>ریال · مسیر پله‌ای</span></div><div id="bt-intraday-pnl-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>اثر خالص هر پا</h3><span>تفکیک ریالی</span></div><div id="bt-intraday-leg-chart" class="backtest-chart"></div></section></div>
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>حرکت قیمت هر پا</h3><span>نسبت به اولین معامله همان پا</span></div><div id="bt-intraday-price-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>حجم تجمعی هر پا</h3><span>قرارداد</span></div><div id="bt-intraday-volume-chart" class="backtest-chart"></div></section></div>
-        <div class="backtest-analysis-grid"><section><div class="section-head"><h3>پنجره‌های ۱۵ دقیقه‌ای</h3><span>دامنه و جریان آفست</span></div><div id="bt-interval-table" class="history-table-wrap"></div></section><section><div class="section-head"><h3>ماتریس هم‌حرکتی اثر پاها</h3><span>تغییرات نقطه‌به‌نقطه</span></div><div id="bt-correlation-table" class="history-table-wrap"></div></section></div>
+        <div class="backtest-analysis-grid"><section><div class="section-head"><h3>پنجره‌های ۱۵ دقیقه‌ای</h3><span>دامنه و جریان آفست</span></div><div id="bt-interval-table" class="history-table-wrap"></div></section><section><div class="section-head"><h3>ماتریس هم‌حرکتی اثر پاها</h3><span>تغییرات نقطه‌به‌نقطه</span></div><div id="bt-correlation-table" class="history-table-wrap"></div><p id="bt-correlation-note" class="backtest-table-note"></p></section></div>
         <section class="backtest-tape"><div class="section-head"><div><h3>نوار مشترک قیمت و حجم</h3><p>نمودارها همه نقاط را دارند؛ جدول برای حفظ سرعت حداکثر ۳۰۰ نقطه را با فاصله یکنواخت نشان می‌دهد.</p></div><span id="bt-tape-count">—</span></div><div id="bt-tape-table" class="history-table-wrap"></div></section>
       </section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">اثر هر پایه</p><h2>جزئیات پاهای استراتژی در روز سنجش</h2></div><span id="bt-final-source">—</span></div><div id="bt-leg-table" class="history-table-wrap"></div></section>
@@ -293,6 +297,7 @@ export async function mount(root, { state }) {
       $('bt-intraday-source').textContent = 'فاقد خط زمانی کامل';
       $('bt-intraday-kpis').innerHTML = '';
       $('bt-tape-count').textContent = '—';
+      $('bt-correlation-note').textContent = '';
       hosts.forEach((id) => { $(id).innerHTML = '<p class="empty-note">برای این روز، قیمت تمام پاها در بازهٔ ۹:۰۰ تا ۱۲:۳۰ کامل نشده است.</p>'; });
       return;
     }
@@ -324,7 +329,11 @@ export async function mount(root, { state }) {
     $('bt-interval-table').innerHTML = `<table class="history-table backtest-compact-table"><thead><tr><th>بازه</th><th>ابتدا</th><th>انتها</th><th>بیشینه</th><th>کمینه</th><th>تغییر</th><th>حجم پاها</th><th>نقاط تازه</th></tr></thead><tbody>${summary.intervals.map((row) => `<tr><td>${faDigits(clockLabel(row.startSecond).slice(0, 5))}–${faDigits(clockLabel(row.endSecond).slice(0, 5))}</td><td class="${signTone(row.openPnl)}">${fmt.money(row.openPnl)}</td><td class="${signTone(row.closePnl)}">${fmt.money(row.closePnl)}</td><td class="gain">${fmt.money(row.highPnl)}</td><td class="loss">${fmt.money(row.lowPnl)}</td><td class="${signTone(row.changePnl)}">${fmt.money(row.changePnl)}</td><td>${row.observations ? `${fmt.int(row.volume)} · ${fmt.int(row.trades)} معامله` : 'فاقد مشاهده'}</td><td>${row.observations ? `${fmt.pct(row.freshPct)}٪` : '—'}</td></tr>`).join('')}</tbody></table>`;
 
     const legHeads = summary.legs.map((leg, index) => `<th>${faDigits(index + 1)} · ${esc(nameOf(leg, 'پا'))}</th>`).join('');
-    $('bt-correlation-table').innerHTML = `<table class="history-table backtest-correlation"><thead><tr><th>پا</th>${legHeads}</tr></thead><tbody>${summary.legs.map((leg, row) => `<tr><th>${faDigits(row + 1)} · ${esc(nameOf(leg, 'پا'))}</th>${summary.correlation[row].map((value) => `<td data-correlation="${Number.isFinite(value) ? Math.abs(value).toFixed(2) : ''}" class="${signTone(value)}">${fmt.num(value)}</td>`).join('')}</tr>`).join('')}</tbody></table><p class="backtest-table-note">همبستگی از تغییر اثر خالص پاها بین نقاط پیاپی محاسبه می‌شود؛ مقدار نامعلوم یعنی تغییر مشترک کافی وجود نداشته است.</p>`;
+    $('bt-correlation-table').innerHTML = `<table class="history-table backtest-correlation"><thead><tr><th>پا</th>${legHeads}</tr></thead><tbody>${summary.legs.map((leg, row) => `<tr><th>${faDigits(row + 1)} · ${esc(nameOf(leg, 'پا'))}</th>${summary.correlation[row].map((value) => `<td data-correlation="${Number.isFinite(value) ? Math.abs(value).toFixed(2) : ''}" class="${signTone(value)}">${fmt.num(value)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    // توضیح ماتریس بیرون از جعبه پیمایش می‌نشیند. اگر داخلش باشد با جدول
+    // ۹۲۰ پیکسلی افقی کشیده و از دید کاربر بیرون می‌رود — و این جمله دقیقاً
+    // همان چیزی است که «مقدار نامعلوم» را از «همبستگی صفر» جدا می‌کند.
+    $('bt-correlation-note').textContent = 'همبستگی از تغییر اثر خالص پاها بین نقاط پیاپی محاسبه می‌شود؛ مقدار نامعلوم یعنی تغییر مشترک کافی وجود نداشته است.';
 
     const maxTape = 300, stride = Math.max(1, Math.ceil(intraday.length / maxTape));
     const tape = intraday.filter((_, index) => index % stride === 0 || index === intraday.length - 1);

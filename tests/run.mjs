@@ -1872,6 +1872,36 @@ group('۳۲. بازپخش تاریخی استراتژی');
   check('خلاصه هر پا قیمت، اثر و فعالیت بازار را نگه می‌دارد', intradaySummary32.legs.length === 2 && intradaySummary32.legs[0].lastPrice === 4 && intradaySummary32.legs[1].tradeCount === 2);
   check('ماتریس هم‌حرکتی به تعداد پاها و با قطر یک ساخته می‌شود', intradaySummary32.correlation.length === 2 && intradaySummary32.correlation[0][0] === 1 && intradaySummary32.correlation[1][1] === 1);
 
+  // ——— دو پا روی یک قرارداد: یک معامله فیزیکی، نه دو تا ———
+  // اگر جمع سطر از روی حجم پاها بسته شود، همان معامله دوبار شمرده می‌شود و
+  // عددی بیرون می‌آید که در تابلو وجود ندارد.
+  const sharedIns32 = replayIntraday({
+    replay: {
+      ...replay32,
+      priced: [replay32.priced[0], { ...replay32.priced[0], side: 'sell' }],
+    },
+    tradesByIns: { [String(replay32.priced[0].ins)]: [
+      { sequence: 1, time: 90000, price: 6, quantity: 100 },
+      { sequence: 2, time: 90100, price: 7, quantity: 50 },
+    ] },
+    fees: args32.fees,
+  });
+  check('حجم تجمعی سطر با دو پای هم‌قرارداد دوبار شمرده نمی‌شود',
+    sharedIns32.length === 2 && sharedIns32[0].cumulativeVolume === 100 && sharedIns32.at(-1).cumulativeVolume === 150,
+    sharedIns32.map((row) => row.cumulativeVolume).join('/'));
+  check('حجم تجمعی سطر همان جمع رویدادهای همان مسیر است',
+    sharedIns32.at(-1).cumulativeVolume === sharedIns32.reduce((sum, row) => sum + row.eventVolume, 0));
+  const chartSource32 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  check('برچسب سری نمودار نام قرارداد بالادست را فرار می‌دهد',
+    chartSource32.includes('const seriesLabel = (item) => esc(item.label);')
+    && !/\$\{item\.label\}/.test(chartSource32));
+  check('توضیح ماتریس هم‌حرکتی بیرون از جعبه پیمایش جدول می‌نشیند',
+    chartSource32.includes('id="bt-correlation-note"')
+    && !/backtest-correlation[\s\S]{0,2000}?<p class="backtest-table-note"/.test(chartSource32));
+  const styleSource32 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  check('ماتریس هم‌حرکتی کف پهنای جدول تاریخچه را نمی‌گیرد',
+    styleSource32.includes('.history-table.backtest-correlation { min-width: 0; }'));
+
   // ——— ابطال معامله: «باطل نشده» و «نمی‌دانیم» دو چیز متفاوت‌اند ———
   check('پرچم ابطال از هر املای محتمل بالادست خوانده می‌شود',
     canceledFlag({ canceled: true }) === true && canceledFlag({ cancelled: 1 }) === true

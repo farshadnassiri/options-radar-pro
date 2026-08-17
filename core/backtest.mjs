@@ -93,6 +93,11 @@ export function replayIntraday({ replay, tradesByIns = {}, baseTrades = [], fees
   const latest = new Map();
   const firstPrices = new Map(), cumulativeVolumes = new Map(), tradeCounts = new Map();
   let lastBase = NaN, baseCumulativeVolume = 0, baseTradeCount = 0, baseLastSecond = NaN;
+  // حجم تجمعی سطر باید همان چیزی باشد که واقعاً معامله شده. اگر دو پا روی یک
+  // قرارداد بنشینند (نسبتی، رول)، یک معامله فیزیکی به هر دو اندیس می‌نشیند و
+  // جمعِ حجم‌های پا آن را دوبار می‌شمارد. پس جمع رویدادها نگه داشته می‌شود،
+  // نه جمع پاها؛ همان واحدی که `intervals.volume` هم با آن ساخته می‌شود.
+  let cumulativeVolume = 0;
   const out = [];
   const capital = num(replay.entry?.capital?.value, NaN);
   const firstBase = replay.rows.find((row) => Number.isFinite(row.baseClose))?.baseClose;
@@ -124,6 +129,7 @@ export function replayIntraday({ replay, tradesByIns = {}, baseTrades = [], fees
       }
       at += 1;
     }
+    cumulativeVolume += eventVolume;   // پیش از خروج: حجم حتی در ثانیه‌های ناقص هم معامله شده است
     if (latest.size !== replay.priced.length) continue;
 
     const perLeg = replay.priced.map((leg, index) => {
@@ -154,7 +160,7 @@ export function replayIntraday({ replay, tradesByIns = {}, baseTrades = [], fees
       basePrice: lastBase,
       basePct: lastBase > 0 && firstBase > 0 ? ((lastBase / firstBase) - 1) * 100 : NaN,
       eventVolume, eventTrades,
-      cumulativeVolume: [...cumulativeVolumes.values()].reduce((sum, value) => sum + value, 0),
+      cumulativeVolume,
       activeLegs: perLeg.filter((leg) => leg.observedNow).length,
       maxAgeSec, allFresh: maxAgeSec <= INTRADAY_FRESH_SECOND,
       baseSecondVolume, baseSecondTrades, baseCumulativeVolume, baseTradeCount,

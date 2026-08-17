@@ -227,6 +227,11 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-analysis-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 14px; margin-top: 14px; }
 .backtest-analysis-grid > * { min-width: 0; }
 .backtest-compact-table th, .backtest-compact-table td, .backtest-correlation th, .backtest-correlation td, .backtest-tape-table th, .backtest-tape-table td { white-space: nowrap; }
+/* ماتریس یک مربع کوچک است، نه جدول پهنِ تاریخچه. کف ۹۲۰ پیکسلیِ
+   history-table آن را در ستون باریکِ تحلیل همیشه افقی می‌کرد. دو کلاس لازم
+   است: قاعده history-table پایین‌تر در همین فایل می‌آید و با وزن برابر
+   برنده می‌شد. */
+.history-table.backtest-correlation { min-width: 0; }
 .backtest-correlation td { min-width: 72px; text-align: center; font-family: var(--mono); background: color-mix(in srgb, var(--accent) 4%, transparent); }
 .backtest-correlation td.gain { color: var(--gain); background: color-mix(in srgb, var(--gain) 8%, transparent); }
 .backtest-correlation td.loss { color: var(--loss); background: color-mix(in srgb, var(--loss) 8%, transparent); }
