@@ -6,7 +6,10 @@ import {
   historyDayName, historyMarketMetrics, historyPrice, normalizeHistoryDate,
   replayHistory, rollingEntryMatrix, holdingPeriodProfile, strategyLegSnapshots,
 } from '/core/history.mjs';
-import { replayIntraday, combinedBacktestPath } from '/core/backtest.mjs';
+import {
+  replayIntraday, combinedBacktestPath, summarizeIntraday,
+  INTRADAY_START_SECOND, INTRADAY_END_SECOND,
+} from '/core/backtest.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
@@ -19,8 +22,26 @@ const nameOf = (entity, fallback = 'بدون نام') => {
 const dateLabel = (value) => faDigits(historyDateLabel(value));
 const chunks = (list, size) => Array.from({ length: Math.ceil(list.length / size) }, (_, index) => list.slice(index * size, (index + 1) * size));
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+const LEG_COLORS = ['var(--accent)', 'var(--cmp1)', 'var(--cmp2)', 'var(--cmp3)', 'var(--cmp4)'];
 const errorText = (error, fallback) => /fetch failed|network|failed to fetch/i.test(String(error?.message || error))
   ? 'اتصال به منبع داده برقرار نشد.' : (String(error?.message || '').trim() || fallback);
+const clockLabel = (second) => {
+  const value = Math.max(0, Math.trunc(Number(second) || 0));
+  return `${String(Math.floor(value / 3600)).padStart(2, '0')}:${String(Math.floor((value % 3600) / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+};
+const ageLabel = (second) => Number.isFinite(Number(second)) ? `${fmt.int(second)} ثانیه` : '—';
+
+function intradayChartRows(points, date) {
+  return points.map((point) => {
+    const row = { ...point, date, granularity: 'trade' };
+    point.perLeg.forEach((leg, index) => {
+      row[`legPnl${index}`] = leg.netPnl;
+      row[`legPrice${index}`] = leg.pricePct;
+      row[`legVolume${index}`] = leg.cumulativeVolume;
+    });
+    return row;
+  });
+}
 
 function basisRail(id, selected = 'LAST') {
   return `<div class="backtest-basis" id="${id}" role="radiogroup" aria-label="مبنای قیمت">${HISTORY_BASES.map(([value, label]) => `<button type="button" data-basis="${value}" role="radio" aria-checked="${value === selected}">${label}</button>`).join('')}</div>`;
@@ -67,17 +88,19 @@ function marketSnapshot(snapshots, selectedBasis) {
   }).join('')}</div>`;
 }
 
-function chart(host, points, series, { money = false } = {}) {
+function chart(host, points, series, { money = false, count = false, timeScale = false, step = false } = {}) {
   const rows = points.filter((point) => series.some((item) => Number.isFinite(Number(point[item.key]))));
   if (rows.length < 2) { host.innerHTML = '<p class="empty-note">برای نمودار دست‌کم دو نقطه معتبر لازم است.</p>'; return; }
   const W = 900, H = 330, L = 92, R = 28, T = 28, B = 55;
   const values = rows.flatMap((row) => series.map((item) => Number(row[item.key])).filter(Number.isFinite));
   let lo = Math.min(0, ...values), hi = Math.max(0, ...values);
   if (Math.abs(hi - lo) < 1e-9) { lo -= 1; hi += 1; }
-  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
-  const x = (index) => L + (index / Math.max(1, rows.length - 1)) * (W - L - R);
+  const pad = (hi - lo) * 0.08; lo = count ? 0 : lo - pad; hi += pad;
+  const x = (row, index) => timeScale
+    ? L + ((Math.max(INTRADAY_START_SECOND, Math.min(INTRADAY_END_SECOND, Number(row.second))) - INTRADAY_START_SECOND) / (INTRADAY_END_SECOND - INTRADAY_START_SECOND)) * (W - L - R)
+    : L + (index / Math.max(1, rows.length - 1)) * (W - L - R);
   const y = (value) => T + ((hi - value) / (hi - lo)) * (H - T - B);
-  const label = (value) => money ? fmt.money(value) : fmt.pct(value);
+  const label = (value) => money ? fmt.money(value) : count ? fmt.int(value) : fmt.pct(value);
   const ticks = Array.from({ length: 5 }, (_, index) => lo + ((hi - lo) * index) / 4);
   // یک خط منطقی می‌تواند بین دو نام میدان تقسیم شده باشد (سطر روزانه
   // `baseCumulativePct`، سطر ریزمعامله `basePct`). آن‌ها هم‌رنگ‌اند چون یک
@@ -88,19 +111,28 @@ function chart(host, points, series, { money = false } = {}) {
   // بخش روزانه را باریک می‌کند. بدون این خط، کاربر نمی‌فهمد از کجا مقیاس
   // زمان عوض شده و شیب تند انتهای نمودار را با حرکت چند روزه اشتباه می‌گیرد.
   const firstTick = rows.findIndex((row) => row.granularity === 'trade');
-  const boundary = firstTick > 0 ? `<line x1="${x(firstTick)}" x2="${x(firstTick)}" y1="${T}" y2="${H - B}" class="backtest-split"/><text x="${x(firstTick)}" y="${H - B + 18}" text-anchor="middle" class="backtest-split-label">شروع ریزمعامله روز آخر</text>` : '';
+  const boundary = !timeScale && firstTick > 0 ? `<line x1="${x(rows[firstTick], firstTick)}" x2="${x(rows[firstTick], firstTick)}" y1="${T}" y2="${H - B}" class="backtest-split"/><text x="${x(rows[firstTick], firstTick)}" y="${H - B + 18}" text-anchor="middle" class="backtest-split-label">شروع ریزمعامله روز آخر</text>` : '';
+  const timeTicks = timeScale ? [9 * 3600, 10 * 3600, 11 * 3600, 12 * 3600, INTRADAY_END_SECOND] : [];
+  const seriesShape = (item) => {
+    const values = rows.map((row, index) => Number.isFinite(Number(row[item.key])) ? { x: x(row, index), y: y(Number(row[item.key])) } : null).filter(Boolean);
+    if (!values.length) return '';
+    if (!step) return `<polyline fill="none" stroke="${item.color}" points="${values.map((point) => `${point.x},${point.y}`).join(' ')}"/>`;
+    const d = values.slice(1).reduce((path, point) => `${path} H ${point.x} V ${point.y}`, `M ${values[0].x} ${values[0].y}`);
+    return `<path fill="none" stroke="${item.color}" d="${d}"/>`;
+  };
 
   host.innerHTML = `<div class="backtest-chart-legend">${legend.map((item) => `<span style="--series:${item.color}"><i></i>${item.label}</span>`).join('')}</div><div class="backtest-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار تعاملی بک‌تست">
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="backtest-grid"/><text x="${L - 10}" y="${y(value) + 4}" text-anchor="end">${label(value)}</text>`).join('')}
+    ${timeTicks.map((second) => `<line x1="${x({ second }, 0)}" x2="${x({ second }, 0)}" y1="${T}" y2="${H - B}" class="backtest-time-grid"/><text x="${x({ second }, 0)}" y="${H - B + 22}" text-anchor="middle">${faDigits(clockLabel(second).slice(0, 5))}</text>`).join('')}
     <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="backtest-zero"/>
     ${boundary}
-    ${series.map((item) => `<polyline fill="none" stroke="${item.color}" points="${rows.map((row, index) => Number.isFinite(Number(row[item.key])) ? `${x(index)},${y(Number(row[item.key]))}` : '').filter(Boolean).join(' ')}"/>`).join('')}
+    ${series.map(seriesShape).join('')}
     <g class="backtest-cursor" hidden><line y1="${T}" y2="${H - B}"/><g></g></g>
     <rect class="backtest-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
   </svg><div class="backtest-tip" hidden></div></div>`;
   const svg = host.querySelector('svg'), cursor = host.querySelector('.backtest-cursor'), tip = host.querySelector('.backtest-tip');
   const show = (index, clientX, clientY) => {
-    const row = rows[index], px = x(index);
+    const row = rows[index], px = x(row, index);
     cursor.hidden = false;
     cursor.querySelector('line').setAttribute('x1', px); cursor.querySelector('line').setAttribute('x2', px);
     cursor.querySelector('g').innerHTML = series.map((item) => Number.isFinite(Number(row[item.key])) ? `<circle cx="${px}" cy="${y(Number(row[item.key]))}" r="4" fill="${item.color}"/>` : '').join('');
@@ -114,7 +146,14 @@ function chart(host, points, series, { money = false } = {}) {
   const move = (event) => {
     const rect = svg.getBoundingClientRect();
     const ux = ((event.clientX - rect.left) / rect.width) * W;
-    const index = Math.max(0, Math.min(rows.length - 1, Math.round(((ux - L) / (W - L - R)) * (rows.length - 1))));
+    let index;
+    if (timeScale) {
+      const target = INTRADAY_START_SECOND + ((ux - L) / (W - L - R)) * (INTRADAY_END_SECOND - INTRADAY_START_SECOND);
+      let low = 0, high = rows.length - 1;
+      while (low < high) { const middle = Math.floor((low + high) / 2); if (rows[middle].second < target) low = middle + 1; else high = middle; }
+      index = low > 0 && Math.abs(rows[low - 1].second - target) < Math.abs(rows[low].second - target) ? low - 1 : low;
+    } else index = Math.round(((ux - L) / (W - L - R)) * (rows.length - 1));
+    index = Math.max(0, Math.min(rows.length - 1, index));
     show(index, event.clientX, event.clientY);
   };
   svg.addEventListener('pointermove', move);
@@ -132,9 +171,15 @@ export async function mount(root, { state }) {
     <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><div id="bt-legs" class="backtest-legs"></div></section>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت پاها در روز ایجاد</h2></div><span>هر کارت یک پای استراتژی</span></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت پاها در روز خروج</h2></div><span>همان قراردادهای ترکیب</span></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
-    <section class="card backtest-runbar"><div><p class="eyebrow">نمای مسیر</p><select id="bt-path-mode"><option value="combined">روزهای قبل + ریزمعامله روز آخر</option><option value="daily">فقط مسیر روزانه</option><option value="intraday">فقط ریزمعامله روز سنجش</option></select></div><p id="bt-run-note">ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست.</p><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button></section>
+    <section class="card backtest-runbar"><div><p class="eyebrow">نمای مسیر</p><select id="bt-path-mode"><option value="combined">روزهای قبل + ریزمعامله روز آخر</option><option value="daily">فقط مسیر روزانه</option><option value="intraday">فقط ریزمعامله روز سنجش</option></select></div><p id="bt-run-note">برای هر ثانیهٔ معامله بین ۹:۰۰ تا ۱۲:۳۰، آخرین قیمت مشاهده‌شده تمام پاها روی یک خط زمانی مشترک قرار می‌گیرد. این ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.</p><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button></section>
     <section id="bt-result" hidden><div class="backtest-kpis" id="bt-kpis"></div>
       <div class="backtest-chart-grid"><section class="card"><div class="section-head"><h2>سود و زیان مبلغی</h2><span>ریال</span></div><div id="bt-money-chart" class="backtest-chart"></div></section><section class="card"><div class="section-head"><h2>بازده و تغییر نماد پایه</h2><span>درصد</span></div><div id="bt-return-chart" class="backtest-chart"></div></section></div>
+      <section class="card backtest-intraday-panel"><div class="section-head"><div><p class="eyebrow">خط زمانی مشترک همه پاها</p><h2>تحلیل درون‌روزی ۹:۰۰ تا ۱۲:۳۰</h2></div><div class="backtest-head-actions"><span id="bt-intraday-source">—</span><button type="button" id="bt-export-intraday">خروجی همه نقاط</button></div></div><div id="bt-intraday-kpis" class="backtest-kpis"></div>
+        <div class="backtest-chart-grid"><section><div class="section-head"><h3>آفست لحظه‌ای موقعیت</h3><span>ریال · مسیر پله‌ای</span></div><div id="bt-intraday-pnl-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>اثر خالص هر پا</h3><span>تفکیک ریالی</span></div><div id="bt-intraday-leg-chart" class="backtest-chart"></div></section></div>
+        <div class="backtest-chart-grid"><section><div class="section-head"><h3>حرکت قیمت هر پا</h3><span>نسبت به اولین معامله همان پا</span></div><div id="bt-intraday-price-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>حجم تجمعی هر پا</h3><span>قرارداد</span></div><div id="bt-intraday-volume-chart" class="backtest-chart"></div></section></div>
+        <div class="backtest-analysis-grid"><section><div class="section-head"><h3>پنجره‌های ۱۵ دقیقه‌ای</h3><span>دامنه و جریان آفست</span></div><div id="bt-interval-table" class="history-table-wrap"></div></section><section><div class="section-head"><h3>ماتریس هم‌حرکتی اثر پاها</h3><span>تغییرات نقطه‌به‌نقطه</span></div><div id="bt-correlation-table" class="history-table-wrap"></div></section></div>
+        <section class="backtest-tape"><div class="section-head"><div><h3>نوار مشترک قیمت و حجم</h3><p>نمودارها همه نقاط را دارند؛ جدول برای حفظ سرعت حداکثر ۳۰۰ نقطه را با فاصله یکنواخت نشان می‌دهد.</p></div><span id="bt-tape-count">—</span></div><div id="bt-tape-table" class="history-table-wrap"></div></section>
+      </section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">اثر هر پایه</p><h2>جزئیات پاهای استراتژی در روز سنجش</h2></div><span id="bt-final-source">—</span></div><div id="bt-leg-table" class="history-table-wrap"></div></section>
       <section class="card backtest-matrix-link"><div class="section-head"><div><p class="eyebrow">رابطه با ماتریس ورود × خروج</p><h2>اعتبارسنجی افق کوتاه</h2></div></div><div id="bt-matrix-idea"></div></section>
     </section>
@@ -241,6 +286,67 @@ export async function mount(root, { state }) {
     return payload.rows || [];
   }
 
+  function paintIntradayAnalysis() {
+    const summary = summarizeIntraday(intraday);
+    const hosts = ['bt-intraday-pnl-chart', 'bt-intraday-leg-chart', 'bt-intraday-price-chart', 'bt-intraday-volume-chart', 'bt-interval-table', 'bt-correlation-table', 'bt-tape-table'];
+    if (!summary.points) {
+      $('bt-intraday-source').textContent = 'فاقد خط زمانی کامل';
+      $('bt-intraday-kpis').innerHTML = '';
+      $('bt-tape-count').textContent = '—';
+      hosts.forEach((id) => { $(id).innerHTML = '<p class="empty-note">برای این روز، قیمت تمام پاها در بازهٔ ۹:۰۰ تا ۱۲:۳۰ کامل نشده است.</p>'; });
+      return;
+    }
+
+    const rows = intradayChartRows(intraday, replay.endDate);
+    const legSeries = summary.legs.map((leg, index) => ({ key: `legPnl${index}`, label: `${faDigits(index + 1)} · ${nameOf(leg, 'پا')}`, color: LEG_COLORS[index % LEG_COLORS.length] }));
+    const priceSeries = [
+      { key: 'returnPct', label: 'بازده استراتژی از ورود', color: 'var(--gain)' },
+      ...summary.legs.map((leg, index) => ({ key: `legPrice${index}`, label: `قیمت ${faDigits(index + 1)} · ${nameOf(leg, 'پا')}`, color: LEG_COLORS[index % LEG_COLORS.length] })),
+    ];
+    const volumeSeries = summary.legs.map((leg, index) => ({ key: `legVolume${index}`, label: `${faDigits(index + 1)} · ${nameOf(leg, 'پا')}`, color: LEG_COLORS[index % LEG_COLORS.length] }));
+    $('bt-intraday-source').textContent = `${fmt.int(summary.points)} نقطه · ${faDigits(summary.first.timeLabel)} تا ${faDigits(summary.last.timeLabel)} · پنجره ${fmt.pct(summary.coveragePct)}٪ جلسه`;
+    const cards = [
+      ['آفست پایان مشاهده', fmt.money(summary.last.netPnl), signTone(summary.last.netPnl)],
+      ['بازده پایان مشاهده', `${fmt.pct(summary.last.returnPct)}٪`, signTone(summary.last.returnPct)],
+      ['بهترین لحظه', `${fmt.money(summary.best.netPnl)} · ${faDigits(summary.best.timeLabel)}`, 'gain'],
+      ['بدترین لحظه', `${fmt.money(summary.worst.netPnl)} · ${faDigits(summary.worst.timeLabel)}`, 'loss'],
+      ['بیشترین افت از قله', fmt.money(summary.maxDrawdown), signTone(summary.maxDrawdown)],
+      ['زمان مشاهده‌شده در سود', `${fmt.pct(summary.positiveTimePct)}٪`, signTone(summary.positiveTimePct)],
+      ['زمان با تازگی همه پاها', `${fmt.pct(summary.freshTimePct)}٪`, ''],
+      ['بیشترین سن پا در پایان', ageLabel(summary.last.maxAgeSec), summary.last.allFresh ? 'gain' : 'loss'],
+    ];
+    $('bt-intraday-kpis').innerHTML = cards.map(([label, value, tone]) => `<article class="${tone}"><span>${label}</span><b>${value}</b></article>`).join('');
+    chart($('bt-intraday-pnl-chart'), rows, [{ key: 'netPnl', label: 'سود و زیان خالص کل', color: 'var(--accent)' }], { money: true, timeScale: true, step: true });
+    chart($('bt-intraday-leg-chart'), rows, legSeries, { money: true, timeScale: true, step: true });
+    chart($('bt-intraday-price-chart'), rows, priceSeries, { timeScale: true, step: true });
+    chart($('bt-intraday-volume-chart'), rows, volumeSeries, { count: true, timeScale: true, step: true });
+
+    $('bt-interval-table').innerHTML = `<table class="history-table backtest-compact-table"><thead><tr><th>بازه</th><th>ابتدا</th><th>انتها</th><th>بیشینه</th><th>کمینه</th><th>تغییر</th><th>حجم پاها</th><th>نقاط تازه</th></tr></thead><tbody>${summary.intervals.map((row) => `<tr><td>${faDigits(clockLabel(row.startSecond).slice(0, 5))}–${faDigits(clockLabel(row.endSecond).slice(0, 5))}</td><td class="${signTone(row.openPnl)}">${fmt.money(row.openPnl)}</td><td class="${signTone(row.closePnl)}">${fmt.money(row.closePnl)}</td><td class="gain">${fmt.money(row.highPnl)}</td><td class="loss">${fmt.money(row.lowPnl)}</td><td class="${signTone(row.changePnl)}">${fmt.money(row.changePnl)}</td><td>${row.observations ? `${fmt.int(row.volume)} · ${fmt.int(row.trades)} معامله` : 'فاقد مشاهده'}</td><td>${row.observations ? `${fmt.pct(row.freshPct)}٪` : '—'}</td></tr>`).join('')}</tbody></table>`;
+
+    const legHeads = summary.legs.map((leg, index) => `<th>${faDigits(index + 1)} · ${esc(nameOf(leg, 'پا'))}</th>`).join('');
+    $('bt-correlation-table').innerHTML = `<table class="history-table backtest-correlation"><thead><tr><th>پا</th>${legHeads}</tr></thead><tbody>${summary.legs.map((leg, row) => `<tr><th>${faDigits(row + 1)} · ${esc(nameOf(leg, 'پا'))}</th>${summary.correlation[row].map((value) => `<td data-correlation="${Number.isFinite(value) ? Math.abs(value).toFixed(2) : ''}" class="${signTone(value)}">${fmt.num(value)}</td>`).join('')}</tr>`).join('')}</tbody></table><p class="backtest-table-note">همبستگی از تغییر اثر خالص پاها بین نقاط پیاپی محاسبه می‌شود؛ مقدار نامعلوم یعنی تغییر مشترک کافی وجود نداشته است.</p>`;
+
+    const maxTape = 300, stride = Math.max(1, Math.ceil(intraday.length / maxTape));
+    const tape = intraday.filter((_, index) => index % stride === 0 || index === intraday.length - 1);
+    $('bt-tape-count').textContent = `${fmt.int(tape.length)} از ${fmt.int(intraday.length)} نقطه`;
+    const tapeHeads = summary.legs.map((leg, index) => `<th>قیمت پای ${faDigits(index + 1)}</th><th>حجم ثانیه/تجمعی</th><th>سن</th>`).join('');
+    $('bt-tape-table').innerHTML = `<table class="history-table backtest-tape-table"><thead><tr><th>زمان</th><th>آفست</th><th>بازده</th><th>قیمت پایه</th><th>سن بیشینه</th>${tapeHeads}</tr></thead><tbody>${tape.map((row) => `<tr data-fresh="${row.allFresh}"><td>${faDigits(row.timeLabel)}</td><td class="${signTone(row.netPnl)}">${fmt.money(row.netPnl)}</td><td class="${signTone(row.returnPct)}">${fmt.pct(row.returnPct)}٪</td><td>${fmt.money(row.basePrice)}</td><td>${ageLabel(row.maxAgeSec)}</td>${row.perLeg.map((leg) => `<td>${fmt.money(leg.exitPrice)}</td><td>${fmt.int(leg.secondVolume)} / ${fmt.int(leg.cumulativeVolume)}</td><td>${ageLabel(leg.ageSec)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  }
+
+  function exportIntraday() {
+    if (!intraday.length || !replay) return;
+    const headers = ['زمان', 'سود و زیان خالص', 'بازده درصد', 'قیمت نماد پایه', 'تغییر نماد پایه درصد', 'بیشترین سن ثانیه'];
+    replay.priced.forEach((leg, index) => headers.push(`پای ${index + 1} قیمت`, `پای ${index + 1} حجم ثانیه`, `پای ${index + 1} حجم تجمعی`, `پای ${index + 1} اثر خالص`, `پای ${index + 1} سن ثانیه`));
+    const lines = [headers, ...intraday.map((row) => {
+      const values = [row.timeLabel, row.netPnl, row.returnPct, row.basePrice, row.basePct, row.maxAgeSec];
+      row.perLeg.forEach((leg) => values.push(leg.exitPrice, leg.secondVolume, leg.cumulativeVolume, leg.netPnl, leg.ageSec));
+      return values;
+    })].map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(','));
+    const href = URL.createObjectURL(new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = href; link.download = `intraday-${replay.endDate}.csv`; link.click();
+    setTimeout(() => URL.revokeObjectURL(href), 0);
+  }
+
   function paintResult() {
     const mode = $('bt-path-mode').value;
     const path = combinedBacktestPath(replay, intraday, mode);
@@ -258,11 +364,13 @@ export async function mount(root, { state }) {
     $('bt-kpis').innerHTML = cards.map(([label, value, tone]) => `<article class="${tone}"><span>${label}</span><b>${value}</b></article>`).join('');
     chart($('bt-money-chart'), path, [{ key: 'netPnl', label: 'سود و زیان خالص', color: 'var(--accent)' }], { money: true });
     chart($('bt-return-chart'), path, [{ key: 'returnPct', label: 'بازده استراتژی', color: 'var(--accent)' }, { key: 'basePct', label: 'تغییر پایه', color: 'var(--cmp1)' }, { key: 'baseCumulativePct', label: 'تغییر پایه', color: 'var(--cmp1)' }]);
+    paintIntradayAnalysis();
     const finalLegs = lastTick?.perLeg || lastDaily?.perLeg || [];
     $('bt-final-source').textContent = lastTick ? `آخرین ریزمعامله کامل در ${faDigits(lastTick.timeLabel)}` : 'قیمت روزانه انتخاب‌شده';
     $('bt-leg-table').innerHTML = `<table class="history-table"><thead><tr><th>پا</th><th>جهت</th><th>قیمت ورود</th><th>قیمت سنجش</th><th>اثر ناخالص</th><th>کارمزد</th><th>اثر خالص</th><th>حجم/ارزش روز</th></tr></thead><tbody>${finalLegs.map((leg, index) => {
       const dailyLeg = lastDaily?.perLeg?.[index];
-      return `<tr><td>${faDigits(index + 1)} · ${esc(nameOf(leg, `پای ${index + 1}`))}</td><td>${replay.priced[index]?.side === 'buy' ? 'خرید' : 'فروش'}</td><td>${fmt.money(leg.entryPrice)}</td><td>${fmt.money(leg.exitPrice)}</td><td class="${signTone(leg.grossPnl)}">${fmt.money(leg.grossPnl)}</td><td>${fmt.money((leg.entryFee || 0) + (leg.exitFee || 0))}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td><td>حجم ${fmt.int(dailyLeg?.volume)} · ارزش ${fmt.money(dailyLeg?.value)}</td></tr>`;
+      const activity = lastTick ? `حجم ${fmt.int(leg.cumulativeVolume)} · ${fmt.int(leg.tradeCount)} معامله · سن ${ageLabel(leg.ageSec)}` : `حجم ${fmt.int(dailyLeg?.volume)} · ارزش ${fmt.money(dailyLeg?.value)}`;
+      return `<tr><td>${faDigits(index + 1)} · ${esc(nameOf(leg, `پای ${index + 1}`))}</td><td>${replay.priced[index]?.side === 'buy' ? 'خرید' : 'فروش'}</td><td>${fmt.money(leg.entryPrice)}</td><td>${fmt.money(leg.exitPrice)}</td><td class="${signTone(leg.grossPnl)}">${fmt.money(leg.grossPnl)}</td><td>${fmt.money((leg.entryFee || 0) + (leg.exitFee || 0))}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td><td>${activity}</td></tr>`;
     }).join('')}</tbody></table>`;
 
     const args = { legs, seriesByIns, baseIns: String(ua.ins), startDate: entryDates[0], endDate: Number($('bt-exit-date').dataset.value), entryBasis: entryRail.dataset.value, exitBasis: exitRail.dataset.value, units: Math.max(1, Math.trunc(Number($('bt-units').value) || 1)), fees: feesOf(state.settings), settings: state.settings };
@@ -296,11 +404,11 @@ export async function mount(root, { state }) {
       $('bt-run-note').textContent = !allTrades.length
         ? 'برای روز سنجش ریزمعامله‌ای دریافت نشد؛ مسیر روزانه معتبر است و عدد درون‌روزی ساخته نمی‌شود.'
         : cancelUnknown
-          ? 'ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست. منبع داده وضعیت ابطال معامله را اعلام نکرده، پس معامله باطل‌شده احتمالی کنار گذاشته نشده است.'
-          : 'ریز روز آخر از آخرین معامله مشاهده‌شده هر پا تا همان لحظه ساخته می‌شود و تضمین آفست هم‌زمان نیست. معامله باطل‌شده کنار گذاشته شده است.';
+          ? 'خط زمانی مشترک فقط از معاملات ۹:۰۰ تا ۱۲:۳۰ ساخته می‌شود؛ قیمت هر پا آخرین مشاهده تا همان ثانیه است و سن آن جدا نمایش داده می‌شود. منبع داده وضعیت ابطال را اعلام نکرده، پس ابطال احتمالی نامعلوم است.'
+          : 'خط زمانی مشترک فقط از معاملات ۹:۰۰ تا ۱۲:۳۰ ساخته می‌شود؛ قیمت، حجم و سن هر پا در هر ثانیه نگه داشته شده و معامله باطل‌شده کنار گذاشته شده است. این مسیر تضمین اجرای هم‌زمان نیست.';
       intraday = replayIntraday({ replay, tradesByIns: byIns, baseTrades: byIns[String(ua.ins)] || [], fees: feesOf(state.settings) });
       $('bt-result').hidden = false; paintResult();
-      if (intraday.length) setStatus(`${fmt.int(replay.summary.validDays)} روز و ${fmt.int(intraday.length)} نقطه ریزمعامله محاسبه شد${tradeWarning ? `؛ ${tradeWarning}` : ''}.`, Boolean(tradeWarning));
+      if (intraday.length) setStatus(`${fmt.int(replay.summary.validDays)} روز و ${fmt.int(intraday.length)} نقطه مشترک درون‌روزی محاسبه شد${tradeWarning ? `؛ ${tradeWarning}` : ''}.`, Boolean(tradeWarning));
       else setStatus(`${fmt.int(replay.summary.validDays)} روز آماده شد؛ ${tradeWarning || 'در روز سنجش ریزمعامله کامل برای همه پاها پیدا نشد'}.`, Boolean(tradeWarning));
       $('bt-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { setStatus(errorText(error, 'بک‌تست اجرا نشد.'), true); } finally { $('bt-run').disabled = false; }
@@ -310,6 +418,7 @@ export async function mount(root, { state }) {
   exitRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(exitRail, button.dataset.basis); refreshExitDates(); } });
   $('bt-combo').addEventListener('change', renderCombo); $('bt-path-mode').addEventListener('change', () => { if (replay) paintResult(); });
   $('bt-load').addEventListener('click', loadHistory); $('bt-run').addEventListener('click', runBacktest);
+  $('bt-export-intraday').addEventListener('click', exportIntraday);
   baseSelect.addEventListener('change', () => { $('bt-work').hidden = true; $('bt-result').hidden = true; });
   strategySelect.addEventListener('change', () => { $('bt-work').hidden = true; $('bt-result').hidden = true; });
 
