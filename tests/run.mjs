@@ -1948,6 +1948,39 @@ group('۳۳. گزارش همه استراتژی‌ها');
   check('گزارش گروه و بدترین استراتژی را جدا نگه می‌دارد', report.groups.length === 2 && report.worstStrategy?.strategyId === 'b');
 }
 
+// ═══════════════════════════ ۳۴. انتخابگر تاریخ مشترک ═══════════════════════════
+group('۳۴. انتخابگر تاریخ مشترک');
+{
+  const read = (relative) => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
+  const wheelSource34 = read('../ui/datewheel.mjs');
+  check('انتخابگر تاریخ یک ماژول مشترک است، نه سه پیاده‌سازی جدا',
+    wheelSource34.includes('export function mountDateWheel('));
+  // چرخ ماوس بدون `passive: false` قابل گرفتن نیست و مرورگر هشدار می‌دهد؛
+  // بدون آن، پیمایش با چرخ اصلاً کار نمی‌کند.
+  check('شنونده چرخ ماوس غیرمنفعل ثبت می‌شود',
+    /addEventListener\('wheel',[\s\S]*?\{ passive: false \}\)/.test(wheelSource34));
+  // در دو سر فهرست باید رویداد رها شود، وگرنه کاربر داخل جعبه حبس می‌شود و
+  // صفحه اسکرول نمی‌کند.
+  check('در انتهای فهرست، رویداد چرخ به صفحه واگذار می‌شود',
+    wheelSource34.includes('if (step(Math.sign(notches))) event.preventDefault();'));
+
+  const tabs34 = ['../ui/tabs/backtest.mjs', '../ui/tabs/portfolio-backtest.mjs', '../ui/tabs/history.mjs', '../ui/tabs/positions.mjs'];
+  const sources34 = tabs34.map(read);
+  check('هیچ تبی ریل افقی قدیمی تاریخ را نگه نداشته است',
+    sources34.every((source) => !source.includes('backtest-wheel')));
+  check('همه تب‌های دارای تاریخ از انتخابگر مشترک استفاده می‌کنند',
+    sources34.every((source) => source.includes("from '/ui/datewheel.mjs'")));
+  const historySource34 = read('../ui/tabs/history.mjs');
+  check('لغزنده و فهرست کشویی تاریخ در تحلیل تاریخی جایگزین شده‌اند',
+    !/id="h-(start|end|payoff-day|rolling-start|rolling-end)"[^>]*(type="range"|<\/select)/.test(historySource34)
+    && !historySource34.includes('<select id="h-rolling-start">'));
+
+  const styleSource34 = read('../ui/style.css');
+  check('کارت‌های تاریخ در ستون عمودی چیده می‌شوند',
+    /\.date-wheel-track \{[^}]*display: grid;/.test(styleSource34)
+    && !/\.date-wheel \{[^}]*overflow-x: auto/.test(styleSource34));
+}
+
 // ═══════════════════════════ گزارش ═══════════════════════════
 const W = 62;
 console.log('\n' + '═'.repeat(W));

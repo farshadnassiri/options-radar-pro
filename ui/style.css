@@ -144,23 +144,41 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 }
 .backtest-date-grid, .backtest-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
 .backtest-date-grid > *, .backtest-chart-grid > * { min-width: 0; }
-.backtest-wheel {
-  position: relative; display: flex; gap: 9px; width: 100%; max-width: 100%; min-width: 0; min-height: 116px; padding: 14px; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory;
-  border: 1px solid var(--line); border-radius: 13px; background: linear-gradient(135deg, var(--panel-2), var(--panel));
+/* انتخابگر تاریخ مشترک — ستون کارت، پیمایش با چرخ ماوس.
+   ارتفاع ثابت است تا کارت‌ها یک «پنجره» بسازند؛ بدون آن، فهرست بلندِ روز
+   کل صفحه را می‌کشید و «انتخابگر» به یک جدول تبدیل می‌شد. */
+.date-wheel {
+  position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; max-width: 100%; min-width: 0;
+  height: 268px; padding: 10px 10px 6px; border: 1px solid var(--line); border-radius: 13px;
+  background: linear-gradient(135deg, var(--panel-2), var(--panel));
+}
+.date-wheel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.date-wheel-track {
+  display: grid; gap: 7px; align-content: start; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  scroll-snap-type: y proximity; padding-inline-end: 4px;
   scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
 }
-.backtest-wheel::-webkit-scrollbar { height: 7px; }
-.backtest-wheel::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: var(--line-strong); }
-.backtest-wheel button {
-  position: relative; flex: 0 0 148px; display: grid; gap: 8px; align-content: center; min-height: 78px; padding: 11px 13px;
-  scroll-snap-align: center; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); color: var(--muted); font: inherit; cursor: pointer; opacity: .68; box-shadow: var(--shadow-sm); transition: opacity var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+.date-wheel-track::-webkit-scrollbar { width: 7px; }
+.date-wheel-track::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: var(--line-strong); }
+.date-wheel button {
+  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; align-items: center;
+  min-height: 46px; padding: 8px 12px; scroll-snap-align: center;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--muted);
+  font: inherit; text-align: start; cursor: pointer; opacity: .72;
+  transition: opacity var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
 }
-.backtest-wheel button::after { content: ""; position: absolute; inset-inline: 18px; bottom: 0; height: 3px; border-radius: var(--radius-pill) var(--radius-pill) 0 0; background: transparent; }
-.backtest-wheel button small { text-align: center; font-size: 10.5px; }
-.backtest-wheel button b { font-family: var(--mono); direction: ltr; text-align: center; font-size: 14px; }
-.backtest-wheel button:hover { opacity: 1; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); transform: translateY(-2px); }
-.backtest-wheel button[aria-selected="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); opacity: 1; transform: translateY(-2px); }
-.backtest-wheel button[aria-selected="true"]::after { background: var(--accent); }
+.date-wheel button small { font-size: 11px; }
+.date-wheel button b { font-family: var(--mono); direction: ltr; text-align: left; font-size: 13.5px; }
+.date-wheel button em { grid-column: 1 / -1; font-style: normal; font-size: 10.5px; color: var(--muted); }
+.date-wheel button:hover { opacity: 1; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.date-wheel button[aria-selected="true"] {
+  opacity: 1; color: var(--accent); border-color: var(--accent); background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.date-wheel-status { padding: 5px 4px 0; border-top: 1px dashed var(--line); color: var(--muted); font-size: 10.5px; text-align: center; }
+.date-wheel-empty { margin: auto; color: var(--muted); font-size: 11.5px; text-align: center; }
+.date-wheel-field { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 700; }
+.date-wheel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 11px; }
 .backtest-legs { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 9px; margin-top: 13px; }
 .backtest-legs article { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); }
 .backtest-legs span, .backtest-legs small { color: var(--muted); font-size: 10.5px; }

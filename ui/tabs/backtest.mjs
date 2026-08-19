@@ -3,13 +3,14 @@ import { buildChain } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, flattenActiveContracts, generateHistoricalCombos, historyDateLabel,
-  historyDayName, historyMarketMetrics, historyPrice, normalizeHistoryDate,
+  historyMarketMetrics, historyPrice, normalizeHistoryDate,
   replayHistory, rollingEntryMatrix, holdingPeriodProfile, strategyLegSnapshots,
 } from '/core/history.mjs';
 import {
   replayIntraday, combinedBacktestPath, summarizeIntraday,
   INTRADAY_START_SECOND, INTRADAY_END_SECOND,
 } from '/core/backtest.mjs';
+import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
@@ -50,33 +51,6 @@ function basisRail(id, selected = 'LAST') {
 function setRail(host, value) {
   host.dataset.value = value;
   host.querySelectorAll('[data-basis]').forEach((button) => button.setAttribute('aria-checked', String(button.dataset.basis === value)));
-}
-
-function mountWheel(host, dates, selected, onChange) {
-  host.innerHTML = dates.length ? dates.map((date) => `<button type="button" role="option" data-date="${date}" aria-selected="${date === selected}"><small>${historyDayName(date)}</small><b>${dateLabel(date)}</b></button>`).join('') : '<p>روز قابل‌اجرا پیدا نشد.</p>';
-  const select = (date, notify = true) => {
-    const value = Number(date);
-    host.querySelectorAll('[data-date]').forEach((button) => button.setAttribute('aria-selected', String(Number(button.dataset.date) === value)));
-    const active = host.querySelector(`[data-date="${value}"]`);
-    active?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: notify ? 'smooth' : 'auto' });
-    host.dataset.value = String(value || '');
-    if (notify && value) onChange(value);
-  };
-  host.onclick = (event) => {
-    const button = event.target.closest('[data-date]');
-    if (button) select(button.dataset.date);
-  };
-  host.onkeydown = (event) => {
-    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !dates.length) return;
-    event.preventDefault();
-    const current = Math.max(0, dates.indexOf(Number(host.dataset.value)));
-    const index = event.key === 'Home' ? 0 : event.key === 'End' ? dates.length - 1
-      : Math.max(0, Math.min(dates.length - 1, current + (event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? 1 : -1)));
-    select(dates[index]);
-    host.querySelector(`[data-date="${dates[index]}"]`)?.focus();
-  };
-  if (selected) select(selected, false);
-  return select;
 }
 
 function marketSnapshot(snapshots, selectedBasis) {
@@ -170,8 +144,8 @@ export async function mount(root, { state }) {
     <div class="backtest-form"><label>نماد پایه<select id="bt-base"><option value="">در حال دریافت…</option></select></label><label>استراتژی<select id="bt-strategy"></select></label><label>تعداد واحد<input id="bt-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><button type="button" class="primary" id="bt-load">دریافت روزهای قابل اجرا</button></div>
   </section>
   <section id="bt-work" hidden>
-    <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود</h2></div><span>فقط روز دارای ترکیب معتبر</span></div><div class="backtest-wheel" id="bt-entry-date" role="listbox" tabindex="0"></div></section>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ خروج آزمایشی</h2></div><span>فقط روز دارای قیمت همه پاها</span></div><div class="backtest-wheel" id="bt-exit-date" role="listbox" tabindex="0"></div></section></div>
+    <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود</h2></div><span>فقط روز دارای ترکیب معتبر</span></div><div id="bt-entry-date"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ خروج آزمایشی</h2></div><span>فقط روز دارای قیمت همه پاها</span></div><div id="bt-exit-date"></div></section></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><div id="bt-legs" class="backtest-legs"></div></section>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت پاها در روز ایجاد</h2></div><span>هر کارت یک پای استراتژی</span></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت پاها در روز خروج</h2></div><span>همان قراردادهای ترکیب</span></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
@@ -238,7 +212,7 @@ export async function mount(root, { state }) {
     const result = replayHistory({ legs, seriesByIns, baseIns: String(ua.ins), startDate: entryDate, endDate: maxDate, entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST', units: 1, fees: feesOf(state.settings), settings: state.settings });
     exitDates = result.ok ? result.rows.filter((row) => row.status === 'ok').map((row) => row.date) : [];
     const selected = exitDates.includes(Number($('bt-exit-date').dataset.value)) ? Number($('bt-exit-date').dataset.value) : exitDates[Math.min(exitDates.length - 1, 4)];
-    mountWheel($('bt-exit-date'), exitDates, selected, () => paintSnapshots());
+    mountDateWheel($('bt-exit-date'), exitDates, selected, () => paintSnapshots(), { empty: 'روز دارای قیمت همه پاها پیدا نشد.' });
     paintSnapshots();
   }
 
@@ -279,7 +253,7 @@ export async function mount(root, { state }) {
       if (!entryDates.length) throw new Error('با این نماد و استراتژی روز قابل‌اجرایی پیدا نشد');
       $('bt-work').hidden = false;
       const selected = entryDates[Math.max(0, entryDates.length - 10)];
-      mountWheel($('bt-entry-date'), entryDates, selected, () => refreshCombos());
+      mountDateWheel($('bt-entry-date'), entryDates, selected, () => refreshCombos(), { empty: 'روز قابل‌اجرا پیدا نشد.' });
       refreshCombos(); setStatus(`${fmt.int(entryDates.length)} روز قابل اجرا آماده است.`);
     } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); } finally { $('bt-load').disabled = false; }
   }

@@ -6,6 +6,7 @@ import {
   replayHistory, basisMatrix, entrySensitivity, optimizeExitPolicy, normalizeHistoryDate,
   holdingPeriodProfile, replayTradeDetail,
 } from '/core/history.mjs';
+import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa } from '/ui/fmt.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 
@@ -241,8 +242,10 @@ export async function mount(root, { state }) {
 
     <section class="card history-range" id="h-range" hidden>
       <div class="range-head"><h2>بازه روزهای معاملاتی</h2><b id="h-range-label">—</b></div>
-      <label>شروع<input type="range" id="h-start" min="0" value="0"></label>
-      <label>پایان<input type="range" id="h-end" min="0" value="0"></label>
+      <div class="date-wheel-grid">
+        <div class="date-wheel-field"><span>شروع</span><div id="h-start"></div></div>
+        <div class="date-wheel-field"><span>پایان</span><div id="h-end"></div></div>
+      </div>
       <div id="h-base-liquidity" class="base-liquidity-snapshot">—</div>
     </section>
 
@@ -272,7 +275,7 @@ export async function mount(root, { state }) {
         <div class="section-head"><div><p class="eyebrow">ورودی ثابت روز اول؛ قیمت پایه متغیر در هر روز</p><h2>نمودار روزانه سود و زیان استراتژی</h2></div><b id="h-payoff-date">—</b></div>
         <p class="note">منحنی از قیمت‌های ورود روز اول ساخته می‌شود و ثابت می‌ماند؛ با جابه‌جایی روز، فقط خط قیمت پایانی سهم پایه و شاخص‌های تصمیم به‌روز می‌شوند. سود آفست واقعی همان روز جدا از سود سناریویی سررسید گزارش می‌شود.</p>
         <div class="payoff-day-controls">
-          <label for="h-payoff-day">روز معاملاتی<input id="h-payoff-day" type="range" min="0" value="0"></label>
+          <div class="date-wheel-field"><span>روز معاملاتی</span><div id="h-payoff-day"></div></div>
           <div class="payoff-layer-controls" aria-label="لایه‌های نمودار">
             <label><input type="checkbox" data-payoff-layer="fill" checked> ناحیه سود/زیان</label>
             <label><input type="checkbox" data-payoff-layer="strike" checked> قیمت‌های اعمال</label>
@@ -318,8 +321,8 @@ export async function mount(root, { state }) {
           <label for="h-rolling-entry">قیمت ورود<select id="h-rolling-entry">${basisOptions(false)}</select></label>
           <label for="h-rolling-exit">قیمت تسویه / آفست<select id="h-rolling-exit">${basisOptions(false)}</select></label>
           <label for="h-rolling-units">تعداد واحد<input id="h-rolling-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label>
-          <label for="h-rolling-start">شروع بررسی<select id="h-rolling-start"></select></label>
-          <label for="h-rolling-end">پایان بررسی<select id="h-rolling-end"></select></label>
+          <div class="date-wheel-field"><span>شروع بررسی</span><div id="h-rolling-start"></div></div>
+          <div class="date-wheel-field"><span>پایان بررسی</span><div id="h-rolling-end"></div></div>
           <label for="h-rolling-base-value">حداقل ارزش پایه (میلیارد ریال)<input id="h-rolling-base-value" type="number" min="0" step="0.1" value="0"></label>
           <label for="h-rolling-base-volume">حداقل حجم پایه<input id="h-rolling-base-volume" type="number" min="0" step="1" value="0"></label>
           <label for="h-rolling-leg-value">حداقل ارزش هر قرارداد (میلیون ریال)<input id="h-rolling-leg-value" type="number" min="0" step="0.1" value="0"></label>
@@ -452,14 +455,17 @@ export async function mount(root, { state }) {
     applyMatrixZoom();
   }
 
+  // شروع و پایانِ ماتریس نمی‌توانند از هم رد شوند. هر کدام که جابه‌جا شد،
+  // آن یکی را تا مرز خودش هل می‌دهد — همان رفتاری که دو `select` قبلی داشتند.
+  let rollingStartWheel = null, rollingEndWheel = null;
   function refreshRollingDates() {
-    const start = $('h-rolling-start'), end = $('h-rolling-end');
-    const options = dates.map((date) => `<option value="${date}">${historyDayName(date)} ${historyDateLabel(date)}</option>`).join('');
-    start.innerHTML = options; end.innerHTML = options;
-    if (dates.length) {
-      start.value = String(dates[Math.max(0, Number($('h-start').value) || 0)]);
-      end.value = String(dates[Math.min(dates.length - 1, Number($('h-end').value) || dates.length - 1)]);
-    }
+    if (!dates.length) return;
+    rollingStartWheel = mountDateWheel($('h-rolling-start'), dates, rangeStart() || dates[0], (value) => {
+      if (value > Number($('h-rolling-end').dataset.value)) rollingEndWheel.select(value, false);
+    });
+    rollingEndWheel = mountDateWheel($('h-rolling-end'), dates, rangeEnd() || dates.at(-1), (value) => {
+      if (value < Number($('h-rolling-start').dataset.value)) rollingStartWheel.select(value, false);
+    });
   }
 
   function setRollingCandidates(candidates, preferredLegs = null) {
@@ -478,7 +484,7 @@ export async function mount(root, { state }) {
   function rollingArgsForSelection() {
     const candidate = rollingCandidates[Number($('h-rolling-strategy').value)];
     if (!candidate) throw new Error('برای ماتریس یک استراتژی یا ترکیب قرارداد انتخاب کن');
-    const startDate = Number($('h-rolling-start').value), endDate = Number($('h-rolling-end').value);
+    const startDate = Number($('h-rolling-start').dataset.value), endDate = Number($('h-rolling-end').dataset.value);
     if (!startDate || !endDate || startDate > endDate) throw new Error('بازه زمانی ماتریس معتبر نیست');
     return {
       legs: candidate.legs, seriesByIns, baseIns: String(ua.ins), startDate, endDate,
@@ -599,10 +605,7 @@ export async function mount(root, { state }) {
         .map((r) => Number(r.date)).filter((d) => d && d >= firstContractDate && d <= lastContractDate)
         .sort((a, b) => a - b);
       if (!dates.length) throw new Error('برای نماد پایه تاریخچه‌ای برنگشت');
-      const start = $('h-start'), end = $('h-end');
-      start.max = end.max = String(dates.length - 1);
-      start.value = String(Math.max(0, dates.length - 15));
-      end.value = String(dates.length - 1);
+      mountRangeWheels();
       $('h-range').hidden = false;
       runBtn.disabled = false;
       buildLegControls();
@@ -624,14 +627,26 @@ export async function mount(root, { state }) {
     }
   }
 
+  let rangeStartWheel = null, rangeEndWheel = null;
+  const rangeStart = () => Number($('h-start').dataset.value);
+  const rangeEnd = () => Number($('h-end').dataset.value);
+
+  function mountRangeWheels() {
+    rangeStartWheel = mountDateWheel($('h-start'), dates, dates[Math.max(0, dates.length - 15)], (value) => {
+      if (value > rangeEnd()) rangeEndWheel.select(value, false);
+      paintRange();
+    });
+    rangeEndWheel = mountDateWheel($('h-end'), dates, dates.at(-1), (value) => {
+      if (value < rangeStart()) rangeStartWheel.select(value, false);
+      paintRange();
+    });
+  }
+
   function paintRange() {
     if (!dates.length) return;
-    const start = $('h-start'), end = $('h-end');
-    if (+start.value > +end.value) {
-      if (document.activeElement === start) end.value = start.value; else start.value = end.value;
-    }
-    $('h-range-label').textContent = `${historyDayName(dates[+start.value])} ${historyDateLabel(dates[+start.value])} تا ${historyDayName(dates[+end.value])} ${historyDateLabel(dates[+end.value])}`;
-    const startRow = (seriesByIns[String(ua?.ins)] || []).find((r) => Number(r.date) === dates[+start.value]);
+    const start = rangeStart(), end = rangeEnd();
+    $('h-range-label').textContent = `${historyDayName(start)} ${historyDateLabel(start)} تا ${historyDayName(end)} ${historyDateLabel(end)}`;
+    const startRow = (seriesByIns[String(ua?.ins)] || []).find((r) => Number(r.date) === start);
     if (startRow) {
       const official = Number(startRow.value) || 0;
       const estimated = official > 0 ? official : (Number(startRow.vol) || 0) * (Number(startRow.close) || 0);
@@ -709,7 +724,7 @@ export async function mount(root, { state }) {
   function argsFor(legs, manualEntry = {}) {
     return {
       legs, seriesByIns, baseIns: String(ua.ins),
-      startDate: dates[+$('h-start').value], endDate: dates[+$('h-end').value],
+      startDate: rangeStart(), endDate: rangeEnd(),
       entryBasis: entrySelect.value === 'MANUAL' ? 'CLOSE' : entrySelect.value,
       exitBasis: exitSelect.value,
       manualEntry, units: Math.max(1, Math.trunc(Number($('h-units').value) || 1)),
@@ -852,13 +867,19 @@ export async function mount(root, { state }) {
     enableColumnSort($('h-optimal').querySelector('table'));
   }
 
+  const payoffDays = () => currentReplay?.rows?.filter((r) => r.status === 'ok' && Number.isFinite(r.baseClose)) || [];
+
+  function mountPayoffWheel() {
+    const valid = payoffDays();
+    mountDateWheel($('h-payoff-day'), valid.map((r) => r.date), valid[0]?.date, renderDailyPayoff,
+      { empty: 'روز معتبری برای رسم نیست.' });
+  }
+
   function renderDailyPayoff() {
-    const valid = currentReplay?.rows?.filter((r) => r.status === 'ok' && Number.isFinite(r.baseClose)) || [];
+    const valid = payoffDays();
     if (!valid.length) { $('h-daily-payoff').innerHTML = '<p class="empty-note">روز معتبر برای رسم وجود ندارد.</p>'; return; }
-    const slider = $('h-payoff-day');
-    slider.max = String(valid.length - 1);
-    slider.value = String(Math.min(valid.length - 1, Math.max(0, Number(slider.value) || 0)));
-    const row = valid[Number(slider.value)];
+    const picked = Number($('h-payoff-day').dataset.value);
+    const row = valid.find((r) => r.date === picked) || valid[0];
     $('h-payoff-date').textContent = `${row.dayName} ${row.dateLabel} · پایه ${fmt.money(row.baseClose)}`;
     const enabled = Object.fromEntries([...root.querySelectorAll('[data-payoff-layer]')].map((input) => [input.dataset.payoffLayer, input.checked]));
     payoffChart?.destroy?.();
@@ -979,7 +1000,7 @@ export async function mount(root, { state }) {
     paintKpis(replay); paintStatistics(replay); paintDayTable(replay); paintContrib(replay);
     paintLegEvolution(replay); histogram($('h-distribution'), replay.rows);
     paintBasis(args); paintSensitivity(args, replay); paintMargin(replay); paintOptimal(args, replay);
-    $('h-payoff-day').value = '0'; renderDailyPayoff();
+    mountPayoffWheel(); renderDailyPayoff();
     enableColumnSort($('h-stats').querySelector('table'));
     enableColumnSort($('h-weekday-stats').querySelector('table'));
     lineChart($('h-pnl-chart'), replay.rows, [
@@ -1054,7 +1075,7 @@ export async function mount(root, { state }) {
         setStatus('در حال ساخت و ارزیابی ترکیب‌های تاریخی…');
         const response = await askWorker({
           type: 'combos', defId: strategySelect.value, ua: analysisUa || ua, seriesByIns,
-          startDate: dates[+$('h-start').value], endDate: dates[+$('h-end').value],
+          startDate: rangeStart(), endDate: rangeEnd(),
           entryBasis: entrySelect.value, exitBasis: exitSelect.value,
           units: Math.max(1, Math.trunc(Number($('h-units').value) || 1)),
           fees: feesOf(state.settings), settings: state.settings,
@@ -1244,13 +1265,6 @@ export async function mount(root, { state }) {
   strategySelect.addEventListener('change', () => { paintExpirySummary(); if (dates.length) buildLegControls(); $('h-results').hidden = true; });
   modeSelect.addEventListener('change', () => { $('h-legs-card').hidden = modeSelect.value !== 'manual' || !dates.length; $('h-filter').disabled = modeSelect.value !== 'all'; if (modeSelect.value === 'all' && entrySelect.value === 'MANUAL') entrySelect.value = 'CLOSE'; buildLegControls(); });
   entrySelect.addEventListener('change', buildLegControls);
-  $('h-start').addEventListener('input', paintRange); $('h-end').addEventListener('input', paintRange);
-  $('h-rolling-start').addEventListener('change', () => {
-    if (Number($('h-rolling-start').value) > Number($('h-rolling-end').value)) $('h-rolling-end').value = $('h-rolling-start').value;
-  });
-  $('h-rolling-end').addEventListener('change', () => {
-    if (Number($('h-rolling-end').value) < Number($('h-rolling-start').value)) $('h-rolling-start').value = $('h-rolling-end').value;
-  });
   loadBtn.addEventListener('click', loadHistory); runBtn.addEventListener('click', runAnalysis);
   exportBtn.addEventListener('click', exportCsv); $('h-rolling').addEventListener('click', renderRolling);
   $('h-matrix-export-csv').addEventListener('click', exportMatrixCsv);
@@ -1264,7 +1278,6 @@ export async function mount(root, { state }) {
   frozenCard.addEventListener('pointerup', endFrozenDrag);
   frozenCard.addEventListener('pointercancel', endFrozenDrag);
   frozenCard.addEventListener('click', handleFrozenClick);
-  $('h-payoff-day').addEventListener('input', renderDailyPayoff);
   root.querySelectorAll('[data-payoff-layer]').forEach((input) => input.addEventListener('change', renderDailyPayoff));
   root.querySelectorAll('[data-matrix-mode]').forEach((button) => button.addEventListener('click', () => {
     matrixMode = button.dataset.matrixMode;

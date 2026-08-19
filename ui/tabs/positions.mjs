@@ -4,7 +4,8 @@
 // لحظه یعنی هزینه بستن موقعیت در بازار، نه پریمیومی که گرفتی.
 
 import { markToMarket, blankPosition } from '/core/positions.mjs';
-import { todayJalali } from '/core/jalali.mjs';
+import { todayJalali, gregorianToJalali } from '/core/jalali.mjs';
+import { mountDateWheel } from '/ui/datewheel.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { fmt } from '/ui/table.mjs';
 import { faDigits, kpiTone } from '/ui/fmt.mjs';
@@ -70,20 +71,47 @@ export async function mount(root, { state, api }) {
     const w = document.createElement('div');
     w.className = 'field';
     if (kind === 'select') w.innerHTML = `<label>${label}</label><select id="f-${key}">${extra}</select>`;
+    else if (kind === 'wheel') w.innerHTML = `<label>${label}</label><div id="f-${key}"></div>`;
     else w.innerHTML = `<label>${label}</label><input type="${kind}" id="f-${key}" ${extra}>`;
     form.appendChild(w);
     F[key] = w.querySelector(`#f-${key}`);
     return F[key];
   };
 
+  // فهرست روزهای قابل انتخاب برای تاریخ ورود. تاریخ ورود موقعیتِ ثبت‌شده
+  // همیشه در گذشته است، پس فقط عقب می‌رود؛ یک سال و نیم برای موقعیت‌های
+  // اختیار — که سررسیدشان چند ماهه است — با فاصله زیاد کافی است.
+  const entryDateOptions = () => {
+    const out = [];
+    const now = new Date();
+    for (let back = 0; back < 540; back++) {
+      const day = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate() - back));
+      out.push(Number(`${day.getUTCFullYear()}${String(day.getUTCMonth() + 1).padStart(2, '0')}${String(day.getUTCDate()).padStart(2, '0')}`));
+    }
+    return out;
+  };
+  // میلادی به شمسی، به همان قالبی که `parseJalali` می‌خواند.
+  const jalaliOf = (compact) => {
+    const text = String(compact);
+    const [jy, jm, jd] = gregorianToJalali(Number(text.slice(0, 4)), Number(text.slice(4, 6)), Number(text.slice(6, 8)));
+    return `${jy}/${String(jm).padStart(2, '0')}/${String(jd).padStart(2, '0')}`;
+  };
+
   field('kind', 'نوع موقعیت', 'select', KINDS.map(([v, t]) => `<option value="${v}">${t}</option>`).join(''));
   field('ua', 'نماد پایه', 'select', '<option value="">— انتخاب کن —</option>');
   field('exp', 'سررسید', 'select', '');
   field('opt', 'قرارداد اختیار', 'select', '');
-  field('date', 'تاریخ ورود (شمسی)', 'text', `value="${todayJalali()}"`);
+  field('date', 'تاریخ ورود (شمسی)', 'wheel');
   field('qty', 'تعداد قرارداد', 'number', 'value="1" min="1"');
   field('sPrice', 'قیمت ورود سهم پایه', 'number', 'value="0"');
   field('oPrice', 'قیمت ورود اختیار', 'number', 'value="0"');
+
+  const entryDates = entryDateOptions();
+  mountDateWheel(F.date, entryDates, entryDates[0], () => {}, { empty: 'تاریخی در دسترس نیست.' });
+  const entryDateValue = () => {
+    const picked = Number(F.date.dataset.value);
+    return picked ? jalaliOf(picked) : todayJalali();
+  };
 
   function refreshUaOptions() {
     const cur = F.ua.value;
@@ -163,7 +191,7 @@ export async function mount(root, { state, api }) {
         ...blankPosition(),
         title: `${KINDS.find(([v]) => v === kind)[1].split('—')[0].trim()} ${detail.name}`,
         uaIns: F.ua.value, uaName: detail.name,
-        entryDate: F.date.value, qty: Math.max(1, Number(F.qty.value) || 1),
+        entryDate: entryDateValue(), qty: Math.max(1, Number(F.qty.value) || 1),
         legs,
       });
       await save();
