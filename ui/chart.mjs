@@ -101,7 +101,7 @@ function frame(points, analysis, opt, xMin, xMax, todayPoints) {
   const W = opt.width ?? 760, H = opt.height ?? 280;
   // حاشیه چپ جا برای برچسب محور عمودی باز می‌کند و حاشیه پایین برای دو ردیف
   // برچسب: قیمت اعمال بالای محور، و مقیاس قیمت پایه زیر آن.
-  const pad = { t: 24, r: 18, b: 54, l: 72 };
+  const pad = { t: 28, r: 24, b: 62, l: 86 };
 
   // فقط نقاط داخل بازه، به‌علاوه دو نقطه لبه که خط تا لبه قاب برسد
   const at = analysis.at;
