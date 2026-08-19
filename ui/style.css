@@ -1371,3 +1371,67 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
   .btn:hover, .primary:hover, .ghost:hover, .chip:hover, .step-btn:hover,
   .kpi:hover, .btn:active, .primary:active, .ghost:active { transform: none; }
 }
+
+/* ——— مرجع فرمول‌ها ———
+   رابطه‌ها با فونت فارسی نوشته می‌شوند، نه تک‌عرض. وسوسه‌اش هست — ستون‌بندی
+   با فونت تک‌عرض مرتب‌تر درمی‌آید — ولی این رابطه‌ها بیشترشان کلمه فارسی‌اند
+   («میانه»، «پریمیوم»، «اندازه») و فونت تک‌عرض لاتین حرف فارسی ندارد؛
+   مرورگر حرف‌به‌حرف به فونت دیگری می‌افتد و «میانه» به «میا نه» می‌شکند.
+   ستون‌بندی با `white-space: pre` نگه داشته می‌شود، که برای این رابطه‌ها کافی
+   است. عدد تک‌عرض هم اینجا لازم نیست، چون عددی در رابطه‌ها نیست. */
+.fx-head { margin-top: 30px; }
+.fx-list { display: grid; gap: 16px; }
+.fx-item { padding: 13px 15px; border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--panel-2); }
+.fx-item h4 { margin: 0 0 9px; font-size: var(--fs-lg); }
+.fx-expr {
+  margin: 0; padding: 11px 13px; overflow-x: auto;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--panel);
+  font-family: var(--sans); font-size: var(--fs-sm); line-height: var(--lh-loose);
+  direction: rtl; text-align: start; white-space: pre; tab-size: 2;
+}
+.fx-note { margin: 9px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-normal); }
+.fx-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 11px; }
+.fx-keys > span { color: var(--muted); font-size: var(--fs-xs); }
+.fx-key {
+  padding: 3px 10px; border: 1px dashed var(--line); border-radius: var(--radius-pill);
+  background: var(--panel); color: var(--accent); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.fx-key:hover { background: var(--accent-soft); border-style: solid; border-color: var(--accent); }
+
+.fx-rows { width: 100%; border-collapse: collapse; }
+.fx-rows th, .fx-rows td { padding: 7px 9px; border-bottom: 1px solid var(--line-soft); text-align: start; vertical-align: top; }
+.fx-rows th { width: 30%; min-width: 140px; color: var(--ink-2); font-weight: 700; font-size: var(--fs-sm); }
+.fx-rows td { color: var(--ink); font-size: var(--fs-sm); line-height: var(--lh-normal); }
+.fx-rows tr:last-child th, .fx-rows tr:last-child td { border-bottom: 0; }
+
+.fx-strategies { display: grid; gap: 20px; }
+.fx-strategy-group > h4 { margin: 0 0 9px; color: var(--accent); font-size: var(--fs-md); }
+.fx-strategy { border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--panel-2); margin-bottom: 7px; }
+.fx-strategy > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 9px 13px; cursor: pointer; user-select: none; list-style: none;
+}
+.fx-strategy > summary::-webkit-details-marker { display: none; }
+.fx-strategy > summary:hover { color: var(--accent); }
+.fx-strategy > summary span { color: var(--muted); font-size: var(--fs-xs); }
+.fx-strategy[open] > summary { border-bottom: 1px solid var(--line-soft); }
+.fx-strategy-body { padding: 11px 13px 13px; }
+.fx-capital { margin: 0 0 11px; font-size: var(--fs-sm); }
+.fx-capital > span { color: var(--muted); margin-inline-end: 7px; }
+.fx-walk { margin: 12px 0 0; padding-inline-start: 20px; color: var(--ink-2); font-size: var(--fs-sm); line-height: var(--lh-loose); }
+.fx-walk li { margin-bottom: 5px; }
+.fx-watch {
+  margin: 12px 0 0; padding: 9px 11px;
+  border-inline-start: 3px solid var(--warn); border-radius: var(--radius-sm);
+  background: var(--warn-soft); color: var(--ink-2);
+  font-size: var(--fs-sm); line-height: var(--lh-normal);
+}
+
+/* پرش از نام یک عدد در فرمول به خود کنترلش: بدون این نشانه کوتاه، در فرم
+   بلند تنظیمات معلوم نمی‌ماند مقصد کدام بود. */
+.field.flash { animation: fx-flash 1.4s var(--transition-med); border-radius: var(--radius-sm); }
+@keyframes fx-flash {
+  0%, 55% { background: var(--accent-soft); box-shadow: 0 0 0 5px var(--accent-soft); }
+  100% { background: transparent; box-shadow: none; }
+}

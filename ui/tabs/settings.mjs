@@ -5,8 +5,95 @@
 // اعداد در کد را می‌گیرد.
 
 import { SCHEMA, GROUPS, defaults } from '/core/settings.mjs';
+import { FORMULAS, FORMULA_GROUPS, STRATEGY_FORMULAS, SYMBOLS } from '/core/formulas.mjs';
+import { CATALOG, GROUPS as STRAT_GROUPS } from '/strategies/catalog.mjs';
 
 const SCOPE_LABEL = { server: 'سرور', client: 'مرورگر', both: 'هر دو' };
+
+const esc = (t) => String(t)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/**
+ * بخش مرجع فرمول‌ها.
+ *
+ * جایش همین تب است، نه یک صفحه راهنمای جدا: عددی که کاربر می‌خواهد عوض
+ * کند و توضیحِ اینکه آن عدد کجای محاسبه می‌نشیند، باید کنار هم باشند.
+ * هر کارت فهرست کلیدهایی را که می‌خواند نشان می‌دهد و کلیک روی هر کلید،
+ * کنترلش را در همین صفحه پیدا و برجسته می‌کند.
+ */
+function renderFormulas(host, { labelOf, focusKey }) {
+  const chip = (k) => {
+    const label = labelOf(k);
+    return label ? `<button type="button" class="fx-key" data-key="${esc(k)}">${esc(label)}</button>` : '';
+  };
+
+  const cards = Object.entries(FORMULA_GROUPS).map(([gid, meta]) => {
+    const items = FORMULAS.filter((f) => f.group === gid).map((f) => `
+      <article class="fx-item">
+        <h4>${esc(f.title)}</h4>
+        <pre class="fx-expr">${f.lines.map(esc).join('\n')}</pre>
+        ${f.note ? `<p class="fx-note">${esc(f.note)}</p>` : ''}
+        ${f.reads.length ? `<div class="fx-keys"><span>می‌خواند از</span>${f.reads.map(chip).join('')}</div>` : ''}
+      </article>`).join('');
+    return `
+      <section class="card settings-card fx-card" id="fx-${esc(gid)}">
+        <h3>${esc(meta.title)}</h3>
+        ${meta.note ? `<p class="note">${esc(meta.note)}</p>` : ''}
+        <div class="fx-list">${items}</div>
+      </section>`;
+  }).join('');
+
+  const byGroup = Object.entries(STRAT_GROUPS).map(([gid, gname]) => {
+    const rows = CATALOG.filter((d) => d.group === gid).map((d) => {
+      const c = STRATEGY_FORMULAS[d.id];
+      if (!c) return '';
+      const walk = c.walkthrough
+        ? `<ol class="fx-walk">${c.walkthrough.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`
+        : '';
+      return `
+        <details class="fx-strategy">
+          <summary><b>${esc(d.name)}</b><span>${esc(d.dir)}</span></summary>
+          <div class="fx-strategy-body">
+            <p class="fx-capital"><span>سرمایه درگیر</span> ${esc(c.capital)}</p>
+            <table class="fx-rows"><tbody>
+              ${c.rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}
+            </tbody></table>
+            ${walk}
+            <p class="fx-watch">${esc(c.watch)}</p>
+          </div>
+        </details>`;
+    }).join('');
+    return rows ? `<div class="fx-strategy-group"><h4>${esc(gname)}</h4>${rows}</div>` : '';
+  }).join('');
+
+  host.innerHTML = `
+    <div class="page-head fx-head">
+      <h2>فرمول‌ها</h2>
+      <p>همان محاسبه‌ای که موتور می‌کند، به زبان آدم. هر رابطه می‌گوید کدام
+         عدد این صفحه را می‌خواند؛ روی نامش بزن تا کنترلش را پیدا کنی.
+         عددی که ندانی از کجا آمده، قابل اعتماد نیست — چه درست باشد چه غلط.</p>
+    </div>
+    <section class="card settings-card">
+      <h3>نمادها</h3>
+      <table class="fx-rows"><tbody>
+        ${SYMBOLS.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}
+      </tbody></table>
+    </section>
+    ${cards}
+    <section class="card settings-card">
+      <h3>هر استراتژی، جداگانه</h3>
+      <p class="note">همه استراتژی‌ها از همان موتور بالا عبور می‌کنند و هیچ‌کدام
+         محاسبه‌گر اختصاصی ندارد. آنچه اینجا می‌آید، همان چیزی است که از
+         استراتژی به استراتژی فرق می‌کند.</p>
+      <div class="fx-strategies">${byGroup}</div>
+    </section>`;
+
+  host.addEventListener('click', (e) => {
+    const btn = e.target.closest('.fx-key');
+    if (btn) focusKey(btn.dataset.key);
+  });
+}
+
 
 export async function mount(root, { state, api }) {
   // اگر فایل تنظیمات از نسخه قبلی مانده و کلید تازه‌ای نداشته باشد، پیش‌فرض
@@ -21,6 +108,7 @@ export async function mount(root, { state, api }) {
     </div>
     <nav class="settings-nav" id="settings-nav"></nav>
     <div id="groups"></div>
+    <div id="formulas"></div>
     <div class="bar card" style="position:sticky;bottom:12px">
       <button class="btn" id="save">ذخیره تنظیمات</button>
       <button class="btn sec" id="reset">بازگشت به پیش‌فرض</button>
@@ -117,6 +205,37 @@ export async function mount(root, { state, api }) {
     }
     holder.appendChild(card);
   }
+
+  // ——— مرجع فرمول‌ها ———
+  // پس از کنترل‌ها می‌نشیند، نه پیش از آن‌ها: کسی که برای عوض‌کردن یک عدد
+  // آمده باید اول عدد را ببیند؛ کسی که برای فهمیدن آمده، تا پایین می‌آید.
+  const labelOf = (k) => SCHEMA.find((f) => f.key === k)?.label || '';
+  const focusKey = (k) => {
+    const entry = inputs.get(k);
+    if (!entry) return;
+    entry.node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    entry.node.focus({ preventScroll: true });
+    // برجسته‌سازی کوتاه: در فرم بلند تنظیمات، پرش تنها کافی نیست تا چشم
+    // بفهمد کدام کنترل مقصد بوده.
+    const field = entry.node.closest('.field');
+    if (!field) return;
+    field.classList.remove('flash');
+    void field.offsetWidth;
+    field.classList.add('flash');
+  };
+  const fxHost = root.querySelector('#formulas');
+  renderFormulas(fxHost, { labelOf, focusKey });
+
+  const fxBtn = document.createElement('button');
+  fxBtn.type = 'button';
+  fxBtn.className = 'chip';
+  fxBtn.textContent = 'فرمول‌ها';
+  fxBtn.setAttribute('aria-pressed', 'false');
+  fxBtn.addEventListener('click', () => fxHost.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  nav.appendChild(fxBtn);
+  // در همان نوار پرش ثبت می‌شود تا چیپش هم مثل بقیه با اسکرول روشن شود —
+  // و چون آخرین بخش صفحه است، همان چیزی است که `atBottom` باید روشن کند.
+  navByCard.set(fxHost, fxBtn);
 
   // نوار پرش، پیشِ‌رو: چیپ کارتی که زیر نوار ایستاده روشن می‌ماند، تا در
   // فهرست بلند تنظیمات معلوم باشد الان کجای صفحه‌ای — بی‌آنکه کلیک لازم باشد.
