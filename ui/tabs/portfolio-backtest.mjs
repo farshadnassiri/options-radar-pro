@@ -251,7 +251,7 @@ export async function mount(root, { state }) {
     const detail = $('pb-detail'); detail.hidden = false;
     const replay = replayHistory(replayArgs(item));
     if (!replay.ok) { detail.innerHTML = `<section class="card"><p class="empty-note">${esc(replay.error)}</p></section>`; return; }
-    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span></div><div id="pb-detail-result"></div></section>
+    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">رصد در بک‌تست سریع</button></div></div><div id="pb-detail-result"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">قیمت دستی واقعی برای هر قرارداد</p><h2>بازمحاسبه بدون دست‌کاری قیمت سایر پاها</h2></div><button type="button" class="primary" id="pb-manual-run">بازمحاسبه دستی</button></div><div class="portfolio-manual">${replay.priced.map((leg, index) => `<label>${fmt.int(index + 1)} · ${esc(nameOf(leg, 'پایه'))}<input type="number" min="0" step="1" data-manual="${index}" value="${leg.price}"></label>`).join('')}</div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">تحلیل حساسیت پویا</p><h2>اگر قیمت ورود یا مبنای خروج فرق می‌کرد</h2></div><div class="portfolio-shock-controls"><label>دامنه شوک<input id="pb-shock-range" type="number" min="1" max="50" step="1" value="10"></label><label>گام<input id="pb-shock-step" type="number" min="1" max="25" step="1" value="5"></label></div></div><div id="pb-sensitivity"></div></section>`;
     renderReplay(item, replay);
@@ -262,10 +262,35 @@ export async function mount(root, { state }) {
       if (manualReplay.ok) renderReplay(item, manualReplay, true);
       else detail.querySelector('#pb-detail-result').innerHTML = `<p class="empty-note">${esc(manualReplay.error)}</p>`;
     };
+    detail.querySelector('#pb-watch').onclick = () => watchInBacktest(item);
     const updateSensitivity = () => renderSensitivity(item, replayArgs(item));
     detail.querySelector('#pb-shock-range').oninput = updateSensitivity;
     detail.querySelector('#pb-shock-step').oninput = updateSensitivity;
     detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /**
+   * همین موقعیت را به بک‌تست سریع می‌سپارد و کاربر را همان‌جا می‌برد.
+   *
+   * فقط انتخاب‌ها منتقل می‌شوند، نه نتیجه‌ها: نماد، استراتژی، قراردادهای
+   * همین ترکیب، هر دو تاریخ، مبناهای قیمت و تعداد واحد. بک‌تست سریع خودش
+   * از نو محاسبه می‌کند — اگر عددی از اینجا کپی می‌شد، دو تب می‌توانستند دو
+   * حرف بزنند و معلوم نبود کدام مال کدام محاسبه است.
+   */
+  function watchInBacktest(item) {
+    state.handoff = {
+      to: 'backtest', from: 'portfolio-backtest',
+      uaIns: String(ua.ins), uaName: nameOf(ua, 'نماد پایه'),
+      strategyId: item.strategyId, strategyName: item.strategyName,
+      legIns: item.legs.map((leg) => String(leg.ins)),
+      comboName: comboName(item),
+      entryDate: Number($('pb-entry-date').dataset.value),
+      exitDate: Number($('pb-exit-date').dataset.value),
+      entryBasis: entryRail.dataset.value || 'LAST',
+      exitBasis: exitRail.dataset.value || 'LAST',
+      units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
+    };
+    location.hash = 'backtest';
   }
 
   async function runAll() {

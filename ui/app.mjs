@@ -16,6 +16,10 @@ export const state = {
   // است نه زمان سرور، چون همان چیزی است که کاربر می‌خواهد بداند: از کی تا
   // حالا چیزی تازه نیامده.
   link: { status: 'idle', since: Date.now(), lastData: null },
+  // تحویل بین تب‌ها. تبی که تب دیگری را باز می‌کند، آنچه را کاربر همین حالا
+  // انتخاب کرده اینجا می‌گذارد و تب مقصد سر جای خودش برش می‌دارد و پاک
+  // می‌کند. از localStorage استفاده نمی‌شود چون این داده عمر یک کلیک دارد.
+  handoff: null,
 };
 
 // ————————————————————————————————— تنظیمات —————————————————————————————————
@@ -428,6 +432,14 @@ await loadSettings();
 applyTheme(getTheme() || state.settings.theme || 'ledger');
 tickHealth();
 setInterval(tickHealth, 3000);
+
+// تعویض تب از داخل یک تب دیگر: تب مبدأ فقط `location.hash` را عوض می‌کند.
+// راه جایگزین این بود که تب‌ها `open` را از همین فایل وارد کنند، که یک حلقه
+// وارد‌کردن می‌سازد — این فایل هر تب را به‌صورت پویا وارد می‌کند.
+window.addEventListener('hashchange', () => {
+  const next = location.hash.replace('#', '');
+  if (next && next !== current && TABS.some((t) => t.id === next)) open(next);
+});
 
 const hash = location.hash.replace('#', '');
 if (hash && TABS.some((t) => t.id === hash)) open(hash);

@@ -173,6 +173,7 @@ export async function mount(root, { state }) {
   // تاریخ، عددی که کاربر وارد کرده دیگر مال آن قرارداد و آن روز نیست، پس
   // نگه‌داشتنش یعنی نسبت‌دادن یک قیمت به جایی که هرگز آنجا نبوده.
   let manualEntry = {}, manualExit = {};
+  let entryWheel = null, exitWheel = null;
   const setStatus = (text, error = false) => { status.textContent = text; status.toggleAttribute('data-error', error); };
 
   for (const [group, title] of Object.entries(GROUPS)) {
@@ -218,7 +219,7 @@ export async function mount(root, { state }) {
     const result = replayHistory({ legs, seriesByIns, baseIns: String(ua.ins), startDate: entryDate, endDate: maxDate, entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST', units: 1, fees: feesOf(state.settings), settings: state.settings });
     exitDates = result.ok ? result.rows.filter((row) => row.status === 'ok').map((row) => row.date) : [];
     const selected = exitDates.includes(Number($('bt-exit-date').dataset.value)) ? Number($('bt-exit-date').dataset.value) : exitDates[Math.min(exitDates.length - 1, 4)];
-    mountDateWheel($('bt-exit-date'), exitDates, selected, () => { manualExit = {}; paintSnapshots(); }, { empty: 'روز دارای قیمت همه پاها پیدا نشد.' });
+    exitWheel = mountDateWheel($('bt-exit-date'), exitDates, selected, () => { manualExit = {}; paintSnapshots(); }, { empty: 'روز دارای قیمت همه پاها پیدا نشد.' });
     paintSnapshots();
   }
 
@@ -297,7 +298,7 @@ export async function mount(root, { state }) {
       if (!entryDates.length) throw new Error('با این نماد و استراتژی روز قابل‌اجرایی پیدا نشد');
       $('bt-work').hidden = false;
       const selected = entryDates[Math.max(0, entryDates.length - 10)];
-      mountDateWheel($('bt-entry-date'), entryDates, selected, () => refreshCombos(), { empty: 'روز قابل‌اجرا پیدا نشد.' });
+      entryWheel = mountDateWheel($('bt-entry-date'), entryDates, selected, () => refreshCombos(), { empty: 'روز قابل‌اجرا پیدا نشد.' });
       refreshCombos(); setStatus(`${fmt.int(entryDates.length)} روز قابل اجرا آماده است.`);
     } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); } finally { $('bt-load').disabled = false; }
   }
@@ -451,6 +452,41 @@ export async function mount(root, { state }) {
     } catch (error) { setStatus(errorText(error, 'بک‌تست اجرا نشد.'), true); } finally { $('bt-run').disabled = false; }
   }
 
+  /**
+   * موقعیتی که تب «آزمون همه استراتژی‌ها» فرستاده را اینجا می‌چیند.
+   *
+   * هر چیزی که برداشته نشد، صریح گفته می‌شود. مثلاً اگر همان ترکیب قرارداد
+   * در روز ورود انتخابی، ترکیب معتبری برای این استراتژی نباشد، بی‌صدا ترکیب
+   * دیگری انتخاب نمی‌شود — کاربر باید بداند دارد چه چیزی را می‌بیند.
+   */
+  async function applyHandoff(plan) {
+    const skipped = [];
+    if (!chain.has(String(plan.uaIns))) { setStatus(`نماد پایه «${plan.uaName}» در فهرست این تب نیست.`, true); return; }
+    baseSelect.value = String(plan.uaIns);
+    if ([...strategySelect.options].some((option) => option.value === plan.strategyId)) strategySelect.value = plan.strategyId;
+    else skipped.push(`استراتژی «${plan.strategyName}» در این تب فقط برای ترکیب‌های قابل اجرا فهرست می‌شود`);
+    $('bt-units').value = String(plan.units);
+    setRail(entryRail, plan.entryBasis); setRail(exitRail, plan.exitBasis);
+
+    await loadHistory();
+    if (!entryDates.length) return;
+    if (entryDates.includes(plan.entryDate)) entryWheel.select(plan.entryDate);
+    else skipped.push(`روز ورود ${dateLabel(plan.entryDate)} برای این استراتژی ترکیب قابل اجرا ندارد`);
+
+    const wanted = [...plan.legIns].sort().join('|');
+    const index = combos.findIndex((combo) => combo.legs.map((leg) => String(leg.ins)).sort().join('|') === wanted);
+    if (index >= 0) { $('bt-combo').value = String(index); renderCombo(); }
+    else skipped.push(`ترکیب «${plan.comboName}» بین ترکیب‌های این روز نبود`);
+
+    if (exitDates.includes(plan.exitDate)) exitWheel.select(plan.exitDate);
+    else skipped.push(`روز سنجش ${dateLabel(plan.exitDate)} برای همه پاها قیمت کامل ندارد`);
+
+    setStatus(skipped.length
+      ? `موقعیت از آزمون همه استراتژی‌ها آمد، ولی ${skipped.join('؛ ')}.`
+      : 'موقعیت از آزمون همه استراتژی‌ها چیده شد؛ دکمه اجرای بک‌تست را بزن.', skipped.length > 0);
+    $('bt-work').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   entryRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(entryRail, button.dataset.basis); if (entryDates.length) refreshCombos(); } });
   exitRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(exitRail, button.dataset.basis); refreshExitDates(); } });
   $('bt-combo').addEventListener('change', renderCombo); $('bt-path-mode').addEventListener('change', () => { if (replay) paintResult(); });
@@ -470,6 +506,14 @@ export async function mount(root, { state }) {
     }
     setStatus(`${fmt.int(chain.size)} نماد پایه آماده است.`);
   } catch (error) { setStatus(errorText(error, 'فهرست نمادها دریافت نشد.'), true); }
+
+  // تحویل عمر یک کلیک دارد: همین‌جا برداشته و پاک می‌شود تا باز کردن دوباره
+  // این تب، دوباره همان چیدمان را روی انتخاب تازه کاربر ننشاند.
+  if (state.handoff?.to === 'backtest') {
+    const plan = state.handoff;
+    state.handoff = null;
+    if (chain.size) await applyHandoff(plan);
+  }
 
   return () => {};
 }
