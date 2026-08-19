@@ -292,6 +292,22 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-correlation td { min-width: 72px; text-align: center; font-family: var(--mono); background: color-mix(in srgb, var(--accent) 4%, transparent); }
 .backtest-correlation td.gain { color: var(--gain); background: color-mix(in srgb, var(--gain) 8%, transparent); }
 .backtest-correlation td.loss { color: var(--loss); background: color-mix(in srgb, var(--loss) 8%, transparent); }
+.backtest-overview { margin-bottom: 14px; }
+.backtest-overview > .backtest-chart-grid { margin-top: 14px; }
+.backtest-overview > .backtest-chart-grid > section { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel-2) 70%, var(--panel)); }
+/* ردیف روز، دروازه ورود به ریزمعامله همان روز است؛ باید مثل دکمه دیده شود. */
+.history-table tbody tr[data-day] { cursor: pointer; }
+.history-table tbody tr[data-day]:hover { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.history-table tbody tr[data-day][aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.backtest-timeframe { margin: 14px 0; border-top: 4px solid var(--cmp1); }
+.backtest-tf-field { display: grid; gap: 5px; color: var(--muted); font-size: 10.5px; font-weight: 700; }
+.backtest-tf-field select { min-height: 34px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; }
+.backtest-timeframe > #bt-tf-body > .backtest-chart-grid { margin-top: 14px; }
+.backtest-timeframe > #bt-tf-body > .backtest-chart-grid > section { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel-2) 70%, var(--panel)); }
+/* شدت رنگ خانه ماتریس ورود×خروج با قدر مطلق میانه، تا چشم بزرگی را ببیند
+   نه فقط علامت را. `--weight` را خودِ رندر روی هر خانه می‌گذارد. */
+.backtest-tf-matrix td.gain { background: color-mix(in srgb, var(--gain) calc(var(--weight, 0) * 45%), transparent); }
+.backtest-tf-matrix td.loss { background: color-mix(in srgb, var(--loss) calc(var(--weight, 0) * 45%), transparent); }
 .backtest-table-note { margin: 9px 2px 0; color: var(--muted); font-size: 10.5px; line-height: 1.8; }
 .backtest-tape { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .backtest-tape .section-head p { margin-top: 4px; color: var(--muted); font-size: 10.5px; font-weight: 400; }
