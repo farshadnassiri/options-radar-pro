@@ -259,13 +259,279 @@ export function summarizeIntraday(points = [], { bucketSeconds = 15 * 60 } = {})
   };
 }
 
-/** مسیر ترکیبی: روزهای پیشین یک نقطه، روز آخر هر ریزمعامله یک نقطه. */
-export function combinedBacktestPath(replay, intraday = [], mode = 'combined') {
+/**
+ * مسیر ترکیبی: روزهای پیشین یک نقطه، روز ریزشده هر معامله یک نقطه.
+ *
+ * `intradayDate` جداست چون کاربر می‌تواند هر روز مسیر را باز کند، نه فقط روز
+ * آخر. اگر این تاریخ با تاریخ نقاط ریزمعامله یکی نباشد، مسیر ترکیبی روزهای
+ * اشتباهی را کنار می‌گذارد و نمودار یک پرش دروغین نشان می‌دهد.
+ */
+export function combinedBacktestPath(replay, intraday = [], mode = 'combined', intradayDate = null) {
   const daily = (replay?.rows || []).filter((row) => row.status === 'ok');
+  const at = intradayDate ?? replay?.endDate;
   if (mode === 'daily' || !intraday.length) return daily.map((row) => ({ ...row, granularity: 'day' }));
-  if (mode === 'intraday') return intraday.map((row) => ({ ...row, date: replay.endDate, granularity: 'trade' }));
+  if (mode === 'intraday') return intraday.map((row) => ({ ...row, date: at, granularity: 'trade' }));
   return [
-    ...daily.filter((row) => row.date < replay.endDate).map((row) => ({ ...row, granularity: 'day' })),
-    ...intraday.map((row) => ({ ...row, date: replay.endDate, granularity: 'trade' })),
+    ...daily.filter((row) => row.date < at).map((row) => ({ ...row, granularity: 'day' })),
+    ...intraday.map((row) => ({ ...row, date: at, granularity: 'trade' })),
   ];
+}
+
+// ═══════════════════ تحلیل چندروزه روی تایم‌فریم انتخابی ═══════════════════
+//
+// تا اینجا هر تابع فقط یک روز را می‌دید. برای پاسخ به «این استراتژی چه مدت
+// سودده بود» یا «کدام ساعت روز برای ورود بهتر است»، باید چند روز کنار هم
+// بنشینند. سه قاعده در همه این توابع یکی است:
+//
+//   ۱. سطلی که مشاهده‌ای ندارد ساخته نمی‌شود. جای خالی صادق است.
+//   ۲. هر عدد تجمیعی، تعداد نمونه‌اش را همراه خودش می‌برد.
+//   ۳. هیچ قیمتی درون‌یابی نمی‌شود؛ فقط آخرین قیمت مشاهده‌شده.
+
+const BUCKET_MIN_SECOND = 60;
+
+const bucketWidth = (value, fallback) => Math.max(BUCKET_MIN_SECOND, Math.trunc(num(value, fallback)));
+
+/** آغاز سطلی که این ثانیه در آن می‌افتد. */
+function bucketStartSecond(second, width) {
+  const bounded = Math.min(Math.max(num(second), INTRADAY_START_SECOND), INTRADAY_END_SECOND - 1);
+  return INTRADAY_START_SECOND + Math.floor((bounded - INTRADAY_START_SECOND) / width) * width;
+}
+
+/** نقاط یک روز را به سطل‌های زمانی می‌شکند و در هر سطل فقط مشاهده‌شده‌ها را نگه می‌دارد. */
+function groupByBucket(points, width) {
+  const rows = (points || []).filter((point) => Number.isFinite(point?.netPnl)).sort((a, b) => a.second - b.second);
+  const groups = new Map();
+  for (const row of rows) {
+    const start = bucketStartSecond(row.second, width);
+    if (!groups.has(start)) groups.set(start, []);
+    groups.get(start).push(row);
+  }
+  return groups;
+}
+
+/**
+ * مسیر چندروزه روی تایم‌فریم انتخابی.
+ *
+ * ورودی `days` آرایه‌ای از `{ date, points }` است — خروجی `replayIntraday`
+ * برای هر روز. خروجی، یک ردیف به‌ازای هر سطلِ دارای مشاهده، به‌ترتیب زمان.
+ */
+export function bucketIntradayPath(days = [], { bucketSeconds = 15 * 60 } = {}) {
+  const width = bucketWidth(bucketSeconds, 15 * 60);
+  const out = [];
+  let previousClose = NaN;
+  for (const day of days || []) {
+    const groups = groupByBucket(day?.points, width);
+    for (const start of [...groups.keys()].sort((a, b) => a - b)) {
+      const list = groups.get(start);
+      const first = list[0], last = list.at(-1);
+      const values = list.map((row) => row.netPnl);
+      out.push({
+        date: day.date, startSecond: start, endSecond: Math.min(INTRADAY_END_SECOND, start + width),
+        timeLabel: last.timeLabel, observations: list.length,
+        seconds: Math.max(0, last.second - first.second),
+        openPnl: first.netPnl, closePnl: last.netPnl,
+        highPnl: Math.max(...values), lowPnl: Math.min(...values),
+        // «تغییر درون سطل» از اولین تا آخرین مشاهده همان سطل است؛ «تغییر
+        // پیاپی» از بسته‌شدن سطل قبلی — حتی اگر آن سطل در روز دیگری باشد.
+        changePnl: last.netPnl - first.netPnl,
+        stepPnl: Number.isFinite(previousClose) ? last.netPnl - previousClose : NaN,
+        openReturnPct: first.returnPct, returnPct: last.returnPct,
+        basePrice: last.basePrice, basePct: last.basePct,
+        volume: list.reduce((sum, row) => sum + num(row.eventVolume), 0),
+        trades: list.reduce((sum, row) => sum + num(row.eventTrades), 0),
+        baseVolume: Math.max(0, num(last.baseCumulativeVolume) - num(first.baseCumulativeVolume) + num(first.baseSecondVolume)),
+        freshPct: (list.filter((row) => row.allFresh).length / list.length) * 100,
+        maxAgeSec: Math.max(...list.map((row) => num(row.maxAgeSec, 0))),
+        perLeg: last.perLeg.map((leg, index) => ({
+          index, ins: leg.ins, name: leg.name, side: leg.side,
+          price: leg.exitPrice, netPnl: leg.netPnl,
+          changePnl: leg.netPnl - first.perLeg[index].netPnl,
+          priceChange: leg.exitPrice - first.perLeg[index].exitPrice,
+          cumulativeVolume: leg.cumulativeVolume, tradeCount: leg.tradeCount, ageSec: leg.ageSec,
+        })),
+      });
+      previousClose = last.netPnl;
+    }
+  }
+  return out;
+}
+
+/**
+ * چه مدت در سود بود و چه مدت در زیان — به تفکیک روز و در کل.
+ *
+ * واحد، ثانیهٔ مشاهده‌شده است، نه ثانیهٔ تقویمی: بین دو معامله هیچ مشاهده‌ای
+ * نداریم و شمردن آن به‌عنوان «در سود» یعنی ادعای چیزی که ندیده‌ایم. پس هر
+ * ثانیه به آخرین مشاهده پیش از خودش نسبت داده می‌شود و بازهٔ بی‌معامله بعد
+ * از آخرین معامله روز اصلاً شمرده نمی‌شود.
+ */
+export function intradayHoldingSummary(days = []) {
+  const rows = [];
+  for (const day of days || []) {
+    const points = (day?.points || []).filter((point) => Number.isFinite(point?.netPnl)).sort((a, b) => a.second - b.second);
+    if (!points.length) continue;
+    let positive = 0, negative = 0, flat = 0, observed = 0;
+    points.forEach((point, index) => {
+      const duration = Math.max(0, (points[index + 1]?.second ?? point.second) - point.second);
+      observed += duration;
+      if (point.netPnl > 0) positive += duration;
+      else if (point.netPnl < 0) negative += duration;
+      else flat += duration;
+    });
+    const values = points.map((point) => point.netPnl);
+    rows.push({
+      date: day.date, points: points.length,
+      firstSecond: points[0].second, lastSecond: points.at(-1).second,
+      observedSeconds: observed, positiveSeconds: positive, negativeSeconds: negative, flatSeconds: flat,
+      positivePct: observed > 0 ? (positive / observed) * 100 : NaN,
+      openPnl: points[0].netPnl, closePnl: points.at(-1).netPnl,
+      changePnl: points.at(-1).netPnl - points[0].netPnl,
+      bestPnl: Math.max(...values), worstPnl: Math.min(...values),
+      closeReturnPct: points.at(-1).returnPct,
+      basePct: points.at(-1).basePct,
+      volume: points.reduce((sum, point) => sum + num(point.eventVolume), 0),
+    });
+  }
+  const observedSeconds = rows.reduce((sum, row) => sum + row.observedSeconds, 0);
+  const positiveSeconds = rows.reduce((sum, row) => sum + row.positiveSeconds, 0);
+  const negativeSeconds = rows.reduce((sum, row) => sum + row.negativeSeconds, 0);
+  return {
+    days: rows,
+    observedSeconds, positiveSeconds, negativeSeconds,
+    flatSeconds: observedSeconds - positiveSeconds - negativeSeconds,
+    positivePct: observedSeconds > 0 ? (positiveSeconds / observedSeconds) * 100 : NaN,
+    negativePct: observedSeconds > 0 ? (negativeSeconds / observedSeconds) * 100 : NaN,
+    positiveDays: rows.filter((row) => row.closePnl > 0).length,
+    negativeDays: rows.filter((row) => row.closePnl < 0).length,
+    dayCount: rows.length,
+  };
+}
+
+const median = (values) => {
+  const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return NaN;
+  const middle = sorted.length / 2;
+  return sorted.length % 2 ? sorted[Math.floor(middle)] : (sorted[middle - 1] + sorted[middle]) / 2;
+};
+
+/**
+ * رفتار هر بازهٔ ساعتی روز، تجمیع‌شده روی همه روزها.
+ *
+ * پاسخ «در چه بازه‌هایی از روز رفتار مشابه داشته» عدد `consistencyPct` است:
+ * سهم پرتکرارترین جهت در همان بازه. ۱۰۰ یعنی در همه روزها یک‌جور حرکت کرده،
+ * ۵۰ یعنی سکه انداختن. این توصیف گذشته است، نه پیش‌بینی.
+ */
+export function timeOfDayProfile(days = [], { bucketSeconds = 30 * 60 } = {}) {
+  const width = bucketWidth(bucketSeconds, 30 * 60);
+  const slots = new Map();
+  for (const day of days || []) {
+    const groups = groupByBucket(day?.points, width);
+    for (const [start, list] of groups) {
+      if (!slots.has(start)) slots.set(start, []);
+      slots.get(start).push({
+        date: day.date,
+        changePnl: list.at(-1).netPnl - list[0].netPnl,
+        closePnl: list.at(-1).netPnl,
+        volume: list.reduce((sum, row) => sum + num(row.eventVolume), 0),
+      });
+    }
+  }
+  return [...slots.keys()].sort((a, b) => a - b).map((start) => {
+    const list = slots.get(start);
+    const changes = list.map((row) => row.changePnl);
+    const up = changes.filter((value) => value > 0).length;
+    const down = changes.filter((value) => value < 0).length;
+    return {
+      startSecond: start, endSecond: Math.min(INTRADAY_END_SECOND, start + width),
+      days: list.length, upDays: up, downDays: down, flatDays: list.length - up - down,
+      meanChange: changes.reduce((sum, value) => sum + value, 0) / list.length,
+      medianChange: median(changes),
+      upPct: (up / list.length) * 100,
+      consistencyPct: (Math.max(up, down) / list.length) * 100,
+      meanVolume: list.reduce((sum, row) => sum + row.volume, 0) / list.length,
+    };
+  });
+}
+
+/** سود خالص «ورود با این قیمت‌ها و خروج با آن قیمت‌ها»، با کارمزد هر دو سمت. */
+function pnlBetween(legs, openPrices, closePrices, fees) {
+  const openLegs = legs.map((leg, index) => ({ ...leg, price: openPrices[index] }));
+  const closeLegs = legs.map((leg, index) => ({ ...leg, side: reverseSide(leg.side), price: closePrices[index] }));
+  return grossCash(openLegs) + grossCash(closeLegs) - entryFees(openLegs, fees) - entryFees(closeLegs, fees);
+}
+
+// ماتریس ورود×خروج درون‌روزی با سطل یک‌دقیقه‌ای، ۲۱۰ سطل و بیش از بیست هزار
+// جفت در هر روز می‌سازد. کف پنج دقیقه، این را به کمتر از هزار جفت می‌آورد.
+// مقدار واقعاً به‌کاررفته در خروجی برمی‌گردد تا رابط بتواند صریح بگوید.
+export const ENTRY_EXIT_MIN_BUCKET = 5 * 60;
+
+/**
+ * «کِی بهتر بود وارد می‌شدی و کِی خارج؟»
+ *
+ * برای هر جفت بازهٔ ساعتی (ورود پیش از خروج)، نتیجهٔ ساختن موقعیت با
+ * قیمت‌های مشاهده‌شدهٔ پایان بازهٔ ورود و بستنش با قیمت‌های پایان بازهٔ خروج
+ * — روی هر روز جداگانه، بعد تجمیع.
+ *
+ * این با «آفست موقعیتی که در روز ورود ساخته شده» فرق دارد و عمداً جداست:
+ * آنجا قیمت ورود ثابت است، اینجا هر دو سر متغیرند. اگر یکی جای دیگری
+ * گزارش شود، عددی به کاربر داده‌ایم که به سؤالش ربط ندارد.
+ */
+export function intradayEntryExitProfile(days = [], { legs = [], bucketSeconds = 30 * 60, fees = {} } = {}) {
+  const width = Math.max(ENTRY_EXIT_MIN_BUCKET, bucketWidth(bucketSeconds, 30 * 60));
+  if (!legs.length) return { bucketSeconds: width, slots: [], cells: [], entries: [], exits: [], best: null, days: 0 };
+
+  const perDay = [];
+  const slotSet = new Set();
+  for (const day of days || []) {
+    const groups = groupByBucket(day?.points, width);
+    const marks = new Map();
+    for (const [start, list] of groups) {
+      marks.set(start, list.at(-1).perLeg.map((leg) => leg.exitPrice));
+      slotSet.add(start);
+    }
+    if (marks.size > 1) perDay.push(marks);
+  }
+  const slots = [...slotSet].sort((a, b) => a - b);
+  const pairs = new Map();
+  for (const marks of perDay) {
+    const present = [...marks.keys()].sort((a, b) => a - b);
+    for (let i = 0; i < present.length; i++) {
+      for (let j = i + 1; j < present.length; j++) {
+        const key = `${present[i]}|${present[j]}`;
+        if (!pairs.has(key)) pairs.set(key, []);
+        pairs.get(key).push(pnlBetween(legs, marks.get(present[i]), marks.get(present[j]), fees));
+      }
+    }
+  }
+  const cells = [...pairs.entries()].map(([key, values]) => {
+    const [entrySecond, exitSecond] = key.split('|').map(Number);
+    const wins = values.filter((value) => value > 0).length;
+    return {
+      entrySecond, exitSecond, samples: values.length,
+      meanPnl: values.reduce((sum, value) => sum + value, 0) / values.length,
+      medianPnl: median(values), bestPnl: Math.max(...values), worstPnl: Math.min(...values),
+      winPct: (wins / values.length) * 100,
+    };
+  }).sort((a, b) => a.entrySecond - b.entrySecond || a.exitSecond - b.exitSecond);
+
+  // رتبه‌بندی با میانه، نه میانگین: یک روز استثنایی نباید یک بازه را برنده کند.
+  const summarize = (second, pick) => {
+    const list = cells.filter((cell) => cell[pick] === second);
+    if (!list.length) return null;
+    const samples = list.reduce((sum, cell) => sum + cell.samples, 0);
+    return {
+      second, pairs: list.length, samples,
+      medianPnl: median(list.map((cell) => cell.medianPnl)),
+      meanPnl: list.reduce((sum, cell) => sum + cell.meanPnl * cell.samples, 0) / samples,
+      winPct: list.reduce((sum, cell) => sum + cell.winPct * cell.samples, 0) / samples,
+    };
+  };
+  const entries = slots.map((second) => summarize(second, 'entrySecond')).filter(Boolean);
+  const exits = slots.map((second) => summarize(second, 'exitSecond')).filter(Boolean);
+  const pickBest = (list) => list.reduce((best, row) => !best || row.medianPnl > best.medianPnl ? row : best, null);
+  const bestCell = cells.reduce((best, cell) => !best || cell.medianPnl > best.medianPnl ? cell : best, null);
+  return {
+    bucketSeconds: width, requestedBucketSeconds: bucketWidth(bucketSeconds, 30 * 60),
+    days: perDay.length, slots, cells, entries, exits,
+    bestEntry: pickBest(entries), bestExit: pickBest(exits), best: bestCell,
+  };
 }
