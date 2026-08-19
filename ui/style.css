@@ -42,6 +42,10 @@
   --transition-med: .25s cubic-bezier(.4, 0, .2, 1);
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo,
           Vazirmatn, Tahoma, monospace;
+  /* پشته فارسی: اول وزیرمتن، بعد فونت‌هایی که روی دستگاه‌های ایرانی واقعاً
+     نصب‌اند. تاهوما پیش از Segoe UI می‌آید — پوشش فارسی Segoe UI ناقص است و
+     مرورگر برای حرف‌های نداشته‌اش باز به فونت دیگری می‌افتد، یعنی یک متن با
+     دو فونت. تاهوما همه‌جا هست و کل الفبا را دارد. */
   --sans: Vazirmatn, "Vazirmatn RD", "IRANSansX", "IRANSans", Sahel, Shabnam,
           Tahoma, "Segoe UI", system-ui, sans-serif;
 
@@ -278,8 +282,17 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-manual-note[data-state="empty"] { display: none; }
 .backtest-runbar { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; margin: 14px 0; border-inline-start: 4px solid var(--accent); }
 .backtest-runbar p { margin: 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.8; }
-.backtest-kpis { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 9px; margin: 14px 0; }
-.backtest-kpis article { min-height: 82px; padding: 13px; border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: 11px; background: var(--panel); }
+.backtest-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
+.backtest-kpis article {
+  background: var(--panel); border: 1px solid var(--line-soft);
+  border-inline-start: 4px solid var(--accent);
+  border-radius: var(--radius-lg); padding: 14px 16px;
+  box-shadow: var(--shadow-2xs);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
 .backtest-kpis article.gain { border-top-color: var(--gain); }
 .backtest-kpis article.loss { border-top-color: var(--loss); }
 .backtest-kpis span { display: block; margin-bottom: 8px; color: var(--muted); font-size: var(--fs-xs); }
@@ -408,7 +421,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 
 @media (max-width: 1100px) {
   .backtest-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .backtest-kpis { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+  .backtest-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
   .portfolio-form { grid-template-columns: repeat(3, minmax(145px, 1fr)); }
   .portfolio-manual { grid-template-columns: repeat(2, minmax(155px, 1fr)); }
   .portfolio-sensitivity-grid { grid-template-columns: 1fr; }
@@ -741,8 +757,17 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .frozen-leg > b { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-lg); }
 .frozen-leg span { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
 .frozen-leg strong { color: var(--ink-2); font-family: var(--mono); font-weight: 600; }
-.history-kpis { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
-.history-kpi { min-height: 82px; padding: 13px 14px; border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: 12px; background: var(--panel); }
+.history-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
+.history-kpi {
+  background: var(--panel); border: 1px solid var(--line-soft);
+  border-inline-start: 4px solid var(--accent);
+  border-radius: var(--radius-lg); padding: 14px 16px;
+  box-shadow: var(--shadow-2xs);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
 .history-kpi span { display: block; margin-bottom: 9px; color: var(--muted); font-size: var(--fs-sm); }
 .history-kpi b { font-size: var(--fs-xl); line-height: 1.7; }
 .history-kpi.gain { border-top-color: var(--gain); }
@@ -784,7 +809,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .scatter-gain { fill: color-mix(in srgb, var(--gain) 70%, transparent); }
 .scatter-loss { fill: color-mix(in srgb, var(--loss) 70%, transparent); }
 .history-table-wrap { width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
-.history-table { width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0; font-size: var(--fs-md); }
+.history-table {
+  width: 100%; border-collapse: collapse; font-size: var(--fs-md);
+  background: var(--panel);
+}
 .history-table th,
 .history-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); border-left: 1px solid color-mix(in srgb, var(--line) 65%, transparent); text-align: right; white-space: nowrap; }
 .history-table th { position: sticky; top: 0; z-index: 1; background: var(--panel-2); color: var(--muted); font-size: var(--fs-sm); }
@@ -900,7 +928,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .history-control-grid { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
   .history-liquidity-controls { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
   .history-liquidity-controls > div { grid-column: 1 / -1; }
-  .history-kpis { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+  .history-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
   .trade-detail-kpis { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
   .payoff-decision-strip { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .rolling-controls { grid-template-columns: repeat(3, minmax(145px, 1fr)); }
@@ -917,7 +948,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .history-analysis-grid { grid-template-columns: 1fr; }
   .history-liquidity-controls > div { grid-column: auto; }
   .range-head { align-items: flex-start; flex-direction: column; }
-  .history-kpis { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+  .history-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
   .trade-detail-kpis { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
   .payoff-day-controls { grid-template-columns: 1fr; }
   .frozen-legs { max-height: 150px; }
