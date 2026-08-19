@@ -44,7 +44,7 @@ import {
   replayTradeDetail, strategyLegSnapshots, manualPriceCheck,
 } from '../core/history.mjs';
 import {
-  replayIntraday, combinedBacktestPath, summarizeIntraday, tradeSecond, tradeTimeLabel,
+  replayIntraday, summarizeIntraday, tradeSecond, tradeTimeLabel,
   normalizeTrades, canceledFlag, inIntradaySession,
   bucketIntradayPath, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
   ENTRY_EXIT_MIN_BUCKET, INTRADAY_START_SECOND,
@@ -1854,7 +1854,6 @@ group('۳۲. بازپخش تاریخی استراتژی');
   check('رویداد نماد پایه هم روی خط زمانی مشترک می‌نشیند', intraday32[1].timeLabel === '09:00:40' && intraday32[1].basePrice === 111);
   check('ارزش‌گذاری ریزمعامله اثر هر پا و سود کل را از موتور مشترک می‌سازد', intraday32[2].perLeg.length === 2 && intraday32[2].netPnl === 8000, intraday32[2].netPnl);
   check('قیمت پایه ریزمعامله به‌صورت مشاهده‌شده و درصدی نگه داشته می‌شود', intraday32[1].basePrice === 111 && near(intraday32[1].basePct, 11));
-  check('مسیر ترکیبی روز آخر را با ریزمعامله جایگزین می‌کند', combinedBacktestPath(replay32, intraday32).filter((point) => point.granularity === 'trade').length === 3);
   check('تبدیل زمان ریزمعامله پایدار است', tradeSecond(90105) === 32465 && tradeTimeLabel(90105) === '09:01:05');
   check('مرز جلسه درون‌روزی دقیقاً ۹ تا ۱۲:۳۰ است', !inIntradaySession(85959) && inIntradaySession(90000) && inIntradaySession(123000) && !inIntradaySession(123001));
 
@@ -2313,33 +2312,13 @@ group('۳۹. تحلیل چندروزه روی تایم‌فریم انتخابی
   check('ورودی خالی، خروجی خالی می‌دهد',
     bucketIntradayPath([]).length === 0 && intradayHoldingSummary([]).dayCount === 0 && timeOfDayProfile([]).length === 0);
 
-  // ——— مسیر ترکیبی وقتی روزِ ریزشده، روز آخر نیست ———
-  // کاربر می‌تواند هر روز مسیر را باز کند. اگر مسیر ترکیبی همیشه روز آخر را
-  // مرز بگیرد، برای یک روز میانی همه روزهای بعدش هم می‌مانند و نمودار یک
-  // پرش دروغین بین نقطه روزانه و نقطه ثانیه‌ای نشان می‌دهد.
-  const replay39 = {
-    ok: true, endDate: 20260803,
-    rows: [
-      { date: 20260801, status: 'ok', netPnl: 1 },
-      { date: 20260802, status: 'ok', netPnl: 2 },
-      { date: 20260803, status: 'ok', netPnl: 3 },
-    ],
-  };
-  const ticks39 = [point39(S, 10), point39(S + 60, 11)];
-  const middle39 = combinedBacktestPath(replay39, ticks39, 'combined', 20260802);
-  check('مسیر ترکیبی فقط روزهای پیش از روز ریزشده را نگه می‌دارد',
-    middle39.filter((row) => row.granularity === 'day').map((row) => row.date).join(',') === '20260801',
-    middle39.filter((row) => row.granularity === 'day').map((row) => row.date).join(','));
-  check('نقاط ریزمعامله تاریخ همان روز باز‌شده را می‌گیرند',
-    middle39.filter((row) => row.granularity === 'trade').every((row) => row.date === 20260802));
-  check('بدون تاریخ صریح، همان روز آخر بازپخش مرز می‌ماند',
-    combinedBacktestPath(replay39, ticks39, 'combined').filter((row) => row.granularity === 'day').length === 2);
 }
 
-// ═══════════════════════════ ۴۰. نمای مسیر و تحلیل تایم‌فریم در بک‌تست سریع ═══════════════════════════
-group('۴۰. نمای مسیر و تحلیل تایم‌فریم در بک‌تست سریع');
+// ═══════════════════════════ ۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فریم ═══════════════════════════
+group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فریم');
 {
   const source40 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  const backtestModule40 = await import('../core/backtest.mjs');
   const styleSource40 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
 
   // ——— ترتیب سه گام: کلی، روزبه‌روز، ریزمعامله ———
@@ -2365,10 +2344,26 @@ group('۴۰. نمای مسیر و تحلیل تایم‌فریم در بک‌ت�
     source40.includes('if (tradesCache.has(date)) return tradesCache.get(date);') && source40.includes('tradesCache.set(date, result);'));
   // ترکیب یا بازه که عوض شود، کش مال بازپخش قبلی است.
   check('اجرای دوباره بک‌تست، کش ریزمعامله را خالی می‌کند', source40.includes('tradesCache.clear();'));
-  // مسیر ترکیبی باید بداند ریزمعامله مال کدام روز است، وگرنه روزهای اشتباهی
-  // را کنار می‌گذارد و نمودار یک پرش دروغین نشان می‌دهد.
-  check('مسیر ترکیبی روز ریزشده را می‌گیرد، نه همیشه روز آخر',
-    source40.includes('combinedBacktestPath(replay, intraday, mode, intradayDate)'));
+  // ——— نمای کلی بازه، مستقل از روزِ بازشده ———
+  //
+  // کشوی «نمای مسیر» سه حالت داشت و دو حالتش تکراری بود: «فقط ریزمعامله روز
+  // سنجش» همان چیزی را می‌کشید که پنل درون‌روزی با محور ساعت و مسیر پله‌ای
+  // بهتر می‌کشد، و حالت ترکیبی روزها را با ثانیه‌ها روی یک محور اندیسی قاطی
+  // می‌کرد. بدتر از هر دو: مسیر ترکیبی روی روزِ بازشده بریده می‌شد، پس
+  // «بهترین نقطه» و «سود/زیان نهایی» با کلیک روی ردیف‌های جدول روزبه‌روز
+  // عوض می‌شدند — در بخشی که عنوانش «عملکرد کلی این بازه» است.
+  check('کشوی نمای مسیر برداشته شده', !source40.includes('bt-path-mode'));
+  check('نمای کلی همیشه کل بازه را در تفکیک روز می‌سازد',
+    source40.includes("replay.rows.filter((row) => row.status === 'ok').map((row) => ({ ...row, granularity: 'day' }))"));
+  check('سود/زیان نهایی نمای کلی از روز سنجش می‌آید، نه از آخرین تیکِ روزِ بازشده',
+    source40.includes('const final = replay.summary.last;'));
+  // اگر این فراخوانی برگردد، نمای کلی دوباره به روزِ بازشده گره می‌خورد.
+  check('باز کردن ریزمعامله یک روز، نمای کلی را دوباره نمی‌کشد',
+    /async function openDayIntraday\([\s\S]{0,1400}?\n  \}/.exec(source40)?.[0]?.includes('paintOverview()') === false);
+  check('خط مرز روز آخر و شیوه‌نامه‌اش هر دو برداشته شدند',
+    !source40.includes('backtest-split') && !styleSource40.includes('backtest-split'));
+  check('تابع مسیر ترکیبی از موتور هم برداشته شد',
+    !Object.keys(backtestModule40).includes('combinedBacktestPath'), Object.keys(backtestModule40).length + ' صادرات');
 
   // ——— تحلیل تایم‌فریم ———
   check('کاربر تایم‌فریم را خودش انتخاب می‌کند', source40.includes('id="bt-tf-size"') && source40.includes('id="bt-tf-run"'));

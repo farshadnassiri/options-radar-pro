@@ -7,7 +7,7 @@ import {
   replayHistory, rollingEntryMatrix, holdingPeriodProfile, strategyLegSnapshots,
 } from '/core/history.mjs';
 import {
-  replayIntraday, combinedBacktestPath, summarizeIntraday,
+  replayIntraday, summarizeIntraday,
   bucketIntradayPath, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
   INTRADAY_START_SECOND, INTRADAY_END_SECOND,
 } from '/core/backtest.mjs';
@@ -87,11 +87,6 @@ function chart(host, points, series, { money = false, count = false, timeScale =
   // باید — و در خودِ chart، تا فراخوان بعدی نتواند دوباره فراموشش کند.
   const seriesLabel = (item) => esc(item.label);
 
-  // مرز روز آخر. محور افقی بر پایه اندیس است، پس چند صد نقطه ریزمعامله
-  // بخش روزانه را باریک می‌کند. بدون این خط، کاربر نمی‌فهمد از کجا مقیاس
-  // زمان عوض شده و شیب تند انتهای نمودار را با حرکت چند روزه اشتباه می‌گیرد.
-  const firstTick = rows.findIndex((row) => row.granularity === 'trade');
-  const boundary = !timeScale && firstTick > 0 ? `<line x1="${x(rows[firstTick], firstTick)}" x2="${x(rows[firstTick], firstTick)}" y1="${T}" y2="${H - B}" class="backtest-split"/><text x="${x(rows[firstTick], firstTick)}" y="${H - B + 18}" text-anchor="middle" class="backtest-split-label">شروع ریزمعامله روز آخر</text>` : '';
   const timeTicks = timeScale ? [9 * 3600, 10 * 3600, 11 * 3600, 12 * 3600, INTRADAY_END_SECOND] : [];
   const seriesShape = (item) => {
     const values = rows.map((row, index) => Number.isFinite(Number(row[item.key])) ? { x: x(row, index), y: y(Number(row[item.key])) } : null).filter(Boolean);
@@ -105,7 +100,6 @@ function chart(host, points, series, { money = false, count = false, timeScale =
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="backtest-grid"/><text x="${L - 10}" y="${y(value) + 4}" text-anchor="end">${label(value)}</text>`).join('')}
     ${timeTicks.map((second) => `<line x1="${x({ second }, 0)}" x2="${x({ second }, 0)}" y1="${T}" y2="${H - B}" class="backtest-time-grid"/><text x="${x({ second }, 0)}" y="${H - B + 22}" text-anchor="middle">${faDigits(clockLabel(second).slice(0, 5))}</text>`).join('')}
     <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="backtest-zero"/>
-    ${boundary}
     ${series.map(seriesShape).join('')}
     <g class="backtest-cursor" hidden><line y1="${T}" y2="${H - B}"/><g></g></g>
     <rect class="backtest-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
@@ -151,7 +145,7 @@ export async function mount(root, { state }) {
     <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><div id="bt-legs" class="backtest-legs"></div></section>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت پاها در روز ایجاد</h2></div><span>هر کارت یک پای استراتژی</span></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت پاها در روز خروج</h2></div><span>همان قراردادهای ترکیب</span></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
-    <section class="card backtest-runbar"><div><p class="eyebrow">نمای مسیر</p><select id="bt-path-mode"><option value="combined">روزهای قبل + ریزمعامله روز آخر</option><option value="daily">فقط مسیر روزانه</option><option value="intraday">فقط ریزمعامله روز سنجش</option></select></div><p id="bt-run-note">برای هر ثانیهٔ معامله بین ۹:۰۰ تا ۱۲:۳۰، آخرین قیمت مشاهده‌شده تمام پاها روی یک خط زمانی مشترک قرار می‌گیرد. این ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.</p><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button></section>
+    <section class="card backtest-runbar"><p id="bt-run-note">برای هر ثانیهٔ معامله بین ۹:۰۰ تا ۱۲:۳۰، آخرین قیمت مشاهده‌شده تمام پاها روی یک خط زمانی مشترک قرار می‌گیرد. این ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.</p><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button></section>
     <section id="bt-result" hidden>
       <section class="card backtest-overview"><div class="section-head"><div><p class="eyebrow">گام اول نتیجه</p><h2>عملکرد کلی این بازه</h2></div><span id="bt-overview-range">—</span></div>
         <div class="backtest-kpis" id="bt-kpis"></div>
@@ -378,7 +372,6 @@ export async function mount(root, { state }) {
       const warning = tradeWarningText(day);
       paintIntradayAnalysis();
       paintDayTable();
-      paintOverview();
       setStatus(warning
         ? `ریزمعامله ${dateLabel(date)}: ${warning}.`
         : `${fmt.int(intraday.length)} نقطه مشترک درون‌روزی برای ${dateLabel(date)} ساخته شد.`, Boolean(warning));
@@ -478,18 +471,34 @@ export async function mount(root, { state }) {
     setTimeout(() => URL.revokeObjectURL(href), 0);
   }
 
+  /**
+   * عملکرد کل بازه، در تفکیک روزانه.
+   *
+   * این بخش عمداً ریزمعامله را وارد نمی‌کند. قبلاً یک کشوی «نمای مسیر» سه
+   * حالت داشت و حالت پیش‌فرضش روزهای پیش از روزِ بازشده را با ثانیه‌های
+   * همان روز می‌چسباند. دو ایراد داشت که هر دو بی‌صدا بودند:
+   *
+   *   ۱. محور افقی بر پایه اندیس است. چند صد نقطه ریزمعامله در کنار چند ده
+   *      روز، بخش روزانه را به یک نوار باریک تبدیل می‌کرد و شیب دو طرف مرز
+   *      اصلاً با هم قابل مقایسه نبود.
+   *   ۲. مسیر روی روزِ بازشده بریده می‌شد. پس «بهترین نقطه» و «بدترین نقطه»
+   *      و «سود/زیان نهایی» با کلیک روی هر ردیف جدول روزبه‌روز عوض می‌شدند —
+   *      در بخشی که عنوانش «عملکرد کلی این بازه» است.
+   *
+   * حالا این بخش همیشه کل بازه را در تفکیک روز نشان می‌دهد و به اینکه کدام
+   * روز باز است کاری ندارد. لحظه‌به‌لحظهٔ یک روز کار پنل درون‌روزی است، که
+   * همان داده را با محور ساعت و مسیر پله‌ای رسم می‌کند.
+   */
   function paintOverview() {
-    const mode = $('bt-path-mode').value;
-    const path = combinedBacktestPath(replay, intraday, mode, intradayDate);
-    const lastDaily = replay.summary.last, lastTick = intraday.at(-1);
-    const final = mode !== 'daily' && lastTick ? lastTick : lastDaily;
+    const path = replay.rows.filter((row) => row.status === 'ok').map((row) => ({ ...row, granularity: 'day' }));
+    const final = replay.summary.last;
     const firstProfit = path.find((point) => point.netPnl > 0);
     const best = path.filter((point) => Number.isFinite(point.netPnl)).reduce((a, point) => !a || point.netPnl > a.netPnl ? point : a, null);
     const worst = path.filter((point) => Number.isFinite(point.netPnl)).reduce((a, point) => !a || point.netPnl < a.netPnl ? point : a, null);
-    const firstLabel = firstProfit ? (firstProfit.granularity === 'trade' ? `${dateLabel(intradayDate)} · ${faDigits(firstProfit.timeLabel)}` : `${faDigits(firstProfit.dateLabel)} · روز ${fmt.int(firstProfit.holdingDays)}`) : 'در این بازه رخ نداد';
+    const firstLabel = firstProfit ? `${faDigits(firstProfit.dateLabel)} · روز ${fmt.int(firstProfit.holdingDays)}` : 'در این بازه رخ نداد';
     const cards = [
       ['سود/زیان نهایی', fmt.money(final?.netPnl), signTone(final?.netPnl)], ['بازده نهایی', fmt.pct(final?.returnPct), signTone(final?.returnPct)],
-      ['تغییر نماد پایه', fmt.pct(final?.basePct ?? lastDaily?.baseCumulativePct), signTone(final?.basePct ?? lastDaily?.baseCumulativePct)], ['کوتاه‌ترین زمان سود', firstLabel, firstProfit ? 'gain' : ''],
+      ['تغییر نماد پایه', fmt.pct(final?.baseCumulativePct), signTone(final?.baseCumulativePct)], ['کوتاه‌ترین زمان سود', firstLabel, firstProfit ? 'gain' : ''],
       ['بهترین نقطه', best ? `${fmt.money(best.netPnl)} · ${fmt.pct(best.returnPct)}` : '—', 'gain'], ['بدترین نقطه', worst ? `${fmt.money(worst.netPnl)} · ${fmt.pct(worst.returnPct)}` : '—', 'loss'],
     ];
     $('bt-kpis').innerHTML = cards.map(([label, value, tone]) => `<article class="${tone}"><span>${label}</span><b>${value}</b></article>`).join('');
@@ -716,7 +725,7 @@ export async function mount(root, { state }) {
 
   entryRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(entryRail, button.dataset.basis); if (entryDates.length) refreshCombos(); } });
   exitRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(exitRail, button.dataset.basis); refreshExitDates(); } });
-  $('bt-combo').addEventListener('change', renderCombo); $('bt-path-mode').addEventListener('change', () => { if (replay) paintOverview(); });
+  $('bt-combo').addEventListener('change', renderCombo);
   $('bt-load').addEventListener('click', loadHistory); $('bt-run').addEventListener('click', runBacktest);
   $('bt-export-intraday').addEventListener('click', exportIntraday);
   $('bt-days-table').addEventListener('click', (event) => {
