@@ -13,7 +13,15 @@
 
 import { num, EPS } from './num.mjs';
 import { evaluate } from './evaluate.mjs';
-import { underlyingQuote, legContractSize, comboContractSize } from './chain.mjs';
+import {
+  underlyingQuote, legContractSize, comboContractSize,
+  blockedExpirySet, expiryBlocked,
+} from './chain.mjs';
+
+// سررسیدهای پرشده جای اصلی‌شان `core/chain.mjs` است، چون فقط مسیر زنده
+// نیست که به آن نیاز دارد — تحلیل تاریخی و بک‌تست هم باید همان سررسید را
+// کنار بگذارند. اینجا دوباره صادر می‌شود تا مصرف‌کننده‌های قبلی نشکنند.
+export { blockedExpirySet, expiryBlocked };
 
 /** انتخاب k عضوی از فهرست، به ترتیب صعودی. */
 function combos(arr, k, cap) {
@@ -44,28 +52,6 @@ function equalWidth(ks) {
 
 const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept', 'blockedExpiry'];
 
-/**
- * سررسیدهایی که سقف موقعیت بازشان پر است.
- *
- * وقتی سقف یک سررسید پر می‌شود، اخذ موقعیت فزاینده تازه ممکن نیست و فقط
- * می‌شود موقعیت قبلی را آفست کرد. پیشنهاد استراتژی روی چنین سررسیدی، عددی
- * است که کاربر نمی‌تواند اجرایش کند؛ پس اصلاً ساخته نمی‌شود. این وضعیت از
- * تابلو خوانده نمی‌شود — کارگزار اعلامش می‌کند — پس ورودی دستی است.
- *
- * قالب: «شناسه نماد پایه:تاریخ سررسید»، جدا شده با ویرگول.
- */
-export function blockedExpirySet(text = '') {
-  const out = new Set();
-  for (const part of String(text ?? '').split(',')) {
-    const at = part.indexOf(':');
-    if (at < 1) continue;
-    const ins = part.slice(0, at).trim(), endDate = part.slice(at + 1).trim();
-    if (ins && endDate) out.add(`${ins}:${endDate}`);
-  }
-  return out;
-}
-
-export const expiryBlocked = (set, uaIns, endDate) => set.has(`${uaIns}:${endDate}`);
 
 /**
  * چرا ردیف ادعای اجرا ندارد.

@@ -311,7 +311,7 @@ export async function mount(root, { state }) {
   async function loadHistory() {
     ua = chain.get(baseSelect.value);
     if (!ua) { setStatus('ابتدا نماد پایه را انتخاب کن.', true); return; }
-    contracts = flattenActiveContracts(ua);
+    contracts = flattenActiveContracts(ua, state.settings.blockedExpiries);
     const codes = [...new Set([String(ua.ins), ...contracts.map((contract) => String(contract.ins))])];
     $('bt-load').disabled = true; setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
     try {

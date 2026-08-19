@@ -1442,3 +1442,9 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
   0%, 55% { background: var(--accent-soft); box-shadow: 0 0 0 5px var(--accent-soft); }
   100% { background: transparent; box-shadow: none; }
 }
+
+/* سررسیدی که سقف موقعیت بازش پر است: دیده می‌شود ولی انتخاب‌شدنی نیست.
+   پنهان‌کردنش گیج‌کننده بود («سررسیدم کو؟») و انتخاب‌پذیر گذاشتنش یعنی
+   عددی ساخته شود که کاربر نمی‌تواند اجرایش کند. */
+.expiry-blocked { opacity: .62; cursor: not-allowed; }
+.expiry-blocked small { color: var(--warn); }

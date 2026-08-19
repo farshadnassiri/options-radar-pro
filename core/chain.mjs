@@ -44,6 +44,45 @@ export function comboContractSize(sizes, declared) {
   return { size: dec > 0 ? dec : 0, assumed: true, mixed: false };
 }
 
+/**
+ * سررسیدهایی که سقف موقعیت بازشان پر است.
+ *
+ * وقتی سقف یک سررسید پر می‌شود، اخذ موقعیت فزاینده تازه ممکن نیست و فقط
+ * می‌شود موقعیت قبلی را آفست کرد. پیشنهاد استراتژی روی چنین سررسیدی، عددی
+ * است که کاربر نمی‌تواند اجرایش کند؛ پس اصلاً ساخته نمی‌شود. این وضعیت از
+ * تابلو خوانده نمی‌شود — کارگزار اعلامش می‌کند — پس ورودی دستی است.
+ *
+ * قالب: «شناسه نماد پایه:تاریخ سررسید»، جدا شده با ویرگول.
+ */
+export function blockedExpirySet(text = '') {
+  const out = new Set();
+  for (const part of String(text ?? '').split(',')) {
+    const at = part.indexOf(':');
+    if (at < 1) continue;
+    const ins = part.slice(0, at).trim(), endDate = part.slice(at + 1).trim();
+    if (ins && endDate) out.add(`${ins}:${endDate}`);
+  }
+  return out;
+}
+
+export const expiryBlocked = (set, uaIns, endDate) => set.has(`${uaIns}:${endDate}`);
+
+/**
+ * همان دارایی پایه، بدون سررسیدهایی که سقف موقعیتشان پر است.
+ *
+ * چرا تحلیل تاریخی هم باید همین را رعایت کند: سقف پر یعنی امروز نمی‌شود
+ * روی آن سررسید موقعیت فزاینده تازه گرفت. عددی که از بازپخش گذشته همان
+ * سررسید درمی‌آید، تصمیمی را تغذیه می‌کند که اجرایش ممکن نیست — پس
+ * کنار گذاشتنش تصمیم کاربر است، نه استنتاج از داده. به همین دلیل هم
+ * وابسته به بازه تاریخی نیست: قید، امروزِ کاربر است نه گذشته بازار.
+ */
+export function withoutBlockedExpiries(ua, blocked) {
+  if (!ua || !blocked?.size) return ua;
+  const kept = (ua.expiryList || []).filter((ex) => !expiryBlocked(blocked, ua.ins, ex.endDate));
+  if (kept.length === (ua.expiryList || []).length) return ua;
+  return { ...ua, expiryList: kept };
+}
+
 /** نزدیک‌ترین قیمت اعمال به قیمت پایه، در یک سررسید. */
 function nearestStrike(ex, spot) {
   let best = null, bestDiff = Infinity;

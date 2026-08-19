@@ -9,7 +9,9 @@ import { grossCash, entryFees, analyzePayoff } from './payoff.mjs';
 import { analyzeMixed, isSingleExpiry } from './mixed.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
 import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
-import { legContractSize, comboContractSize } from './chain.mjs';
+import {
+  legContractSize, comboContractSize, blockedExpirySet, withoutBlockedExpiries,
+} from './chain.mjs';
 
 export const HISTORY_BASES = [
   ['FIRST', 'اولین'],
@@ -131,9 +133,18 @@ function readableHistoryName(entity, fallback) {
   return name && name !== String(entity?.ins || '') ? name : fallback;
 }
 
-export function flattenActiveContracts(ua) {
+/**
+ * قراردادهای فعال یک پایه، به شکل تخت.
+ *
+ * `blockedExpiries` را می‌گیرد تا سررسیدی که سقف موقعیتش پر است اصلاً وارد
+ * فهرست نشود — نه در انتخابگر دیده شود، نه در ترکیب‌سازی، نه در بازپخش.
+ * پیش از این، این قید فقط در مسیر زنده اعمال می‌شد و کل خانواده تحلیل
+ * تاریخی آن را نادیده می‌گرفت.
+ */
+export function flattenActiveContracts(ua, blockedExpiries = '') {
   const out = [];
-  for (const ex of ua?.expiryList || []) {
+  const usable = withoutBlockedExpiries(ua, blockedExpirySet(blockedExpiries));
+  for (const ex of usable?.expiryList || []) {
     for (const st of ex.strikeList || []) {
       for (const kind of ['call', 'put']) {
         const q = st[kind];
@@ -447,7 +458,7 @@ function equalWidth(strikes) {
 /** تمام ترکیب‌های ساختاری یک استراتژی روی قراردادهای فعال. */
 export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entryBasis = 'CLOSE', settings = {}, filtered = true, liquidity = {} }) {
   const start = normalizeHistoryDate(startDate);
-  const contracts = flattenActiveContracts(ua);
+  const contracts = flattenActiveContracts(ua, settings.blockedExpiries);
   const indexes = new Map(Object.entries(seriesByIns || {}).map(([ins, rows]) => [String(ins), indexHistory(rows)]));
   const baseIndex = indexes.get(String(ua.ins)) || new Map();
   const spot = historyPrice(baseIndex.get(start), 'CLOSE');

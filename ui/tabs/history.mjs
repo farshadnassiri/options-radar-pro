@@ -1,5 +1,7 @@
 import { CATALOG, GROUPS, byId } from '/strategies/catalog.mjs';
-import { buildChain, comboContractSize } from '/core/chain.mjs';
+import {
+  buildChain, comboContractSize, blockedExpirySet, expiryBlocked,
+} from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, flattenActiveContracts, historyDateLabel, historyDayName,
@@ -505,12 +507,17 @@ export async function mount(root, { state }) {
 
   function paintExpirySummary() {
     const selected = selectedExpirySet();
-    const total = ua?.expiryList?.length || 0;
+    const blocked = blockedExpirySet(state.settings.blockedExpiries);
+    const blockedCount = (ua?.expiryList || []).filter((ex) => expiryBlocked(blocked, ua.ins, ex.endDate)).length;
+    const total = (ua?.expiryList?.length || 0) - blockedCount;
     const def = byId(strategySelect.value);
     $('h-expiry-summary').textContent = !total ? 'سررسیدی موجود نیست'
       : selected.size === total ? `همه ${fmt.int(total)} سررسید`
         : selected.size ? `${fmt.int(selected.size)} از ${fmt.int(total)} سررسید`
           : 'هیچ سررسیدی انتخاب نشده';
+    if (blockedCount) {
+      $('h-expiry-summary').textContent += ` · ${fmt.int(blockedCount)} سررسید با سقف پر کنار گذاشته شد`;
+    }
     $('h-expiry-summary').classList.toggle('warn', selected.size < (def?.expiries || 1));
   }
 
@@ -525,11 +532,26 @@ export async function mount(root, { state }) {
   function buildExpiryControls() {
     const host = $('h-expiry-list');
     host.innerHTML = '';
+    // سررسیدی که سقف موقعیتش پر است، پنهان نمی‌شود — علامت می‌خورد و از
+    // انتخاب درمی‌آید. پنهان‌کردنش کاربر را گیج می‌کرد («سررسیدم کو؟»)؛
+    // تیک‌خورده گذاشتنش هم همان چیزی بود که کاربر گزارش داد: قید را در نوار
+    // بالا زده بود و سررسید همچنان در فیلتر می‌آمد و وارد محاسبه می‌شد.
+    const blocked = blockedExpirySet(state.settings.blockedExpiries);
     for (const expiry of ua?.expiryList || []) {
       const date = normalizeHistoryDate(expiry.endDate);
+      const isBlocked = expiryBlocked(blocked, ua.ins, expiry.endDate);
       const label = document.createElement('label');
-      label.innerHTML = `<input type="checkbox" value="${date}" data-history-expiry checked><span>${historyDateLabel(date)}</span><small>${fmt.int(expiry.days)} روز · ${fmt.int(expiry.strikeList?.length || 0)} قیمت اعمال</small>`;
-      label.querySelector('input').addEventListener('change', () => { paintExpirySummary(); invalidateLoadedHistory(); });
+      if (isBlocked) label.classList.add('expiry-blocked');
+      label.innerHTML = `<input type="checkbox" value="${date}" data-history-expiry${isBlocked ? ' disabled' : ' checked'}><span>${historyDateLabel(date)}</span><small>${isBlocked ? 'سقف موقعیت پر — کنار گذاشته شد' : `${fmt.int(expiry.days)} روز · ${fmt.int(expiry.strikeList?.length || 0)} قیمت اعمال`}</small>`;
+      label.querySelector('input').addEventListener('change', () => {
+        paintExpirySummary();
+        // عوض‌شدن انتخاب سررسید، تاریخچه بارگذاری‌شده را باطل می‌کند و کارت
+        // قراردادها را می‌بندد. بی‌پیام، این دقیقاً شبیه خرابی است: کاربر
+        // یک تیک می‌زند و همه قراردادها ناپدید می‌شوند. پس گفته می‌شود چرا.
+        const hadHistory = contracts.length > 0;
+        invalidateLoadedHistory();
+        if (hadHistory) setStatus('انتخاب سررسید عوض شد؛ برای دیدن قراردادها دوباره تاریخچه را بگیر.');
+      });
       host.appendChild(label);
     }
     paintExpirySummary();
@@ -589,7 +611,7 @@ export async function mount(root, { state }) {
     const expirySet = selectedExpirySet();
     if (!expirySet.size) { setStatus('دست‌کم یک سررسید را انتخاب کن.', true); return; }
     analysisUa = { ...ua, expiryList: ua.expiryList.filter((expiry) => expirySet.has(normalizeHistoryDate(expiry.endDate))) };
-    contracts = flattenActiveContracts(analysisUa);
+    contracts = flattenActiveContracts(analysisUa, state.settings.blockedExpiries);
     if (!contracts.length) { setStatus('در سررسیدهای انتخاب‌شده قراردادی پیدا نشد.', true); return; }
     const codes = [...new Set([String(ua.ins), ...contracts.map((c) => String(c.ins))])];
     loadBtn.disabled = true; runBtn.disabled = true;
