@@ -82,7 +82,7 @@ export function makePicker(host, opts = {}) {
       frag.appendChild(row);
     }
     listHost.appendChild(frag);
-    if (!shown.length) listHost.innerHTML = '<div style="padding:14px;color:var(--muted);font-size:12.5px">نمادی با این نام در دیده‌بان نیست.</div>';
+    if (!shown.length) listHost.innerHTML = '<div style="padding:14px;color:var(--muted);font-size:var(--fs-sm)">نمادی با این نام در دیده‌بان نیست.</div>';
     summary();
   }
 
