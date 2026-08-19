@@ -3,9 +3,10 @@ import { buildChain } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, basisMatrix, entrySensitivity, flattenActiveContracts,
-  historyDateLabel, historyDayName, historyMarketMetrics, historyPrice,
+  historyDateLabel, historyMarketMetrics, historyPrice,
   normalizeHistoryDate, replayHistory,
 } from '/core/history.mjs';
+import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -28,32 +29,6 @@ function basisRail(id, selected = 'LAST') {
 function setRail(host, value) {
   host.dataset.value = value;
   host.querySelectorAll('[data-basis]').forEach((button) => button.setAttribute('aria-checked', String(button.dataset.basis === value)));
-}
-
-function mountWheel(host, dates, selected, onChange) {
-  host.innerHTML = dates.length ? dates.map((date) => `<button type="button" role="option" data-date="${date}" aria-selected="${date === selected}"><small>${historyDayName(date)}</small><b>${dateLabel(date)}</b></button>`).join('') : '<p>روز دارای قیمت پایه پیدا نشد.</p>';
-  const select = (date, notify = true) => {
-    const value = Number(date);
-    host.dataset.value = String(value || '');
-    host.querySelectorAll('[data-date]').forEach((button) => button.setAttribute('aria-selected', String(Number(button.dataset.date) === value)));
-    const active = host.querySelector(`[data-date="${value}"]`);
-    active?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: notify ? 'smooth' : 'auto' });
-    if (notify && value) onChange(value);
-  };
-  host.onclick = (event) => {
-    const button = event.target.closest('[data-date]');
-    if (button) select(button.dataset.date);
-  };
-  host.onkeydown = (event) => {
-    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !dates.length) return;
-    event.preventDefault();
-    const current = Math.max(0, dates.indexOf(Number(host.dataset.value)));
-    const index = event.key === 'Home' ? 0 : event.key === 'End' ? dates.length - 1
-      : Math.max(0, Math.min(dates.length - 1, current + (event.key === 'ArrowDown' || event.key === 'ArrowLeft' ? 1 : -1)));
-    select(dates[index]);
-    host.querySelector(`[data-date="${dates[index]}"]`)?.focus();
-  };
-  if (selected) select(selected, false);
 }
 
 function lineChart(host, rows) {
@@ -114,7 +89,7 @@ export async function mount(root, { state }) {
     <p class="portfolio-note">سقف ترکیب برای کنترل زمان اجراست و در گزارش شفاف ثبت می‌شود. «همه استراتژی‌ها» یعنی همه الگوها بررسی می‌شوند؛ تعداد ترکیب قراردادهای هر الگو می‌تواند با این سقف محدود شود.</p>
   </section>
   <section id="pb-work" hidden>
-    <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود همه استراتژی‌ها</h2></div><span id="pb-entry-market">—</span></div><div class="backtest-wheel" id="pb-entry-date" role="listbox" tabindex="0"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ مقایسه نهایی</h2></div><span id="pb-exit-market">—</span></div><div class="backtest-wheel" id="pb-exit-date" role="listbox" tabindex="0"></div></section></div>
+    <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود همه استراتژی‌ها</h2></div><span id="pb-entry-market">—</span></div><div id="pb-entry-date"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ مقایسه نهایی</h2></div><span id="pb-exit-market">—</span></div><div id="pb-exit-date"></div></section></div>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><h2>مبنای قیمت ورود</h2><span>مشاهده‌شده برای اجرای دسته‌ای</span></div>${basisRail('pb-entry-basis', 'LAST')}<p class="portfolio-note">پس از انتخاب هر ترکیب، قیمت دستی هر پا جداگانه قابل ویرایش است.</p></section><section class="card"><div class="section-head"><h2>مبنای قیمت خروج</h2><span>یکسان برای مقایسه منصفانه</span></div>${basisRail('pb-exit-basis', 'LAST')}</section></div>
     <section class="card portfolio-run"><div><p class="eyebrow">مرحله دوم</p><h2>ساخت و بازپخش دسته‌ای</h2><p>فقط ترکیبی وارد رتبه‌بندی می‌شود که دقیقاً در روز سنجش برای همه پاها قیمت و نقدشوندگی معتبر داشته باشد.</p></div><button type="button" class="primary" id="pb-run">اجرای همه استراتژی‌ها</button></section>
   </section>
@@ -158,8 +133,8 @@ export async function mount(root, { state }) {
     const exits = baseDates.filter((date) => date >= entry && Number.isFinite(historyPrice(rowAt(ua.ins, date), exitBasis)));
     const oldExit = Number($('pb-exit-date').dataset.value);
     const exit = exits.includes(oldExit) ? oldExit : exits[Math.min(exits.length - 1, 5)];
-    mountWheel($('pb-entry-date'), entries, entry, () => refreshDates());
-    mountWheel($('pb-exit-date'), exits, exit, (date) => { $('pb-exit-market').textContent = marketText(date); });
+    mountDateWheel($('pb-entry-date'), entries, entry, () => refreshDates(), { empty: 'روز دارای قیمت پایه پیدا نشد.' });
+    mountDateWheel($('pb-exit-date'), exits, exit, (date) => { $('pb-exit-market').textContent = marketText(date); }, { empty: 'روز دارای قیمت پایه پیدا نشد.' });
     $('pb-entry-market').textContent = marketText(entry); $('pb-exit-market').textContent = marketText(exit);
   }
 
@@ -276,7 +251,7 @@ export async function mount(root, { state }) {
     const detail = $('pb-detail'); detail.hidden = false;
     const replay = replayHistory(replayArgs(item));
     if (!replay.ok) { detail.innerHTML = `<section class="card"><p class="empty-note">${esc(replay.error)}</p></section>`; return; }
-    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span></div><div id="pb-detail-result"></div></section>
+    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">رصد در بک‌تست سریع</button></div></div><div id="pb-detail-result"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">قیمت دستی واقعی برای هر قرارداد</p><h2>بازمحاسبه بدون دست‌کاری قیمت سایر پاها</h2></div><button type="button" class="primary" id="pb-manual-run">بازمحاسبه دستی</button></div><div class="portfolio-manual">${replay.priced.map((leg, index) => `<label>${fmt.int(index + 1)} · ${esc(nameOf(leg, 'پایه'))}<input type="number" min="0" step="1" data-manual="${index}" value="${leg.price}"></label>`).join('')}</div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">تحلیل حساسیت پویا</p><h2>اگر قیمت ورود یا مبنای خروج فرق می‌کرد</h2></div><div class="portfolio-shock-controls"><label>دامنه شوک<input id="pb-shock-range" type="number" min="1" max="50" step="1" value="10"></label><label>گام<input id="pb-shock-step" type="number" min="1" max="25" step="1" value="5"></label></div></div><div id="pb-sensitivity"></div></section>`;
     renderReplay(item, replay);
@@ -287,10 +262,35 @@ export async function mount(root, { state }) {
       if (manualReplay.ok) renderReplay(item, manualReplay, true);
       else detail.querySelector('#pb-detail-result').innerHTML = `<p class="empty-note">${esc(manualReplay.error)}</p>`;
     };
+    detail.querySelector('#pb-watch').onclick = () => watchInBacktest(item);
     const updateSensitivity = () => renderSensitivity(item, replayArgs(item));
     detail.querySelector('#pb-shock-range').oninput = updateSensitivity;
     detail.querySelector('#pb-shock-step').oninput = updateSensitivity;
     detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /**
+   * همین موقعیت را به بک‌تست سریع می‌سپارد و کاربر را همان‌جا می‌برد.
+   *
+   * فقط انتخاب‌ها منتقل می‌شوند، نه نتیجه‌ها: نماد، استراتژی، قراردادهای
+   * همین ترکیب، هر دو تاریخ، مبناهای قیمت و تعداد واحد. بک‌تست سریع خودش
+   * از نو محاسبه می‌کند — اگر عددی از اینجا کپی می‌شد، دو تب می‌توانستند دو
+   * حرف بزنند و معلوم نبود کدام مال کدام محاسبه است.
+   */
+  function watchInBacktest(item) {
+    state.handoff = {
+      to: 'backtest', from: 'portfolio-backtest',
+      uaIns: String(ua.ins), uaName: nameOf(ua, 'نماد پایه'),
+      strategyId: item.strategyId, strategyName: item.strategyName,
+      legIns: item.legs.map((leg) => String(leg.ins)),
+      comboName: comboName(item),
+      entryDate: Number($('pb-entry-date').dataset.value),
+      exitDate: Number($('pb-exit-date').dataset.value),
+      entryBasis: entryRail.dataset.value || 'LAST',
+      exitBasis: exitRail.dataset.value || 'LAST',
+      units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
+    };
+    location.hash = 'backtest';
   }
 
   async function runAll() {

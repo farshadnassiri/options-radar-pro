@@ -19,7 +19,7 @@ import { evaluate, profitRegions, probOfProfit, breakevenMetrics } from '../core
 import { CATALOG, buildLegs, byId } from '../strategies/catalog.mjs';
 import { defaults } from '../core/settings.mjs';
 import { buildChain, underlyingList, chainStats } from '../core/chain.mjs';
-import { scan as scanFn, scanAll, generateCombos, unexecutableReason } from '../core/scan.mjs';
+import { scan as scanFn, scanAll, generateCombos, unexecutableReason, blockedExpirySet, expiryBlocked, emptyFunnel } from '../core/scan.mjs';
 import { markToMarket, rollAnalysis } from '../core/positions.mjs';
 import { timeMachine } from '../core/timemachine.mjs';
 import { jalaliToGregorian, gregorianToJalali, parseJalali, todayJalali } from '../core/jalali.mjs';
@@ -33,11 +33,13 @@ import {
   historyPrice, normalizeHistoryDate, historyDateLabel, historyDayName,
   replayHistory, summarizeReplay, basisMatrix, entrySensitivity, generateHistoricalCombos,
   historyMarketMetrics, optimizeExitPolicy, rollingEntryMatrix, holdingPeriodProfile,
-  replayTradeDetail, strategyLegSnapshots,
+  replayTradeDetail, strategyLegSnapshots, manualPriceCheck,
 } from '../core/history.mjs';
 import {
   replayIntraday, combinedBacktestPath, summarizeIntraday, tradeSecond, tradeTimeLabel,
   normalizeTrades, canceledFlag, inIntradaySession,
+  bucketIntradayPath, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
+  ENTRY_EXIT_MIN_BUCKET, INTRADAY_START_SECOND,
 } from '../core/backtest.mjs';
 import { summarizePortfolio } from '../core/portfolio.mjs';
 
@@ -979,7 +981,7 @@ group('۱۸. نگهبان مرز سرور');
   // ——— مسیر مجاز ———
   check('ریشه به صفحه اصلی می‌رود', ok('/') === path.join(ROOT, 'ui', 'index.html'), `${ok('/')}`);
   check('فایل معمولی زیر ریشه قبول است', ok('/ui/style.css') === path.join(ROOT, 'ui', 'style.css'));
-  check('مسیر تودرتو قبول است', ok('/ui/tabs/engine.mjs') === path.join(ROOT, 'ui', 'tabs', 'engine.mjs'));
+  check('مسیر تودرتو قبول است', ok('/ui/tabs/backtest.mjs') === path.join(ROOT, 'ui', 'tabs', 'backtest.mjs'));
 
   // ——— همان باگی که این گروه برایش نوشته شد ———
   // مقایسه رشته‌ای startsWith، پوشه هم‌نام‌شروع کنار ریشه را رد نمی‌کرد
@@ -1946,6 +1948,443 @@ group('۳۳. گزارش همه استراتژی‌ها');
   check('تعداد و درصد معاملات سودده و زیان‌ده درست است', report.wins === 2 && report.losses === 1 && near(report.winPct, 200 / 3));
   check('رتبه‌بندی استراتژی با میانه بازده انجام می‌شود، نه بهترین تک‌معامله', report.bestStrategy?.strategyId === 'a' && report.bestTrade?.id === 'a1');
   check('گزارش گروه و بدترین استراتژی را جدا نگه می‌دارد', report.groups.length === 2 && report.worstStrategy?.strategyId === 'b');
+}
+
+// ═══════════════════════════ ۳۴. انتخابگر تاریخ مشترک ═══════════════════════════
+group('۳۴. انتخابگر تاریخ مشترک');
+{
+  const read = (relative) => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
+  const wheelSource34 = read('../ui/datewheel.mjs');
+  check('انتخابگر تاریخ یک ماژول مشترک است، نه سه پیاده‌سازی جدا',
+    wheelSource34.includes('export function mountDateWheel('));
+  // چرخ ماوس بدون `passive: false` قابل گرفتن نیست و مرورگر هشدار می‌دهد؛
+  // بدون آن، پیمایش با چرخ اصلاً کار نمی‌کند.
+  check('شنونده چرخ ماوس غیرمنفعل ثبت می‌شود',
+    /addEventListener\('wheel',[\s\S]*?\{ passive: false \}\)/.test(wheelSource34));
+  // در دو سر فهرست باید رویداد رها شود، وگرنه کاربر داخل جعبه حبس می‌شود و
+  // صفحه اسکرول نمی‌کند.
+  check('در انتهای فهرست، رویداد چرخ به صفحه واگذار می‌شود',
+    wheelSource34.includes('if (step(Math.sign(notches))) event.preventDefault();'));
+
+  const tabs34 = ['../ui/tabs/backtest.mjs', '../ui/tabs/portfolio-backtest.mjs', '../ui/tabs/history.mjs', '../ui/tabs/positions.mjs'];
+  const sources34 = tabs34.map(read);
+  check('هیچ تبی ریل افقی قدیمی تاریخ را نگه نداشته است',
+    sources34.every((source) => !source.includes('backtest-wheel')));
+  check('همه تب‌های دارای تاریخ از انتخابگر مشترک استفاده می‌کنند',
+    sources34.every((source) => source.includes("from '/ui/datewheel.mjs'")));
+  const historySource34 = read('../ui/tabs/history.mjs');
+  check('لغزنده و فهرست کشویی تاریخ در تحلیل تاریخی جایگزین شده‌اند',
+    !/id="h-(start|end|payoff-day|rolling-start|rolling-end)"[^>]*(type="range"|<\/select)/.test(historySource34)
+    && !historySource34.includes('<select id="h-rolling-start">'));
+
+  const styleSource34 = read('../ui/style.css');
+  check('کارت‌های تاریخ در ستون عمودی چیده می‌شوند',
+    /\.date-wheel-track \{[^}]*display: grid;/.test(styleSource34)
+    && !/\.date-wheel \{[^}]*overflow-x: auto/.test(styleSource34));
+}
+
+// ═══════════════════════════ ۳۵. نوار ثابت مشخصات موقعیت ═══════════════════════════
+group('۳۵. نوار ثابت مشخصات موقعیت');
+{
+  const historySource35 = fs.readFileSync(new URL('../ui/tabs/history.mjs', import.meta.url), 'utf8');
+  const styleSource35 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  // کشیدن جعبه، جای آن را از دست کاربر می‌گرفت: تا «بازنشانی جایگاه» را
+  // نمی‌زد، جعبه همان‌جا که رها شده بود می‌ماند — حتی روی محتوای مهم.
+  check('کد کشیدن جعبه مشخصات به‌کلی برداشته شده است',
+    !/frozenDrag|beginFrozenDrag|data-frozen-drag|resetFrozenPosition/.test(historySource35)
+    && !/data-detached|frozen-drag-handle/.test(styleSource35));
+  // نوار باید اولین فرزند تب باشد، نه داخل بخش نتایج؛ وگرنه پیش از اجرای
+  // تحلیل اصلاً وجود ندارد و «بالای صفحه» نیست.
+  const frozenAt35 = historySource35.indexOf('id="h-frozen-strategy"');
+  check('نوار مشخصات بالای تب می‌نشیند، نه داخل بخش نتایج',
+    frozenAt35 > 0 && frozenAt35 < historySource35.indexOf('class="history-hero"'));
+  check('نوار مشخصات با پیمایش صفحه ثابت می‌ماند',
+    /\.history-frozen \{[^}]*position: sticky;[^}]*top: 0;/.test(styleSource35));
+  // «بقیه اطلاعات کامل» یعنی هر دو تاریخ و مبناها و سرمایه و نتیجه، نه فقط
+  // نام استراتژی — همان چیزی که تا دیروز باید در جدول پایین دنبالش می‌گشتی.
+  // فهرست را از خودِ سازنده نوار بیرون می‌کشیم، نه از کل فایل — همین برچسب‌ها
+  // در خروجی CSV ماتریس هم هستند و بررسی سراسری، حذفشان از نوار را نمی‌دید.
+  const factsBlock35 = historySource35.slice(
+    historySource35.indexOf('function renderFrozenStrategy('),
+    historySource35.indexOf('function toggleFrozenFold('));
+  for (const fact of ['تاریخ ورود', 'تاریخ خروج', 'مدت نگهداری', 'مبنای ورود / خروج', 'سرمایه درگیر', 'نتیجه پایان']) {
+    check(`نوار مشخصات «${fact}» را درج می‌کند`, factsBlock35.includes(`['${fact}',`));
+  }
+  // کلیک روی هر خانه ماتریس یک موقعیت دیگر است — ورود و خروج دیگر روی همان
+  // پاها. اگر نوار به‌روز نشود، مشخصات موقعیتِ چند کلیک قبل را نشان می‌دهد.
+  check('کلیک روی خانه ماتریس نوار مشخصات را با همان ورود و خروج پر می‌کند',
+    /const detail = replayTradeDetail\(args, entryDate, exitDate\);[\s\S]{0,700}?renderFrozenStrategy\(detail\.replay, args,/.test(historySource35));
+}
+
+// ═══════════════════════════ ۳۶. قیمت دستی پاها در بک‌تست سریع ═══════════════════════════
+group('۳۶. قیمت دستی پاها در بک‌تست سریع');
+{
+  const base36 = [
+    { date: 20260801, close: 100, last: 100, low: 98, high: 102 },
+    { date: 20260802, close: 110, last: 110, low: 105, high: 112 },
+    { date: 20260803, close: 105, last: 105, low: 103, high: 108 },
+  ];
+  const put36 = [
+    { date: 20260801, close: 8, last: 9, low: 7, high: 10 },
+    { date: 20260802, close: 5, last: 4, low: 3, high: 6 },
+    { date: 20260803, close: 4, last: 3, low: 2, high: 5 },
+  ];
+  const call36 = [
+    { date: 20260801, close: 10, last: 11, low: 9, high: 12 },
+    { date: 20260802, close: 7, last: 6, low: 5, high: 8 },
+    { date: 20260803, close: 6, last: 5, low: 4, high: 7 },
+  ];
+  const args36 = {
+    legs: [
+      { ins: '11', name: 'پوت', kind: 'put', side: 'sell', ratio: 1, size: 1000, strike: 90, expiry: 20260820 },
+      { ins: '12', name: 'کال', kind: 'call', side: 'sell', ratio: 1, size: 1000, strike: 110, expiry: 20260820 },
+    ],
+    baseIns: '1', startDate: 20260801, endDate: 20260803,
+    entryBasis: 'CLOSE', exitBasis: 'LAST', units: 1,
+    seriesByIns: { 1: base36, 11: put36, 12: call36 },
+    fees: { buyStock: 0, sellStock: 0, option: 0, exercise: 0 },
+    settings: defaults(),
+  };
+
+  // ——— بازه روز: پیام می‌دهد، جلو را نمی‌گیرد ———
+  check('قیمت داخل بازه روز، «در بازه» گزارش می‌شود', manualPriceCheck(put36[0], 8).status === 'inside');
+  check('قیمت بیرون بازه روز، «بیرون از بازه» گزارش می‌شود', manualPriceCheck(put36[0], 25).status === 'outside');
+  // نبودن کمترین و بیشترین یعنی نمی‌دانیم، نه اینکه در بازه بوده.
+  check('بدون کمترین و بیشترین روز، وضعیت نامعلوم می‌ماند',
+    manualPriceCheck({ close: 8 }, 8).status === 'unknown' && manualPriceCheck(null, 8).status === 'unknown');
+  check('ورودی خالی یا نامعتبر پیامی نمی‌سازد',
+    manualPriceCheck(put36[0], NaN).status === 'empty' && manualPriceCheck(put36[0], 0).status === 'empty');
+  const bounds36 = manualPriceCheck(put36[0], 25);
+  check('پیام بازه، همان کمترین و بیشترین همان روز را حمل می‌کند', bounds36.low === 7 && bounds36.high === 10);
+
+  // ——— قیمت دستی خروج ———
+  const plain36 = replayHistory(args36);
+  const manualExit36 = replayHistory({ ...args36, manualExit: { 0: 1, 1: 1 } });
+  check('قیمت دستی خروج در روز سنجش اثر می‌گذارد',
+    manualExit36.ok && manualExit36.rows.at(-1).perLeg[0].exitPrice === 1 && manualExit36.rows.at(-1).perLeg[1].exitPrice === 1);
+  check('قیمت دستی خروج فقط روی روز سنجش می‌نشیند، نه روزهای مسیر',
+    manualExit36.rows[1].perLeg[0].exitPrice === plain36.rows[1].perLeg[0].exitPrice
+    && manualExit36.rows[1].perLeg[1].exitPrice === plain36.rows[1].perLeg[1].exitPrice);
+  // ۱۸۰۰۰ دریافتی ورود منهای ۲۰۰۰ هزینه بستن دو پا با قیمت ۱
+  check('سود روز سنجش با قیمت دستی خروج درست حساب می‌شود',
+    manualExit36.rows.at(-1).netPnl === 16000, manualExit36.rows.at(-1).netPnl);
+  // بیرون از بازه روز باید محاسبه شود، نه رد. این دقیقاً خواسته کاربر است.
+  const wild36 = replayHistory({ ...args36, manualExit: { 0: 500, 1: 500 } });
+  check('قیمت دستی بیرون از بازه روز جلوی محاسبه را نمی‌گیرد',
+    wild36.ok && wild36.rows.at(-1).status === 'ok' && wild36.rows.at(-1).netPnl === -982000, wild36.rows.at(-1).netPnl);
+  // روزی که یک پا اصلاً قیمت ندارد، با قیمت دستی قابل سنجش می‌شود.
+  const gapSeries36 = { ...args36.seriesByIns, 12: call36.slice(0, 2) };
+  check('روز فاقد قیمت یک پا، بدون قیمت دستی همچنان فاقد داده می‌ماند',
+    replayHistory({ ...args36, seriesByIns: gapSeries36 }).rows.at(-1).status === 'missing');
+  check('همان روز با قیمت دستی همان پا معتبر می‌شود',
+    replayHistory({ ...args36, seriesByIns: gapSeries36, manualExit: { 1: 3 } }).rows.at(-1).status === 'ok');
+  check('بازپخش، قیمت‌های دستی به‌کاررفته را همراه نتیجه برمی‌گرداند',
+    manualExit36.manualExit[0] === 1 && Object.keys(plain36.manualExit).length === 0);
+
+  // ——— رابط ———
+  const backtestSource36 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  check('رابط بک‌تست برای هر پا در هر دو روز ورودی قیمت دستی می‌سازد',
+    backtestSource36.includes('data-manual="${scope}"')
+    && backtestSource36.includes("marketSnapshot(strategyLegSnapshots(legs, seriesByIns, entry), entryRail.dataset.value || 'LAST', 'entry', manualEntry)")
+    && backtestSource36.includes("marketSnapshot(strategyLegSnapshots(legs, seriesByIns, exit), exitRail.dataset.value || 'LAST', 'exit', manualExit)"));
+  check('رابط بک‌تست قیمت دستی هر دو سمت را به موتور می‌دهد',
+    /replayHistory\(\{[^}]*manualEntry, manualExit,/.test(backtestSource36));
+  // قیمت دستی به یک قرارداد و یک روز تعلق دارد؛ ماندنش پس از تعویض ترکیب
+  // یا تاریخ یعنی نسبت‌دادن قیمتی به جایی که هرگز آنجا نبوده.
+  check('تعویض ترکیب یا تاریخ خروج، قیمت‌های دستی را پاک می‌کند',
+    /function renderCombo\(\) \{[\s\S]{0,200}?manualEntry = \{\}; manualExit = \{\};/.test(backtestSource36)
+    && backtestSource36.includes('() => { manualExit = {}; paintSnapshots(); }'));
+}
+
+// ═══════════════════════════ ۳۷. سپردن موقعیت به بک‌تست سریع ═══════════════════════════
+group('۳۷. سپردن موقعیت به بک‌تست سریع');
+{
+  const read37 = (relative) => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
+  const appSource37 = read37('../ui/app.mjs');
+  const portfolioSource37 = read37('../ui/tabs/portfolio-backtest.mjs');
+  const backtestSource37 = read37('../ui/tabs/backtest.mjs');
+
+  // بدون شنونده `hashchange`، عوض‌کردن hash از داخل یک تب فقط نشانی را عوض
+  // می‌کند و هیچ تبی باز نمی‌شود.
+  check('پوسته برنامه تغییر hash از داخل تب را به باز کردن تب ترجمه می‌کند',
+    appSource37.includes("window.addEventListener('hashchange'")
+    && appSource37.includes('if (next && next !== current && TABS.some((t) => t.id === next)) open(next);'));
+  check('جعبه تحویل بین تب‌ها در وضعیت مشترک تعریف شده است', /^\s*handoff: null,$/m.test(appSource37));
+  // وارد کردن `open` از app.mjs یک حلقه می‌ساخت، چون app.mjs خودش هر تب را
+  // به‌صورت پویا وارد می‌کند.
+  check('تب‌ها برای تعویض تب، پوسته برنامه را وارد نمی‌کنند',
+    !portfolioSource37.includes("from '/ui/app.mjs'") && !backtestSource37.includes("from '/ui/app.mjs'"));
+
+  check('آزمون همه استراتژی‌ها دکمه رصد در بک‌تست سریع دارد',
+    portfolioSource37.includes('id="pb-watch"') && portfolioSource37.includes("onclick = () => watchInBacktest(item)"));
+  // فقط انتخاب‌ها منتقل می‌شوند، نه نتیجه‌ها؛ وگرنه دو تب می‌توانند دو عدد
+  // نشان دهند و معلوم نباشد کدام مال کدام محاسبه است.
+  for (const key of ['uaIns', 'strategyId', 'legIns', 'entryDate', 'exitDate', 'entryBasis', 'exitBasis', 'units']) {
+    check(`تحویل «${key}» را همراه می‌برد`, new RegExp(`^\\s*${key}:`, 'm').test(portfolioSource37.slice(portfolioSource37.indexOf('state.handoff = {'))));
+  }
+  check('تحویل هیچ عدد نتیجه‌ای را کپی نمی‌کند',
+    !/state\.handoff = \{[\s\S]*?\};/.exec(portfolioSource37)[0].match(/netPnl|returnPct|capital/));
+  check('آزمون همه استراتژی‌ها کاربر را به تب بک‌تست سریع می‌برد',
+    portfolioSource37.includes("location.hash = 'backtest';"));
+
+  check('بک‌تست سریع تحویل را برمی‌دارد و می‌چیند',
+    backtestSource37.includes("state.handoff?.to === 'backtest'") && backtestSource37.includes('await applyHandoff(plan)'));
+  // اگر پاک نشود، باز کردن دوباره تب، انتخاب تازه کاربر را با چیدمان کهنه
+  // بازنویسی می‌کند.
+  check('تحویل پس از برداشتن پاک می‌شود', /const plan = state\.handoff;\s*\n\s*state\.handoff = null;/.test(backtestSource37));
+  // اگر ترکیب یا روز پیدا نشود، بی‌صدا چیز دیگری انتخاب نمی‌شود.
+  check('هرچه از تحویل چیده نشد، صریح گزارش می‌شود',
+    backtestSource37.includes('const skipped = [];') && backtestSource37.includes('skipped.push(') && backtestSource37.includes("skipped.join('؛ ')"));
+}
+
+// ═══════════════════════════ ۳۸. سررسید با سقف موقعیت پر ═══════════════════════════
+group('۳۸. سررسید با سقف موقعیت پر');
+{
+  const mkRow38 = (strike, endDate) => ({
+    uaInsCode: 'L', lval30_UA: 'اهرم', pDrCotVal_UA: 100000, pClosing_UA: 100000,
+    insCode_C: `c${strike}_${endDate}`, lVal18AFC_C: `ض${strike}`, insCode_P: `p${strike}_${endDate}`, lVal18AFC_P: `ط${strike}`,
+    strikePrice: strike, contractSize: 1000, remainedDay: endDate === 20260101 ? 30 : 60, endDate,
+    pMeDem_C: 3000, qTitMeDem_C: 50, pMeOf_C: 3150, qTitMeOf_C: 50,
+    pDrCotVal_C: 3000, pClosing_C: 3000, oP_C: 500, qTotTran5J_C: 1000, qTotCap_C: 300000000,
+    pMeDem_P: 3000, qTitMeDem_P: 50, pMeOf_P: 3150, qTitMeOf_P: 50,
+    pDrCotVal_P: 3000, pClosing_P: 3000, oP_P: 500, qTotTran5J_P: 1000, qTotCap_P: 300000000,
+  });
+  const chain38 = buildChain([
+    mkRow38(95000, 20260101), mkRow38(105000, 20260101),
+    mkRow38(95000, 20260201), mkRow38(105000, 20260201),
+  ]);
+  const s38 = { ...defaults(), comboWindowPct: 25, greeksInScan: false };
+  const ua38 = chain38.get('L');
+  check('نمونه دو سررسید دارد', ua38.expiryList.length === 2, ua38.expiryList.map((ex) => ex.endDate).join('/'));
+
+  // ——— خواندن فهرست ———
+  const set38 = blockedExpirySet('L:20260101, L:20260201 ');
+  check('فهرست سررسیدهای پرشده با فاصله اضافی هم درست خوانده می‌شود', set38.size === 2 && set38.has('L:20260201'));
+  check('ورودی خالی یا بی‌دونقطه چیزی نمی‌سازد',
+    blockedExpirySet('').size === 0 && blockedExpirySet('L').size === 0 && blockedExpirySet(':20260101').size === 0 && blockedExpirySet(null).size === 0);
+  check('بستن یک سررسید، سررسید دیگر همان نماد را نمی‌بندد',
+    expiryBlocked(blockedExpirySet('L:20260101'), 'L', 20260101) && !expiryBlocked(blockedExpirySet('L:20260101'), 'L', 20260201));
+  check('بستن سررسید یک نماد به نماد دیگر سرایت نمی‌کند',
+    !expiryBlocked(blockedExpirySet('L:20260101'), 'M', 20260101));
+
+  // ——— اثر روی ترکیب‌سازی ———
+  const openAll38 = generateCombos(byId('naked-call'), ua38, s38);
+  const oneBlocked38 = generateCombos(byId('naked-call'), ua38, { ...s38, blockedExpiries: 'L:20260101' });
+  const allBlocked38 = generateCombos(byId('naked-call'), ua38, { ...s38, blockedExpiries: 'L:20260101,L:20260201' });
+  check('بدون فهرست، هر دو سررسید ترکیب می‌سازند', openAll38.length > 0 && new Set(openAll38.map((row) => row.endDate)).size === 2);
+  check('سررسید پرشده هیچ ترکیبی نمی‌سازد',
+    oneBlocked38.length > 0 && oneBlocked38.every((row) => row.endDate === 20260201), new Set(oneBlocked38.map((row) => row.endDate)).size);
+  check('بستن همه سررسیدها یعنی هیچ پیشنهادی', allBlocked38.length === 0);
+
+  // سررسید بسته اصلاً ترکیب نمی‌سازد، پس در سطل‌های قیف دیده نمی‌شود؛ اگر
+  // شمرده نشود، کاربر جدول خالی را به نبود مظنه نسبت می‌دهد.
+  const funnel38 = emptyFunnel();
+  generateCombos(byId('naked-call'), ua38, { ...s38, blockedExpiries: 'L:20260101' }, funnel38);
+  check('قیف، سررسیدهای کنارگذاشته‌شده را جدا می‌شمارد', funnel38.blockedExpiry === 1, funnel38.blockedExpiry);
+  const scan38 = scanFn({ def: byId('naked-call'), chain: chain38, uaKeys: ['L'], settings: { ...s38, blockedExpiries: 'L:20260101' } });
+  // ردیف اسکن `endDate` را حمل نمی‌کند؛ `days` تنها نشانه سررسید در خروجی است
+  // و در این نمونه ۳۰ روز مال سررسید بسته و ۶۰ روز مال سررسید باز است.
+  check('اسکن کامل هم سررسید پرشده را پیشنهاد نمی‌دهد',
+    scan38.rows.length > 0 && scan38.rows.every((row) => row.days === 60), scan38.rows.map((row) => row.days).join('/'));
+
+  // ——— رابط ———
+  const settingsSource38 = fs.readFileSync(new URL('../core/settings.mjs', import.meta.url), 'utf8');
+  check('فهرست سررسیدهای پرشده در تنظیمات ذخیره می‌شود، نه فقط در حافظه مرورگر',
+    settingsSource38.includes("key: 'blockedExpiries'") && defaults().blockedExpiries === '');
+  const indexSource38 = fs.readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
+  check('انتخابگر سررسید در نوار بالای برنامه است',
+    indexSource38.indexOf('data-capacity-panel') > 0 && indexSource38.indexOf('data-capacity-panel') < indexSource38.indexOf('</header>'));
+  const expiriesSource38 = fs.readFileSync(new URL('../ui/expiries.mjs', import.meta.url), 'utf8');
+  // تا کسی نوار را باز نکند نباید هیچ درخواستی برود؛ همان قاعده «تب بسته
+  // هیچ هزینه‌ای ندارد».
+  check('زنجیره فقط با باز شدن نوار گرفته می‌شود',
+    /host\.addEventListener\('toggle', \(\) => \{ if \(host\.open\) loadChain\(\); \}\)/.test(expiriesSource38)
+    && (expiriesSource38.match(/fetch\(/g) || []).length === 1);
+  const tableSource38 = fs.readFileSync(new URL('../ui/table.mjs', import.meta.url), 'utf8');
+  check('قیف، کنارگذاشتن سررسید را به کاربر توضیح می‌دهد', tableSource38.includes('f.blockedExpiry > 0'));
+}
+
+// ═══════════════════════════ ۳۹. تحلیل چندروزه روی تایم‌فریم انتخابی ═══════════════════════════
+group('۳۹. تحلیل چندروزه روی تایم‌فریم انتخابی');
+{
+  const S = INTRADAY_START_SECOND;
+  // نقطه‌ساز ساده: هر نقطه یک ثانیه با آفست و یک پا.
+  const point39 = (second, netPnl, price = 10, volume = 1) => ({
+    second, timeLabel: '—', netPnl, returnPct: netPnl / 100,
+    basePrice: 1000, basePct: 0, eventVolume: volume, eventTrades: 1,
+    baseCumulativeVolume: 0, baseSecondVolume: 0, maxAgeSec: 0, allFresh: true,
+    perLeg: [{ index: 0, ins: '11', name: 'پا', side: 'sell', exitPrice: price, netPnl, cumulativeVolume: volume, tradeCount: 1, ageSec: 0 }],
+  });
+  const days39 = [
+    { date: 20260801, points: [point39(S, 100), point39(S + 60, 300), point39(S + 1900, -50)] },
+    { date: 20260802, points: [point39(S + 30, 20), point39(S + 120, 90), point39(S + 1900, 10)] },
+  ];
+
+  // ——— سطل‌بندی ———
+  const buckets39 = bucketIntradayPath(days39, { bucketSeconds: 30 * 60 });
+  check('هر روز جدا سطل می‌شود و سطل بی‌مشاهده ساخته نمی‌شود',
+    buckets39.length === 4, buckets39.map((row) => `${row.date}@${row.startSecond - S}`).join(' '));
+  check('باز، بسته، بیشینه و کمینه هر سطل از مشاهده‌های همان سطل می‌آید',
+    buckets39[0].openPnl === 100 && buckets39[0].closePnl === 300 && buckets39[0].highPnl === 300 && buckets39[0].lowPnl === 100);
+  check('تغییر درون سطل از اولین تا آخرین مشاهده همان سطل است', buckets39[0].changePnl === 200);
+  // تغییر پیاپی از بسته‌شدن سطل قبلی می‌آید، حتی وقتی سطل قبلی روز دیگری است.
+  check('اولین سطل تغییر پیاپی ندارد، نه اینکه صفر باشد', Number.isNaN(buckets39[0].stepPnl));
+  // سطل سوم اولین سطل روز دوم است؛ مرجعش بستهٔ آخرین سطل روز اول است، نه صفر.
+  check('تغییر پیاپی از سطل قبلی حساب می‌شود، حتی وقتی روز عوض شده',
+    buckets39[1].stepPnl === -350 && buckets39[2].stepPnl === 140,
+    `${buckets39[1].stepPnl}/${buckets39[2].stepPnl}`);
+  check('هر سطل تعداد مشاهده و حجم خودش را حمل می‌کند',
+    buckets39[0].observations === 2 && buckets39[0].volume === 2 && buckets39[1].observations === 1);
+  check('اثر هر پا در سطل هم گزارش می‌شود', buckets39[0].perLeg[0].changePnl === 200);
+  // تایم‌فریم کوچک‌تر یعنی سطل بیشتر، بدون ساختن نقطه تازه.
+  const fine39 = bucketIntradayPath(days39, { bucketSeconds: 60 });
+  check('تایم‌فریم ریزتر سطل بیشتر می‌دهد ولی مشاهده تازه نمی‌سازد',
+    fine39.length === 6 && fine39.reduce((sum, row) => sum + row.observations, 0) === 6, fine39.length);
+  check('تایم‌فریم زیر یک دقیقه به یک دقیقه بسته می‌شود',
+    bucketIntradayPath(days39, { bucketSeconds: 1 }).length === fine39.length);
+
+  // ——— مدت سود و زیان ———
+  const holding39 = intradayHoldingSummary(days39);
+  // روز اول: ۶۰ ثانیه با آفست ۱۰۰، بعد ۱۸۴۰ ثانیه با ۳۰۰، و نقطه آخر بدون
+  // ادامه — پس ۱۹۰۰ ثانیه مشاهده‌شده که همه‌اش در سود بوده.
+  check('مدت مشاهده‌شده از فاصله نقاط می‌آید، نه از طول جلسه',
+    holding39.days[0].observedSeconds === 1900 && holding39.days[0].positiveSeconds === 1900);
+  check('بازه پس از آخرین معامله روز اصلاً شمرده نمی‌شود',
+    holding39.days[0].observedSeconds === 1900 && holding39.days[0].lastSecond - holding39.days[0].firstSecond === 1900);
+  check('روز سودده و زیان‌ده از آفست پایان روز شمرده می‌شود',
+    holding39.positiveDays === 1 && holding39.negativeDays === 1 && holding39.dayCount === 2);
+  check('درصد زمان در سود روی کل بازه محاسبه می‌شود', near(holding39.positivePct, 100));
+  // صفر نه سود است نه زیان؛ ریختنش در یکی از دو سطل، درصدها را جابه‌جا می‌کند.
+  const flat39 = intradayHoldingSummary([{ date: 1, points: [point39(S, 0), point39(S + 50, 5)] }]);
+  check('ثانیه با آفست صفر نه در سود شمرده می‌شود نه در زیان',
+    flat39.flatSeconds === 50 && flat39.positiveSeconds === 0 && flat39.negativeSeconds === 0,
+    `${flat39.flatSeconds}/${flat39.positiveSeconds}`);
+  const lossDay39 = intradayHoldingSummary([{ date: 1, points: [point39(S, -5), point39(S + 100, -7)] }]);
+  check('زمان در زیان جدا از زمان در سود شمرده می‌شود',
+    lossDay39.negativeSeconds === 100 && lossDay39.positiveSeconds === 0 && near(lossDay39.negativePct, 100));
+
+  // ——— رفتار ساعتی ———
+  const profile39 = timeOfDayProfile(days39, { bucketSeconds: 30 * 60 });
+  check('بازه ساعتی مشترک دو روز، دو نمونه دارد', profile39[0].days === 2 && profile39[0].upDays === 2);
+  check('یکنواختی جهت، سهم پرتکرارترین جهت است', near(profile39[0].consistencyPct, 100));
+  const mixed39 = timeOfDayProfile([
+    { date: 1, points: [point39(S, 0), point39(S + 60, 10)] },
+    { date: 2, points: [point39(S, 0), point39(S + 60, -10)] },
+  ], { bucketSeconds: 30 * 60 });
+  check('دو روز با جهت مخالف، یکنواختی پنجاه درصد می‌دهد', near(mixed39[0].consistencyPct, 50) && near(mixed39[0].upPct, 50));
+
+  // ——— بهترین بازه ورود و خروج ———
+  const legs39 = [{ kind: 'call', side: 'buy', ratio: 1, size: 1, strike: 100, price: 0 }];
+  const priced39 = [
+    { date: 1, points: [point39(S, 0, 10), point39(S + 20 * 60, 0, 14), point39(S + 40 * 60, 0, 12)] },
+    { date: 2, points: [point39(S, 0, 20), point39(S + 20 * 60, 0, 26), point39(S + 40 * 60, 0, 24)] },
+  ];
+  const matrix39 = intradayEntryExitProfile(priced39, { legs: legs39, bucketSeconds: 20 * 60, fees: {} });
+  check('ماتریس ورود×خروج فقط جفت‌های رو به جلو می‌سازد',
+    matrix39.cells.length === 3 && matrix39.cells.every((cell) => cell.exitSecond > cell.entrySecond), matrix39.cells.length);
+  check('هر خانه روی همه روزها تجمیع می‌شود', matrix39.cells.every((cell) => cell.samples === 2));
+  // خرید ۱۰ و فروش ۱۴ در روز اول و ۲۰ به ۲۶ در روز دوم → میانه ۵
+  const firstToSecond39 = matrix39.cells.find((cell) => cell.entrySecond === S && cell.exitSecond === S + 20 * 60);
+  check('سود هر خانه از قیمت مشاهده‌شده دو سرِ همان جفت می‌آید',
+    firstToSecond39.medianPnl === 5 && firstToSecond39.winPct === 100, firstToSecond39.medianPnl);
+  check('بهترین بازه ورود و خروج با میانه رتبه‌بندی می‌شوند',
+    matrix39.bestEntry.second === S && matrix39.bestExit.second === S + 20 * 60,
+    `${matrix39.bestEntry.second - S}/${matrix39.bestExit.second - S}`);
+  // کف پنج دقیقه‌ای عمدی است و باید صریح برگردد، نه بی‌صدا اعمال شود.
+  const clamped39 = intradayEntryExitProfile(priced39, { legs: legs39, bucketSeconds: 60, fees: {} });
+  check('تایم‌فریم ریزتر از کف ماتریس، صریح به کف بسته می‌شود',
+    clamped39.bucketSeconds === ENTRY_EXIT_MIN_BUCKET && clamped39.requestedBucketSeconds === 60);
+  check('بدون پا، ماتریس عدد نمی‌سازد', intradayEntryExitProfile(priced39, { legs: [], bucketSeconds: 20 * 60 }).cells.length === 0);
+  check('روزی که فقط یک سطل دارد، هیچ جفتی نمی‌سازد',
+    intradayEntryExitProfile([{ date: 1, points: [point39(S, 0, 10)] }], { legs: legs39, bucketSeconds: 20 * 60 }).days === 0);
+  // کارمزد باید در هر دو سمت کم شود، وگرنه ماتریس سود را بیش‌برآورد می‌کند.
+  const withFee39 = intradayEntryExitProfile(priced39, { legs: legs39, bucketSeconds: 20 * 60, fees: { option: 0.1 } });
+  check('کارمزد هر دو سمت از سود خانه کم می‌شود',
+    withFee39.cells.find((cell) => cell.entrySecond === S && cell.exitSecond === S + 20 * 60).medianPnl < 5);
+
+  check('ورودی خالی، خروجی خالی می‌دهد',
+    bucketIntradayPath([]).length === 0 && intradayHoldingSummary([]).dayCount === 0 && timeOfDayProfile([]).length === 0);
+
+  // ——— مسیر ترکیبی وقتی روزِ ریزشده، روز آخر نیست ———
+  // کاربر می‌تواند هر روز مسیر را باز کند. اگر مسیر ترکیبی همیشه روز آخر را
+  // مرز بگیرد، برای یک روز میانی همه روزهای بعدش هم می‌مانند و نمودار یک
+  // پرش دروغین بین نقطه روزانه و نقطه ثانیه‌ای نشان می‌دهد.
+  const replay39 = {
+    ok: true, endDate: 20260803,
+    rows: [
+      { date: 20260801, status: 'ok', netPnl: 1 },
+      { date: 20260802, status: 'ok', netPnl: 2 },
+      { date: 20260803, status: 'ok', netPnl: 3 },
+    ],
+  };
+  const ticks39 = [point39(S, 10), point39(S + 60, 11)];
+  const middle39 = combinedBacktestPath(replay39, ticks39, 'combined', 20260802);
+  check('مسیر ترکیبی فقط روزهای پیش از روز ریزشده را نگه می‌دارد',
+    middle39.filter((row) => row.granularity === 'day').map((row) => row.date).join(',') === '20260801',
+    middle39.filter((row) => row.granularity === 'day').map((row) => row.date).join(','));
+  check('نقاط ریزمعامله تاریخ همان روز باز‌شده را می‌گیرند',
+    middle39.filter((row) => row.granularity === 'trade').every((row) => row.date === 20260802));
+  check('بدون تاریخ صریح، همان روز آخر بازپخش مرز می‌ماند',
+    combinedBacktestPath(replay39, ticks39, 'combined').filter((row) => row.granularity === 'day').length === 2);
+}
+
+// ═══════════════════════════ ۴۰. نمای مسیر و تحلیل تایم‌فریم در بک‌تست سریع ═══════════════════════════
+group('۴۰. نمای مسیر و تحلیل تایم‌فریم در بک‌تست سریع');
+{
+  const source40 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  const styleSource40 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+
+  // ——— ترتیب سه گام: کلی، روزبه‌روز، ریزمعامله ———
+  const at = (needle) => source40.indexOf(needle);
+  check('اول عملکرد کلی بازه، بعد مسیر روزبه‌روز، بعد ریزمعامله',
+    at('id="bt-kpis"') > 0 && at('id="bt-kpis"') < at('id="bt-days-table"')
+    && at('id="bt-days-table"') < at('id="bt-intraday-title"'));
+  check('نمای کلی بازه، بازه خودش را برچسب می‌زند', source40.includes("$('bt-overview-range').textContent"));
+
+  // ——— ورود به ریزمعامله با کلیک روی ردیف روز ———
+  check('هر ردیف جدول روزبه‌روز با کلیک و صفحه‌کلید باز می‌شود',
+    source40.includes('data-day="${row.date}" tabindex="0"')
+    && /\$\('bt-days-table'\)\.addEventListener\('click'[\s\S]{0,220}?openDayIntraday\(Number\(row\.dataset\.day\)\)/.test(source40)
+    && /\$\('bt-days-table'\)\.addEventListener\('keydown'[\s\S]{0,260}?openDayIntraday\(Number\(row\.dataset\.day\)\)/.test(source40));
+  check('روز باز‌شده در عنوان پنل ریزمعامله نوشته می‌شود',
+    source40.includes("$('bt-intraday-title').textContent") && source40.includes('ریزمعامله ${dateLabel(intradayDate)}'));
+  check('ردیف روزِ باز‌شده در جدول علامت می‌خورد',
+    source40.includes('aria-selected="${row.date === intradayDate}"')
+    && /tr\[data-day\]\[aria-selected="true"\]/.test(styleSource40));
+  // ریزمعامله هر روز چند درخواست است؛ رفت‌وبرگشت بین روزها نباید هر بار
+  // همان درخواست‌ها را دوباره بفرستد.
+  check('ریزمعامله هر روز یک‌بار گرفته و نگه داشته می‌شود',
+    source40.includes('if (tradesCache.has(date)) return tradesCache.get(date);') && source40.includes('tradesCache.set(date, result);'));
+  // ترکیب یا بازه که عوض شود، کش مال بازپخش قبلی است.
+  check('اجرای دوباره بک‌تست، کش ریزمعامله را خالی می‌کند', source40.includes('tradesCache.clear();'));
+  // مسیر ترکیبی باید بداند ریزمعامله مال کدام روز است، وگرنه روزهای اشتباهی
+  // را کنار می‌گذارد و نمودار یک پرش دروغین نشان می‌دهد.
+  check('مسیر ترکیبی روز ریزشده را می‌گیرد، نه همیشه روز آخر',
+    source40.includes('combinedBacktestPath(replay, intraday, mode, intradayDate)'));
+
+  // ——— تحلیل تایم‌فریم ———
+  check('کاربر تایم‌فریم را خودش انتخاب می‌کند', source40.includes('id="bt-tf-size"') && source40.includes('id="bt-tf-run"'));
+  check('عوض‌کردن تایم‌فریم فقط سطل‌بندی را عوض می‌کند، نه داده را',
+    /\$\('bt-tf-size'\)\.addEventListener\('change'[\s\S]{0,420}?if \(timeframeDays\.length\) paintTimeframe\(null\)/.test(source40));
+  for (const [id, what] of [['bt-tf-pnl-chart', 'آفست کل'], ['bt-tf-leg-chart', 'تفکیک پاها'], ['bt-tf-return-chart', 'بازده و پایه'], ['bt-tf-base-chart', 'قیمت نماد پایه']]) {
+    check(`نمودار «${what}» در تحلیل تایم‌فریم رسم می‌شود`, source40.includes(`$('${id}')`));
+  }
+  check('نماد پایه هم در نمودار و هم در جدول سطل‌ها می‌آید',
+    source40.includes("label: 'تغییر نماد پایه'") && source40.includes("label: 'قیمت نماد پایه'") && source40.includes('<th>پایه</th>'));
+  check('مدت سود و زیان، رفتار ساعتی و ماتریس ورود×خروج هر سه ساخته می‌شوند',
+    source40.includes('intradayHoldingSummary(timeframeDays)') && source40.includes('timeOfDayProfile(timeframeDays')
+    && source40.includes('intradayEntryExitProfile(timeframeDays'));
+  check('بهترین بازه ورود و خروج به کاربر گفته می‌شود',
+    source40.includes('بهترین بازه ورود') && source40.includes('بهترین بازه خروج'));
+  // چند ده درخواست بی‌خبر نباید برود؛ و روزی که نقطه مشترک ندارد باید شمرده
+  // شود نه اینکه با صفر پر شود.
+  check('گرفتن ریزمعامله چندروزه پیشرفت گزارش می‌کند و سقف دارد',
+    source40.includes('دریافت ریزمعامله ${fmt.int(index + 1)} از') && source40.includes('TIMEFRAME_DAY_CAP'));
+  check('روز بدون نقطه مشترک شمرده و صریح گزارش می‌شود',
+    source40.includes('if (points.length) out.push({ date: wanted[index], points }); else empty += 1;')
+    && source40.includes('روز بدون نقطه مشترک کنار گذاشته شد'));
+  check('اگر ماتریس روی سطل درشت‌تر ساخته شود، همان‌جا گفته می‌شود',
+    source40.includes('matrix.bucketSeconds !== matrix.requestedBucketSeconds'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

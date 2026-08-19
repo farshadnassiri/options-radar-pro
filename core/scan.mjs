@@ -42,7 +42,30 @@ function equalWidth(ks) {
   return true;
 }
 
-const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept'];
+const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept', 'blockedExpiry'];
+
+/**
+ * سررسیدهایی که سقف موقعیت بازشان پر است.
+ *
+ * وقتی سقف یک سررسید پر می‌شود، اخذ موقعیت فزاینده تازه ممکن نیست و فقط
+ * می‌شود موقعیت قبلی را آفست کرد. پیشنهاد استراتژی روی چنین سررسیدی، عددی
+ * است که کاربر نمی‌تواند اجرایش کند؛ پس اصلاً ساخته نمی‌شود. این وضعیت از
+ * تابلو خوانده نمی‌شود — کارگزار اعلامش می‌کند — پس ورودی دستی است.
+ *
+ * قالب: «شناسه نماد پایه:تاریخ سررسید»، جدا شده با ویرگول.
+ */
+export function blockedExpirySet(text = '') {
+  const out = new Set();
+  for (const part of String(text ?? '').split(',')) {
+    const at = part.indexOf(':');
+    if (at < 1) continue;
+    const ins = part.slice(0, at).trim(), endDate = part.slice(at + 1).trim();
+    if (ins && endDate) out.add(`${ins}:${endDate}`);
+  }
+  return out;
+}
+
+export const expiryBlocked = (set, uaIns, endDate) => set.has(`${uaIns}:${endDate}`);
 
 /**
  * چرا ردیف ادعای اجرا ندارد.
@@ -66,7 +89,7 @@ export function unexecutableReason(row) {
 }
 
 export function emptyFunnel() {
-  return { built: 0, noQuote: 0, refBasis: 0, noDepth: 0, filtered: 0, kept: 0, evaluated: 0, capped: false };
+  return { built: 0, noQuote: 0, refBasis: 0, noDepth: 0, filtered: 0, kept: 0, blockedExpiry: 0, evaluated: 0, capped: false };
 }
 
 /**
@@ -94,7 +117,10 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
   const needsStock = def.legs.some((l) => l.kind === 'underlying');
   const uaQ = underlyingQuote(ua);
 
-  const expiries = ua.expiryList.filter((ex) => ex.days >= s.minDays && ex.days <= s.maxDays);
+  const blocked = blockedExpirySet(s.blockedExpiries);
+  const inWindow = ua.expiryList.filter((ex) => ex.days >= s.minDays && ex.days <= s.maxDays);
+  const expiries = inWindow.filter((ex) => !expiryBlocked(blocked, ua.ins, ex.endDate));
+  funnel.blockedExpiry += inWindow.length - expiries.length;
   const pairs = def.expiries > 1
     ? expiries.flatMap((a, i) => expiries.slice(i + 1).map((b) => [a, b]))
     : expiries.map((a) => [a]);

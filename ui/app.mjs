@@ -6,6 +6,7 @@
 import { fmt, faDigits, faAgo, faClock, pageTitle, normFa } from '/ui/fmt.mjs';
 import { defaults } from '/core/settings.mjs';
 import { CATALOG, GROUPS as SGROUPS } from '/strategies/catalog.mjs';
+import { mountCapacityPicker } from '/ui/expiries.mjs';
 
 export const state = {
   settings: defaults(),
@@ -16,6 +17,10 @@ export const state = {
   // است نه زمان سرور، چون همان چیزی است که کاربر می‌خواهد بداند: از کی تا
   // حالا چیزی تازه نیامده.
   link: { status: 'idle', since: Date.now(), lastData: null },
+  // تحویل بین تب‌ها. تبی که تب دیگری را باز می‌کند، آنچه را کاربر همین حالا
+  // انتخاب کرده اینجا می‌گذارد و تب مقصد سر جای خودش برش می‌دارد و پاک
+  // می‌کند. از localStorage استفاده نمی‌شود چون این داده عمر یک کلیک دارد.
+  handoff: null,
 };
 
 // ————————————————————————————————— تنظیمات —————————————————————————————————
@@ -155,7 +160,6 @@ async function tickHealth() {
 
 const TABS = [
   { id: 'settings', title: 'تنظیمات', section: 'پایه', mod: '/ui/tabs/settings.mjs', phase: 1 },
-  { id: 'engine', title: 'موتور و نمودار بازده', section: 'پایه', mod: '/ui/tabs/engine.mjs', phase: 2 },
   { id: 'chain', title: 'دیده‌بان زنجیره اختیار', section: 'پایه', mod: '/ui/tabs/chain.mjs', phase: 3 },
   { id: 'history', title: 'تحلیل تاریخی استراتژی', section: 'پایه', mod: '/ui/tabs/history.mjs', phase: 3 },
   { id: 'backtest', title: 'بک‌تست سریع', section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },
@@ -429,6 +433,19 @@ await loadSettings();
 applyTheme(getTheme() || state.settings.theme || 'ledger');
 tickHealth();
 setInterval(tickHealth, 3000);
+
+mountCapacityPicker(el('capacity'), {
+  getSettings: () => state.settings,
+  putSettings,
+});
+
+// تعویض تب از داخل یک تب دیگر: تب مبدأ فقط `location.hash` را عوض می‌کند.
+// راه جایگزین این بود که تب‌ها `open` را از همین فایل وارد کنند، که یک حلقه
+// وارد‌کردن می‌سازد — این فایل هر تب را به‌صورت پویا وارد می‌کند.
+window.addEventListener('hashchange', () => {
+  const next = location.hash.replace('#', '');
+  if (next && next !== current && TABS.some((t) => t.id === next)) open(next);
+});
 
 const hash = location.hash.replace('#', '');
 if (hash && TABS.some((t) => t.id === hash)) open(hash);
