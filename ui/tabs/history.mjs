@@ -197,6 +197,10 @@ const xmlCell = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
 
 export async function mount(root, { state }) {
   root.innerHTML = `
+    <aside class="history-frozen" id="h-frozen-strategy" aria-live="polite" data-empty="true">
+      <div class="frozen-summary"><span>مشخصات موقعیت</span><b>هنوز موقعیتی انتخاب نشده است.</b><small>با اجرای تحلیل یا کلیک روی هر ترکیب و هر خانه ماتریس، مشخصات کامل همان موقعیت اینجا می‌نشیند و با پیمایش صفحه ثابت می‌ماند.</small></div>
+    </aside>
+
     <section class="history-hero">
       <div>
         <p class="eyebrow">بازپخش واقعی قیمت قرارداد</p>
@@ -255,9 +259,6 @@ export async function mount(root, { state }) {
     </section>
 
     <section id="h-results" hidden>
-      <aside class="history-frozen" id="h-frozen-strategy" aria-live="polite">
-        <div class="frozen-summary"><span>استراتژی انتخاب‌شده</span><b>پس از اجرای تحلیل، مشخصات قرارداد اینجا ثابت می‌ماند.</b></div>
-      </aside>
       <div class="history-kpis" id="h-kpis"></div>
       <section class="card" id="h-auto-card" hidden>
         <div class="section-head"><div><p class="eyebrow">حالت خودکار</p><h2>ترکیب‌های ممکن</h2></div><span id="h-combo-note"></span></div>
@@ -348,7 +349,6 @@ export async function mount(root, { state }) {
   let chain = new Map(), ua = null, analysisUa = null, contracts = [], seriesByIns = {}, dates = [];
   let currentReplay = null, currentArgs = null, autoRows = [], selectedAuto = null;
   let rollingResult = null, rollingArgs = null, rollingCandidates = [], matrixMode = 'cumulative', matrixZoom = 1, payoffChart = null;
-  let frozenDrag = null;
   let worker = null, seq = 0, rollingResolve = null;
 
   for (const [group, title] of Object.entries(GROUPS)) {
@@ -387,67 +387,74 @@ export async function mount(root, { state }) {
   const basisName = (value) => HISTORY_BASES.find(([key]) => key === value)?.[1] || value || '—';
   const legSignature = (legs = []) => legs.map((leg) => `${leg.ins}|${leg.side}|${leg.ratio}`).join('::');
 
-  function renderFrozenStrategy(legs, replay, label = '') {
+  const FROZEN_FOLD_KEY = 'history:frozen-folded';
+  const frozenFolded = () => { try { return localStorage.getItem(FROZEN_FOLD_KEY) === '1'; } catch { return false; } };
+
+  /**
+   * مشخصات کامل موقعیت انتخاب‌شده، ثابت در بالای صفحه.
+   *
+   * تا دیروز این جعبه کشیدنی بود و فقط نام و بازه را داشت. کشیدن، جای
+   * جعبه را از دست کاربر می‌گرفت (یک‌بار که رهایش می‌کرد، تا بازنشانی
+   * همان‌جا می‌ماند) و برای دیدن تاریخ ورود و خروج باید تا جدول پایین
+   * می‌رفتی. حالا ثابت است و همان چیزی را می‌گوید که برای شناختن موقعیت
+   * لازم است: نام استراتژی، هر دو تاریخ، مبنای قیمت، سرمایه، و نتیجه.
+   */
+  function renderFrozenStrategy(replay, args, label = '') {
     const def = byId(strategySelect.value);
+    const summary = replay.summary || {};
+    const last = summary.last;
     const first = replay.rows.find((row) => Number.isFinite(row.baseClose));
     const title = label || def?.name || 'ترکیب انتخاب‌شده';
-    const entryMethod = Object.keys(currentArgs?.manualEntry || {}).length ? 'دستی هر پا' : basisName(currentArgs?.entryBasis);
+    const entryMethod = Object.keys(args?.manualEntry || {}).length ? 'دستی هر پا' : basisName(args?.entryBasis);
+    const facts = [
+      ['تاریخ ورود', `${historyDayName(replay.startDate)} ${historyDateLabel(replay.startDate)}`, ''],
+      ['تاریخ خروج', `${historyDayName(replay.endDate)} ${historyDateLabel(replay.endDate)}`, ''],
+      ['مدت نگهداری', last ? `${fmt.int(last.holdingDays)} روز تقویمی · ${fmt.int(summary.validDays)} روز معتبر` : '—', ''],
+      ['تعداد واحد', fmt.int(args?.units || 1), ''],
+      ['مبنای ورود / خروج', `${entryMethod} / ${basisName(args?.exitBasis)}`, ''],
+      ['پایه ورود → خروج', `${fmt.money(first?.baseClose)} → ${fmt.money(last?.baseClose)}`, ''],
+      ['جریان نقدی خالص ورود', fmt.money(summary.netCash), signTone(summary.netCash)],
+      ['سرمایه درگیر', `${fmt.money(summary.capital)}${summary.capitalLabel ? ` · ${summary.capitalLabel}` : ''}`, ''],
+      ['وجه تضمین خالص', summary.marginNet > 0 ? fmt.money(summary.marginNet) : 'بدون وجه تضمین', ''],
+      ['نتیجه پایان', last ? `${fmt.money(last.netPnl)} · ${fmt.pct(last.returnPct)}٪` : '—', signTone(last?.netPnl)],
+    ];
     const cards = replay.priced.map((leg, index) => {
       const kind = leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'دارایی پایه';
       const side = leg.side === 'buy' ? 'خرید' : 'فروش';
       const strike = leg.kind === 'underlying' ? '—' : fmt.int(leg.strike);
       const expiry = leg.expiry ? historyDateLabel(leg.expiry) : '—';
+      const exitPrice = last?.perLeg?.[index]?.exitPrice;
       return `<article class="frozen-leg">
         <b>${faDigits(index + 1)}. ${esc(side)} ${esc(kind)} · ${esc(displayName(leg, `پای ${faDigits(index + 1)}`))}</b>
         <span>اعمال <strong>${strike}</strong></span><span>سررسید <strong>${expiry}</strong></span>
         <span>اندازه <strong>${fmt.int(leg.size || 1)}</strong></span>
         <span>نسبت کل <strong>${fmt.num(leg.ratio)}</strong></span><span>ورود <strong>${fmt.money(leg.price)}</strong></span>
+        <span>خروج <strong>${Number.isFinite(exitPrice) ? fmt.money(exitPrice) : '—'}</strong></span>
       </article>`;
     }).join('');
-    $('h-frozen-strategy').innerHTML = `<div class="frozen-drag-handle" data-frozen-drag title="برای جابه‌جایی بکش">
-      <span>⠿ مشخصات موقعیت · برای جابه‌جایی بکش</span><button type="button" class="ghost" data-frozen-reset>بازنشانی جایگاه</button>
-    </div><div class="frozen-summary">
-      <span>استراتژی انتخاب‌شده</span><b>${esc(title)}</b>
-      <small>پایه ${esc(displayName(ua, 'دارایی پایه'))} · قیمت پایه ورود ${fmt.money(first?.baseClose)} · ${historyDateLabel(replay.startDate)} تا ${historyDateLabel(replay.endDate)} · ورود ${esc(entryMethod)} / خروج ${esc(basisName(currentArgs?.exitBasis))}</small>
-    </div><div class="frozen-legs">${cards}</div>`;
+    const host = $('h-frozen-strategy');
+    host.dataset.empty = 'false';
+    host.dataset.folded = frozenFolded() ? '1' : '0';
+    host.innerHTML = `<div class="frozen-head">
+      <div class="frozen-summary"><span>مشخصات موقعیت</span><b>${esc(title)}</b>
+        <small>پایه ${esc(displayName(ua, 'دارایی پایه'))} · ${esc(GROUPS[def?.group] || 'ترکیب دستی')}${def?.dir ? ` · ${esc(def.dir)}` : ''}</small></div>
+      <button type="button" class="ghost" data-frozen-fold>${frozenFolded() ? 'باز کردن' : 'جمع کردن'}</button>
+    </div>
+    <div class="frozen-facts">${facts.map(([key, value, tone]) => `<div><span>${esc(key)}</span><b class="${tone}">${esc(value)}</b></div>`).join('')}</div>
+    <div class="frozen-legs">${cards}</div>`;
   }
 
-  function resetFrozenPosition() {
-    const card = $('h-frozen-strategy');
-    delete card.dataset.detached;
-    card.style.removeProperty('left'); card.style.removeProperty('top');
-    card.style.removeProperty('width'); card.style.removeProperty('height');
-    card.style.removeProperty('max-height');
-  }
-
-  function beginFrozenDrag(event) {
-    if (event.button !== 0 || event.target.closest('button') || !event.target.closest('[data-frozen-drag]')) return;
-    const card = $('h-frozen-strategy'), rect = card.getBoundingClientRect();
-    card.dataset.detached = 'true';
-    card.style.left = `${rect.left}px`; card.style.top = `${rect.top}px`;
-    card.style.width = `${Math.min(rect.width, window.innerWidth - 24)}px`;
-    card.style.maxHeight = `${Math.max(220, window.innerHeight - 24)}px`;
-    frozenDrag = { pointerId: event.pointerId, dx: event.clientX - rect.left, dy: event.clientY - rect.top };
-    card.setPointerCapture?.(event.pointerId); card.classList.add('dragging');
-    event.preventDefault();
-  }
-
-  function moveFrozenCard(event) {
-    if (!frozenDrag || event.pointerId !== frozenDrag.pointerId) return;
-    const card = $('h-frozen-strategy'), rect = card.getBoundingClientRect();
-    const left = Math.min(Math.max(8, event.clientX - frozenDrag.dx), Math.max(8, window.innerWidth - rect.width - 8));
-    const top = Math.min(Math.max(8, event.clientY - frozenDrag.dy), Math.max(8, window.innerHeight - Math.min(rect.height, window.innerHeight - 16) - 8));
-    card.style.left = `${left}px`; card.style.top = `${top}px`;
-  }
-
-  function endFrozenDrag(event) {
-    if (!frozenDrag || event.pointerId !== frozenDrag.pointerId) return;
-    const card = $('h-frozen-strategy');
-    card.releasePointerCapture?.(event.pointerId); card.classList.remove('dragging'); frozenDrag = null;
+  function toggleFrozenFold() {
+    const host = $('h-frozen-strategy');
+    const next = host.dataset.folded !== '1';
+    host.dataset.folded = next ? '1' : '0';
+    try { localStorage.setItem(FROZEN_FOLD_KEY, next ? '1' : '0'); } catch { /* حافظه قفل */ }
+    const button = host.querySelector('[data-frozen-fold]');
+    if (button) button.textContent = next ? 'باز کردن' : 'جمع کردن';
   }
 
   function handleFrozenClick(event) {
-    if (event.target.closest('[data-frozen-reset]')) resetFrozenPosition();
+    if (event.target.closest('[data-frozen-fold]')) toggleFrozenFold();
   }
 
   function changeMatrixZoom(delta) {
@@ -956,9 +963,14 @@ export async function mount(root, { state }) {
   }
 
   function showTradeDetail(entryDate, exitDate) {
-    const detail = replayTradeDetail(rollingArgs || currentArgs, entryDate, exitDate);
+    const args = rollingArgs || currentArgs;
+    const detail = replayTradeDetail(args, entryDate, exitDate);
     const host = $('h-trade-detail');
     if (!detail.ok) { host.hidden = false; host.innerHTML = `<p class="empty-note">${esc(detail.error)}</p>`; return; }
+    // هر خانه ماتریس یک موقعیت دیگر است: همان پاها، ولی ورود و خروج دیگر.
+    // نوار بالای صفحه باید همان موقعیتی را نشان دهد که کاربر همین حالا روی
+    // آن کلیک کرده، نه موقعیتی که چند کلیک قبل اجرا شده بود.
+    renderFrozenStrategy(detail.replay, args, rollingCandidates[Number($('h-rolling-strategy').value)]?.label || '');
     const { selected, best, worst, firstProfit, path } = detail;
     const selectedDailyPnl = detail.tradingDays === 0 ? selected.netPnl : selected.pnlDelta;
     const metrics = [
@@ -991,7 +1003,7 @@ export async function mount(root, { state }) {
     currentReplay = replay; currentArgs = args;
     $('h-results').hidden = false; exportBtn.disabled = false;
     $('h-selected-label').textContent = label || legs.map((l) => l.name).join(' · ');
-    renderFrozenStrategy(legs, replay, label);
+    renderFrozenStrategy(replay, args, label);
     if (!rollingCandidates.length) {
       setRollingCandidates([{ legs, label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')}` }], legs);
     } else {
@@ -1273,10 +1285,6 @@ export async function mount(root, { state }) {
   $('h-matrix-zoom-in').addEventListener('click', () => changeMatrixZoom(0.15));
   $('h-matrix-zoom-reset').addEventListener('click', () => { matrixZoom = 1; applyMatrixZoom(); });
   const frozenCard = $('h-frozen-strategy');
-  frozenCard.addEventListener('pointerdown', beginFrozenDrag);
-  frozenCard.addEventListener('pointermove', moveFrozenCard);
-  frozenCard.addEventListener('pointerup', endFrozenDrag);
-  frozenCard.addEventListener('pointercancel', endFrozenDrag);
   frozenCard.addEventListener('click', handleFrozenClick);
   root.querySelectorAll('[data-payoff-layer]').forEach((input) => input.addEventListener('change', renderDailyPayoff));
   root.querySelectorAll('[data-matrix-mode]').forEach((button) => button.addEventListener('click', () => {
@@ -1321,10 +1329,6 @@ export async function mount(root, { state }) {
   await loadUniverse();
   return () => {
     payoffChart?.destroy?.(); if (worker) worker.terminate();
-    frozenCard.removeEventListener('pointerdown', beginFrozenDrag);
-    frozenCard.removeEventListener('pointermove', moveFrozenCard);
-    frozenCard.removeEventListener('pointerup', endFrozenDrag);
-    frozenCard.removeEventListener('pointercancel', endFrozenDrag);
     frozenCard.removeEventListener('click', handleFrozenClick);
   };
 }
