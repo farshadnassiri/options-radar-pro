@@ -259,24 +259,6 @@ export function summarizeIntraday(points = [], { bucketSeconds = 15 * 60 } = {})
   };
 }
 
-/**
- * مسیر ترکیبی: روزهای پیشین یک نقطه، روز ریزشده هر معامله یک نقطه.
- *
- * `intradayDate` جداست چون کاربر می‌تواند هر روز مسیر را باز کند، نه فقط روز
- * آخر. اگر این تاریخ با تاریخ نقاط ریزمعامله یکی نباشد، مسیر ترکیبی روزهای
- * اشتباهی را کنار می‌گذارد و نمودار یک پرش دروغین نشان می‌دهد.
- */
-export function combinedBacktestPath(replay, intraday = [], mode = 'combined', intradayDate = null) {
-  const daily = (replay?.rows || []).filter((row) => row.status === 'ok');
-  const at = intradayDate ?? replay?.endDate;
-  if (mode === 'daily' || !intraday.length) return daily.map((row) => ({ ...row, granularity: 'day' }));
-  if (mode === 'intraday') return intraday.map((row) => ({ ...row, date: at, granularity: 'trade' }));
-  return [
-    ...daily.filter((row) => row.date < at).map((row) => ({ ...row, granularity: 'day' })),
-    ...intraday.map((row) => ({ ...row, date: at, granularity: 'trade' })),
-  ];
-}
-
 // ═══════════════════ تحلیل چندروزه روی تایم‌فریم انتخابی ═══════════════════
 //
 // تا اینجا هر تابع فقط یک روز را می‌دید. برای پاسخ به «این استراتژی چه مدت
