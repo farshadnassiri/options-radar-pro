@@ -4,17 +4,14 @@
    ———————————————————————————————————————————————— */
 
 :root {
-  --ground: #edf0f4;
+  --ground: #f8fafc;
   --panel: #ffffff;
-  --panel-2: #f6f8fa;
-  --line: #d2d9e2;
-  --line-soft: #e6ebf1;
-  --ink: #16202c;
-  --ink-2: #4b5a6b;
-  /* پیش‌تر #7f8c9b — نسبت کنتراست فقط ۳٫۴۳:۱ روی --panel و ۳٫۲۲:۱ روی
-     --panel-2 داشت، زیر آستانه ۴٫۵:۱ متن معمولی WCAG AA، درست همان‌جایی
-     که برچسب کارت KPI و عدد محور و متن‌های ریز دیگر رویش می‌نشینند. */
-  --muted: #5f6b78;
+  --panel-2: #f1f5f9;
+  --line: #cbd5e1;
+  --line-soft: #e2e8f0;
+  --ink: #0f172a;
+  --ink-2: #334155;
+  --muted: #64748b;
   --accent: #0b6e6b;
   --accent-soft: #d8ebea;
   --accent-2: #2c3e8f;
@@ -29,15 +26,18 @@
   --cmp2: #b5651d;
   --cmp3: #1f6f8b;
   --cmp4: #5c7a29;
-  --shadow: 0 1px 2px rgba(22, 32, 44, .06), 0 8px 24px rgba(22, 32, 44, .05);
-  --shadow-sm: 0 1px 3px rgba(22, 32, 44, .08);
-  --shadow-md: 0 2px 6px rgba(22, 32, 44, .06), 0 8px 24px rgba(22, 32, 44, .07);
-  --shadow-lg: 0 4px 12px rgba(22, 32, 44, .08), 0 16px 40px rgba(22, 32, 44, .1);
-  --radius: 8px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 14px;
-  --radius-pill: 999px;
+  --shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 10px 25px -5px rgba(15, 23, 42, .08);
+  --shadow-2xs: 0 1px 2px rgba(15, 23, 42, .04);
+  --shadow-xs: 0 1px 3px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .04);
+  --shadow-sm: 0 2px 5px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .04);
+  --shadow-md: 0 4px 14px -2px rgba(15, 23, 42, .08), 0 2px 6px -1px rgba(15, 23, 42, .04);
+  --shadow-lg: 0 12px 28px -4px rgba(15, 23, 42, .1), 0 6px 12px -2px rgba(15, 23, 42, .05);
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 9999px;
   --transition-fast: .15s cubic-bezier(.4, 0, .2, 1);
   --transition-med: .25s cubic-bezier(.4, 0, .2, 1);
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo,
@@ -49,11 +49,7 @@
   --sans: Vazirmatn, "Vazirmatn RD", "IRANSansX", "IRANSans", Sahel, Shabnam,
           Tahoma, "Segoe UI", system-ui, sans-serif;
 
-  /* ——— مقیاس اندازه قلم ———
-     خط فارسی نقطه و سرکش دارد و در اندازه‌های زیر ۱۱ پیکسل همان نقطه‌ها به
-     هم می‌چسبند؛ «ب» و «پ» و «ت» و «ث» فقط با شمردن نقطه از هم جدا می‌شوند،
-     پس کوچک‌شدن در فارسی خیلی زودتر از لاتین به ناخوانایی می‌رسد. کف مقیاس
-     همین‌جا ۱۱ پیکسل بسته شده و هیچ اندازه‌ای در فایل خام نوشته نمی‌شود. */
+  /* ——— مقیاس اندازه قلم ——— */
   --fs-3xs: 11px;
   --fs-2xs: 11.5px;
   --fs-xs: 12px;
@@ -64,45 +60,43 @@
   --fs-2xl: 16.5px;
   --fs-3xl: 18px;
   --fs-4xl: 21px;
-  /* برچسب محور نمودار جدا می‌ماند: بزرگ‌کردنش عددهای محور را روی هم می‌اندازد
-     و خوانایی را کم می‌کند، نه زیاد. این‌ها هم رقم لاتین تک‌عرض‌اند، نه متن فارسی. */
   --fs-chart-sm: 10px;
   --fs-chart: 11px;
   --fs-chart-lg: 12px;
 
-  /* ارتفاع خط فارسی باید از لاتین بازتر باشد، وگرنه سرکش «ک» و «گ» سطر بالا
-     به نقطه‌های سطر پایین می‌خورد. */
   --lh-tight: 1.5;
   --lh-normal: 1.75;
   --lh-loose: 1.95;
 }
 
 body[data-theme="board"] {
-  --ground: #0d151e;
-  --panel: #14202c;
-  --panel-2: #182634;
-  --line: #26353f;
-  --line-soft: #1e2c39;
-  --ink: #e3eaf1;
-  --ink-2: #b3c2cf;
-  --muted: #8397a8;
-  --accent: #37b3ac;
-  --accent-soft: #10312f;
-  --accent-2: #7f92d8;
-  --gain: #43c389;
-  --gain-soft: #102c22;
-  --loss: #e8637a;
-  --loss-soft: #33141c;
-  --warn: #d9a13a;
-  --warn-soft: #322614;
-  --cmp1: #b79cf2;
-  --cmp2: #e0a15c;
-  --cmp3: #5fb8d6;
-  --cmp4: #a9c96e;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .3);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, .35);
-  --shadow-md: 0 2px 6px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
-  --shadow-lg: 0 4px 12px rgba(0, 0, 0, .35), 0 16px 40px rgba(0, 0, 0, .3);
+  --ground: #0b0f17;
+  --panel: #111827;
+  --panel-2: #162032;
+  --line: #223249;
+  --line-soft: #1a273a;
+  --ink: #f1f5f9;
+  --ink-2: #cbd5e1;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --accent-soft: #0c283c;
+  --accent-2: #818cf8;
+  --gain: #34d399;
+  --gain-soft: #062e22;
+  --loss: #fb7185;
+  --loss-soft: #38121e;
+  --warn: #fbbf24;
+  --warn-soft: #35260c;
+  --cmp1: #c084fc;
+  --cmp2: #fb923c;
+  --cmp3: #38bdf8;
+  --cmp4: #a3e635;
+  --shadow: 0 1px 3px rgba(0, 0, 0, .5), 0 12px 30px rgba(0, 0, 0, .4);
+  --shadow-2xs: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-xs: 0 1px 3px rgba(0, 0, 0, .4), 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-sm: 0 2px 5px rgba(0, 0, 0, .4), 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-md: 0 4px 14px -2px rgba(0, 0, 0, .5), 0 2px 6px -1px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, .6), 0 6px 12px -2px rgba(0, 0, 0, .4);
 }
 
 * { box-sizing: border-box; }
@@ -183,17 +177,18 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   position: sticky; top: 0; z-index: 20;
   flex: none;
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 10px 18px;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-  backdrop-filter: blur(14px) saturate(1.6);
-  -webkit-backdrop-filter: blur(14px) saturate(1.6);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  padding: 10px 20px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(16px) saturate(1.8);
+  -webkit-backdrop-filter: blur(16px) saturate(1.8);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
   box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 4%, transparent);
 }
 .brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .brand-mark {
-  width: 10px; height: 24px; border-radius: 3px; align-self: center;
+  width: 10px; height: 24px; border-radius: var(--radius-sm); align-self: center;
   background: linear-gradient(180deg, var(--accent) 0 55%, var(--accent-2) 55% 100%);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .brand-name { font-weight: 800; font-size: var(--fs-3xl); }
 .brand-sub { color: var(--muted); font-size: var(--fs-md); white-space: nowrap; }
@@ -447,9 +442,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .warn-metric b { color: var(--loss); }
 
 .pill {
-  padding: 4px 12px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 600;
-  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2);
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  padding: 5px 13px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 700;
+  background: var(--panel-2); border: 1px solid var(--line-soft); color: var(--ink-2);
+  box-shadow: var(--shadow-2xs);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 .pill.open { background: var(--gain-soft); border-color: var(--gain); color: var(--gain); }
 .pill.shut { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
@@ -474,7 +470,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
    چشم از همان‌جا شروع می‌کند. مرز جداکننده هم روی لبه رو به متن می‌نشیند. */
 .shell { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: 0; flex: 1; overflow: hidden; }
 .rail {
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--line-soft);
   background: var(--panel); padding: 0 0 40px;
   position: relative; align-self: stretch; height: 100%; min-height: 0;
   overflow: auto; overscroll-behavior: contain; direction: ltr;
@@ -484,18 +480,18 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .rail-search {
   position: sticky; top: 0; z-index: 2;
   display: flex; align-items: center; gap: 8px;
-  padding: 12px 12px 10px;
-  background: color-mix(in srgb, var(--panel) 90%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  padding: 12px 14px 10px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line-soft);
 }
 .rail-search input {
   flex: 1; min-width: 0;
   background: var(--panel-2); color: var(--ink);
-  border: 1px solid var(--line); border-radius: var(--radius-pill);
-  padding: 8px 14px; font: inherit; font-size: var(--fs-lg);
-  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent);
+  border: 1px solid var(--line-soft); border-radius: var(--radius-pill);
+  padding: 8px 14px; font: inherit; font-size: var(--fs-md);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 3%, transparent);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .rail-search input:focus {
@@ -537,9 +533,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
    برچسب‌های کوتاه. سطر دوم کم‌رنگ است تا نام همچنان اول خوانده شود. */
 .tab-btn {
   display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%;
-  padding: 9px 12px; margin-bottom: 2px;
-  background: none; border: 0; border-radius: var(--radius);
-  color: var(--ink-2); font: inherit; font-size: var(--fs-xl); text-align: start; cursor: pointer;
+  padding: 9px 12px; margin-bottom: 3px;
+  background: none; border: 0; border-radius: var(--radius-md);
+  color: var(--ink-2); font: inherit; font-size: var(--fs-md); text-align: start; cursor: pointer;
   position: relative;
   transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
@@ -578,7 +574,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
-.stage { padding: 20px 22px 60px; min-width: 0; min-height: 0; height: 100%; overflow: auto; direction: ltr; }
+.stage { padding: 22px 26px 60px; min-width: 0; min-height: 0; height: 100%; overflow: auto; direction: ltr; background: var(--ground); }
 .stage > * { direction: rtl; }
 @media (max-width: 820px) {
   html, body { height: auto; min-height: 100%; overflow: auto; }
@@ -723,7 +719,12 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .history-frozen[data-folded="1"] .frozen-legs { display: none; }
 .history-frozen[data-empty="true"] { border-style: dashed; box-shadow: none; }
 .frozen-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.frozen-head .ghost { flex: none; cursor: pointer; }
+.frozen-head .ghost {
+  background: var(--panel); border: 1px solid var(--line-soft); color: var(--ink-2);
+  box-shadow: var(--shadow-2xs);
+  border-radius: var(--radius-md); padding: 6px 14px; font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
 .frozen-summary { display: grid; align-content: center; gap: 3px; min-width: 0; }
 .frozen-summary span { color: var(--accent); font-size: var(--fs-md); font-weight: 800; }
 .frozen-summary b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-3xl); }
@@ -890,7 +891,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .payoff-layer-controls label { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: var(--fs-2xs); cursor: pointer; }
 .payoff-layer-controls input { accent-color: var(--accent); }
 .history-payoff-shell { border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
-.history-payoff-shell .chart-box { border: 0; border-radius: 0; }
+.history-payoff-shell .chart-box { position: relative; border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-xs); overflow: hidden; }
 .payoff-decision-strip { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
 .payoff-decision-strip > div { min-height: 58px; padding: 9px 11px; background: var(--panel-2); }
 .payoff-decision-strip span { display: block; color: var(--muted); font-size: var(--fs-3xs); margin-bottom: 5px; }
@@ -940,9 +941,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 
 .card {
   background: var(--panel); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-md);
-  padding: 16px; margin-bottom: 16px;
-  transition: box-shadow var(--transition-med), transform var(--transition-med);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  padding: 18px 20px; margin-bottom: 18px;
+  transition: box-shadow var(--transition-med), transform var(--transition-med), border-color var(--transition-med);
 }
 .card:hover { box-shadow: var(--shadow-lg); }
 .card > h3 {
@@ -1022,10 +1023,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 }
 
 .btn, .primary {
-  background: var(--accent);
-  color: #fff; border: 1px solid color-mix(in srgb, var(--accent) 78%, #000); border-radius: var(--radius-lg);
-  padding: 9px 18px; font: inherit; font-weight: 800; font-size: var(--fs-lg); cursor: pointer;
-  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.14);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 108%, #fff) 0%, var(--accent) 100%);
+  color: #fff; border: 1px solid color-mix(in srgb, var(--accent) 76%, #000); border-radius: var(--radius-md);
+  padding: 9px 18px; font: inherit; font-weight: 800; font-size: var(--fs-md); cursor: pointer;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.18);
   transition: transform var(--transition-fast), filter var(--transition-fast), box-shadow var(--transition-fast);
 }
 .btn:hover, .primary:hover { filter: brightness(1.08); transform: translateY(-2px); box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255,255,255,.14); }
@@ -1129,9 +1130,10 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 /* ——— شاخص‌های کلیدی ——— */
 .kpis { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); margin-bottom: 16px; }
 .kpi {
-  background: var(--panel); border: 1px solid var(--line);
+  background: var(--panel); border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
   border-inline-start: 4px solid var(--line);
-  border-radius: var(--radius-md); padding: 10px 12px;
+  border-radius: var(--radius-md); padding: 12px 14px;
+  box-shadow: var(--shadow-2xs);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 .kpi:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
@@ -1242,7 +1244,7 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
    فاصله نوار بالای صفحه — پس سرستون این جدول ۴۶ پیکسل پایین‌تر می‌افتاد و
    دو ردیف اول زیرش پنهان می‌شد. انتخابگر اینجا با نام جدول بالا برده شده
    تا مشخصیتش قطعی باشد. */
-.tbl-wrap { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); overflow: hidden; }
+.tbl-wrap { border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-sm); overflow: hidden; }
 .tbl-body table.data { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
 .tbl-body table.data thead th {
   position: sticky; top: 0; z-index: 3;
