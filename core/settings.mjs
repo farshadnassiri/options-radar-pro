@@ -153,6 +153,9 @@ export const SCHEMA = [
     def: 100, min: 0, max: 1000, step: 1, unit: 'درصد', label: 'سقف اسپرد' },
   { key: 'minReturnPct', group: 'screen', kind: 'num', scope: 'client',
     def: 0, min: -100, max: 1000, step: 0.5, unit: 'درصد', label: 'حداقل بازده دوره' },
+  { key: 'blockedExpiries', group: 'screen', kind: 'text', scope: 'client',
+    def: '', label: 'سررسیدهای با سقف موقعیت پر',
+    hint: 'فهرست «شناسه نماد پایه:تاریخ سررسید» جداشده با ویرگول. معمولاً از نوار بالای برنامه انتخاب می‌شود. وقتی سقف یک سررسید پر است، موقعیت فزاینده تازه ممکن نیست و فقط آفست موقعیت قبلی می‌ماند؛ پس برای آن سررسید هیچ استراتژی‌ای پیشنهاد نمی‌شود.' },
 
   // ——— مهار ترکیب‌سازی ———
   { key: 'comboWindowPct', group: 'combo', kind: 'num', scope: 'client',

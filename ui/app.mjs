@@ -6,6 +6,7 @@
 import { fmt, faDigits, faAgo, faClock, pageTitle, normFa } from '/ui/fmt.mjs';
 import { defaults } from '/core/settings.mjs';
 import { CATALOG, GROUPS as SGROUPS } from '/strategies/catalog.mjs';
+import { mountCapacityPicker } from '/ui/expiries.mjs';
 
 export const state = {
   settings: defaults(),
@@ -432,6 +433,11 @@ await loadSettings();
 applyTheme(getTheme() || state.settings.theme || 'ledger');
 tickHealth();
 setInterval(tickHealth, 3000);
+
+mountCapacityPicker(el('capacity'), {
+  getSettings: () => state.settings,
+  putSettings,
+});
 
 // تعویض تب از داخل یک تب دیگر: تب مبدأ فقط `location.hash` را عوض می‌کند.
 // راه جایگزین این بود که تب‌ها `open` را از همین فایل وارد کنند، که یک حلقه
