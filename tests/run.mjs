@@ -979,7 +979,7 @@ group('۱۸. نگهبان مرز سرور');
   // ——— مسیر مجاز ———
   check('ریشه به صفحه اصلی می‌رود', ok('/') === path.join(ROOT, 'ui', 'index.html'), `${ok('/')}`);
   check('فایل معمولی زیر ریشه قبول است', ok('/ui/style.css') === path.join(ROOT, 'ui', 'style.css'));
-  check('مسیر تودرتو قبول است', ok('/ui/tabs/engine.mjs') === path.join(ROOT, 'ui', 'tabs', 'engine.mjs'));
+  check('مسیر تودرتو قبول است', ok('/ui/tabs/backtest.mjs') === path.join(ROOT, 'ui', 'tabs', 'backtest.mjs'));
 
   // ——— همان باگی که این گروه برایش نوشته شد ———
   // مقایسه رشته‌ای startsWith، پوشه هم‌نام‌شروع کنار ریشه را رد نمی‌کرد
