@@ -1448,3 +1448,23 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
    عددی ساخته شود که کاربر نمی‌تواند اجرایش کند. */
 .expiry-blocked { opacity: .62; cursor: not-allowed; }
 .expiry-blocked small { color: var(--warn); }
+
+/* ——— نوار فرض‌های منحنی امروز ———
+   منحنی سررسید با هیچ فرضی تکان نمی‌خورد؛ منحنی امروز ارزش‌گذاری مدل است و
+   سه ورودی دارد. این نوار همان سه را دست کاربر می‌دهد تا به‌جای پرسیدن
+   «اگر…» بتواند ببیندش. */
+.payoff-assume {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 9px 14px;
+  margin-bottom: 10px; padding: 9px 12px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.payoff-assume[data-dirty="1"] { border-color: var(--warn); background: var(--warn-soft); }
+.assume-row { display: flex; align-items: center; gap: 8px; flex: 1 1 220px; min-width: 200px; }
+.assume-name { flex: none; color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; }
+.assume-row input[type="range"] { flex: 1; min-width: 70px; accent-color: var(--accent); }
+.assume-val {
+  flex: none; min-width: 62px; text-align: start;
+  font-family: var(--mono); font-size: var(--fs-sm); font-variant-numeric: tabular-nums;
+}
+.payoff-assume [data-assume-reset] { flex: none; }
