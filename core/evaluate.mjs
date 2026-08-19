@@ -190,6 +190,14 @@ export function evaluate({ legs, quotes, ctx }) {
   const legging = leggingRisk(priced);
 
   const warn = [...quality.flags];
+  // اندازه قرارداد در هر عدد پولی ضرب می‌شود. اگر از مشخصات قرارداد نیامده
+  // باشد، یا پاهای یک ترکیب روی دو اندازه متفاوت باشند، ردیف باید بگوید —
+  // وگرنه عددی که ۱۰٪ غلط است دقیقاً شبیه عددی است که درست است.
+  const sizeAssumed = priced.some((l) => l.sizeAssumed);
+  const sizeMixed = !!ctx.sizeMixed
+    || new Set(priced.filter((l) => l.kind !== 'underlying').map((l) => num(l.size))).size > 1;
+  if (sizeAssumed) warn.push('اندازه قرارداد فرضی');
+  if (sizeMixed) warn.push('اندازه قرارداد ناهمگون');
   if (days < basis.shortDte) warn.push('سررسید نزدیک');
   if (!Number.isFinite(payoff.maxLoss)) warn.push('زیان نامحدود');
   if (margin.coverage === 'partial') warn.push('پوشش ناقص');
@@ -261,6 +269,8 @@ export function evaluate({ legs, quotes, ctx }) {
 
     // سلامت
     quality: quality.level, qualityLabel: quality.label, executable,
+    sizeAssumed, sizeMixed,
+    contractSizes: [...new Set(priced.map((l) => num(l.size)))],
     warn: [...new Set(warn)],
 
     // برای نمودار — پاهای قیمت‌خورده، بدون شیء تابع‌دار

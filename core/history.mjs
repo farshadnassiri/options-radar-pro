@@ -9,6 +9,7 @@ import { grossCash, entryFees, analyzePayoff } from './payoff.mjs';
 import { analyzeMixed, isSingleExpiry } from './mixed.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
 import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
+import { legContractSize, comboContractSize } from './chain.mjs';
 
 export const HISTORY_BASES = [
   ['FIRST', 'اولین'],
@@ -139,7 +140,7 @@ export function flattenActiveContracts(ua) {
         if (!q?.ins) continue;
         out.push({
           ins: String(q.ins), name: readableHistoryName(q, `قرارداد ${kind === 'call' ? 'اختیار خرید' : 'اختیار فروش'}`), kind,
-          strike: st.strike, size: st.size || 1000,
+          strike: st.strike, size: num(st.size, 0), sizeFromSpec: !!st.sizeFromSpec,
           expiry: normalizeHistoryDate(ex.endDate), expiryRaw: ex.endDate,
           daysNow: ex.days,
         });
@@ -482,19 +483,35 @@ export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entr
       if (made >= maxPerExpiry || out.length >= maxRows) { capped = true; break; }
       if (filtered && def.strikes >= 3 && settings.wingsEqualWidth && !equalWidth(strikeSet)) continue;
       built += 1;
+      // پاهای اختیار اول، تا اندازه پای سهم پایه از قراردادهای همین
+      // ترکیب بیاید. `contracts[0]` قرارداد اول کل فهرست بود، نه لزوماً
+      // قراردادی که در این ترکیب هست؛ پس از افزایش سرمایه که اندازه یک سری
+      // تعدیل می‌شود، آن عدد به سری دیگری تعلق داشت.
       const legs = [];
       let missingStructure = false;
+      let stockSlot = -1;
+      const optionSizes = [];
+      let sizeAssumed = false;
       for (const t of def.legs) {
         if (t.kind === 'underlying') {
-          const size = contracts[0]?.size || 1000;
-          legs.push({ kind: 'underlying', side: t.side, ratio: t.ratio, size, ins: String(ua.ins), name: ua.name, expiry: exSet[0] });
+          stockSlot = legs.length;
+          legs.push({ kind: 'underlying', side: t.side, ratio: t.ratio, size: 0, ins: String(ua.ins), name: ua.name, expiry: exSet[0] });
           continue;
         }
         const expiry = exSet[Math.min(t.exp, exSet.length - 1)];
         const strike = strikeSet[t.slot - 1];
         const c = byKey.get(`${expiry}|${t.kind}|${strike}`);
         if (!c) { missingStructure = true; break; }
-        legs.push({ ...c, side: t.side, ratio: t.ratio, slot: t.slot, exp: t.exp });
+        const sz = legContractSize(c.size, settings.contractSize);
+        if (sz.assumed) sizeAssumed = true;
+        optionSizes.push(c.size);
+        legs.push({ ...c, size: sz.size, sizeAssumed: sz.assumed, side: t.side, ratio: t.ratio, slot: t.slot, exp: t.exp });
+      }
+      const comboSize = comboContractSize(optionSizes, settings.contractSize);
+      if (!missingStructure && stockSlot >= 0) {
+        legs[stockSlot].size = comboSize.size;
+        legs[stockSlot].sizeAssumed = comboSize.assumed;
+        if (comboSize.assumed) sizeAssumed = true;
       }
       if (missingStructure) continue;
       const hasEntry = legs.every((l) => Number.isFinite(historyPrice(indexes.get(String(l.ins))?.get(start), entryBasis)));

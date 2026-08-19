@@ -14,6 +14,36 @@ import { impliedVol } from './bs.mjs';
 
 const n = (x) => num(x, 0);
 
+/**
+ * اندازه قرارداد یک پا.
+ *
+ * اولویت با مشخصات خودِ قرارداد است. اگر تابلو ندهد، پیش‌فرض اعلامی کاربر
+ * می‌نشیند ولی `assumed` بالا می‌رود تا ردیف نشان‌دار شود — چون اندازه در
+ * هر عدد پولی ضرب می‌شود و «فرض کردم ۱۰۰۰ است» با «۱۰۰۰ است» یکی نیست.
+ */
+export function legContractSize(specSize, declared) {
+  const spec = n(specSize);
+  if (spec > 0) return { size: spec, assumed: false };
+  const dec = n(declared);
+  return { size: dec > 0 ? dec : 0, assumed: true };
+}
+
+/**
+ * اندازه قرارداد مشترک پاهای اختیار یک ترکیب.
+ *
+ * پای سهم پایه، تعداد سهمش باید با اندازه قراردادی که پوشش می‌دهد بخواند —
+ * نه با اندازه یک قرارداد دلخواه دیگر همان پایه. اگر پاهای اختیار یک ترکیب
+ * روی دو اندازه متفاوت باشند (سری‌ای که تعدیل شده کنار سری‌ای که نشده)،
+ * هیچ عدد واحدی درست نیست؛ آن ترکیب نشان‌دار می‌شود.
+ */
+export function comboContractSize(sizes, declared) {
+  const seen = [...new Set(sizes.map((x) => n(x)).filter((x) => x > 0))];
+  if (seen.length === 1) return { size: seen[0], assumed: false, mixed: false };
+  if (seen.length > 1) return { size: Math.max(...seen), assumed: false, mixed: true };
+  const dec = n(declared);
+  return { size: dec > 0 ? dec : 0, assumed: true, mixed: false };
+}
+
 /** نزدیک‌ترین قیمت اعمال به قیمت پایه، در یک سررسید. */
 function nearestStrike(ex, spot) {
   let best = null, bestDiff = Infinity;
@@ -122,9 +152,20 @@ export function buildChain(rows) {
       ua.expiries.set(days, ex);
     }
 
+    // اندازه قرارداد از مشخصات خودِ همان قرارداد می‌آید، نه از یک عدد
+    // سراسری. پس از افزایش سرمایه، اندازه قرارداد و قیمت اعمال یک سری
+    // تعدیل می‌شوند و ممکن است دو سررسید یک پایه، دو اندازه متفاوت داشته
+    // باشند. اندازه در هر ستون پولی ضرب می‌شود، پس یک عدد فرضی اشتباه،
+    // کل ردیف را به همان نسبت غلط می‌کند.
+    //
+    // اگر تابلو اندازه نداد، اینجا عددی ساخته نمی‌شود (قاعده ۲-۴): صفر
+    // می‌ماند و پرچمش پایین است، تا لایه بالاتر که پیش‌فرض اعلامی کاربر را
+    // دارد جایش بگذارد و ردیف را نشان‌دار کند.
+    const specSize = n(r.contractSize);
     ex.strikes.set(strike, {
       strike,
-      size: n(r.contractSize) || 1000,
+      size: specSize > 0 ? specSize : 0,
+      sizeFromSpec: specSize > 0,
       call: sideQuote(r, 'C'),
       put: sideQuote(r, 'P'),
     });

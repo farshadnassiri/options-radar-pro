@@ -1,5 +1,5 @@
 import { CATALOG, GROUPS, byId } from '/strategies/catalog.mjs';
-import { buildChain } from '/core/chain.mjs';
+import { buildChain, comboContractSize } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, flattenActiveContracts, historyDateLabel, historyDayName,
@@ -711,7 +711,11 @@ export async function mount(root, { state }) {
       if (c) optionLegs.push({ index, template: t, contract: c });
     });
     const nearestExpiry = Math.min(...optionLegs.map((x) => x.contract.expiry));
-    const size = optionLegs[0]?.contract.size || 1000;
+    // اندازه پای سهم پایه از قراردادهای همین ترکیب می‌آید، نه از اولین‌شان:
+    // اگر افزایش سرمایه اندازه یکی از سری‌ها را تعدیل کرده باشد، دو پا دو
+    // اندازه دارند و هیچ عدد واحدی درست نیست.
+    const size = comboContractSize(
+      optionLegs.map((x) => x.contract.size), state.settings.contractSize).size;
     return def.legs.map((t, index) => {
       if (t.kind === 'underlying') return { kind: 'underlying', side: t.side, ratio: t.ratio, size, ins: String(ua.ins), name: ua.name, expiry: nearestExpiry };
       const found = optionLegs.find((x) => x.index === index)?.contract;
