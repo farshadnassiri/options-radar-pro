@@ -268,12 +268,22 @@ export function strategyMargin(legs, ctx = {}) {
     });
   });
 
+  // سهمی که به‌عنوان پوشش قفل شده — «دارایی مسدودی» تابلو. از همان
+  // تفکیک پوشش می‌آید که بالا حساب شد، پس محاسبه دوباره لازم نیست.
+  const sharesLocked = cov.shorts.reduce((a, r) => a
+    + r.by.filter((b) => b.what === 'underlying').reduce((x, b) => x + b.ratio, 0)
+      * num(r.leg.size, contractSize), 0);
+  // وجه تضمین لازم کل: مجموع پاها، پیش از تخفیف پوشش و پیش از کسر بستانکار.
+  const requiredTotal = perLeg.reduce((a, l) => a + l.required, 0);
+
   const credit = Math.max(0, cash);
   return {
     isCredit,
     grossCash: cash,
     coverage: cov.state,
     nakedRatio: cov.nakedRatio,
+    sharesLocked,
+    requiredTotal,
     margin: total,
     marginNet: ctx.capitalMode === 'GROSS' ? total : Math.max(0, total - credit),
     conditionalMargin: conditional,          // اگر پوشش از بین برود
