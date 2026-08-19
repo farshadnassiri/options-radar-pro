@@ -171,6 +171,12 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .capacity-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 11px; padding-top: 10px; border-top: 1px dashed var(--line); }
 .capacity-actions span { color: var(--muted); font-size: var(--fs-xs); }
 .capacity-actions button { cursor: pointer; }
+.capacity-actions button[disabled] { cursor: default; opacity: 0.5; }
+.capacity-note button { margin-inline-start: 6px; cursor: pointer; }
+/* علامت‌خورده‌ای که در زنجیره نیست همچنان در محاسبه اثر دارد، پس باید از
+   بقیه جدا دیده شود — وگرنه شبیه یک بخش عادیِ دیگر می‌ماند. */
+.capacity-list [data-capacity-stranded] { border-color: var(--warn); background: var(--warn-soft); }
+.capacity-list [data-capacity-stranded] h4 { color: var(--warn); }
 
 /* ——— نوار بالا ——— */
 .top {
