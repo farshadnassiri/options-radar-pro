@@ -427,6 +427,7 @@ export async function mount(root, { tab, state, api }) {
 
       const tm = timeMachine(r.__legs, closes, {
         daysToday: r.days, sigma: r.sigmaUse, rFree: s().rFree, divYield: s().divYield,
+        yearDays: s().dayCountYear, contractSize: s().contractSize,
       });
       const rows2 = tm.map((x) => `
         <tr><td>${jalaliFromDEven(x.date)}</td><td class="n">${fmt.money(x.S)}</td>

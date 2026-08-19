@@ -11,6 +11,7 @@ import {
   grossCash, entryFees, analyzePayoff, positionGreeks, signedQty,
 } from './payoff.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
+import { basisOf } from './settings.mjs';
 import { closeValuation } from './positions.mjs';
 import {
   priceLegs, executionCost, maxSize, rowQuality, leggingRisk, spreadPct, midOf,
@@ -72,16 +73,21 @@ export function evaluate({ legs, quotes, ctx }) {
     option: s.feeOption, exercise: s.feeExercise,
   };
   const params = { A: s.marginA, B: s.marginB, C: s.marginC, maint: s.marginMaint };
+  // مبنای محاسبه از تنظیمات می‌آید، نه از عدد سخت‌کد. اندازه قرارداد و
+  // تقویم، هر دو ورودی‌اند نه ثابت طبیعت.
+  const basis = basisOf(s);
+  const Y = Math.max(1, num(basis.yearDays, 365));
   const S = num(ctx.S);
   const Sclose = num(ctx.Sclose, S);
   const days = Math.max(1, num(ctx.days, 1));
-  const T = days / 365;
+  const T = days / Y;
   const qty = Math.max(1, num(ctx.qty, s.qtyDefault));
 
   // ——— ۱. قیمت اجرا ———
   const priced = priceLegs(legs, quotes, {
     basis: s.priceBasis, execMode: s.execMode, qty,
     refFallback: !!s.showUnexecutable, maxSlipPct: s.maxSlipPct,
+    contractSize: basis.contractSize,
   });
 
   const quality = rowQuality(priced, { staleSec: s.staleSec });
@@ -111,6 +117,7 @@ export function evaluate({ legs, quotes, ctx }) {
     : analyzeMixed(priced, netCash, {
       fees, rFree: s.rFree, divYield: s.divYield, spot: Sclose,
       sigma: ok(ctx.sigmaHist) ? ctx.sigmaHist : s.volManual,
+      yearDays: Y,
     });
 
   // ——— ۴. وجه تضمین ———
@@ -118,6 +125,7 @@ export function evaluate({ legs, quotes, ctx }) {
   priced.forEach((l, i) => { closes[i] = num(l.quote?.close, num(l.price)); });
   const margin = strategyMargin(priced, {
     S: Sclose, closes, params, creditMode: s.creditSpreadMargin, capitalMode: s.capitalMode,
+    contractSize: basis.contractSize,
   });
 
   // ——— ۵. سرمایه درگیر و بازده ———
@@ -130,10 +138,10 @@ export function evaluate({ legs, quotes, ctx }) {
   const bestPnl = payoff.maxProfit;
   const retMax = cap > 0 && ok(bestPnl) ? (bestPnl / cap) * 100 : NaN;
   const retStatic = cap > 0 && ok(staticPnl) ? (staticPnl / cap) * 100 : NaN;
-  const ann = (r) => (ok(r) ? (r * 365) / days : NaN);
+  const ann = (r) => (ok(r) ? (r * Y) / days : NaN);
   const annComp = (r) => {
     if (!ok(r)) return NaN;
-    const v = ((1 + r / 100) ** (365 / days) - 1) * 100;
+    const v = ((1 + r / 100) ** (Y / days) - 1) * 100;
     return Number.isFinite(v) ? Math.min(v, 1e6) : NaN;
   };
 
@@ -145,7 +153,7 @@ export function evaluate({ legs, quotes, ctx }) {
   const greeksByLeg = priced.map((l) => {
     if (l.kind === 'underlying' || !wantGreeks) return null;
     const pIv = { CLOSE: l.quote?.close, LAST: l.quote?.last, BID: l.quote?.bid }[s.ivBasis] ?? l.quote?.close;
-    const Tl = Math.max(1, num(l.days, days)) / 365;
+    const Tl = Math.max(1, num(l.days, days)) / Y;
     let sig = NaN;
     if (s.volSource === 'MANUAL') sig = s.volManual;
     else if (s.volSource === 'HIST') sig = num(ctx.sigmaHist, NaN);
@@ -153,7 +161,7 @@ export function evaluate({ legs, quotes, ctx }) {
     if (!ok(sig) || sig <= 0) sig = ok(ctx.sigmaHist) ? ctx.sigmaHist : NaN;
     l.sigma = sig;
     if (!ok(sig)) return null;
-    return bsGreeks(l.kind, Sclose, num(l.strike), Tl, r, q, sig);
+    return bsGreeks(l.kind, Sclose, num(l.strike), Tl, r, q, sig, Y);
   });
   const greeks = wantGreeks
     ? positionGreeks(priced, greeksByLeg)
@@ -168,20 +176,21 @@ export function evaluate({ legs, quotes, ctx }) {
 
   // ——— ۸. هزینه اجرا ———
   const cost = executionCost(priced, {
-    fees, marginNet: margin.marginNet, rFree: r, days,
+    fees, marginNet: margin.marginNet, rFree: r, days, yearDays: Y,
   });
 
   // ——— ۹. سقف حجم ———
   const size = maxSize(priced, {
     capitalPerContract: cap,
     capitalAvailable: s.capitalAvailable,
+    contractSize: basis.contractSize,
   });
 
   // ——— ۱۰. ریسک لنگ‌زدن ———
   const legging = leggingRisk(priced);
 
   const warn = [...quality.flags];
-  if (days < 7) warn.push('سررسید نزدیک');
+  if (days < basis.shortDte) warn.push('سررسید نزدیک');
   if (!Number.isFinite(payoff.maxLoss)) warn.push('زیان نامحدود');
   if (margin.coverage === 'partial') warn.push('پوشش ناقص');
   if (priced.some((l) => l.exec?.simultaneous === false)) warn.push('قیمت ناهم‌زمان');
@@ -233,9 +242,9 @@ export function evaluate({ legs, quotes, ctx }) {
 
     // بازده
     retMaxPct: retMax, retStaticPct: retStatic,
-    retMonthPct: ok(retMax) ? (retMax * 30) / days : NaN,
+    retMonthPct: ok(retMax) ? (retMax * basis.monthDays) / days : NaN,
     retAnnPct: ann(retMax), retAnnCompPct: annComp(retMax),
-    shortDte: days < 7,
+    shortDte: days < basis.shortDte,
 
     // احتمال و یونانی
     popPct: pop, sigmaUse,
@@ -258,7 +267,7 @@ export function evaluate({ legs, quotes, ctx }) {
     payoff,
     __legs: priced.map((l) => ({
       kind: l.kind, side: l.side, ratio: num(l.ratio, 1), strike: num(l.strike),
-      size: num(l.size, 1000), price: num(l.price), days: l.days,
+      size: num(l.size, basis.contractSize), price: num(l.price), days: l.days,
     })),
   };
 }

@@ -29,13 +29,13 @@ function nearestStrike(ex, spot) {
  * فهرست نمادها، نه ورودی محاسبه اجرایی. قیمت پایانی مبناست چون بیرون از
  * ساعت بازار هم موجود است؛ تقاضا/عرضه نیست چون آن‌ها فقط داخل بازار زنده‌اند.
  */
-function atmIv(ua, rFree, divYield) {
+function atmIv(ua, rFree, divYield, yearDays = 365) {
   const spot = ua.last || ua.close;
   const ex = ua.expiryList[0];
   if (!(spot > 0) || !ex || !(ex.days > 0)) return NaN;
   const row = nearestStrike(ex, spot);
   if (!row) return NaN;
-  const T = ex.days / 365;
+  const T = ex.days / yearDays;
   for (const q of [row.call, row.put]) {
     const mkt = q.close || q.last;
     if (mkt > 0) {
@@ -153,6 +153,7 @@ export function buildChain(rows) {
 export function underlyingList(chain, opt = {}) {
   const rFree = Number.isFinite(opt.rFree) ? opt.rFree : 0.30;
   const divYield = Number.isFinite(opt.divYield) ? opt.divYield : 0;
+  const yearDays = Number.isFinite(opt.yearDays) ? opt.yearDays : 365;
   return [...chain.values()]
     .map((u) => ({
       ins: u.ins, name: u.name, last: u.last || u.close,
@@ -166,7 +167,7 @@ export function underlyingList(chain, opt = {}) {
       quoted: u.expiryList.reduce((a, ex) => a
         + ex.strikeList.reduce((b, s) => b + (s.call.bid > 0 ? 1 : 0) + (s.put.bid > 0 ? 1 : 0), 0), 0),
       pcRatio: pcOpenInterestRatio(u),
-      atmIv: atmIv(u, rFree, divYield),
+      atmIv: atmIv(u, rFree, divYield, yearDays),
     }))
     .sort((a, b) => b.volume - a.volume || b.contracts - a.contracts);
 }

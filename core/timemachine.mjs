@@ -16,10 +16,10 @@ import { bsPrice } from './bs.mjs';
  * زیان نگه‌داری تا لحظه t = ارزش(t) − ارزش(ورود). این رابطه برای خرید و
  * فروش هر دو یکسان درست است، پس نیازی به شاخه زدن جدا نیست.
  */
-function portfolioValue(legs, S, T, r, q, sigma) {
+function portfolioValue(legs, S, T, r, q, sigma, contractSize = 1000) {
   let v = 0;
   for (const l of legs) {
-    const size = num(l.size, 1000);
+    const size = num(l.size, contractSize);
     const qty = num(l.ratio, 1) * (l.side === 'sell' ? -1 : 1);
     const px = l.kind === 'underlying' ? S : bsPrice(l.kind, S, num(l.strike), T, r, q, sigma);
     if (!ok(px)) return NaN;
@@ -36,16 +36,16 @@ function portfolioValue(legs, S, T, r, q, sigma) {
  * daysToday  روز باقیمانده تا سررسید، امروز (آخرین ردیف closes)
  * sigma      تلاطم فرضی، برای کل بازه ثابت (فرض ساده‌سازی؛ نظر پ-۴ بک‌لاگ)
  */
-export function timeMachine(legs, closes, { daysToday, sigma, rFree = 0, divYield = 0 }) {
+export function timeMachine(legs, closes, { daysToday, sigma, rFree = 0, divYield = 0, yearDays = 365, contractSize = 1000 }) {
   const n = closes.length;
   if (!n || !ok(daysToday) || !ok(sigma) || sigma <= 0) return [];
 
   const rows = closes.map((row, i) => {
     const daysAgo = n - 1 - i; // امروز = صفر
     const daysLeft = Math.max(0, daysToday + daysAgo);
-    const T = Math.max(daysLeft, 0.5) / 365; // نصف روز، تا سررسید خودش صفر نشود
+    const T = Math.max(daysLeft, 0.5) / yearDays; // نصف روز، تا سررسید خودش صفر نشود
     const S = num(row.close);
-    const value = S > 0 ? portfolioValue(legs, S, T, rFree, divYield, sigma) : NaN;
+    const value = S > 0 ? portfolioValue(legs, S, T, rFree, divYield, sigma, contractSize) : NaN;
     return { date: row.date, daysAgo, S, daysLeft, value };
   });
 

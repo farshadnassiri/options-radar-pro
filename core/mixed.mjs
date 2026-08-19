@@ -38,6 +38,7 @@ export function analyzeMixed(legs, netCash, opt = {}) {
   const r = num(opt.rFree, 0.3);
   const q = num(opt.divYield, 0);
   const spot = num(opt.spot, 0);
+  const yearDays = Math.max(1, num(opt.yearDays, 365));
   const sigma = (l) => {
     const v = num(l.sigma, num(opt.sigma, 0.6));
     return v > 0 ? v : 0.6;
@@ -66,7 +67,7 @@ export function analyzeMixed(legs, netCash, opt = {}) {
         }
       } else {
         // پای زنده: با قیمت نظری بسته می‌شود، پس کارمزد معامله می‌دهد
-        const px = bsPrice(l.kind, S, K, daysLeft / 365, r, q, sigma(l));
+        const px = bsPrice(l.kind, S, K, daysLeft / yearDays, r, q, sigma(l));
         v += qy * px - Math.abs(qy) * px * num(fees.option);
       }
     }
@@ -105,7 +106,7 @@ export function analyzeMixed(legs, netCash, opt = {}) {
   // معیار لگاریتمی دورتر از قیمت پایه.
   const maxSd = Math.max(0, ...optLegs.map((l) => {
     const daysLeft = num(l.days, 0) - horizon;
-    return daysLeft > 0 ? sigma(l) * Math.sqrt(daysLeft / 365) : 0;
+    return daysLeft > 0 ? sigma(l) * Math.sqrt(daysLeft / yearDays) : 0;
   }));
   const farUp = anchor * Math.exp(10 * maxSd + 2);
   const farDn = Math.max(anchor * 1e-6, 1e-9);
