@@ -984,8 +984,15 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   border-color: var(--accent); outline: none;
   box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent), 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
-.field.row { flex-direction: row; align-items: center; gap: 8px; }
+/* فیلد بولی: تیک و برچسب کنار هم، توضیح زیر هر دو. با `flex` ساده، توضیح
+   هم هم‌ردیف برچسب می‌نشست و ستون برچسب آن‌قدر باریک می‌شد که «یونانی در
+   مرحله یک» کلمه‌به‌کلمه می‌شکست. */
+.field.row {
+  display: grid; grid-template-columns: auto 1fr;
+  align-items: center; gap: 5px 8px;
+}
 .field.row input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+.field.row .hint { grid-column: 1 / -1; }
 .unit { font-size: var(--fs-sm); color: var(--muted); }
 
 .num-ctl { display: flex; align-items: center; gap: 4px; }
