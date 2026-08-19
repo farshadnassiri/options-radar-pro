@@ -292,7 +292,7 @@ export async function mount(root, { tab, state, api }) {
           <span>بیشترین زیان: <b style="color:${Number.isFinite(an.maxLoss) ? 'inherit' : 'var(--loss)'}">${fmt.money(an.maxLoss)}</b></span>
         </div>
         <div id="cmp-picker"></div>
-        <h4 style="margin:14px 0 4px;font-size:12px">قیمت و عمق هر پا</h4>
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">قیمت و عمق هر پا</h4>
         <table class="mini">
           <thead><tr><th>پا</th><th>اعمال</th><th>قیمت اجرا</th><th>میانه</th><th>اسپرد ٪</th><th>افت ٪</th><th>پرشده</th><th>کمبود</th><th>منبع</th></tr></thead>
           <tbody>${legRows}</tbody>
@@ -325,24 +325,24 @@ export async function mount(root, { tab, state, api }) {
         <p class="note" style="margin:10px 0 2px">${r.marginNote}</p>
         ${r.leggingRisk ? `<p class="note" style="color:var(--warn)">ریسک لنگ‌زدن: سفارش ترکیبی در تابلو نیست. اگر پای فروش پر شود و پای خرید نه، وجه تضمین ${fmt.money(r.conditionalMargin)} همان لحظه مطالبه می‌شود${r.leggingUnlimited ? ' و موقعیت باقی‌مانده زیان نامحدود دارد' : ''}.</p>` : ''}
 
-        <h4 style="margin:14px 0 4px;font-size:12px">تفکیک هزینه اجرا — جمع ${fmt.money(r.execCost)}</h4>
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">تفکیک هزینه اجرا — جمع ${fmt.money(r.execCost)}</h4>
         <table class="mini">
           <thead><tr><th>پا</th><th>کارمزد</th><th>عبور از اسپرد</th><th>افت مظنه</th></tr></thead>
           <tbody>${costRows}
             <tr><td>هزینه فرصت وجه تضمین</td><td class="n" colspan="3">${fmt.money(r.costFunding)}</td></tr></tbody>
         </table>
 
-        <h4 style="margin:14px 0 4px;font-size:12px">سقف حجم — مقید به ${r.binding}</h4>
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">سقف حجم — مقید به ${r.binding}</h4>
         <table class="mini"><tbody>${limitRows}</tbody></table>
 
-        <h4 style="margin:14px 0 4px;font-size:12px">سناریو در سررسید</h4>
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">سناریو در سررسید</h4>
         <table class="mini">
           <thead><tr><th>تغییر پایه</th><th>قیمت پایه</th><th>سود و زیان</th></tr></thead>
           <tbody>${scenRows}</tbody>
         </table>
 
         ${riskTableRows ? `
-        <h4 style="margin:14px 0 4px;font-size:12px">تصویر آینده — ریسک و ریوارد احتمالاتی</h4>
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">تصویر آینده — ریسک و ریوارد احتمالاتی</h4>
         <p class="note" style="color:var(--warn)">توزیع لگاریتم-نرمال با روند صفر — همان مدلی که «احتمال سود» از آن
           می‌آید. مسیر واقعی قیمت نیست: دامنه نوسان روزانه، توقف نماد، و پرش‌های بازار ایران این مدل را نمی‌بیند.</p>
         <table class="mini">

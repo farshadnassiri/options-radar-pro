@@ -4,40 +4,40 @@
    ———————————————————————————————————————————————— */
 
 :root {
-  --ground: #edf0f4;
+  --ground: #f8fafc;
   --panel: #ffffff;
-  --panel-2: #f6f8fa;
-  --line: #d2d9e2;
-  --line-soft: #e6ebf1;
-  --ink: #16202c;
-  --ink-2: #4b5a6b;
-  /* پیش‌تر #7f8c9b — نسبت کنتراست فقط ۳٫۴۳:۱ روی --panel و ۳٫۲۲:۱ روی
-     --panel-2 داشت، زیر آستانه ۴٫۵:۱ متن معمولی WCAG AA، درست همان‌جایی
-     که برچسب کارت KPI و عدد محور و متن‌های ریز دیگر رویش می‌نشینند. */
-  --muted: #5f6b78;
-  --accent: #0b6e6b;
-  --accent-soft: #d8ebea;
-  --accent-2: #2c3e8f;
-  --gain: #12734e;
-  --gain-soft: #dff0e6;
-  --loss: #a81f32;
-  --loss-soft: #fadfe2;
-  --warn: #8a5a00;
-  --warn-soft: #fbf0d6;
+  --panel-2: #f1f5f9;
+  --line: #cbd5e1;
+  --line-soft: #e2e8f0;
+  --ink: #0f172a;
+  --ink-2: #1e293b;
+  --muted: #64748b;
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
+  --accent-2: #6366f1;
+  --gain: #059669;
+  --gain-soft: #ecfdf5;
+  --loss: #e11d48;
+  --loss-soft: #fff1f2;
+  --warn: #d97706;
+  --warn-soft: #fef3c7;
   /* منحنی‌های اضافه روی نمودار — نامزد رول، یا موقعیت مقایسه‌ای */
-  --cmp1: #6a4fa0;
-  --cmp2: #b5651d;
-  --cmp3: #1f6f8b;
-  --cmp4: #5c7a29;
-  --shadow: 0 1px 2px rgba(22, 32, 44, .06), 0 8px 24px rgba(22, 32, 44, .05);
-  --shadow-sm: 0 1px 3px rgba(22, 32, 44, .08);
-  --shadow-md: 0 2px 6px rgba(22, 32, 44, .06), 0 8px 24px rgba(22, 32, 44, .07);
-  --shadow-lg: 0 4px 12px rgba(22, 32, 44, .08), 0 16px 40px rgba(22, 32, 44, .1);
-  --radius: 8px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 14px;
-  --radius-pill: 999px;
+  --cmp1: #8b5cf6;
+  --cmp2: #f97316;
+  --cmp3: #0284c7;
+  --cmp4: #65a30d;
+  --shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 10px 25px -5px rgba(15, 23, 42, .08);
+  --shadow-2xs: 0 1px 2px rgba(15, 23, 42, .04);
+  --shadow-xs: 0 1px 3px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .04);
+  --shadow-sm: 0 2px 5px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .04);
+  --shadow-md: 0 4px 14px -2px rgba(15, 23, 42, .08), 0 2px 6px -1px rgba(15, 23, 42, .04);
+  --shadow-lg: 0 12px 28px -4px rgba(15, 23, 42, .1), 0 6px 12px -2px rgba(15, 23, 42, .05);
+  --radius: 12px;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 9999px;
   --transition-fast: .15s cubic-bezier(.4, 0, .2, 1);
   --transition-med: .25s cubic-bezier(.4, 0, .2, 1);
   --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo,
@@ -49,60 +49,54 @@
   --sans: Vazirmatn, "Vazirmatn RD", "IRANSansX", "IRANSans", Sahel, Shabnam,
           Tahoma, "Segoe UI", system-ui, sans-serif;
 
-  /* ——— مقیاس اندازه قلم ———
-     خط فارسی نقطه و سرکش دارد و در اندازه‌های زیر ۱۱ پیکسل همان نقطه‌ها به
-     هم می‌چسبند؛ «ب» و «پ» و «ت» و «ث» فقط با شمردن نقطه از هم جدا می‌شوند،
-     پس کوچک‌شدن در فارسی خیلی زودتر از لاتین به ناخوانایی می‌رسد. کف مقیاس
-     همین‌جا ۱۱ پیکسل بسته شده و هیچ اندازه‌ای در فایل خام نوشته نمی‌شود. */
+  /* ——— مقیاس اندازه قلم ——— */
   --fs-3xs: 11px;
   --fs-2xs: 11.5px;
   --fs-xs: 12px;
-  --fs-sm: 12.5px;
-  --fs-md: 13.5px;
-  --fs-lg: 14.5px;
-  --fs-xl: 15px;
-  --fs-2xl: 16.5px;
-  --fs-3xl: 18px;
-  --fs-4xl: 21px;
-  /* برچسب محور نمودار جدا می‌ماند: بزرگ‌کردنش عددهای محور را روی هم می‌اندازد
-     و خوانایی را کم می‌کند، نه زیاد. این‌ها هم رقم لاتین تک‌عرض‌اند، نه متن فارسی. */
-  --fs-chart-sm: 10px;
-  --fs-chart: 11px;
-  --fs-chart-lg: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 15px;
+  --fs-xl: 16px;
+  --fs-2xl: 18px;
+  --fs-3xl: 21px;
+  --fs-4xl: 26px;
+  --fs-chart-sm: 12px;
+  --fs-chart: 13.5px;
+  --fs-chart-lg: 15px;
 
-  /* ارتفاع خط فارسی باید از لاتین بازتر باشد، وگرنه سرکش «ک» و «گ» سطر بالا
-     به نقطه‌های سطر پایین می‌خورد. */
   --lh-tight: 1.5;
   --lh-normal: 1.75;
   --lh-loose: 1.95;
 }
 
 body[data-theme="board"] {
-  --ground: #0d151e;
-  --panel: #14202c;
-  --panel-2: #182634;
-  --line: #26353f;
-  --line-soft: #1e2c39;
-  --ink: #e3eaf1;
-  --ink-2: #b3c2cf;
-  --muted: #8397a8;
-  --accent: #37b3ac;
-  --accent-soft: #10312f;
-  --accent-2: #7f92d8;
-  --gain: #43c389;
-  --gain-soft: #102c22;
-  --loss: #e8637a;
-  --loss-soft: #33141c;
-  --warn: #d9a13a;
-  --warn-soft: #322614;
-  --cmp1: #b79cf2;
-  --cmp2: #e0a15c;
-  --cmp3: #5fb8d6;
-  --cmp4: #a9c96e;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px rgba(0, 0, 0, .3);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, .35);
-  --shadow-md: 0 2px 6px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
-  --shadow-lg: 0 4px 12px rgba(0, 0, 0, .35), 0 16px 40px rgba(0, 0, 0, .3);
+  --ground: #0b0f19;
+  --panel: #111827;
+  --panel-2: #1e293b;
+  --line: #334155;
+  --line-soft: #1e293b;
+  --ink: #f8fafc;
+  --ink-2: #cbd5e1;
+  --muted: #94a3b8;
+  --accent: #6366f1;
+  --accent-soft: #1e1b4b;
+  --accent-2: #818cf8;
+  --gain: #10b981;
+  --gain-soft: #064e3b;
+  --loss: #f43f5e;
+  --loss-soft: #4c0519;
+  --warn: #f59e0b;
+  --warn-soft: #451a03;
+  --cmp1: #c084fc;
+  --cmp2: #fb923c;
+  --cmp3: #38bdf8;
+  --cmp4: #a3e635;
+  --shadow: 0 1px 3px rgba(0, 0, 0, .5), 0 12px 30px rgba(0, 0, 0, .4);
+  --shadow-2xs: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-xs: 0 1px 3px rgba(0, 0, 0, .4), 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-sm: 0 2px 5px rgba(0, 0, 0, .4), 0 1px 2px rgba(0, 0, 0, .3);
+  --shadow-md: 0 4px 14px -2px rgba(0, 0, 0, .5), 0 2px 6px -1px rgba(0, 0, 0, .35);
+  --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, .6), 0 6px 12px -2px rgba(0, 0, 0, .4);
 }
 
 * { box-sizing: border-box; }
@@ -183,17 +177,18 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   position: sticky; top: 0; z-index: 20;
   flex: none;
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
-  padding: 10px 18px;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
-  backdrop-filter: blur(14px) saturate(1.6);
-  -webkit-backdrop-filter: blur(14px) saturate(1.6);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  padding: 10px 20px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(16px) saturate(1.8);
+  -webkit-backdrop-filter: blur(16px) saturate(1.8);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
   box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 4%, transparent);
 }
 .brand { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .brand-mark {
-  width: 10px; height: 24px; border-radius: 3px; align-self: center;
+  width: 10px; height: 24px; border-radius: var(--radius-sm); align-self: center;
   background: linear-gradient(180deg, var(--accent) 0 55%, var(--accent-2) 55% 100%);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .brand-name { font-weight: 800; font-size: var(--fs-3xl); }
 .brand-sub { color: var(--muted); font-size: var(--fs-md); white-space: nowrap; }
@@ -287,8 +282,17 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-manual-note[data-state="empty"] { display: none; }
 .backtest-runbar { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; margin: 14px 0; border-inline-start: 4px solid var(--accent); }
 .backtest-runbar p { margin: 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.8; }
-.backtest-kpis { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 9px; margin: 14px 0; }
-.backtest-kpis article { min-height: 82px; padding: 13px; border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: 11px; background: var(--panel); }
+.backtest-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
+.backtest-kpis article {
+  background: var(--panel); border: 1px solid var(--line-soft);
+  border-inline-start: 4px solid var(--accent);
+  border-radius: var(--radius-lg); padding: 14px 16px;
+  box-shadow: var(--shadow-2xs);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
 .backtest-kpis article.gain { border-top-color: var(--gain); }
 .backtest-kpis article.loss { border-top-color: var(--loss); }
 .backtest-kpis span { display: block; margin-bottom: 8px; color: var(--muted); font-size: var(--fs-xs); }
@@ -298,7 +302,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-chart { min-height: 280px; }
 .backtest-chart-stage { position: relative; }
 .backtest-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
-.backtest-chart svg text { fill: var(--muted); font-family: inherit; font-size: var(--fs-chart); direction: ltr; }
+.backtest-chart svg text { fill: var(--ink-2); font-family: inherit; font-size: var(--fs-chart); font-weight: 700; direction: ltr; }
 .backtest-chart polyline, .backtest-chart path { stroke-width: 2.7; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
 .backtest-grid { stroke: color-mix(in srgb, var(--line) 80%, transparent); stroke-width: 1; }
 .backtest-zero { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 4 4; opacity: .55; }
@@ -390,7 +394,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .portfolio-line-chart { min-height: 270px; margin: 10px 0 14px; }
 .portfolio-chart-stage { position: relative; }
 .portfolio-line-chart svg { display: block; width: 100%; height: auto; overflow: visible; }
-.portfolio-line-chart svg text { fill: var(--muted); font-family: inherit; font-size: var(--fs-chart); direction: ltr; }
+.portfolio-line-chart svg text { fill: var(--ink-2); font-family: inherit; font-size: var(--fs-chart); font-weight: 700; direction: ltr; }
 .portfolio-line-chart polyline { stroke-width: 2.6; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
 .portfolio-grid { stroke: color-mix(in srgb, var(--line) 78%, transparent); stroke-width: 1; }
 .portfolio-hit { fill: transparent; cursor: crosshair; }
@@ -417,7 +421,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 
 @media (max-width: 1100px) {
   .backtest-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .backtest-kpis { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
+  .backtest-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
   .portfolio-form { grid-template-columns: repeat(3, minmax(145px, 1fr)); }
   .portfolio-manual { grid-template-columns: repeat(2, minmax(155px, 1fr)); }
   .portfolio-sensitivity-grid { grid-template-columns: 1fr; }
@@ -447,9 +454,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .warn-metric b { color: var(--loss); }
 
 .pill {
-  padding: 4px 12px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 600;
-  background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-2);
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  padding: 5px 13px; border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 700;
+  background: var(--panel-2); border: 1px solid var(--line-soft); color: var(--ink-2);
+  box-shadow: var(--shadow-2xs);
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 .pill.open { background: var(--gain-soft); border-color: var(--gain); color: var(--gain); }
 .pill.shut { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
@@ -474,7 +482,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
    چشم از همان‌جا شروع می‌کند. مرز جداکننده هم روی لبه رو به متن می‌نشیند. */
 .shell { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: 0; flex: 1; overflow: hidden; }
 .rail {
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--line-soft);
   background: var(--panel); padding: 0 0 40px;
   position: relative; align-self: stretch; height: 100%; min-height: 0;
   overflow: auto; overscroll-behavior: contain; direction: ltr;
@@ -484,18 +492,18 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .rail-search {
   position: sticky; top: 0; z-index: 2;
   display: flex; align-items: center; gap: 8px;
-  padding: 12px 12px 10px;
-  background: color-mix(in srgb, var(--panel) 90%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  padding: 12px 14px 10px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--line-soft);
 }
 .rail-search input {
   flex: 1; min-width: 0;
   background: var(--panel-2); color: var(--ink);
-  border: 1px solid var(--line); border-radius: var(--radius-pill);
-  padding: 8px 14px; font: inherit; font-size: var(--fs-lg);
-  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 4%, transparent);
+  border: 1px solid var(--line-soft); border-radius: var(--radius-pill);
+  padding: 8px 14px; font: inherit; font-size: var(--fs-md);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 3%, transparent);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .rail-search input:focus {
@@ -537,9 +545,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
    برچسب‌های کوتاه. سطر دوم کم‌رنگ است تا نام همچنان اول خوانده شود. */
 .tab-btn {
   display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%;
-  padding: 9px 12px; margin-bottom: 2px;
-  background: none; border: 0; border-radius: var(--radius);
-  color: var(--ink-2); font: inherit; font-size: var(--fs-xl); text-align: start; cursor: pointer;
+  padding: 9px 12px; margin-bottom: 3px;
+  background: none; border: 0; border-radius: var(--radius-md);
+  color: var(--ink-2); font: inherit; font-size: var(--fs-md); text-align: start; cursor: pointer;
   position: relative;
   transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
@@ -548,12 +556,14 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .tab-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
 
 .tab-btn[aria-current="true"] {
-  background: var(--accent-soft); color: var(--accent); font-weight: 700;
+  background: var(--accent-soft); color: var(--accent); font-weight: 800;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 /* نشانگر انتخاب روی لبه رو به فهرست می‌نشیند، پس در راست‌به‌چپ سمت راست است */
 .tab-btn[aria-current="true"]::before {
   content: ""; position: absolute; inset-inline-start: 0; inset-block: 4px;
   width: 4px; border-radius: 0 4px 4px 0; background: var(--accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 .tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-btn .phase {
@@ -578,7 +588,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
-.stage { padding: 20px 22px 60px; min-width: 0; min-height: 0; height: 100%; overflow: auto; direction: ltr; }
+.stage { padding: 22px 26px 60px; min-width: 0; min-height: 0; height: 100%; overflow: auto; direction: ltr; background: var(--ground); }
 .stage > * { direction: rtl; }
 @media (max-width: 820px) {
   html, body { height: auto; min-height: 100%; overflow: auto; }
@@ -723,7 +733,12 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .history-frozen[data-folded="1"] .frozen-legs { display: none; }
 .history-frozen[data-empty="true"] { border-style: dashed; box-shadow: none; }
 .frozen-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.frozen-head .ghost { flex: none; cursor: pointer; }
+.frozen-head .ghost {
+  background: var(--panel); border: 1px solid var(--line-soft); color: var(--ink-2);
+  box-shadow: var(--shadow-2xs);
+  border-radius: var(--radius-md); padding: 6px 14px; font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
 .frozen-summary { display: grid; align-content: center; gap: 3px; min-width: 0; }
 .frozen-summary span { color: var(--accent); font-size: var(--fs-md); font-weight: 800; }
 .frozen-summary b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-3xl); }
@@ -742,8 +757,17 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .frozen-leg > b { grid-column: 1 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-lg); }
 .frozen-leg span { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; }
 .frozen-leg strong { color: var(--ink-2); font-family: var(--mono); font-weight: 600; }
-.history-kpis { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 10px; margin: 14px 0; }
-.history-kpi { min-height: 82px; padding: 13px 14px; border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: 12px; background: var(--panel); }
+.history-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
+.history-kpi {
+  background: var(--panel); border: 1px solid var(--line-soft);
+  border-inline-start: 4px solid var(--accent);
+  border-radius: var(--radius-lg); padding: 14px 16px;
+  box-shadow: var(--shadow-2xs);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
 .history-kpi span { display: block; margin-bottom: 9px; color: var(--muted); font-size: var(--fs-sm); }
 .history-kpi b { font-size: var(--fs-xl); line-height: 1.7; }
 .history-kpi.gain { border-top-color: var(--gain); }
@@ -752,8 +776,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .history-analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
 .history-chart { min-height: 220px; min-width: 0; overflow: visible; }
 .history-svg { display: block; width: 100%; min-width: 0; height: auto; overflow: visible; }
-.history-svg text { fill: var(--muted); font-family: inherit; font-size: var(--fs-chart); direction: ltr; unicode-bidi: isolate; }
-.history-svg .history-axis-title { fill: var(--ink-2); font-size: var(--fs-chart-lg); font-weight: 700; font-family: inherit; }
+.history-svg text { fill: var(--ink-2); font-family: inherit; font-size: var(--fs-chart); font-weight: 700; direction: ltr; unicode-bidi: isolate; }
+.history-svg .history-axis-title { fill: var(--ink); font-size: var(--fs-chart-lg); font-weight: 800; font-family: inherit; }
 .history-grid { stroke: color-mix(in srgb, var(--line) 75%, transparent); stroke-width: 1; }
 .history-grid-x { opacity: .55; }
 .history-axis { stroke: var(--line-strong, var(--line)); stroke-width: 1.2; }
@@ -785,7 +809,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .scatter-gain { fill: color-mix(in srgb, var(--gain) 70%, transparent); }
 .scatter-loss { fill: color-mix(in srgb, var(--loss) 70%, transparent); }
 .history-table-wrap { width: 100%; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
-.history-table { width: 100%; min-width: 920px; border-collapse: separate; border-spacing: 0; font-size: var(--fs-md); }
+.history-table {
+  width: 100%; border-collapse: collapse; font-size: var(--fs-md);
+  background: var(--panel);
+}
 .history-table th,
 .history-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); border-left: 1px solid color-mix(in srgb, var(--line) 65%, transparent); text-align: right; white-space: nowrap; }
 .history-table th { position: sticky; top: 0; z-index: 1; background: var(--panel-2); color: var(--muted); font-size: var(--fs-sm); }
@@ -890,7 +917,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .payoff-layer-controls label { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: var(--fs-2xs); cursor: pointer; }
 .payoff-layer-controls input { accent-color: var(--accent); }
 .history-payoff-shell { border: 1px solid var(--line); border-radius: 11px; overflow: hidden; }
-.history-payoff-shell .chart-box { border: 0; border-radius: 0; }
+.history-payoff-shell .chart-box { position: relative; border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-xs); overflow: hidden; }
 .payoff-decision-strip { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 1px; background: var(--line); border-bottom: 1px solid var(--line); }
 .payoff-decision-strip > div { min-height: 58px; padding: 9px 11px; background: var(--panel-2); }
 .payoff-decision-strip span { display: block; color: var(--muted); font-size: var(--fs-3xs); margin-bottom: 5px; }
@@ -901,7 +928,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .history-control-grid { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
   .history-liquidity-controls { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
   .history-liquidity-controls > div { grid-column: 1 / -1; }
-  .history-kpis { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
+  .history-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
   .trade-detail-kpis { grid-template-columns: repeat(3, minmax(140px, 1fr)); }
   .payoff-decision-strip { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .rolling-controls { grid-template-columns: repeat(3, minmax(145px, 1fr)); }
@@ -918,7 +948,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .history-analysis-grid { grid-template-columns: 1fr; }
   .history-liquidity-controls > div { grid-column: auto; }
   .range-head { align-items: flex-start; flex-direction: column; }
-  .history-kpis { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
+  .history-kpis {
+  display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  margin: 14px 0 18px;
+}
   .trade-detail-kpis { grid-template-columns: repeat(2, minmax(130px, 1fr)); }
   .payoff-day-controls { grid-template-columns: 1fr; }
   .frozen-legs { max-height: 150px; }
@@ -940,9 +973,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 
 .card {
   background: var(--panel); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-md);
-  padding: 16px; margin-bottom: 16px;
-  transition: box-shadow var(--transition-med), transform var(--transition-med);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  padding: 18px 20px; margin-bottom: 18px;
+  transition: box-shadow var(--transition-med), transform var(--transition-med), border-color var(--transition-med);
 }
 .card:hover { box-shadow: var(--shadow-lg); }
 .card > h3 {
@@ -1022,10 +1055,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 }
 
 .btn, .primary {
-  background: var(--accent);
-  color: #fff; border: 1px solid color-mix(in srgb, var(--accent) 78%, #000); border-radius: var(--radius-lg);
-  padding: 9px 18px; font: inherit; font-weight: 800; font-size: var(--fs-lg); cursor: pointer;
-  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.14);
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: #fff; border: 0; border-radius: var(--radius-md);
+  padding: 9px 20px; font: inherit; font-weight: 800; font-size: var(--fs-md); cursor: pointer;
+  box-shadow: 0 4px 14px -2px color-mix(in srgb, var(--accent) 40%, transparent);
   transition: transform var(--transition-fast), filter var(--transition-fast), box-shadow var(--transition-fast);
 }
 .btn:hover, .primary:hover { filter: brightness(1.08); transform: translateY(-2px); box-shadow: var(--shadow-md), inset 0 1px 0 rgba(255,255,255,.14); }
@@ -1129,9 +1162,10 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 /* ——— شاخص‌های کلیدی ——— */
 .kpis { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); margin-bottom: 16px; }
 .kpi {
-  background: var(--panel); border: 1px solid var(--line);
-  border-inline-start: 4px solid var(--line);
-  border-radius: var(--radius-md); padding: 10px 12px;
+  background: var(--panel); border: 1px solid var(--line-soft);
+  border-inline-start: 4px solid var(--accent);
+  border-radius: var(--radius-lg); padding: 14px 16px;
+  box-shadow: var(--shadow-2xs);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 .kpi:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
@@ -1140,7 +1174,7 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 .kpi:has(.v.gain) { border-inline-start-color: var(--gain); }
 .kpi:has(.v.loss) { border-inline-start-color: var(--loss); }
 .kpi .k { font-size: var(--fs-sm); color: var(--muted); }
-.kpi .v { font-family: var(--mono); font-size: var(--fs-3xl); font-weight: 700; font-variant-numeric: tabular-nums; direction: ltr; }
+.kpi .v { font-family: var(--mono); font-size: var(--fs-4xl); font-weight: 900; font-variant-numeric: tabular-nums; direction: ltr; line-height: 1.3; }
 .kpi .v.gain { color: var(--gain); }
 .kpi .v.loss { color: var(--loss); }
 .kpi .s { font-size: var(--fs-sm); color: var(--muted); }
@@ -1157,7 +1191,7 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 .payoff .be { fill: var(--panel); stroke: var(--ink); stroke-width: 2; }
 .payoff .spot { stroke: var(--warn); stroke-width: 1.5; }
 .payoff .spot-pnl { fill: var(--warn); stroke: var(--panel); stroke-width: 2.5; }
-.payoff text.axis-title { fill: var(--ink-2); font-size: var(--fs-chart-lg); font-weight: 700; }
+.payoff text.axis-title { fill: var(--ink); font-size: var(--fs-chart-lg); font-weight: 800; }
 .payoff path.curve-today { fill: none; stroke: var(--accent-2); stroke-width: 1.75; stroke-dasharray: 5 4; stroke-linejoin: round; }
 .curve2-legend line.curve-today { stroke: var(--accent-2); stroke-width: 1.75; stroke-dasharray: 5 4; }
 .curve2-legend line.curve { stroke: var(--accent); stroke-width: 2.5; }
@@ -1187,9 +1221,9 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
    لازم است تا نشانه منفی جلوی عدد بماند، ولی «bidi-override» واژه فارسی را
    حرف‌به‌حرف وارونه می‌کرد. «isolate» جهت را می‌بندد بی‌آنکه دستور دوسویه
    داخل رشته را زیر پا بگذارد. */
-.payoff text { font-family: var(--mono); font-size: var(--fs-chart); fill: var(--muted); direction: ltr; unicode-bidi: isolate; }
-.payoff text.lbl { font-family: var(--sans); font-size: var(--fs-chart); unicode-bidi: plaintext; }
-.payoff text.strike-lbl { font-family: var(--mono); font-size: var(--fs-chart-sm); fill: var(--accent-2); }
+.payoff text { font-family: var(--mono); font-size: var(--fs-chart); font-weight: 700; fill: var(--ink-2); direction: ltr; unicode-bidi: isolate; }
+.payoff text.lbl { font-family: var(--sans); font-size: var(--fs-chart); font-weight: 700; unicode-bidi: plaintext; }
+.payoff text.strike-lbl { font-family: var(--mono); font-size: var(--fs-chart); font-weight: 800; fill: var(--accent); }
 
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--muted); margin-top: 8px; }
 
@@ -1242,7 +1276,7 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
    فاصله نوار بالای صفحه — پس سرستون این جدول ۴۶ پیکسل پایین‌تر می‌افتاد و
    دو ردیف اول زیرش پنهان می‌شد. انتخابگر اینجا با نام جدول بالا برده شده
    تا مشخصیتش قطعی باشد. */
-.tbl-wrap { border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); overflow: hidden; }
+.tbl-wrap { border: 1px solid color-mix(in srgb, var(--line) 75%, transparent); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-sm); overflow: hidden; }
 .tbl-body table.data { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; }
 .tbl-body table.data thead th {
   position: sticky; top: 0; z-index: 3;

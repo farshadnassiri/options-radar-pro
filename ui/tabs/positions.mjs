@@ -344,7 +344,7 @@ export async function mount(root, { state, api }) {
     root.querySelector('#det').innerHTML = `
       <div>
         <div id="det-chart"></div>
-        <h4 style="margin:14px 0 4px;font-size:12px">تفکیک هر پا — برای یک دست قرارداد</h4>
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">تفکیک هر پا — برای یک دست قرارداد</h4>
         <table class="mini">
           <thead><tr><th>پا</th><th>قیمت ورود</th><th>قیمت بستن</th><th>سهم درگیر</th><th>کارمزد رفت و برگشت</th><th>سود و زیان</th></tr></thead>
           <tbody>${legRows}</tbody>
@@ -365,7 +365,7 @@ export async function mount(root, { state, api }) {
           <dt>بازده</dt><dd>${fmt.pct(m.retPct)}٪</dd>
           <dt>بازده ماهانه</dt><dd>${fmt.pct(m.retMonthPct)}٪</dd>
         </dl>
-        <h4 style="margin:14px 0 4px;font-size:12px">اگر تا سررسید نگه داری</h4>
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">اگر تا سررسید نگه داری</h4>
         <dl class="kv">
           <dt>در قیمت فعلی پایه</dt><dd>${fmt.money(m.ifHeld.atSpot)}</dd>
           <dt>بیشترین سود</dt><dd>${fmt.money(m.ifHeld.maxProfit)}</dd>
