@@ -200,6 +200,15 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-leg-market-head small { color: var(--muted); }
 .backtest-leg-market-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .backtest-leg-market-head > span { flex: none; padding: 4px 8px; border-radius: var(--radius-pill); background: var(--panel); color: var(--muted); font-size: 10px; }
+.backtest-manual-price { display: grid; gap: 5px; margin-top: 10px; color: var(--muted); font-size: 10.5px; font-weight: 700; }
+.backtest-manual-price input { width: 100%; min-height: 36px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; font-family: var(--mono); }
+.backtest-manual-price input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* بیرون بودن از بازه روز، خطا نیست — هشدار است. رنگش هم باید همین را بگوید:
+   نه قرمزِ «نشد»، نه سکوتِ خاکستری. */
+.backtest-manual-note { margin: 6px 0 0; font-size: 10px; line-height: 1.75; color: var(--muted); }
+.backtest-manual-note[data-state="outside"], .backtest-manual-note[data-state="unknown"] { color: var(--warn); }
+.backtest-manual-note[data-state="inside"] { color: var(--gain); }
+.backtest-manual-note[data-state="empty"] { display: none; }
 .backtest-runbar { display: grid; grid-template-columns: minmax(190px, .65fr) 1.7fr auto; gap: 16px; align-items: end; margin: 14px 0; border-inline-start: 4px solid var(--accent); }
 .backtest-runbar > div { display: grid; gap: 5px; }
 .backtest-runbar p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.8; }

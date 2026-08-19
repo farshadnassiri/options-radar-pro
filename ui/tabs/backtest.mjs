@@ -3,7 +3,7 @@ import { buildChain } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, flattenActiveContracts, generateHistoricalCombos, historyDateLabel,
-  historyMarketMetrics, historyPrice, normalizeHistoryDate,
+  historyMarketMetrics, historyPrice, manualPriceCheck, normalizeHistoryDate,
   replayHistory, rollingEntryMatrix, holdingPeriodProfile, strategyLegSnapshots,
 } from '/core/history.mjs';
 import {
@@ -53,12 +53,13 @@ function setRail(host, value) {
   host.querySelectorAll('[data-basis]').forEach((button) => button.setAttribute('aria-checked', String(button.dataset.basis === value)));
 }
 
-function marketSnapshot(snapshots, selectedBasis) {
+function marketSnapshot(snapshots, selectedBasis, scope, manual = {}) {
   if (!snapshots?.length) return '<p class="empty-note">ابتدا یک ترکیب معتبر انتخاب کن.</p>';
   return `<div class="backtest-leg-markets">${snapshots.map((snapshot) => {
     const kind = snapshot.kind === 'call' ? 'اختیار خرید' : snapshot.kind === 'put' ? 'اختیار فروش' : 'نماد پایه';
     const prices = HISTORY_BASES.map(([basis, label]) => `<div data-active="${basis === selectedBasis}"><span>${label}</span><b>${fmt.money(snapshot.prices[basis])}</b></div>`).join('');
-    return `<article><div class="backtest-leg-market-head"><div><small>پای ${fmt.int(snapshot.index + 1)} · ${snapshot.side === 'buy' ? 'خرید' : 'فروش'} ${kind}</small><b>${esc(nameOf(snapshot, `پای ${snapshot.index + 1}`))}</b></div><span>${snapshot.kind === 'underlying' ? 'دارایی پایه' : `اعمال ${fmt.int(snapshot.strike)}`}</span></div><div class="backtest-price-grid">${prices}</div><div class="backtest-market-strip"><span>حجم <b>${fmt.int(snapshot.market.volume)}</b></span><span>معامله <b>${fmt.int(snapshot.market.trades)}</b></span><span>ارزش ${snapshot.market.valueEstimated ? 'تقریبی' : 'رسمی'} <b>${fmt.money(snapshot.market.value)}</b></span></div></article>`;
+    const value = manual[snapshot.index];
+    return `<article><div class="backtest-leg-market-head"><div><small>پای ${fmt.int(snapshot.index + 1)} · ${snapshot.side === 'buy' ? 'خرید' : 'فروش'} ${kind}</small><b>${esc(nameOf(snapshot, `پای ${snapshot.index + 1}`))}</b></div><span>${snapshot.kind === 'underlying' ? 'دارایی پایه' : `اعمال ${fmt.int(snapshot.strike)}`}</span></div><div class="backtest-price-grid">${prices}</div><div class="backtest-market-strip"><span>حجم <b>${fmt.int(snapshot.market.volume)}</b></span><span>معامله <b>${fmt.int(snapshot.market.trades)}</b></span><span>ارزش ${snapshot.market.valueEstimated ? 'تقریبی' : 'رسمی'} <b>${fmt.money(snapshot.market.value)}</b></span></div><label class="backtest-manual-price">قیمت دستی این پا<input type="number" min="0" step="any" inputmode="decimal" data-manual="${scope}" data-leg="${snapshot.index}" value="${value == null ? '' : esc(value)}" placeholder="خالی بماند = همان مبنای بالا"></label><p class="backtest-manual-note" data-manual-note="${scope}-${snapshot.index}"></p></article>`;
   }).join('')}</div>`;
 }
 
@@ -168,6 +169,10 @@ export async function mount(root, { state }) {
   const entryRail = $('bt-entry-basis'), exitRail = $('bt-exit-basis');
   let chain = new Map(), ua = null, contracts = [], seriesByIns = {}, entryDates = [], combos = [], legs = null;
   let replay = null, intraday = [], exitDates = [];
+  // قیمت دستی به یک قرارداد و یک روز مشخص تعلق دارد. با عوض‌شدن ترکیب یا
+  // تاریخ، عددی که کاربر وارد کرده دیگر مال آن قرارداد و آن روز نیست، پس
+  // نگه‌داشتنش یعنی نسبت‌دادن یک قیمت به جایی که هرگز آنجا نبوده.
+  let manualEntry = {}, manualExit = {};
   const setStatus = (text, error = false) => { status.textContent = text; status.toggleAttribute('data-error', error); };
 
   for (const [group, title] of Object.entries(GROUPS)) {
@@ -184,6 +189,7 @@ export async function mount(root, { state }) {
 
   function renderCombo() {
     const index = Number($('bt-combo').value);
+    manualEntry = {}; manualExit = {};
     legs = combos[index]?.legs || null;
     if (!legs) { $('bt-legs').innerHTML = '<p class="empty-note">ترکیب معتبری برای این روز و مبنای قیمت نیست.</p>'; return; }
     const entryDate = Number($('bt-entry-date').dataset.value), basis = entryRail.dataset.value || 'LAST';
@@ -212,14 +218,52 @@ export async function mount(root, { state }) {
     const result = replayHistory({ legs, seriesByIns, baseIns: String(ua.ins), startDate: entryDate, endDate: maxDate, entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST', units: 1, fees: feesOf(state.settings), settings: state.settings });
     exitDates = result.ok ? result.rows.filter((row) => row.status === 'ok').map((row) => row.date) : [];
     const selected = exitDates.includes(Number($('bt-exit-date').dataset.value)) ? Number($('bt-exit-date').dataset.value) : exitDates[Math.min(exitDates.length - 1, 4)];
-    mountDateWheel($('bt-exit-date'), exitDates, selected, () => paintSnapshots(), { empty: 'روز دارای قیمت همه پاها پیدا نشد.' });
+    mountDateWheel($('bt-exit-date'), exitDates, selected, () => { manualExit = {}; paintSnapshots(); }, { empty: 'روز دارای قیمت همه پاها پیدا نشد.' });
     paintSnapshots();
   }
 
   function paintSnapshots() {
     const entry = Number($('bt-entry-date').dataset.value), exit = Number($('bt-exit-date').dataset.value);
-    $('bt-entry-market').innerHTML = marketSnapshot(strategyLegSnapshots(legs, seriesByIns, entry), entryRail.dataset.value || 'LAST');
-    $('bt-exit-market').innerHTML = marketSnapshot(strategyLegSnapshots(legs, seriesByIns, exit), exitRail.dataset.value || 'LAST');
+    $('bt-entry-market').innerHTML = marketSnapshot(strategyLegSnapshots(legs, seriesByIns, entry), entryRail.dataset.value || 'LAST', 'entry', manualEntry);
+    $('bt-exit-market').innerHTML = marketSnapshot(strategyLegSnapshots(legs, seriesByIns, exit), exitRail.dataset.value || 'LAST', 'exit', manualExit);
+    paintManualNotes();
+  }
+
+  const manualStore = (scope) => (scope === 'entry' ? manualEntry : manualExit);
+  const manualDate = (scope) => Number($(scope === 'entry' ? 'bt-entry-date' : 'bt-exit-date').dataset.value);
+
+  /**
+   * پیام بازه برای هر قیمت دستی.
+   *
+   * بیرون بودن از کمترین تا بیشترین آن روز جلوی اجرا را نمی‌گیرد — کاربر حق
+   * دارد سناریوی «اگر با این قیمت می‌بستم» را بسنجد. ولی بی‌صدا هم نمی‌ماند:
+   * عددی که آن روز معامله نشده، ادعای اجراپذیری ندارد.
+   */
+  function paintManualNotes() {
+    for (const scope of ['entry', 'exit']) {
+      const date = manualDate(scope), store = manualStore(scope);
+      for (const input of root.querySelectorAll(`[data-manual="${scope}"]`)) {
+        const index = Number(input.dataset.leg);
+        const note = root.querySelector(`[data-manual-note="${scope}-${index}"]`);
+        if (!note) continue;
+        const raw = store[index];
+        const check = manualPriceCheck(rowAt(legs?.[index]?.ins, date), raw);
+        note.dataset.state = check.status;
+        note.textContent = check.status === 'empty' ? ''
+          : check.status === 'unknown' ? 'کمترین و بیشترین آن روز برای این قرارداد موجود نیست، پس نمی‌دانیم این قیمت در بازه بوده یا نه.'
+            : check.status === 'inside' ? `در بازه روز است (${fmt.money(check.low)} تا ${fmt.money(check.high)}).`
+              : `در بازه روز نیست؛ بازه معامله‌شده ${fmt.money(check.low)} تا ${fmt.money(check.high)} بود. محاسبه با همین عدد ادامه می‌یابد.`;
+      }
+    }
+  }
+
+  function onManualInput(event) {
+    const input = event.target.closest('[data-manual]');
+    if (!input) return;
+    const store = manualStore(input.dataset.manual), index = Number(input.dataset.leg);
+    const raw = input.value.trim();
+    if (raw === '' || !(Number(raw) > 0)) delete store[index]; else store[index] = Number(raw);
+    paintManualNotes();
   }
 
   async function findExecutableDates() {
@@ -349,7 +393,10 @@ export async function mount(root, { state }) {
     chart($('bt-return-chart'), path, [{ key: 'returnPct', label: 'بازده استراتژی', color: 'var(--accent)' }, { key: 'basePct', label: 'تغییر پایه', color: 'var(--cmp1)' }, { key: 'baseCumulativePct', label: 'تغییر پایه', color: 'var(--cmp1)' }]);
     paintIntradayAnalysis();
     const finalLegs = lastTick?.perLeg || lastDaily?.perLeg || [];
-    $('bt-final-source').textContent = lastTick ? `آخرین ریزمعامله کامل در ${faDigits(lastTick.timeLabel)}` : 'قیمت روزانه انتخاب‌شده';
+    const manualExitCount = Object.keys(replay.manualExit || {}).length;
+    $('bt-final-source').textContent = lastTick
+      ? `آخرین ریزمعامله کامل در ${faDigits(lastTick.timeLabel)}`
+      : manualExitCount ? `قیمت روزانه انتخاب‌شده، با قیمت دستی ${fmt.int(manualExitCount)} پا` : 'قیمت روزانه انتخاب‌شده';
     $('bt-leg-table').innerHTML = `<table class="history-table"><thead><tr><th>پا</th><th>جهت</th><th>قیمت ورود</th><th>قیمت سنجش</th><th>اثر ناخالص</th><th>کارمزد</th><th>اثر خالص</th><th>حجم/ارزش روز</th></tr></thead><tbody>${finalLegs.map((leg, index) => {
       const dailyLeg = lastDaily?.perLeg?.[index];
       const activity = lastTick ? `حجم ${fmt.int(leg.cumulativeVolume)} · ${fmt.int(leg.tradeCount)} معامله · سن ${ageLabel(leg.ageSec)}` : `حجم ${fmt.int(dailyLeg?.volume)} · ارزش ${fmt.money(dailyLeg?.value)}`;
@@ -367,7 +414,7 @@ export async function mount(root, { state }) {
     if (!legs || !startDate || !endDate) { setStatus('تاریخ و ترکیب معتبر را انتخاب کن.', true); return; }
     $('bt-run').disabled = true; setStatus('در حال محاسبه مسیر و دریافت ریزمعامله روز سنجش…');
     try {
-      replay = replayHistory({ legs, seriesByIns, baseIns: String(ua.ins), startDate, endDate, entryBasis: entryRail.dataset.value, exitBasis: exitRail.dataset.value, units: Math.max(1, Math.trunc(Number($('bt-units').value) || 1)), fees: feesOf(state.settings), settings: state.settings });
+      replay = replayHistory({ legs, seriesByIns, baseIns: String(ua.ins), startDate, endDate, entryBasis: entryRail.dataset.value, exitBasis: exitRail.dataset.value, manualEntry, manualExit, units: Math.max(1, Math.trunc(Number($('bt-units').value) || 1)), fees: feesOf(state.settings), settings: state.settings });
       if (!replay.ok) throw new Error(replay.error);
       const requestedCodes = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua.ins)])];
       const fetched = await Promise.allSettled(requestedCodes.map(async (ins) => [ins, await fetchTrades(ins, endDate)]));
@@ -390,6 +437,13 @@ export async function mount(root, { state }) {
           ? 'خط زمانی مشترک فقط از معاملات ۹:۰۰ تا ۱۲:۳۰ ساخته می‌شود؛ قیمت هر پا آخرین مشاهده تا همان ثانیه است و سن آن جدا نمایش داده می‌شود. منبع داده وضعیت ابطال را اعلام نکرده، پس ابطال احتمالی نامعلوم است.'
           : 'خط زمانی مشترک فقط از معاملات ۹:۰۰ تا ۱۲:۳۰ ساخته می‌شود؛ قیمت، حجم و سن هر پا در هر ثانیه نگه داشته شده و معامله باطل‌شده کنار گذاشته شده است. این مسیر تضمین اجرای هم‌زمان نیست.';
       intraday = replayIntraday({ replay, tradesByIns: byIns, baseTrades: byIns[String(ua.ins)] || [], fees: feesOf(state.settings) });
+      const manualUsed = [
+        Object.keys(manualEntry).length ? `ورود ${fmt.int(Object.keys(manualEntry).length)} پا` : '',
+        Object.keys(manualExit).length ? `خروج ${fmt.int(Object.keys(manualExit).length)} پا` : '',
+      ].filter(Boolean);
+      if (manualUsed.length) {
+        $('bt-run-note').textContent += ` قیمت دستی برای ${manualUsed.join(' و ')} به‌کار رفت؛ قیمت دستی خروج فقط روی همان روز سنجش می‌نشیند و مسیر ریزمعامله را عوض نمی‌کند، چون آن مسیر از معامله‌های واقعی همان روز ساخته می‌شود.`;
+      }
       $('bt-result').hidden = false; paintResult();
       if (intraday.length) setStatus(`${fmt.int(replay.summary.validDays)} روز و ${fmt.int(intraday.length)} نقطه مشترک درون‌روزی محاسبه شد${tradeWarning ? `؛ ${tradeWarning}` : ''}.`, Boolean(tradeWarning));
       else setStatus(`${fmt.int(replay.summary.validDays)} روز آماده شد؛ ${tradeWarning || 'در روز سنجش ریزمعامله کامل برای همه پاها پیدا نشد'}.`, Boolean(tradeWarning));
@@ -402,6 +456,8 @@ export async function mount(root, { state }) {
   $('bt-combo').addEventListener('change', renderCombo); $('bt-path-mode').addEventListener('change', () => { if (replay) paintResult(); });
   $('bt-load').addEventListener('click', loadHistory); $('bt-run').addEventListener('click', runBacktest);
   $('bt-export-intraday').addEventListener('click', exportIntraday);
+  $('bt-entry-market').addEventListener('input', onManualInput);
+  $('bt-exit-market').addEventListener('input', onManualInput);
   baseSelect.addEventListener('change', () => { $('bt-work').hidden = true; $('bt-result').hidden = true; });
   strategySelect.addEventListener('change', () => { $('bt-work').hidden = true; $('bt-result').hidden = true; });
 

@@ -68,6 +68,22 @@ export function historyPrice(row, basis, manual = NaN) {
   return value > 0 ? value : NaN;
 }
 
+/**
+ * قیمت دستی را با بازه معامله‌شده همان روز می‌سنجد.
+ *
+ * بیرون بودن، خطا نیست — کاربر می‌تواند سناریوی «اگر با این قیمت می‌خریدم»
+ * را بسنجد. ولی سکوت در برابرش هم درست نیست: عددی که آن روز اصلاً معامله
+ * نشده، ادعای اجراپذیری ندارد و کاربر باید بداند. اگر خودِ کمترین و
+ * بیشترین روز موجود نباشد، وضعیت `unknown` است نه `inside`.
+ */
+export function manualPriceCheck(row, price) {
+  const value = num(price, NaN);
+  const low = historyPrice(row, 'LOW'), high = historyPrice(row, 'HIGH');
+  if (!(value > 0)) return { status: 'empty', price: NaN, low, high };
+  if (!(low > 0) || !(high > 0)) return { status: 'unknown', price: value, low, high };
+  return { status: value >= low && value <= high ? 'inside' : 'outside', price: value, low, high };
+}
+
 export function indexHistory(rows = []) {
   const out = new Map();
   for (const row of rows) {
@@ -157,14 +173,17 @@ function pricedLegsAtEntry(legs, indexes, startDate, basis, manuals, units) {
   return { priced, missing };
 }
 
-function closeAtDate(priced, indexes, date, basis, fees) {
+function closeAtDate(priced, indexes, date, basis, fees, manuals = null) {
   const closeLegs = [];
   const missing = [];
   const perLeg = [];
   for (let i = 0; i < priced.length; i++) {
     const leg = priced[i];
     const row = indexes.get(String(leg.ins))?.get(date);
-    const price = historyPrice(row, basis);
+    const manual = manuals?.[i];
+    // قیمت دستی خروج فقط روی همان روزی می‌نشیند که کاربر آن را برای همان روز
+    // وارد کرده؛ فراخوان مسئول است که `manuals` را تنها برای آن روز بدهد.
+    const price = manual != null && manual !== '' ? num(manual, NaN) : historyPrice(row, basis);
     if (!Number.isFinite(price)) missing.push(i);
     const close = { ...leg, side: reverseSide(leg.side), price };
     closeLegs.push(close);
@@ -303,7 +322,7 @@ export function summarizeReplay(rows, entry = {}) {
  */
 export function replayHistory({
   legs, seriesByIns, baseIns, startDate, endDate,
-  entryBasis = 'CLOSE', exitBasis = 'LAST', manualEntry = {}, units = 1,
+  entryBasis = 'CLOSE', exitBasis = 'LAST', manualEntry = {}, manualExit = {}, units = 1,
   fees = {}, settings = {}, liquidity = {},
 }) {
   const start = normalizeHistoryDate(startDate), requestedEnd = normalizeHistoryDate(endDate);
@@ -351,7 +370,7 @@ export function replayHistory({
   let previousLegPnl = [];
   for (let i = 0; i < dates.length; i++) {
     const date = dates[i];
-    const close = closeAtDate(priced, indexes, date, exitBasis, fees);
+    const close = closeAtDate(priced, indexes, date, exitBasis, fees, date === end ? manualExit : null);
     const base = baseMetrics(baseIndex, date, startBase, dates[i - 1]);
     if (close.missing.length) {
       rows.push({
@@ -398,7 +417,7 @@ export function replayHistory({
     previousLegPnl = close.perLeg.map((l) => l.netPnl);
   }
   return {
-    ok: true, startDate: start, endDate: end, expiry, entryBasis, exitBasis,
+    ok: true, startDate: start, endDate: end, expiry, entryBasis, exitBasis, manualEntry, manualExit,
     priced, entry, rows, summary: summarizeReplay(rows, entry),
     approximateCapital: !isSingleExpiry(priced),
   };
