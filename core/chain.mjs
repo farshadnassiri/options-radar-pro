@@ -14,6 +14,75 @@ import { impliedVol } from './bs.mjs';
 
 const n = (x) => num(x, 0);
 
+/**
+ * اندازه قرارداد یک پا.
+ *
+ * اولویت با مشخصات خودِ قرارداد است. اگر تابلو ندهد، پیش‌فرض اعلامی کاربر
+ * می‌نشیند ولی `assumed` بالا می‌رود تا ردیف نشان‌دار شود — چون اندازه در
+ * هر عدد پولی ضرب می‌شود و «فرض کردم ۱۰۰۰ است» با «۱۰۰۰ است» یکی نیست.
+ */
+export function legContractSize(specSize, declared) {
+  const spec = n(specSize);
+  if (spec > 0) return { size: spec, assumed: false };
+  const dec = n(declared);
+  return { size: dec > 0 ? dec : 0, assumed: true };
+}
+
+/**
+ * اندازه قرارداد مشترک پاهای اختیار یک ترکیب.
+ *
+ * پای سهم پایه، تعداد سهمش باید با اندازه قراردادی که پوشش می‌دهد بخواند —
+ * نه با اندازه یک قرارداد دلخواه دیگر همان پایه. اگر پاهای اختیار یک ترکیب
+ * روی دو اندازه متفاوت باشند (سری‌ای که تعدیل شده کنار سری‌ای که نشده)،
+ * هیچ عدد واحدی درست نیست؛ آن ترکیب نشان‌دار می‌شود.
+ */
+export function comboContractSize(sizes, declared) {
+  const seen = [...new Set(sizes.map((x) => n(x)).filter((x) => x > 0))];
+  if (seen.length === 1) return { size: seen[0], assumed: false, mixed: false };
+  if (seen.length > 1) return { size: Math.max(...seen), assumed: false, mixed: true };
+  const dec = n(declared);
+  return { size: dec > 0 ? dec : 0, assumed: true, mixed: false };
+}
+
+/**
+ * سررسیدهایی که سقف موقعیت بازشان پر است.
+ *
+ * وقتی سقف یک سررسید پر می‌شود، اخذ موقعیت فزاینده تازه ممکن نیست و فقط
+ * می‌شود موقعیت قبلی را آفست کرد. پیشنهاد استراتژی روی چنین سررسیدی، عددی
+ * است که کاربر نمی‌تواند اجرایش کند؛ پس اصلاً ساخته نمی‌شود. این وضعیت از
+ * تابلو خوانده نمی‌شود — کارگزار اعلامش می‌کند — پس ورودی دستی است.
+ *
+ * قالب: «شناسه نماد پایه:تاریخ سررسید»، جدا شده با ویرگول.
+ */
+export function blockedExpirySet(text = '') {
+  const out = new Set();
+  for (const part of String(text ?? '').split(',')) {
+    const at = part.indexOf(':');
+    if (at < 1) continue;
+    const ins = part.slice(0, at).trim(), endDate = part.slice(at + 1).trim();
+    if (ins && endDate) out.add(`${ins}:${endDate}`);
+  }
+  return out;
+}
+
+export const expiryBlocked = (set, uaIns, endDate) => set.has(`${uaIns}:${endDate}`);
+
+/**
+ * همان دارایی پایه، بدون سررسیدهایی که سقف موقعیتشان پر است.
+ *
+ * چرا تحلیل تاریخی هم باید همین را رعایت کند: سقف پر یعنی امروز نمی‌شود
+ * روی آن سررسید موقعیت فزاینده تازه گرفت. عددی که از بازپخش گذشته همان
+ * سررسید درمی‌آید، تصمیمی را تغذیه می‌کند که اجرایش ممکن نیست — پس
+ * کنار گذاشتنش تصمیم کاربر است، نه استنتاج از داده. به همین دلیل هم
+ * وابسته به بازه تاریخی نیست: قید، امروزِ کاربر است نه گذشته بازار.
+ */
+export function withoutBlockedExpiries(ua, blocked) {
+  if (!ua || !blocked?.size) return ua;
+  const kept = (ua.expiryList || []).filter((ex) => !expiryBlocked(blocked, ua.ins, ex.endDate));
+  if (kept.length === (ua.expiryList || []).length) return ua;
+  return { ...ua, expiryList: kept };
+}
+
 /** نزدیک‌ترین قیمت اعمال به قیمت پایه، در یک سررسید. */
 function nearestStrike(ex, spot) {
   let best = null, bestDiff = Infinity;
@@ -29,13 +98,13 @@ function nearestStrike(ex, spot) {
  * فهرست نمادها، نه ورودی محاسبه اجرایی. قیمت پایانی مبناست چون بیرون از
  * ساعت بازار هم موجود است؛ تقاضا/عرضه نیست چون آن‌ها فقط داخل بازار زنده‌اند.
  */
-function atmIv(ua, rFree, divYield) {
+function atmIv(ua, rFree, divYield, yearDays = 365) {
   const spot = ua.last || ua.close;
   const ex = ua.expiryList[0];
   if (!(spot > 0) || !ex || !(ex.days > 0)) return NaN;
   const row = nearestStrike(ex, spot);
   if (!row) return NaN;
-  const T = ex.days / 365;
+  const T = ex.days / yearDays;
   for (const q of [row.call, row.put]) {
     const mkt = q.close || q.last;
     if (mkt > 0) {
@@ -122,9 +191,20 @@ export function buildChain(rows) {
       ua.expiries.set(days, ex);
     }
 
+    // اندازه قرارداد از مشخصات خودِ همان قرارداد می‌آید، نه از یک عدد
+    // سراسری. پس از افزایش سرمایه، اندازه قرارداد و قیمت اعمال یک سری
+    // تعدیل می‌شوند و ممکن است دو سررسید یک پایه، دو اندازه متفاوت داشته
+    // باشند. اندازه در هر ستون پولی ضرب می‌شود، پس یک عدد فرضی اشتباه،
+    // کل ردیف را به همان نسبت غلط می‌کند.
+    //
+    // اگر تابلو اندازه نداد، اینجا عددی ساخته نمی‌شود (قاعده ۲-۴): صفر
+    // می‌ماند و پرچمش پایین است، تا لایه بالاتر که پیش‌فرض اعلامی کاربر را
+    // دارد جایش بگذارد و ردیف را نشان‌دار کند.
+    const specSize = n(r.contractSize);
     ex.strikes.set(strike, {
       strike,
-      size: n(r.contractSize) || 1000,
+      size: specSize > 0 ? specSize : 0,
+      sizeFromSpec: specSize > 0,
       call: sideQuote(r, 'C'),
       put: sideQuote(r, 'P'),
     });
@@ -153,6 +233,7 @@ export function buildChain(rows) {
 export function underlyingList(chain, opt = {}) {
   const rFree = Number.isFinite(opt.rFree) ? opt.rFree : 0.30;
   const divYield = Number.isFinite(opt.divYield) ? opt.divYield : 0;
+  const yearDays = Number.isFinite(opt.yearDays) ? opt.yearDays : 365;
   return [...chain.values()]
     .map((u) => ({
       ins: u.ins, name: u.name, last: u.last || u.close,
@@ -166,7 +247,7 @@ export function underlyingList(chain, opt = {}) {
       quoted: u.expiryList.reduce((a, ex) => a
         + ex.strikeList.reduce((b, s) => b + (s.call.bid > 0 ? 1 : 0) + (s.put.bid > 0 ? 1 : 0), 0), 0),
       pcRatio: pcOpenInterestRatio(u),
-      atmIv: atmIv(u, rFree, divYield),
+      atmIv: atmIv(u, rFree, divYield, yearDays),
     }))
     .sort((a, b) => b.volume - a.volume || b.contracts - a.contracts);
 }

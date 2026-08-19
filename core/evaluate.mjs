@@ -11,11 +11,12 @@ import {
   grossCash, entryFees, analyzePayoff, positionGreeks, signedQty,
 } from './payoff.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
+import { basisOf } from './settings.mjs';
 import { closeValuation } from './positions.mjs';
 import {
   priceLegs, executionCost, maxSize, rowQuality, leggingRisk, spreadPct, midOf,
 } from './exec.mjs';
-import { bsGreeks, impliedVol, probBelow } from './bs.mjs';
+import { bsGreeks, bsPrice, impliedVol, probBelow } from './bs.mjs';
 import { analyzeMixed, isSingleExpiry } from './mixed.mjs';
 
 /** بازه‌هایی از قیمت پایه که در آن‌ها سود می‌کنی. مبنای احتمال سود. */
@@ -72,16 +73,21 @@ export function evaluate({ legs, quotes, ctx }) {
     option: s.feeOption, exercise: s.feeExercise,
   };
   const params = { A: s.marginA, B: s.marginB, C: s.marginC, maint: s.marginMaint };
+  // مبنای محاسبه از تنظیمات می‌آید، نه از عدد سخت‌کد. اندازه قرارداد و
+  // تقویم، هر دو ورودی‌اند نه ثابت طبیعت.
+  const basis = basisOf(s);
+  const Y = Math.max(1, num(basis.yearDays, 365));
   const S = num(ctx.S);
   const Sclose = num(ctx.Sclose, S);
   const days = Math.max(1, num(ctx.days, 1));
-  const T = days / 365;
+  const T = days / Y;
   const qty = Math.max(1, num(ctx.qty, s.qtyDefault));
 
   // ——— ۱. قیمت اجرا ———
   const priced = priceLegs(legs, quotes, {
     basis: s.priceBasis, execMode: s.execMode, qty,
     refFallback: !!s.showUnexecutable, maxSlipPct: s.maxSlipPct,
+    contractSize: basis.contractSize,
   });
 
   const quality = rowQuality(priced, { staleSec: s.staleSec });
@@ -111,6 +117,7 @@ export function evaluate({ legs, quotes, ctx }) {
     : analyzeMixed(priced, netCash, {
       fees, rFree: s.rFree, divYield: s.divYield, spot: Sclose,
       sigma: ok(ctx.sigmaHist) ? ctx.sigmaHist : s.volManual,
+      yearDays: Y,
     });
 
   // ——— ۴. وجه تضمین ———
@@ -118,6 +125,7 @@ export function evaluate({ legs, quotes, ctx }) {
   priced.forEach((l, i) => { closes[i] = num(l.quote?.close, num(l.price)); });
   const margin = strategyMargin(priced, {
     S: Sclose, closes, params, creditMode: s.creditSpreadMargin, capitalMode: s.capitalMode,
+    contractSize: basis.contractSize,
   });
 
   // ——— ۵. سرمایه درگیر و بازده ———
@@ -130,10 +138,10 @@ export function evaluate({ legs, quotes, ctx }) {
   const bestPnl = payoff.maxProfit;
   const retMax = cap > 0 && ok(bestPnl) ? (bestPnl / cap) * 100 : NaN;
   const retStatic = cap > 0 && ok(staticPnl) ? (staticPnl / cap) * 100 : NaN;
-  const ann = (r) => (ok(r) ? (r * 365) / days : NaN);
+  const ann = (r) => (ok(r) ? (r * Y) / days : NaN);
   const annComp = (r) => {
     if (!ok(r)) return NaN;
-    const v = ((1 + r / 100) ** (365 / days) - 1) * 100;
+    const v = ((1 + r / 100) ** (Y / days) - 1) * 100;
     return Number.isFinite(v) ? Math.min(v, 1e6) : NaN;
   };
 
@@ -145,7 +153,7 @@ export function evaluate({ legs, quotes, ctx }) {
   const greeksByLeg = priced.map((l) => {
     if (l.kind === 'underlying' || !wantGreeks) return null;
     const pIv = { CLOSE: l.quote?.close, LAST: l.quote?.last, BID: l.quote?.bid }[s.ivBasis] ?? l.quote?.close;
-    const Tl = Math.max(1, num(l.days, days)) / 365;
+    const Tl = Math.max(1, num(l.days, days)) / Y;
     let sig = NaN;
     if (s.volSource === 'MANUAL') sig = s.volManual;
     else if (s.volSource === 'HIST') sig = num(ctx.sigmaHist, NaN);
@@ -153,7 +161,7 @@ export function evaluate({ legs, quotes, ctx }) {
     if (!ok(sig) || sig <= 0) sig = ok(ctx.sigmaHist) ? ctx.sigmaHist : NaN;
     l.sigma = sig;
     if (!ok(sig)) return null;
-    return bsGreeks(l.kind, Sclose, num(l.strike), Tl, r, q, sig);
+    return bsGreeks(l.kind, Sclose, num(l.strike), Tl, r, q, sig, Y);
   });
   const greeks = wantGreeks
     ? positionGreeks(priced, greeksByLeg)
@@ -166,22 +174,95 @@ export function evaluate({ legs, quotes, ctx }) {
   // ——— ۷. احتمال ———
   const pop = probOfProfit(payoff, S, T, sigmaUse);
 
+  // ——— ۷-۲. مشخصات قرارداد و بازار ———
+  //
+  // ستون‌هایی که تابلوی حرفه‌ای دارد و تا حالا اینجا نبود. همه از داده‌ای
+  // می‌آیند که قبلاً گرفته شده — هیچ درخواست تازه‌ای اضافه نمی‌کنند.
+  //
+  // قاعده جمع‌بستن: چیزی جمع می‌شود که جمعش معنی داشته باشد. ارزش ذاتی و
+  // ارزش زمانی و نوشنال، علامت‌دار جمع می‌شوند چون ارزش موقعیت‌اند. مظنه و
+  // تلاطم ضمنی جمع نمی‌شوند — آن‌ها به‌ازای هر پا فهرست می‌شوند، چون میانگین
+  // یا مجموع دو مظنه، عددی است که در هیچ دفتر سفارشی وجود ندارد.
+  const qtyOf = (l) => signedQty(l);
+  const intrinsicOf = (l) => {
+    if (l.kind === 'underlying') return Sclose;
+    if (l.kind === 'call') return Math.max(0, Sclose - num(l.strike));
+    return Math.max(0, num(l.strike) - Sclose);
+  };
+
+  let notional = 0, intrinsic = 0, timeValue = 0, bsValue = 0, bsKnown = true;
+  let oiTotal = 0, oiChange = 0, volTotal = 0, tradeCount = 0, valueTotal = 0;
+  const bidList = [], askList = [], lastList = [], closeList = [], ivList = [], headlineList = [];
+  let spreadWorst = NaN, bidQtyMin = Infinity, askQtyMin = Infinity;
+
+  priced.forEach((l, i) => {
+    const q = l.quote || {};
+    const qty = qtyOf(l);
+    notional += Math.abs(qty) * Sclose;
+    const intr = intrinsicOf(l);
+    intrinsic += qty * intr;
+    timeValue += qty * (num(l.price) - intr);
+    if (l.kind === 'underlying') { bsValue += qty * Sclose; return; }
+
+    const Tl = Math.max(1, num(l.days, days)) / Y;
+    const sig = num(l.sigma, NaN);
+    const theo = ok(sig) && sig > 0 ? bsPrice(l.kind, Sclose, num(l.strike), Tl, r, s.divYield, sig) : NaN;
+    if (ok(theo)) bsValue += qty * theo; else bsKnown = false;
+
+    oiTotal += num(q.oi);
+    oiChange += num(q.oi) - num(q.oiYday);
+    volTotal += num(q.vol);
+    tradeCount += num(q.trades);
+    valueTotal += num(q.value);
+
+    bidList.push(num(q.bid));
+    askList.push(num(q.ask));
+    lastList.push(num(q.last));
+    closeList.push(num(q.close));
+    ivList.push(ok(sig) ? Number(sig.toFixed(4)) : NaN);
+    headlineList.push(num(l.price));
+
+    const sp = spreadPct(q);
+    if (ok(sp)) spreadWorst = ok(spreadWorst) ? Math.max(spreadWorst, sp) : sp;
+    if (num(q.bidQty) > 0) bidQtyMin = Math.min(bidQtyMin, num(q.bidQty));
+    if (num(q.askQty) > 0) askQtyMin = Math.min(askQtyMin, num(q.askQty));
+  });
+
+  // ارزش بازاری موقعیت: مثبت یعنی خالص خریده‌ای. قرینه نقد ناخالص است.
+  const marketValue = -gross;
+  const bsDiffPct = bsKnown && Math.abs(bsValue) > EPS
+    ? (marketValue / bsValue - 1) * 100 : NaN;
+  // اهرم — کشسانی موقعیت: یک درصد حرکت پایه، چند درصد ارزش موقعیت را
+  // جابه‌جا می‌کند. مخرجش ارزش بازاری است، پس در موقعیت بستانکار خالص
+  // (ارزش منفی) علامتش هم معنی دارد و صاف نمی‌شود.
+  const leverage = Math.abs(marketValue) > EPS && ok(greeks.delta)
+    ? (greeks.delta * Sclose) / marketValue : NaN;
+
   // ——— ۸. هزینه اجرا ———
   const cost = executionCost(priced, {
-    fees, marginNet: margin.marginNet, rFree: r, days,
+    fees, marginNet: margin.marginNet, rFree: r, days, yearDays: Y,
   });
 
   // ——— ۹. سقف حجم ———
   const size = maxSize(priced, {
     capitalPerContract: cap,
     capitalAvailable: s.capitalAvailable,
+    contractSize: basis.contractSize,
   });
 
   // ——— ۱۰. ریسک لنگ‌زدن ———
   const legging = leggingRisk(priced);
 
   const warn = [...quality.flags];
-  if (days < 7) warn.push('سررسید نزدیک');
+  // اندازه قرارداد در هر عدد پولی ضرب می‌شود. اگر از مشخصات قرارداد نیامده
+  // باشد، یا پاهای یک ترکیب روی دو اندازه متفاوت باشند، ردیف باید بگوید —
+  // وگرنه عددی که ۱۰٪ غلط است دقیقاً شبیه عددی است که درست است.
+  const sizeAssumed = priced.some((l) => l.sizeAssumed);
+  const sizeMixed = !!ctx.sizeMixed
+    || new Set(priced.filter((l) => l.kind !== 'underlying').map((l) => num(l.size))).size > 1;
+  if (sizeAssumed) warn.push('اندازه قرارداد فرضی');
+  if (sizeMixed) warn.push('اندازه قرارداد ناهمگون');
+  if (days < basis.shortDte) warn.push('سررسید نزدیک');
   if (!Number.isFinite(payoff.maxLoss)) warn.push('زیان نامحدود');
   if (margin.coverage === 'partial') warn.push('پوشش ناقص');
   if (priced.some((l) => l.exec?.simultaneous === false)) warn.push('قیمت ناهم‌زمان');
@@ -223,6 +304,18 @@ export function evaluate({ legs, quotes, ctx }) {
     unlimitedProfit: payoff.unlimitedProfit, unlimitedLoss: payoff.unlimitedLoss,
     staticPnl,
 
+    // مشخصات قرارداد و بازار
+    notional, intrinsic, timeValue,
+    bsValue: bsKnown ? bsValue : NaN, bsDiffPct, marketValue, leverage,
+    oiTotal, oiChange, volTotal, tradeCount, valueTotal,
+    spreadWorstPct: ok(spreadWorst) ? spreadWorst : NaN,
+    bidQtyMin: Number.isFinite(bidQtyMin) ? bidQtyMin : NaN,
+    askQtyMin: Number.isFinite(askQtyMin) ? askQtyMin : NaN,
+    bidList, askList, lastList, closeList, ivList, headlineList,
+    blockedAsset: num(margin.sharesLocked) * Sclose,
+    sharesLocked: num(margin.sharesLocked),
+    marginRequired: num(margin.requiredTotal),
+
     // سرمایه
     capital: cap, capitalKind: capital.kind, capitalLabel: capital.label,
     margin: margin.margin, marginNet: margin.marginNet,
@@ -233,9 +326,9 @@ export function evaluate({ legs, quotes, ctx }) {
 
     // بازده
     retMaxPct: retMax, retStaticPct: retStatic,
-    retMonthPct: ok(retMax) ? (retMax * 30) / days : NaN,
+    retMonthPct: ok(retMax) ? (retMax * basis.monthDays) / days : NaN,
     retAnnPct: ann(retMax), retAnnCompPct: annComp(retMax),
-    shortDte: days < 7,
+    shortDte: days < basis.shortDte,
 
     // احتمال و یونانی
     popPct: pop, sigmaUse,
@@ -252,13 +345,15 @@ export function evaluate({ legs, quotes, ctx }) {
 
     // سلامت
     quality: quality.level, qualityLabel: quality.label, executable,
+    sizeAssumed, sizeMixed,
+    contractSizes: [...new Set(priced.map((l) => num(l.size)))],
     warn: [...new Set(warn)],
 
     // برای نمودار — پاهای قیمت‌خورده، بدون شیء تابع‌دار
     payoff,
     __legs: priced.map((l) => ({
       kind: l.kind, side: l.side, ratio: num(l.ratio, 1), strike: num(l.strike),
-      size: num(l.size, 1000), price: num(l.price), days: l.days,
+      size: num(l.size, basis.contractSize), price: num(l.price), days: l.days,
     })),
   };
 }
@@ -312,7 +407,7 @@ export const COLUMNS = [
   { key: 'grossCash', label: 'نقد ناخالص', fmt: 'money', group: 'جریان نقد' },
   { key: 'entryFee', label: 'کارمزد ورود', fmt: 'money', group: 'جریان نقد' },
   { key: 'netCash', label: 'نقد خالص', fmt: 'money', group: 'جریان نقد' },
-  { key: 'instantClosePnl', label: 'سود/زیان بستن فوری — دفتر سفارش', fmt: 'money', group: 'جریان نقد', heat: 'gain' },
+  { key: 'instantClosePnl', label: 'آفست — سود/زیان بستن فوری با دفتر سفارش', fmt: 'money', group: 'جریان نقد', heat: 'gain' },
   { key: 'settleLastPnl', label: 'سود/زیان اگر تسویه با آخرین معامله', fmt: 'money', group: 'جریان نقد' },
   { key: 'settleClosePnl', label: 'سود/زیان اگر تسویه با قیمت پایانی', fmt: 'money', group: 'جریان نقد' },
   { key: 'S', label: 'قیمت پایه', fmt: 'money', group: 'سود و زیان' },
@@ -326,7 +421,31 @@ export const COLUMNS = [
   { key: 'maxProfit', label: 'بیشترین سود', fmt: 'money', group: 'سود و زیان', heat: 'gain' },
   { key: 'maxLoss', label: 'بیشترین زیان', fmt: 'money', group: 'سود و زیان', heat: 'loss' },
   { key: 'staticPnl', label: 'سود اگر پایه ثابت بماند', fmt: 'money', group: 'سود و زیان' },
+  { key: 'headlineList', label: 'قیمت سرخط', fmt: 'list', group: 'مظنه' },
+  { key: 'bidList', label: 'تقاضا', fmt: 'list', group: 'مظنه' },
+  { key: 'askList', label: 'عرضه', fmt: 'list', group: 'مظنه' },
+  { key: 'bidQtyMin', label: 'حجم تقاضا — کمترین پا', fmt: 'int', group: 'مظنه' },
+  { key: 'askQtyMin', label: 'حجم عرضه — کمترین پا', fmt: 'int', group: 'مظنه' },
+  { key: 'lastList', label: 'آخرین', fmt: 'list', group: 'مظنه' },
+  { key: 'closeList', label: 'پایانی', fmt: 'list', group: 'مظنه' },
+  { key: 'spreadWorstPct', label: 'فاصله ٪ — بدترین پا', fmt: 'pct', group: 'مظنه', heat: 'loss' },
+  { key: 'volTotal', label: 'حجم', fmt: 'int', group: 'بازار' },
+  { key: 'valueTotal', label: 'ارزش معاملات', fmt: 'money', group: 'بازار' },
+  { key: 'tradeCount', label: 'تعداد معامله', fmt: 'int', group: 'بازار' },
+  { key: 'oiTotal', label: 'موقعیت باز', fmt: 'int', group: 'بازار' },
+  { key: 'oiChange', label: 'تغییر موقعیت باز', fmt: 'int', group: 'بازار' },
+  { key: 'notional', label: 'نوشنال ولیو', fmt: 'money', group: 'ارزش قرارداد' },
+  { key: 'marketValue', label: 'ارزش بازاری موقعیت', fmt: 'money', group: 'ارزش قرارداد' },
+  { key: 'intrinsic', label: 'ارزش ذاتی', fmt: 'money', group: 'ارزش قرارداد' },
+  { key: 'timeValue', label: 'ارزش زمانی', fmt: 'money', group: 'ارزش قرارداد' },
+  { key: 'bsValue', label: 'بلک‌شولز', fmt: 'money', group: 'ارزش قرارداد' },
+  { key: 'bsDiffPct', label: 'درصد اختلاف با بلک‌شولز', fmt: 'pct', group: 'ارزش قرارداد' },
+  { key: 'ivList', label: 'تلاطم ضمنی هر پا', fmt: 'list', group: 'ارزش قرارداد' },
+  { key: 'leverage', label: 'اهرم', fmt: 'num', group: 'ارزش قرارداد' },
   { key: 'capital', label: 'سرمایه درگیر', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginRequired', label: 'تضمین لازم', fmt: 'money', group: 'سرمایه' },
+  { key: 'blockedAsset', label: 'دارایی مسدودی', fmt: 'money', group: 'سرمایه' },
+  { key: 'sharesLocked', label: 'سهم قفل‌شده', fmt: 'int', group: 'سرمایه' },
   { key: 'capitalLabel', label: 'مبنای سرمایه', fmt: 'text', group: 'سرمایه' },
   { key: 'margin', label: 'وجه تضمین', fmt: 'money', group: 'سرمایه' },
   { key: 'marginToMaxLoss', label: 'تضمین به زیان', fmt: 'num', group: 'سرمایه' },
@@ -341,6 +460,8 @@ export const COLUMNS = [
   { key: 'gamma', label: 'گاما', fmt: 'num', group: 'یونانی' },
   { key: 'vega', label: 'وگا', fmt: 'money', group: 'یونانی' },
   { key: 'theta', label: 'تتا روزانه', fmt: 'money', group: 'یونانی' },
+  { key: 'rho', label: 'رو', fmt: 'money', group: 'یونانی' },
+  { key: 'deltaShares', label: 'دلتا بر حسب سهم', fmt: 'num', group: 'یونانی' },
   { key: 'thetaToCapitalPct', label: 'تتا به سرمایه ٪', fmt: 'pct', group: 'یونانی', heat: 'gain' },
   { key: 'sigmaUse', label: 'تلاطم مبنا', fmt: 'num', group: 'یونانی' },
   { key: 'execCost', label: 'هزینه اجرا', fmt: 'money', group: 'اجرا', heat: 'loss' },

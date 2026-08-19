@@ -152,7 +152,7 @@ export function effWidth(kind, kShort, kLong) {
   return kind === 'call' ? Math.max(0, kLong - kShort) : Math.max(0, kShort - kLong);
 }
 
-export function coverage(legs) {
+export function coverage(legs, contractSize = 1000) {
   const shorts = [];
   const pool = legs
     .filter((l) => l.side === 'buy' && (l.kind === 'call' || l.kind === 'put'))
@@ -166,9 +166,9 @@ export function coverage(legs) {
     const rec = { leg: s, covered: 0, naked: 0, by: [] };
 
     if (s.kind === 'call' && shares > 0) {
-      const canCover = Math.min(need, shares / num(s.size, 1000));
+      const canCover = Math.min(need, shares / num(s.size, contractSize));
       if (canCover > 0) {
-        shares -= canCover * num(s.size, 1000);
+        shares -= canCover * num(s.size, contractSize);
         need -= canCover;
         rec.covered += canCover;
         rec.by.push({ what: 'underlying', ratio: canCover });
@@ -222,7 +222,8 @@ export function strategyMargin(legs, ctx = {}) {
   const S = num(ctx.S);
   const closes = ctx.closes || {};
   const mode = ctx.creditMode || 'FULL';
-  const cov = coverage(legs);
+  const contractSize = num(ctx.contractSize, 1000);
+  const cov = coverage(legs, contractSize);
   const cash = grossCash(legs);
   const isCredit = cash > EPS;
 
@@ -232,7 +233,7 @@ export function strategyMargin(legs, ctx = {}) {
 
   legs.forEach((l, i) => {
     if (l.side !== 'sell' || l.kind === 'underlying') return;
-    const size = num(l.size, 1000);
+    const size = num(l.size, contractSize);
     const kind = l.kind;
     const close = num(closes[i], num(l.price, 0));
     const rmOne = requiredMargin(S, num(l.strike), size, kind, close, p);
@@ -267,12 +268,22 @@ export function strategyMargin(legs, ctx = {}) {
     });
   });
 
+  // سهمی که به‌عنوان پوشش قفل شده — «دارایی مسدودی» تابلو. از همان
+  // تفکیک پوشش می‌آید که بالا حساب شد، پس محاسبه دوباره لازم نیست.
+  const sharesLocked = cov.shorts.reduce((a, r) => a
+    + r.by.filter((b) => b.what === 'underlying').reduce((x, b) => x + b.ratio, 0)
+      * num(r.leg.size, contractSize), 0);
+  // وجه تضمین لازم کل: مجموع پاها، پیش از تخفیف پوشش و پیش از کسر بستانکار.
+  const requiredTotal = perLeg.reduce((a, l) => a + l.required, 0);
+
   const credit = Math.max(0, cash);
   return {
     isCredit,
     grossCash: cash,
     coverage: cov.state,
     nakedRatio: cov.nakedRatio,
+    sharesLocked,
+    requiredTotal,
     margin: total,
     marginNet: ctx.capitalMode === 'GROSS' ? total : Math.max(0, total - credit),
     conditionalMargin: conditional,          // اگر پوشش از بین برود

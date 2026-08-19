@@ -82,7 +82,10 @@ const NAN_GREEKS = {
 };
 
 /** یونانی‌های هر سهم، از دید خریدار. برای فروشنده علامت‌ها برعکس می‌شود. */
-export function bsGreeks(kind, S, K, T, r, q, sigma) {
+// تتا را بر حسب روز می‌دهیم، نه سال — چون تصمیم معامله‌گر روزانه است.
+// مخرج همان «روز سال» تنظیمات است تا اگر مبنای روزشماری عوض شد، تتا و
+// سالانه‌سازی بازده با هم جابه‌جا شوند، نه جدا از هم.
+export function bsGreeks(kind, S, K, T, r, q, sigma, yearDays = 365) {
   if (!(S > 0) || !(K > 0) || !(T > 0) || !(sigma > 0)) return { ...NAN_GREEKS };
   const sqT = Math.sqrt(T);
   const sd = sigma * sqT;
@@ -112,7 +115,7 @@ export function bsGreeks(kind, S, K, T, r, q, sigma) {
   return {
     price: bsPrice(kind, S, K, T, r, q, sigma),
     delta, gamma, vega,
-    theta: thetaYear / 365,
+    theta: thetaYear / yearDays,
     rho, d1: a, d2: b, probItm,
   };
 }

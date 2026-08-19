@@ -85,7 +85,8 @@ function todaySeries(legs, netCash, opt) {
   if (!(opt.sigma > 0)) return null;
   const today = analyzeMixed(legs, netCash, {
     fees: opt.fees, spot: opt.spot, sigma: opt.sigma,
-    rFree: opt.rFree, divYield: opt.divYield, horizonDays: 0,
+    rFree: opt.rFree, divYield: opt.divYield,
+    horizonDays: Math.max(0, Number(opt.horizonDays) || 0),
   });
   return { points: today.points.filter((_, i) => i % 3 === 0), at: today.at };
 }
@@ -182,13 +183,22 @@ function frame(points, analysis, opt, xMin, xMax, todayPoints) {
     <line class="strike" x1="${X(k)}" y1="${pad.t}" x2="${X(k)}" y2="${H - pad.b}"/>
     <text class="lbl strike-lbl" x="${X(k)}" y="${H - pad.b - 5}" text-anchor="middle">${axisNum(k)}</text>`).join('');
 
+  // برچسب لبه‌ها نباید از قاب بیرون بزند. با لنگر «میانه»، وقتی قیمت پایه
+  // نزدیک یکی از دو سر بازه بود نیمی از متن بیرون viewBox می‌افتاد و بریده
+  // دیده می‌شد — همان چیزی که در نمودار خرید اختیار خرید پیدا شد. لنگر از
+  // فاصله تا لبه انتخاب می‌شود، نه ثابت.
+  const edgeAnchor = (x, room = 52) => {
+    if (x < pad.l + room) return 'start';
+    if (x > W - pad.r - room) return 'end';
+    return 'middle';
+  };
   const bes = analysis.breakevens.filter((b) => b >= xMin && b <= xMax).map((b) => `
     <circle class="be" cx="${X(b)}" cy="${y0}" r="4"/>
-    <text class="lbl be-lbl" x="${X(b)}" y="${y0 - 9}" text-anchor="middle">${money(b)}</text>`).join('');
+    <text class="lbl be-lbl" x="${X(b)}" y="${y0 - 9}" text-anchor="${edgeAnchor(X(b), 40)}">${money(b)}</text>`).join('');
 
   const spotLine = Number.isFinite(spot) && spot >= xMin && spot <= xMax
     ? `<line class="spot" x1="${X(spot)}" y1="${pad.t}" x2="${X(spot)}" y2="${H - pad.b}"/>
-       <text class="lbl spot-lbl" x="${X(spot)}" y="${pad.t - 7}" text-anchor="middle" style="fill:var(--warn)">پایه ${money(spot)}</text>` : '';
+       <text class="lbl spot-lbl" x="${X(spot)}" y="${pad.t - 7}" text-anchor="${edgeAnchor(X(spot))}" style="fill:var(--warn)">پایه ${money(spot)}</text>` : '';
   const spotPnl = Number.isFinite(spot) ? analysis.at(spot) : NaN;
   const spotPoint = Number.isFinite(spotPnl) && spot >= xMin && spot <= xMax
     ? `<circle class="spot-pnl" cx="${X(spot)}" cy="${Y(Math.min(Math.max(spotPnl, yMin), yMax))}" r="5"><title>سود و زیان سناریویی در قیمت پایه روز: ${money(spotPnl)}</title></circle>` : '';
@@ -420,6 +430,10 @@ function mountInteractive(host, { homeLo, homeHi, initRange, frameOf, valueAt, r
   return {
     view: () => [lo, hi],
     reset,
+    // رسم دوباره با همان بازه — برای وقتی که خودِ منحنی عوض شده، نه نما.
+    // نوارِ «اگر چه می‌شد» از همین استفاده می‌کند: زوم کاربر حفظ می‌شود و
+    // فقط منحنی امروز با فرض تازه از نو کشیده می‌شود.
+    redraw: render,
     destroy() {
       canvas.removeEventListener('wheel', onWheel);
       canvas.removeEventListener('pointerdown', onDown);
@@ -452,9 +466,40 @@ export function mountPayoff(host, legs, netCash, opt = {}) {
     host.innerHTML = '<div class="note">نمودار قابل رسم نیست.</div>';
     return { analysis, view: () => null, reset() {}, destroy() {} };
   }
-  const todayPoints = opt.showToday === false ? null : todaySeries(legs, netCash, opt);
+
+  const wantToday = opt.showToday !== false;
+  // منحنی سررسید فقط به قیمت اعمال و نقد خالص وابسته است و با هیچ فرضی
+  // تکان نمی‌خورد. آنچه فرض‌پذیر است منحنی «امروز» است: ارزش‌گذاری مدل،
+  // که سه ورودی دارد — چند روز مانده، چه تلاطمی، چه نرخی. نوار زیر همین
+  // سه را دست کاربر می‌دهد تا به‌جای پرسیدن «اگر…» بتواند ببیندش.
+  const optionDays = legs
+    .filter((l) => l.kind === 'call' || l.kind === 'put')
+    .map((l) => Number(l.days))
+    .filter((d) => Number.isFinite(d) && d > 0);
+  const nearDays = optionDays.length ? Math.min(...optionDays) : 0;
+  const canWhatIf = opt.whatIf !== false && wantToday && opt.sigma > 0 && nearDays > 0;
+
+  const assume = {
+    days: nearDays,
+    sigma: Number(opt.sigma) || 0,
+    rFree: Number.isFinite(opt.rFree) ? Number(opt.rFree) : 0,
+  };
+  // افق ارزش‌گذاری = چند روز از امروز جلو برویم. «روز مانده» شمارش معکوس
+  // است، پس افق، متمم آن نسبت به نزدیک‌ترین سررسید است.
+  const seriesWith = (a) => todaySeries(legs, netCash, {
+    ...opt, sigma: a.sigma, rFree: a.rFree, horizonDays: nearDays - a.days,
+  });
+
+  let todayPoints = wantToday ? seriesWith(assume) : null;
+
+  let chartHost = host;
+  if (canWhatIf) {
+    host.innerHTML = '<div class="payoff-assume" data-assume></div><div data-chart></div>';
+    chartHost = host.querySelector('[data-chart]');
+  }
+
   const [homeLo, homeHi] = homeRange(points, analysis, opt);
-  const api = mountInteractive(host, {
+  const api = mountInteractive(chartHost, {
     homeLo, homeHi, initRange: opt.initRange,
     frameOf: (lo, hi) => frame(points, analysis, opt, lo, hi, todayPoints),
     valueAt: (S) => analysis.at(S),
@@ -462,7 +507,63 @@ export function mountPayoff(host, legs, netCash, opt = {}) {
     hint: PAYOFF_HINT,
     referenceValue: opt.spot,
   });
+
+  if (canWhatIf) {
+    mountAssumeBar(host.querySelector('[data-assume]'), assume, nearDays, () => {
+      todayPoints = seriesWith(assume);
+      api.redraw();
+    });
+  }
   return { analysis, ...api };
+}
+
+/**
+ * نوار فرض‌های منحنی امروز: روز مانده ، تلاطم ، نرخ بدون ریسک.
+ *
+ * هر فرض هم اسلایدر دارد هم عدد خوانا، و عدد با رقم فارسی چاپ می‌شود.
+ * دکمه بازگشت، هر سه را به مقدار واقعی امروز برمی‌گرداند — بدون آن، کاربر
+ * بعد از چند بار کشیدن نمی‌داند نقطه شروع کجا بود و نمودار را باور می‌کند.
+ */
+function mountAssumeBar(bar, assume, nearDays, onChange) {
+  const start = { ...assume };
+  const ROWS = [
+    { key: 'days', label: 'روز مانده', min: 0, max: nearDays, step: 1,
+      show: (v) => `${fmt.int(v)} روز` },
+    { key: 'sigma', label: 'نوسان دلخواه', min: 0.05, max: 3, step: 0.01,
+      show: (v) => fmt.num(Number(v.toFixed(3))) },
+    { key: 'rFree', label: 'نرخ بهره', min: 0, max: 1, step: 0.005,
+      show: (v) => fmt.num(Number(v.toFixed(3))) },
+  ];
+  bar.innerHTML = ROWS.map((r) => `
+    <label class="assume-row">
+      <span class="assume-name">${r.label}</span>
+      <input type="range" data-k="${r.key}" min="${r.min}" max="${r.max}" step="${r.step}" value="${assume[r.key]}">
+      <b class="assume-val" data-v="${r.key}">${r.show(assume[r.key])}</b>
+    </label>`).join('')
+    + '<button type="button" class="ghost" data-assume-reset title="بازگشت به فرض‌های امروز">بازنشانی</button>';
+
+  const paint = () => {
+    for (const r of ROWS) {
+      bar.querySelector(`[data-v="${r.key}"]`).textContent = r.show(assume[r.key]);
+      bar.querySelector(`[data-k="${r.key}"]`).value = assume[r.key];
+    }
+    bar.dataset.dirty = ROWS.some((r) => assume[r.key] !== start[r.key]) ? '1' : '0';
+  };
+
+  bar.addEventListener('input', (e) => {
+    const k = e.target?.dataset?.k;
+    if (!k) return;
+    assume[k] = Number(e.target.value);
+    paint();
+    onChange();
+  });
+  bar.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-assume-reset]')) return;
+    Object.assign(assume, start);
+    paint();
+    onChange();
+  });
+  paint();
 }
 
 /** بدنه رسم نمودار تفاضل، روی یک بازه دلخواه — همان نقش frame() برای بازده. */

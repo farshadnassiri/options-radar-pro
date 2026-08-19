@@ -15,10 +15,17 @@ import {
   coverage, strategyMargin, capitalBase, DEFAULT_PARAMS,
 } from '../core/margin.mjs';
 import { walkBook, resolvePrice, maxSize, bookCapacity } from '../core/exec.mjs';
-import { evaluate, profitRegions, probOfProfit, breakevenMetrics } from '../core/evaluate.mjs';
+import { evaluate, profitRegions, probOfProfit, breakevenMetrics, COLUMNS } from '../core/evaluate.mjs';
 import { CATALOG, buildLegs, byId } from '../strategies/catalog.mjs';
-import { defaults } from '../core/settings.mjs';
-import { buildChain, underlyingList, chainStats } from '../core/chain.mjs';
+import { flattenActiveContracts, generateHistoricalCombos as histCombos } from '../core/history.mjs';
+import { defaults, SCHEMA } from '../core/settings.mjs';
+import {
+  FORMULAS, FORMULA_GROUPS, STRATEGY_FORMULAS, SYMBOLS, referencedKeys, strategyFormula,
+} from '../core/formulas.mjs';
+import {
+  buildChain, underlyingList, chainStats, legContractSize, comboContractSize,
+  withoutBlockedExpiries,
+} from '../core/chain.mjs';
 import { scan as scanFn, scanAll, generateCombos, unexecutableReason, blockedExpirySet, expiryBlocked, emptyFunnel } from '../core/scan.mjs';
 import { markToMarket, rollAnalysis } from '../core/positions.mjs';
 import { timeMachine } from '../core/timemachine.mjs';
@@ -2385,6 +2392,586 @@ group('۴۰. نمای مسیر و تحلیل تایم‌فریم در بک‌ت�
     && source40.includes('روز بدون نقطه مشترک کنار گذاشته شد'));
   check('اگر ماتریس روی سطل درشت‌تر ساخته شود، همان‌جا گفته می‌شود',
     source40.includes('matrix.bucketSeconds !== matrix.requestedBucketSeconds'));
+}
+
+// ═══════════ ۴۱. مبنای محاسبه از تنظیمات می‌آید، نه از عدد سخت‌کد ═══════════
+//
+// پیش از این، «۳۶۵ روز سال»، «۳۰ روز ماه»، «۱۰۰۰ سهم قرارداد» و «۷ روز
+// آستانه سررسید نزدیک» در دل موتور نوشته شده بودند. هیچ‌کدام ابدی نیستند:
+// اندازه قرارداد با افزایش سرمایه تعدیل می‌شود و مبنای روزشماری انتخاب است.
+// این آزمون‌ها می‌سنجند که عوض‌کردن عدد در تنظیمات، واقعاً خروجی را عوض کند
+// — وگرنه کنترل تنظیمات هست ولی کار نمی‌کند، که از نبودنش بدتر است.
+group('۴۱. مبنای محاسبه از تنظیمات');
+{
+  const size = 1000;
+  const mk = (bid, ask) => ({
+    bid, bidQty: 500, ask, askQty: 500, last: (bid + ask) / 2, close: (bid + ask) / 2,
+    low: bid * 0.9, high: ask * 1.1, state: 'A', staleSec: 10,
+    book: [{ level: 1, bid, bidQty: 500, ask, askQty: 500 }],
+  });
+  const def = byId('covered-call');
+  const run = (over, days = 30) => {
+    const s = { ...defaults(), ...over };
+    const legs = buildLegs(def, { strikes: [110000], size: s.contractSize, days: [days] });
+    return evaluate({
+      legs, quotes: [mk(99000, 100000), mk(4800, 5200)],
+      ctx: {
+        S: 100000, Sclose: 100000, days, size: s.contractSize, qty: 1,
+        settings: s, def, underlying: 'نمونه', sigmaHist: 0.6,
+      },
+    });
+  };
+
+  const base = run({});
+
+  // ——— روز سال ———
+  // بازده سالانه ساده خطی است: نصف‌کردن روزهای سال باید دقیقاً نصفش کند.
+  const halfYear = run({ dayCountYear: 182.5 });
+  check('روز سال، بازده سالانه را مقیاس می‌زند',
+    near(halfYear.retAnnPct, base.retAnnPct / 2, 1e-9),
+    `${base.retAnnPct.toFixed(3)} → ${halfYear.retAnnPct.toFixed(3)}`);
+  check('بازده دوره به روز سال وابسته نیست',
+    near(halfYear.retMaxPct, base.retMaxPct, 1e-12));
+  // تتا دو بار به روز سال وابسته است: یک بار در T و یک بار در تبدیل
+  // سالانه به روزانه. پس نسبتش ساده نیست و اینجا فقط «اثر داشتن» سنجیده
+  // می‌شود؛ خودِ تبدیل روزانه، جدا و ایزوله در آزمون بعدی می‌آید.
+  check('تتای روزانه به روز سال وابسته است',
+    Number.isFinite(halfYear.theta) && !near(halfYear.theta, base.theta, 1e-9),
+    `${base.theta.toFixed(2)} → ${halfYear.theta.toFixed(2)}`);
+
+  // تبدیل تتای سالانه به روزانه، با T ثابت: نصف‌کردن روز سال باید دقیقاً
+  // دو برابرش کند. اینجا هیچ متغیر دیگری تکان نمی‌خورد.
+  const gA = bsGreeks('call', 100000, 110000, 30 / 365, 0.3, 0, 0.6);
+  const gB = bsGreeks('call', 100000, 110000, 30 / 365, 0.3, 0, 0.6, 182.5);
+  check('تبدیل تتای سالانه به روزانه با روز سال مقیاس می‌خورد',
+    near(gB.theta, gA.theta * 2, 1e-9),
+    `${gA.theta.toFixed(2)} → ${gB.theta.toFixed(2)}`);
+
+  // ——— روز ماه ———
+  const month15 = run({ daysPerMonth: 15 });
+  check('روز ماه، بازده ماهانه را مقیاس می‌زند',
+    near(month15.retMonthPct, base.retMonthPct / 2, 1e-9),
+    `${base.retMonthPct.toFixed(3)} → ${month15.retMonthPct.toFixed(3)}`);
+
+  // ——— اندازه قرارداد ———
+  // کاوردکال یعنی «سهم پایه در برابر یک کال». اگر قرارداد روی ۲۰۰۰ سهم
+  // بسته شود، پوشش هم باید دو برابر سهم بخواهد؛ پس دلتای موقعیت دو برابر
+  // می‌شود و پوشش همچنان کامل می‌ماند.
+  const big = run({ contractSize: 2000 });
+  check('اندازه قرارداد، دلتای موقعیت را مقیاس می‌زند',
+    near(big.delta, base.delta * 2, 1e-6),
+    `${base.delta.toFixed(1)} → ${big.delta.toFixed(1)}`);
+  check('پوشش کاوردکال با اندازه بزرگ‌تر هم کامل می‌ماند',
+    big.coverage === 'full' && big.margin === 0, big.coverage);
+
+  // ——— آستانه سررسید نزدیک ———
+  const near5 = run({ shortDteDays: 5 }, 6);
+  const near9 = run({ shortDteDays: 9 }, 6);
+  check('آستانه سررسید نزدیک از تنظیمات خوانده می‌شود',
+    near5.shortDte === false && near9.shortDte === true,
+    `۵ روز → ${near5.shortDte} | ۹ روز → ${near9.shortDte}`);
+  check('هشدار سررسید نزدیک با همان آستانه ظاهر می‌شود',
+    !near5.warn.includes('سررسید نزدیک') && near9.warn.includes('سررسید نزدیک'));
+
+  // ——— هیچ عدد تقویمی سخت‌کدی در موتور نماند ———
+  const engineFiles = ['core/evaluate.mjs', 'core/exec.mjs', 'core/mixed.mjs', 'core/timemachine.mjs'];
+  const leftovers = engineFiles.filter((f) =>
+    /\/\s*365\b/.test(fs.readFileSync(path.join(process.cwd(), f), 'utf8')));
+  check('هیچ تقسیم بر ۳۶۵ سخت‌کدی در موتور نمانده', leftovers.length === 0, leftovers.join('، '));
+}
+
+// ═══════════ ۴۲. مرجع فرمول‌ها از کد عقب نمی‌افتد ═══════════
+//
+// توضیحِ عقب‌افتاده از نبودِ توضیح بدتر است: کاربر رویش حساب می‌کند و
+// نمی‌داند دیگر درست نیست. این آزمون‌ها همان چیزی را می‌بندند که در عمل
+// می‌شکند — استراتژی تازه‌ای اضافه شود و کارتش نوشته نشود، یا کلید
+// تنظیماتی نامش عوض شود و ارجاع فرمول به هوا اشاره کند.
+group('۴۲. مرجع فرمول‌ها');
+{
+  const schemaKeys = new Set(SCHEMA.map((f) => f.key));
+
+  const dangling = referencedKeys().filter((k) => !schemaKeys.has(k));
+  check('هر کلید تنظیمات که فرمول‌ها نام می‌برند، در SCHEMA هست',
+    dangling.length === 0, dangling.join('، '));
+
+  const badGroup = FORMULAS.filter((f) => !FORMULA_GROUPS[f.group]).map((f) => f.id);
+  check('هر کارت فرمول به گروه موجود اشاره می‌کند', badGroup.length === 0, badGroup.join('، '));
+
+  const ids = FORMULAS.map((f) => f.id);
+  check('شناسه کارت فرمول تکراری نیست', new Set(ids).size === ids.length);
+  check('هر کارت فرمول دست‌کم یک رابطه دارد',
+    FORMULAS.every((f) => Array.isArray(f.lines) && f.lines.length > 0));
+  check('هر کارت فرمول عنوان دارد', FORMULAS.every((f) => !!f.title));
+
+  const catalogIds = CATALOG.map((d) => d.id);
+  const uncovered = catalogIds.filter((id) => !strategyFormula(id));
+  check('هر استراتژی فهرست، کارت فرمول دارد', uncovered.length === 0, uncovered.join('، '));
+
+  const orphan = Object.keys(STRATEGY_FORMULAS).filter((id) => !catalogIds.includes(id));
+  check('هیچ کارت فرمولی بدون استراتژی نمانده', orphan.length === 0, orphan.join('، '));
+
+  const shapeBad = catalogIds.filter((id) => {
+    const c = strategyFormula(id);
+    return !c.capital || !Array.isArray(c.rows) || c.rows.length < 4 || !c.watch;
+  });
+  check('هر کارت استراتژی سرمایه، دست‌کم چهار ردیف، و هشدار دارد',
+    shapeBad.length === 0, shapeBad.slice(0, 3).join('، '));
+
+  // چهار ردیفی که در هر استراتژی باید جواب داشته باشند — همان چهار عددی که
+  // کاربر پیش از ورود به موقعیت می‌پرسد.
+  const NEED = ['بیشترین سود', 'بیشترین زیان', 'سربه‌سری', 'وجه تضمین'];
+  const missingRow = catalogIds.filter((id) => {
+    const labels = strategyFormula(id).rows.map((r) => r[0]);
+    return NEED.some((n) => !labels.includes(n));
+  });
+  check('هر کارت استراتژی هر چهار ردیف پایه را دارد',
+    missingRow.length === 0, missingRow.slice(0, 3).join('، '));
+
+  // خواستهٔ صریح: کاوردکال باید نرخ و درصدش کامل توضیح داده شده باشد.
+  const cc = strategyFormula('covered-call');
+  check('کاوردکال گام‌به‌گام توضیح داده شده',
+    Array.isArray(cc.walkthrough) && cc.walkthrough.length >= 5, `${cc.walkthrough?.length} گام`);
+  const ccLabels = cc.rows.map((r) => r[0]);
+  check('هر دو نرخ کاوردکال نام برده شده‌اند',
+    ccLabels.includes('بازده ایستا') && ccLabels.includes('بازده اگر اعمال شود'),
+    ccLabels.join(' | '));
+
+  check('نمادهای مشترک تعریف شده‌اند', SYMBOLS.length >= 5);
+
+  // رقم لاتین در متن توضیح، همان ایراد قاعده ۲-۳ است.
+  const latin = [];
+  for (const f of FORMULAS) {
+    for (const t of [f.title, f.note || '', ...f.lines]) if (/[0-9]/.test(t)) latin.push(f.id);
+  }
+  check('متن فرمول‌ها رقم لاتین ندارد', latin.length === 0, [...new Set(latin)].slice(0, 3).join('، '));
+}
+
+// ═══════════ ۴۳. اندازه قرارداد از مشخصات خودِ قرارداد ═══════════
+//
+// افزایش سرمایه، اندازه قرارداد و قیمت اعمال یک سری را تعدیل می‌کند. پس دو
+// سررسید یک پایه می‌توانند دو اندازه متفاوت داشته باشند. اندازه در هر عدد
+// پولی ضرب می‌شود، پس یک اندازه فرضی اشتباه کل ردیف را به همان نسبت غلط
+// می‌کند — و عددی که ده درصد غلط است دقیقاً شبیه عددی است که درست است.
+//
+// دو باگ واقعی که این گروه قفلشان می‌کند:
+//   ۱ در مسیر تاریخی، پای سهم پایه اندازه‌اش را از `contracts[0]` می‌گرفت.
+//     آن فهرست به سررسید مرتب است، پس همیشه از نزدیک‌ترین سررسید می‌آمد —
+//     حتی وقتی خودِ ترکیب روی سررسید دور بسته می‌شد.
+//   ۲ نبود اندازه در تابلو با عدد ثابت ۱۰۰۰ پر می‌شد، بی‌هیچ نشانه‌ای
+//
+// در مسیر زنده (`core/scan.mjs`) منبع اندازه هم غلط بود — `strikeList[0]` —
+// ولی امروز قابل مشاهده نبود: استراتژی‌های دارای پای سهم همه تک‌سررسیدی‌اند
+// و در یک سررسید همه قیمت‌های اعمال یک اندازه دارند. آنجا هم به منبع درست
+// وصل شد تا با افزودن اولین استراتژی چندسررسیدیِ دارای سهم، بی‌صدا نشکند.
+group('۴۳. اندازه قرارداد از مشخصات قرارداد');
+{
+  // ——— سیاست جایگزینی ———
+  check('اندازه مشخصات بر پیش‌فرض مقدم است',
+    legContractSize(1100, 1000).size === 1100 && legContractSize(1100, 1000).assumed === false);
+  check('نبود اندازه در تابلو، نشان‌دار می‌شود',
+    legContractSize(0, 1000).size === 1000 && legContractSize(0, 1000).assumed === true);
+  check('ترکیب هم‌اندازه، ناهمگون نیست',
+    comboContractSize([1000, 1000], 1000).mixed === false);
+  check('ترکیب با دو اندازه، ناهمگون علامت می‌خورد',
+    comboContractSize([1000, 1100], 1000).mixed === true);
+
+  // ——— زنجیره، اندازه را از همان ردیف تابلو می‌خواند ———
+  const mkRow = (strike, days, size) => ({
+    uaInsCode: '1', lval30_UA: 'نمونه', pDrCotVal_UA: 100000, pClosing_UA: 100000, priceYesterday_UA: 99000,
+    insCode_C: `c${strike}_${days}`, lVal18AFC_C: `ض${strike}`, insCode_P: `p${strike}_${days}`, lVal18AFC_P: `ط${strike}`,
+    strikePrice: strike, contractSize: size, remainedDay: days,
+    endDate: days === 30 ? 20260901 : 20261101,
+    pMeDem_C: 5000, qTitMeDem_C: 500, pMeOf_C: 5200, qTitMeOf_C: 500,
+    pDrCotVal_C: 5100, pClosing_C: 5100, oP_C: 500, qTotTran5J_C: 1000,
+    pMeDem_P: 4000, qTitMeDem_P: 500, pMeOf_P: 4200, qTitMeOf_P: 500,
+    pDrCotVal_P: 4100, pClosing_P: 4100, oP_P: 400, qTotTran5J_P: 800,
+  });
+
+  // سررسید نزدیک تعدیل‌شده (۱۱۰۰ سهم)، سررسید دور تعدیل‌نشده (۱۰۰۰ سهم)
+  const adjusted = [
+    mkRow(95000, 30, 1100), mkRow(100000, 30, 1100), mkRow(105000, 30, 1100),
+    mkRow(95000, 90, 1000), mkRow(100000, 90, 1000), mkRow(105000, 90, 1000),
+  ];
+  const s0 = defaults();
+  const ch = buildChain(adjusted, s0);
+  const ua = ch.get('1');
+  const near = ua.expiryList[0];
+  const far = ua.expiryList[1];
+  check('اندازه هر سررسید از ردیف خودش می‌آید',
+    near.strikeList[0].size === 1100 && far.strikeList[0].size === 1000,
+    `نزدیک ${near.strikeList[0].size} | دور ${far.strikeList[0].size}`);
+  check('اندازه‌ای که از مشخصات آمده، پرچم دارد', near.strikeList[0].sizeFromSpec === true);
+
+  // تابلو بدون اندازه: زنجیره عدد اختراع نمی‌کند (قاعده ۲-۴)
+  const noSize = buildChain([mkRow(100000, 30, 0)], s0).get('1');
+  check('زنجیره بدون اندازه، عدد نمی‌سازد',
+    noSize.expiryList[0].strikeList[0].size === 0
+    && noSize.expiryList[0].strikeList[0].sizeFromSpec === false);
+
+  // ——— باگ ۱: پای سهم پایه ———
+  // کاوردکال روی سررسید نزدیکِ تعدیل‌شده باید ۱۱۰۰ سهم بخواهد، نه ۱۰۰۰.
+  const run = (over = {}) => {
+    const st = { ...defaults(), ...over };
+    return scanFn({ def: byId('covered-call'), chain: buildChain(adjusted, st), uaKeys: ['1'], settings: st, qty: 1 });
+  };
+  const cc = run();
+  const ccRow = cc.rows.find((r) => r.days === 30);
+  check('کاوردکال ردیف ساخت', !!ccRow, `${cc.rows.length} ردیف`);
+  if (ccRow) {
+    const stockLeg = ccRow.__legs.find((l) => l.kind === 'underlying');
+    const callLeg = ccRow.__legs.find((l) => l.kind === 'call');
+    check('پای سهم پایه، اندازه همان کالی را می‌گیرد که پوشش می‌دهد',
+      stockLeg.size === callLeg.size && stockLeg.size === 1100,
+      `سهم ${stockLeg.size} | کال ${callLeg.size}`);
+    check('پوشش کاوردکال با اندازه تعدیل‌شده هم کامل است',
+      ccRow.coverage === 'full' && ccRow.margin === 0, ccRow.coverage);
+    check('اندازه واقعی، ردیف را فرضی علامت نمی‌زند',
+      ccRow.sizeAssumed === false && !ccRow.warn.includes('اندازه قرارداد فرضی'));
+  }
+
+  // اگر پای سهم اندازه سررسید دور را می‌گرفت (باگ قدیمی)، پوشش ناقص می‌شد
+  // و وجه تضمین ناگهان از صفر درمی‌آمد — همان چیزی که بالا رد شد.
+
+  // ——— باگ ۲: نبود اندازه، نشان‌دار می‌شود ———
+  const blank = [mkRow(95000, 30, 0), mkRow(100000, 30, 0), mkRow(105000, 30, 0)];
+  const st2 = { ...defaults(), contractSize: 1000 };
+  const noSpec = scanFn({
+    def: byId('bull-call-spread'), chain: buildChain(blank, st2),
+    uaKeys: ['1'], settings: st2, qty: 1,
+  });
+  const nsRow = noSpec.rows[0];
+  check('بدون اندازه تابلو، پیش‌فرض تنظیمات می‌نشیند', !!nsRow && nsRow.__legs[0].size === 1000);
+  check('و ردیف برچسب «اندازه قرارداد فرضی» می‌گیرد',
+    !!nsRow && nsRow.sizeAssumed === true && nsRow.warn.includes('اندازه قرارداد فرضی'),
+    nsRow ? nsRow.warn.join('، ') : '');
+
+  // پیش‌فرض تنظیمات واقعاً خوانده می‌شود، نه عدد ثابت ۱۰۰۰
+  const st3 = { ...defaults(), contractSize: 500 };
+  const nsRow3 = scanFn({
+    def: byId('bull-call-spread'), chain: buildChain(blank, st3),
+    uaKeys: ['1'], settings: st3, qty: 1,
+  }).rows[0];
+  check('پیش‌فرض جایگزین از تنظیمات می‌آید، نه از عدد ثابت',
+    !!nsRow3 && nsRow3.__legs[0].size === 500, `${nsRow3?.__legs[0].size}`);
+
+  // ——— ترکیب ناهمگون ———
+  const cal = scanFn({
+    def: byId('calendar-call'), chain: buildChain(adjusted, s0),
+    uaKeys: ['1'], settings: s0, qty: 1,
+  }).rows[0];
+  check('تقویمی روی دو سری با دو اندازه، ناهمگون علامت می‌خورد',
+    !!cal && cal.sizeMixed === true && cal.warn.includes('اندازه قرارداد ناهمگون'),
+    cal ? cal.contractSizes.join(' و ') : 'ردیفی نساخت');
+
+  // ——— مسیر تاریخی: همان‌جایی که باگ واقعاً می‌زد ———
+  //
+  // `contracts[0]` قرارداد اولِ کل فهرست بود و فهرست به سررسید مرتب است،
+  // یعنی همیشه از نزدیک‌ترین سررسید. پس کاوردکالی که روی سررسید دور بسته
+  // می‌شد، تعداد سهمش را از سری نزدیک می‌گرفت — و اگر آن سری پس از افزایش
+  // سرمایه تعدیل شده بود، پوشش با تعداد سهم غلط ساخته می‌شد.
+  const contracts = flattenActiveContracts(ua);
+  const nearContract = contracts.find((c) => c.daysNow === 30);
+  const farContract = contracts.find((c) => c.daysNow === 90);
+  check('فهرست قرارداد تاریخی، اندازه هر قرارداد را جدا نگه می‌دارد',
+    nearContract.size === 1100 && farContract.size === 1000,
+    `${nearContract.size} و ${farContract.size}`);
+  check('فهرست تاریخی به سررسید مرتب است، پس قرارداد اول از سری نزدیک است',
+    contracts[0].size === 1100);
+
+  const day = (date, close) => ({ date, close, last: close, low: close, high: close, vol: 1000, trades: 5, value: 1e6 });
+  const hSeries = {};
+  for (const c of contracts) hSeries[c.ins] = [day(20260801, 5000), day(20260802, 5100)];
+  hSeries['1'] = [day(20260801, 100000), day(20260802, 100500)];
+  const uaHist = { ...ua, ins: '1', name: 'نمونه' };
+
+  const histGen = histCombos({
+    def: byId('covered-call'), ua: uaHist, seriesByIns: hSeries,
+    startDate: 20260801, entryBasis: 'CLOSE', settings: defaults(), filtered: false,
+  });
+  // ترکیب‌هایی که پای اختیارشان از سررسید دور است
+  const farCombos = histGen.combos.filter((c) =>
+    c.legs.some((l) => l.kind === 'call' && l.expiry === farContract.expiry));
+  check('کاوردکال تاریخی روی سررسید دور ساخته شد', farCombos.length > 0, `${farCombos.length} ترکیب`);
+  const mismatched = farCombos.filter((c) => {
+    const stock = c.legs.find((l) => l.kind === 'underlying');
+    const call = c.legs.find((l) => l.kind === 'call');
+    return stock.size !== call.size;
+  });
+  check('پای سهم پایه تاریخی، اندازه کال همان ترکیب را می‌گیرد نه سری نزدیک را',
+    mismatched.length === 0,
+    mismatched.length ? `${mismatched[0].legs.find((l) => l.kind === 'underlying').size} ≠ ${mismatched[0].legs.find((l) => l.kind === 'call').size}` : '');
+
+  // ——— buildLegs اندازه هر پا را جدا می‌پذیرد ———
+  const legsMixed = buildLegs(byId('bull-call-spread'), {
+    strikes: [95000, 105000], size: 1000, days: [30],
+    sizes: { 'call1@0': 1100, 'call2@0': 1100 },
+  });
+  check('buildLegs اندازه هر پا را از کلید خودش می‌گیرد',
+    legsMixed.every((l) => l.size === 1100), legsMixed.map((l) => l.size).join('، '));
+
+  // ——— هیچ اندازه ثابتی در مسیر داده نماند ———
+  const sizeFiles = ['core/chain.mjs', 'core/scan.mjs', 'core/history.mjs'];
+  const hardcoded = sizeFiles.filter((f) =>
+    /size[^\n]*\|\|\s*1000/.test(fs.readFileSync(path.join(process.cwd(), f), 'utf8')));
+  check('هیچ «اندازه یا ۱۰۰۰» سخت‌کدی در مسیر داده نمانده', hardcoded.length === 0, hardcoded.join('، '));
+}
+
+// ═══════════ ۴۴. سررسید با سقف پر، از تحلیل تاریخی هم بیرون است ═══════════
+//
+// باگ گزارش‌شده کاربر: تیک «سقف موقعیت پر» زده می‌شد ولی همان سررسید باز در
+// فیلترهای تحلیل تاریخی می‌آمد و وارد محاسبه می‌شد. علتش این بود که قید فقط
+// در مسیر زنده (`core/scan.mjs`) اعمال می‌شد و کل خانواده تحلیل تاریخی —
+// تحلیل تاریخی، بک‌تست سریع، بک‌تست سبد — آن را اصلاً نمی‌دید.
+//
+// سقف پر یعنی امروز نمی‌شود روی آن سررسید موقعیت فزاینده گرفت. پس عددی که
+// از بازپخش گذشته‌اش درمی‌آید، تصمیمی را تغذیه می‌کند که اجرایش ممکن نیست.
+group('۴۴. سررسید با سقف پر در تحلیل تاریخی');
+{
+  const mkRow = (strike, days, endDate) => ({
+    uaInsCode: '7', lval30_UA: 'اهرم', pDrCotVal_UA: 100000, pClosing_UA: 100000, priceYesterday_UA: 99000,
+    insCode_C: `c${strike}_${days}`, lVal18AFC_C: `ض${strike}`, insCode_P: `p${strike}_${days}`, lVal18AFC_P: `ط${strike}`,
+    strikePrice: strike, contractSize: 1000, remainedDay: days, endDate,
+    pMeDem_C: 5000, qTitMeDem_C: 500, pMeOf_C: 5200, qTitMeOf_C: 500,
+    pDrCotVal_C: 5100, pClosing_C: 5100, oP_C: 500, qTotTran5J_C: 1000,
+    pMeDem_P: 4000, qTitMeDem_P: 500, pMeOf_P: 4200, qTitMeOf_P: 500,
+    pDrCotVal_P: 4100, pClosing_P: 4100, oP_P: 400, qTotTran5J_P: 800,
+  });
+  const NEAR = 20260901, FAR = 20261101;
+  const rows = [];
+  for (const k of [95000, 100000, 105000]) {
+    rows.push(mkRow(k, 30, NEAR));
+    rows.push(mkRow(k, 90, FAR));
+  }
+  const ua44 = buildChain(rows, defaults()).get('7');
+  const blockNear = `7:${NEAR}`;
+
+  // ——— لایه مشترک ———
+  const trimmed = withoutBlockedExpiries(ua44, blockedExpirySet(blockNear));
+  check('سررسید پرشده از فهرست سررسیدها بیرون می‌رود',
+    trimmed.expiryList.length === 1 && trimmed.expiryList[0].endDate === FAR,
+    `${trimmed.expiryList.length} سررسید ماند`);
+  check('بدون قید، همان شیء برمی‌گردد و کپی بیهوده ساخته نمی‌شود',
+    withoutBlockedExpiries(ua44, blockedExpirySet('')) === ua44);
+
+  // ——— فهرست قرارداد فعال ———
+  const all44 = flattenActiveContracts(ua44);
+  const kept44 = flattenActiveContracts(ua44, blockNear);
+  check('فهرست قرارداد، سررسید پرشده را حذف می‌کند',
+    all44.length === 12 && kept44.length === 6, `${all44.length} → ${kept44.length}`);
+  check('و هیچ قرارداد سررسید پرشده باقی نمی‌ماند',
+    kept44.every((c) => c.expiryRaw === FAR));
+
+  // ——— ترکیب‌سازی تاریخی ———
+  const day = (date, close) => ({ date, close, last: close, low: close, high: close, vol: 1000, trades: 5, value: 1e6 });
+  const series44 = { 7: [day(20260801, 100000), day(20260802, 100500)] };
+  for (const c of all44) series44[c.ins] = [day(20260801, 5000), day(20260802, 5100)];
+
+  const gen = (blockedExpiries) => histCombos({
+    def: byId('bull-call-spread'), ua: { ...ua44, ins: '7' }, seriesByIns: series44,
+    startDate: 20260801, entryBasis: 'CLOSE',
+    settings: { ...defaults(), blockedExpiries }, filtered: false,
+  });
+
+  const free = gen('');
+  const gated = gen(blockNear);
+  check('بدون قید، ترکیب روی هر دو سررسید ساخته می‌شود',
+    free.combos.length > gated.combos.length,
+    `${free.combos.length} → ${gated.combos.length}`);
+  const leaked = gated.combos.filter((c) =>
+    c.legs.some((l) => l.kind !== 'underlying' && l.expiry === normalizeHistoryDate(NEAR)));
+  check('هیچ ترکیب تاریخی روی سررسید پرشده ساخته نمی‌شود',
+    leaked.length === 0, `${leaked.length} ترکیب نشتی`);
+  check('و سررسید آزاد همچنان ترکیب می‌سازد', gated.combos.length > 0, `${gated.combos.length} ترکیب`);
+
+  // ——— قید روی یک پایه، پایه دیگر را نمی‌بندد ———
+  const otherBase = gen('999:20260901');
+  check('قید یک پایه، پایه دیگر را کنار نمی‌گذارد',
+    otherBase.combos.length === free.combos.length,
+    `${otherBase.combos.length} برابر ${free.combos.length}`);
+
+  // ——— مسیر زنده هم همان قید را دارد (رگرسیون) ———
+  const liveBlocked = scanFn({
+    def: byId('bull-call-spread'), chain: buildChain(rows, defaults()), uaKeys: ['7'],
+    settings: { ...defaults(), blockedExpiries: blockNear }, qty: 1,
+  });
+  check('مسیر زنده هم سررسید پرشده را نمی‌سازد',
+    liveBlocked.rows.every((r) => r.days !== 30), `${liveBlocked.rows.length} ردیف`);
+
+  // ——— هیچ مسیر تاریخی‌ای بدون قید نماند ———
+  const tabs = ['ui/tabs/history.mjs', 'ui/tabs/backtest.mjs', 'ui/tabs/portfolio-backtest.mjs'];
+  const unguarded = tabs.filter((f) => {
+    const src = fs.readFileSync(path.join(process.cwd(), f), 'utf8');
+    return /flattenActiveContracts\(\s*(ua|analysisUa)\s*\)/.test(src);
+  });
+  check('هیچ تب تاریخی، فهرست قرارداد را بدون قید سقف نمی‌گیرد',
+    unguarded.length === 0, unguarded.join('، '));
+}
+
+// ═══════════ ۴۵. ستون‌های مشخصات قرارداد و بازار ═══════════
+//
+// خواسته کاربر: همان ستون‌هایی که تابلوی حرفه‌ای دارد، اینجا هم باشد.
+// قاعده‌ای که این گروه نگه می‌دارد: چیزی جمع می‌شود که جمعش معنی داشته باشد.
+// مظنه و تلاطم ضمنی جمع نمی‌شوند — میانگین دو مظنه، عددی است که در هیچ دفتر
+// سفارشی وجود ندارد — پس به‌ازای هر پا فهرست می‌شوند.
+group('۴۵. ستون‌های مشخصات قرارداد');
+{
+  const size = 1000;
+  const mk = (bid, ask, extra = {}) => ({
+    bid, bidQty: 50, ask, askQty: 80, last: (bid + ask) / 2, close: (bid + ask) / 2,
+    low: bid * 0.9, high: ask * 1.1, state: 'A', staleSec: 10,
+    oi: 500, oiYday: 400, vol: 1200, trades: 30, value: 5e6,
+    book: [{ level: 1, bid, bidQty: 50, ask, askQty: 80 }],
+    ...extra,
+  });
+  const s45 = defaults();
+  const ccDef = byId('covered-call');
+  const cc = evaluate({
+    legs: buildLegs(ccDef, { strikes: [110000], size, days: [30] }),
+    quotes: [mk(99000, 100000), mk(4800, 5200)],
+    ctx: { S: 100000, Sclose: 100000, days: 30, size, qty: 1, settings: s45, def: ccDef, underlying: 'نمونه', sigmaHist: 0.6 },
+  });
+
+  // ——— ارزش قرارداد ———
+  check('نوشنال، قدرمطلق تعهد هر پا روی پایه است',
+    near(cc.notional, 2 * size * 100000, 1e-9), uiFmt.money(cc.notional));
+  check('ارزش بازاری موقعیت، قرینه نقد ناخالص است',
+    near(cc.marketValue, -cc.grossCash, 1e-9), uiFmt.money(cc.marketValue));
+  // کال ۱۱۰٬۰۰۰ روی پایه ۱۰۰٬۰۰۰ خارج از سود است، پس ذاتی‌اش صفر و کل ارزش
+  // ذاتی موقعیت فقط از سهم می‌آید.
+  check('ارزش ذاتی، کال خارج از سود را صفر می‌گیرد',
+    near(cc.intrinsic, size * 100000, 1e-9), uiFmt.money(cc.intrinsic));
+  check('ارزش زمانی کاوردکال منفی است، چون زمان را فروخته‌ای',
+    cc.timeValue < 0 && near(cc.timeValue, -size * 4800, 1e-9), uiFmt.money(cc.timeValue));
+  check('ارزش ذاتی به‌علاوه ارزش زمانی، همان ارزش بازاری است',
+    near(cc.intrinsic + cc.timeValue, cc.marketValue, 1e-6));
+  check('قیمت بلک‌شولز و درصد اختلافش حساب شد',
+    Number.isFinite(cc.bsValue) && Number.isFinite(cc.bsDiffPct), `${uiFmt.pct(cc.bsDiffPct)}`);
+  check('اهرم، کشسانی موقعیت است: دلتا × پایه ÷ ارزش بازاری',
+    near(cc.leverage, (cc.delta * 100000) / cc.marketValue, 1e-9), cc.leverage.toFixed(3));
+
+  // ——— سرمایه و تضمین ———
+  // کاوردکال وجه تضمین نقدی ندارد چون سهم پوشش است، ولی «تضمین لازم» پای
+  // فروش همچنان عددی دارد. این دو نباید یکی گرفته شوند.
+  check('وجه تضمین کاوردکال صفر است ولی تضمین لازم پای فروش صفر نیست',
+    cc.margin === 0 && cc.marginRequired > 0, uiFmt.money(cc.marginRequired));
+  check('دارایی مسدودی، همان سهمی است که پوشش را می‌سازد',
+    cc.sharesLocked === size && near(cc.blockedAsset, size * 100000, 1e-9),
+    `${cc.sharesLocked} سهم`);
+
+  // اسپرد بدهکار سهمی قفل نمی‌کند
+  const sp = byId('bull-call-spread');
+  const spread = evaluate({
+    legs: buildLegs(sp, { strikes: [95000, 105000], size, days: [30] }),
+    quotes: [mk(7000, 7400), mk(2000, 2300)],
+    ctx: { S: 100000, Sclose: 100000, days: 30, size, qty: 1, settings: s45, def: sp, underlying: 'نمونه', sigmaHist: 0.6 },
+  });
+  check('اسپرد بدون پای سهم، دارایی مسدودی ندارد',
+    spread.sharesLocked === 0 && spread.blockedAsset === 0);
+
+  // ——— بازار ———
+  check('حجم و ارزش و تعداد معامله فقط از پاهای اختیار جمع می‌شوند',
+    spread.volTotal === 2400 && spread.tradeCount === 60 && spread.valueTotal === 1e7,
+    `حجم ${spread.volTotal}`);
+  check('موقعیت باز و تغییرش جمع می‌شوند',
+    spread.oiTotal === 1000 && spread.oiChange === 200);
+  check('کاوردکال فقط یک پای اختیار دارد، پس حجم یک پا شمرده می‌شود',
+    cc.volTotal === 1200 && cc.oiTotal === 500);
+
+  // ——— مظنه: فهرست، نه جمع ———
+  check('مظنه هر پا جدا فهرست می‌شود، نه جمع',
+    Array.isArray(spread.bidList) && spread.bidList.length === 2
+    && spread.bidList[0] === 7000 && spread.bidList[1] === 2000,
+    spread.bidList.join(' , '));
+  check('عرضه و آخرین و پایانی هم فهرست‌اند',
+    spread.askList.length === 2 && spread.lastList.length === 2 && spread.closeList.length === 2);
+  check('تلاطم ضمنی هر پا جدا می‌آید', spread.ivList.length === 2 && spread.ivList.every(Number.isFinite),
+    spread.ivList.join(' , '));
+  check('قیمت سرخط هر پا، همان قیمت اجرای همان پاست',
+    spread.headlineList.length === 2
+    && near(spread.headlineList[0], spread.legPrices[0].price, 1e-9));
+  check('حجم مظنه، کمترین پا را می‌دهد نه جمع را',
+    spread.bidQtyMin === 50 && spread.askQtyMin === 80);
+  check('فاصله، بدترین پا را می‌دهد',
+    Number.isFinite(spread.spreadWorstPct) && spread.spreadWorstPct > 0,
+    uiFmt.pct(spread.spreadWorstPct));
+
+  // ——— قرارداد ستونی ———
+  const keys = new Set(COLUMNS.map((c) => c.key));
+  const NEED = ['headlineList', 'bidList', 'askList', 'lastList', 'closeList', 'spreadWorstPct',
+    'bidQtyMin', 'askQtyMin', 'volTotal', 'valueTotal', 'tradeCount', 'oiTotal', 'oiChange',
+    'notional', 'marketValue', 'intrinsic', 'timeValue', 'bsValue', 'bsDiffPct', 'ivList',
+    'leverage', 'marginRequired', 'blockedAsset', 'sharesLocked', 'rho', 'deltaShares'];
+  const absent = NEED.filter((k) => !keys.has(k));
+  check('هر ستون تازه در قرارداد ستونی ثبت شده', absent.length === 0, absent.join('، '));
+
+  // هر ستون باید روی ردیف واقعی مقدار داشته باشد — ستونی که همیشه تهی است،
+  // در انتخابگر فقط سردرگمی می‌سازد.
+  const empty = COLUMNS.filter((c) => !(c.key in cc)).map((c) => c.key);
+  check('هیچ ستونی بدون کلید متناظر روی ردیف نمانده', empty.length === 0, empty.join('، '));
+  const badFmt = COLUMNS.filter((c) => !['money', 'pct', 'num', 'int', 'text', 'list'].includes(c.fmt));
+  check('قالب هر ستون معتبر است', badFmt.length === 0, badFmt.map((c) => c.key).join('، '));
+}
+
+// ═══════════ ۴۶. نوار فرض‌های نمودار بازده ═══════════
+//
+// نمودار حالا سه فرض منحنی «امروز» را دست کاربر می‌دهد: روز مانده، تلاطم،
+// نرخ بدون ریسک. منحنی سررسید فرض‌پذیر نیست و نباید تکان بخورد.
+//
+// معنی اسلایدر «روز مانده» یک متمم است: افق ارزش‌گذاری = نزدیک‌ترین سررسید
+// منهای روز مانده. این آزمون همان تبدیل را قفل می‌کند، چون اگر جهتش برعکس
+// شود نمودار بی‌صدا غلط می‌شود — شکلش هنوز باورپذیر است.
+group('۴۶. فرض‌های منحنی امروز');
+{
+  const legs46 = [{ kind: 'call', side: 'buy', ratio: 1, size: 1000, strike: 20000, price: 32318, days: 63 }];
+  const net46 = -32318 * 1000;
+  const fees46 = { buyStock: 0, sellStock: 0, option: 0, exercise: 0 };
+  const base46 = { fees: fees46, spot: 50784, sigma: 0.467, rFree: 0.25, divYield: 0 };
+  const expiry46 = analyzePayoff(legs46, net46, { fees: fees46 });
+  const atHorizon = (h) => analyzeMixed(legs46, net46, { ...base46, horizonDays: h });
+
+  // روز مانده = ۰  →  افق = نزدیک‌ترین سررسید  →  همان منحنی سررسید
+  const collapsed = atHorizon(63);
+  const sameAsExpiry = [30000, 50784, 70000]
+    .every((S) => near(collapsed.at(S), expiry46.at(S), 1e-6));
+  check('روز مانده صفر، منحنی امروز را روی منحنی سررسید می‌خواباند', sameAsExpiry,
+    `${Math.round(collapsed.at(50784))} در برابر ${Math.round(expiry46.at(50784))}`);
+
+  // روز مانده کامل  →  افق صفر  →  ارزش زمانی هنوز هست، پس بالاتر از سررسید
+  const today46 = atHorizon(0);
+  check('با روز مانده کامل، خرید کال ارزش زمانی دارد و بالای منحنی سررسید است',
+    today46.at(50784) > expiry46.at(50784),
+    `${Math.round(today46.at(50784))} > ${Math.round(expiry46.at(50784))}`);
+
+  // تلاطم بالاتر، ارزش زمانی بیشتر — برای موقعیت خرید یعنی منحنی بالاتر
+  const hiVol = analyzeMixed(legs46, net46, { ...base46, sigma: 0.9, horizonDays: 0 });
+  check('تلاطم بیشتر، منحنی امروزِ موقعیت خرید را بالا می‌برد',
+    hiVol.at(50784) > today46.at(50784),
+    `${Math.round(hiVol.at(50784))} > ${Math.round(today46.at(50784))}`);
+
+  // نرخ بهره روی کال خرید اثر مثبت دارد (رو مثبت است)
+  const hiRate = analyzeMixed(legs46, net46, { ...base46, rFree: 0.6, horizonDays: 0 });
+  check('نرخ بالاتر، منحنی امروزِ کال خرید را بالا می‌برد',
+    hiRate.at(50784) > today46.at(50784),
+    `${Math.round(hiRate.at(50784))} > ${Math.round(today46.at(50784))}`);
+
+  // منحنی سررسید به هیچ‌کدام وابسته نیست
+  check('منحنی سررسید با هیچ فرضی تکان نمی‌خورد',
+    near(analyzePayoff(legs46, net46, { fees: fees46 }).at(50784), expiry46.at(50784), 1e-12));
+
+  // ——— قرارداد نوار، در خود ماژول ———
+  const chartSrc = fs.readFileSync(path.join(process.cwd(), 'ui/chart.mjs'), 'utf8');
+  check('نوار فرض‌ها افق را از متمم روز مانده می‌سازد',
+    chartSrc.includes('horizonDays: nearDays - a.days'));
+  check('هر سه فرض در نوار هست',
+    ['روز مانده', 'نوسان دلخواه', 'نرخ بهره'].every((t) => chartSrc.includes(t)));
+  check('نوار دکمه بازگشت به فرض‌های واقعی دارد', chartSrc.includes('data-assume-reset'));
+  // عددی که کاربر می‌بیند باید از fmt عبور کند (قاعده ۲-۳)
+  check('عدد نوار فرض‌ها از fmt عبور می‌کند',
+    chartSrc.includes('fmt.int(v)') && chartSrc.includes('fmt.num(Number(v.toFixed(3)))'));
+  // برچسب لبه، بیرون قاب نیفتد
+  check('برچسب قیمت پایه و سربه‌سری لنگر لبه‌ای دارد',
+    chartSrc.includes('edgeAnchor(X(spot))') && chartSrc.includes('edgeAnchor(X(b)'));
+  check('رسم دوباره از بیرون ممکن است', chartSrc.includes('redraw: render'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

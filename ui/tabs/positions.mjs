@@ -172,7 +172,15 @@ export async function mount(root, { state, api }) {
     addBtn.disabled = true;
     try {
       const strike = Number(o.dataset.strike);
-      const size = Number(o.dataset.size) || 1000;
+      // اندازه از مشخصات همان قرارداد می‌آید. اگر تابلو نداده باشد،
+      // پیش‌فرض اعلامی تنظیمات می‌نشیند و کاربر همان‌جا خبردار می‌شود —
+      // چون اندازه در هر عدد پولی این موقعیت ضرب خواهد شد.
+      const specSize = Number(o.dataset.size);
+      const size = specSize > 0 ? specSize : Number(s().contractSize) || 0;
+      if (!(size > 0)) { flash('اندازه قرارداد معلوم نیست؛ در تنظیمات مقدارش را بگذار.', true); return; }
+      if (!(specSize > 0)) {
+        flash(`اندازه قرارداد از تابلو نیامد؛ پیش‌فرض تنظیمات (${size}) به کار رفت.`);
+      }
       const days = Number(o.dataset.days);
       const kind = F.kind.value;
       const put = wantPut();

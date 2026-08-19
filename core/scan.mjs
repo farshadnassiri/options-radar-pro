@@ -13,7 +13,15 @@
 
 import { num, EPS } from './num.mjs';
 import { evaluate } from './evaluate.mjs';
-import { underlyingQuote } from './chain.mjs';
+import {
+  underlyingQuote, legContractSize, comboContractSize,
+  blockedExpirySet, expiryBlocked,
+} from './chain.mjs';
+
+// سررسیدهای پرشده جای اصلی‌شان `core/chain.mjs` است، چون فقط مسیر زنده
+// نیست که به آن نیاز دارد — تحلیل تاریخی و بک‌تست هم باید همان سررسید را
+// کنار بگذارند. اینجا دوباره صادر می‌شود تا مصرف‌کننده‌های قبلی نشکنند.
+export { blockedExpirySet, expiryBlocked };
 
 /** انتخاب k عضوی از فهرست، به ترتیب صعودی. */
 function combos(arr, k, cap) {
@@ -44,28 +52,6 @@ function equalWidth(ks) {
 
 const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept', 'blockedExpiry'];
 
-/**
- * سررسیدهایی که سقف موقعیت بازشان پر است.
- *
- * وقتی سقف یک سررسید پر می‌شود، اخذ موقعیت فزاینده تازه ممکن نیست و فقط
- * می‌شود موقعیت قبلی را آفست کرد. پیشنهاد استراتژی روی چنین سررسیدی، عددی
- * است که کاربر نمی‌تواند اجرایش کند؛ پس اصلاً ساخته نمی‌شود. این وضعیت از
- * تابلو خوانده نمی‌شود — کارگزار اعلامش می‌کند — پس ورودی دستی است.
- *
- * قالب: «شناسه نماد پایه:تاریخ سررسید»، جدا شده با ویرگول.
- */
-export function blockedExpirySet(text = '') {
-  const out = new Set();
-  for (const part of String(text ?? '').split(',')) {
-    const at = part.indexOf(':');
-    if (at < 1) continue;
-    const ins = part.slice(0, at).trim(), endDate = part.slice(at + 1).trim();
-    if (ins && endDate) out.add(`${ins}:${endDate}`);
-  }
-  return out;
-}
-
-export const expiryBlocked = (set, uaIns, endDate) => set.has(`${uaIns}:${endDate}`);
 
 /**
  * چرا ردیف ادعای اجرا ندارد.
@@ -143,13 +129,29 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
       if (def.strikes >= 3 && s.wingsEqualWidth && !equalWidth(set)) continue;
       funnel.built += 1;
 
-      // پاها و مظنه‌ها
+      // پاها و مظنه‌ها.
+      //
+      // اندازه هر پای اختیار از مشخصات خودِ همان قرارداد می‌آید. پای سهم
+      // پایه اندازه اعلامی ندارد — تعداد سهمش باید با اندازه قراردادی بخواند
+      // که پوشش می‌دهد — پس اول پاهای اختیار ساخته می‌شوند و اندازه پای سهم
+      // از آن‌ها می‌آید، نه از `strikeList[0]` که قرارداد اول سررسید نزدیک
+      // است و لزوماً در این ترکیب نیست.
+      //
+      // امروز این دو عدد یکی درمی‌آیند، چون استراتژی‌های دارای پای سهم همه
+      // تک‌سررسیدی‌اند و افزایش سرمایه کل یک سری را با هم تعدیل می‌کند، پس
+      // در یک سررسید همه قیمت‌های اعمال یک اندازه دارند. ولی منبع درست،
+      // قراردادهای همین ترکیب است؛ با منبع غلط، اولین استراتژی چندسررسیدیِ
+      // دارای سهم بی‌صدا می‌شکست.
       const legs = [];
       const quotes = [];
       let missing = false;
+      let sizeAssumed = false;
+      const optionSizes = [];
+      let stockSlot = -1;
       for (const t of def.legs) {
         if (t.kind === 'underlying') {
-          legs.push({ kind: 'underlying', side: t.side, ratio: t.ratio, size: near.strikeList[0].size, price: 0 });
+          stockSlot = legs.length;
+          legs.push({ kind: 'underlying', side: t.side, ratio: t.ratio, size: 0, price: 0 });
           quotes.push(uaQ);
           if (!(uaQ.bid > 0 || uaQ.ask > 0)) missing = true;
           continue;
@@ -163,11 +165,22 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
         if (!(px > 0)) missing = true;
         if (t.side === 'sell' && (q.bidQty < s.minBidQty || q.oi < s.minOpenInt)) missing = true;
         if (q.vol < s.minLegVol || q.value < s.minLegValue) missing = true;
+        const sz = legContractSize(row.size, s.contractSize);
+        if (sz.assumed) sizeAssumed = true;
+        optionSizes.push(row.size);
         legs.push({
-          kind: t.kind, side: t.side, ratio: t.ratio, strike: K, size: row.size,
+          kind: t.kind, side: t.side, ratio: t.ratio, strike: K, size: sz.size,
+          sizeAssumed: sz.assumed,
           days: ex.days, price: 0, ins: q.ins, name: q.name, exp: t.exp, slot: t.slot,
         });
         quotes.push(q);
+      }
+
+      const comboSize = comboContractSize(optionSizes, s.contractSize);
+      if (stockSlot >= 0) {
+        legs[stockSlot].size = comboSize.size;
+        legs[stockSlot].sizeAssumed = comboSize.assumed;
+        if (comboSize.assumed) sizeAssumed = true;
       }
 
       if (missing && !s.showUnexecutable) { funnel.noQuote += 1; continue; }
@@ -178,7 +191,7 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
         days: near.days, endDate: near.endDate,
         expiryDays: exSet.map((e) => e.days),
         spot, spotClose: ua.close || ua.last,
-        size: near.strikeList[0].size,
+        size: comboSize.size, sizeAssumed, sizeMixed: comboSize.mixed,
         strikes: set,
         hasQuoteGap: missing,
         needsStock,
@@ -224,6 +237,7 @@ export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, qty }) {
           quotes: c.quotes,
           ctx: {
             S: c.spot, Sclose: c.spotClose, days: c.days, size: c.size,
+            sizeMixed: c.sizeMixed,
             qty: qty ?? s.qtyDefault, settings: s, def,
             underlying: c.underlying, sigmaHist: sigmaByUa[key],
             greeks: s.greeksInScan,

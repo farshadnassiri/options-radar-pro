@@ -152,12 +152,13 @@ export function resolvePrice(quote, side, opt = {}) {
  */
 export function priceLegs(legs, quotes, opt = {}) {
   const qty = num(opt.qty, 1);
+  const contractSize = num(opt.contractSize, 1000);
   const out = [];
   legs.forEach((l, i) => {
     const q = quotes[i] || {};
     // پای سهم پایه بر حسب سهم است، نه قرارداد
     const need = l.kind === 'underlying'
-      ? qty * num(l.ratio, 1) * num(l.size, 1000)
+      ? qty * num(l.ratio, 1) * num(l.size, contractSize)
       : qty * num(l.ratio, 1);
     const r = resolvePrice(q, l.side, { ...opt, qty: need, refFallback: !!opt.refFallback });
     out.push({ ...l, price: r.price, exec: r, quote: q, need });
@@ -170,10 +171,11 @@ export function priceLegs(legs, quotes, opt = {}) {
  * بدون این ستون، عدد سقف حجم برای کاربر بی‌معناست.
  */
 export function maxSize(pricedLegs, opt = {}) {
+  const contractSize = num(opt.contractSize, 1000);
   const limits = [];
   for (const l of pricedLegs) {
     const per = l.kind === 'underlying'
-      ? num(l.ratio, 1) * num(l.size, 1000)
+      ? num(l.ratio, 1) * num(l.size, contractSize)
       : num(l.ratio, 1);
     const label = l.kind === 'underlying'
       ? 'عمق سهم پایه'
@@ -241,7 +243,7 @@ export function executionCost(pricedLegs, opt = {}) {
 
   // هزینه فرصت وجه تضمین
   const days = num(opt.days, 0);
-  const funding = num(opt.marginNet) * num(opt.rFree) * (days / 365);
+  const funding = num(opt.marginNet) * num(opt.rFree) * (days / num(opt.yearDays, 365));
 
   return {
     rows,

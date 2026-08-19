@@ -181,16 +181,22 @@ export const byId = (id) => CATALOG.find((s) => s.id === id);
  *
  * strikes: آرایه قیمت اعمال، از کوچک به بزرگ. طولش باید با def.strikes بخواند.
  * quotesBySlot: قیمت و سررسید هر پا، به‌ازای کلید `${kind}${slot}@${exp}`
- * size: اندازه قرارداد
+ * sizes: اندازه قرارداد هر پا، با همان کلید — از مشخصات خودِ همان قرارداد
+ * size:  اندازه پیش‌فرض، فقط برای پایی که در `sizes` نیامده
+ *
+ * چرا اندازه، هم کلیدی است و هم پیش‌فرض دارد: پس از افزایش سرمایه، اندازه
+ * قرارداد و قیمت اعمال یک سری تعدیل می‌شوند. پس دو پای یک ترکیب می‌توانند
+ * دو اندازه متفاوت داشته باشند و یک عدد واحد برای همه پاها، فرض غلطی است
+ * که در هر ستون پولی ضرب می‌شود.
  */
-export function buildLegs(def, { strikes, size = 1000, days = [], prices = {} }) {
+export function buildLegs(def, { strikes, size = 1000, sizes = {}, days = [], prices = {} }) {
   return def.legs.map((t) => {
     const K = t.kind === 'underlying' ? undefined : strikes[t.slot - 1];
     const key = t.kind === 'underlying' ? 'underlying' : `${t.kind}${t.slot}@${t.exp}`;
     return {
       kind: t.kind, side: t.side, ratio: t.ratio,
       strike: K,
-      size: t.kind === 'underlying' ? size : size,
+      size: sizes[key] ?? size,
       days: t.kind === 'underlying' ? undefined : (days[t.exp] ?? days[0] ?? 0),
       price: prices[key] ?? 0,
       slot: t.slot, exp: t.exp, key,
