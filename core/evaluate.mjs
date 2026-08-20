@@ -368,6 +368,9 @@ export function evaluate({ legs, quotes, ctx }) {
       // قرارداد هم‌اعمال در دو سررسید، یکی گرفته می‌شوند.
       ins: l.ins ? String(l.ins) : '', name: l.name || '',
     })),
+    // دفتر سفارش هر پا، برای سنجش ریسک عمق هنگام *بستن* موقعیت. فقط سطوح،
+    // نه کل شیء مظنه — بقیه‌اش در ستون‌ها هست و تکرارش ردیف را سنگین می‌کند.
+    __books: priced.map((l) => ({ book: Array.isArray(l.quote?.book) ? l.quote.book : [] })),
   };
 }
 

@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { bsPrice, bsGreeks, impliedVol, probBelow, probAbove, histVol, npdf, d1d2, ncdf, ninv, priceQuantile } from '../core/bs.mjs';
-import { grossCash, entryFees, analyzePayoff, signedQty } from '../core/payoff.mjs';
+import { grossCash, entryFees, analyzePayoff, signedQty, pnlAtExpiry } from '../core/payoff.mjs';
 import { analyzeMixed } from '../core/mixed.mjs';
 import {
   initialMargin, requiredMargin, minMargin, verifyMargin, impliedUnderlying,
@@ -39,6 +39,7 @@ import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE }
 import { strandedKeys } from '../ui/expiries.mjs';
 import { icon, GROUP_ICON, TAB_ICON, sectionIcon } from '../ui/icons.mjs';
 import { canHandoff, handoffPlan } from '../ui/handoff.mjs';
+import { scenarioLadder, sensitivityGrid, bookDepthRisk } from '../core/scenario.mjs';
 import * as uiFmt48 from '../ui/fmt.mjs';
 import { GROUPS as STRAT_GROUPS48 } from '../strategies/catalog.mjs';
 import {
@@ -3284,6 +3285,100 @@ group('۵۱. انتقال ترکیب زنده به بک‌تست');
     check(`${what} دکمهٔ انتقال دارد و فقط برای ردیف قابل انتقال`,
       src.includes('canHandoff(r) ? handoffButtonHtml()') && src.includes("location.hash = 'backtest'"));
   }
+}
+
+// ═══════════════════════════ ۵۲. سناریو، حساسیت، و ریسک عمق دفتر ═══════════════════════════
+group('۵۲. سناریو، حساسیت، و ریسک عمق دفتر');
+{
+  // Bull Call Spread: خرید کال ۱۰۰ به ۸ ، فروش کال ۱۱۰ به ۳ ، اندازه ۱۰۰۰
+  const legs52 = [
+    { kind: 'call', side: 'buy', strike: 100, price: 8, ratio: 1, size: 1000, name: 'C100' },
+    { kind: 'call', side: 'sell', strike: 110, price: 3, ratio: 1, size: 1000, name: 'C110' },
+  ];
+  const net52 = grossCash(legs52);
+  const base52 = { legs: legs52, spot: 100, days: 60, sigma: 0.4, rFree: 0.25, divYield: 0, yearDays: 365 };
+  const lad52 = scenarioLadder(base52);
+
+  check('نردبان سناریو ساخته می‌شود', lad52.length >= 8, `${lad52.length} سطح`);
+  // مهم‌ترین ثابت این ماژول: اگر جدول و نمودار از دو راه حساب کنند، دو حرف
+  // می‌زنند و کاربر نمی‌فهمد کدام درست است.
+  check('سود و زیان هر سطح، دقیقاً همان چیزی است که نمودار بازده می‌کشد',
+    lad52.every((r) => near(r.pnl, pnlAtExpiry(legs52, r.level, net52))));
+  check('تفکیک هر پا با جمع کل می‌خواند',
+    lad52.every((r) => near(r.pnl, r.perLeg.reduce((a, l) => a + l.pnl, 0))));
+  check('از بدترین به بهترین مرتب است',
+    lad52.every((r, i) => i === 0 || lad52[i - 1].pnl <= r.pnl));
+  // در ترکیب سقف‌دار همهٔ سطوح بالای سقف یک عدد می‌دهند؛ بدون مرتب‌سازی دوم
+  // «صدک ۹۵» بعد از «صدک ۹۹» می‌نشیند.
+  check('سطوح هم‌سود بر پایه قیمت مرتب می‌مانند',
+    lad52.every((r, i) => i === 0 || lad52[i - 1].pnl < r.pnl || lad52[i - 1].level <= r.level));
+  check('سقف سود و کف زیان همان اسپرد است',
+    near(Math.max(...lad52.map((r) => r.pnl)), 5000) && near(Math.min(...lad52.map((r) => r.pnl)), -5000));
+  check('قیمت امروز همیشه در فهرست هست', lad52.some((r) => r.kind === 'spot' && near(r.level, 100)));
+  check('احتمال هر سطح با صدکش می‌خواند',
+    lad52.filter((r) => r.kind === 'percentile').every((r) => near(r.probBelow * 100, r.pct, 0.5)));
+  // بدون تلاطم، صدک ساخته نمی‌شود ولی قیمت امروز باید بماند
+  const noVol52 = scenarioLadder({ ...base52, sigma: 0 });
+  check('بدون تلاطم، فقط قیمت امروز می‌ماند — نه صدکِ ساختگی',
+    noVol52.length === 1 && noVol52[0].kind === 'spot');
+  check('ورودی تهی، خروجی تهی می‌دهد',
+    scenarioLadder({}).length === 0 && scenarioLadder({ legs: legs52, spot: 0 }).length === 0);
+
+  // ——— حساسیت ———
+  const grid52 = sensitivityGrid({ ...base52, axis: 'days', moves: [-20, 0, 20] });
+  check('جدول حساسیت، سطر و ستون درست دارد',
+    grid52.rows.length === 3 && grid52.axisValues.length === 3);
+  check('هر خانه، تفکیک پا دارد و با جمعش می‌خواند',
+    grid52.rows.every((r) => r.cells.every((c) => near(c.pnl, c.perLeg.reduce((a, v) => a + v, 0)))));
+  // روی محور روز، صفر یعنی سررسید — و آن‌جا باید دقیقاً منحنی سررسید باشد،
+  // نه بلک‌شولز با تی خیلی کوچک که عددی شبیه درست می‌دهد.
+  const atExpiry52 = grid52.axisValues.indexOf(0);
+  check('روز صفر، دقیقاً همان سود و زیان سررسید است',
+    atExpiry52 >= 0 && grid52.rows.every((r) => near(r.cells[atExpiry52].pnl, pnlAtExpiry(legs52, r.level, net52))));
+  check('پیش از سررسید، ارزش زمانی هنوز هست',
+    grid52.rows.find((r) => r.movePct === -20).cells[0].pnl > grid52.rows.find((r) => r.movePct === -20).cells[atExpiry52].pnl);
+  for (const axis of ['days', 'sigma', 'rFree']) {
+    check(`محور «${axis}» جدول می‌سازد`, sensitivityGrid({ ...base52, axis }).rows.length > 0);
+  }
+  check('محور ناشناخته به روز مانده برمی‌گردد', sensitivityGrid({ ...base52, axis: 'چیزی' }).axis === 'days');
+
+  // ——— ریسک عمق دفتر ———
+  const books52 = [
+    { book: [{ bid: 7.9, bidQty: 2, ask: 8.1, askQty: 5 }, { bid: 7.5, bidQty: 10, ask: 8.6, askQty: 9 }] },
+    { book: [{ bid: 2.8, bidQty: 1, ask: 3.2, askQty: 2 }, { bid: 2.4, bidQty: 4, ask: 3.9, askQty: 20 }] },
+  ];
+  const d52 = bookDepthRisk({ legs: legs52, quotes: books52, units: 5 });
+  // بستن یعنی جهت معکوس: پای خرید به تقاضا می‌خورد، پای فروش به عرضه
+  check('جهت بستن، معکوس جهت باز کردن است',
+    d52.perLeg[0].closeSide === 'sell' && d52.perLeg[1].closeSide === 'buy');
+  // پای خرید: ۲ در ۷٫۹ و ۳ در ۷٫۵ → میانگین وزنی ۷٫۶۶ ، هزینه ۱٬۲۰۰
+  check('میانگین وزنی از پیمایش دفتر می‌آید', near(d52.perLeg[0].vwap, 7.66));
+  check('هزینه بستن هر پا، اختلاف با بهترین مظنه است',
+    near(d52.perLeg[0].exitCost, 1200) && near(d52.perLeg[1].exitCost, 2100));
+  check('هزینه بستن کل، جمع پاهاست', near(d52.exitCostTotal, 3300));
+  check('بدترین لغزش، بزرگ‌ترین قدرمطلق است', near(d52.worstSlipPct, 13.125), d52.worstSlipPct);
+  // دفتر سفارش سهم در دیده‌بان اختیار نیست؛ «نامعلوم» با «صفر» یکی نیست
+  const withStock52 = bookDepthRisk({
+    legs: [...legs52, { kind: 'underlying', side: 'buy', price: 100, ratio: 1, size: 1000 }],
+    quotes: [...books52, {}], units: 5 });
+  check('پای دارایی پایه اصلاً وارد سنجش عمق نمی‌شود', withStock52.perLeg.length === 2);
+  const noBook52 = bookDepthRisk({ legs: legs52, quotes: [{}, {}], units: 5 });
+  check('پای بی‌دفتر، «نامعلوم» است نه «صفر»',
+    noBook52.unknownLegs === 2 && !Number.isFinite(noBook52.exitCostTotal));
+  const thin52 = bookDepthRisk({ legs: legs52, quotes: [
+    { book: [{ bid: 7.9, bidQty: 1, ask: 8.1, askQty: 1 }] }, books52[1]], units: 5 });
+  check('پای کم‌عمق، کسری و قفل‌بودن را گزارش می‌کند',
+    thin52.blockedLegs === 1 && thin52.perLeg[0].short === 4 && thin52.closableUnits === 1,
+    `کسری ${thin52.perLeg[0].short} | واحد ${thin52.closableUnits}`);
+
+  const panelSrc52 = fs.readFileSync(new URL('../ui/scenario-panel.mjs', import.meta.url), 'utf8');
+  check('پنل هیچ محاسبه‌ای ندارد و همه را از موتور می‌خواند',
+    panelSrc52.includes("from '/core/scenario.mjs'")
+    && !/Math\.exp|bsPrice|Math\.log/.test(panelSrc52));
+  check('پارامترهای حساسیت قابل تنظیم‌اند',
+    ['scen-axis', 'scen-range', 'scen-steps', 'scen-units'].every((id) => panelSrc52.includes(id)));
+  // پله فرد لازم است تا «بدون تغییر» همیشه وسط جدول بیفتد
+  check('تعداد پله فرد می‌شود تا صفر وسط بماند', panelSrc52.includes('if (steps % 2 === 0) steps += 1;'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

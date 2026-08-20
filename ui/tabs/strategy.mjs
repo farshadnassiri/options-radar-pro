@@ -21,6 +21,7 @@ import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
 import { canHandoff, handoffPlan, handoffButtonHtml } from '/ui/handoff.mjs';
+import { mountScenarioPanel } from '/ui/scenario-panel.mjs';
 import { runScan, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 
 /** dEven عددی (مثلاً ۲۰۲۶۰۱۰۱) به تاریخ شمسی خوانا. */
@@ -62,6 +63,7 @@ export async function mount(root, { tab, state, api }) {
   // می‌خوانندش؛ تغییر اینجا بدون این لایه، بی‌صدا روی همه‌شان اثر می‌گذاشت.
   const overrides = {};
   const s = () => ({ ...state.settings, ...overrides });
+  let disposeScen = null;
   let rows = [];
   let picked = null;
   let view = 'خلاصه';
@@ -119,6 +121,7 @@ export async function mount(root, { tab, state, api }) {
     <section class="card" id="detail-card" style="margin-top:16px;display:none">
       <h3 id="detail-title">جزئیات ردیف</h3>
       <div class="detail" id="detail"></div>
+      <div id="scen-wrap"></div>
       <div id="tm-wrap" style="margin-top:16px"></div>
     </section>`;
 
@@ -403,6 +406,14 @@ export async function mount(root, { tab, state, api }) {
       });
     }
     renderCmpPicker();
+
+    // ——— سناریو، حساسیت، عمق دفتر ———
+    disposeScen?.();
+    disposeScen = mountScenarioPanel(root.querySelector('#scen-wrap'), r, {
+      rFree: s().rFree, divYield: s().divYield, yearDays: s().dayCountYear,
+      units: Math.max(1, Number(s().qtyDefault) || 1),
+    });
+
     // ——— انتقال به بک‌تست ———
     root.querySelector('#to-backtest')?.addEventListener('click', () => {
       state.handoff = handoffPlan(r, {
@@ -552,5 +563,5 @@ export async function mount(root, { tab, state, api }) {
   });
 
   setStatus();
-  return () => { offWatch(); offChain(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); };
+  return () => { offWatch(); offChain(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); disposeScen?.(); };
 }
