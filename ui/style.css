@@ -216,39 +216,51 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 }
 .backtest-date-grid, .backtest-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
 .backtest-date-grid > *, .backtest-chart-grid > * { min-width: 0; }
-/* انتخابگر تاریخ مشترک — ستون کارت، پیمایش با چرخ ماوس.
-   ارتفاع ثابت است تا کارت‌ها یک «پنجره» بسازند؛ بدون آن، فهرست بلندِ روز
-   کل صفحه را می‌کشید و «انتخابگر» به یک جدول تبدیل می‌شد. */
-.date-wheel {
-  position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; max-width: 100%; min-width: 0;
-  height: 268px; padding: 10px 10px 6px; border: 1px solid var(--line); border-radius: 13px;
+/* انتخابگر تاریخ مشترک — تقویم شمسی ماهانه.
+   ارتفاع ثابت است تا با عوض‌شدن ماه (۲۹ تا ۳۱ روز، و صفر تا شش خانه خالی
+   در ابتدا) چیدمان اطرافش بالا و پایین نپرد. */
+.date-cal {
+  display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 7px;
+  width: 100%; max-width: 100%; min-width: 0; height: 268px; padding: 10px 10px 6px;
+  border: 1px solid var(--line); border-radius: 13px;
   background: linear-gradient(135deg, var(--panel-2), var(--panel));
 }
-.date-wheel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.date-wheel-track {
-  display: grid; gap: 7px; align-content: start; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  scroll-snap-type: y proximity; padding-inline-end: 4px;
-  scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+.date-cal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.date-cal-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.date-cal-head b { text-align: center; font-size: var(--fs-md); }
+.date-cal-nav {
+  display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--panel);
+  color: var(--muted); font: inherit; font-size: var(--fs-lg); line-height: 1; cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
-.date-wheel-track::-webkit-scrollbar { width: 7px; }
-.date-wheel-track::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: var(--line-strong); }
-.date-wheel button {
-  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; align-items: center;
-  min-height: 46px; padding: 8px 12px; scroll-snap-align: center;
-  border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--muted);
-  font: inherit; text-align: start; cursor: pointer; opacity: .72;
-  transition: opacity var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
+.date-cal-nav:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.date-cal-nav:disabled { opacity: .35; cursor: default; }
+.date-cal-week, .date-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.date-cal-week span { color: var(--muted); font-size: var(--fs-xs); text-align: center; }
+.date-cal-grid { align-content: start; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.date-cal-grid::-webkit-scrollbar { width: 7px; }
+.date-cal-grid::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: var(--line-strong); }
+.date-cal-grid > * {
+  display: grid; place-items: center; min-height: 30px; padding: 0;
+  border: 1px solid transparent; border-radius: 8px;
+  font: inherit; font-size: var(--fs-sm); font-variant-numeric: tabular-nums;
 }
-.date-wheel button small { font-size: var(--fs-sm); }
-.date-wheel button b { font-family: var(--mono); direction: ltr; text-align: left; font-size: var(--fs-lg); }
-.date-wheel button em { grid-column: 1 / -1; font-style: normal; font-size: var(--fs-xs); color: var(--muted); }
-.date-wheel button:hover { opacity: 1; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
-.date-wheel button[aria-selected="true"] {
-  opacity: 1; color: var(--accent); border-color: var(--accent); background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--accent);
+/* روزی که تابلو نداشته، خانهٔ خاموش است نه خانهٔ غایب — «آن روز معامله
+   نشده» خودش اطلاعات است و حذفش، تقویم را دروغ‌گو می‌کند. */
+.date-cal-off { color: var(--muted); opacity: .32; }
+.date-cal-pad { visibility: hidden; }
+.date-cal-grid button {
+  border-color: var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
-.date-wheel-status { padding: 5px 4px 0; border-top: 1px dashed var(--line); color: var(--muted); font-size: var(--fs-xs); text-align: center; }
-.date-wheel-empty { margin: auto; color: var(--muted); font-size: var(--fs-sm); text-align: center; }
+.date-cal-grid button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.date-cal-grid button[aria-selected="true"] {
+  color: var(--panel); border-color: var(--accent); background: var(--accent); font-weight: 700;
+}
+.date-cal-status { padding: 5px 4px 0; border-top: 1px dashed var(--line); color: var(--muted); font-size: var(--fs-xs); text-align: center; }
+.date-cal-empty { margin: auto; color: var(--muted); font-size: var(--fs-sm); text-align: center; }
 .date-wheel-field { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
 .date-wheel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 11px; }
 .backtest-legs { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 9px; margin-top: 13px; }
