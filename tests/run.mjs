@@ -3322,7 +3322,24 @@ group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
     appSrc48.includes('if (raw == null) return new Set(allSections);'));
   check('برچسب «n پا» از ریل برداشته شد', !appSrc48.includes('پا</span>'));
   check('باز شدن تب، گروه بسته‌اش را باز می‌کند',
-    appSrc48.includes('if (folded.has(t.section)) { folded.delete(t.section); buildRail(); }'));
+    appSrc48.includes('if (folded.has(t.section)) { revealSection(t.section); buildRail(); }'));
+  // آکاردئون: با ده سرگروه و چهل تب، «چند بخشِ هم‌زمان باز» یعنی ستون کناری
+  // بلندتر از صفحه می‌شود و کاربر برای رسیدن به سرگروه بعدی از کنار فهرستی
+  // رد می‌شود که کاری با آن ندارد.
+  check('باز شدن یک بخش، بقیه بخش‌های باز را می‌بندد',
+    /function revealSection\(sec\) \{[\s\S]*?folded\.add\(other\)[\s\S]*?folded\.delete\(sec\);/.test(appSrc48));
+  // `stage` خودش جعبهٔ پیمایش است؛ `scrollIntoView` پیمایش داخلی‌اش را صفر
+  // نمی‌کند و تب تازه از جایی که تب قبلی رهایش کرده بود شروع می‌شد.
+  check('تب تازه از سطر اول شروع می‌شود، نه از جای تب قبلی',
+    (appSrc48.match(/stage\.scrollTop = 0;/g) || []).length >= 2);
+  // رنگ بخش از توکن‌های خودِ پوسته می‌آید، وگرنه پوستهٔ تیره باید جدا رنگ
+  // بگیرد و همان پراکندگی‌ای می‌شود که نگهبان ۴ جلویش را گرفته.
+  check('رنگ هر بخش ریل از توکن پوسته می‌آید، نه از رنگ سخت‌کد',
+    /const SECTION_TONE = \{[\s\S]*?\};/.test(appSrc48)
+    && !/SECTION_TONE = \{[\s\S]*?#[0-9a-fA-F]{3}/.test(appSrc48));
+  const styleSrc48 = readSrc('../ui/style.css');
+  check('تب باز، رنگ بخش خودش را می‌گیرد نه یک رنگ همیشگی',
+    /\.tab-btn\[aria-current="true"\] \{[^}]*var\(--sec\)/.test(styleSrc48));
 }
 
 // ═══════════════════════════ ۴۹. سنجه‌های رصدگر لحظه‌ای ═══════════════════════════
