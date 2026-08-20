@@ -363,6 +363,36 @@ group('۶. مخرج بازده');
 
   const stock = capitalBase({ legs: [{ kind: 'underlying' }], netCash: -950000, marginNet: 0, maxLoss: 950000 });
   check('دارای سهم → مخرج، بهای سهم منهای پریمیوم', stock.kind === 'STOCK_NET' && stock.value === 950000);
+
+  // ——— بدهکارِ دارای فروشِ برهنه ———
+  //
+  // گزارش آزمون واقعی: یک نسبت‌اسپرد پوت با بدهکار خالصِ ۵۵۷ ریال، وجه
+  // تضمین ۱۳٬۶۴۲٬۰۰۰ و بیشترین زیانِ ۳۸٬۰۶۵٬۵۵۷، بازده ماهانهٔ ۳۳۱٬۹۰۵٪
+  // نشان می‌داد و صدر جدول می‌نشست.
+  //
+  // ریشه: سمت بدهکار فقط پریمیوم پرداختی را می‌شمرد، انگار «بدهکار» یعنی
+  // «بی‌تعهد». با ۵۵۷ ریال نمی‌شود موقعیتی را باز کرد که کارگزار برایش
+  // ۱۳٫۶ میلیون بلوکه می‌کند.
+  const naked = capitalBase({ legs: [{ kind: 'put' }], netCash: -2000, marginNet: 19004500, maxLoss: 90147000 });
+  check('بدهکارِ دارای فروش برهنه، پول بلوکه‌شده را هم می‌شمرد',
+    naked.kind === 'DEBIT_BLOCKED' && naked.value === 90147000, naked.label);
+  check('و بازده را از عددِ نجومی به عدد واقعی برمی‌گرداند',
+    (5000 / naked.value) * 100 < (5000 / 2000) * 100 / 1000);
+  // وقتی وجه تضمین از بیشترین زیان بزرگ‌تر است، خودش لنگر می‌شود
+  const nakedBigMargin = capitalBase({ legs: [{ kind: 'put' }], netCash: -2000, marginNet: 40000, maxLoss: 30000 });
+  check('اگر وجه تضمین از بیشترین زیان بزرگ‌تر باشد، همان مخرج است',
+    nakedBigMargin.value === 40000, nakedBigMargin.label);
+  // زیان نامحدود عدد نمی‌سازد؛ وجه تضمین تنها لنگر واقعی است
+  const nakedUnlimited = capitalBase({ legs: [{ kind: 'call' }], netCash: -2000, marginNet: 25000, maxLoss: Infinity });
+  check('با زیان نامحدود، وجه تضمین لنگر می‌ماند و مخرج بی‌نهایت نمی‌شود',
+    nakedUnlimited.value === 25000 && Number.isFinite(nakedUnlimited.value));
+
+  // مرز مهم: اسپرد بدهکارِ کاملاً پوشیده وجه تضمین صفر می‌گیرد و باید
+  // مو‌به‌مو همان بدهکار خالص بماند — این اصلاح نباید هر ردیف عادی را
+  // جابه‌جا کند.
+  const coveredDebit = capitalBase({ legs: [{ kind: 'call' }], netCash: -4100000, marginNet: 0, maxLoss: 5030000 });
+  check('اسپرد بدهکارِ پوشیده دست‌نخورده می‌ماند، حتی اگر بیشترین زیان بزرگ‌تر باشد',
+    coveredDebit.kind === 'DEBIT' && coveredDebit.value === 4100000, coveredDebit.label);
 }
 
 // ═══════════════════════════ ۷. لایه اجرا ═══════════════════════════
