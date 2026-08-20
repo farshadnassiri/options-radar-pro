@@ -321,6 +321,11 @@ export function evaluate({ legs, quotes, ctx }) {
   if (priced.some((l) => num(l.exec?.slipPct) > s.maxSlipPct)) warn.push('افت مظنه بالا');
   if (!singleExpiry) warn.push('چند سررسید — بازده تقریبی');
   if (!offsettable) warn.push('آفست ناممکن');
+  // بازده نامتعارف. بعد از اصلاح مخرج، عددهای چندمیلیون‌درصدی از بین
+  // رفتند؛ آنچه می‌ماند از مظنه می‌آید نه از فرمول — اسپردی که بازار به آن
+  // قیمت نمی‌دهد. حذفش نمی‌کنیم، ولی بی‌نشان هم رهایش نمی‌کنیم.
+  if (num(s.retWarnMonthPct, 0) > 0 && ok(retMax)
+    && (retMax * basis.monthDays) / days > s.retWarnMonthPct) warn.push('بازده نامتعارف');
 
   return {
     // هویت

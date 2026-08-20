@@ -216,6 +216,10 @@ export function passesFilters(row, s) {
   // فقط برای این هست که ببینی چه ترکیبی وجود دارد و چرا اجرا نمی‌شود.
   if (!row.executable && s.showUnexecutable) return true;
   if (!Number.isFinite(row.capital) || row.capital <= 0) return false;
+  // کف سرمایه. ترکیبی که سرمایه درگیرش چند ریال است، بازده درصدیِ بی‌معنی
+  // می‌سازد و صدر جدول می‌نشیند — در حالی که با آن مبلغ اصلاً باز نمی‌شود.
+  // پیش‌فرض صفر است: آستانه سلیقهٔ کاربر است، نه حکم مدل.
+  if (num(s.minCapital, 0) > 0 && row.capital < s.minCapital) return false;
   if (Number.isFinite(s.minReturnPct) && row.retMaxPct < s.minReturnPct) return false;
   for (const l of row.legPrices) {
     if (Number.isFinite(l.spreadPct) && l.spreadPct > s.maxSpreadPct) return false;
