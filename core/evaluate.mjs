@@ -19,7 +19,7 @@ import {
   grossCash, entryFees, analyzePayoff, positionGreeks, signedQty,
 } from './payoff.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
-import { basisOf } from './settings.mjs';
+import { basisOf, marginParamsOf } from './settings.mjs';
 import { closeValuation } from './positions.mjs';
 import {
   priceLegs, executionCost, maxSize, rowQuality, leggingRisk, spreadPct, midOf,
@@ -87,7 +87,10 @@ export function evaluate({ legs, quotes, ctx }) {
     buyStock: s.feeBuyStock, sellStock: s.feeSellStock,
     option: s.feeOption, exercise: s.feeExercise,
   };
-  const params = { A: s.marginA, B: s.marginB, C: s.marginC, maint: s.marginMaint };
+  // از `marginParamsOf` می‌آید نه از شیء دستی. سه جای برنامه این شیء را
+  // دستی می‌ساختند و هر پارامتر تازه‌ای باید در هر سه اضافه می‌شد وگرنه
+  // بی‌صدا جا می‌ماند — همان‌طور که مبنای جزء B جا می‌ماند.
+  const params = marginParamsOf(s);
   // مبنای محاسبه از تنظیمات می‌آید، نه از عدد سخت‌کد. اندازه قرارداد و
   // تقویم، هر دو ورودی‌اند نه ثابت طبیعت.
   const basis = basisOf(s);
@@ -159,7 +162,7 @@ export function evaluate({ legs, quotes, ctx }) {
   pos.forEach((l, i) => { closes[i] = num(l.quote?.close, num(l.price)); });
   const margin = strategyMargin(pos, {
     S: Sclose, closes, params, creditMode: s.creditSpreadMargin, capitalMode: s.capitalMode,
-    contractSize: basis.contractSize,
+    nakedComboMargin: s.nakedComboMargin, contractSize: basis.contractSize,
   });
 
   // ——— ۵. سرمایه درگیر و بازده ———

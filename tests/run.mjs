@@ -12,7 +12,7 @@ import { grossCash, entryFees, analyzePayoff, signedQty, pnlAtExpiry } from '../
 import { analyzeMixed } from '../core/mixed.mjs';
 import {
   initialMargin, requiredMargin, minMargin, verifyMargin, impliedUnderlying,
-  coverage, strategyMargin, capitalBase, DEFAULT_PARAMS,
+  coverage, strategyMargin, capitalBase, marginBase, DEFAULT_PARAMS,
 } from '../core/margin.mjs';
 import { walkBook, resolvePrice, maxSize, bookCapacity } from '../core/exec.mjs';
 import { evaluate, profitRegions, probOfProfit, breakevenMetrics, COLUMNS } from '../core/evaluate.mjs';
@@ -343,6 +343,13 @@ group('۵. پوشش موقعیت و قاعده بستانکار در برابر 
   check('نسبت‌اسپرد، پوشش ناقص', coverage(ratio).state === 'partial', `نسبت لخت ${coverage(ratio).nakedRatio}`);
   check('نسبت‌اسپرد بدهکار هم وجه تضمین می‌گیرد، چون بخشی لخت است',
     M(ratio).margin > 0, `وجه تضمین ${Math.round(M(ratio).margin).toLocaleString()}`);
+  // و یادداشتش هم باید همین را بگوید. «بدهکار یعنی بی‌تعهد» فقط برای
+  // ترکیب پوشیده درست است؛ متن قدیمی همان جمله را برای نسبت‌اسپرد هم چاپ
+  // می‌کرد، درست کنار وجه تضمینی که خودش گزارش کرده بود.
+  check('و یادداشتش «وجه تضمین گرفته نمی‌شود» نمی‌گوید',
+    M(ratio).note.includes('فروش برهنه'), M(ratio).note);
+  check('ترکیب بدهکارِ پوشیده همچنان «وجه تضمین گرفته نمی‌شود» می‌گیرد',
+    M(bearPut).margin === 0 && M(bearPut).note.includes('گرفته نمی‌شود'), M(bearPut).note);
 
   // کاوردکال: پوشش با سهم پایه، وجه تضمین نقدی صفر
   const cc = [{ kind: 'underlying', side: 'buy', price: 100, ratio: 1, size }, mk('call', 'sell', 110, 5)];
@@ -366,6 +373,47 @@ group('۵. پوشش موقعیت و قاعده بستانکار در برابر 
   check('سه حالت وجه تضمین بستانکار، سه عدد متفاوت',
     full > less && less >= 0 && width > 0,
     `الف ${Math.round(full).toLocaleString()} | ب ${Math.round(less).toLocaleString()} | ج ${Math.round(width).toLocaleString()}`);
+  // ——— قاعدهٔ ترکیبی فروش هم‌زمان کال و پوت ———
+  //
+  // حسابرسی: برنامه دو پای لخت را جمع می‌بندد، متن ضوابط منتشرشده «بزرگ‌تر
+  // + پریمیوم پای دیگر» می‌دهد. هیچ‌کدام با تابلو تأیید نشده، پس هر دو
+  // در دسترس‌اند و پیش‌فرض همان محافظه‌کارانه می‌ماند.
+  const strangle = [mk('call', 'sell', 110, 5), mk('put', 'sell', 90, 4)];
+  const cSum = strategyMargin(strangle, { S, closes: { 0: 5, 1: 4 } });
+  const cMax = strategyMargin(strangle, { S, closes: { 0: 5, 1: 4 }, nakedComboMargin: 'MAX_PLUS_PREMIUM' });
+  check('پیش‌فرضِ فروش هم‌زمان کال و پوت، همان جمع دو پا می‌ماند',
+    cSum.comboRule === 'SUM' && cSum.margin === strategyMargin(strangle, { S, closes: { 0: 5, 1: 4 }, nakedComboMargin: 'SUM' }).margin);
+  check('قاعدهٔ متن ضوابط، وجه تضمین کمتری می‌دهد', cMax.margin < cSum.margin,
+    `جمع ${Math.round(cSum.margin).toLocaleString()} | ضوابط ${Math.round(cMax.margin).toLocaleString()}`);
+  check('و دقیقاً برابر «بزرگ‌ترِ IM دو پا + پریمیوم هر دو» است',
+    Math.abs(cMax.margin - (Math.max(
+      initialMargin(S, 110, size, 'call'), initialMargin(S, 90, size, 'put'),
+    ) + 5 * size + 4 * size)) < 1e-6, `${Math.round(cMax.margin).toLocaleString()}`);
+  check('برچسب قاعدهٔ به‌کاررفته گزارش می‌شود', cMax.comboRule === 'MAX_PLUS_PREMIUM');
+  // ترکیبی که متن ضوابط دربارهٔ آن حرفی نزده، از قاعده بیرون می‌ماند
+  const twoCalls = [mk('call', 'sell', 110, 5), mk('call', 'sell', 120, 3)];
+  check('دو کالِ لخت مشمول قاعدهٔ ترکیبی نیست — حدس زدن، اختراع عدد است',
+    strategyMargin(twoCalls, { S, closes: { 0: 5, 1: 3 }, nakedComboMargin: 'MAX_PLUS_PREMIUM' }).comboRule === 'SUM');
+  const crossExpiry = [mk('call', 'sell', 110, 5, 1, 30), mk('put', 'sell', 90, 4, 1, 90)];
+  check('کال و پوت با دو سررسید هم بیرون می‌ماند',
+    strategyMargin(crossExpiry, { S, closes: { 0: 5, 1: 4 }, nakedComboMargin: 'MAX_PLUS_PREMIUM' }).comboRule === 'SUM');
+
+  // ——— مبنای جزء B ———
+  //
+  // تابلو B×S نشان داد، متن ضوابط B×K می‌نویسد. عددی اختراع نمی‌شود؛
+  // انتخاب صریح است و پیش‌فرض همان تطبیق‌شده با تابلو.
+  const pSpot = { A: 0.20, B: 0.10, C: 10000, maint: 0.70, bBasis: 'SPOT' };
+  const pStrike = { ...pSpot, bBasis: 'STRIKE' };
+  check('پیش‌فرض جزء B، قیمت پایانی پایه است',
+    marginBase(100, 300, size, 'call').legB === marginBase(100, 300, size, 'call', pSpot).legB);
+  check('با مبنای قیمت اعمال، جزء B عدد دیگری می‌شود',
+    marginBase(100, 300, size, 'call', pStrike).legB === 0.10 * 300 * size);
+  check('و آن اختلاف به وجه تضمین اولیه می‌رسد',
+    initialMargin(100, 300, size, 'call', pStrike) > initialMargin(100, 300, size, 'call', pSpot),
+    `${initialMargin(100, 300, size, 'call', pSpot).toLocaleString()} در برابر ${initialMargin(100, 300, size, 'call', pStrike).toLocaleString()}`);
+  check('در حالت هم‌ارز — قیمت اعمال برابر قیمت پایه — دو مبنا یکی می‌شوند',
+    initialMargin(100, 100, size, 'put', pStrike) === initialMargin(100, 100, size, 'put', pSpot));
+
 }
 
 group('۶. مخرج بازده');

@@ -26,16 +26,32 @@
 import { num, ok, ceilTo, nearly, EPS } from './num.mjs';
 import { grossCash, signedQty } from './payoff.mjs';
 
-export const DEFAULT_PARAMS = { A: 0.20, B: 0.10, C: 10000, maint: 0.70 };
+export const DEFAULT_PARAMS = { A: 0.20, B: 0.10, C: 10000, maint: 0.70, bBasis: 'SPOT' };
 
 export function otmAmount(S, K, kind) {
   return kind === 'call' ? Math.max(0, K - S) : Math.max(0, S - K);
 }
 
-/** پایه وجه تضمین و اینکه کدام جزء مقید کرده است. */
+/**
+ * پایه وجه تضمین و اینکه کدام جزء مقید کرده است.
+ *
+ * ——— مبنای جزء B ———
+ *
+ * شش مشاهدهٔ تابلو که این فایل رویشان تثبیت شد، جزء B را بر قیمت پایانی
+ * دارایی پایه نشان دادند. متن آینه‌ای ضوابط منتشرشده، همان جزء را بر قیمت
+ * اعمال می‌نویسد. حسابرسی مستقل روی ۷٬۹۲۵ پای فروش، بیشینه اختلاف ۷٫۳۴
+ * میلیون ریال برای یک محاسبه شمرد.
+ *
+ * هیچ‌کدام از این دو را نمی‌شود از روی داده حل کرد: تابلو گفت B×S، متن
+ * گفت B×K، و فایل رسمیِ قابل دانلود از دامنهٔ سازمان بورس در دسترس نبود.
+ * پس عددی اختراع نمی‌شود و انتخاب، صریح و در دست کاربر است. پیش‌فرض همان
+ * چیزی می‌ماند که با تابلوی واقعی تطبیق داده شده — `SPOT` — و `STRIKE`
+ * برای کسی است که می‌خواهد انطباق با متن ضوابط را بسنجد یا با صورتحساب
+ * کارگزارش مقایسه کند.
+ */
 export function marginBase(S, K, size, kind, p = DEFAULT_PARAMS) {
   const legA = (p.A * S - otmAmount(S, K, kind)) * size;
-  const legB = p.B * S * size;
+  const legB = p.B * (p.bBasis === 'STRIKE' ? K : S) * size;
   return { base: Math.max(legA, legB), legA, legB, binding: legA >= legB ? 'A' : 'B' };
 }
 
@@ -84,7 +100,7 @@ export function verifyMargin({ S, K, size, kind, optClose, imRef, rmRef, params 
   const rows = [
     ['مقدار در زیان بودن قرارداد', otmAmount(S, K, kind) * size],
     [`جزء A  (${params.A} × S − OTM)`, mb.legA],
-    [`جزء B  (${params.B} × S)`, mb.legB],
+    [`جزء B  (${params.B} × ${params.bBasis === 'STRIKE' ? 'قیمت اعمال' : 'S'})`, mb.legB],
     ['پایه انتخابی (بزرگ‌تر)', mb.base],
     [`گردشده به مضرب ${params.C}`, im],
     ['قیمت پایانی اختیار × اندازه', num(optClose) * size],
@@ -265,8 +281,43 @@ export function strategyMargin(legs, ctx = {}) {
       required: rmOne,
       minimum: minMargin(rmOne, p),
       covered: rec.covered, naked: rec.naked, due,
+      // اجزای بخش لخت، برای قاعدهٔ ترکیبی پایین
+      days: num(l.days, NaN),
+      nakedIm: initialMargin(S, num(l.strike), size, kind, p) * rec.naked,
+      nakedPrem: close * size * rec.naked,
+      nakedDue: rmOne * rec.naked,
     });
   });
+
+  // ——— قاعدهٔ ترکیبی فروش کال و پوت ———
+  //
+  // برنامه از ابتدا دو پای لخت را جمع می‌بست. متن ضوابط منتشرشده برای
+  // فروش هم‌زمان کال و پوت، قاعدهٔ دیگری می‌دهد: بزرگ‌ترِ وجه تضمین دو پا،
+  // به‌علاوهٔ پریمیوم پای دیگر. منطقش این است که کال و پوت هم‌زمان در زیان
+  // عمیق نمی‌روند، پس جمع‌بستن دو پا سرمایه را بیش‌برآورد می‌کند.
+  //
+  // با تجزیهٔ خودِ همین فایل (RM = IM + پریمیوم × اندازه) آن قاعده می‌شود
+  // max(IM کال ، IM پوت) + پریمیوم هر دو پا — همان «بزرگ‌تر + پریمیوم دیگری».
+  //
+  // پیش‌فرض عوض نمی‌شود. هیچ‌کدام از این دو با تابلوی واقعی تأیید نشده و
+  // جمع‌بستن محافظه‌کارانه‌تر است؛ کم‌برآوردِ وجه تضمین یعنی کال‌مارجین
+  // غیرمنتظره، و آن بدتر از بیش‌برآورد است. انتخاب، صریح و در دست کاربر.
+  const comboMode = ctx.nakedComboMargin || 'SUM';
+  let comboRule = 'SUM';
+  if (comboMode === 'MAX_PLUS_PREMIUM') {
+    const nakedCalls = perLeg.filter((l) => l.kind === 'call' && l.naked > EPS);
+    const nakedPuts = perLeg.filter((l) => l.kind === 'put' && l.naked > EPS);
+    // فقط ترکیب تمیزِ یک کال و یک پوتِ هم‌سررسید. هر چیز دیگری — نسبت‌اسپرد،
+    // چند سررسید، پای نیمه‌پوشیده — از این قاعده بیرون است و جمع می‌ماند،
+    // چون متن ضوابط دربارهٔ آن حالت‌ها چیزی نمی‌گوید و حدس زدن، اختراع عدد است.
+    if (nakedCalls.length === 1 && nakedPuts.length === 1
+      && nakedCalls[0].days === nakedPuts[0].days) {
+      const c = nakedCalls[0], u = nakedPuts[0];
+      const after = Math.max(c.nakedIm, u.nakedIm) + c.nakedPrem + u.nakedPrem;
+      total += after - (c.nakedDue + u.nakedDue);
+      comboRule = 'MAX_PLUS_PREMIUM';
+    }
+  }
 
   // سهمی که به‌عنوان پوشش قفل شده — «دارایی مسدودی» تابلو. از همان
   // تفکیک پوشش می‌آید که بالا حساب شد، پس محاسبه دوباره لازم نیست.
@@ -288,12 +339,19 @@ export function strategyMargin(legs, ctx = {}) {
     marginNet: ctx.capitalMode === 'GROSS' ? total : Math.max(0, total - credit),
     conditionalMargin: conditional,          // اگر پوشش از بین برود
     creditMode: mode,
+    comboRule,
     perLeg,
-    note: !isCredit
-      ? 'بدهکار خالص — وجه تضمین گرفته نمی‌شود'
+    note: (!isCredit
+      ? (total > 0
+        // بدهکارِ دارای فروش برهنه: «بدهکار یعنی بی‌تعهد» فقط برای ترکیب
+        // پوشیده درست است. اگر پایی لخت مانده، وجه تضمین گرفته می‌شود.
+        ? 'بدهکار خالص با فروش برهنه — وجه تضمین گرفته می‌شود'
+        : 'بدهکار خالص — وجه تضمین گرفته نمی‌شود')
       : mode === 'FULL'
         ? 'بستانکار خالص — مبنای الف، تأییدنشده با تابلو'
-        : 'بستانکار خالص — مبنای انتخابی تو، تأییدنشده با تابلو',
+        : 'بستانکار خالص — مبنای انتخابی تو، تأییدنشده با تابلو')
+      + (comboRule === 'MAX_PLUS_PREMIUM' ? ' · قاعدهٔ ترکیبی متن ضوابط' : '')
+      + (p.bBasis === 'STRIKE' ? ' · جزء B بر قیمت اعمال' : ''),
   };
 }
 

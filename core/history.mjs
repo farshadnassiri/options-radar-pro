@@ -8,6 +8,7 @@ import { num, ok, EPS } from './num.mjs';
 import { grossCash, entryFees, analyzePayoff } from './payoff.mjs';
 import { analyzeMixed, isSingleExpiry } from './mixed.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
+import { marginParamsOf } from './settings.mjs';
 import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
 import {
   legContractSize, comboContractSize, blockedExpirySet, withoutBlockedExpiries,
@@ -230,8 +231,9 @@ function capitalForEntry(priced, netCash, spot, settings, fees) {
   const closes = Object.fromEntries(priced.map((l, i) => [i, l.price]));
   const margin = strategyMargin(priced, {
     S: spot, closes,
-    params: { A: settings.marginA, B: settings.marginB, C: settings.marginC, maint: settings.marginMaint },
+    params: marginParamsOf(settings),
     creditMode: settings.creditSpreadMargin, capitalMode: settings.capitalMode,
+    nakedComboMargin: settings.nakedComboMargin,
   });
   const capital = capitalBase({
     legs: priced, netCash, marginNet: margin.marginNet, maxLoss: payoff.maxLoss,
@@ -413,8 +415,9 @@ export function replayHistory({
     const currentCloses = Object.fromEntries(close.perLeg.map((l, index) => [index, l.exitPrice]));
     const dayMargin = strategyMargin(priced, {
       S: base.baseClose, closes: currentCloses,
-      params: { A: settings.marginA, B: settings.marginB, C: settings.marginC, maint: settings.marginMaint },
+      params: marginParamsOf(settings),
       creditMode: settings.creditSpreadMargin, capitalMode: settings.capitalMode,
+      nakedComboMargin: settings.nakedComboMargin,
     });
     rows.push({
       date, dateLabel: historyDateLabel(date), dayName: historyDayName(date),
