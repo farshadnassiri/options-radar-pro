@@ -11,6 +11,7 @@ import {
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
+import { attachExportsIn } from '/ui/export.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -174,7 +175,7 @@ function scatterChart(host, rows) {
     ${yTicks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="history-grid"/><text x="${L - 9}" y="${y(v) + 4}" text-anchor="end">${fmt.pct(v)}</text>`).join('')}
     ${xTicks.map((v) => `<line x1="${x(v)}" x2="${x(v)}" y1="${T}" y2="${H - B}" class="history-grid history-grid-x"/><text x="${x(v)}" y="${H - B + 20}" text-anchor="middle">${fmt.money(v)}</text>`).join('')}
     <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="chart-zero"/>${circles}
-    <text class="history-axis-title" x="${(L + W - R) / 2}" y="${H - 9}" text-anchor="middle">قدر مطلق افت از قله</text><text class="history-axis-title" transform="translate(17 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle">بازده پایان</text>
+    <text class="history-axis-title" x="${(L + W - R) / 2}" y="${H - 9}" text-anchor="middle">قدر مطلق افت از قله (ریال)</text><text class="history-axis-title" transform="translate(17 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle">بازده پایان (درصد)</text>
   </svg><div class="history-tooltip" hidden></div></div>`;
   const stage = host.querySelector('.history-chart-stage'), tip = host.querySelector('.history-tooltip');
   stage.addEventListener('pointermove', (event) => {
@@ -343,6 +344,11 @@ export async function mount(root, { state }) {
         <div id="h-holding-profile" class="history-table-wrap"><p class="empty-note">پس از محاسبه ماتریس ساخته می‌شود.</p></div>
       </section>
     </section>`;
+
+  // هر ظرف جدول، دکمهٔ خروجی خودش را می‌گیرد. ظرف‌ها در همین قالب‌اند حتی
+  // وقتی خالی‌اند، و خواندن لحظهٔ کلیک انجام می‌شود — پس یک بار کافی است.
+  attachExportsIn(root, 'history');
+
 
   const $ = (id) => root.querySelector(`#${id}`);
   const baseSelect = $('h-base'), strategySelect = $('h-strategy'), modeSelect = $('h-mode');

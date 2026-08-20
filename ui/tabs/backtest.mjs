@@ -7,12 +7,13 @@ import {
   replayHistory, rollingEntryMatrix, holdingPeriodProfile, strategyLegSnapshots,
 } from '/core/history.mjs';
 import {
-  replayIntraday, summarizeIntraday,
+  replayIntraday, summarizeIntraday, inIntradaySession,
   bucketIntradayPath, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
   INTRADAY_START_SECOND, INTRADAY_END_SECOND,
 } from '/core/backtest.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, signTone, ltr } from '/ui/fmt.mjs';
+import { attachExportsIn } from '/ui/export.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -64,10 +65,28 @@ function marketSnapshot(snapshots, selectedBasis, scope, manual = {}) {
   }).join('')}</div>`;
 }
 
-function chart(host, points, series, { money = false, count = false, timeScale = false, step = false } = {}) {
+/**
+ * عنوان محور، افقی و عمودی.
+ *
+ * برچسب عددی و عنوان محور دو کار جدا می‌کنند: عدد را می‌خوانی، عنوان را یک
+ * بار می‌بینی و می‌فهمی واحد چیست. بدون عنوان، «۱۲٬۵۰۰» می‌تواند ریال باشد
+ * یا قرارداد یا درصد — و نمودار بی‌واحد، نموداری است که باید حدس بزنی.
+ *
+ * عنوان عمودی چرخانده می‌شود چون در قاب باریکِ سمت چپ افقی جا نمی‌شود؛
+ * زاویه ‎−۹۰‎ است تا از پایین به بالا خوانده شود، همان قراردادی که همه‌جا هست.
+ */
+function axisTitles(xLabel, yLabel, geo) {
+  const { W, H, L, R, T, B } = geo;
+  const cx = L + (W - L - R) / 2;
+  const cy = T + (H - T - B) / 2;
+  return `${xLabel ? `<text class="axis-title" x="${cx}" y="${H - 6}" text-anchor="middle">${xLabel}</text>` : ''}
+    ${yLabel ? `<text class="axis-title" x="${16}" y="${cy}" text-anchor="middle" transform="rotate(-90 16 ${cy})">${yLabel}</text>` : ''}`;
+}
+
+function chart(host, points, series, { money = false, count = false, timeScale = false, step = false, xLabel, yLabel } = {}) {
   const rows = points.filter((point) => series.some((item) => Number.isFinite(Number(point[item.key]))));
   if (rows.length < 2) { host.innerHTML = '<p class="empty-note">برای نمودار دست‌کم دو نقطه معتبر لازم است.</p>'; return; }
-  const W = 900, H = 330, L = 92, R = 28, T = 28, B = 55;
+  const W = 900, H = 348, L = 104, R = 28, T = 28, B = 68;
   const values = rows.flatMap((row) => series.map((item) => Number(row[item.key])).filter(Number.isFinite));
   let lo = Math.min(0, ...values), hi = Math.max(0, ...values);
   if (Math.abs(hi - lo) < 1e-9) { lo -= 1; hi += 1; }
@@ -100,6 +119,10 @@ function chart(host, points, series, { money = false, count = false, timeScale =
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="backtest-grid"/><text x="${L - 10}" y="${y(value) + 4}" text-anchor="end">${label(value)}</text>`).join('')}
     ${timeTicks.map((second) => `<line x1="${x({ second }, 0)}" x2="${x({ second }, 0)}" y1="${T}" y2="${H - B}" class="backtest-time-grid"/><text x="${x({ second }, 0)}" y="${H - B + 22}" text-anchor="middle">${faDigits(clockLabel(second).slice(0, 5))}</text>`).join('')}
     <line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="backtest-zero"/>
+    ${axisTitles(
+      xLabel ?? (timeScale ? 'ساعت جلسه — ۹:۰۰ تا ۱۲:۳۰' : 'مسیر زمانی'),
+      yLabel ?? (money ? 'ریال' : count ? 'تعداد' : 'درصد'),
+      { W, H, L, R, T, B })}
     ${series.map(seriesShape).join('')}
     <g class="backtest-cursor" hidden><line y1="${T}" y2="${H - B}"/><g></g></g>
     <rect class="backtest-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
@@ -181,6 +204,10 @@ export async function mount(root, { state }) {
     </section>
   </section>`;
 
+
+  // هر ظرف جدول، دکمهٔ خروجی خودش را می‌گیرد. ظرف‌ها در همین قالب‌اند حتی
+  // وقتی خالی‌اند، و خواندن لحظهٔ کلیک انجام می‌شود — پس یک بار کافی است.
+  attachExportsIn(root, 'backtest');
   const $ = (id) => root.querySelector(`#${id}`);
   const status = $('bt-status'), baseSelect = $('bt-base'), strategySelect = $('bt-strategy');
   const entryRail = $('bt-entry-basis'), exitRail = $('bt-exit-basis');
@@ -190,6 +217,9 @@ export async function mount(root, { state }) {
   // روزهای مسیر بالا و پایین برود، پس هر روزِ گرفته‌شده نگه داشته می‌شود؛
   // وگرنه هر کلیک همان درخواست‌ها را دوباره می‌فرستد.
   const tradesCache = new Map();
+  // آخرین دریافتی که کش نشد — نتیجهٔ ناقص عمداً کش نمی‌شود، ولی پیام خطا
+  // باید بداند چه شد.
+  let lastDayFetch = null;
   let timeframeDays = [], timeframeSeconds = 900;
   // قیمت دستی به یک قرارداد و یک روز مشخص تعلق دارد. با عوض‌شدن ترکیب یا
   // تاریخ، عددی که کاربر وارد کرده دیگر مال آن قرارداد و آن روز نیست، پس
@@ -338,15 +368,40 @@ export async function mount(root, { state }) {
    * فراخوان بتواند بگوید کدام پا داده ندارد. تفاوت «معامله نشده» با «نگرفتیم»
    * دقیقاً همان چیزی است که یک آفست دروغین می‌سازد.
    */
-  async function fetchDayTrades(date) {
-    if (tradesCache.has(date)) return tradesCache.get(date);
+  async function fetchDayTrades(date, { force = false } = {}) {
+    if (!force && tradesCache.has(date)) return tradesCache.get(date);
     const codes = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua.ins)])];
     const fetched = await Promise.allSettled(codes.map(async (ins) => [ins, await fetchTrades(ins, date)]));
     const byIns = Object.fromEntries(fetched.filter((item) => item.status === 'fulfilled').map((item) => item.value));
     const failed = fetched.map((item, index) => item.status === 'rejected' ? codes[index] : null).filter(Boolean);
     const result = { byIns, failed, date };
-    tradesCache.set(date, result);
+    // نتیجهٔ ناقص کش نمی‌شود.
+    //
+    // پیش از این هر نتیجه‌ای کش می‌شد، حتی وقتی درخواستِ یکی از پاها شکست
+    // خورده بود. یعنی یک خطای گذرای بالادست — سهمیه، مهلت، ۵۰۲ — آن روز را
+    // تا پایان نشست قفل می‌کرد: هر بار باز کردنش همان نتیجهٔ خرابِ کش‌شده
+    // را برمی‌گرداند و کاربر می‌دید روزی وسط مسیر خالی است در حالی که روز
+    // قبل و بعدش سالم‌اند. دقیقاً همان چیزی که گزارش شد.
+    lastDayFetch = result;
+    if (!requiredMissing(failed).length) tradesCache.set(date, result);
     return result;
+  }
+
+  /**
+   * کدام پا در بازهٔ جلسه اصلاً معامله نشده.
+   *
+   * این با «دریافت نشد» یکی نیست و پیام باید فرقشان را بگوید: یکی واقعیت
+   * بازار است (قرارداد بی‌رمق)، دیگری خرابی ماست. تا امروز هر دو یک جملهٔ
+   * واحد می‌گرفتند و کاربر نمی‌دانست باید دوباره تلاش کند یا نه.
+   */
+  function legsWithoutTrades(byIns) {
+    const out = [];
+    legs.forEach((leg, index) => {
+      const rows = byIns[String(leg.ins)] || [];
+      const inSession = rows.filter((t) => !t.canceled && Number(t.price) > 0 && inIntradaySession(t.time));
+      if (!inSession.length) out.push(nameOf(leg, `پای ${faDigits(index + 1)}`));
+    });
+    return out;
   }
 
   const requiredMissing = (failed) => {
@@ -400,6 +455,29 @@ export async function mount(root, { state }) {
     }).join('')}</tbody></table>`;
   }
 
+  /**
+   * چرا این روز خط زمانی مشترک ندارد.
+   *
+   * سه علت کاملاً متفاوت به یک نتیجه می‌رسند و تا امروز هر سه یک جملهٔ واحد
+   * می‌گرفتند: «قیمت تمام پاها کامل نشده است». آن جمله برای دو تای اول
+   * دروغ است — خرابیِ ما را به‌عنوان واقعیتِ بازار گزارش می‌کرد.
+   */
+  function intradayGap(day) {
+    if (!day) return null;
+    const missing = requiredMissing(day.failed || []);
+    if (missing.length) {
+      return { kind: 'fetch', text: `ریزمعاملهٔ ${fmt.int(missing.length)} پا از بالادست دریافت نشد. این خرابیِ دریافت است، نه نبودِ معامله.` };
+    }
+    if (day.failed?.length) {
+      return { kind: 'fetch-base', text: 'ریزمعاملهٔ نماد پایه دریافت نشد؛ تغییر پایه در این نما نمی‌آید.' };
+    }
+    const quiet = legsWithoutTrades(day.byIns || {});
+    if (quiet.length) {
+      return { kind: 'quiet', text: `در بازهٔ ۹:۰۰ تا ۱۲:۳۰ این روز، ${quiet.map((n) => `«${esc(n)}»` ).join(' و ')} هیچ معامله‌ای نداشت. خط زمانی مشترک وقتی ساخته می‌شود که هر پا دست‌کم یک معامله داشته باشد.` };
+    }
+    return { kind: 'partial', text: 'معامله‌ها هست ولی هیچ ثانیه‌ای پیدا نشد که قیمت همهٔ پاها با هم مشاهده شده باشد.' };
+  }
+
   function paintIntradayAnalysis() {
     const summary = summarizeIntraday(intraday);
     // عنوان باید بگوید کدام روز؛ کاربر می‌تواند هر روز مسیر را باز کند و
@@ -409,11 +487,19 @@ export async function mount(root, { state }) {
       : 'تحلیل درون‌روزی ۹:۰۰ تا ۱۲:۳۰';
     const hosts = ['bt-intraday-pnl-chart', 'bt-intraday-leg-chart', 'bt-intraday-price-chart', 'bt-intraday-volume-chart', 'bt-interval-table', 'bt-correlation-table', 'bt-tape-table'];
     if (!summary.points) {
-      $('bt-intraday-source').textContent = 'فاقد خط زمانی کامل';
+      const gap = intradayGap(tradesCache.get(intradayDate) || lastDayFetch);
+      const retry = gap && gap.kind.startsWith('fetch')
+        ? '<button type="button" class="ghost" id="bt-intraday-retry">تلاش دوباره</button>' : '';
+      $('bt-intraday-source').textContent = gap?.kind === 'quiet' ? 'پای بی‌معامله' : 'فاقد خط زمانی کامل';
       $('bt-intraday-kpis').innerHTML = '';
       $('bt-tape-count').textContent = '—';
       $('bt-correlation-note').textContent = '';
-      hosts.forEach((id) => { $(id).innerHTML = '<p class="empty-note">برای این روز، قیمت تمام پاها در بازهٔ ۹:۰۰ تا ۱۲:۳۰ کامل نشده است.</p>'; });
+      const msg = `<p class="empty-note">${gap?.text || 'برای این روز خط زمانی مشترکی ساخته نشد.'} ${retry}</p>`;
+      hosts.forEach((id) => { $(id).innerHTML = id === hosts[0] ? msg : `<p class="empty-note">${gap?.text || 'داده‌ای برای رسم نیست.'}</p>`; });
+      $('bt-intraday-retry')?.addEventListener('click', () => {
+        tradesCache.delete(intradayDate);
+        openDayIntraday(intradayDate, { scroll: false });
+      });
       return;
     }
 

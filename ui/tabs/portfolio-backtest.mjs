@@ -8,6 +8,7 @@ import {
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
+import { attachExportsIn } from '/ui/export.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -31,14 +32,14 @@ function setRail(host, value) {
   host.querySelectorAll('[data-basis]').forEach((button) => button.setAttribute('aria-checked', String(button.dataset.basis === value)));
 }
 
-function lineChart(host, rows) {
+function lineChart(host, rows, { xLabel, yLabel } = {}) {
   const points = rows.filter((row) => row.status === 'ok' && Number.isFinite(row.netPnl) && Number.isFinite(row.returnPct));
   if (points.length < 2) { host.innerHTML = '<p class="empty-note">برای نمودار دست‌کم دو روز معتبر لازم است.</p>'; return; }
   const series = [
     { key: 'returnPct', label: 'بازده استراتژی', color: 'var(--accent)' },
     { key: 'baseCumulativePct', label: 'تغییر نماد پایه', color: 'var(--cmp1)' },
   ];
-  const W = 900, H = 320, L = 72, R = 24, T = 24, B = 48;
+  const W = 900, H = 340, L = 92, R = 24, T = 24, B = 62;
   const values = points.flatMap((row) => series.map((item) => row[item.key]).filter(Number.isFinite));
   let low = Math.min(0, ...values), high = Math.max(0, ...values);
   if (Math.abs(high - low) < 1e-9) { low -= 1; high += 1; }
@@ -48,6 +49,8 @@ function lineChart(host, rows) {
   const ticks = Array.from({ length: 5 }, (_, index) => low + ((high - low) * index) / 4);
   host.innerHTML = `<div class="portfolio-chart-legend">${series.map((item) => `<span style="--series:${item.color}"><i></i>${item.label}</span>`).join('')}</div><div class="portfolio-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار تعاملی مسیر بازده استراتژی و نماد پایه">
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="portfolio-grid"/><text x="${L - 9}" y="${y(value) + 4}" text-anchor="end">${fmt.pct(value)}</text>`).join('')}
+    <text class="axis-title" x="${(L + W - R) / 2}" y="${H - 8}" text-anchor="middle">${xLabel || 'روز مسیر'}</text>
+    <text class="axis-title" transform="translate(16 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle">${yLabel || 'بازده (درصد)'}</text>
     ${series.map((item) => `<polyline fill="none" stroke="${item.color}" points="${points.map((row, index) => `${x(index)},${y(row[item.key])}`).join(' ')}"/>`).join('')}
     <g class="portfolio-cursor" hidden><line y1="${T}" y2="${H - B}"/><g></g></g>
     <rect class="portfolio-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
@@ -100,6 +103,11 @@ export async function mount(root, { state }) {
     <section class="card"><div class="section-head"><div><p class="eyebrow">ترکیب‌های واقعی</p><h2 id="pb-combo-title">برای مشاهده جزئیات یک استراتژی را انتخاب کن</h2></div><span>هر ردیف یک ترکیب قرارداد</span></div><div id="pb-combos" class="history-table-wrap"></div></section>
     <section id="pb-detail" class="portfolio-detail" hidden></section>
   </section>`;
+
+  // هر ظرف جدول، دکمهٔ خروجی خودش را می‌گیرد. ظرف‌ها در همین قالب‌اند حتی
+  // وقتی خالی‌اند، و خواندن لحظهٔ کلیک انجام می‌شود — پس یک بار کافی است.
+  attachExportsIn(root, 'portfolio');
+
 
   const $ = (id) => root.querySelector(`#${id}`);
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');

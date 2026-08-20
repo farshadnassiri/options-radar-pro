@@ -40,6 +40,7 @@ import { strandedKeys } from '../ui/expiries.mjs';
 import { icon, GROUP_ICON, TAB_ICON, sectionIcon } from '../ui/icons.mjs';
 import { canHandoff, handoffPlan } from '../ui/handoff.mjs';
 import { scenarioLadder, sensitivityGrid, bookDepthRisk } from '../core/scenario.mjs';
+import { csvCell, numericCell, toCsv, stamp } from '../ui/export.mjs';
 import * as uiFmt48 from '../ui/fmt.mjs';
 import { GROUPS as STRAT_GROUPS48 } from '../strategies/catalog.mjs';
 import {
@@ -2346,7 +2347,8 @@ group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فری�
   // ریزمعامله هر روز چند درخواست است؛ رفت‌وبرگشت بین روزها نباید هر بار
   // همان درخواست‌ها را دوباره بفرستد.
   check('ریزمعامله هر روز یک‌بار گرفته و نگه داشته می‌شود',
-    source40.includes('if (tradesCache.has(date)) return tradesCache.get(date);') && source40.includes('tradesCache.set(date, result);'));
+    source40.includes('if (!force && tradesCache.has(date)) return tradesCache.get(date);')
+    && source40.includes('tradesCache.set(date, result);'));
   // ترکیب یا بازه که عوض شود، کش مال بازپخش قبلی است.
   check('اجرای دوباره بک‌تست، کش ریزمعامله را خالی می‌کند', source40.includes('tradesCache.clear();'));
   // ——— نمای کلی بازه، مستقل از روزِ بازشده ———
@@ -3379,6 +3381,117 @@ group('۵۲. سناریو، حساسیت، و ریسک عمق دفتر');
     ['scen-axis', 'scen-range', 'scen-steps', 'scen-units'].every((id) => panelSrc52.includes(id)));
   // پله فرد لازم است تا «بدون تغییر» همیشه وسط جدول بیفتد
   check('تعداد پله فرد می‌شود تا صفر وسط بماند', panelSrc52.includes('if (steps % 2 === 0) steps += 1;'));
+}
+
+// ═══════════════════════════ ۵۳. روزِ قفل‌شدهٔ ریزمعامله ═══════════════════════════
+group('۵۳. روزِ قفل‌شدهٔ ریزمعامله');
+{
+  const src53 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+
+  // گزارش کاربر: «گاهی این پیام را می‌دهد، روز قبل و بعدش سالم است.»
+  //
+  // علت: هر نتیجه‌ای کش می‌شد، حتی وقتی درخواستِ یکی از پاها شکست خورده بود.
+  // یک خطای گذرای بالادست — سهمیه، مهلت، ۵۰۲ — آن روز را تا پایان نشست قفل
+  // می‌کرد و هر بار باز کردنش همان نتیجهٔ خرابِ کش‌شده را برمی‌گرداند.
+  check('نتیجهٔ ناقص کش نمی‌شود',
+    /if \(!requiredMissing\(failed\)\.length\) tradesCache\.set\(date, result\);/.test(src53));
+  check('گرفتن دوباره با اجبار ممکن است', src53.includes('async function fetchDayTrades(date, { force = false } = {})'));
+  check('دکمهٔ تلاش دوباره همان روز را از کش پاک می‌کند',
+    src53.includes("tradesCache.delete(intradayDate);") && src53.includes('bt-intraday-retry'));
+
+  // سه علت کاملاً متفاوت به یک نتیجه می‌رسیدند و هر سه یک جملهٔ واحد
+  // می‌گرفتند. آن جمله برای دو تای اول دروغ بود: خرابیِ ما را به‌عنوان
+  // واقعیتِ بازار گزارش می‌کرد.
+  check('علت نبودِ خط زمانی تفکیک می‌شود، نه یک جملهٔ واحد',
+    src53.includes('function intradayGap(day)')
+    && ["'fetch'", "'fetch-base'", "'quiet'", "'partial'"].every((k) => src53.includes(k)));
+  check('پیام قدیمیِ گمراه‌کننده دیگر نیست',
+    !src53.includes('برای این روز، قیمت تمام پاها در بازهٔ ۹:۰۰ تا ۱۲:۳۰ کامل نشده است'));
+  // «معامله نشده» واقعیت بازار است و تلاش دوباره دردی دوا نمی‌کند؛ فقط
+  // خرابیِ دریافت دکمه می‌گیرد.
+  check('تلاش دوباره فقط برای خرابی دریافت است، نه برای پای بی‌معامله',
+    src53.includes("gap.kind.startsWith('fetch')"));
+  check('نام پای بی‌معامله گفته می‌شود، نه فقط شمارش',
+    src53.includes('function legsWithoutTrades(byIns)') && src53.includes('quiet.map('));
+  // معاملهٔ باطل‌شده و قیمت صفر نباید «معامله» حساب شوند
+  check('شمارش معامله، باطل‌شده و قیمت صفر را کنار می‌گذارد',
+    /!t\.canceled && Number\(t\.price\) > 0 && inIntradaySession\(t\.time\)/.test(src53));
+  // نتیجهٔ ناقص کش نمی‌شود، ولی پیام خطا باید بداند چه شد
+  check('آخرین دریافتِ کش‌نشده برای ساختن پیام نگه داشته می‌شود',
+    src53.includes('let lastDayFetch = null;') && src53.includes('lastDayFetch = result;'));
+}
+
+// ═══════════════════════════ ۵۴. خروجی اکسل و عنوان محور نمودارها ═══════════════════════════
+group('۵۴. خروجی اکسل و عنوان محور');
+{
+  // ——— خانه‌ها ———
+  //
+  // رابط عدد را فارسی نشان می‌دهد. اکسل `۱۲٬۳۴۵` را عدد نمی‌فهمد و به‌صورت
+  // متن می‌نشاند، پس جمع و مرتب‌سازی از کار می‌افتد.
+  check('عدد فارسی به رقم لاتین برمی‌گردد', numericCell('۱۲٬۳۴۵') === '12345');
+  check('منفی و اعشار فارسی هم درست می‌شوند', numericCell('−۴٬۵۰۰٫۲۵') === '-4500.25');
+  // واحد در سرستون هست؛ «٪» چسبیده ستون را متن می‌کند
+  check('نشانه درصد از خانه برداشته می‌شود', numericCell('−۳۷٫۷۱٪') === '-37.71');
+  check('ولی فقط وقتی باقی‌مانده یک عدد کامل باشد',
+    numericCell('۵۰٪ تا ۶۰٪').startsWith('"'), numericCell('۵۰٪ تا ۶۰٪'));
+  // «۳۰ روز» عدد نیست: اگر عدد شود واحدش را از دست می‌دهد و ۳۰ ثانیه از ۳۰ روز جدا نمی‌شود
+  check('متنِ دارای عدد، متن می‌ماند', numericCell('۳۰ روز') === '"30 روز"');
+  check('نقل‌قول درون متن دوبار می‌شود، طبق RFC 4180',
+    csvCell('او گفت "سلام"') === '"او گفت ""سلام"""');
+  check('خانه تهی، رشته خالیِ نقل‌قول‌دار است', csvCell(null) === '""' && csvCell(undefined) === '""');
+  check('شکست خط در خانه، سطر را نمی‌شکند', !csvCell('خط\nدوم').includes('\n'));
+
+  // ——— فایل ———
+  //
+  // بدون BOM اکسل ویندوزی فایل را با کدپیج محلی می‌خواند و متن فارسی به هم
+  // می‌ریزد. خودِ فایل سالم است؛ اکسل اشتباه می‌خواند.
+  const csv54 = toCsv([['نام', 'مقدار'], ['اهرم', '۱۲٬۳۴۵']]);
+  check('فایل با BOM شروع می‌شود', csv54.charCodeAt(0) === 0xFEFF);
+  check('سطرها با CRLF جدا می‌شوند', csv54.includes('\r\n'));
+  check('سرستون متن می‌ماند و مقدار عدد می‌شود',
+    csv54.includes('"نام","مقدار"') && csv54.includes('"اهرم",12345'));
+  check('مهر زمانی نام فایل، رقم لاتین است و طول ثابت',
+    /^\d{8}-\d{4}$/.test(stamp(new Date(2026, 7, 20, 5, 9))), stamp(new Date(2026, 7, 20, 5, 9)));
+
+  // ——— اتصال ———
+  const exSrc54 = fs.readFileSync(new URL('../ui/export.mjs', import.meta.url), 'utf8');
+  // جدول مجازی‌سازی‌شده فقط ردیف‌های داخل قاب را در DOM دارد؛ خروجیِ
+  // DOM-خوان آن‌جا بی‌صدا ناقص می‌شود.
+  check('جارو، جدول مجازی‌سازی‌شده را کنار می‌گذارد',
+    exSrc54.includes("if (wrap.closest('.tbl-wrap')) continue;"));
+  check('دکمه بیرون از ظرفِ بازنویسی‌شونده می‌نشیند',
+    exSrc54.includes("wrap.parentNode.insertBefore(bar, wrap);"));
+  check('سرستون چندسطری با colspan جابه‌جا نمی‌شود',
+    exSrc54.includes("for (let i = 0; i < span; i++) row.push(cell.textContent);"));
+  const tblSrc54 = fs.readFileSync(new URL('../ui/table.mjs', import.meta.url), 'utf8');
+  check('جدول مجازی‌سازی‌شده خروجی داده‌محور دارد، نه DOM-محور',
+    tblSrc54.includes('function exportRows()') && tblSrc54.includes('view.map((r) => cols.map('));
+  for (const [file, what] of [['../ui/tabs/backtest.mjs', 'بک‌تست'], ['../ui/tabs/history.mjs', 'تاریخچه'],
+    ['../ui/tabs/portfolio-backtest.mjs', 'سبد'], ['../ui/tabs/positions.mjs', 'موقعیت‌ها'],
+    ['../ui/tabs/roll.mjs', 'رول'], ['../ui/scenario-panel.mjs', 'سناریو']]) {
+    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    check(`جدول‌های ${what} دکمه خروجی می‌گیرند`, src.includes('attachExportsIn('));
+  }
+
+  // ——— عنوان محور ———
+  //
+  // بدون عنوان، «۱۲٬۵۰۰» می‌تواند ریال باشد یا قرارداد یا درصد.
+  for (const [file, what] of [['../ui/chart.mjs', 'نمودار بازده'], ['../ui/tabs/backtest.mjs', 'نمودارهای بک‌تست'],
+    ['../ui/tabs/history.mjs', 'نمودارهای تاریخچه'], ['../ui/tabs/portfolio-backtest.mjs', 'نمودار سبد']]) {
+    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    check(`${what} عنوان محور دارد`, /axis-title/.test(src));
+  }
+  const chartSrc54 = fs.readFileSync(new URL('../ui/chart.mjs', import.meta.url), 'utf8');
+  check('واحد در عنوان محور نوشته می‌شود',
+    chartSrc54.includes('قیمت سهم پایه (ریال)') && chartSrc54.includes('سود و زیان (ریال)'));
+  const btSrc54 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  check('عنوان محور بک‌تست از واحد خودِ نمودار می‌آید',
+    btSrc54.includes("money ? 'ریال' : count ? 'تعداد' : 'درصد'")
+    && btSrc54.includes("timeScale ? 'ساعت جلسه"));
+  const css54 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  check('عنوان محور از برچسب عددی درشت‌تر است',
+    /--fs-axis: 15\.5px;/.test(css54) && /--fs-chart: 15px;/.test(css54));
+  check('اعداد نمودار درشت‌تر شدند', /--fs-chart-sm: 13px;/.test(css54) && /--fs-chart-lg: 17px;/.test(css54));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════
