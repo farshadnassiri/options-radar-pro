@@ -16,6 +16,7 @@ import { fmt, coverageInfo, signTone } from '/ui/fmt.mjs';
 import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
+import { canHandoff, handoffPlan, handoffButtonHtml } from '/ui/handoff.mjs';
 import { runScanAll, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 
 const DEFAULT_COLS = ['strategy', 'underlying', 'legsText', 'days', 'netCash', 'capital',
@@ -136,6 +137,7 @@ export async function mount(root, { state, api }) {
           <span>بیشترین سود: ${fmt.money(an.maxProfit)}</span>
           <span>بیشترین زیان: <b style="color:${Number.isFinite(an.maxLoss) ? 'inherit' : 'var(--loss)'}">${fmt.money(an.maxLoss)}</b></span>
         </div>
+        <div class="detail-actions">${canHandoff(r) ? handoffButtonHtml() : ''}</div>
         <div id="cmp-picker"></div>
       </div>
       <div>
@@ -199,6 +201,16 @@ export async function mount(root, { state, api }) {
       });
     }
     renderCmpPicker();
+    // ——— انتقال به بک‌تست ———
+    root.querySelector('#to-backtest')?.addEventListener('click', () => {
+      state.handoff = handoffPlan(r, {
+        from: 'top', strategyId: r.strategyId || '', strategyName: r.strategy || '',
+        units: Math.max(1, Number(s().qtyDefault) || 1),
+        entryBasis: 'LAST', exitBasis: 'LAST',
+      });
+      location.hash = 'backtest';
+    });
+
     mountChart();
   }
 

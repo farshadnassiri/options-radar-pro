@@ -20,6 +20,7 @@ import { fmt, faNum, faDigits, coverageInfo, signTone, ltr } from '/ui/fmt.mjs';
 import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
+import { canHandoff, handoffPlan, handoffButtonHtml } from '/ui/handoff.mjs';
 import { runScan, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 
 /** dEven عددی (مثلاً ۲۰۲۶۰۱۰۱) به تاریخ شمسی خوانا. */
@@ -300,6 +301,7 @@ export async function mount(root, { tab, state, api }) {
           <span>بیشترین سود: ${fmt.money(an.maxProfit)}</span>
           <span>بیشترین زیان: <b style="color:${Number.isFinite(an.maxLoss) ? 'inherit' : 'var(--loss)'}">${fmt.money(an.maxLoss)}</b></span>
         </div>
+        <div class="detail-actions">${canHandoff(r) ? handoffButtonHtml() : ''}</div>
         <div id="cmp-picker"></div>
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">قیمت و عمق هر پا</h4>
         <table class="mini">
@@ -401,6 +403,16 @@ export async function mount(root, { tab, state, api }) {
       });
     }
     renderCmpPicker();
+    // ——— انتقال به بک‌تست ———
+    root.querySelector('#to-backtest')?.addEventListener('click', () => {
+      state.handoff = handoffPlan(r, {
+        from: 'strategy', strategyId: def.id, strategyName: def.name,
+        units: Math.max(1, Number(s().qtyDefault) || 1),
+        entryBasis: 'LAST', exitBasis: 'LAST',
+      });
+      location.hash = 'backtest';
+    });
+
     // نمودار بعد از نشستن قالب سوار می‌شود، چون به اندازه واقعی قاب نیاز دارد
     mountChart();
 

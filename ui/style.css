@@ -1297,6 +1297,11 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .tbl-body table.data thead th[data-sorted="asc"] { color: var(--accent); }
 .tbl-body { overflow: auto; height: 56vh; position: relative; }
 
+/* دکمهٔ انتقال به بک‌تست، در پنل جزئیات یک ترکیب زنده. */
+.detail-actions { display: flex; gap: 8px; margin: 12px 0 4px; }
+.handoff-btn { cursor: pointer; font-weight: 700; }
+.handoff-btn:hover { border-color: var(--accent); color: var(--accent); }
+
 /* ——— نمودار میله‌ای رصد بازار ——— */
 .market-chart-card { margin: 16px 0; }
 .market-metric { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }

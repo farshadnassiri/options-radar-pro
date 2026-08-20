@@ -706,7 +706,12 @@ export async function mount(root, { state }) {
 
     await loadHistory();
     if (!entryDates.length) return;
-    if (entryDates.includes(plan.entryDate)) entryWheel.select(plan.entryDate);
+    // «خودکار» یعنی ردیف زنده تاریخ نداشت. بلندترین بازهٔ موجودِ همین ترکیب
+    // برداشته می‌شود: قدیمی‌ترین روزِ دارای ترکیب معتبر. حدس‌زدن یک بازهٔ
+    // ثابت از تب مبدأ، بازه‌ای می‌ساخت که ممکن است برای این قرارداد وجود
+    // نداشته باشد.
+    const wantEntry = plan.entryDate === 'auto' ? entryDates[0] : plan.entryDate;
+    if (entryDates.includes(wantEntry)) entryWheel.select(wantEntry);
     else skipped.push(`روز ورود ${dateLabel(plan.entryDate)} برای این استراتژی ترکیب قابل اجرا ندارد`);
 
     const wanted = [...plan.legIns].sort().join('|');
@@ -714,7 +719,8 @@ export async function mount(root, { state }) {
     if (index >= 0) { $('bt-combo').value = String(index); renderCombo(); }
     else skipped.push(`ترکیب «${plan.comboName}» بین ترکیب‌های این روز نبود`);
 
-    if (exitDates.includes(plan.exitDate)) exitWheel.select(plan.exitDate);
+    const wantExit = plan.exitDate === 'auto' ? exitDates.at(-1) : plan.exitDate;
+    if (exitDates.includes(wantExit)) exitWheel.select(wantExit);
     else skipped.push(`روز سنجش ${dateLabel(plan.exitDate)} برای همه پاها قیمت کامل ندارد`);
 
     setStatus(skipped.length

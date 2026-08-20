@@ -363,6 +363,10 @@ export function evaluate({ legs, quotes, ctx }) {
     __legs: priced.map((l) => ({
       kind: l.kind, side: l.side, ratio: num(l.ratio, 1), strike: num(l.strike),
       size: num(l.size, basis.contractSize), price: num(l.price), days: l.days,
+      // شناسه قرارداد لازم است تا همین ترکیب در تب بک‌تست دوباره پیدا شود.
+      // بدون آن، انتقال باید ترکیب را از روی قیمت اعمال حدس بزند و دو
+      // قرارداد هم‌اعمال در دو سررسید، یکی گرفته می‌شوند.
+      ins: l.ins ? String(l.ins) : '', name: l.name || '',
     })),
   };
 }
