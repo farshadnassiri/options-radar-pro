@@ -21,6 +21,7 @@ import { defaults, sanitize } from '../core/settings.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
 import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
+import { createLog } from './errlog.mjs';
 import { watchBackoffSec } from './backoff.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -70,9 +71,23 @@ const stat = {
   queueDepth: 0, inflight: 0, clients: 0, paused: false, pauseReason: '',
 };
 
+const errlog = createLog();
+
 function log(...a) {
   const t = new Date().toTimeString().slice(0, 8);
   console.log(`[${t}]`, ...a);
+}
+
+/**
+ * ثبت در دفتر خطا، به‌علاوهٔ چاپ در کنسول.
+ *
+ * کنسول برای کسی است که سرور را از ترمینال اجرا می‌کند؛ دفتر برای کسی که
+ * برنامه را در مرورگر باز کرده و ترمینالی نمی‌بیند. تا امروز فقط اولی بود.
+ */
+function logErr(where, e, level = 'error') {
+  const message = e?.message ? `${e.name || 'Error'}: ${e.message}` : String(e);
+  errlog.push({ level, where, message, detail: e?.stack || '' });
+  log(`⚠ ${where}: ${message}`);
 }
 
 // ————————————————————————————————— سهمیه نرخ درخواست —————————————————————————————————
@@ -171,6 +186,7 @@ async function get(pathname, ttlSec, priority = 5) {
         stat.errors += 1;
         stat.lastError = `${e.name}: ${e.message}`;
         stat.lastErrorAt = Date.now();
+        errlog.push({ level: 'error', where: `بالادست ${path}`, message: stat.lastError, detail: `تلاش ${attempt + 1} از ${S.retries + 1}` });
         if (attempt < S.retries) await sleep(300 * 2 ** attempt);
       }
     }
@@ -281,6 +297,7 @@ async function watchTick() {
     broadcast('watch', { at: watch.at, full: first, count: rows.length, rows: first ? rows : changed });
     return true;
   } catch (e) {
+    logErr('دور دیده‌بان', e);
     broadcast('trouble', { at: Date.now(), message: `${e.name}: ${e.message}` });
     return false;
   }
@@ -545,6 +562,33 @@ async function handle(req, res) {
       return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
     }
 
+    // دفتر خطاها. برنامه در مرورگر باز است و کاربر ترمینال سرور را نمی‌بیند؛
+    // بدون این نقطه پایانی، «چه شد؟» هیچ پاسخی ندارد.
+    if (p === '/api/logs') {
+      if (req.method === 'DELETE') { errlog.clear(); return sendJson(res, 200, { ok: true }); }
+      if (req.method === 'POST') {
+        // خطای سمت مرورگر هم اینجا می‌نشیند تا یک دفتر واحد باشد، نه دو تا.
+        const body = JSON.parse(await readBody(req, MAX_BODY) || '{}');
+        for (const item of (Array.isArray(body.rows) ? body.rows : []).slice(0, 50)) {
+          errlog.push({
+            level: item.level === 'warn' ? 'warn' : 'error',
+            where: `مرورگر · ${item.where || '—'}`,
+            message: item.message || '', detail: item.detail || '',
+          });
+        }
+        return sendJson(res, 200, { ok: true, ...errlog.stats() });
+      }
+      return sendJson(res, 200, {
+        rows: errlog.list({
+          limit: Math.min(300, Math.max(1, Number(u.searchParams.get('limit')) || 100)),
+          sinceSeq: Number(u.searchParams.get('since')) || 0,
+          level: u.searchParams.get('level') || null,
+        }),
+        ...errlog.stats(),
+        market: marketOpen(), lastError: stat.lastError, lastErrorAt: stat.lastErrorAt,
+      });
+    }
+
     if (p === '/api/cache' && req.method === 'DELETE') {
       cache.clear();
       return sendJson(res, 200, { cleared: true });
@@ -556,6 +600,7 @@ async function handle(req, res) {
     // بدنه بزرگ و جیسون خراب، خطای فرستنده‌اند نه خطای بالادست
     if (e instanceof BodyTooLarge) return sendJson(res, 413, { error: e.message });
     if (e instanceof SyntaxError) return sendJson(res, 400, { error: 'بدنه، جیسون معتبر نیست' });
+    logErr(`درخواست ${p}`, e);
     return sendJson(res, 502, { error: `${e.name}: ${e.message}` });
   }
 }
