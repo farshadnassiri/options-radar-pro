@@ -6,7 +6,10 @@
 // محاسبه هیچ‌جای این فایل نیست؛ همه در `core/scenario.mjs` است تا بی‌نیاز از
 // مرورگر آزمون شود. اینجا فقط رسم است.
 
-import { scenarioLadder, sensitivityGrid, bookDepthRisk } from '/core/scenario.mjs';
+import {
+  scenarioLadder, sensitivityGrid, sensitivityAxis, bookDepthRisk,
+  SENS_AXES, SENS_METRICS,
+} from '/core/scenario.mjs';
 import { fmt, faNum, faDigits, negClass } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 
@@ -31,7 +34,17 @@ export function mountScenarioPanel(host, row, opt = {}) {
     legs, spot: row.S, days: row.horizonDays ?? row.days,
     sigma: row.sigmaUse, rFree: opt.rFree, divYield: opt.divYield,
     yearDays: opt.yearDays || 365,
+    // مخرج «بازده ٪ سرمایه» همان سرمایه‌ای است که ستون جدول می‌گوید، نه
+    // عددی که پنل خودش بسازد؛ دو مخرج یعنی دو درصد برای یک چیز.
+    capital: row.capital,
   };
+  // فرض‌های بازار که کاربر می‌تواند عوض کند. مقدار اولیه همان چیزی است که
+  // ردیف با آن سنجیده شده، تا نقطهٔ شروع با جدول یکی باشد.
+  const marketDefaults = {
+    sigma: base.sigma, rFree: base.rFree, divYield: base.divYield, days: base.days,
+  };
+  const market = { ...marketDefaults };
+  const units = Math.max(1, Math.trunc(Number(opt.units) || Number(row.qty) || 1));
 
   host.innerHTML = `
     <section class="card scen-card">
@@ -48,25 +61,58 @@ export function mountScenarioPanel(host, row, opt = {}) {
     <section class="card scen-card">
       <div class="section-head">
         <div><p class="eyebrow">اگر فرض‌ها عوض شوند</p><h3>تحلیل حساسیت</h3></div>
-        <div class="scen-controls">
-          <label>محور دوم
-            <select id="scen-axis">
-              <option value="days">روز مانده</option>
-              <option value="sigma">تلاطم</option>
-              <option value="rFree">نرخ بهره</option>
-            </select>
-          </label>
-          <label>دامنه قیمت پایه ٪
-            <input id="scen-range" type="number" min="2" max="80" step="1" value="20">
-          </label>
-          <label>تعداد پله
-            <input id="scen-steps" type="number" min="3" max="15" step="2" value="9">
-          </label>
-        </div>
+        <span class="scen-note">${fmt.int(units)} قرارداد</span>
       </div>
-      <p class="note">هر خانه، سود و زیان کل ترکیب است. روی محور «روز مانده»، صفر یعنی سررسید و
-         همان‌جا عمداً از ارزش‌گذاری مدل به ارزش ذاتی سوییچ می‌شود — بلک‌شولز در صفر تعریف‌نشده است
-         و با زمانِ خیلی کوچک عددی می‌دهد که شبیه درست است ولی نیست.</p>
+
+      <div class="scen-controls scen-row">
+        <label>محور دوم
+          <select id="scen-axis">
+            ${SENS_AXES.map((a) => `<option value="${a.key}">${esc(a.label)}</option>`).join('')}
+          </select>
+        </label>
+        <label id="scen-span-wrap">دامنه محور <span id="scen-span-unit" class="scen-hint"></span>
+          <input id="scen-span" type="number" min="1" max="200" step="1" value="40">
+        </label>
+        <label>تعداد ستون
+          <input id="scen-cols" type="number" min="3" max="11" step="2" value="5">
+        </label>
+        <label>هر خانه چه می‌گوید
+          <select id="scen-metric">
+            ${SENS_METRICS.map((m) => `<option value="${m.key}">${esc(m.label)}</option>`).join('')}
+          </select>
+        </label>
+      </div>
+
+      <div class="scen-controls scen-row scen-assume">
+        <label>تلاطم سالانه
+          <input id="scen-sigma" type="number" min="0.01" max="5" step="0.01">
+        </label>
+        <label>نرخ بهره ٪
+          <input id="scen-rfree" type="number" min="0" max="100" step="0.5">
+        </label>
+        <label>بازده نقدی پایه ٪
+          <input id="scen-div" type="number" min="0" max="100" step="0.5">
+        </label>
+        <label>روز مانده
+          <input id="scen-days" type="number" min="0" max="3650" step="1">
+        </label>
+        <label>دامنه قیمت پایه ٪
+          <input id="scen-range" type="number" min="2" max="80" step="1" value="20">
+        </label>
+        <label>تعداد پله
+          <input id="scen-steps" type="number" min="3" max="15" step="2" value="9">
+        </label>
+        <button type="button" class="ghost" id="scen-reset">بازگشت به فرض‌های بازار</button>
+      </div>
+
+      <p class="note">پارامتری که محور دوم است، دور همان عددی می‌چرخد که اینجا گذاشته‌ای؛ بقیه ثابت
+         می‌مانند. پس می‌شود هم‌زمان تلاطم را دستی گذاشت و محور را روی نرخ برد — چیزی که با یک
+         فرضِ متغیر ممکن نبود. دامنهٔ محور برای تلاطم <b>نسبی</b> است (‎±٪ همان عدد) و برای نرخ‌ها
+         <b>مطلق</b> بر حسب واحد درصد، چون نرخِ صفر با ضریب نسبی هیچ بازه‌ای نمی‌سازد.</p>
+      <p class="note">روی محور «روز مانده»، صفر یعنی سررسید و همان‌جا عمداً از ارزش‌گذاری مدل به
+         ارزش ذاتی سوییچ می‌شود — بلک‌شولز در صفر تعریف‌نشده است و با زمانِ خیلی کوچک عددی
+         می‌دهد که شبیه درست است ولی نیست. یونانی‌ها همان ستون خالی می‌مانند، نه صفر.</p>
+      <p id="scen-basis" class="scen-sum"></p>
       <div id="scen-grid" class="history-table-wrap"></div>
       <div id="scen-legs" class="history-table-wrap" style="margin-top:12px"></div>
     </section>
@@ -75,7 +121,7 @@ export function mountScenarioPanel(host, row, opt = {}) {
       <div class="section-head">
         <div><p class="eyebrow">اگر بخواهی بیرون بیایی</p><h3>ریسک عمق دفتر سفارش</h3></div>
         <label class="scen-units">تعداد واحد
-          <input id="scen-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, Number(opt.units) || 1)}">
+          <input id="scen-units" type="number" min="1" max="100000" step="1" value="${units}">
         </label>
       </div>
       <p class="note">هزینهٔ <b>بستن</b> موقعیت، نه باز کردنش. بستن یعنی جهت معکوس: پای خرید به تقاضا
@@ -111,23 +157,91 @@ export function mountScenarioPanel(host, row, opt = {}) {
   }
 
   // ——— جدول حساسیت ———
+  const clamp = (v, lo, hi, dflt) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
+  };
+
   function movesOf() {
-    const range = Math.max(2, Math.min(80, Number($('scen-range').value) || 20));
-    let steps = Math.max(3, Math.min(15, Math.trunc(Number($('scen-steps').value) || 9)));
+    const range = clamp($('scen-range').value, 2, 80, 20);
+    let steps = Math.trunc(clamp($('scen-steps').value, 3, 15, 9));
     if (steps % 2 === 0) steps += 1;                 // فرد، تا صفر همیشه وسط بیفتد
     const half = (steps - 1) / 2;
     return Array.from({ length: steps }, (_, i) => Math.round(((i - half) / half) * range * 100) / 100);
   }
 
-  const axisLabel = (axis, v) => (axis === 'days' ? `${fmt.int(v)} روز`
-    : axis === 'sigma' ? fmt.num(v) : `${fmt.pct(v * 100)}٪`);
+  /** فرض‌های بازار را از فرم می‌خواند. نرخ‌ها در فرم درصدند، در موتور کسر. */
+  function readMarket() {
+    market.sigma = clamp($('scen-sigma').value, 0.001, 5, marketDefaults.sigma);
+    market.rFree = clamp($('scen-rfree').value, 0, 100, marketDefaults.rFree * 100) / 100;
+    market.divYield = clamp($('scen-div').value, 0, 100, marketDefaults.divYield * 100) / 100;
+    market.days = Math.trunc(clamp($('scen-days').value, 0, 3650, marketDefaults.days));
+    return market;
+  }
+
+  /** فرم را از یک مجموعه فرض پر می‌کند — همان مسیرِ «بازگشت به فرض‌های بازار». */
+  function writeMarket(m) {
+    const put = (id, v, dec) => { $(id).value = Number.isFinite(v) ? v.toFixed(dec) : ''; };
+    put('scen-sigma', m.sigma, 2);
+    put('scen-rfree', m.rFree * 100, 1);
+    put('scen-div', m.divYield * 100, 1);
+    $('scen-days').value = Number.isFinite(m.days) ? String(Math.trunc(m.days)) : '';
+  }
+
+  /**
+   * دامنهٔ محور برای «روز مانده» معنی ندارد — بازهٔ طبیعی‌اش از روز مانده تا
+   * صفر است — پس ورودی‌اش پنهان می‌شود، نه اینکه بی‌اثر جا بماند. واحدش هم
+   * بین تلاطم (نسبی) و نرخ (واحد درصد) فرق می‌کند و باید نوشته شود.
+   */
+  function syncAxisControls() {
+    const axis = $('scen-axis').value;
+    const isDays = axis === 'days';
+    $('scen-span-wrap').style.display = isDays ? 'none' : '';
+    $('scen-span-unit').textContent = axis === 'sigma' ? '(٪ نسبی)' : '(واحد درصد)';
+    if (!isDays && $('scen-span').dataset.axis !== axis) {
+      $('scen-span').value = axis === 'sigma' ? '40' : '5';
+      $('scen-span').dataset.axis = axis;
+    }
+  }
+
+  const axisDef = (key) => SENS_AXES.find((a) => a.key === key) || SENS_AXES[0];
+  /** سرستون محور دوم. جنس را موتور می‌گوید، قالب را `fmt` — تا رقم فارسی بماند. */
+  const axisLabel = (axis, v) => {
+    if (!ok(v)) return '—';
+    const kind = axisDef(axis).kind;
+    return kind === 'days' ? `${fmt.int(v)} روز` : kind === 'ratio' ? fmt.num(v) : `${fmt.pct(v * 100)}٪`;
+  };
+
+  const metricDef = () => SENS_METRICS.find((m) => m.key === $('scen-metric').value) || SENS_METRICS[0];
+  const cellText = (c, m) => {
+    const v = c[m.key];
+    return m.fmt === 'pct' ? `${fmt.pct(v)}٪` : m.fmt === 'num' ? fmt.num(v) : fmt.money(v);
+  };
 
   function drawGrid() {
+    syncAxisControls();
     const axis = $('scen-axis').value;
-    const g = sensitivityGrid({ ...base, axis, moves: movesOf() });
-    if (!g.rows.length) { $('scen-grid').innerHTML = '<p class="empty-note">جدول حساسیت ساخته نشد.</p>'; return; }
-    const vals = g.rows.flatMap((r) => r.cells.map((c) => c.pnl)).filter(ok);
-    const lo = Math.min(...vals), hi = Math.max(...vals);
+    const m = readMarket();
+    const args = {
+      ...base, ...m, axis,
+      moves: movesOf(),
+      range: clamp($('scen-span').value, 1, 200, axis === 'sigma' ? 40 : 5),
+      steps: Math.trunc(clamp($('scen-cols').value, 3, 11, 5)),
+    };
+    const g = sensitivityGrid({ ...args, axisValues: sensitivityAxis(args) });
+    drawBasis(m, axis, g);
+    const md = metricDef();
+    if (!g.rows.length) {
+      $('scen-grid').innerHTML = '<p class="empty-note">با این فرض‌ها جدول حساسیت ساخته نشد.</p>';
+      $('scen-legs').innerHTML = '';
+      return;
+    }
+    // شدت رنگ از بزرگ‌ترین قدرمطلق همان سنجه در همین جدول می‌آید. سنجه‌ها
+    // هم‌مقیاس نیستند — گاما هزارم است و وگا میلیون — پس مقیاس ثابت،
+    // یکی را همیشه بی‌رنگ و دیگری را همیشه پُررنگ می‌کرد.
+    const vals = g.rows.flatMap((r) => r.cells.map((c) => c[md.key])).filter(ok);
+    const lo = vals.length ? Math.min(...vals) : 0;
+    const hi = vals.length ? Math.max(...vals) : 0;
     const shade = (v) => {
       if (!ok(v)) return '';
       const side = v >= 0 ? hi : -lo;
@@ -138,24 +252,38 @@ export function mountScenarioPanel(host, row, opt = {}) {
     $('scen-grid').innerHTML = `<table class="history-table scen-matrix"><thead><tr>
       <th>تغییر پایه ٪</th><th>قیمت پایه</th>
       ${g.axisValues.map((v) => `<th>${esc(axisLabel(axis, v))}</th>`).join('')}
-      </tr></thead><tbody>${g.rows.map((r) => `<tr>
+      </tr></thead>
+      <caption class="scen-caption">هر خانه: ${esc(md.label)} — ${fmt.int(units)} قرارداد</caption>
+      <tbody>${g.rows.map((r) => `<tr>
         <td class="n ${negClass(r.movePct)}">${fmt.pct(r.movePct)}٪</td>
         <td class="n">${fmt.money(r.level)}</td>
-        ${r.cells.map((c) => `<td class="n ${ok(c.pnl) ? (c.pnl >= 0 ? 'gain' : 'loss') : ''}"
-             style="${shade(c.pnl)}">${fmt.money(c.pnl)}</td>`).join('')}
+        ${r.cells.map((c) => `<td class="n ${ok(c[md.key]) ? (c[md.key] >= 0 ? 'gain' : 'loss') : ''}"
+             style="${shade(c[md.key])}">${cellText(c, md)}</td>`).join('')}
       </tr>`).join('')}</tbody></table>`;
-    drawLegBreakdown(g);
+    drawLegBreakdown(g, axis);
   }
 
-  /** تفکیک اثر هر پا، در ستونِ وسطِ محور دوم — یعنی فرض‌های امروز. */
-  function drawLegBreakdown(g) {
+  /** یک خط، تا معلوم باشد جدول با چه فرض‌هایی ساخته شد و کدامش دستی است. */
+  function drawBasis(m, axis, g) {
+    const moved = (k) => (Math.abs(m[k] - marketDefaults[k]) > 1e-12 ? ' <b class="warn-ink">(دستی)</b>' : '');
+    const axisName = axisDef(axis).label;
+    $('scen-basis').innerHTML = `
+      محور دوم <b>${esc(axisName)}</b>
+      · تلاطم <b>${fmt.num(m.sigma)}</b>${moved('sigma')}
+      · نرخ بهره <b>${fmt.pct(m.rFree * 100)}٪</b>${moved('rFree')}
+      · بازده نقدی <b>${fmt.pct(m.divYield * 100)}٪</b>${moved('divYield')}
+      · روز مانده <b>${fmt.int(m.days)}</b>${moved('days')}
+      · ${g.axisValues.length ? `${fmt.int(g.axisValues.length)} ستون` : 'بی‌ستون'}`;
+  }
+
+  /** تفکیک اثر هر پا، در ستونِ وسطِ محور دوم — یعنی فرض‌های همین فرم. */
+  function drawLegBreakdown(g, axis) {
     const mid = Math.min(g.axisValues.length - 1, Math.floor(g.axisValues.length / 2));
-    const axis = g.axis;
     $('scen-legs').innerHTML = `<table class="history-table"><thead><tr>
       <th>تغییر پایه ٪</th><th>قیمت پایه</th>
       ${legs.map((l, i) => `<th>${esc(legLabel(l, i))}</th>`).join('')}
       <th>جمع</th></tr></thead>
-      <caption class="scen-caption">تفکیک هر پا در ${esc(axisLabel(axis, g.axisValues[mid]))}</caption>
+      <caption class="scen-caption">تفکیک سود و زیان هر پا در ${esc(axisLabel(axis, g.axisValues[mid]))}</caption>
       <tbody>${g.rows.map((r) => {
         const cell = r.cells[mid];
         return `<tr>
@@ -170,7 +298,12 @@ export function mountScenarioPanel(host, row, opt = {}) {
   // ——— ریسک عمق ———
   function drawDepth() {
     const units = Math.max(1, Math.trunc(Number($('scen-units').value) || 1));
-    const d = bookDepthRisk({ legs, quotes: (row.__books || []).map((b) => b), units });
+    // پاهای ردیف در تعداد قرارداد ردیف ضرب شده‌اند؛ اگر این را نگوییم،
+    // «تعداد واحد» دوباره در همان حجم ضرب می‌شود.
+    const d = bookDepthRisk({
+      legs, quotes: (row.__books || []).map((b) => b), units,
+      legUnits: Math.max(1, Math.trunc(Number(row.qty) || 1)),
+    });
     if (!d.perLeg.length) { $('scen-depth').innerHTML = '<p class="empty-note">این ترکیب پای اختیاری ندارد.</p>'; return; }
     const sum = `<p class="scen-sum">
       ${ok(d.exitCostTotal) ? `هزینه بستن کل موقعیت <b class="${negClass(-d.exitCostTotal)}">${fmt.money(d.exitCostTotal)}</b>` : 'هزینه بستن نامعلوم'}
@@ -196,9 +329,18 @@ export function mountScenarioPanel(host, row, opt = {}) {
   }
 
   drawLadder();
+  writeMarket(marketDefaults);
   drawGrid();
   drawDepth();
-  for (const id of ['scen-axis', 'scen-range', 'scen-steps']) $(id).addEventListener('change', drawGrid);
+  const GRID_INPUTS = ['scen-axis', 'scen-span', 'scen-cols', 'scen-metric',
+    'scen-sigma', 'scen-rfree', 'scen-div', 'scen-days', 'scen-range', 'scen-steps'];
+  // `input` و نه فقط `change`: با فلش‌های ورودی عددی، جدول باید همان لحظه
+  // جواب بدهد — همان چیزی که «تحلیل حساسیت» را از یک جدول ثابت جدا می‌کند.
+  for (const id of GRID_INPUTS) {
+    $(id).addEventListener('change', drawGrid);
+    $(id).addEventListener('input', drawGrid);
+  }
+  $('scen-reset').addEventListener('click', () => { writeMarket(marketDefaults); drawGrid(); });
   $('scen-units').addEventListener('change', drawDepth);
   return () => { host.innerHTML = ''; };
 }
