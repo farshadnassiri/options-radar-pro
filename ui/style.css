@@ -1297,6 +1297,55 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .tbl-body table.data thead th[data-sorted="asc"] { color: var(--accent); }
 .tbl-body { overflow: auto; height: 56vh; position: relative; }
 
+/* ——— نمودار میله‌ای رصد بازار ——— */
+.market-chart-card { margin: 16px 0; }
+.market-metric { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }
+.market-metric select {
+  min-height: 34px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
+}
+.market-bars { display: grid; gap: 7px; margin-top: 10px; }
+.market-bar { display: grid; grid-template-columns: 128px 1fr 116px; gap: 12px; align-items: center; }
+.market-bar > b {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-md); font-weight: 700;
+}
+.market-bar > i { display: block; height: 15px; border-radius: var(--radius-pill); background: var(--panel-2); overflow: hidden; }
+.market-bar-fill { display: flex; height: 100%; border-radius: var(--radius-pill); overflow: hidden; }
+.market-bar-fill .seg-call { background: var(--gain); }
+.market-bar-fill .seg-put { background: var(--loss); }
+.market-bar-fill .seg-one { background: var(--accent); }
+.market-bar-v {
+  font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr;
+  font-size: var(--fs-sm); color: var(--ink-2); text-align: start;
+}
+
+/* ——— طیف رنگی ردیف بر پایهٔ ستون مرتب‌شده ———
+   شدت از `--heat-t` می‌آید که جاوااسکریپت روی خود ردیف می‌گذارد. رنگ در CSS
+   می‌ماند تا با پوسته عوض شود، و عدد در جاوااسکریپت تا با داده. */
+.tbl-body tr[data-heat] { background: color-mix(in srgb, var(--accent) calc(var(--heat-t) * 20%), transparent); }
+.tbl-body tr[data-heat="gain"] { background: color-mix(in srgb, var(--gain) calc(var(--heat-t) * 24%), transparent); }
+.tbl-body tr[data-heat="loss"] { background: color-mix(in srgb, var(--loss) calc(var(--heat-t) * 24%), transparent); }
+.tbl-body tr[data-heat]:hover { background: var(--panel-2); }
+
+/* راهنمای طیف. بدون آن رنگ فقط تزیین است و کسی نمی‌داند کم یعنی چه. */
+.heat-legend { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--muted); }
+.heat-legend b { color: var(--ink-2); font-weight: 700; }
+.heat-legend i { font-style: normal; font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; }
+.heat-legend .heat-ramp {
+  width: 92px; height: 10px; border-radius: var(--radius-pill); border: 1px solid var(--line-soft);
+  background: linear-gradient(to left, color-mix(in srgb, var(--accent) 24%, transparent), transparent);
+}
+.heat-legend[data-kind="gain"] .heat-ramp { background: linear-gradient(to left, color-mix(in srgb, var(--gain) 28%, transparent), transparent); }
+.heat-legend[data-kind="loss"] .heat-ramp { background: linear-gradient(to left, color-mix(in srgb, var(--loss) 28%, transparent), transparent); }
+/* واگرا: منفی سرخ، صفر بی‌رنگ، مثبت سبز — و در راست‌به‌چپ کمینه سمت راست است */
+.heat-legend[data-kind="div"] .heat-ramp {
+  background: linear-gradient(to left,
+    color-mix(in srgb, var(--loss) 28%, transparent), transparent 50%,
+    color-mix(in srgb, var(--gain) 28%, transparent));
+}
+.heat-legend .heat-lo { color: var(--muted); }
+
 /* ——— نوار ابزار جدول و انتخابگر ستون ——— */
 /* ——— جابه‌جایی ستون با کشیدن ——— */
 .tbl-body table.data thead th { cursor: grab; user-select: none; }

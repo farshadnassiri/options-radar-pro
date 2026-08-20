@@ -9,20 +9,46 @@ import { makeTable, fmt } from '/ui/table.mjs';
 import { makePicker } from '/ui/picker.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
 
-const COLS = [
-  { key: 'name', label: 'نماد پایه', fmt: 'text' },
-  { key: 'last', label: 'آخرین', fmt: 'money' },
-  { key: 'contracts', label: 'قرارداد', fmt: 'int' },
-  { key: 'quoted', label: 'دارای مظنه', fmt: 'int', heat: 'prob' },
-  { key: 'quotedPct', label: 'نسبت مظنه ٪', fmt: 'pct', heat: 'prob' },
-  { key: 'expiries', label: 'سررسید', fmt: 'int' },
-  { key: 'nearestDays', label: 'نزدیک‌ترین سررسید', fmt: 'int' },
-  { key: 'volume', label: 'حجم اختیار', fmt: 'int', heat: 'gain' },
-  { key: 'oi', label: 'موقعیت باز', fmt: 'int', heat: 'gain' },
-  { key: 'pcRatio', label: 'نسبت پوت به کال', fmt: 'num' },
-  { key: 'atmIvPct', label: 'تلاطم ضمنی ٪ — نزدیک‌ترین پول', fmt: 'pct' },
+// ستون‌های رصد بازار.
+//
+// `COLS` نمای شروع است و `ALL_COLS` هرچه می‌شود اضافه کرد. تفکیک عمدی است:
+// یک جدول بیست‌ستونه در نگاه اول کسی را به تصمیم نمی‌رساند، ولی ستونی که
+// اصلاً وجود نداشته باشد هم قابل اضافه‌کردن نیست.
+const ALL_COLS = [
+  { key: 'name', label: 'نماد پایه', fmt: 'text', group: 'شناسه' },
+  { key: 'last', label: 'آخرین', fmt: 'money', group: 'قیمت پایه' },
+  { key: 'close', label: 'پایانی', fmt: 'money', group: 'قیمت پایه' },
+
+  { key: 'contracts', label: 'قرارداد', fmt: 'int', group: 'اندازه تابلو' },
+  { key: 'strikes', label: 'قیمت اعمال', fmt: 'int', group: 'اندازه تابلو' },
+  { key: 'expiries', label: 'سررسید', fmt: 'int', group: 'اندازه تابلو' },
+  { key: 'nearestDays', label: 'نزدیک‌ترین سررسید', fmt: 'int', group: 'اندازه تابلو' },
+  { key: 'farDays', label: 'دورترین سررسید', fmt: 'int', group: 'اندازه تابلو' },
+
+  { key: 'quoted', label: 'دارای مظنه', fmt: 'int', group: 'نقدشوندگی', heat: 'prob' },
+  { key: 'quotedPct', label: 'نسبت مظنه ٪', fmt: 'pct', group: 'نقدشوندگی', heat: 'prob' },
+  { key: 'twoSided', label: 'مظنه دوطرفه', fmt: 'int', group: 'نقدشوندگی', heat: 'prob' },
+  { key: 'spreadMedPct', label: 'میانه فاصله مظنه ٪', fmt: 'pct', group: 'نقدشوندگی', heat: 'loss' },
+
+  { key: 'volume', label: 'حجم اختیار', fmt: 'int', group: 'گردش امروز', heat: 'gain' },
+  { key: 'callVol', label: 'حجم کال', fmt: 'int', group: 'گردش امروز' },
+  { key: 'putVol', label: 'حجم پوت', fmt: 'int', group: 'گردش امروز' },
+  { key: 'value', label: 'ارزش معاملات', fmt: 'money', group: 'گردش امروز', heat: 'gain' },
+  { key: 'trades', label: 'تعداد معامله', fmt: 'int', group: 'گردش امروز' },
+
+  { key: 'oi', label: 'موقعیت باز', fmt: 'int', group: 'تعهد انباشته', heat: 'gain' },
+  { key: 'callOi', label: 'موقعیت باز کال', fmt: 'int', group: 'تعهد انباشته' },
+  { key: 'putOi', label: 'موقعیت باز پوت', fmt: 'int', group: 'تعهد انباشته' },
+  { key: 'pcRatio', label: 'نسبت پوت به کال — موقعیت باز', fmt: 'num', group: 'تعهد انباشته' },
+  { key: 'pcVolRatio', label: 'نسبت پوت به کال — حجم', fmt: 'num', group: 'تعهد انباشته' },
+
+  { key: 'atmIvPct', label: 'تلاطم ضمنی ٪ — نزدیک‌ترین پول', fmt: 'pct', group: 'تلاطم' },
 ];
 
+const COLS = ALL_COLS.filter((c) => [
+  'name', 'last', 'contracts', 'strikes', 'quoted', 'quotedPct', 'spreadMedPct',
+  'expiries', 'nearestDays', 'volume', 'value', 'oi', 'pcRatio', 'atmIvPct',
+].includes(c.key));
 export async function mount(root, { state, api }) {
   root.innerHTML = `
     <div class="page-head">
@@ -46,6 +72,24 @@ export async function mount(root, { state, api }) {
       </section>
     </div>
 
+    <section class="card market-chart-card">
+      <div class="section-head">
+        <div><p class="eyebrow">ترکیب بازار</p><h3>بزرگ‌ترین نمادها</h3></div>
+        <label class="market-metric">سنجه
+          <select id="mkt-metric">
+            <option value="volume">حجم اختیار</option>
+            <option value="value">ارزش معاملات</option>
+            <option value="oi">موقعیت باز</option>
+            <option value="contracts">تعداد قرارداد</option>
+            <option value="quoted">دارای مظنه</option>
+          </select>
+        </label>
+      </div>
+      <p class="note">هر میله یک نماد پایه. تفکیک رنگی، سهم کال و پوت همان سنجه است — جایی که
+         سنجه تفکیک‌پذیر نیست، میله یک‌تکه می‌ماند.</p>
+      <div id="mkt-bars" class="market-bars"></div>
+    </section>
+
     <div id="table"></div>
 
     <section class="card" id="chain-card" style="margin-top:16px;display:none">
@@ -55,6 +99,10 @@ export async function mount(root, { state, api }) {
       <div class="scroll" style="max-height:60vh"><table class="data" id="chain"></table></div>
     </section>`;
 
+  const num = (v) => (Number.isFinite(v) ? v : 0);
+  const esc = (v) => String(v ?? '').replace(/[&<>'"]/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
+
   const picker = makePicker(root.querySelector('#pick'), {});
   let list = [];
   let detail = null;
@@ -62,6 +110,7 @@ export async function mount(root, { state, api }) {
 
   const table = makeTable(root.querySelector('#table'), COLS, {
     sortKey: 'volume',
+    all: ALL_COLS, storeKey: 'chain:market',
     onPick: (r) => openChain(r.ins),
   });
   // پیام پیش‌فرض جدول («نوار تشخیص بالا می‌گوید...») برای این تب غلط است —
@@ -78,11 +127,55 @@ export async function mount(root, { state, api }) {
       ['دارای مظنه', fmt.int(stats.quoted), `${faNum(((stats.quoted / (stats.contracts || 1)) * 100).toFixed(0))}٪ از تابلو`],
       ['حجم امروز', fmt.int(stats.vol), 'قرارداد'],
       ['موقعیت باز', fmt.int(stats.oi), 'قرارداد'],
-      ['ارزش معاملات', fmt.int(stats.value), 'ریال'],
+      ['ارزش معاملات', fmt.money(stats.value), 'ریال'],
+      ['نسبت پوت به کال', Number.isFinite(stats.pcOi) ? faNum(stats.pcOi.toFixed(2)) : '—', 'موقعیت باز'],
       ['سن عکس لحظه‌ای', at ? faAgo(Date.now() - at) : '—', ''],
     ];
     root.querySelector('#kpis').innerHTML = items.map(([k, v, s2]) => `
       <div class="kpi"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s2}</div></div>`).join('');
+  }
+
+  /**
+   * میله‌های افقی «بزرگ‌ترین نمادها».
+   *
+   * چرا میلهٔ افقی و نه دایره‌ای: نام نمادها فارسی و بلندند و روی قطاعِ
+   * دایره جا نمی‌شوند؛ و مقایسهٔ طول در یک راستا کاری است که چشم بی‌خطا
+   * انجام می‌دهد، برخلاف مقایسهٔ زاویه.
+   *
+   * سنجه‌هایی که تفکیک کال و پوت دارند دوتکه کشیده می‌شوند. آن‌هایی که
+   * ندارند — تعداد قرارداد، دارای مظنه — عمداً یک‌تکه می‌مانند؛ نصف‌کردنِ
+   * ساختگی، عددی می‌سازد که در هیچ تابلویی نیست.
+   */
+  const SPLIT = { volume: ['callVol', 'putVol'], oi: ['callOi', 'putOi'] };
+
+  function drawBars() {
+    const host = root.querySelector('#mkt-bars');
+    const metric = root.querySelector('#mkt-metric').value;
+    const rows = list
+      .filter((u) => Number.isFinite(u[metric]) && u[metric] > 0)
+      .sort((a, b) => b[metric] - a[metric])
+      .slice(0, 12);
+    if (!rows.length) { host.innerHTML = '<p class="empty-note">هنوز داده‌ای برای این سنجه نرسیده.</p>'; return; }
+    const top = rows[0][metric];
+    const col = ALL_COLS.find((c) => c.key === metric);
+    const f = fmt[col?.fmt] || fmt.int;
+    const parts = SPLIT[metric];
+    host.innerHTML = rows.map((u) => {
+      const total = u[metric];
+      const w = (total / top) * 100;
+      const inner = parts
+        ? parts.map((k, i) => {
+          const share = total > 0 ? (num(u[k]) / total) * 100 : 0;
+          return `<span class="${i === 0 ? 'seg-call' : 'seg-put'}" style="width:${share.toFixed(2)}%"
+                   title="${i === 0 ? 'کال' : 'پوت'} ${f(num(u[k]))}"></span>`;
+        }).join('')
+        : '<span class="seg-one" style="width:100%"></span>';
+      return `<div class="market-bar">
+        <b title="${esc(u.name)}">${esc(u.name)}</b>
+        <i><span class="market-bar-fill" style="width:${w.toFixed(2)}%">${inner}</span></i>
+        <span class="market-bar-v">${f(total)}</span>
+      </div>`;
+    }).join('');
   }
 
   async function drawFlow() {
@@ -185,6 +278,7 @@ export async function mount(root, { state, api }) {
     table.setEmptyMessage(NO_CHAIN_MSG);
     picker.setList(cs.list);
     drawKpis(cs.stats, cs.at);
+    drawBars();
   });
   if (chainState.list.length) {
     list = chainState.list.map(withDerived);
@@ -192,7 +286,11 @@ export async function mount(root, { state, api }) {
     table.setEmptyMessage(NO_CHAIN_MSG);
     picker.setList(chainState.list);
     drawKpis(chainState.stats, chainState.at);
+    drawBars();
   }
+
+  root.querySelector('#mkt-metric').addEventListener('change', drawBars);
+  drawBars();
 
   const offWatch = api.subscribeWatch((w) => pushRows(w, !w.changed));
   drawFlow();

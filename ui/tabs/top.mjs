@@ -19,7 +19,8 @@ import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE }
 import { runScanAll, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 
 const DEFAULT_COLS = ['strategy', 'underlying', 'legsText', 'days', 'netCash', 'capital',
-  'retMaxPct', 'retMonthPct', 'popPct', 'maxProfit', 'maxLoss', 'warn'];
+  'beDistPct', 'beRoomPct', 'retMaxPct', 'retMonthPct', 'popPct',
+  'maxProfit', 'maxLoss', 'maxLossPct', 'rewardRisk', 'warn'];
 
 export async function mount(root, { state, api }) {
   const s = () => state.settings;

@@ -32,8 +32,17 @@ function jalaliFromDEven(dEven) {
 }
 
 const VIEWS = {
-  خلاصه: ['underlying', 'legsText', 'days', 'cashLabel', 'netCash', 'breakevens', 'maxProfit',
-    'maxLoss', 'capital', 'retMaxPct', 'retMonthPct', 'popPct', 'execCost', 'maxQty', 'binding',
+  // نمای خلاصه، ترتیبِ خواندن یک ردیف است: چه چیزی، چند روز، چقدر نقد،
+  // سربه‌سری کجاست و چقدر با آن فاصله داریم، سود و زیان و درصدهایشان، و بعد
+  // سرمایه و اجرا.
+  //
+  // «فاصله تا سربه‌سری ٪» و «بیشترین زیان ٪ سرمایه» تازه‌اند. ستون‌هایشان از
+  // قبل در قرارداد ستونی بود ولی در هیچ نمای آماده‌ای نبود — یعنی عملاً کسی
+  // نمی‌دیدشان. عدد ریالیِ زیان بدون درصد، دو ترکیب با سرمایهٔ متفاوت را
+  // قابل مقایسه نمی‌کند.
+  خلاصه: ['underlying', 'legsText', 'days', 'cashLabel', 'netCash', 'breakevens', 'beDistPct',
+    'beRoomPct', 'maxProfit', 'retMaxPct', 'maxLoss', 'maxLossPct', 'rewardRisk',
+    'capital', 'retMonthPct', 'popPct', 'execCost', 'maxQty', 'binding',
     'qualityLabel', 'warn'],
   سرمایه: ['underlying', 'legsText', 'days', 'capital', 'capitalLabel', 'margin', 'marginToMaxLoss',
     'conditionalMargin', 'netCash', 'maxLoss', 'retMaxPct', 'retAnnPct', 'warn'],

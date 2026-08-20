@@ -138,6 +138,14 @@ export function evaluate({ legs, quotes, ctx }) {
   const bestPnl = payoff.maxProfit;
   const retMax = cap > 0 && ok(bestPnl) ? (bestPnl / cap) * 100 : NaN;
   const retStatic = cap > 0 && ok(staticPnl) ? (staticPnl / cap) * 100 : NaN;
+  // سمت زیان هم باید درصد داشته باشد. تا امروز فقط سود درصد می‌گرفت
+  // (`retMaxPct`) و زیان فقط ریالی بود، پس دو ترکیب با سرمایهٔ متفاوت از روی
+  // ستون «بیشترین زیان» قابل مقایسه نبودند.
+  const retMaxLoss = cap > 0 && ok(payoff.maxLoss) ? (payoff.maxLoss / cap) * 100 : NaN;
+  // نسبت پاداش به ریسک. زیان نامحدود اینجا عدد نمی‌سازد — بی‌نهایت در مخرج
+  // یعنی صفر، و صفرِ ساختگی بدتر از خالی است.
+  const rewardRisk = ok(bestPnl) && ok(payoff.maxLoss) && payoff.maxLoss > 0
+    ? bestPnl / payoff.maxLoss : NaN;
   const ann = (r) => (ok(r) ? (r * Y) / days : NaN);
   const annComp = (r) => {
     if (!ok(r)) return NaN;
@@ -301,6 +309,7 @@ export function evaluate({ legs, quotes, ctx }) {
     ...breakevenMetrics(payoff.breakevens, S),
     singleExpiry, payoffApprox: !!payoff.approx, horizonDays: payoff.horizonDays ?? days,
     maxProfit: payoff.maxProfit, maxLoss: payoff.maxLoss,
+    maxLossPct: retMaxLoss, rewardRisk,
     unlimitedProfit: payoff.unlimitedProfit, unlimitedLoss: payoff.unlimitedLoss,
     staticPnl,
 
@@ -420,6 +429,8 @@ export const COLUMNS = [
   { key: 'beWidthPct', label: 'پهنای سربه‌سری ٪', fmt: 'pct', group: 'سود و زیان' },
   { key: 'maxProfit', label: 'بیشترین سود', fmt: 'money', group: 'سود و زیان', heat: 'gain' },
   { key: 'maxLoss', label: 'بیشترین زیان', fmt: 'money', group: 'سود و زیان', heat: 'loss' },
+  { key: 'maxLossPct', label: 'بیشترین زیان ٪ سرمایه', fmt: 'pct', group: 'سود و زیان', heat: 'loss' },
+  { key: 'rewardRisk', label: 'پاداش به ریسک', fmt: 'num', group: 'سود و زیان', heat: 'gain' },
   { key: 'staticPnl', label: 'سود اگر پایه ثابت بماند', fmt: 'money', group: 'سود و زیان' },
   { key: 'headlineList', label: 'قیمت سرخط', fmt: 'list', group: 'مظنه' },
   { key: 'bidList', label: 'تقاضا', fmt: 'list', group: 'مظنه' },
