@@ -19,7 +19,7 @@ import {
   grossCash, entryFees, analyzePayoff, positionGreeks, signedQty,
 } from './payoff.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
-import { basisOf, marginParamsOf } from './settings.mjs';
+import { basisOf, marginParamsOf, feesOf, assetClassLabel } from './settings.mjs';
 import { closeValuation } from './positions.mjs';
 import {
   priceLegs, executionCost, maxSize, rowQuality, leggingRisk, spreadPct, midOf,
@@ -83,10 +83,10 @@ export function probOfProfit(an, S, T, sigma) {
  */
 export function evaluate({ legs, quotes, ctx }) {
   const s = ctx.settings;
-  const fees = {
-    buyStock: s.feeBuyStock, sellStock: s.feeSellStock,
-    option: s.feeOption, exercise: s.feeExercise,
-  };
+  // نرخ پای سهم به نوع پایه بستگی دارد — سهم، صندوق قابل معامله، صندوق
+  // کالایی. تا وقتی کاربر نگاشتش را ننوشته، هر سه یک عدد می‌گیرند و هیچ
+  // ردیفی جابه‌جا نمی‌شود؛ ولی ردیف می‌گوید کدام نرخ خورده است.
+  const fees = feesOf(s, ctx.assetClass || 'STOCK');
   // از `marginParamsOf` می‌آید نه از شیء دستی. سه جای برنامه این شیء را
   // دستی می‌ساختند و هر پارامتر تازه‌ای باید در هر سه اضافه می‌شد وگرنه
   // بی‌صدا جا می‌ماند — همان‌طور که مبنای جزء B جا می‌ماند.
@@ -327,6 +327,8 @@ export function evaluate({ legs, quotes, ctx }) {
     strategy: ctx.def?.name || 'ترکیب دستی',
     strategyId: ctx.def?.id || 'custom',
     underlying: ctx.underlying || '',
+    assetClass: fees.assetClass,
+    assetClassLabel: assetClassLabel(fees.assetClass),
     days, qty, legCount: priced.length,
     strikes: payoff.strikes,
     // سررسید و نام قرارداد: تا امروز ردیف فقط «روز مانده» داشت. دو ترکیب با
@@ -509,6 +511,7 @@ export const COLUMNS = [
   { key: 'days', label: 'روز', fmt: 'int', group: 'هویت' },
   // بدون این ستون، «نقد خالص ۶٬۶۴۲٬۵۵۴» نمی‌گوید مال چند قرارداد است.
   { key: 'qty', label: 'حجم من (قرارداد)', fmt: 'int', group: 'هویت' },
+  { key: 'assetClassLabel', label: 'نوع دارایی پایه — مبنای نرخ کارمزد', fmt: 'text', group: 'هویت' },
   { key: 'expiryLabel', label: 'تاریخ سررسید', fmt: 'text', group: 'هویت' },
   { key: 'strikes', label: 'قیمت اعمال', fmt: 'list', group: 'هویت' },
   { key: 'legNames', label: 'نام قرارداد پاها', fmt: 'sym', group: 'هویت' },

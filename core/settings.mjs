@@ -10,6 +10,8 @@
 // scope : server = حلقه دریافت داده | client = محاسبه و نمایش | both
 // ————————————————————————————————————————————————————————————————
 
+import { num } from './num.mjs';
+
 export const SCHEMA = [
   // ——— منبع داده ———
   { key: 'baseUrl', group: 'data', kind: 'text', scope: 'server',
@@ -94,6 +96,25 @@ export const SCHEMA = [
     hint: 'با پنل کارگزاری خودت تطبیق بده. این عدد در استراتژی چندپا چند بار پرداخت می‌شود.' },
   { key: 'feeExercise', group: 'fees', kind: 'pct', scope: 'client',
     def: 0.000500, min: 0, max: 0.05, step: 0.000001, label: 'کارمزد اعمال' },
+  // ——— نرخ دارایی پایه بر حسب نوع ابزار ———
+  // پیش‌فرض هر سه کلاس عمداً برابر نرخ سهم است، تا تا وقتی کاربر نرخ
+  // کارگزارش را وارد نکرده هیچ عددی بی‌صدا جابه‌جا نشود. عددی که تأییدش
+  // نکرده‌ایم اینجا نمی‌نشیند.
+  { key: 'feeBuyEtf', group: 'fees', kind: 'pct', scope: 'client',
+    def: 0.003712, min: 0, max: 0.05, step: 0.000001,
+    label: 'کارمزد خرید صندوق قابل معامله',
+    hint: 'تا وارد نکنی، برابر نرخ سهم می‌ماند. نرخ واقعی را از صورتحساب کارگزارت بردار.' },
+  { key: 'feeSellEtf', group: 'fees', kind: 'pct', scope: 'client',
+    def: 0.008800, min: 0, max: 0.05, step: 0.000001,
+    label: 'کارمزد فروش صندوق قابل معامله',
+    hint: 'مالیات فروشندهٔ سهم برای صندوق برقرار نیست؛ نرخ واقعی را از صورتحساب کارگزارت بردار.' },
+  { key: 'feeBuyCommodity', group: 'fees', kind: 'pct', scope: 'client',
+    def: 0.003712, min: 0, max: 0.05, step: 0.000001, label: 'کارمزد خرید صندوق کالایی' },
+  { key: 'feeSellCommodity', group: 'fees', kind: 'pct', scope: 'client',
+    def: 0.008800, min: 0, max: 0.05, step: 0.000001, label: 'کارمزد فروش صندوق کالایی' },
+  { key: 'assetClassMap', group: 'fees', kind: 'text', scope: 'client',
+    def: '', label: 'نوع دارایی پایه',
+    hint: 'فهرست «شناسه یا نام پایه:نوع» جداشده با ویرگول — مثل «اهرم:ETF». نوع‌ها: STOCK و ETF و COMMODITY. هرچه اینجا نباشد سهم فرض می‌شود. تابلوی اختیار نوع ابزار را نمی‌دهد، پس این نگاشت دست توست؛ حدس زدن از روی نام، اختراع داده است.' },
 
   // ——— وجه تضمین ———
   { key: 'marginA', group: 'margin', kind: 'num', scope: 'client',
@@ -302,11 +323,66 @@ export function sanitize(input = {}) {
   return out;
 }
 
-/** دسته کارمزد، جدا شده از تنظیمات تا موتورها به کل شیء وابسته نشوند. */
-export function feesOf(s) {
+/**
+ * نوع‌های دارایی پایه. کارمزد و مالیاتِ سهم، صندوق قابل معامله و صندوق
+ * کالایی یکی نیست، و استراتژی‌های دارای پای سهم — کاوردکال، پوت حفاظتی،
+ * کولار، تبدیل — همان نرخ را در ارزش کل موقعیت ضرب می‌کنند.
+ */
+export const ASSET_CLASSES = [
+  ['STOCK', 'سهم'],
+  ['ETF', 'صندوق قابل معامله'],
+  ['COMMODITY', 'صندوق کالایی'],
+];
+
+const ASSET_CLASS_LABEL = new Map(ASSET_CLASSES);
+export const assetClassLabel = (k) => ASSET_CLASS_LABEL.get(k) || ASSET_CLASS_LABEL.get('STOCK');
+
+/**
+ * نگاشت «پایه → نوع ابزار»، از متن تنظیمات.
+ *
+ * چرا دستی: تابلوی اختیار نوع ابزار پایه را نمی‌دهد. تشخیص خودکار از روی
+ * نام یعنی حدس زدن — و حدسی که در نرخ کارمزدِ کل موقعیت ضرب شود، از نداشتنِ
+ * تفکیک بدتر است. پس ورودی، اعلام کاربر است؛ همان الگوی «سررسیدهای با سقف
+ * موقعیت پر» که آن هم از تابلو خوانده نمی‌شود.
+ *
+ * قالب: «شناسه یا نام پایه:نوع»، جداشده با ویرگول.
+ */
+export function assetClassMap(text = '') {
+  const out = new Map();
+  for (const part of String(text ?? '').split(',')) {
+    const at = part.lastIndexOf(':');
+    if (at < 1) continue;
+    const key = part.slice(0, at).trim();
+    const cls = part.slice(at + 1).trim().toUpperCase();
+    if (key && ASSET_CLASS_LABEL.has(cls)) out.set(key, cls);
+  }
+  return out;
+}
+
+/** نوع پایه: اول با شناسه، بعد با نام. هرچه در نگاشت نباشد، سهم است. */
+export function assetClassOf(map, ua = {}) {
+  if (!map?.size) return 'STOCK';
+  const ins = ua.ins == null ? '' : String(ua.ins);
+  const name = ua.name == null ? '' : String(ua.name);
+  return map.get(ins) || map.get(name) || 'STOCK';
+}
+
+/**
+ * دسته کارمزد، جدا شده از تنظیمات تا موتورها به کل شیء وابسته نشوند.
+ *
+ * `assetClass` فقط نرخ پای سهم را جابه‌جا می‌کند. کارمزد اختیار و اعمال از
+ * قرارداد می‌آید نه از نوع پایه، پس دست‌نخورده می‌ماند.
+ */
+export function feesOf(s, assetClass = 'STOCK') {
+  const [buy, sell] = assetClass === 'ETF'
+    ? [s.feeBuyEtf, s.feeSellEtf]
+    : assetClass === 'COMMODITY'
+      ? [s.feeBuyCommodity, s.feeSellCommodity]
+      : [s.feeBuyStock, s.feeSellStock];
   return {
-    buyStock: s.feeBuyStock, sellStock: s.feeSellStock,
+    buyStock: num(buy, s.feeBuyStock), sellStock: num(sell, s.feeSellStock),
     option: s.feeOption, exercise: s.feeExercise,
+    assetClass,
   };
 }
 

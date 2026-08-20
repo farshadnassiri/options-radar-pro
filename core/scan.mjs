@@ -13,6 +13,7 @@
 
 import { num, EPS } from './num.mjs';
 import { evaluate } from './evaluate.mjs';
+import { assetClassMap, assetClassOf } from './settings.mjs';
 import {
   underlyingQuote, legContractSize, comboContractSize,
   blockedExpirySet, expiryBlocked,
@@ -232,6 +233,7 @@ export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, qty }) {
   const rows = [];
   const t0 = Date.now();
 
+  const classes = assetClassMap(s.assetClassMap);
   for (const key of uaKeys) {
     const ua = chain.get(key);
     if (!ua) continue;
@@ -247,6 +249,9 @@ export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, qty }) {
             sizeMixed: c.sizeMixed,
             qty: qty ?? s.qtyDefault, settings: s, def,
             underlying: c.underlying, sigmaHist: sigmaByUa[key],
+            // نوع پایه، از نگاشت اعلامی کاربر. نرخ کارمزد پای سهم از همین
+            // می‌آید و ردیف هم می‌گوید کدام نرخ خورده است.
+            assetClass: assetClassOf(classes, ua),
             // سررسید تا امروز فقط به‌شکل «روز مانده» می‌رسید. دو ترکیب با
             // ۲۳ روز مانده می‌توانند دو سررسید متفاوت باشند و «روز» این را
             // نمی‌گوید؛ ستون «تاریخ سررسید» بدون این، خالی می‌ماند.
