@@ -1609,6 +1609,44 @@ group('۲۸. غربال روی کل کاتالوگ — برترین موقعیت
 
   check('نوار تشخیص هم روی کل جمع می‌زند', all.funnel.built >= single.funnel.built,
     `کل ${all.funnel.built} ، تک ${single.funnel.built}`);
+
+  // ——— تجمیع، همان چیزی را بگوید که تک‌تک گفتند ———
+  //
+  // گزارش آزمون واقعی: «`scanAll.total=3288` در برابر `sum(scan.total)=4593`».
+  // ریشه: هر `scan` ردیف‌هایش را در `topN` می‌بُرد و `scanAll` طولِ آرایهٔ
+  // به‌هم‌چسبیدهٔ همان بریده‌ها را «کل» گزارش می‌کرد. یعنی پیام «از X ردیف»
+  // در رابط، هرچه استراتژی بیشتر و topN کوچک‌تر، غلط‌تر می‌شد.
+  //
+  // topN عمداً کوچک است تا برش قطعاً اتفاق بیفتد؛ با topN بزرگ این باگ
+  // اصلاً خودش را نشان نمی‌دهد.
+  const sTight = { ...s4, topN: 3 };
+  const perDef = feasible.map((def) => scanFn({ def, chain: chain4, uaKeys: ['1'], settings: sTight }));
+  const merged = scanAll({ defs: feasible, chain: chain4, uaKeys: ['1'], settings: sTight, limit: 500 });
+  const sumOf = (key) => perDef.reduce((a, r) => a + r.funnel[key], 0);
+  const sumTotal = perDef.reduce((a, r) => a + r.total, 0);
+
+  check('برش تک‌استراتژی واقعاً اتفاق افتاده — وگرنه این گروه چیزی را نمی‌سنجد',
+    sumTotal > merged.rows.length, `کل ${sumTotal} ، پس از برش ${merged.rows.length}`);
+  check('«کل» تجمیعی، جمع کلِ هر استراتژی است نه طول آرایهٔ بریده‌شده',
+    merged.total === sumTotal, `${merged.total} در برابر ${sumTotal}`);
+  for (const k of ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept', 'blockedExpiry', 'evaluated']) {
+    check(`سطل «${k}» در تجمیع گم نمی‌شود`, merged.funnel[k] === sumOf(k),
+      `${merged.funnel[k]} در برابر ${sumOf(k)}`);
+  }
+  // `evaluated` پیش از این در `FUNNEL_KEYS` نبود و همیشه صفر می‌ماند —
+  // ادعای «هیچ ترکیبی ارزیابی نشد» در نمایی که هزاران‌تا ارزیابی کرده بود.
+  check('شمار ارزیابی‌شده در نمای کلی صفر نمی‌ماند', merged.funnel.evaluated > 0,
+    `${merged.funnel.evaluated}`);
+
+  // «به سقف خورد» بولی است؛ با جمعِ عددی تجمیع نمی‌شود و باید با «یا» بیاید،
+  // وگرنه هشدار سقفِ یک استراتژی در نمای کلی پنهان می‌ماند.
+  const sCap = { ...s4, maxRows: 2 };
+  const perCap = feasible.map((def) => scanFn({ def, chain: chain4, uaKeys: ['1'], settings: sCap }));
+  const mergedCap = scanAll({ defs: feasible, chain: chain4, uaKeys: ['1'], settings: sCap, limit: 500 });
+  check('اگر حتی یک استراتژی به سقف بخورد، نمای کلی هم می‌گوید',
+    perCap.some((r) => r.funnel.capped) && mergedCap.funnel.capped === true);
+  check('بدون برخورد به سقف، پرچم سقف روشن نمی‌شود',
+    perDef.every((r) => !r.funnel.capped) && merged.funnel.capped === false);
 }
 
 // ═══════════════ ۲۹. ماشین زمان — شبیه‌سازی بلک-شولز روی تاریخچه ═══════════════

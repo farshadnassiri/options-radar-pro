@@ -50,7 +50,14 @@ function equalWidth(ks) {
   return true;
 }
 
-const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept', 'blockedExpiry'];
+// سطل‌های شمارشیِ نوار تشخیص. `evaluated` هم شمارشی است و باید جمع شود —
+// نبودنش در این فهرست یعنی نمای «برترین موقعیت‌ها» همیشه «۰ ترکیب ارزیابی
+// شد» گزارش می‌کرد، در حالی که هزاران‌تا ارزیابی شده بود.
+//
+// `capped` عمداً اینجا نیست: بولی است نه عدد، و جمعش معنی ندارد. تجمیعش
+// جداگانه با «یا» انجام می‌شود.
+const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept',
+  'blockedExpiry', 'evaluated'];
 
 
 /**
@@ -288,9 +295,18 @@ export function scanAll({ defs, chain, uaKeys, settings, sigmaByUa = {}, qty, li
   const t0 = Date.now();
   const funnel = emptyFunnel();
   const rows = [];
+  // شمار کل، جمع شمارِ هر استراتژی است — نه طول آرایهٔ نهایی. هر `scan`
+  // ردیف‌هایش را در `topN` می‌بُرد، پس جمعِ آرایه‌های بریده‌شده «چند ترکیب
+  // پیدا شد» را نمی‌گوید، «چند ترکیب از برش جان به در برد» را می‌گوید. با
+  // topN=۵۰ و ۳۱ استراتژی، ۴۵۹۳ ترکیب «۳۲۸۸» گزارش می‌شد.
+  let total = 0;
   for (const def of defs) {
     const res = scan({ def, chain, uaKeys, settings, sigmaByUa, qty });
     for (const k of FUNNEL_KEYS) funnel[k] += res.funnel[k] || 0;
+    // «به سقف خورد» بولی است: اگر حتی یک استراتژی به سقف بخورد، نمای کلی
+    // هم به سقف خورده و هشدارش نباید پنهان بماند.
+    if (res.funnel.capped) funnel.capped = true;
+    total += res.total;
     rows.push(...res.rows);
   }
 
@@ -301,7 +317,7 @@ export function scanAll({ defs, chain, uaKeys, settings, sigmaByUa = {}, qty, li
     return yf - xf;
   });
 
-  return { rows: rows.slice(0, limit), total: rows.length, funnel, ms: Date.now() - t0 };
+  return { rows: rows.slice(0, limit), total, funnel, ms: Date.now() - t0 };
 }
 
 export { FUNNEL_KEYS };
