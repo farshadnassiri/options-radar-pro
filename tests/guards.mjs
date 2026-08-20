@@ -37,6 +37,18 @@ function walk(dir, ext, out = []) {
 const rel = (p) => path.relative(ROOT, p).replace(/\\/g, '/');
 const sources = walk(ROOT, '.mjs');
 
+/**
+ * شمار استراتژی‌های کاتالوگ.
+ *
+ * `ui/app.mjs` وارد نمی‌شود چون به DOM دست می‌زند و در نود می‌ترکد؛ ولی
+ * کاتالوگ تابع خالص است و مستقیم خوانده می‌شود. عدد از منبع می‌آید، نه از
+ * یک ثابت دستی که خودش هم می‌تواند کهنه شود.
+ */
+function catalogCount() {
+  const src = fs.readFileSync(path.join(ROOT, 'strategies/catalog.mjs'), 'utf8');
+  return (src.match(/^\s*\{\s*id:\s*'/gm) || []).length;
+}
+
 // ═════════════════════ ۱. صفر وابستگی npm (قاعده ۲-۱) ═════════════════════
 group('۱. صفر وابستگی npm');
 {
@@ -171,6 +183,74 @@ group('۶. فایل‌های قرارداد و حافظه سر جایشان هس
   for (const f of ['AGENTS.md', 'CLAUDE.md', 'WORKLOG.md', 'TASK_STATUS.md', 'README.md']) {
     check(`${f} موجود است`, fs.existsSync(path.join(ROOT, f)));
   }
+}
+
+// ═════════════════════ ۷. آزمون، به سیستم‌عامل بند نباشد ═════════════════════
+//
+// یک دور آزمون روی ویندوز، سیزده قابلیتِ کاملاً سالم را «خراب» گزارش کرد.
+// علت در کد برنامه نبود: `core.autocrlf=true` فایل‌ها را با CRLF روی دیسک
+// می‌گذارد و ادعاهایی که متنِ منبع را با الگوی دارای `\n` می‌سنجند، بی‌صدا
+// رد می‌شوند. نتیجه‌اش بدتر از یک باگ است — `node tests/run.mjs` که پیش از
+// هر پوش الزامی است هرگز سبز نمی‌شود، و آدم یاد می‌گیرد قرمز را جدی نگیرد.
+//
+// دو قفل، چون یکی کافی نیست: `.gitattributes` ریشه را می‌بندد برای
+// checkoutهای تازه، و خواندنِ نرمال‌کننده در خود آزمون، checkoutهایی را که
+// از قبل ساخته شده‌اند هم می‌پوشاند.
+group('۷. آزمون به پایان‌خط سیستم‌عامل بند نیست');
+{
+  const attrPath = path.join(ROOT, '.gitattributes');
+  check('.gitattributes موجود است', fs.existsSync(attrPath));
+  const attrs = fs.existsSync(attrPath) ? fs.readFileSync(attrPath, 'utf8') : '';
+  check('پایان‌خط همه فایل‌های متنی روی LF قفل شده',
+    /^\s*\*\s+text=auto\s+eol=lf\s*$/m.test(attrs));
+
+  // ادعای «کد این را دارد» باید از خواننده نرمال‌کننده رد شود. یک
+  // `readFileSync` خام، همان کلاس خطا را برمی‌گرداند بی‌آنکه کسی بفهمد.
+  const runSrc = fs.readFileSync(path.join(ROOT, 'tests/run.mjs'), 'utf8');
+  check('آزمون اصلی منبع را فقط با خوانندهٔ نرمال‌کننده می‌خواند',
+    !/fs\.readFileSync/.test(runSrc) && /\.replace\(\/\\r\\n\/g, '\\n'\)/.test(runSrc));
+}
+
+// ═════════════════════ ۸. شمار تب، یک عدد باشد نه سه ═════════════════════
+//
+// یک دور آزمون سه عدد متفاوت پیدا کرد: کد ۴۰ تب می‌ساخت، README می‌گفت ۳۹،
+// و AGENTS.md و یک کامنت در app.mjs می‌گفتند ۳۴. هیچ‌کدام دروغ عمدی نبود —
+// هر بار که استراتژی اضافه شد، کد خودش را به‌روز کرد و متن‌ها جا ماندند.
+//
+// عدد از کاتالوگ و از خودِ app.mjs شمرده می‌شود، نه از یک ثابتِ دستی. پس
+// افزودن استراتژی بعدی، همین‌جا قرمز می‌شود و می‌گوید کدام متن عقب مانده.
+group('۸. شمار تب در کد و مستندات یکی است');
+{
+  const appSrc = fs.readFileSync(path.join(ROOT, 'ui/app.mjs'), 'utf8');
+  const literal = /const TABS = \[([\s\S]*?)\n\];/.exec(appSrc)?.[1] || '';
+  const baseTabs = (literal.match(/\{\s*id:\s*'/g) || []).length;
+  // حلقهٔ استراتژی‌ها `id: d.id` می‌نویسد، پس این الگو فقط تب‌های تک‌نسخه‌ای
+  // را می‌شمرد — «موقعیت‌های من» و «تحلیل رول».
+  const pushedTabs = (appSrc.match(/TABS\.push\(\{\s*id:\s*'/g) || []).length;
+  const strategyTabs = catalogCount();
+  const tabCount = baseTabs + strategyTabs + pushedTabs;
+
+  check('ساختار شمارش تب در app.mjs پیدا شد', baseTabs > 0 && pushedTabs > 0,
+    `${baseTabs} پایه + ${strategyTabs} استراتژی + ${pushedTabs} موقعیت`);
+
+  // هر شمارِ «N تب» در متن باید یکی از سه عدد واقعی باشد: کل، پایه، یا
+  // استراتژی. متن‌ها هر سه را جایی می‌گویند و هر سه می‌توانند کهنه شوند.
+  const legit = new Set([tabCount, baseTabs, strategyTabs].map((n) => faNum(String(n))));
+  for (const [file, label] of [['README.md', 'README'], ['AGENTS.md', 'AGENTS']]) {
+    const text = fs.readFileSync(path.join(ROOT, file), 'utf8');
+    const claimed = [...text.matchAll(/([۰-۹]+)\s*تب/g)].map((m) => m[1]);
+    const stale = claimed.filter((c) => !legit.has(c));
+    check(`${label} هیچ شمار تبِ کهنه‌ای ندارد`, claimed.length > 0 && stale.length === 0,
+      stale.length ? `کهنه: ${stale.join('، ')} — مجاز: ${[...legit].join('، ')}`
+        : `${claimed.join('، ')}`);
+  }
+  // و دست‌کم یکی‌شان باید شمارِ کل را صریح بگوید، وگرنه حذفِ عدد از متن،
+  // این نگهبان را بی‌صدا راضی می‌کند.
+  const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  const agents = fs.readFileSync(path.join(ROOT, 'AGENTS.md'), 'utf8');
+  const totalFa = faNum(String(tabCount));
+  check('شمار کل تب‌ها در هر دو سند نوشته شده',
+    readme.includes(`${totalFa} تب`) && agents.includes(`${totalFa} تب`), totalFa);
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

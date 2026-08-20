@@ -6,6 +6,7 @@ on:
     branches: [main]
 
 jobs:
+  # ——— دروازهٔ اصلی: لینوکس، با نگهبان‌هایی که به تاریخچه نیاز دارند ———
   check:
     runs-on: ubuntu-latest
     steps:
@@ -33,3 +34,31 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: node tests/commits.mjs
+
+  # ——— ویندوز ———
+  #
+  # یک دور آزمون دستی روی ویندوز، سیزده قابلیتِ کاملاً سالم را «خراب»
+  # گزارش کرد: `core.autocrlf=true` فایل‌ها را با CRLF روی دیسک می‌گذارد و
+  # ادعاهایی که متن منبع را با الگوی دارای `\n` می‌سنجند، بی‌صدا رد
+  # می‌شوند. `.gitattributes` و خوانندهٔ نرمال‌کننده آن را بستند؛ این کار
+  # مطمئن می‌شود دوباره باز نشود.
+  #
+  # `autocrlf` صریح روشن می‌شود تا بدترین حالت آزموده شود، نه پیش‌فرض
+  # runner. اگر روزی `.gitattributes` پاک شود، همین‌جا قرمز می‌شود.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: روشن‌کردن CRLF پیش از checkout — بدترین حالت را بسنج
+        run: git config --global core.autocrlf true
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: آزمون موتور
+        run: node tests/run.mjs
+
+      - name: نگهبان قواعد مخزن
+        run: node tests/guards.mjs

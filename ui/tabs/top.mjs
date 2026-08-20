@@ -12,7 +12,7 @@ import { COLUMNS } from '/core/evaluate.mjs';
 import { analyzePayoff } from '/core/payoff.mjs';
 import { analyzeMixed, isSingleExpiry } from '/core/mixed.mjs';
 import { makeTable, funnelBar, changedIds } from '/ui/table.mjs';
-import { fmt, coverageInfo, signTone } from '/ui/fmt.mjs';
+import { fmt, coverageInfo, signTone, offsetCell } from '/ui/fmt.mjs';
 import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
@@ -146,7 +146,7 @@ export async function mount(root, { state, api }) {
           <dt>جهت نقدی</dt><dd>${r.cashLabel}</dd>
           <dt>نقد خالص</dt><dd>${fmt.money(r.netCash)}</dd>
           <dt>اگر همین حالا ببندی — دفتر سفارش</dt>
-          <dd style="color:${r.instantClosePnl >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(r.instantClosePnl)}</dd>
+          <dd>${offsetCell(r)}</dd>
           <dt>اگر با آخرین معامله تسویه کنی <span class="unit">مرجع</span></dt>
           <dd style="color:${r.settleLastPnl >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(r.settleLastPnl)}</dd>
           <dt>اگر با قیمت پایانی تسویه کنی <span class="unit">مرجع</span></dt>

@@ -10,6 +10,8 @@
 // scope : server = حلقه دریافت داده | client = محاسبه و نمایش | both
 // ————————————————————————————————————————————————————————————————
 
+import { num } from './num.mjs';
+
 export const SCHEMA = [
   // ——— منبع داده ———
   { key: 'baseUrl', group: 'data', kind: 'text', scope: 'server',
@@ -94,6 +96,25 @@ export const SCHEMA = [
     hint: 'با پنل کارگزاری خودت تطبیق بده. این عدد در استراتژی چندپا چند بار پرداخت می‌شود.' },
   { key: 'feeExercise', group: 'fees', kind: 'pct', scope: 'client',
     def: 0.000500, min: 0, max: 0.05, step: 0.000001, label: 'کارمزد اعمال' },
+  // ——— نرخ دارایی پایه بر حسب نوع ابزار ———
+  // پیش‌فرض هر سه کلاس عمداً برابر نرخ سهم است، تا تا وقتی کاربر نرخ
+  // کارگزارش را وارد نکرده هیچ عددی بی‌صدا جابه‌جا نشود. عددی که تأییدش
+  // نکرده‌ایم اینجا نمی‌نشیند.
+  { key: 'feeBuyEtf', group: 'fees', kind: 'pct', scope: 'client',
+    def: 0.003712, min: 0, max: 0.05, step: 0.000001,
+    label: 'کارمزد خرید صندوق قابل معامله',
+    hint: 'تا وارد نکنی، برابر نرخ سهم می‌ماند. نرخ واقعی را از صورتحساب کارگزارت بردار.' },
+  { key: 'feeSellEtf', group: 'fees', kind: 'pct', scope: 'client',
+    def: 0.008800, min: 0, max: 0.05, step: 0.000001,
+    label: 'کارمزد فروش صندوق قابل معامله',
+    hint: 'مالیات فروشندهٔ سهم برای صندوق برقرار نیست؛ نرخ واقعی را از صورتحساب کارگزارت بردار.' },
+  { key: 'feeBuyCommodity', group: 'fees', kind: 'pct', scope: 'client',
+    def: 0.003712, min: 0, max: 0.05, step: 0.000001, label: 'کارمزد خرید صندوق کالایی' },
+  { key: 'feeSellCommodity', group: 'fees', kind: 'pct', scope: 'client',
+    def: 0.008800, min: 0, max: 0.05, step: 0.000001, label: 'کارمزد فروش صندوق کالایی' },
+  { key: 'assetClassMap', group: 'fees', kind: 'text', scope: 'client',
+    def: '', label: 'نوع دارایی پایه',
+    hint: 'فهرست «شناسه یا نام پایه:نوع» جداشده با ویرگول — مثل «اهرم:ETF». نوع‌ها: STOCK و ETF و COMMODITY. هرچه اینجا نباشد سهم فرض می‌شود. تابلوی اختیار نوع ابزار را نمی‌دهد، پس این نگاشت دست توست؛ حدس زدن از روی نام، اختراع داده است.' },
 
   // ——— وجه تضمین ———
   { key: 'marginA', group: 'margin', kind: 'num', scope: 'client',
@@ -104,6 +125,22 @@ export const SCHEMA = [
     def: 10000, min: 1, max: 1000000, step: 1000, unit: 'ریال', label: 'واحد گردکردن C' },
   { key: 'marginMaint', group: 'margin', kind: 'num', scope: 'client',
     def: 0.70, min: 0, max: 1, step: 0.01, label: 'ضریب نگهداشت' },
+  { key: 'marginBBasis', group: 'margin', kind: 'pick', scope: 'client',
+    def: 'SPOT',
+    options: [
+      ['SPOT', 'قیمت پایانی پایه — تطبیق‌شده با تابلو'],
+      ['STRIKE', 'قیمت اعمال — متن ضوابط منتشرشده'],
+    ],
+    label: 'مبنای جزء B وجه تضمین',
+    hint: 'شش مشاهدهٔ تابلو، B را بر قیمت پایانی پایه نشان دادند؛ متن آینه‌ای ضوابط، بر قیمت اعمال. فایل رسمی از دامنه سازمان بورس در دسترس نبود، پس هیچ‌کدام قطعی نیست. پیش‌فرض همان است که با تابلوی واقعی خوانده؛ گزینه دوم برای سنجش انطباق با متن یا مقایسه با صورتحساب کارگزار است. روی ۷٬۹۲۵ پای فروش، بیشینه اختلاف ۷٫۳۴ میلیون ریال بود.' },
+  { key: 'nakedComboMargin', group: 'margin', kind: 'pick', scope: 'client',
+    def: 'SUM',
+    options: [
+      ['SUM', 'جمع دو پا — محافظه‌کارانه'],
+      ['MAX_PLUS_PREMIUM', 'بزرگ‌تر + پریمیوم پای دیگر — متن ضوابط'],
+    ],
+    label: 'وجه تضمین فروش هم‌زمان کال و پوت',
+    hint: 'استرادل و استرنگل فروش. کال و پوت هم‌زمان در زیان عمیق نمی‌روند، پس متن ضوابط به‌جای جمع، بزرگ‌ترِ دو پا به‌علاوهٔ پریمیوم پای دیگر را می‌گیرد. هیچ‌کدام با تابلو تأیید نشده؛ جمع‌بستن محافظه‌کارانه‌تر است چون کم‌برآوردِ وجه تضمین یعنی کال‌مارجین غیرمنتظره. فقط روی ترکیب تمیزِ یک کال و یک پوتِ هم‌سررسیدِ کاملاً لخت اعمال می‌شود.' },
   { key: 'capitalMode', group: 'margin', kind: 'pick', scope: 'client',
     def: 'NET', options: [['NET', 'خالص — وجه تضمین منهای بستانکار'], ['GROSS', 'ناخالص — کل وجه تضمین']],
     label: 'مبنای سرمایه در موقعیت فروش' },
@@ -174,6 +211,13 @@ export const SCHEMA = [
     def: 100, min: 0, max: 1000, step: 1, unit: 'درصد', label: 'سقف اسپرد' },
   { key: 'minReturnPct', group: 'screen', kind: 'num', scope: 'client',
     def: 0, min: -100, max: 1000, step: 0.5, unit: 'درصد', label: 'حداقل بازده دوره' },
+  { key: 'minCapital', group: 'screen', kind: 'num', scope: 'client',
+    def: 0, min: 0, max: 1e13, step: 1000000, unit: 'ریال', label: 'حداقل سرمایه درگیر',
+    hint: 'ترکیبی که سرمایه درگیرش چند ریال است، بازده درصدیِ بی‌معنی می‌سازد و صدر جدول می‌نشیند، در حالی که با آن مبلغ اصلاً باز نمی‌شود. صفر یعنی خاموش — عدد آستانه سلیقهٔ توست، نه حکم مدل.' },
+  { key: 'retWarnMonthPct', group: 'screen', kind: 'num', scope: 'client',
+    def: 1000, min: 0, max: 1e7, step: 100, unit: 'درصد',
+    label: 'آستانه هشدار بازده نامتعارف',
+    hint: 'بالاتر از این، ردیف برچسب «بازده نامتعارف» می‌گیرد. فیلتر نیست و ردیف را حذف نمی‌کند؛ فقط می‌گوید عدد از مظنه‌ای آمده که بازار به آن قیمت نمی‌دهد. صفر یعنی خاموش.' },
   { key: 'blockedExpiries', group: 'screen', kind: 'text', scope: 'client',
     def: '', label: 'سررسیدهای با سقف موقعیت پر',
     hint: 'فهرست «شناسه نماد پایه:تاریخ سررسید» جداشده با ویرگول. معمولاً از نوار بالای برنامه انتخاب می‌شود. وقتی سقف یک سررسید پر است، موقعیت فزاینده تازه ممکن نیست و فقط آفست موقعیت قبلی می‌ماند؛ پس برای آن سررسید هیچ استراتژی‌ای پیشنهاد نمی‌شود.' },
@@ -248,7 +292,7 @@ export const GROUPS = {
   hours:  { title: 'ساعات بازار', note: 'بیرون از بازار حلقه دریافت متوقف می‌شود و آخرین عکس لحظه‌ای در حافظه می‌ماند.' },
   basis:  { title: 'مبنای محاسبه', note: 'اعداد پایه‌ای که زیر همه فرمول‌ها نشسته‌اند. عوض کردنشان هر ستون بازده را در همه تب‌ها جابه‌جا می‌کند.' },
   fees:   { title: 'کارمزدها', note: 'در استراتژی چندپا، کارمزد هر پا جدا پرداخت می‌شود.' },
-  margin: { title: 'وجه تضمین و سرمایه', note: 'بستانکار خالص وجه تضمین می‌گیرد، بدهکار خالص نمی‌گیرد.' },
+  margin: { title: 'وجه تضمین و سرمایه', note: 'بستانکار خالص وجه تضمین می‌گیرد، بدهکار خالص نمی‌گیرد. دو گزینهٔ «مبنای جزء B» و «فروش هم‌زمان کال و پوت» جایی هستند که تابلوی واقعی و متن ضوابط منتشرشده با هم نمی‌خوانند؛ پیش‌فرض هر دو، همان رفتار تطبیق‌شده با تابلو است.' },
   exec:   { title: 'مبنای قیمت و اجرا', note: 'مبنای دفتر سفارش، تنها مبنایی است که ادعای اجرا دارد.' },
   screen: { title: 'غربال مشترک', note: 'این فیلترها روی همه تب‌ها اعمال می‌شوند.' },
   combo: { title: 'ترکیب‌سازی', note: 'تعداد ترکیب با تعداد پا رشد انفجاری دارد. این اعداد مهارش می‌کنند.' },
@@ -286,11 +330,66 @@ export function sanitize(input = {}) {
   return out;
 }
 
-/** دسته کارمزد، جدا شده از تنظیمات تا موتورها به کل شیء وابسته نشوند. */
-export function feesOf(s) {
+/**
+ * نوع‌های دارایی پایه. کارمزد و مالیاتِ سهم، صندوق قابل معامله و صندوق
+ * کالایی یکی نیست، و استراتژی‌های دارای پای سهم — کاوردکال، پوت حفاظتی،
+ * کولار، تبدیل — همان نرخ را در ارزش کل موقعیت ضرب می‌کنند.
+ */
+export const ASSET_CLASSES = [
+  ['STOCK', 'سهم'],
+  ['ETF', 'صندوق قابل معامله'],
+  ['COMMODITY', 'صندوق کالایی'],
+];
+
+const ASSET_CLASS_LABEL = new Map(ASSET_CLASSES);
+export const assetClassLabel = (k) => ASSET_CLASS_LABEL.get(k) || ASSET_CLASS_LABEL.get('STOCK');
+
+/**
+ * نگاشت «پایه → نوع ابزار»، از متن تنظیمات.
+ *
+ * چرا دستی: تابلوی اختیار نوع ابزار پایه را نمی‌دهد. تشخیص خودکار از روی
+ * نام یعنی حدس زدن — و حدسی که در نرخ کارمزدِ کل موقعیت ضرب شود، از نداشتنِ
+ * تفکیک بدتر است. پس ورودی، اعلام کاربر است؛ همان الگوی «سررسیدهای با سقف
+ * موقعیت پر» که آن هم از تابلو خوانده نمی‌شود.
+ *
+ * قالب: «شناسه یا نام پایه:نوع»، جداشده با ویرگول.
+ */
+export function assetClassMap(text = '') {
+  const out = new Map();
+  for (const part of String(text ?? '').split(',')) {
+    const at = part.lastIndexOf(':');
+    if (at < 1) continue;
+    const key = part.slice(0, at).trim();
+    const cls = part.slice(at + 1).trim().toUpperCase();
+    if (key && ASSET_CLASS_LABEL.has(cls)) out.set(key, cls);
+  }
+  return out;
+}
+
+/** نوع پایه: اول با شناسه، بعد با نام. هرچه در نگاشت نباشد، سهم است. */
+export function assetClassOf(map, ua = {}) {
+  if (!map?.size) return 'STOCK';
+  const ins = ua.ins == null ? '' : String(ua.ins);
+  const name = ua.name == null ? '' : String(ua.name);
+  return map.get(ins) || map.get(name) || 'STOCK';
+}
+
+/**
+ * دسته کارمزد، جدا شده از تنظیمات تا موتورها به کل شیء وابسته نشوند.
+ *
+ * `assetClass` فقط نرخ پای سهم را جابه‌جا می‌کند. کارمزد اختیار و اعمال از
+ * قرارداد می‌آید نه از نوع پایه، پس دست‌نخورده می‌ماند.
+ */
+export function feesOf(s, assetClass = 'STOCK') {
+  const [buy, sell] = assetClass === 'ETF'
+    ? [s.feeBuyEtf, s.feeSellEtf]
+    : assetClass === 'COMMODITY'
+      ? [s.feeBuyCommodity, s.feeSellCommodity]
+      : [s.feeBuyStock, s.feeSellStock];
   return {
-    buyStock: s.feeBuyStock, sellStock: s.feeSellStock,
+    buyStock: num(buy, s.feeBuyStock), sellStock: num(sell, s.feeSellStock),
     option: s.feeOption, exercise: s.feeExercise,
+    assetClass,
   };
 }
 
@@ -308,5 +407,8 @@ export function basisOf(s) {
 }
 
 export function marginParamsOf(s) {
-  return { A: s.marginA, B: s.marginB, C: s.marginC, maint: s.marginMaint };
+  return {
+    A: s.marginA, B: s.marginB, C: s.marginC, maint: s.marginMaint,
+    bBasis: s.marginBBasis || 'SPOT',
+  };
 }

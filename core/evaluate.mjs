@@ -19,7 +19,7 @@ import {
   grossCash, entryFees, analyzePayoff, positionGreeks, signedQty,
 } from './payoff.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
-import { basisOf } from './settings.mjs';
+import { basisOf, marginParamsOf, feesOf, assetClassLabel } from './settings.mjs';
 import { closeValuation } from './positions.mjs';
 import {
   priceLegs, executionCost, maxSize, rowQuality, leggingRisk, spreadPct, midOf,
@@ -83,11 +83,14 @@ export function probOfProfit(an, S, T, sigma) {
  */
 export function evaluate({ legs, quotes, ctx }) {
   const s = ctx.settings;
-  const fees = {
-    buyStock: s.feeBuyStock, sellStock: s.feeSellStock,
-    option: s.feeOption, exercise: s.feeExercise,
-  };
-  const params = { A: s.marginA, B: s.marginB, C: s.marginC, maint: s.marginMaint };
+  // نرخ پای سهم به نوع پایه بستگی دارد — سهم، صندوق قابل معامله، صندوق
+  // کالایی. تا وقتی کاربر نگاشتش را ننوشته، هر سه یک عدد می‌گیرند و هیچ
+  // ردیفی جابه‌جا نمی‌شود؛ ولی ردیف می‌گوید کدام نرخ خورده است.
+  const fees = feesOf(s, ctx.assetClass || 'STOCK');
+  // از `marginParamsOf` می‌آید نه از شیء دستی. سه جای برنامه این شیء را
+  // دستی می‌ساختند و هر پارامتر تازه‌ای باید در هر سه اضافه می‌شد وگرنه
+  // بی‌صدا جا می‌ماند — همان‌طور که مبنای جزء B جا می‌ماند.
+  const params = marginParamsOf(s);
   // مبنای محاسبه از تنظیمات می‌آید، نه از عدد سخت‌کد. اندازه قرارداد و
   // تقویم، هر دو ورودی‌اند نه ثابت طبیعت.
   const basis = basisOf(s);
@@ -128,10 +131,19 @@ export function evaluate({ legs, quotes, ctx }) {
   // تسویه کنم چه می‌شود؟ — سه مبنا روی همان مظنه‌های استفاده‌شده برای ورود.
   // مبنای دفتر سفارش ادعای اجرا دارد (bid/ask واقعی)؛ آخرین و پایانی فقط
   // مرجع‌اند، چون لحظه وقوعشان با لحظه این محاسبه هم‌زمان نیست.
+  //
+  // «بستن فوری» ادعای اجرا دارد، پس اگر سمت خروجِ حتی یک پا خالی باشد عدد
+  // ساخته نمی‌شود. مبنای آخرین و پایانی از اول مرجع‌اند و همیشه عدد دارند.
   const quotesForClose = pos.map((l) => l.quote || {});
-  const instantClosePnl = netCash + closeValuation(pos, quotesForClose, 'BOOK', fees).net;
+  const instantClose = closeValuation(pos, quotesForClose, 'BOOK', fees, { strict: true });
+  const offsettable = instantClose.offsettable !== false;
+  const instantClosePnl = offsettable ? netCash + instantClose.net : NaN;
   const settleLastPnl = netCash + closeValuation(pos, quotesForClose, 'LAST', fees).net;
   const settleClosePnl = netCash + closeValuation(pos, quotesForClose, 'CLOSE', fees).net;
+  // کدام پا سمت خروج ندارد — تا کاربر بداند کجا گیر است، نه فقط اینکه گیر است
+  const noExitLegs = instantClose.perLeg
+    .map((x, i) => (x.offsettable ? null : (pos[i].name || pos[i].key || `پای ${i + 1}`)))
+    .filter(Boolean);
 
   // ——— ۳. بازده در سررسید ———
   // اگر سررسید پاها یکی نباشد، موتور تکه‌ای-خطی جواب غلط می‌دهد: فروش و خرید
@@ -150,7 +162,7 @@ export function evaluate({ legs, quotes, ctx }) {
   pos.forEach((l, i) => { closes[i] = num(l.quote?.close, num(l.price)); });
   const margin = strategyMargin(pos, {
     S: Sclose, closes, params, creditMode: s.creditSpreadMargin, capitalMode: s.capitalMode,
-    contractSize: basis.contractSize,
+    nakedComboMargin: s.nakedComboMargin, contractSize: basis.contractSize,
   });
 
   // ——— ۵. سرمایه درگیر و بازده ———
@@ -308,12 +320,20 @@ export function evaluate({ legs, quotes, ctx }) {
   if (priced.some((l) => l.exec?.simultaneous === false)) warn.push('قیمت ناهم‌زمان');
   if (priced.some((l) => num(l.exec?.slipPct) > s.maxSlipPct)) warn.push('افت مظنه بالا');
   if (!singleExpiry) warn.push('چند سررسید — بازده تقریبی');
+  if (!offsettable) warn.push('آفست ناممکن');
+  // بازده نامتعارف. بعد از اصلاح مخرج، عددهای چندمیلیون‌درصدی از بین
+  // رفتند؛ آنچه می‌ماند از مظنه می‌آید نه از فرمول — اسپردی که بازار به آن
+  // قیمت نمی‌دهد. حذفش نمی‌کنیم، ولی بی‌نشان هم رهایش نمی‌کنیم.
+  if (num(s.retWarnMonthPct, 0) > 0 && ok(retMax)
+    && (retMax * basis.monthDays) / days > s.retWarnMonthPct) warn.push('بازده نامتعارف');
 
   return {
     // هویت
     strategy: ctx.def?.name || 'ترکیب دستی',
     strategyId: ctx.def?.id || 'custom',
     underlying: ctx.underlying || '',
+    assetClass: fees.assetClass,
+    assetClassLabel: assetClassLabel(fees.assetClass),
     days, qty, legCount: priced.length,
     strikes: payoff.strikes,
     // سررسید و نام قرارداد: تا امروز ردیف فقط «روز مانده» داشت. دو ترکیب با
@@ -342,6 +362,7 @@ export function evaluate({ legs, quotes, ctx }) {
     grossCash: gross, entryFee, netCash, isCredit,
     cashLabel: isCredit ? 'بستانکار' : 'بدهکار',
     instantClosePnl, settleLastPnl, settleClosePnl,
+    offsettable, noExitLegs,
 
     // سود و زیان
     breakevens: payoff.breakevens,
@@ -495,6 +516,7 @@ export const COLUMNS = [
   { key: 'days', label: 'روز', fmt: 'int', group: 'هویت' },
   // بدون این ستون، «نقد خالص ۶٬۶۴۲٬۵۵۴» نمی‌گوید مال چند قرارداد است.
   { key: 'qty', label: 'حجم من (قرارداد)', fmt: 'int', group: 'هویت' },
+  { key: 'assetClassLabel', label: 'نوع دارایی پایه — مبنای نرخ کارمزد', fmt: 'text', group: 'هویت' },
   { key: 'expiryLabel', label: 'تاریخ سررسید', fmt: 'text', group: 'هویت' },
   { key: 'strikes', label: 'قیمت اعمال', fmt: 'list', group: 'هویت' },
   { key: 'legNames', label: 'نام قرارداد پاها', fmt: 'sym', group: 'هویت' },
@@ -503,6 +525,8 @@ export const COLUMNS = [
   { key: 'entryFee', label: 'کارمزد ورود', fmt: 'money', group: 'جریان نقد' },
   { key: 'netCash', label: 'نقد خالص', fmt: 'money', group: 'جریان نقد' },
   { key: 'instantClosePnl', label: 'آفست — سود/زیان بستن فوری با دفتر سفارش', fmt: 'money', group: 'جریان نقد', heat: 'gain' },
+  { key: 'offsettable', label: 'آفست ممکن است', fmt: 'bool', group: 'جریان نقد' },
+  { key: 'noExitLegs', label: 'پای بدون سمت خروج', fmt: 'sym', group: 'جریان نقد' },
   { key: 'settleLastPnl', label: 'سود/زیان اگر تسویه با آخرین معامله', fmt: 'money', group: 'جریان نقد' },
   { key: 'settleClosePnl', label: 'سود/زیان اگر تسویه با قیمت پایانی', fmt: 'money', group: 'جریان نقد' },
   { key: 'S', label: 'قیمت پایه', fmt: 'money', group: 'سود و زیان' },

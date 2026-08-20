@@ -13,6 +13,7 @@
 
 import { num, EPS } from './num.mjs';
 import { evaluate } from './evaluate.mjs';
+import { assetClassMap, assetClassOf } from './settings.mjs';
 import {
   underlyingQuote, legContractSize, comboContractSize,
   blockedExpirySet, expiryBlocked,
@@ -50,7 +51,14 @@ function equalWidth(ks) {
   return true;
 }
 
-const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept', 'blockedExpiry'];
+// سطل‌های شمارشیِ نوار تشخیص. `evaluated` هم شمارشی است و باید جمع شود —
+// نبودنش در این فهرست یعنی نمای «برترین موقعیت‌ها» همیشه «۰ ترکیب ارزیابی
+// شد» گزارش می‌کرد، در حالی که هزاران‌تا ارزیابی شده بود.
+//
+// `capped` عمداً اینجا نیست: بولی است نه عدد، و جمعش معنی ندارد. تجمیعش
+// جداگانه با «یا» انجام می‌شود.
+const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept',
+  'blockedExpiry', 'evaluated'];
 
 
 /**
@@ -208,6 +216,10 @@ export function passesFilters(row, s) {
   // فقط برای این هست که ببینی چه ترکیبی وجود دارد و چرا اجرا نمی‌شود.
   if (!row.executable && s.showUnexecutable) return true;
   if (!Number.isFinite(row.capital) || row.capital <= 0) return false;
+  // کف سرمایه. ترکیبی که سرمایه درگیرش چند ریال است، بازده درصدیِ بی‌معنی
+  // می‌سازد و صدر جدول می‌نشیند — در حالی که با آن مبلغ اصلاً باز نمی‌شود.
+  // پیش‌فرض صفر است: آستانه سلیقهٔ کاربر است، نه حکم مدل.
+  if (num(s.minCapital, 0) > 0 && row.capital < s.minCapital) return false;
   if (Number.isFinite(s.minReturnPct) && row.retMaxPct < s.minReturnPct) return false;
   for (const l of row.legPrices) {
     if (Number.isFinite(l.spreadPct) && l.spreadPct > s.maxSpreadPct) return false;
@@ -225,6 +237,7 @@ export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, qty }) {
   const rows = [];
   const t0 = Date.now();
 
+  const classes = assetClassMap(s.assetClassMap);
   for (const key of uaKeys) {
     const ua = chain.get(key);
     if (!ua) continue;
@@ -240,6 +253,9 @@ export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, qty }) {
             sizeMixed: c.sizeMixed,
             qty: qty ?? s.qtyDefault, settings: s, def,
             underlying: c.underlying, sigmaHist: sigmaByUa[key],
+            // نوع پایه، از نگاشت اعلامی کاربر. نرخ کارمزد پای سهم از همین
+            // می‌آید و ردیف هم می‌گوید کدام نرخ خورده است.
+            assetClass: assetClassOf(classes, ua),
             // سررسید تا امروز فقط به‌شکل «روز مانده» می‌رسید. دو ترکیب با
             // ۲۳ روز مانده می‌توانند دو سررسید متفاوت باشند و «روز» این را
             // نمی‌گوید؛ ستون «تاریخ سررسید» بدون این، خالی می‌ماند.
@@ -288,9 +304,18 @@ export function scanAll({ defs, chain, uaKeys, settings, sigmaByUa = {}, qty, li
   const t0 = Date.now();
   const funnel = emptyFunnel();
   const rows = [];
+  // شمار کل، جمع شمارِ هر استراتژی است — نه طول آرایهٔ نهایی. هر `scan`
+  // ردیف‌هایش را در `topN` می‌بُرد، پس جمعِ آرایه‌های بریده‌شده «چند ترکیب
+  // پیدا شد» را نمی‌گوید، «چند ترکیب از برش جان به در برد» را می‌گوید. با
+  // topN=۵۰ و ۳۱ استراتژی، ۴۵۹۳ ترکیب «۳۲۸۸» گزارش می‌شد.
+  let total = 0;
   for (const def of defs) {
     const res = scan({ def, chain, uaKeys, settings, sigmaByUa, qty });
     for (const k of FUNNEL_KEYS) funnel[k] += res.funnel[k] || 0;
+    // «به سقف خورد» بولی است: اگر حتی یک استراتژی به سقف بخورد، نمای کلی
+    // هم به سقف خورده و هشدارش نباید پنهان بماند.
+    if (res.funnel.capped) funnel.capped = true;
+    total += res.total;
     rows.push(...res.rows);
   }
 
@@ -301,7 +326,7 @@ export function scanAll({ defs, chain, uaKeys, settings, sigmaByUa = {}, qty, li
     return yf - xf;
   });
 
-  return { rows: rows.slice(0, limit), total: rows.length, funnel, ms: Date.now() - t0 };
+  return { rows: rows.slice(0, limit), total, funnel, ms: Date.now() - t0 };
 }
 
 export { FUNNEL_KEYS };
