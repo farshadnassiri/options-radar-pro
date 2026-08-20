@@ -66,6 +66,24 @@ import { BE_SLOTS } from '../core/evaluate.mjs';
 let pass = 0, fail = 0;
 const results = [];
 
+/**
+ * خواندن متن یک فایل پروژه برای ادعاهای «کد این را دارد».
+ *
+ * پایان‌خط همیشه `\n` می‌شود. چرا لازم است: بیش از پنجاه ادعا در این
+ * فایل، متنِ منبع را با الگو می‌سنجند و چند تایشان `\n` را صریح در الگو
+ * دارند. روی ویندوز با `core.autocrlf=true` همان فایل‌ها `\r\n` دارند و آن
+ * الگوها بی‌صدا رد می‌شوند — سیزده قابلیتِ کاملاً سالم «خراب» گزارش
+ * می‌شدند و `node tests/run.mjs` که پیش از هر پوش الزامی است، هرگز سبز
+ * نمی‌شد.
+ *
+ * `.gitattributes` ریشه را می‌بندد؛ این تابع لایهٔ دوم است، برای
+ * checkoutهایی که از قبل ساخته شده‌اند. الگوی تازه‌ای هم که فردا کسی با
+ * `\n` بنویسد، دیگر نمی‌تواند این کلاس خطا را برگرداند.
+ */
+const readSrc = (relative) => fs
+  .readFileSync(new URL(relative, import.meta.url), 'utf8')
+  .replace(/\r\n/g, '\n');
+
 function check(name, cond, detail = '') {
   if (cond) { pass += 1; results.push(['✔', name, detail]); }
   else { fail += 1; results.push(['✘', name, detail]); }
@@ -1274,8 +1292,8 @@ group('۲۱. قالب‌بندی عدد فارسی');
 // پنل شمارنده‌های فنی به درخواست کاربر از رابط حذف شده است. حضور هرکدام از
 // شناسه‌ها یا برچسب‌های آن یعنی بخشی از پنل ناخواسته برگشته است.
 {
-  const indexHtml = fs.readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
-  const appSource = fs.readFileSync(new URL('../ui/app.mjs', import.meta.url), 'utf8');
+  const indexHtml = readSrc('../ui/index.html');
+  const appSource = readSrc('../ui/app.mjs');
   const removedHealthPanel = [
     'health-detail', 'detail-btn', 'درخواست بالادست', 'اصابت کش',
     'تأخیر بالادست', 'سن عکس سرور', 'قطعی اتصال', 'آخرین خطا',
@@ -1750,7 +1768,7 @@ group('۳۲. بازپخش تاریخی استراتژی');
   const legSnapshots32 = strategyLegSnapshots(legs32, args32.seriesByIns, 20260801);
   check('کارت قیمت بک‌تست برای هر پای استراتژی یک عکس مستقل می‌سازد', legSnapshots32.length === 2 && legSnapshots32[0].ins === '11' && legSnapshots32[1].ins === '12');
   check('قیمت کارت پاها از قرارداد می‌آید، نه دارایی پایه', legSnapshots32[0].prices.CLOSE === 8 && legSnapshots32[1].prices.CLOSE === 10 && legSnapshots32.every((row) => row.prices.CLOSE !== 100));
-  const backtestSource32 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  const backtestSource32 = readSrc('../ui/tabs/backtest.mjs');
   check('رابط بک‌تست عکس قیمت را با پاهای انتخاب‌شده می‌سازد', backtestSource32.includes('strategyLegSnapshots(legs, seriesByIns, entry)') && !backtestSource32.includes('marketSnapshot(rowAt(ua?.ins'));
   check('رابط بک‌تست تحلیل خط زمانی، اثر پاها، حجم و ماتریس هم‌حرکتی را رندر می‌کند',
     backtestSource32.includes('summarizeIntraday(intraday)') && backtestSource32.includes('bt-intraday-leg-chart')
@@ -1915,14 +1933,14 @@ group('۳۲. بازپخش تاریخی استراتژی');
     sharedIns32.map((row) => row.cumulativeVolume).join('/'));
   check('حجم تجمعی سطر همان جمع رویدادهای همان مسیر است',
     sharedIns32.at(-1).cumulativeVolume === sharedIns32.reduce((sum, row) => sum + row.eventVolume, 0));
-  const chartSource32 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  const chartSource32 = readSrc('../ui/tabs/backtest.mjs');
   check('برچسب سری نمودار نام قرارداد بالادست را فرار می‌دهد',
     chartSource32.includes('const seriesLabel = (item) => esc(item.label);')
     && !/\$\{item\.label\}/.test(chartSource32));
   check('توضیح ماتریس هم‌حرکتی بیرون از جعبه پیمایش جدول می‌نشیند',
     chartSource32.includes('id="bt-correlation-note"')
     && !/backtest-correlation[\s\S]{0,2000}?<p class="backtest-table-note"/.test(chartSource32));
-  const styleSource32 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  const styleSource32 = readSrc('../ui/style.css');
   check('ماتریس هم‌حرکتی کف پهنای جدول تاریخچه را نمی‌گیرد',
     styleSource32.includes('.history-table.backtest-correlation { min-width: 0; }'));
 
@@ -1975,7 +1993,7 @@ group('۳۳. گزارش همه استراتژی‌ها');
 // ═══════════════════════════ ۳۴. انتخابگر تاریخ مشترک ═══════════════════════════
 group('۳۴. انتخابگر تاریخ مشترک');
 {
-  const read = (relative) => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
+  const read = (relative) => readSrc(relative);
   const wheelSource34 = read('../ui/datewheel.mjs');
   check('انتخابگر تاریخ یک ماژول مشترک است، نه سه پیاده‌سازی جدا',
     wheelSource34.includes('export function mountDateWheel('));
@@ -2008,8 +2026,8 @@ group('۳۴. انتخابگر تاریخ مشترک');
 // ═══════════════════════════ ۳۵. نوار ثابت مشخصات موقعیت ═══════════════════════════
 group('۳۵. نوار ثابت مشخصات موقعیت');
 {
-  const historySource35 = fs.readFileSync(new URL('../ui/tabs/history.mjs', import.meta.url), 'utf8');
-  const styleSource35 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  const historySource35 = readSrc('../ui/tabs/history.mjs');
+  const styleSource35 = readSrc('../ui/style.css');
   // کشیدن جعبه، جای آن را از دست کاربر می‌گرفت: تا «بازنشانی جایگاه» را
   // نمی‌زد، جعبه همان‌جا که رها شده بود می‌ماند — حتی روی محتوای مهم.
   check('کد کشیدن جعبه مشخصات به‌کلی برداشته شده است',
@@ -2104,7 +2122,7 @@ group('۳۶. قیمت دستی پاها در بک‌تست سریع');
     manualExit36.manualExit[0] === 1 && Object.keys(plain36.manualExit).length === 0);
 
   // ——— رابط ———
-  const backtestSource36 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  const backtestSource36 = readSrc('../ui/tabs/backtest.mjs');
   check('رابط بک‌تست برای هر پا در هر دو روز ورودی قیمت دستی می‌سازد',
     backtestSource36.includes('data-manual="${scope}"')
     && backtestSource36.includes("marketSnapshot(strategyLegSnapshots(legs, seriesByIns, entry), entryRail.dataset.value || 'LAST', 'entry', manualEntry)")
@@ -2121,7 +2139,7 @@ group('۳۶. قیمت دستی پاها در بک‌تست سریع');
 // ═══════════════════════════ ۳۷. سپردن موقعیت به بک‌تست سریع ═══════════════════════════
 group('۳۷. سپردن موقعیت به بک‌تست سریع');
 {
-  const read37 = (relative) => fs.readFileSync(new URL(relative, import.meta.url), 'utf8');
+  const read37 = (relative) => readSrc(relative);
   const appSource37 = read37('../ui/app.mjs');
   const portfolioSource37 = read37('../ui/tabs/portfolio-backtest.mjs');
   const backtestSource37 = read37('../ui/tabs/backtest.mjs');
@@ -2210,19 +2228,19 @@ group('۳۸. سررسید با سقف موقعیت پر');
     scan38.rows.length > 0 && scan38.rows.every((row) => row.days === 60), scan38.rows.map((row) => row.days).join('/'));
 
   // ——— رابط ———
-  const settingsSource38 = fs.readFileSync(new URL('../core/settings.mjs', import.meta.url), 'utf8');
+  const settingsSource38 = readSrc('../core/settings.mjs');
   check('فهرست سررسیدهای پرشده در تنظیمات ذخیره می‌شود، نه فقط در حافظه مرورگر',
     settingsSource38.includes("key: 'blockedExpiries'") && defaults().blockedExpiries === '');
-  const indexSource38 = fs.readFileSync(new URL('../ui/index.html', import.meta.url), 'utf8');
+  const indexSource38 = readSrc('../ui/index.html');
   check('انتخابگر سررسید در نوار بالای برنامه است',
     indexSource38.indexOf('data-capacity-panel') > 0 && indexSource38.indexOf('data-capacity-panel') < indexSource38.indexOf('</header>'));
-  const expiriesSource38 = fs.readFileSync(new URL('../ui/expiries.mjs', import.meta.url), 'utf8');
+  const expiriesSource38 = readSrc('../ui/expiries.mjs');
   // تا کسی نوار را باز نکند نباید هیچ درخواستی برود؛ همان قاعده «تب بسته
   // هیچ هزینه‌ای ندارد».
   check('زنجیره فقط با باز شدن نوار گرفته می‌شود',
     /host\.addEventListener\('toggle', \(\) => \{ if \(host\.open\) \{ paintPanel\(\); loadChain\(\); \} \}\)/.test(expiriesSource38)
     && (expiriesSource38.match(/fetch\(/g) || []).length === 1);
-  const tableSource38 = fs.readFileSync(new URL('../ui/table.mjs', import.meta.url), 'utf8');
+  const tableSource38 = readSrc('../ui/table.mjs');
   check('قیف، کنارگذاشتن سررسید را به کاربر توضیح می‌دهد', tableSource38.includes('f.blockedExpiry > 0'));
 }
 
@@ -2332,9 +2350,9 @@ group('۳۹. تحلیل چندروزه روی تایم‌فریم انتخابی
 // ═══════════════════════════ ۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فریم ═══════════════════════════
 group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فریم');
 {
-  const source40 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  const source40 = readSrc('../ui/tabs/backtest.mjs');
   const backtestModule40 = await import('../core/backtest.mjs');
-  const styleSource40 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  const styleSource40 = readSrc('../ui/style.css');
 
   // ——— ترتیب سه گام: کلی، روزبه‌روز، ریزمعامله ———
   const at = (needle) => source40.indexOf(needle);
@@ -2488,7 +2506,7 @@ group('۴۱. مبنای محاسبه از تنظیمات');
   // ——— هیچ عدد تقویمی سخت‌کدی در موتور نماند ———
   const engineFiles = ['core/evaluate.mjs', 'core/exec.mjs', 'core/mixed.mjs', 'core/timemachine.mjs'];
   const leftovers = engineFiles.filter((f) =>
-    /\/\s*365\b/.test(fs.readFileSync(path.join(process.cwd(), f), 'utf8')));
+    /\/\s*365\b/.test(readSrc(`../${f}`)));
   check('هیچ تقسیم بر ۳۶۵ سخت‌کدی در موتور نمانده', leftovers.length === 0, leftovers.join('، '));
 }
 
@@ -2724,7 +2742,7 @@ group('۴۳. اندازه قرارداد از مشخصات قرارداد');
   // ——— هیچ اندازه ثابتی در مسیر داده نماند ———
   const sizeFiles = ['core/chain.mjs', 'core/scan.mjs', 'core/history.mjs'];
   const hardcoded = sizeFiles.filter((f) =>
-    /size[^\n]*\|\|\s*1000/.test(fs.readFileSync(path.join(process.cwd(), f), 'utf8')));
+    /size[^\n]*\|\|\s*1000/.test(readSrc(`../${f}`)));
   check('هیچ «اندازه یا ۱۰۰۰» سخت‌کدی در مسیر داده نمانده', hardcoded.length === 0, hardcoded.join('، '));
 }
 
@@ -2812,7 +2830,7 @@ group('۴۴. سررسید با سقف پر در تحلیل تاریخی');
   // ——— هیچ مسیر تاریخی‌ای بدون قید نماند ———
   const tabs = ['ui/tabs/history.mjs', 'ui/tabs/backtest.mjs', 'ui/tabs/portfolio-backtest.mjs'];
   const unguarded = tabs.filter((f) => {
-    const src = fs.readFileSync(path.join(process.cwd(), f), 'utf8');
+    const src = readSrc(`../${f}`);
     return /flattenActiveContracts\(\s*(ua|analysisUa)\s*\)/.test(src);
   });
   check('هیچ تب تاریخی، فهرست قرارداد را بدون قید سقف نمی‌گیرد',
@@ -2971,7 +2989,7 @@ group('۴۶. فرض‌های منحنی امروز');
     near(analyzePayoff(legs46, net46, { fees: fees46 }).at(50784), expiry46.at(50784), 1e-12));
 
   // ——— قرارداد نوار، در خود ماژول ———
-  const chartSrc = fs.readFileSync(path.join(process.cwd(), 'ui/chart.mjs'), 'utf8');
+  const chartSrc = readSrc('../ui/chart.mjs');
   check('نوار فرض‌ها افق را از متمم روز مانده می‌سازد',
     chartSrc.includes('horizonDays: nearDays - a.days'));
   check('هر سه فرض در نوار هست',
@@ -3025,12 +3043,12 @@ group('۴۷. نوار سقف سررسید، وقتی زنجیره نیست');
   check('فهرست جداافتاده‌ها مرتب است', 
     strandedKeys(new Set([other47, gone47]), chain47).join('|') === [gone47, other47].sort().join('|'));
 
-  const src47 = fs.readFileSync(new URL('../ui/expiries.mjs', import.meta.url), 'utf8');
+  const src47 = readSrc('../ui/expiries.mjs');
   // `history/universe` تنها نقطه‌ای است که فهرست قرارداد فعال را بیرون از ساعت
   // بازار هم می‌دهد؛ خودِ سرور همین را در توضیحش نوشته است.
   check('نوار، فهرست را از نقطه‌ای می‌گیرد که شب و روز پاسخ می‌دهد',
     src47.includes("fetch('/api/history/universe')") && !src47.includes("fetch('/api/watch')"));
-  const serverSrc47 = fs.readFileSync(new URL('../server/server.mjs', import.meta.url), 'utf8');
+  const serverSrc47 = readSrc('../server/server.mjs');
   check('چرا `watch` مناسب نبود: حلقه دیده‌بان پشت ساعت بازار می‌ایستد',
     /if \(!gate\.open\) return true;/.test(serverSrc47));
   check('`history/universe` وقتی عکس لحظه‌ای خالی است خودش از بالادست می‌گیرد',
@@ -3061,7 +3079,7 @@ group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
   // با نام فارسی می‌شناسد هیچ راهی برای پیدا کردنش ندارد.
   check('برابر فارسی برای جست‌وجو نگه داشته شده',
     CATALOG.every((d) => typeof d.fa === 'string' && d.fa.length > 0));
-  const appSrc48 = fs.readFileSync(new URL('../ui/app.mjs', import.meta.url), 'utf8');
+  const appSrc48 = readSrc('../ui/app.mjs');
   check('جست‌وجوی ریل نام فارسی را هم می‌بیند', appSrc48.includes("${t.def?.fa || ''}"));
 
   // ——— جزیرهٔ جهت‌دار ———
@@ -3073,7 +3091,7 @@ group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
   check('مقدار تهی رشتهٔ خالی می‌دهد', uiFmt48.ltr(null) === '' && uiFmt48.ltr(undefined) === '');
   for (const [file, what] of [['../ui/app.mjs', 'ریل'], ['../ui/tabs/strategy.mjs', 'سرصفحهٔ استراتژی'],
     ['../ui/tabs/backtest.mjs', 'فهرست بک‌تست'], ['../ui/tabs/history.mjs', 'فهرست تاریخچه']]) {
-    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    const src = readSrc(file);
     check(`نام استراتژی در ${what} ایزوله می‌شود`, /ltr\(/.test(src));
   }
 
@@ -3083,7 +3101,7 @@ group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
     && uiFmt48.negClass(NaN) === '' && uiFmt48.negClass(Infinity) === '');
   check('سلول عددی آماده، کلاس و قالب را با هم می‌دهد',
     uiFmt48.numCell(-5000, 'money').includes('class="n neg') && uiFmt48.numCell(-5000, 'money').includes('<td'));
-  const css48 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  const css48 = readSrc('../ui/style.css');
   // `signTone` ده‌ها جا کلاس loss می‌گذاشت و هیچ قاعدهٔ سراسری‌ای رنگش
   // نمی‌کرد — یعنی بیشترشان بی‌اثر بودند.
   check('کلاس زیان و سود روی سلول جدول قاعدهٔ سراسری دارد',
@@ -3140,7 +3158,7 @@ group('۴۹. سنجه‌های رصدگر لحظه‌ای');
   const cols49 = new Set(COLUMNS.map((c) => c.key));
   check('ستون درصد بیشترین زیان هست', cols49.has('maxLossPct'));
   check('ستون پاداش به ریسک هست', cols49.has('rewardRisk'));
-  const src49 = fs.readFileSync(new URL('../core/evaluate.mjs', import.meta.url), 'utf8');
+  const src49 = readSrc('../core/evaluate.mjs');
   // بی‌نهایت در مخرج، صفر می‌دهد و صفرِ ساختگی بدتر از خالی است.
   check('زیان نامحدود، نسبت پاداش به ریسک نمی‌سازد',
     src49.includes('ok(bestPnl) && ok(payoff.maxLoss) && payoff.maxLoss > 0'));
@@ -3151,8 +3169,8 @@ group('۴۹. سنجه‌های رصدگر لحظه‌ای');
   //
   // ستون‌های سربه‌سری از قبل در قرارداد ستونی بودند ولی در هیچ نمای آماده‌ای
   // نبودند؛ یعنی عملاً کسی نمی‌دیدشان. آزمون، همان دیده‌شدن را قفل می‌کند.
-  const stratSrc49 = fs.readFileSync(new URL('../ui/tabs/strategy.mjs', import.meta.url), 'utf8');
-  const topSrc49 = fs.readFileSync(new URL('../ui/tabs/top.mjs', import.meta.url), 'utf8');
+  const stratSrc49 = readSrc('../ui/tabs/strategy.mjs');
+  const topSrc49 = readSrc('../ui/tabs/top.mjs');
   const summary49 = /خلاصه: \[([\s\S]*?)\],\n/.exec(stratSrc49)?.[1] || '';
   for (const k of ['be1DistPct', 'beRoomPct', 'maxProfit', 'maxProfitPct', 'retMaxPct', 'maxLoss',
     'maxLossPct', 'rewardRisk', 'expiryLabel', 'strikes', 'legNames']) {
@@ -3225,7 +3243,7 @@ group('۵۰. رصد بازار — ستون، طیف، نمودار');
     heatRamp(5, 5, 5, null) === null && heatRamp(NaN, 0, 10, null) === null
     && heatRamp(5, NaN, 10, null) === null);
 
-  const tblSrc50 = fs.readFileSync(new URL('../ui/table.mjs', import.meta.url), 'utf8');
+  const tblSrc50 = readSrc('../ui/table.mjs');
   // ردیف رصد بازار مفهوم «قابل اجرا» ندارد. با `!r.executable` همه‌شان
   // خاکستریِ غیرقابل‌اجرا می‌شدند و چون آن کلاس طیف را کنار می‌زند، هیچ ردیفی
   // در رصد بازار رنگ نمی‌گرفت.
@@ -3238,7 +3256,7 @@ group('۵۰. رصد بازار — ستون، طیف، نمودار');
   check('ستون مرتب‌شده حتی بدون heat اعلان‌شده دامنه می‌گیرد',
     tblSrc50.includes("if (!c.heat && c.key !== sortKey) continue;"));
 
-  const chainSrc50 = fs.readFileSync(new URL('../ui/tabs/chain.mjs', import.meta.url), 'utf8');
+  const chainSrc50 = readSrc('../ui/tabs/chain.mjs');
   check('انتخابگر و ماندگاری ستون در رصد بازار روشن است',
     chainSrc50.includes('all: ALL_COLS') && chainSrc50.includes("storeKey: 'chain:market'"));
   check('نمودار میله‌ای با سنجهٔ قابل تعویض هست',
@@ -3288,12 +3306,12 @@ group('۵۱. انتقال ترکیب زنده به بک‌تست');
     check(`نتیجهٔ «${k}» در نقشه منتقل نمی‌شود`, !(k in plan51));
   }
 
-  const btSrc51 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  const btSrc51 = readSrc('../ui/tabs/backtest.mjs');
   check('مقصد، تاریخ خودکار را به بلندترین بازهٔ موجود ترجمه می‌کند',
     btSrc51.includes("plan.entryDate === 'auto' ? entryDates[0]")
     && btSrc51.includes("plan.exitDate === 'auto' ? exitDates.at(-1)"));
   for (const [file, what] of [['../ui/tabs/strategy.mjs', 'تب استراتژی'], ['../ui/tabs/top.mjs', 'برترین موقعیت‌ها']]) {
-    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    const src = readSrc(file);
     check(`${what} دکمهٔ انتقال دارد و فقط برای ردیف قابل انتقال`,
       src.includes('canHandoff(r) ? handoffButtonHtml()') && src.includes("location.hash = 'backtest'"));
   }
@@ -3392,7 +3410,7 @@ group('۵۲. سناریو، حساسیت، و ریسک عمق دفتر');
     SENS_AXES.every((a) => ['days', 'ratio', 'rate'].includes(a.kind))
     && SENS_AXES.map((a) => a.kind).join() === 'days,ratio,rate,rate');
   check('موتور برچسبِ آماده نمی‌سازد؛ قالب‌بندی کار رابط است',
-    !fs.readFileSync(new URL('../core/scenario.mjs', import.meta.url), 'utf8').includes('روز`'));
+    !readSrc('../core/scenario.mjs').includes('روز`'));
 
   // ——— فرض‌های ثابت، هم‌زمان با محور ———
   //
@@ -3484,7 +3502,7 @@ group('۵۲. سناریو، حساسیت، و ریسک عمق دفتر');
   check('بدون اعلامِ مقیاس، پیش‌فرض همان «یک واحد» می‌ماند',
     near(bookDepthRisk({ legs: legs52, quotes: books52, units: 5 }).exitCostTotal, d52.exitCostTotal));
 
-  const panelSrc52 = fs.readFileSync(new URL('../ui/scenario-panel.mjs', import.meta.url), 'utf8');
+  const panelSrc52 = readSrc('../ui/scenario-panel.mjs');
   check('پنل هیچ محاسبه‌ای ندارد و همه را از موتور می‌خواند',
     panelSrc52.includes("from '/core/scenario.mjs'")
     && !/Math\.exp|bsPrice|Math\.log/.test(panelSrc52));
@@ -3514,7 +3532,7 @@ group('۵۲. سناریو، حساسیت، و ریسک عمق دفتر');
 // ═══════════════════════════ ۵۳. روزِ قفل‌شدهٔ ریزمعامله ═══════════════════════════
 group('۵۳. روزِ قفل‌شدهٔ ریزمعامله');
 {
-  const src53 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  const src53 = readSrc('../ui/tabs/backtest.mjs');
 
   // گزارش کاربر: «گاهی این پیام را می‌دهد، روز قبل و بعدش سالم است.»
   //
@@ -3582,7 +3600,7 @@ group('۵۴. خروجی اکسل و عنوان محور');
     /^\d{8}-\d{4}$/.test(stamp(new Date(2026, 7, 20, 5, 9))), stamp(new Date(2026, 7, 20, 5, 9)));
 
   // ——— اتصال ———
-  const exSrc54 = fs.readFileSync(new URL('../ui/export.mjs', import.meta.url), 'utf8');
+  const exSrc54 = readSrc('../ui/export.mjs');
   // جدول مجازی‌سازی‌شده فقط ردیف‌های داخل قاب را در DOM دارد؛ خروجیِ
   // DOM-خوان آن‌جا بی‌صدا ناقص می‌شود.
   check('جارو، جدول مجازی‌سازی‌شده را کنار می‌گذارد',
@@ -3591,13 +3609,13 @@ group('۵۴. خروجی اکسل و عنوان محور');
     exSrc54.includes("wrap.parentNode.insertBefore(bar, wrap);"));
   check('سرستون چندسطری با colspan جابه‌جا نمی‌شود',
     exSrc54.includes("for (let i = 0; i < span; i++) row.push(cell.textContent);"));
-  const tblSrc54 = fs.readFileSync(new URL('../ui/table.mjs', import.meta.url), 'utf8');
+  const tblSrc54 = readSrc('../ui/table.mjs');
   check('جدول مجازی‌سازی‌شده خروجی داده‌محور دارد، نه DOM-محور',
     tblSrc54.includes('function exportRows()') && tblSrc54.includes('view.map((r) => cols.map('));
   for (const [file, what] of [['../ui/tabs/backtest.mjs', 'بک‌تست'], ['../ui/tabs/history.mjs', 'تاریخچه'],
     ['../ui/tabs/portfolio-backtest.mjs', 'سبد'], ['../ui/tabs/positions.mjs', 'موقعیت‌ها'],
     ['../ui/tabs/roll.mjs', 'رول'], ['../ui/scenario-panel.mjs', 'سناریو']]) {
-    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    const src = readSrc(file);
     check(`جدول‌های ${what} دکمه خروجی می‌گیرند`, src.includes('attachExportsIn('));
   }
 
@@ -3606,17 +3624,17 @@ group('۵۴. خروجی اکسل و عنوان محور');
   // بدون عنوان، «۱۲٬۵۰۰» می‌تواند ریال باشد یا قرارداد یا درصد.
   for (const [file, what] of [['../ui/chart.mjs', 'نمودار بازده'], ['../ui/tabs/backtest.mjs', 'نمودارهای بک‌تست'],
     ['../ui/tabs/history.mjs', 'نمودارهای تاریخچه'], ['../ui/tabs/portfolio-backtest.mjs', 'نمودار سبد']]) {
-    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    const src = readSrc(file);
     check(`${what} عنوان محور دارد`, /axis-title/.test(src));
   }
-  const chartSrc54 = fs.readFileSync(new URL('../ui/chart.mjs', import.meta.url), 'utf8');
+  const chartSrc54 = readSrc('../ui/chart.mjs');
   check('واحد در عنوان محور نوشته می‌شود',
     chartSrc54.includes('قیمت سهم پایه (ریال)') && chartSrc54.includes('سود و زیان (ریال)'));
-  const btSrc54 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  const btSrc54 = readSrc('../ui/tabs/backtest.mjs');
   check('عنوان محور بک‌تست از واحد خودِ نمودار می‌آید',
     btSrc54.includes("money ? 'ریال' : count ? 'تعداد' : 'درصد'")
     && btSrc54.includes("timeScale ? 'ساعت جلسه"));
-  const css54 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  const css54 = readSrc('../ui/style.css');
   check('عنوان محور از برچسب عددی درشت‌تر است',
     /--fs-axis: 15\.5px;/.test(css54) && /--fs-chart: 15px;/.test(css54));
   check('اعداد نمودار درشت‌تر شدند', /--fs-chart-sm: 13px;/.test(css54) && /--fs-chart-lg: 17px;/.test(css54));
@@ -3646,7 +3664,7 @@ group('۵۵. دفتر خطا و عکس پشتیبان');
   check('دفتر خالی، فهرست خالی می‌دهد نه خطا', empty.list().length === 0 && empty.stats().held === 0);
 
   // ——— سرور ———
-  const srv55 = fs.readFileSync(new URL('../server/server.mjs', import.meta.url), 'utf8');
+  const srv55 = readSrc('../server/server.mjs');
   check('نقطه پایانی دفتر خطا هست', srv55.includes("if (p === '/api/logs')"));
   check('خطای بالادست ثبت می‌شود', /errlog\.push\(\{ level: 'error', where: \`بالادست/.test(srv55));
   check('خطای درخواست و دور دیده‌بان هم ثبت می‌شوند',
@@ -3657,7 +3675,7 @@ group('۵۵. دفتر خطا و عکس پشتیبان');
   check('دستهٔ ارسالی مرورگر سقف دارد', srv55.includes('.slice(0, 50)'));
 
   // ——— مرورگر ———
-  const cli55 = fs.readFileSync(new URL('../ui/errlog.mjs', import.meta.url), 'utf8');
+  const cli55 = readSrc('../ui/errlog.mjs');
   // ارسال تک‌تک، خودش می‌شود منبع بار؛ و تلاش دوباره برای «خطای ارسال خطا»
   // بی‌نهایت خطای تازه می‌سازد.
   check('ارسال به سرور دسته‌ای است', /setTimeout\([\s\S]{0,400}?pending\.splice\(0, 50\)/.test(cli55));
@@ -3669,7 +3687,7 @@ group('۵۵. دفتر خطا و عکس پشتیبان');
     cli55.includes("/^[A-Za-z]+Error:/.test(raw)"));
 
   // ——— عکس پشتیبان ———
-  const app55 = fs.readFileSync(new URL('../ui/app.mjs', import.meta.url), 'utf8');
+  const app55 = readSrc('../ui/app.mjs');
   // حلقهٔ دیده‌بان بیرون از ساعت بازار پارک می‌شود، پس رویداد watch هیچ‌وقت
   // پخش نمی‌شود و همهٔ تب‌ها کور می‌مانند.
   check('نبودِ داده زنده، از نقطه‌ای که شب و روز پاسخ می‌دهد پر می‌شود',
@@ -3683,7 +3701,7 @@ group('۵۵. دفتر خطا و عکس پشتیبان');
   check('برچسب عکس آخرین جلسه صریح می‌گوید زنده نیست',
     /snapshot: \['عکس آخرین جلسه — زنده نیست'/.test(app55));
 
-  const tabs55 = fs.readFileSync(new URL('../ui/tabs/logs.mjs', import.meta.url), 'utf8');
+  const tabs55 = readSrc('../ui/tabs/logs.mjs');
   check('تب دفتر خطا، سرور و مرورگر را در یک فهرست می‌ریزد',
     tabs55.includes('[...serverRows, ...local]'));
   // ثبتِ خطای خواندنِ دفتر خطا در همان دفتر، حلقه می‌سازد
@@ -3691,7 +3709,7 @@ group('۵۵. دفتر خطا و عکس پشتیبان');
     tabs55.includes('// خطای خواندنِ دفتر خطا در خودِ دفتر ثبت نمی‌شود — حلقه می‌سازد.'));
   check('تب در فهرست تب‌ها ثبت شده و آیکون دارد',
     app55.includes("id: 'logs', title: 'دفتر خطاها'")
-    && fs.readFileSync(new URL('../ui/icons.mjs', import.meta.url), 'utf8').includes("logs: 'alert'"));
+    && readSrc('../ui/icons.mjs').includes("logs: 'alert'"));
 }
 
 
@@ -3739,7 +3757,7 @@ group('۵۶. فهرست خالی، با دلیل');
 }
 
 {
-  const picker56 = fs.readFileSync(new URL('../ui/picker.mjs', import.meta.url), 'utf8');
+  const picker56 = readSrc('../ui/picker.mjs');
   // ریشهٔ باگ: جعبه تا رسیدن اولین ردیف اصلاً رسم نمی‌شد — نه پیامی، نه خلاصه‌ای
   check('انتخابگر بدون داده هم یک بار رسم می‌شود',
     picker56.includes('const offFeed = onFeed((f) => { feed = f; render(); });')
@@ -3747,7 +3765,7 @@ group('۵۶. فهرست خالی، با دلیل');
   check('انتخابگر اشتراک خوراک را پس می‌دهد', picker56.includes('dispose() { offFeed(); }'));
   check('دکمه تلاش دوباره به همان خوراک وصل است', picker56.includes('retryFeed()'));
 
-  const app56 = fs.readFileSync(new URL('../ui/app.mjs', import.meta.url), 'utf8');
+  const app56 = readSrc('../ui/app.mjs');
   check('عکس پشتیبانِ خالی، خاموش رد نمی‌شود',
     app56.includes("if (!rows.length) { setFeed('empty'); return; }"));
   check('شکست عکس پشتیبان، در وضعیت خوراک می‌نشیند',
@@ -3756,16 +3774,16 @@ group('۵۶. فهرست خالی، با دلیل');
     app56.includes('export function retryFeed()'));
   check('تب‌ها به onFeed دسترسی دارند', app56.includes('subscribeWatch, onFeed, retryFeed }'));
 
-  const scan56 = fs.readFileSync(new URL('../ui/scanner.mjs', import.meta.url), 'utf8');
+  const scan56 = readSrc('../ui/scanner.mjs');
   // خرابی ریسه یعنی زنجیره ساخته نمی‌شود و فهرست تا ابد خالی می‌ماند
   check('خرابی ریسه اسکن به دفتر خطاها می‌رود',
     scan56.includes("logError('ریسه اسکن'"));
 
-  const pos56 = fs.readFileSync(new URL('../ui/tabs/positions.mjs', import.meta.url), 'utf8');
+  const pos56 = readSrc('../ui/tabs/positions.mjs');
   check('فهرست کشویی موقعیت‌ها هم دلیل خالی‌بودن را می‌گوید',
     pos56.includes('emptyReason({ listCount: 0, feedStatus: feed.status'));
 
-  const css56 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  const css56 = readSrc('../ui/style.css');
   check('پیام خالی سبک دارد', css56.includes('.picker-empty {'));
 }
 
@@ -3875,13 +3893,13 @@ group('۵۷. سررسید، نام قرارداد، و هر سربه‌سری د
     check(`ستون ${k} در قرارداد ستونی هست`, cols57.includes(k));
   }
 
-  const scanSrc57 = fs.readFileSync(new URL('../core/scan.mjs', import.meta.url), 'utf8');
+  const scanSrc57 = readSrc('../core/scan.mjs');
   // بدون این، ستون «تاریخ سررسید» در اسکن واقعی خالی می‌ماند
   check('اسکن، سررسید را به ارزیاب می‌دهد', scanSrc57.includes('endDate: c.endDate,'));
 
   // خانهٔ عددی «direction: ltr» می‌گیرد؛ با «text-align: start» به چپ می‌چسبد
   // در حالی که سرستونِ راست‌به‌چپ به راست می‌چسبد — عدد زیر ستون خودش نمی‌ماند
-  const css57 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  const css57 = readSrc('../ui/style.css');
   check('خانهٔ عددی جدول کوچک، هم‌لبهٔ سرستون است',
     /\.mini td\.n \{[^}]*text-align: end;/.test(css57));
   check('خانهٔ عددی جدول اصلی، هم‌لبهٔ سرستون است',
@@ -4010,7 +4028,7 @@ group('۵۸. ردیف با حجم واقعی کاربر سنجیده می‌شو
   // تب‌ها باید حجمِ همان تب را به پنل سناریو و انتقال بدهند، نه پیش‌فرض
   // تنظیمات — وگرنه کاربر حجم را عوض می‌کند و پنل جزئیات همان عدد قبلی را
   // نگه می‌دارد.
-  const stratSrc58 = fs.readFileSync(new URL('../ui/tabs/strategy.mjs', import.meta.url), 'utf8');
+  const stratSrc58 = readSrc('../ui/tabs/strategy.mjs');
   check('تب استراتژی، حجم کنترل خودش را به پنل جزئیات می‌دهد',
     !/units: Math\.max\(1, Number\(s\(\)\.qtyDefault\)/.test(stratSrc58)
     && stratSrc58.includes('units: unitsOf(r)'));
