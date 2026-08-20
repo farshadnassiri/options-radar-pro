@@ -4,7 +4,7 @@ import {
 } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
-  HISTORY_BASES, flattenActiveContracts, historyDateLabel, historyDayName,
+  HISTORY_BASES, comboKey, flattenActiveContracts, historyDateLabel, historyDayName,
   replayHistory, basisMatrix, entrySensitivity, optimizeExitPolicy, normalizeHistoryDate,
   holdingPeriodProfile, replayTradeDetail,
 } from '/core/history.mjs';
@@ -393,7 +393,6 @@ export async function mount(root, { state }) {
   });
 
   const basisName = (value) => HISTORY_BASES.find(([key]) => key === value)?.[1] || value || '—';
-  const legSignature = (legs = []) => legs.map((leg) => `${leg.ins}|${leg.side}|${leg.ratio}`).join('::');
 
   const FROZEN_FOLD_KEY = 'history:frozen-folded';
   const frozenFolded = () => { try { return localStorage.getItem(FROZEN_FOLD_KEY) === '1'; } catch { return false; } };
@@ -490,8 +489,8 @@ export async function mount(root, { state }) {
       ? rollingCandidates.map((item, index) => `<option value="${index}">${esc(item.label)}</option>`).join('')
       : '<option value="">ابتدا یک تحلیل معتبر اجرا کن</option>';
     if (preferredLegs) {
-      const preferred = legSignature(preferredLegs);
-      const index = rollingCandidates.findIndex((item) => legSignature(item.legs) === preferred);
+      const preferred = comboKey(preferredLegs);
+      const index = rollingCandidates.findIndex((item) => comboKey(item.legs) === preferred);
       if (index >= 0) select.value = String(index);
     }
   }
@@ -1084,13 +1083,19 @@ export async function mount(root, { state }) {
     [...$('h-combos').rows].forEach((row, index) => { row.dataset.originalOrder = String(index); });
     enableColumnSort($('h-combos-table'));
     scatterChart($('h-scatter'), sorted);
-    if (sorted[0]) selectAutoCombo(sorted[0]);
+    // انتخاب قبلی را نگه می‌دارد. جدول با هر تغییر مبنا یا بازه از نو ساخته
+    // و دوباره مرتب می‌شود؛ اگر همیشه ردیف اول انتخاب شود، ترکیبی که کاربر
+    // روی آن کار می‌کرد بی‌صدا عوض می‌شود. اندیس هویت نیست، قراردادها هستند.
+    const keep = selectedAuto ? comboKey(selectedAuto.legs) : '';
+    const again = keep ? sorted.find((row) => comboKey(row.legs) === keep) : null;
+    const next = again || sorted[0];
+    if (next) selectAutoCombo(next);
   }
 
   function selectAutoCombo(combo) {
     selectedAuto = combo;
-    const selectedSignature = legSignature(combo.legs);
-    const rollingIndex = rollingCandidates.findIndex((item) => legSignature(item.legs) === selectedSignature);
+    const selectedSignature = comboKey(combo.legs);
+    const rollingIndex = rollingCandidates.findIndex((item) => comboKey(item.legs) === selectedSignature);
     if (rollingIndex >= 0) $('h-rolling-strategy').value = String(rollingIndex);
     [...$('h-combos').rows].forEach((row) => row.classList.toggle('selected', autoRows[Number(row.dataset.combo)] === combo));
     const baseline = replayHistory(argsFor(combo.legs, {}));

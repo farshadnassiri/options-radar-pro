@@ -51,7 +51,7 @@ import {
   historyPrice, normalizeHistoryDate, historyDateLabel, historyDayName,
   replayHistory, summarizeReplay, basisMatrix, entrySensitivity, generateHistoricalCombos,
   historyMarketMetrics, optimizeExitPolicy, rollingEntryMatrix, holdingPeriodProfile,
-  replayTradeDetail, strategyLegSnapshots, manualPriceCheck,
+  replayTradeDetail, strategyLegSnapshots, manualPriceCheck, comboKey, dateParts,
 } from '../core/history.mjs';
 import {
   replayIntraday, summarizeIntraday, tradeSecond, tradeTimeLabel,
@@ -2181,14 +2181,20 @@ group('۳۴. انتخابگر تاریخ مشترک');
   const wheelSource34 = read('../ui/datewheel.mjs');
   check('انتخابگر تاریخ یک ماژول مشترک است، نه سه پیاده‌سازی جدا',
     wheelSource34.includes('export function mountDateWheel('));
-  // چرخ ماوس بدون `passive: false` قابل گرفتن نیست و مرورگر هشدار می‌دهد؛
-  // بدون آن، پیمایش با چرخ اصلاً کار نمی‌کند.
-  check('شنونده چرخ ماوس غیرمنفعل ثبت می‌شود',
-    /addEventListener\('wheel',[\s\S]*?\{ passive: false \}\)/.test(wheelSource34));
-  // در دو سر فهرست باید رویداد رها شود، وگرنه کاربر داخل جعبه حبس می‌شود و
-  // صفحه اسکرول نمی‌کند.
-  check('در انتهای فهرست، رویداد چرخ به صفحه واگذار می‌شود',
-    wheelSource34.includes('if (step(Math.sign(notches))) event.preventDefault();'));
+  // چرخ ماوس دیگر مقدار را عوض نمی‌کند. کاربری که فقط می‌خواست صفحه را
+  // پایین ببرد و اشاره‌گرش از روی جعبه رد می‌شد، بی‌آنکه بخواهد روز را عوض
+  // می‌کرد — و چون روز ورود فهرست ترکیب‌ها را از نو می‌سازد، ترکیب
+  // انتخاب‌شده هم بی‌صدا عوض می‌شد.
+  check('هیچ شنونده‌ای برای چرخ ماوس نمانده — اسکرول، انتخاب را عوض نمی‌کند',
+    !/['"]wheel['"]/.test(wheelSource34) && !wheelSource34.includes('onwheel'));
+  check('تقویم ماهانه است، نه ستون بی‌پایان روز',
+    wheelSource34.includes('export function jalaliMonthDays(')
+    && wheelSource34.includes('date-cal-grid'));
+  // شمار روز ماه از خودِ تبدیل شمسی می‌آید، نه از قاعدهٔ کبیسهٔ رونویسی‌شده.
+  check('طول ماه از تفاضل اول ماه بعد حساب می‌شود، نه از فرمول دوم',
+    !/kabise|isLeap|leapJalali/i.test(wheelSource34)
+    && wheelSource34.includes('jalaliToGregorian(ny, nm, 1)'));
+  check('روزِ بی‌معامله حذف نمی‌شود، خاموش می‌شود', wheelSource34.includes('date-cal-off'));
 
   const tabs34 = ['../ui/tabs/backtest.mjs', '../ui/tabs/portfolio-backtest.mjs', '../ui/tabs/history.mjs', '../ui/tabs/positions.mjs'];
   const sources34 = tabs34.map(read);
@@ -2202,9 +2208,12 @@ group('۳۴. انتخابگر تاریخ مشترک');
     && !historySource34.includes('<select id="h-rolling-start">'));
 
   const styleSource34 = read('../ui/style.css');
-  check('کارت‌های تاریخ در ستون عمودی چیده می‌شوند',
-    /\.date-wheel-track \{[^}]*display: grid;/.test(styleSource34)
-    && !/\.date-wheel \{[^}]*overflow-x: auto/.test(styleSource34));
+  check('تقویم هفت ستونه است — یک ستون برای هر روز هفته',
+    /\.date-cal-week, \.date-cal-grid \{[^}]*repeat\(7, minmax\(0, 1fr\)\)/.test(styleSource34));
+  // ارتفاع ثابت: ماه‌ها ۲۹ تا ۳۱ روزند و صفر تا شش خانه خالی در ابتدا
+  // دارند؛ بدون ارتفاع ثابت، چیدمان اطراف با هر جابه‌جایی ماه می‌پرد.
+  check('ارتفاع تقویم با عوض‌شدن ماه نمی‌پرد',
+    /\.date-cal \{[^}]*height: \d+px;/.test(styleSource34));
 }
 
 // ═══════════════════════════ ۳۵. نوار ثابت مشخصات موقعیت ═══════════════════════════
@@ -3313,7 +3322,24 @@ group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
     appSrc48.includes('if (raw == null) return new Set(allSections);'));
   check('برچسب «n پا» از ریل برداشته شد', !appSrc48.includes('پا</span>'));
   check('باز شدن تب، گروه بسته‌اش را باز می‌کند',
-    appSrc48.includes('if (folded.has(t.section)) { folded.delete(t.section); buildRail(); }'));
+    appSrc48.includes('if (folded.has(t.section)) { revealSection(t.section); buildRail(); }'));
+  // آکاردئون: با ده سرگروه و چهل تب، «چند بخشِ هم‌زمان باز» یعنی ستون کناری
+  // بلندتر از صفحه می‌شود و کاربر برای رسیدن به سرگروه بعدی از کنار فهرستی
+  // رد می‌شود که کاری با آن ندارد.
+  check('باز شدن یک بخش، بقیه بخش‌های باز را می‌بندد',
+    /function revealSection\(sec\) \{[\s\S]*?folded\.add\(other\)[\s\S]*?folded\.delete\(sec\);/.test(appSrc48));
+  // `stage` خودش جعبهٔ پیمایش است؛ `scrollIntoView` پیمایش داخلی‌اش را صفر
+  // نمی‌کند و تب تازه از جایی که تب قبلی رهایش کرده بود شروع می‌شد.
+  check('تب تازه از سطر اول شروع می‌شود، نه از جای تب قبلی',
+    (appSrc48.match(/stage\.scrollTop = 0;/g) || []).length >= 2);
+  // رنگ بخش از توکن‌های خودِ پوسته می‌آید، وگرنه پوستهٔ تیره باید جدا رنگ
+  // بگیرد و همان پراکندگی‌ای می‌شود که نگهبان ۴ جلویش را گرفته.
+  check('رنگ هر بخش ریل از توکن پوسته می‌آید، نه از رنگ سخت‌کد',
+    /const SECTION_TONE = \{[\s\S]*?\};/.test(appSrc48)
+    && !/SECTION_TONE = \{[\s\S]*?#[0-9a-fA-F]{3}/.test(appSrc48));
+  const styleSrc48 = readSrc('../ui/style.css');
+  check('تب باز، رنگ بخش خودش را می‌گیرد نه یک رنگ همیشگی',
+    /\.tab-btn\[aria-current="true"\] \{[^}]*var\(--sec\)/.test(styleSrc48));
 }
 
 // ═══════════════════════════ ۴۹. سنجه‌های رصدگر لحظه‌ای ═══════════════════════════
@@ -4336,6 +4362,76 @@ group('۶۱. نمودار ریزمعامله، مرجع است نه اجرا');
     btUi.includes('دفتر سفارش تاریخی نمی‌دهد'));
   const btCore = readSrc('../core/backtest.mjs');
   check('موتور هم همین را در جای خودش نوشته', btCore.includes('این عدد قابل آفست نیست'));
+}
+
+// ═════════ ۶۲. تاریخ تولتیپ، و پایداری انتخاب ترکیب ═════════
+group('۶۲. تاریخ تولتیپ نمودار ریزمعامله');
+{
+  // `replayIntraday` تاریخ را روی نقاط نمی‌گذارد — ثانیهٔ درون‌روز می‌دهد،
+  // نه روز — پس رابط باید روزِ باز را مهر بزند. تا امروز `replay.endDate`
+  // را می‌زد که ثابت است و با کلیک روی ردیف عوض نمی‌شود؛ نتیجه این بود که
+  // هر چهار نمودار درون‌روز، تاریخِ روز آخرِ بازه را نشان می‌دادند بی‌آنکه
+  // هیچ عددی غلط شود. همین آن را سخت‌یاب می‌کرد.
+  const btSrc = readSrc('../ui/tabs/backtest.mjs');
+  check('نقاط نمودار با روزِ باز مهر می‌خورند، نه با روز پایان بازه',
+    btSrc.includes('intradayChartRows(intraday, intradayDate)')
+    && !btSrc.includes('intradayChartRows(intraday, replay.endDate)'));
+  check('تاریخ تولتیپ از خودِ نقطه می‌آید و نقطهٔ بی‌تاریخ «—» می‌گیرد',
+    btSrc.includes("Number.isFinite(Number(row.date)) ? dateLabel(row.date) : '—'"));
+  // درصد در تولتیپ باید واحد داشته باشد: عنوان محور کنارش نیست و «۱۲٫۳۵»
+  // تنها، نه ریال است نه درصد.
+  check('عدد درصدی در تولتیپ واحد می‌گیرد', btSrc.includes('const tipLabel ='));
+
+  // ریشهٔ «NaN/NaN/NaN»: تاریخ نامعتبر از `dateParts` رد می‌شد و `{0,0,0}`
+  // می‌ساخت. بدتر از برچسب خراب، `dateUtc` بود که از همان صفر یک تاریخ
+  // واقعی در ۱۸۹۹ می‌ساخت و بی‌سروصدا وارد محاسبه می‌شد.
+  check('تاریخ صفر و ماه/روز بیرون از دامنه، تاریخ شمرده نمی‌شوند',
+    dateParts(0) === null && dateParts(20260000) === null && dateParts(20261301) === null
+    && dateParts(20260832) === null);
+  check('و برچسبشان «—» است، نه NaN',
+    historyDateLabel(0) === '—' && historyDateLabel(undefined) === '—');
+  check('تاریخ معتبر دست‌نخورده می‌ماند',
+    historyDateLabel(20260819) === '1405/05/28' && dateParts(20260819).d === 19);
+}
+
+group('۶۳. انتخاب ترکیب با تغییر قیمت یا اسکرول عوض نمی‌شود');
+{
+  // ترکیب‌ها با هر تغییر مبنای قیمت یا روز ورود از نو ساخته می‌شوند و
+  // ترتیبشان عوض می‌شود، پس اندیس آرایه هویت نیست. `innerHTML` روی یک
+  // `select` هم مقدارش را به گزینهٔ اول برمی‌گرداند — یعنی کاربر روی
+  // قراردادی کار می‌کرد که خودش انتخابش نکرده بود.
+  const legs = (spec) => spec.map(([ins, side, ratio]) => ({ ins, side, ratio }));
+  const a = legs([['111', 'sell', 1], ['222', 'buy', 2]]);
+  check('کلید ترکیب به ترتیب پاها وابسته نیست',
+    comboKey(a) === comboKey(legs([['222', 'buy', 2], ['111', 'sell', 1]])));
+  check('همان قراردادها با سمت متفاوت، یک ترکیب نیستند',
+    comboKey(a) !== comboKey(legs([['111', 'buy', 1], ['222', 'buy', 2]])));
+  check('همان قراردادها با نسبت متفاوت هم یکی نیستند',
+    comboKey(a) !== comboKey(legs([['111', 'sell', 1], ['222', 'buy', 3]])));
+  check('نسبت نانوشته، یک است', comboKey([{ ins: '9', side: 'buy' }]) === comboKey([{ ins: '9', side: 'buy', ratio: 1 }]));
+
+  const btSrc63 = readSrc('../ui/tabs/backtest.mjs');
+  check('بک‌تست، انتخاب را با هویت نگه می‌دارد نه با اندیس',
+    btSrc63.includes('const keep = legs ? comboKey(legs) : \'\';')
+    && btSrc63.includes("comboKey(combo.legs) === keep"));
+  check('و اگر ترکیب قبلی در روز تازه نبود، ساکت جایگزین نمی‌شود',
+    btSrc63.includes('ترکیب قبلی در این روز نبود'));
+
+  const hSrc63 = readSrc('../ui/tabs/history.mjs');
+  check('تحلیل تاریخی هم ردیف انتخاب‌شده را نگه می‌دارد، نه ردیف اول را',
+    hSrc63.includes('const keep = selectedAuto ? comboKey(selectedAuto.legs)')
+    && !hSrc63.includes('if (sorted[0]) selectAutoCombo(sorted[0]);'));
+  check('و تعریف دوم هویت پا در رابط نمانده — یکی است، در موتور',
+    !hSrc63.includes('legSignature'));
+
+  // بعضی مرورگرها روی `select` فوکوس‌دار، هر درجهٔ چرخ را یک گزینه جلو
+  // می‌برند. `blur` به‌جای `preventDefault` است چون جلوگیری از رویداد،
+  // اسکرول صفحه را هم می‌گیرد و کاربر داخل فهرست حبس می‌شود.
+  const appSrc63 = readSrc('../ui/app.mjs');
+  check('چرخ ماوس روی فهرست کشویی، مقدارش را عوض نمی‌کند',
+    /document\.addEventListener\('wheel'[\s\S]*?select\.blur\(\);/.test(appSrc63));
+  check('و صفحه همچنان اسکرول می‌شود — رویداد گرفته نمی‌شود',
+    /addEventListener\('wheel'[\s\S]*?\{ passive: true, capture: true \}\)/.test(appSrc63));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

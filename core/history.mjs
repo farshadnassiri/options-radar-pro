@@ -27,7 +27,14 @@ const DAY_FA = ['یک‌شنبه', 'دوشنبه', 'سه‌شنبه', 'چهار�
 export function dateParts(value) {
   const s = String(Math.trunc(num(value))).padStart(8, '0');
   if (!/^\d{8}$/.test(s)) return null;
-  return { y: Number(s.slice(0, 4)), m: Number(s.slice(4, 6)), d: Number(s.slice(6, 8)) };
+  const y = Number(s.slice(0, 4)), m = Number(s.slice(4, 6)), d = Number(s.slice(6, 8));
+  // صفر و ماه/روز بیرون از دامنه، تاریخ نیستند. تا امروز از این در رد
+  // می‌شدند و `{0,0,0}` می‌ساختند؛ `historyDateLabel` رویشان «NaN/NaN/NaN»
+  // چاپ می‌کرد و `dateUtc` یک تاریخ واقعی در ۱۸۹۹ می‌ساخت — که بدتر است،
+  // چون بی‌سروصدا وارد محاسبه می‌شود. حالا `null` می‌دهند و هر فراخوان،
+  // همان مسیر «تاریخ نامعتبر» خودش را می‌رود.
+  if (y < 1 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return { y, m, d };
 }
 
 /** تاریخ سررسید دیده‌بان ممکن است شمسی یا میلادی باشد؛ خروجی همیشه YYYYMMDD میلادی است. */
@@ -459,6 +466,24 @@ function equalWidth(strikes) {
 }
 
 /** تمام ترکیب‌های ساختاری یک استراتژی روی قراردادهای فعال. */
+/**
+ * هویت پایدار یک ترکیب — همان چیزی که کاربر «انتخاب کرده».
+ *
+ * ترکیب‌ها با هر تغییر مبنای قیمت یا روز ورود از نو ساخته می‌شوند و ترتیبشان
+ * عوض می‌شود، پس اندیس آرایه هویت نیست: اندیس ۳ بعد از بازسازی می‌تواند
+ * قرارداد دیگری باشد. آنچه عوض نمی‌شود، خودِ قراردادهاست.
+ *
+ * `side` و `ratio` هم داخل کلیدند چون یک جفت قرارداد یکسان می‌تواند دو
+ * ترکیب متفاوت بسازد — کالِ خریده و همان کالِ فروخته یکی نیستند. ترتیب پاها
+ * مرتب می‌شود تا دو ساختِ متفاوت از یک ترکیب، یک کلید بدهند.
+ */
+export function comboKey(legs = []) {
+  return legs
+    .map((leg) => `${leg?.ins ?? ''}|${leg?.side ?? ''}|${Number(leg?.ratio) || 1}`)
+    .sort()
+    .join('::');
+}
+
 export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entryBasis = 'CLOSE', settings = {}, filtered = true, liquidity = {} }) {
   const start = normalizeHistoryDate(startDate);
   const contracts = flattenActiveContracts(ua, settings.blockedExpiries);

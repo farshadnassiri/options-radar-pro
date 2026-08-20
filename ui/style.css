@@ -216,39 +216,51 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 }
 .backtest-date-grid, .backtest-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
 .backtest-date-grid > *, .backtest-chart-grid > * { min-width: 0; }
-/* انتخابگر تاریخ مشترک — ستون کارت، پیمایش با چرخ ماوس.
-   ارتفاع ثابت است تا کارت‌ها یک «پنجره» بسازند؛ بدون آن، فهرست بلندِ روز
-   کل صفحه را می‌کشید و «انتخابگر» به یک جدول تبدیل می‌شد. */
-.date-wheel {
-  position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; max-width: 100%; min-width: 0;
-  height: 268px; padding: 10px 10px 6px; border: 1px solid var(--line); border-radius: 13px;
+/* انتخابگر تاریخ مشترک — تقویم شمسی ماهانه.
+   ارتفاع ثابت است تا با عوض‌شدن ماه (۲۹ تا ۳۱ روز، و صفر تا شش خانه خالی
+   در ابتدا) چیدمان اطرافش بالا و پایین نپرد. */
+.date-cal {
+  display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 7px;
+  width: 100%; max-width: 100%; min-width: 0; height: 268px; padding: 10px 10px 6px;
+  border: 1px solid var(--line); border-radius: 13px;
   background: linear-gradient(135deg, var(--panel-2), var(--panel));
 }
-.date-wheel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.date-wheel-track {
-  display: grid; gap: 7px; align-content: start; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
-  scroll-snap-type: y proximity; padding-inline-end: 4px;
-  scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+.date-cal:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.date-cal-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.date-cal-head b { text-align: center; font-size: var(--fs-md); }
+.date-cal-nav {
+  display: grid; place-items: center; width: 28px; height: 28px; padding: 0;
+  border: 1px solid var(--line); border-radius: 9px; background: var(--panel);
+  color: var(--muted); font: inherit; font-size: var(--fs-lg); line-height: 1; cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
-.date-wheel-track::-webkit-scrollbar { width: 7px; }
-.date-wheel-track::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: var(--line-strong); }
-.date-wheel button {
-  position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; align-items: center;
-  min-height: 46px; padding: 8px 12px; scroll-snap-align: center;
-  border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--muted);
-  font: inherit; text-align: start; cursor: pointer; opacity: .72;
-  transition: opacity var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
+.date-cal-nav:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.date-cal-nav:disabled { opacity: .35; cursor: default; }
+.date-cal-week, .date-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.date-cal-week span { color: var(--muted); font-size: var(--fs-xs); text-align: center; }
+.date-cal-grid { align-content: start; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.date-cal-grid::-webkit-scrollbar { width: 7px; }
+.date-cal-grid::-webkit-scrollbar-thumb { border-radius: var(--radius-pill); background: var(--line-strong); }
+.date-cal-grid > * {
+  display: grid; place-items: center; min-height: 30px; padding: 0;
+  border: 1px solid transparent; border-radius: 8px;
+  font: inherit; font-size: var(--fs-sm); font-variant-numeric: tabular-nums;
 }
-.date-wheel button small { font-size: var(--fs-sm); }
-.date-wheel button b { font-family: var(--mono); direction: ltr; text-align: left; font-size: var(--fs-lg); }
-.date-wheel button em { grid-column: 1 / -1; font-style: normal; font-size: var(--fs-xs); color: var(--muted); }
-.date-wheel button:hover { opacity: 1; border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
-.date-wheel button[aria-selected="true"] {
-  opacity: 1; color: var(--accent); border-color: var(--accent); background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--accent);
+/* روزی که تابلو نداشته، خانهٔ خاموش است نه خانهٔ غایب — «آن روز معامله
+   نشده» خودش اطلاعات است و حذفش، تقویم را دروغ‌گو می‌کند. */
+.date-cal-off { color: var(--muted); opacity: .32; }
+.date-cal-pad { visibility: hidden; }
+.date-cal-grid button {
+  border-color: var(--line); background: var(--panel); color: var(--ink); cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
 }
-.date-wheel-status { padding: 5px 4px 0; border-top: 1px dashed var(--line); color: var(--muted); font-size: var(--fs-xs); text-align: center; }
-.date-wheel-empty { margin: auto; color: var(--muted); font-size: var(--fs-sm); text-align: center; }
+.date-cal-grid button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.date-cal-grid button[aria-selected="true"] {
+  color: var(--panel); border-color: var(--accent); background: var(--accent); font-weight: 700;
+}
+.date-cal-status { padding: 5px 4px 0; border-top: 1px dashed var(--line); color: var(--muted); font-size: var(--fs-xs); text-align: center; }
+.date-cal-empty { margin: auto; color: var(--muted); font-size: var(--fs-sm); text-align: center; }
 .date-wheel-field { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
 .date-wheel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 11px; }
 .backtest-legs { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 9px; margin-top: 13px; }
@@ -524,9 +536,12 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .rail-list { padding: 8px 8px 0; }
 .rail-none { padding: 18px 10px; color: var(--muted); font-size: var(--fs-md); text-align: center; }
 
-.rail-group { margin-bottom: 4px; }
+/* هر بخش رنگ خودش را دارد (`--sec`، از ui/app.mjs). فقط یک بخش هم‌زمان باز
+   می‌ماند، پس بخشِ باز حق دارد بیشتر دیده شود. */
+.rail-group { margin-bottom: 4px; border-radius: var(--radius-md); }
+.rail-group[data-folded="0"] { background: color-mix(in srgb, var(--sec) 5%, transparent); }
 .rail-head {
-  display: flex; align-items: center; gap: 7px; width: 100%;
+  display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 6px 8px; margin: 6px 0 2px;
   background: none; border: 0; border-radius: var(--radius);
   color: var(--muted); font: inherit; font-size: var(--fs-sm); font-weight: 700;
@@ -534,20 +549,39 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   transition: color var(--transition-fast), background var(--transition-fast);
 }
 .rail-head:hover { color: var(--ink-2); background: var(--panel-2); }
-.rail-head .caret {
-  width: 0; height: 0; flex: none;
-  border-block: 4px solid transparent;
-  border-inline-end: 5px solid currentColor;
-  transition: transform .15s ease;
+.rail-group[data-folded="0"] .rail-head { color: var(--sec); }
+/* مربع رنگیِ آیکون — لنگر بصری سرگروه. آیکون خطیِ تنها کنار متن پررنگ گم
+   می‌شد. بخشِ باز، مربعش پر می‌شود تا از بستهٔ کنارش جدا باشد. */
+.rail-head-chip {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px;
+  border-radius: 8px; color: var(--sec);
+  background: color-mix(in srgb, var(--sec) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sec) 22%, transparent);
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
+.rail-group[data-folded="0"] .rail-head-chip {
+  color: var(--panel); background: var(--sec); border-color: var(--sec);
+}
+.rail-head .caret { flex: none; opacity: .7; transition: transform .18s ease; }
 .rail-head-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-head-n {
   font-family: var(--mono); font-size: var(--fs-sm);
   background: var(--panel-2); border: 1px solid var(--line-soft);
   border-radius: 999px; padding: 0 6px;
 }
+.rail-group[data-folded="0"] .rail-head-n {
+  color: var(--sec); background: color-mix(in srgb, var(--sec) 10%, transparent);
+  border-color: color-mix(in srgb, var(--sec) 25%, transparent);
+}
+/* شورون رو به شروعِ خط است (راست، در راست‌به‌چپ) و با باز شدن، پایین
+   می‌چرخد — همان قراردادی که هر آکاردئون دیگری دارد. */
 .rail-group[data-folded="0"] .caret { transform: rotate(-90deg); }
 .rail-group[data-folded="1"] .rail-items { display: none; }
+/* خط عمودیِ کم‌رنگ کنار آیتم‌ها: می‌گوید این‌ها زیرمجموعهٔ همان سرگروه‌اند. */
+.rail-items {
+  padding-inline-start: 6px; margin-inline-start: 20px;
+  border-inline-start: 1px solid color-mix(in srgb, var(--sec) 22%, transparent);
+}
 
 /* یک سطری: آیکون، نام، نقطهٔ جهت. پیش از این دوسطری بود و سطر دومش فقط
    برچسب جهت و شمار پا را حمل می‌کرد؛ هر دو حالا در همان سطر اول جا شده‌اند
@@ -560,17 +594,19 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   position: relative;
   transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
-.tab-btn:hover { background: var(--panel-2); color: var(--ink); }
+.tab-btn:hover { background: color-mix(in srgb, var(--sec) 8%, var(--panel-2)); color: var(--ink); }
 
+/* تب باز، رنگ بخشِ خودش را می‌گیرد نه یک بنفشِ همیشگی — پس نگاه، هم تب باز
+   را پیدا می‌کند هم بخشی که در آن است. */
 .tab-btn[aria-current="true"] {
-  background: var(--accent-soft); color: var(--accent); font-weight: 800;
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 15%, transparent);
+  background: color-mix(in srgb, var(--sec) 13%, transparent); color: var(--sec); font-weight: 800;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--sec) 15%, transparent);
 }
 /* نشانگر انتخاب روی لبه رو به فهرست می‌نشیند، پس در راست‌به‌چپ سمت راست است */
 .tab-btn[aria-current="true"]::before {
   content: ""; position: absolute; inset-inline-start: 0; inset-block: 4px;
-  width: 4px; border-radius: 0 4px 4px 0; background: var(--accent);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+  width: 4px; border-radius: 0 4px 4px 0; background: var(--sec);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--sec) 60%, transparent);
 }
 .tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -597,8 +633,11 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 /* برجستگی صفحه‌کلید (بالا/پایین در جست‌وجوی فهرست)، جدا از تب باز */
 .tab-btn[data-kbd-active="1"]:not([aria-current="true"]) {
   background: var(--panel-2);
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--sec) 40%, transparent);
 }
+/* `--sec` را هر گروه روی خودش می‌گذارد؛ این کف است تا هیچ گزینشگری بیرون
+   از گروه بدون رنگ نماند. */
+.rail-list { --sec: var(--accent); }
 
 .stage { padding: 22px 26px 60px; min-width: 0; min-height: 0; height: 100%; overflow: auto; direction: ltr; background: var(--ground); }
 .stage > * { direction: rtl; }

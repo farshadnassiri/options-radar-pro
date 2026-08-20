@@ -319,10 +319,59 @@ const loadFolded = (allSections) => {
   if (raw == null) return new Set(allSections);
   try { return new Set(JSON.parse(raw)); } catch { return new Set(allSections); }
 };
-const folded = loadFolded([...new Set(TABS.map((t) => t.section))]);
+const ALL_SECTIONS = [...new Set(TABS.map((t) => t.section))];
+const folded = loadFolded(ALL_SECTIONS);
 const saveFolded = () => {
   try { localStorage.setItem(FOLD_KEY, JSON.stringify([...folded])); } catch { /* بی‌اهمیت */ }
 };
+
+/**
+ * فقط یک بخش هم‌زمان باز می‌ماند.
+ *
+ * با ده سرگروه و چهل تب، «چند بخشِ هم‌زمان باز» یعنی ستون کناری بلندتر از
+ * صفحه می‌شود و کاربر برای رسیدن به سرگروه بعدی باید از کنار فهرستی رد شود
+ * که کاری با آن ندارد. آکاردئون همان چیزی را نگه می‌دارد که همین حالا لازم
+ * است و بقیه را جمع می‌کند، پس کل ساختار همیشه در یک نگاه دیده می‌شود.
+ */
+function revealSection(sec) {
+  for (const other of ALL_SECTIONS) {
+    if (other !== sec) folded.add(other);
+  }
+  folded.delete(sec);
+}
+
+/**
+ * رنگ هر بخش ریل — همه از توکن‌های خودِ پوسته.
+ *
+ * هدف تزئین نیست. با ده سرگروهِ هم‌شکل، پیدا کردن بخش درست یعنی خواندن ده
+ * عنوان؛ با رنگ، یعنی یک نگاه. هیچ رنگ تازه‌ای ساخته نشد: همان توکن‌هایی که
+ * نمودار مقایسه‌ای و سود و زیان از آن‌ها می‌خوانند، اینجا هم به کار می‌روند،
+ * پس هر دو پوسته خودبه‌خود درست درمی‌آیند.
+ *
+ * رنگ‌ها با معنیِ بخش خوانده شده‌اند، نه تصادفی: کسب درآمد سبزِ سود، پوشش
+ * ریسک همان سبز کم‌رنگ‌تر، نسبت و بک‌اسپرد قرمزِ زیان (بازِ زیان دارند)، و
+ * تلاطم نارنجیِ هشدار.
+ */
+const SECTION_TONE = {
+  'پایه': '--accent',
+  'کسب درآمد': '--gain',
+  'اسپرد عمودی': '--cmp3',
+  'اسپرد تقویمی': '--cmp1',
+  'تلاطم': '--warn',
+  'باترفلای و کندور': '--cmp4',
+  'نسبت و بک‌اسپرد': '--loss',
+  'پوشش ریسک': '--gain',
+  'آربیتراژ و همبستگی': '--cmp2',
+  'موقعیت من': '--accent-2',
+};
+
+/**
+ * نام بخش، به شکلی که در گزینشگر CSS بنشیند.
+ *
+ * نام بخش فارسی است و می‌تواند نیم‌فاصله و فاصله داشته باشد؛ گذاشتنش خام در
+ * `querySelector` گزینشگر را می‌شکند. کد ثابتِ حرف‌ها، هم یکتاست هم امن.
+ */
+const cssId = (text) => [...String(text)].map((ch) => ch.codePointAt(0).toString(36)).join('-');
 
 /** جهت هر استراتژی — یک نقطهٔ رنگی کنار نام، با عنوان راهنما. */
 function dirTone(def) {
@@ -372,19 +421,32 @@ function buildRail() {
     const grp = document.createElement('section');
     grp.className = 'rail-group';
     grp.dataset.folded = isFolded ? '1' : '0';
+    grp.dataset.section = cssId(sec);
+    // رنگ بخش، از توکن‌های خودِ پوسته. هدف تزئین نیست: با ده سرگروه هم‌شکل،
+    // پیدا کردن بخش درست یعنی خواندن ده عنوان؛ با رنگ، یعنی یک نگاه.
+    grp.style.setProperty('--sec', `var(${SECTION_TONE[sec] || '--accent'})`);
 
     const head = document.createElement('button');
     head.type = 'button';
     head.className = 'rail-head';
     head.setAttribute('aria-expanded', isFolded ? 'false' : 'true');
-    head.innerHTML = `<span class="caret" aria-hidden="true"></span>
-      ${icon(sectionIcon(sec, tabs[0]?.group), 'ic rail-head-ic')}
+    // آیکون داخل یک مربعِ رنگ‌گرفته از بخش می‌نشیند. آیکون خطیِ تنها، کنار
+    // یک متن پررنگ گم می‌شد؛ مربع، لنگر بصری سرگروه است.
+    head.innerHTML = `${icon('chevron', 'ic caret')}
+      <span class="rail-head-chip">${icon(sectionIcon(sec, tabs[0]?.group), 'ic rail-head-ic')}</span>
       <span class="rail-head-name">${sec}</span>
       <span class="rail-head-n">${faDigits(tabs.length)}</span>`;
     head.addEventListener('click', () => {
-      if (folded.has(sec)) folded.delete(sec); else folded.add(sec);
+      if (folded.has(sec)) revealSection(sec); else folded.add(sec);
       saveFolded();
       buildRail();
+      // بخشی که تازه باز شد باید کامل دیده شود. بستن بخش‌های بالاتر، فهرست
+      // را کوتاه می‌کند و سرگروه از جایی که بود بالاتر می‌پرد؛ بدون این خط
+      // کاربر بعد از کلیک، جای دیگری از فهرست را می‌بیند.
+      if (!folded.has(sec)) {
+        list.querySelector(`.rail-group[data-section="${cssId(sec)}"]`)
+          ?.scrollIntoView({ block: 'nearest' });
+      }
     });
     grp.appendChild(head);
 
@@ -451,7 +513,7 @@ async function open(id) {
   // تعویض از تب دیگر، انتقال به بک‌تست — می‌تواند در گروهی بسته گم بماند.
   // باز کردن گروهش ذخیره نمی‌شود: تصمیمِ کاربر نبوده، پس نباید جای تصمیم او
   // بنشیند.
-  if (folded.has(t.section)) { folded.delete(t.section); buildRail(); }
+  if (folded.has(t.section)) { revealSection(t.section); buildRail(); }
   const gen = ++openGen;
   if (disposer) { try { disposer(); } catch {} disposer = null; }
   current = id;
@@ -460,6 +522,7 @@ async function open(id) {
   }
   const stage = el('stage');
   stage.innerHTML = '<div class="empty"><p>در حال باز کردن…</p></div>';
+  stage.scrollTop = 0;
   location.hash = id;
   document.title = pageTitle(t.title);
 
@@ -468,7 +531,11 @@ async function open(id) {
   // پایین رها می‌کرد و محتوای تازه از دید بیرون می‌ماند. بعد از رسیدن
   // محتوای واقعی صدا زده می‌شود، نه روی اسکلت خالی — تا آن وقت صفحه هنوز
   // آن‌قدر بلند نشده که stage واقعاً بتواند بالای دید بنشیند.
+  // `stage` خودش جعبهٔ پیمایش است (`overflow: auto`)، پس `scrollIntoView`
+  // روی آن، پیمایش داخلی‌اش را صفر نمی‌کند. تبی که باز می‌شود باید از سطر
+  // اول شروع شود، نه از جایی که تب قبلی رهایش کرده بود.
   const scrollToStage = () => {
+    stage.scrollTop = 0;
     if (window.matchMedia('(max-width: 820px)').matches) {
       stage.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -565,6 +632,25 @@ document.addEventListener('keydown', (e) => {
 const getTheme = () => { try { return localStorage.getItem('theme'); } catch { return null; } };
 
 installGlobalCapture();
+
+/**
+ * چرخ ماوس روی یک فهرست کشویی، مقدارش را عوض نمی‌کند.
+ *
+ * بعضی مرورگرها روی `select` فوکوس‌دار، هر درجهٔ چرخ را یک گزینه جلو
+ * می‌برند. کاربری که فقط می‌خواهد صفحه را پایین ببرد و اشاره‌گرش از روی
+ * فهرست ترکیب‌ها رد می‌شود، بی‌آنکه بخواهد قرارداد دیگری را انتخاب می‌کند —
+ * و هیچ چیزی هم نمی‌گوید که عوض شد.
+ *
+ * `blur` به‌جای `preventDefault`: جلوگیری از رویداد، اسکرول صفحه را هم
+ * می‌گیرد و کاربر داخل فهرست حبس می‌شود. برداشتن فوکوس، هم انتخاب را حفظ
+ * می‌کند هم می‌گذارد صفحه مثل هر جای دیگری اسکرول شود. باز کردن فهرست با
+ * کلیک یا صفحه‌کلید، دست‌نخورده است.
+ */
+document.addEventListener('wheel', (event) => {
+  const select = event.target?.closest?.('select');
+  if (select && document.activeElement === select) select.blur();
+}, { passive: true, capture: true });
+
 applyTheme(getTheme() || 'ledger');
 buildRail();
 await loadSettings();
