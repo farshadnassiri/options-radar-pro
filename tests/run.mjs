@@ -51,7 +51,7 @@ import {
   historyPrice, normalizeHistoryDate, historyDateLabel, historyDayName,
   replayHistory, summarizeReplay, basisMatrix, entrySensitivity, generateHistoricalCombos,
   historyMarketMetrics, optimizeExitPolicy, rollingEntryMatrix, holdingPeriodProfile,
-  replayTradeDetail, strategyLegSnapshots, manualPriceCheck,
+  replayTradeDetail, strategyLegSnapshots, manualPriceCheck, comboKey, dateParts,
 } from '../core/history.mjs';
 import {
   replayIntraday, summarizeIntraday, tradeSecond, tradeTimeLabel,
@@ -4336,6 +4336,67 @@ group('۶۱. نمودار ریزمعامله، مرجع است نه اجرا');
     btUi.includes('دفتر سفارش تاریخی نمی‌دهد'));
   const btCore = readSrc('../core/backtest.mjs');
   check('موتور هم همین را در جای خودش نوشته', btCore.includes('این عدد قابل آفست نیست'));
+}
+
+// ═════════ ۶۲. تاریخ تولتیپ، و پایداری انتخاب ترکیب ═════════
+group('۶۲. تاریخ تولتیپ نمودار ریزمعامله');
+{
+  // `replayIntraday` تاریخ را روی نقاط نمی‌گذارد — ثانیهٔ درون‌روز می‌دهد،
+  // نه روز — پس رابط باید روزِ باز را مهر بزند. تا امروز `replay.endDate`
+  // را می‌زد که ثابت است و با کلیک روی ردیف عوض نمی‌شود؛ نتیجه این بود که
+  // هر چهار نمودار درون‌روز، تاریخِ روز آخرِ بازه را نشان می‌دادند بی‌آنکه
+  // هیچ عددی غلط شود. همین آن را سخت‌یاب می‌کرد.
+  const btSrc = readSrc('../ui/tabs/backtest.mjs');
+  check('نقاط نمودار با روزِ باز مهر می‌خورند، نه با روز پایان بازه',
+    btSrc.includes('intradayChartRows(intraday, intradayDate)')
+    && !btSrc.includes('intradayChartRows(intraday, replay.endDate)'));
+  check('تاریخ تولتیپ از خودِ نقطه می‌آید و نقطهٔ بی‌تاریخ «—» می‌گیرد',
+    btSrc.includes("Number.isFinite(Number(row.date)) ? dateLabel(row.date) : '—'"));
+  // درصد در تولتیپ باید واحد داشته باشد: عنوان محور کنارش نیست و «۱۲٫۳۵»
+  // تنها، نه ریال است نه درصد.
+  check('عدد درصدی در تولتیپ واحد می‌گیرد', btSrc.includes('const tipLabel ='));
+
+  // ریشهٔ «NaN/NaN/NaN»: تاریخ نامعتبر از `dateParts` رد می‌شد و `{0,0,0}`
+  // می‌ساخت. بدتر از برچسب خراب، `dateUtc` بود که از همان صفر یک تاریخ
+  // واقعی در ۱۸۹۹ می‌ساخت و بی‌سروصدا وارد محاسبه می‌شد.
+  check('تاریخ صفر و ماه/روز بیرون از دامنه، تاریخ شمرده نمی‌شوند',
+    dateParts(0) === null && dateParts(20260000) === null && dateParts(20261301) === null
+    && dateParts(20260832) === null);
+  check('و برچسبشان «—» است، نه NaN',
+    historyDateLabel(0) === '—' && historyDateLabel(undefined) === '—');
+  check('تاریخ معتبر دست‌نخورده می‌ماند',
+    historyDateLabel(20260819) === '1405/05/28' && dateParts(20260819).d === 19);
+}
+
+group('۶۳. انتخاب ترکیب با تغییر قیمت یا اسکرول عوض نمی‌شود');
+{
+  // ترکیب‌ها با هر تغییر مبنای قیمت یا روز ورود از نو ساخته می‌شوند و
+  // ترتیبشان عوض می‌شود، پس اندیس آرایه هویت نیست. `innerHTML` روی یک
+  // `select` هم مقدارش را به گزینهٔ اول برمی‌گرداند — یعنی کاربر روی
+  // قراردادی کار می‌کرد که خودش انتخابش نکرده بود.
+  const legs = (spec) => spec.map(([ins, side, ratio]) => ({ ins, side, ratio }));
+  const a = legs([['111', 'sell', 1], ['222', 'buy', 2]]);
+  check('کلید ترکیب به ترتیب پاها وابسته نیست',
+    comboKey(a) === comboKey(legs([['222', 'buy', 2], ['111', 'sell', 1]])));
+  check('همان قراردادها با سمت متفاوت، یک ترکیب نیستند',
+    comboKey(a) !== comboKey(legs([['111', 'buy', 1], ['222', 'buy', 2]])));
+  check('همان قراردادها با نسبت متفاوت هم یکی نیستند',
+    comboKey(a) !== comboKey(legs([['111', 'sell', 1], ['222', 'buy', 3]])));
+  check('نسبت نانوشته، یک است', comboKey([{ ins: '9', side: 'buy' }]) === comboKey([{ ins: '9', side: 'buy', ratio: 1 }]));
+
+  const btSrc63 = readSrc('../ui/tabs/backtest.mjs');
+  check('بک‌تست، انتخاب را با هویت نگه می‌دارد نه با اندیس',
+    btSrc63.includes('const keep = legs ? comboKey(legs) : \'\';')
+    && btSrc63.includes("comboKey(combo.legs) === keep"));
+  check('و اگر ترکیب قبلی در روز تازه نبود، ساکت جایگزین نمی‌شود',
+    btSrc63.includes('ترکیب قبلی در این روز نبود'));
+
+  const hSrc63 = readSrc('../ui/tabs/history.mjs');
+  check('تحلیل تاریخی هم ردیف انتخاب‌شده را نگه می‌دارد، نه ردیف اول را',
+    hSrc63.includes('const keep = selectedAuto ? comboKey(selectedAuto.legs)')
+    && !hSrc63.includes('if (sorted[0]) selectAutoCombo(sorted[0]);'));
+  check('و تعریف دوم هویت پا در رابط نمانده — یکی است، در موتور',
+    !hSrc63.includes('legSignature'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

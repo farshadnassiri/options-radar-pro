@@ -2,7 +2,7 @@ import { CATALOG, GROUPS, byId } from '/strategies/catalog.mjs';
 import { buildChain } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
-  HISTORY_BASES, flattenActiveContracts, generateHistoricalCombos, historyDateLabel,
+  HISTORY_BASES, comboKey, flattenActiveContracts, generateHistoricalCombos, historyDateLabel,
   historyMarketMetrics, historyPrice, manualPriceCheck, normalizeHistoryDate,
   replayHistory, rollingEntryMatrix, holdingPeriodProfile, strategyLegSnapshots,
 } from '/core/history.mjs';
@@ -34,6 +34,15 @@ const clockLabel = (second) => {
 };
 const ageLabel = (second) => Number.isFinite(Number(second)) ? `${fmt.int(second)} ثانیه` : '—';
 
+/**
+ * نقاط ریزمعامله را برای نمودار آماده می‌کند.
+ *
+ * `date` باید روزی باشد که همین حالا باز است. `replayIntraday` تاریخ را روی
+ * نقاط نمی‌گذارد — ثانیهٔ درون‌روز می‌دهد، نه روز — پس اینجا مهر می‌خورد و
+ * تولتیپ از همین می‌خواند. اگر روز اشتباهی مهر شود، هر چهار نمودارِ درون‌روز
+ * تاریخ غلط نشان می‌دهند بی‌آنکه هیچ عددی غلط شود، و همین آن را سخت‌یاب
+ * می‌کند: عددها درست‌اند، فقط تاریخ بالای تولتیپ مالِ روز دیگری است.
+ */
 function intradayChartRows(points, date) {
   return points.map((point) => {
     const row = { ...point, date, granularity: 'trade' };
@@ -96,6 +105,10 @@ function chart(host, points, series, { money = false, count = false, timeScale =
     : L + (index / Math.max(1, rows.length - 1)) * (W - L - R);
   const y = (value) => T + ((hi - value) / (hi - lo)) * (H - T - B);
   const label = (value) => money ? fmt.money(value) : count ? fmt.int(value) : fmt.pct(value);
+  // در تولتیپ، واحد باید کنار عدد باشد. روی محور، عنوان محور واحد را
+  // می‌گوید و تکرارش روی پنج برچسب فقط شلوغی است؛ ولی تولتیپ عنوان محور را
+  // کنارش ندارد و «۱۲٫۳۵» تنها، نه ریال است نه درصد.
+  const tipLabel = (value) => money || count ? label(value) : `${label(value)}٪`;
   const ticks = Array.from({ length: 5 }, (_, index) => lo + ((hi - lo) * index) / 4);
   // یک خط منطقی می‌تواند بین دو نام میدان تقسیم شده باشد (سطر روزانه
   // `baseCumulativePct`، سطر ریزمعامله `basePct`). آن‌ها هم‌رنگ‌اند چون یک
@@ -133,8 +146,13 @@ function chart(host, points, series, { money = false, count = false, timeScale =
     cursor.hidden = false;
     cursor.querySelector('line').setAttribute('x1', px); cursor.querySelector('line').setAttribute('x2', px);
     cursor.querySelector('g').innerHTML = series.map((item) => Number.isFinite(Number(row[item.key])) ? `<circle cx="${px}" cy="${y(Number(row[item.key]))}" r="4" fill="${item.color}"/>` : '').join('');
-    const when = row.granularity === 'trade' ? `${dateLabel(row.date)} · ${faDigits(row.timeLabel)}` : faDigits(row.dateLabel || historyDateLabel(row.date));
-    tip.innerHTML = `<b>${when}</b>${series.map((item) => Number.isFinite(Number(row[item.key])) ? `<span style="--series:${item.color}"><i></i>${seriesLabel(item)}: <strong class="${signTone(row[item.key])}">${label(row[item.key])}</strong></span>` : '').join('')}`;
+    // تاریخ نقطه، از خودِ نقطه. اگر نقطه تاریخ نداشته باشد، «—» درست‌تر از
+    // «NaN/NaN/NaN» است و درست‌تر از تاریخی که از جای دیگری قرض گرفته شده.
+    const stamp = Number.isFinite(Number(row.date)) ? dateLabel(row.date) : '—';
+    const when = row.granularity === 'trade'
+      ? `${stamp} · ${faDigits(row.timeLabel ?? '')}`
+      : faDigits(row.dateLabel || (Number.isFinite(Number(row.date)) ? historyDateLabel(row.date) : '—'));
+    tip.innerHTML = `<b>${when}</b>${series.map((item) => Number.isFinite(Number(row[item.key])) ? `<span style="--series:${item.color}"><i></i>${seriesLabel(item)}: <strong class="${signTone(row[item.key])}">${tipLabel(row[item.key])}</strong></span>` : '').join('')}`;
     tip.hidden = false;
     const box = host.getBoundingClientRect();
     tip.style.left = `${Math.max(8, Math.min(box.width - 190, clientX - box.left + 12))}px`;
@@ -254,13 +272,29 @@ export async function mount(root, { state }) {
     refreshExitDates();
   }
 
+  /**
+   * ترکیب‌ها را برای روز و مبنای فعلی از نو می‌سازد، بدون از دست دادن انتخاب.
+   *
+   * `innerHTML` روی یک `select`، مقدارش را به گزینهٔ اول برمی‌گرداند. تا امروز
+   * همین اتفاق می‌افتاد: با هر کلیک روی مبنای قیمت ورود یا هر تغییر روز،
+   * ترکیبِ انتخاب‌شده بی‌صدا به ترکیب دیگری می‌پرید و کاربر روی قراردادی
+   * کار می‌کرد که خودش انتخابش نکرده بود.
+   *
+   * پس هویت نگه داشته می‌شود، نه اندیس: اگر همان قراردادها در فهرست تازه
+   * باشند دوباره انتخاب می‌شوند، و فقط وقتی نباشند به گزینهٔ اول می‌افتد.
+   */
   function refreshCombos() {
     const entryDate = Number($('bt-entry-date').dataset.value);
     if (!entryDate) return;
+    const keep = legs ? comboKey(legs) : '';
     const generated = generateHistoricalCombos({ def: byId(strategySelect.value), ua, seriesByIns, startDate: entryDate, entryBasis: entryRail.dataset.value || 'LAST', settings: state.settings, filtered: true });
     combos = generated.combos || [];
-    $('bt-combo').innerHTML = combos.length ? combos.slice(0, 1000).map((combo, index) => `<option value="${index}">${esc(comboLabel(combo))}</option>`).join('') : '<option value="">ترکیب معتبر پیدا نشد</option>';
-    $('bt-combo-count').textContent = `${fmt.int(combos.length)} ترکیب قابل اجرا`;
+    const shown = combos.slice(0, 1000);
+    $('bt-combo').innerHTML = shown.length ? shown.map((combo, index) => `<option value="${index}">${esc(comboLabel(combo))}</option>`).join('') : '<option value="">ترکیب معتبر پیدا نشد</option>';
+    const at = keep ? shown.findIndex((combo) => comboKey(combo.legs) === keep) : -1;
+    if (at >= 0) $('bt-combo').value = String(at);
+    $('bt-combo-count').textContent = `${fmt.int(combos.length)} ترکیب قابل اجرا`
+      + (keep && at < 0 && shown.length ? ' · ترکیب قبلی در این روز نبود' : '');
     renderCombo();
   }
 
@@ -504,7 +538,10 @@ export async function mount(root, { state }) {
       return;
     }
 
-    const rows = intradayChartRows(intraday, replay.endDate);
+    // روزِ باز، نه روز پایان بازه. `replay.endDate` ثابت است و با کلیک روی
+    // هر ردیف عوض نمی‌شود، پس تولتیپ هر چهار نمودار همیشه تاریخ روز آخر را
+    // نشان می‌داد — حتی وقتی نقاط مالِ روز دیگری بودند.
+    const rows = intradayChartRows(intraday, intradayDate);
     const legSeries = summary.legs.map((leg, index) => ({ key: `legPnl${index}`, label: `${faDigits(index + 1)} · ${nameOf(leg, 'پا')}`, color: LEG_COLORS[index % LEG_COLORS.length] }));
     const priceSeries = [
       { key: 'returnPct', label: 'بازده استراتژی از ورود', color: 'var(--gain)' },
@@ -801,8 +838,11 @@ export async function mount(root, { state }) {
     if (entryDates.includes(wantEntry)) entryWheel.select(wantEntry);
     else skipped.push(`روز ورود ${dateLabel(plan.entryDate)} برای این استراتژی ترکیب قابل اجرا ندارد`);
 
-    const wanted = [...plan.legIns].sort().join('|');
-    const index = combos.findIndex((combo) => combo.legs.map((leg) => String(leg.ins)).sort().join('|') === wanted);
+    // همان کلیدی که `refreshCombos` با آن انتخاب را نگه می‌دارد. تحویل فقط
+    // شناسهٔ قرارداد دارد نه سمت و نسبت، پس مقایسه روی همان بخش انجام می‌شود.
+    const insOf = (key) => key.split('::').map((part) => part.split('|')[0]).sort().join('|');
+    const wanted = [...plan.legIns].map(String).sort().join('|');
+    const index = combos.findIndex((combo) => insOf(comboKey(combo.legs)) === wanted);
     if (index >= 0) { $('bt-combo').value = String(index); renderCombo(); }
     else skipped.push(`ترکیب «${plan.comboName}» بین ترکیب‌های این روز نبود`);
 
