@@ -1,6 +1,6 @@
 {
   "name": "options-radar",
-  "version": "0.16.1",
+  "version": "0.17.0",
   "private": true,
   "type": "module",
   "description": "رصد استراتژی آپشن — سرور محلی و موتور محاسبه",

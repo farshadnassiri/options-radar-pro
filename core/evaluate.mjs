@@ -18,6 +18,7 @@ import {
 } from './exec.mjs';
 import { bsGreeks, bsPrice, impliedVol, probBelow } from './bs.mjs';
 import { analyzeMixed, isSingleExpiry } from './mixed.mjs';
+import { historyDateLabel } from './history.mjs';
 
 /** بازه‌هایی از قیمت پایه که در آن‌ها سود می‌کنی. مبنای احتمال سود. */
 export function profitRegions(an) {
@@ -284,6 +285,13 @@ export function evaluate({ legs, quotes, ctx }) {
     underlying: ctx.underlying || '',
     days, qty, legCount: priced.length,
     strikes: payoff.strikes,
+    // سررسید و نام قرارداد: تا امروز ردیف فقط «روز مانده» داشت. دو ترکیب با
+    // ۲۳ روز مانده می‌توانند دو سررسید متفاوت باشند، و «روز» این را نمی‌گوید.
+    expiry: num(ctx.endDate),
+    expiryLabel: ctx.endDate ? historyDateLabel(ctx.endDate) : '',
+    // نام قراردادِ هر پا، همان‌طور که در تابلو و سامانهٔ کارگزار نوشته می‌شود
+    // (مثل «طهرم7058»). این شناسه است نه عدد؛ رقمش عمداً فارسی نمی‌شود.
+    legNames: priced.map((l) => l.name || '').filter(Boolean),
     legsText: priced.map((l) => `${l.side === 'sell' ? '−' : '+'}${num(l.ratio, 1)} ${l.kind === 'underlying' ? 'سهم' : (l.kind === 'call' ? 'کال' : 'پوت') + ' ' + num(l.strike)}`).join('  '),
 
     // قیمت
@@ -310,6 +318,10 @@ export function evaluate({ legs, quotes, ctx }) {
     singleExpiry, payoffApprox: !!payoff.approx, horizonDays: payoff.horizonDays ?? days,
     maxProfit: payoff.maxProfit, maxLoss: payoff.maxLoss,
     maxLossPct: retMaxLoss, rewardRisk,
+    // همان عددِ `retMaxPct` است، ولی کنار «بیشترین سود» می‌نشیند تا سود و
+    // زیان در یک گروه، هر دو ریالی و درصدی داشته باشند — همان تقارنی که
+    // `maxLossPct` دارد.
+    maxProfitPct: retMax,
     unlimitedProfit: payoff.unlimitedProfit, unlimitedLoss: payoff.unlimitedLoss,
     staticPnl,
 
@@ -389,28 +401,56 @@ export function evaluate({ legs, quotes, ctx }) {
  *
  *   beNear      نزدیک‌ترین سربه‌سری به قیمت پایه
  *   beDistPct   فاصله علامت‌دار تا آن، درصد قیمت پایه.
- *               مثبت یعنی سربه‌سری بالای پایه است و پایه باید بالا برود.
+ *
+ *               علامت از دید «قیمت امروز» خوانده می‌شود، نه از دید سربه‌سری:
+ *               مثبت یعنی پایه **بالای** سربه‌سری است، منفی یعنی پایین‌تر.
+ *               پیش از این وارونه بود (فاصلهٔ سربه‌سری از پایه) و همان
+ *               ستون، برای دو ترکیب هم‌جهت دو علامت متفاوت می‌داد.
+ *
  *   beRoomPct   اندازه همان فاصله، بدون علامت — ستون مرتب‌سازی «حاشیه امن»
  *   beLow       پایین‌ترین سربه‌سری ، beHigh  بالاترین
  *   beWidthPct  فاصله دو سر، درصد قیمت پایه. برای استرادل و کندور معنی دارد.
+ *   be1..be4    هر سربه‌سری در ستون خودش، از پایین به بالا، با فاصلهٔ خودش.
+ *               یک ستونِ «سربه‌سری» که چند عدد را کنار هم می‌ریزد، نه مرتب
+ *               می‌شود نه مقایسه — و استرادل و کندور همیشه بیش از یکی دارند.
+ *   beDistList  فاصلهٔ همه سربه‌سری‌ها، هم‌ترتیب با `breakevens`. اگر روزی
+ *               ترکیبی بیش از BE_SLOTS نقطه ساخت، این ستون چیزی را پنهان
+ *               نمی‌کند.
  */
+
+/** چند سربه‌سری ستون جدا می‌گیرد. چهار پا، حداکثر چهار نقطهٔ واقعی می‌سازد. */
+export const BE_SLOTS = 4;
+
 export function breakevenMetrics(bes, S) {
-  const list = (Array.isArray(bes) ? bes : []).filter((b) => ok(b) && b > 0);
+  const list = (Array.isArray(bes) ? bes : []).filter((b) => ok(b) && b > 0).sort((a, b) => a - b);
+  const slots = {};
+  for (let i = 1; i <= BE_SLOTS; i++) { slots[`be${i}`] = NaN; slots[`be${i}DistPct`] = NaN; }
   if (!list.length || !(S > 0)) {
-    return { beNear: NaN, beDistPct: NaN, beRoomPct: NaN, beLow: NaN, beHigh: NaN, beWidthPct: NaN, beCount: list.length };
+    return {
+      beNear: NaN, beDistPct: NaN, beRoomPct: NaN, beLow: NaN, beHigh: NaN,
+      beWidthPct: NaN, beCount: list.length, beDistList: [], ...slots,
+    };
   }
+  // مثبت = پایه بالای سربه‌سری است
+  const distOf = (b) => ((S - b) / S) * 100;
   let near = list[0];
   for (const b of list) if (Math.abs(b - S) < Math.abs(near - S)) near = b;
-  const lo = Math.min(...list);
-  const hi = Math.max(...list);
+  const lo = list[0];
+  const hi = list[list.length - 1];
+  for (let i = 0; i < Math.min(BE_SLOTS, list.length); i++) {
+    slots[`be${i + 1}`] = list[i];
+    slots[`be${i + 1}DistPct`] = distOf(list[i]);
+  }
   return {
     beNear: near,
-    beDistPct: ((near - S) / S) * 100,
-    beRoomPct: (Math.abs(near - S) / S) * 100,
+    beDistPct: distOf(near),
+    beRoomPct: Math.abs(distOf(near)),
     beLow: lo,
     beHigh: hi,
     beWidthPct: list.length > 1 ? ((hi - lo) / S) * 100 : NaN,
     beCount: list.length,
+    beDistList: list.map(distOf),
+    ...slots,
   };
 }
 
@@ -419,6 +459,9 @@ export const COLUMNS = [
   { key: 'underlying', label: 'پایه', fmt: 'text', group: 'هویت', pin: true },
   { key: 'legsText', label: 'پاها', fmt: 'text', group: 'هویت', pin: true },
   { key: 'days', label: 'روز', fmt: 'int', group: 'هویت' },
+  { key: 'expiryLabel', label: 'تاریخ سررسید', fmt: 'text', group: 'هویت' },
+  { key: 'strikes', label: 'قیمت اعمال', fmt: 'list', group: 'هویت' },
+  { key: 'legNames', label: 'نام قرارداد پاها', fmt: 'sym', group: 'هویت' },
   { key: 'cashLabel', label: 'جهت نقدی', fmt: 'text', group: 'جریان نقد' },
   { key: 'grossCash', label: 'نقد ناخالص', fmt: 'money', group: 'جریان نقد' },
   { key: 'entryFee', label: 'کارمزد ورود', fmt: 'money', group: 'جریان نقد' },
@@ -428,6 +471,15 @@ export const COLUMNS = [
   { key: 'settleClosePnl', label: 'سود/زیان اگر تسویه با قیمت پایانی', fmt: 'money', group: 'جریان نقد' },
   { key: 'S', label: 'قیمت پایه', fmt: 'money', group: 'سود و زیان' },
   { key: 'breakevens', label: 'سربه‌سری', fmt: 'list', group: 'سود و زیان' },
+  { key: 'beDistList', label: 'فاصله تا هر سربه‌سری ٪', fmt: 'pctList', group: 'سود و زیان' },
+  { key: 'be1', label: 'سربه‌سری ۱', fmt: 'money', group: 'سود و زیان' },
+  { key: 'be1DistPct', label: 'فاصله تا سربه‌سری ۱ ٪', fmt: 'pct', group: 'سود و زیان' },
+  { key: 'be2', label: 'سربه‌سری ۲', fmt: 'money', group: 'سود و زیان' },
+  { key: 'be2DistPct', label: 'فاصله تا سربه‌سری ۲ ٪', fmt: 'pct', group: 'سود و زیان' },
+  { key: 'be3', label: 'سربه‌سری ۳', fmt: 'money', group: 'سود و زیان' },
+  { key: 'be3DistPct', label: 'فاصله تا سربه‌سری ۳ ٪', fmt: 'pct', group: 'سود و زیان' },
+  { key: 'be4', label: 'سربه‌سری ۴', fmt: 'money', group: 'سود و زیان' },
+  { key: 'be4DistPct', label: 'فاصله تا سربه‌سری ۴ ٪', fmt: 'pct', group: 'سود و زیان' },
   { key: 'beNear', label: 'نزدیک‌ترین سربه‌سری', fmt: 'money', group: 'سود و زیان' },
   { key: 'beDistPct', label: 'فاصله تا سربه‌سری ٪', fmt: 'pct', group: 'سود و زیان' },
   { key: 'beRoomPct', label: 'حاشیه امن ٪', fmt: 'pct', group: 'سود و زیان', heat: 'prob' },
@@ -435,6 +487,7 @@ export const COLUMNS = [
   { key: 'beHigh', label: 'سربه‌سری بالا', fmt: 'money', group: 'سود و زیان' },
   { key: 'beWidthPct', label: 'پهنای سربه‌سری ٪', fmt: 'pct', group: 'سود و زیان' },
   { key: 'maxProfit', label: 'بیشترین سود', fmt: 'money', group: 'سود و زیان', heat: 'gain' },
+  { key: 'maxProfitPct', label: 'بیشترین سود ٪ سرمایه', fmt: 'pct', group: 'سود و زیان', heat: 'gain' },
   { key: 'maxLoss', label: 'بیشترین زیان', fmt: 'money', group: 'سود و زیان', heat: 'loss' },
   { key: 'maxLossPct', label: 'بیشترین زیان ٪ سرمایه', fmt: 'pct', group: 'سود و زیان', heat: 'loss' },
   { key: 'rewardRisk', label: 'پاداش به ریسک', fmt: 'num', group: 'سود و زیان', heat: 'gain' },
