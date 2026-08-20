@@ -19,6 +19,7 @@ const OVER = 12;
 // دوباره صادر می‌شود چون تب‌ها از قدیم آن را از همین‌جا می‌گیرند.
 export { fmt } from './fmt.mjs';
 import { fmt, faDigits } from './fmt.mjs';
+import { downloadCsv, stamp } from './export.mjs';
 
 const HEAT = {
   gain: ['--gain-soft', '--gain'],
@@ -169,6 +170,7 @@ export function makeTable(host, cols, opts = {}) {
         <button type="button" class="ghost tbl-cols-btn" ${all === cols ? 'hidden' : ''}>
           ستون‌ها <b class="tbl-cols-n"></b>
         </button>
+        <button type="button" class="ghost tbl-export-btn">خروجی اکسل</button>
         <span class="tbl-sort" role="status" aria-live="polite"></span>
         <span class="heat-legend" hidden></span>
         <span class="sp"></span>
@@ -188,6 +190,7 @@ export function makeTable(host, cols, opts = {}) {
   const colsBtn = host.querySelector('.tbl-cols-btn');
   const colsN = host.querySelector('.tbl-cols-n');
   const panel = host.querySelector('.col-panel');
+  const exportBtn = host.querySelector('.tbl-export-btn');
 
   let rows = [];
   let view = [];
@@ -203,6 +206,28 @@ export function makeTable(host, cols, opts = {}) {
   let activeIdx = -1;
 
   const active = () => keys.map((k) => byKey.get(k)).filter(Boolean);
+
+  /**
+   * خروجی، از داده می‌آید نه از DOM.
+   *
+   * این جدول مجازی‌سازی‌شده است: فقط پنجاه ردیفِ داخل قاب در DOM هستند. یک
+   * خروجیِ DOM-خوان اینجا بی‌صدا ناقص می‌شود — فایلی می‌دهد که شبیه درست است
+   * و کاربر تا وقتی نشمارد نمی‌فهمد نصف ردیف‌ها نیستند.
+   *
+   * ترتیب ستون و ترتیب مرتب‌سازیِ روی صفحه حفظ می‌شود، چون کاربر همان چیزی
+   * را می‌خواهد که می‌بیند.
+   */
+  function exportRows() {
+    const cols = active();
+    const head = cols.map((c) => c.label);
+    const body = view.map((r) => cols.map((c) => (fmt[c.fmt] || fmt.text)(r[c.key])));
+    return [head, ...body];
+  }
+  exportBtn?.addEventListener('click', () => {
+    const rows = exportRows();
+    if (rows.length < 2) return;
+    downloadCsv(`${(opts.exportName || 'table')}-${stamp()}`, rows);
+  });
 
   // ——— سرستون: چسبان بالای قاب، مرتب‌شونده، و جابه‌جاشونده با کشیدن ———
   //

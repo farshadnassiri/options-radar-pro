@@ -10,6 +10,7 @@ import { mountPayoff } from '/ui/chart.mjs';
 import { fmt } from '/ui/table.mjs';
 import { faDigits, kpiTone } from '/ui/fmt.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
+import { attachExportsIn } from '/ui/export.mjs';
 
 const KINDS = [
   ['covered-call', 'کاوردکال — سهم + فروش کال'],
@@ -63,6 +64,11 @@ export async function mount(root, { state, api }) {
       <h3 id="det-title">جزئیات موقعیت</h3>
       <div class="detail" id="det"></div>
     </section>`;
+
+  // هر ظرف جدول، دکمهٔ خروجی خودش را می‌گیرد. ظرف‌ها در همین قالب‌اند حتی
+  // وقتی خالی‌اند، و خواندن لحظهٔ کلیک انجام می‌شود — پس یک بار کافی است.
+  attachExportsIn(root, 'positions');
+
 
   // ——————————————— فرم ———————————————
   const form = root.querySelector('#form');

@@ -13,6 +13,7 @@ import { mountPayoff, mountDiff } from '/ui/chart.mjs';
 import { fmt } from '/ui/table.mjs';
 import { faDigits, signTone } from '/ui/fmt.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
+import { attachExportsIn } from '/ui/export.mjs';
 
 const baseName = (position) => {
   const name = String(position?.uaName || '').trim();
@@ -75,6 +76,11 @@ export async function mount(root, { state, api }) {
       <section class="card"><h3>موقعیت فعلی در سررسید</h3><div id="c1"></div></section>
       <section class="card"><h3>موقعیت پس از رول</h3><div id="c2"></div></section>
     </div>`;
+
+  // هر ظرف جدول، دکمهٔ خروجی خودش را می‌گیرد. ظرف‌ها در همین قالب‌اند حتی
+  // وقتی خالی‌اند، و خواندن لحظهٔ کلیک انجام می‌شود — پس یک بار کافی است.
+  attachExportsIn(root, 'roll');
+
 
   const el = (id) => root.querySelector(id);
 

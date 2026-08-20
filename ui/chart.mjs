@@ -226,8 +226,8 @@ function frame(points, analysis, opt, xMin, xMax, todayPoints) {
       ${grid}${layers.fill ? areas.join('') : ''}${layers.strike ? strikes : ''}${layers.spot ? spotLine : ''}
       <line class="axis" x1="${pad.l}" y1="${H - pad.b}" x2="${W - pad.r}" y2="${H - pad.b}"/>
       ${xTicks}
-      <text class="lbl axis-title" x="${(pad.l + W - pad.r) / 2}" y="${H - 8}" text-anchor="middle">قیمت سهم پایه</text>
-      <text class="lbl axis-title" transform="translate(14 ${(pad.t + H - pad.b) / 2}) rotate(-90)" text-anchor="middle">سود و زیان</text>
+      <text class="lbl axis-title" x="${(pad.l + W - pad.r) / 2}" y="${H - 8}" text-anchor="middle">قیمت سهم پایه (ریال)</text>
+      <text class="lbl axis-title" transform="translate(14 ${(pad.t + H - pad.b) / 2}) rotate(-90)" text-anchor="middle">سود و زیان (ریال)</text>
       <line class="zero" x1="${pad.l}" y1="${y0}" x2="${W - pad.r}" y2="${y0}"/>
       ${todayLine ? `<path class="curve-today" d="${todayLine}"/>` : ''}
       ${cmpPaths}

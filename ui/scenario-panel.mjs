@@ -8,6 +8,7 @@
 
 import { scenarioLadder, sensitivityGrid, bookDepthRisk } from '/core/scenario.mjs';
 import { fmt, faNum, faDigits, negClass } from '/ui/fmt.mjs';
+import { attachExportsIn } from '/ui/export.mjs';
 
 const esc = (v) => String(v ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
@@ -83,6 +84,10 @@ export function mountScenarioPanel(host, row, opt = {}) {
       <div id="scen-depth" class="history-table-wrap"></div>
     </section>`;
 
+
+  // هر ظرف جدول، دکمهٔ خروجی خودش را می‌گیرد. ظرف‌ها در همین قالب‌اند حتی
+  // وقتی خالی‌اند، و خواندن لحظهٔ کلیک انجام می‌شود — پس یک بار کافی است.
+  attachExportsIn(host, 'scenario');
   const $ = (id) => host.querySelector(`#${id}`);
 
   // ——— نردبان سناریو ———
