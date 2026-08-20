@@ -3,8 +3,16 @@
 // هر تب، هر استراتژی، همین ستون‌ها را دارد. اسم و معنی و واحد در همه‌جا یکی
 // است. این تنها راهی است که چیزی مبهم نماند.
 //
-// همه اعداد پولی «برای یک دست قرارداد» است. تعداد قرارداد فقط دو جا اثر
-// می‌گذارد: قیمت اجرا از عمق دفتر سفارش، و سقف حجم.
+// همه اعداد پولی برای **حجم واقعی کاربر** است — `ctx.qty` قرارداد، نه یک
+// دست. تا پیش از این ردیف برای یک دست سنجیده می‌شد و کاربری که ۳۰۰ قرارداد
+// می‌گرفت باید هر عدد را خودش در ۳۰۰ ضرب می‌کرد؛ «نقد خالص ۶٬۶۴۲٬۵۵۴» کنار
+// «حجم من ۳۰۰» هیچ‌جا نمی‌گفت کدام‌یک را نشان می‌دهد. حالا می‌گوید.
+//
+// تفکیک: عددی که به موقعیت تو تعلق دارد در `qty` مقیاس می‌خورد (نقد، سود و
+// زیان، سرمایه، وجه تضمین، یونانی، هزینه اجرا). عددی که مالِ بازار است
+// نمی‌خورد (حجم معاملات، موقعیت باز، مظنه‌ها). قیمت هم نمی‌خورد — قیمت
+// اعمال و سربه‌سری و قیمت پایه، با حجم تو جابه‌جا نمی‌شوند. درصدها هم
+// دست‌نخورده می‌مانند، چون صورت و مخرجشان با هم مقیاس می‌خورند.
 
 import { num, ok, EPS } from './num.mjs';
 import {
@@ -66,6 +74,12 @@ export function probOfProfit(an, S, T, sigma) {
  *   legs      پاها، بدون قیمت — قیمت از quotes و مبنای انتخابی می‌آید
  *   quotes    هم‌طول legs: { bid,bidQty,ask,askQty,last,close,low,high,book[],state,staleSec }
  *   ctx       { S, Sclose, days, size, qty, settings, sigmaHist, def }
+ *
+ * `ctx.qty` تعداد قرارداد (واحد استراتژی) است و در همه اعداد پولی ضرب
+ * می‌شود. جای ضرب، همان‌جایی است که پاها ساخته می‌شوند — نه در پایان روی
+ * تک‌تک خروجی‌ها. اگر مقیاس در انتها اعمال می‌شد، هر ستون تازه‌ای که کسی
+ * اضافه می‌کرد باید به فهرست ضرب هم افزوده می‌شد وگرنه بی‌صدا در مقیاس یک
+ * دست می‌ماند؛ با ضرب در نسبت پا، موتور مشترک خودش همه را می‌برد.
  */
 export function evaluate({ legs, quotes, ctx }) {
   const s = ctx.settings;
@@ -82,9 +96,11 @@ export function evaluate({ legs, quotes, ctx }) {
   const Sclose = num(ctx.Sclose, S);
   const days = Math.max(1, num(ctx.days, 1));
   const T = days / Y;
-  const qty = Math.max(1, num(ctx.qty, s.qtyDefault));
+  const qty = Math.max(1, Math.trunc(num(ctx.qty, s.qtyDefault)));
 
   // ——— ۱. قیمت اجرا ———
+  // `priced` مقیاس «یک دست» را نگه می‌دارد: قیمت هر پا، کیفیت داده، و سقف
+  // حجم همگی به‌ازای یک واحد معنی دارند و نباید در تعداد ضرب شوند.
   const priced = priceLegs(legs, quotes, {
     basis: s.priceBasis, execMode: s.execMode, qty,
     refFallback: !!s.showUnexecutable, maxSlipPct: s.maxSlipPct,
@@ -94,9 +110,17 @@ export function evaluate({ legs, quotes, ctx }) {
   const quality = rowQuality(priced, { staleSec: s.staleSec });
   const executable = quality.level !== 'unexecutable';
 
+  // ——— ۱-۲. موقعیت واقعی ———
+  // همان پاها، با نسبتِ ضرب‌شده در تعداد قرارداد. از اینجا به بعد هر تابع
+  // موتور روی `pos` کار می‌کند، پس مقیاس یک بار اعمال می‌شود و همه‌جا —
+  // بازده، وجه تضمین، یونانی، هزینه اجرا، نمودار — با هم می‌خوانند.
+  const pos = qty === 1
+    ? priced
+    : priced.map((l) => ({ ...l, ratio: num(l.ratio, 1) * qty }));
+
   // ——— ۲. جریان نقد ———
-  const gross = grossCash(priced);
-  const entryFee = entryFees(priced, fees);
+  const gross = grossCash(pos);
+  const entryFee = entryFees(pos, fees);
   const netCash = gross - entryFee;
   const isCredit = gross > EPS;
 
@@ -104,18 +128,18 @@ export function evaluate({ legs, quotes, ctx }) {
   // تسویه کنم چه می‌شود؟ — سه مبنا روی همان مظنه‌های استفاده‌شده برای ورود.
   // مبنای دفتر سفارش ادعای اجرا دارد (bid/ask واقعی)؛ آخرین و پایانی فقط
   // مرجع‌اند، چون لحظه وقوعشان با لحظه این محاسبه هم‌زمان نیست.
-  const quotesForClose = priced.map((l) => l.quote || {});
-  const instantClosePnl = netCash + closeValuation(priced, quotesForClose, 'BOOK', fees).net;
-  const settleLastPnl = netCash + closeValuation(priced, quotesForClose, 'LAST', fees).net;
-  const settleClosePnl = netCash + closeValuation(priced, quotesForClose, 'CLOSE', fees).net;
+  const quotesForClose = pos.map((l) => l.quote || {});
+  const instantClosePnl = netCash + closeValuation(pos, quotesForClose, 'BOOK', fees).net;
+  const settleLastPnl = netCash + closeValuation(pos, quotesForClose, 'LAST', fees).net;
+  const settleClosePnl = netCash + closeValuation(pos, quotesForClose, 'CLOSE', fees).net;
 
   // ——— ۳. بازده در سررسید ———
   // اگر سررسید پاها یکی نباشد، موتور تکه‌ای-خطی جواب غلط می‌دهد: فروش و خرید
   // یک قیمت اعمال، ارزش ذاتی همدیگر را صفر می‌کنند و تقویمی بی‌سود درمی‌آید.
-  const singleExpiry = isSingleExpiry(priced);
+  const singleExpiry = isSingleExpiry(pos);
   const payoff = singleExpiry
-    ? analyzePayoff(priced, netCash, { fees })
-    : analyzeMixed(priced, netCash, {
+    ? analyzePayoff(pos, netCash, { fees })
+    : analyzeMixed(pos, netCash, {
       fees, rFree: s.rFree, divYield: s.divYield, spot: Sclose,
       sigma: ok(ctx.sigmaHist) ? ctx.sigmaHist : s.volManual,
       yearDays: Y,
@@ -123,15 +147,15 @@ export function evaluate({ legs, quotes, ctx }) {
 
   // ——— ۴. وجه تضمین ———
   const closes = {};
-  priced.forEach((l, i) => { closes[i] = num(l.quote?.close, num(l.price)); });
-  const margin = strategyMargin(priced, {
+  pos.forEach((l, i) => { closes[i] = num(l.quote?.close, num(l.price)); });
+  const margin = strategyMargin(pos, {
     S: Sclose, closes, params, creditMode: s.creditSpreadMargin, capitalMode: s.capitalMode,
     contractSize: basis.contractSize,
   });
 
   // ——— ۵. سرمایه درگیر و بازده ———
   const capital = capitalBase({
-    legs: priced, netCash, marginNet: margin.marginNet, maxLoss: payoff.maxLoss,
+    legs: pos, netCash, marginNet: margin.marginNet, maxLoss: payoff.maxLoss,
   });
   const cap = capital.value;
 
@@ -159,6 +183,9 @@ export function evaluate({ legs, quotes, ctx }) {
   // در مرحله یک غربال، استخراج تلاطم ضمنی برای هر پا گران است و کنار گذاشته
   // می‌شود. مرحله دو برای کاندیداهای برتر روشنش می‌کند.
   const wantGreeks = ctx.greeks !== false;
+  // یونانی هر پا به‌ازای یک سهم است و به نسبت پا کاری ندارد، پس روی پاهای
+  // یک‌دستی حساب می‌شود — همان‌جایی که `legPrices` تلاطم ضمنی را می‌خواند.
+  // وزن و علامت را `positionGreeks` روی پاهای موقعیت اعمال می‌کند.
   const greeksByLeg = priced.map((l) => {
     if (l.kind === 'underlying' || !wantGreeks) return null;
     const pIv = { CLOSE: l.quote?.close, LAST: l.quote?.last, BID: l.quote?.bid }[s.ivBasis] ?? l.quote?.close;
@@ -173,7 +200,7 @@ export function evaluate({ legs, quotes, ctx }) {
     return bsGreeks(l.kind, Sclose, num(l.strike), Tl, r, q, sig, Y);
   });
   const greeks = wantGreeks
-    ? positionGreeks(priced, greeksByLeg)
+    ? positionGreeks(pos, greeksByLeg)
     : { delta: NaN, gamma: NaN, vega: NaN, theta: NaN, rho: NaN, deltaShares: NaN, incomplete: true };
 
   const sigmaUse = s.volSource === 'MANUAL' ? s.volManual
@@ -204,7 +231,7 @@ export function evaluate({ legs, quotes, ctx }) {
   const bidList = [], askList = [], lastList = [], closeList = [], ivList = [], headlineList = [];
   let spreadWorst = NaN, bidQtyMin = Infinity, askQtyMin = Infinity;
 
-  priced.forEach((l, i) => {
+  pos.forEach((l, i) => {
     const q = l.quote || {};
     const qty = qtyOf(l);
     notional += Math.abs(qty) * Sclose;
@@ -214,7 +241,8 @@ export function evaluate({ legs, quotes, ctx }) {
     if (l.kind === 'underlying') { bsValue += qty * Sclose; return; }
 
     const Tl = Math.max(1, num(l.days, days)) / Y;
-    const sig = num(l.sigma, NaN);
+    // تلاطم روی پای یک‌دستی نشسته است، نه روی کپیِ مقیاس‌خورده
+    const sig = num(priced[i].sigma, NaN);
     const theo = ok(sig) && sig > 0 ? bsPrice(l.kind, Sclose, num(l.strike), Tl, r, s.divYield, sig) : NaN;
     if (ok(theo)) bsValue += qty * theo; else bsKnown = false;
 
@@ -248,13 +276,16 @@ export function evaluate({ legs, quotes, ctx }) {
     ? (greeks.delta * Sclose) / marketValue : NaN;
 
   // ——— ۸. هزینه اجرا ———
-  const cost = executionCost(priced, {
+  const cost = executionCost(pos, {
     fees, marginNet: margin.marginNet, rFree: r, days, yearDays: Y,
   });
 
   // ——— ۹. سقف حجم ———
+  // سقف حجم به‌ازای «یک واحد» سنجیده می‌شود — جوابش خودش تعداد قرارداد
+  // است، پس ورودی‌اش هم باید مقیاس یک دست باشد وگرنه سقف بر `qty` تقسیم
+  // می‌شود و کاربرِ ۳۰۰ قرارداد، سقف یک‌سیصدم واقعی می‌بیند.
   const size = maxSize(priced, {
-    capitalPerContract: cap,
+    capitalPerContract: cap / qty,
     capitalAvailable: s.capitalAvailable,
     contractSize: basis.contractSize,
   });
@@ -372,7 +403,10 @@ export function evaluate({ legs, quotes, ctx }) {
 
     // برای نمودار — پاهای قیمت‌خورده، بدون شیء تابع‌دار
     payoff,
-    __legs: priced.map((l) => ({
+    // پاهای موقعیت، نه یک دست: نمودار بازده و پنل سناریو همین‌ها را با
+    // `netCash` جفت می‌کنند و اگر یکی مقیاس‌خورده باشد و دیگری نه، نمودار و
+    // جدول دو عدد متفاوت می‌گویند.
+    __legs: pos.map((l) => ({
       kind: l.kind, side: l.side, ratio: num(l.ratio, 1), strike: num(l.strike),
       size: num(l.size, basis.contractSize), price: num(l.price), days: l.days,
       // شناسه قرارداد لازم است تا همین ترکیب در تب بک‌تست دوباره پیدا شود.
@@ -382,7 +416,7 @@ export function evaluate({ legs, quotes, ctx }) {
     })),
     // دفتر سفارش هر پا، برای سنجش ریسک عمق هنگام *بستن* موقعیت. فقط سطوح،
     // نه کل شیء مظنه — بقیه‌اش در ستون‌ها هست و تکرارش ردیف را سنگین می‌کند.
-    __books: priced.map((l) => ({ book: Array.isArray(l.quote?.book) ? l.quote.book : [] })),
+    __books: pos.map((l) => ({ book: Array.isArray(l.quote?.book) ? l.quote.book : [] })),
   };
 }
 
@@ -459,6 +493,8 @@ export const COLUMNS = [
   { key: 'underlying', label: 'پایه', fmt: 'text', group: 'هویت', pin: true },
   { key: 'legsText', label: 'پاها', fmt: 'text', group: 'هویت', pin: true },
   { key: 'days', label: 'روز', fmt: 'int', group: 'هویت' },
+  // بدون این ستون، «نقد خالص ۶٬۶۴۲٬۵۵۴» نمی‌گوید مال چند قرارداد است.
+  { key: 'qty', label: 'حجم من (قرارداد)', fmt: 'int', group: 'هویت' },
   { key: 'expiryLabel', label: 'تاریخ سررسید', fmt: 'text', group: 'هویت' },
   { key: 'strikes', label: 'قیمت اعمال', fmt: 'list', group: 'هویت' },
   { key: 'legNames', label: 'نام قرارداد پاها', fmt: 'sym', group: 'هویت' },

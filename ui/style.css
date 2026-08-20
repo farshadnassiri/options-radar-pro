@@ -1344,6 +1344,14 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
   background: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
 }
 .scen-units input { width: 108px; }
+/* دو ردیف کنترل حساسیت: بالا شکل جدول، پایین فرض‌های بازار. */
+.scen-row { margin-top: 10px; }
+.scen-row + .scen-row { padding-top: 10px; border-top: 1px dashed var(--line); }
+.scen-controls input[type="number"] { width: 104px; }
+.scen-controls button { min-height: 36px; cursor: pointer; align-self: end; }
+.scen-hint { color: var(--muted); font-weight: 400; }
+/* «دستی» یعنی این فرض دیگر فرضِ بازار نیست — باید به چشم بیاید. */
+.warn-ink { color: var(--warn); }
 .scen-caption { caption-side: top; text-align: start; padding: 8px 10px; color: var(--muted); font-size: var(--fs-sm); }
 /* ردیف «قیمت امروز» مرزِ خوانش است: بالای آن سناریوهای بدتر، پایینش بهترها. */
 .history-table tr.scen-spot > td { background: var(--accent-soft); font-weight: 700; }

@@ -39,7 +39,10 @@ import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE }
 import { strandedKeys } from '../ui/expiries.mjs';
 import { icon, GROUP_ICON, TAB_ICON, sectionIcon } from '../ui/icons.mjs';
 import { canHandoff, handoffPlan } from '../ui/handoff.mjs';
-import { scenarioLadder, sensitivityGrid, bookDepthRisk } from '../core/scenario.mjs';
+import {
+  scenarioLadder, sensitivityGrid, sensitivityAxis, bookDepthRisk,
+  SENS_AXES, SENS_METRICS,
+} from '../core/scenario.mjs';
 import { csvCell, numericCell, toCsv, stamp } from '../ui/export.mjs';
 import { createLog } from '../server/errlog.mjs';
 import * as uiFmt48 from '../ui/fmt.mjs';
@@ -440,7 +443,10 @@ group('۹. ارزیاب ردیف، سرتاسری');
   check('بازده دوره مثبت و متناهی', Number.isFinite(row.retMaxPct) && row.retMaxPct > 0, `${row.retMaxPct.toFixed(2)}٪`);
   check('بازده ماهانه با نسبت روز مقیاس می‌خورد', near(row.retMonthPct, row.retMaxPct * 30 / 30, 1e-9));
   check('یونانی‌ها کامل محاسبه شدند', !row.greeksIncomplete && Number.isFinite(row.delta));
-  check('دلتای کاوردکال بین صفر و اندازه قرارداد', row.delta > 0 && row.delta < size, `${row.delta.toFixed(1)}`);
+  // ردیف برای حجم واقعی کاربر سنجیده می‌شود، پس سقف دلتا هم در تعداد
+  // قرارداد ضرب می‌شود: کاوردکالِ سه‌تایی حداکثر سه هزار سهم دلتا دارد.
+  check('دلتای کاوردکال بین صفر و اندازه قرارداد ضربدر حجم',
+    row.delta > 0 && row.delta < size * row.qty, `${row.delta.toFixed(1)} از ${size * row.qty}`);
   check('احتمال سود محاسبه شد', Number.isFinite(row.popPct), `${row.popPct.toFixed(1)}٪`);
   check('هزینه اجرا تفکیک شده و مثبت است',
     row.execCost > 0 && row.costCommission > 0 && row.costRows.length === 2,
@@ -3331,9 +3337,10 @@ group('۵۲. سناریو، حساسیت، و ریسک عمق دفتر');
     scenarioLadder({}).length === 0 && scenarioLadder({ legs: legs52, spot: 0 }).length === 0);
 
   // ——— حساسیت ———
-  const grid52 = sensitivityGrid({ ...base52, axis: 'days', moves: [-20, 0, 20] });
+  const grid52 = sensitivityGrid({ ...base52, axis: 'days', moves: [-20, 0, 20], steps: 3 });
   check('جدول حساسیت، سطر و ستون درست دارد',
-    grid52.rows.length === 3 && grid52.axisValues.length === 3);
+    grid52.rows.length === 3 && grid52.axisValues.length === 3,
+    `${grid52.rows.length}×${grid52.axisValues.length}`);
   check('هر خانه، تفکیک پا دارد و با جمعش می‌خواند',
     grid52.rows.every((r) => r.cells.every((c) => near(c.pnl, c.perLeg.reduce((a, v) => a + v, 0)))));
   // روی محور روز، صفر یعنی سررسید — و آن‌جا باید دقیقاً منحنی سررسید باشد،
@@ -3343,12 +3350,97 @@ group('۵۲. سناریو، حساسیت، و ریسک عمق دفتر');
     atExpiry52 >= 0 && grid52.rows.every((r) => near(r.cells[atExpiry52].pnl, pnlAtExpiry(legs52, r.level, net52))));
   check('پیش از سررسید، ارزش زمانی هنوز هست',
     grid52.rows.find((r) => r.movePct === -20).cells[0].pnl > grid52.rows.find((r) => r.movePct === -20).cells[atExpiry52].pnl);
-  for (const axis of ['days', 'sigma', 'rFree']) {
+  for (const axis of SENS_AXES.map((a) => a.key)) {
     check(`محور «${axis}» جدول می‌سازد`, sensitivityGrid({ ...base52, axis }).rows.length > 0);
   }
   check('محور ناشناخته به روز مانده برمی‌گردد', sensitivityGrid({ ...base52, axis: 'چیزی' }).axis === 'days');
 
-  // ——— ریسک عمق دفتر ———
+  // ——— محورِ خودساخته: هر جنس، قاعده خودش ———
+  //
+  // یک قاعدهٔ واحد برای هر سه محور، برای دوتاشان بی‌معنی می‌شود: بازهٔ نسبی
+  // روی نرخِ صفر هیچ‌چیز نمی‌سازد، و بازهٔ مطلق روی تلاطم، ۱۵٪ و ۹۰٪ را
+  // یک‌جور نمی‌بیند.
+  const days52 = sensitivityAxis({ axis: 'days', days: 60, steps: 5 });
+  check('محور روز، از روز مانده تا صفر می‌رود و نزولی است',
+    days52[0] === 60 && days52.at(-1) === 0 && days52.every((v, i) => i === 0 || days52[i - 1] >= v),
+    days52.join(' '));
+  const sig52 = sensitivityAxis({ axis: 'sigma', sigma: 0.4, range: 50, steps: 5 });
+  check('محور تلاطم نسبی است و مبنا دقیقاً وسط می‌افتد',
+    sig52.length === 5 && near(sig52[2], 0.4) && near(sig52[0], 0.2) && near(sig52[4], 0.6),
+    sig52.map((v) => v.toFixed(2)).join(' '));
+  const smallSig52 = sensitivityAxis({ axis: 'sigma', sigma: 0.15, range: 50, steps: 5 });
+  check('همان دامنه روی تلاطم کوچک، بازهٔ کوچک می‌دهد — نه بازهٔ ثابت',
+    near(smallSig52[0], 0.075) && near(smallSig52[4], 0.225),
+    smallSig52.map((v) => v.toFixed(3)).join(' '));
+  const rate52 = sensitivityAxis({ axis: 'rFree', rFree: 0.25, range: 5, steps: 5 });
+  check('محور نرخ مطلق است، بر حسب واحد درصد',
+    near(rate52[0], 0.20) && near(rate52[2], 0.25) && near(rate52[4], 0.30),
+    rate52.map((v) => v.toFixed(3)).join(' '));
+  // ضریب نسبی روی صفر، پنج‌بار صفر می‌داد؛ بازهٔ مطلق هنوز معنی دارد.
+  const zero52 = sensitivityAxis({ axis: 'rFree', rFree: 0, range: 4, steps: 5 });
+  check('نرخ صفر هم بازه می‌سازد، ولی نرخ منفی نمی‌سازد',
+    zero52.length === 5 && zero52.every((v) => v >= 0) && near(zero52.at(-1), 0.04),
+    zero52.map((v) => v.toFixed(3)).join(' '));
+  check('تعداد ستون فرد می‌شود تا مبنا وسط بماند',
+    sensitivityAxis({ axis: 'sigma', sigma: 0.4, range: 50, steps: 4 }).length === 5);
+  check('بی‌تلاطم، محور تلاطم ساخته نمی‌شود — نه صفرِ ساختگی',
+    sensitivityAxis({ axis: 'sigma', sigma: 0, range: 50, steps: 5 }).length === 0);
+  // جنس مقدار در موتور است، قالبش در رابط — چون هر عددی که به کاربر نشان
+  // داده می‌شود باید از `ui/fmt.mjs` رد شود و با رقم فارسی چاپ شود. برچسبِ
+  // آمادهٔ موتور، یک مسیر دوم بود که از همان قاعده فرار می‌کرد.
+  check('هر محور جنس خودش را اعلام می‌کند',
+    SENS_AXES.every((a) => ['days', 'ratio', 'rate'].includes(a.kind))
+    && SENS_AXES.map((a) => a.kind).join() === 'days,ratio,rate,rate');
+  check('موتور برچسبِ آماده نمی‌سازد؛ قالب‌بندی کار رابط است',
+    !fs.readFileSync(new URL('../core/scenario.mjs', import.meta.url), 'utf8').includes('روز`'));
+
+  // ——— فرض‌های ثابت، هم‌زمان با محور ———
+  //
+  // پیش از این فقط یک فرض هم‌زمان عوض می‌شد: بقیه از ردیف می‌آمدند و راهی
+  // برای دست‌کاری‌شان نبود. «اگر فرض‌ها عوض شوند» با یک فرضِ متغیر، نصف
+  // سؤال است.
+  const hiVol52 = sensitivityGrid({ ...base52, sigma: 0.8, axis: 'rFree', moves: [0], steps: 3, range: 5 });
+  const loVol52 = sensitivityGrid({ ...base52, sigma: 0.2, axis: 'rFree', moves: [0], steps: 3, range: 5 });
+  check('تلاطمِ دستی روی محور نرخ هم اثر می‌گذارد',
+    hiVol52.rows[0].cells.every((c) => near(c.sigma, 0.8))
+    && loVol52.rows[0].cells.every((c) => near(c.sigma, 0.2))
+    && !near(hiVol52.rows[0].cells[1].pnl, loVol52.rows[0].cells[1].pnl));
+  check('فرض‌های مبنا در خروجی گزارش می‌شوند',
+    near(hiVol52.base.sigma, 0.8) && near(hiVol52.base.rFree, 0.25) && hiVol52.base.days === 60);
+  const divGrid52 = sensitivityGrid({ ...base52, axis: 'divYield', moves: [0], steps: 3, range: 4 });
+  check('محور بازده نقدی، مقدار خودش را به خانه می‌رساند',
+    divGrid52.rows[0].cells.every((c, i) => near(c.divYield, divGrid52.axisValues[i])));
+
+  // ——— سنجه‌های هر خانه ———
+  const mid52 = sensitivityGrid({ ...base52, axis: 'days', moves: [0], steps: 3, capital: 5000 }).rows[0];
+  const live52 = mid52.cells[0];
+  const exp52 = mid52.cells.at(-1);
+  check('هر سنجه، در هر خانه هست', SENS_METRICS.every((m) => m.key in live52));
+  check('بازده ٪ سرمایه، همان سود تقسیم بر سرمایه است',
+    near(live52.retPct, (live52.pnl / 5000) * 100));
+  check('بی‌سرمایه، درصد ساخته نمی‌شود',
+    !Number.isFinite(sensitivityGrid({ ...base52, axis: 'days', moves: [0], steps: 3 }).rows[0].cells[0].retPct));
+  // ارزش موقعیت خاطرهٔ قیمت ورود ندارد؛ سود و زیان دارد. تفاضلشان باید
+  // دقیقاً همان نقد ورود باشد، وگرنه یکی از دو عدد از جای دیگری می‌آید.
+  check('ارزش موقعیت و سود و زیان با نقد ورود می‌خوانند',
+    near(live52.pnl - live52.value, net52) && near(exp52.pnl - exp52.value, net52),
+    `${Math.round(live52.pnl)} − ${Math.round(live52.value)} = ${Math.round(net52)}`);
+  // اسپرد صعودی کال: دلتای مثبت، وگای کوچک، و همه پیش از سررسید معلوم
+  check('یونانی‌های موقعیت پیش از سررسید معلوم‌اند',
+    ['delta', 'gamma', 'vega', 'theta', 'rho'].every((k) => Number.isFinite(live52[k]))
+    && live52.delta > 0, `دلتا ${live52.delta.toFixed(1)}`);
+  // دلتای سررسید سر قیمت اعمال اصلاً تعریف ندارد؛ «صفر» ادعایی است که مدل
+  // نمی‌کند و کاربر آن را با «خنثی شده» اشتباه می‌گیرد.
+  check('سر سررسید، یونانی خالی است نه صفر',
+    exp52.atExpiry && ['delta', 'gamma', 'vega', 'theta'].every((k) => !Number.isFinite(exp52[k])));
+  // یونانی موقعیت باید با حجم مقیاس بخورد، مثل هر عدد دیگر موقعیت
+  const big52 = legs52.map((l) => ({ ...l, ratio: l.ratio * 10 }));
+  const bigCell52 = sensitivityGrid({ ...base52, legs: big52, axis: 'days', moves: [0], steps: 3 }).rows[0].cells[0];
+  check('سنجه‌های خانه با اندازهٔ موقعیت مقیاس می‌خورند',
+    ['pnl', 'value', 'delta', 'gamma', 'vega', 'theta'].every(
+      (k) => near(bigCell52[k], live52[k] * 10, Math.abs(live52[k] * 10) * 1e-9 + 1e-9)));
+
+  // ——— ریسک عمق دفتر ———  // ——— ریسک عمق دفتر ———
   const books52 = [
     { book: [{ bid: 7.9, bidQty: 2, ask: 8.1, askQty: 5 }, { bid: 7.5, bidQty: 10, ask: 8.6, askQty: 9 }] },
     { book: [{ bid: 2.8, bidQty: 1, ask: 3.2, askQty: 2 }, { bid: 2.4, bidQty: 4, ask: 3.9, askQty: 20 }] },
@@ -3377,12 +3469,44 @@ group('۵۲. سناریو، حساسیت، و ریسک عمق دفتر');
     thin52.blockedLegs === 1 && thin52.perLeg[0].short === 4 && thin52.closableUnits === 1,
     `کسری ${thin52.perLeg[0].short} | واحد ${thin52.closableUnits}`);
 
+  // ——— پاهایی که خودشان مقیاس‌خورده‌اند ———
+  //
+  // ردیف غربال پاهایش را در تعداد قرارداد کاربر ضرب کرده تحویل می‌دهد، تا
+  // نمودار و نقد خالص یک مقیاس داشته باشند. بدون `legUnits`، «تعداد واحد»
+  // دوباره در همان حجم ضرب می‌شد: ۵ قرارداد از پاهای ۵تایی یعنی ۲۵ —
+  // عمقی که دفتر ندارد و هر ردیف را «قفل» نشان می‌داد.
+  const scaled52 = legs52.map((l) => ({ ...l, ratio: l.ratio * 5 }));
+  const scaledD52 = bookDepthRisk({ legs: scaled52, quotes: books52, units: 5, legUnits: 5 });
+  check('پای مقیاس‌خورده، حجم را دوبار حساب نمی‌کند',
+    scaledD52.perLeg.every((l, i) => near(l.want, d52.perLeg[i].want))
+    && near(scaledD52.exitCostTotal, d52.exitCostTotal),
+    `${scaledD52.perLeg[0].want} خواسته`);
+  check('بدون اعلامِ مقیاس، پیش‌فرض همان «یک واحد» می‌ماند',
+    near(bookDepthRisk({ legs: legs52, quotes: books52, units: 5 }).exitCostTotal, d52.exitCostTotal));
+
   const panelSrc52 = fs.readFileSync(new URL('../ui/scenario-panel.mjs', import.meta.url), 'utf8');
   check('پنل هیچ محاسبه‌ای ندارد و همه را از موتور می‌خواند',
     panelSrc52.includes("from '/core/scenario.mjs'")
     && !/Math\.exp|bsPrice|Math\.log/.test(panelSrc52));
   check('پارامترهای حساسیت قابل تنظیم‌اند',
     ['scen-axis', 'scen-range', 'scen-steps', 'scen-units'].every((id) => panelSrc52.includes(id)));
+  // خواستهٔ کاربر: «با انتخاب تلاطم امکان وارد کردن عدد آن باشه، و همچنین
+  // بقیه پارامترها.» هر فرض بازار ورودی عددی خودش را دارد، سنجهٔ هر خانه
+  // انتخابی است، و راه برگشت به فرض‌های بازار یک دکمه است.
+  check('هر فرض بازار، ورودی عددی خودش را دارد',
+    ['scen-sigma', 'scen-rfree', 'scen-div', 'scen-days', 'scen-span', 'scen-cols']
+      .every((id) => panelSrc52.includes(id)));
+  check('سنجهٔ هر خانه انتخابی است و از موتور می‌آید',
+    panelSrc52.includes('scen-metric') && panelSrc52.includes('SENS_METRICS'));
+  check('محورها از موتور می‌آیند، نه فهرست دستیِ دوم در رابط',
+    panelSrc52.includes('SENS_AXES') && !/'rFree'\]\.includes/.test(panelSrc52));
+  check('راه برگشت به فرض‌های بازار هست', panelSrc52.includes('scen-reset'));
+  check('پنل، مقیاسِ پاهای ردیف را به سنجش عمق اعلام می‌کند',
+    panelSrc52.includes('legUnits:'));
+  // سرستون محور، رقمِ لاتین چاپ می‌کرد («0.85») چون از رشتهٔ خام موتور
+  // می‌آمد و از `fmt` رد نمی‌شد.
+  check('سرستون محور دوم از قالب‌بند فارسی رد می‌شود',
+    /kind === 'days' \? `\$\{fmt\.int/.test(panelSrc52) && panelSrc52.includes('esc(axisLabel(axis, v))'));
   // پله فرد لازم است تا «بدون تغییر» همیشه وسط جدول بیفتد
   check('تعداد پله فرد می‌شود تا صفر وسط بماند', panelSrc52.includes('if (steps % 2 === 0) steps += 1;'));
 }
@@ -3762,6 +3886,134 @@ group('۵۷. سررسید، نام قرارداد، و هر سربه‌سری د
     /\.mini td\.n \{[^}]*text-align: end;/.test(css57));
   check('خانهٔ عددی جدول اصلی، هم‌لبهٔ سرستون است',
     /table\.data td\.n \{[^}]*text-align: end;/.test(css57));
+}
+
+// ═══════════ ۵۸. ردیف با حجم واقعی کاربر سنجیده می‌شود ═══════════
+group('۵۸. ردیف با حجم واقعی کاربر سنجیده می‌شود');
+{
+  // گزارش کاربر: «نقد خالص برای ۱ قرارداد گذاشته، در حالی که ۳۰۰ قرارداد
+  // دارم.» ردیف تا امروز برای یک دست سنجیده می‌شد و `qty` فقط دو جا اثر
+  // داشت — پیمایش دفتر سفارش و سقف حجم. یعنی هر عدد پولی جدول، جدول
+  // کوچک‌های پنل جزئیات، نمودار بازده، و پنل سناریو، همه یک‌سیصدم موقعیت
+  // واقعی را نشان می‌دادند بی‌آنکه جایی بگوید.
+  const s58 = { ...defaults(), qtyDefault: 1 };
+  const size58 = 1000;
+  // عمق سخاوتمند، تا قیمت اجرا بین دو حجم فرق نکند و مقایسه تمیز بماند؛
+  // وگرنه پیمایش دفتر برای ۱۰ قرارداد قیمت بدتری می‌دهد و ضریب دقیق نیست.
+  const deep58 = (bid, ask) => ({
+    bid, bidQty: 1e9, ask, askQty: 1e9, last: (bid + ask) / 2, close: (bid + ask) / 2,
+    low: bid, high: ask, state: 'A', staleSec: 5,
+    book: [{ level: 1, bid, bidQty: 1e9, ask, askQty: 1e9 }],
+  });
+
+  const def58 = byId('short-strangle');
+  const legs58 = buildLegs(def58, { strikes: [90000, 110000], size: size58, days: [30] });
+  const quotes58 = [deep58(3000, 3200), deep58(2600, 2800)];
+  const ctx58 = (qty) => ({
+    S: 100000, Sclose: 100000, days: 30, size: size58, qty,
+    settings: s58, def: def58, underlying: 'نمونه', sigmaHist: 0.5,
+  });
+  const one58 = evaluate({ legs: legs58, quotes: quotes58, ctx: ctx58(1) });
+  const many58 = evaluate({ legs: legs58, quotes: quotes58, ctx: ctx58(300) });
+
+  check('تعداد قرارداد در خود ردیف دیده می‌شود', one58.qty === 1 && many58.qty === 300);
+
+  // ——— چه چیزی مقیاس می‌خورد: هرچه مال موقعیت توست ———
+  const SCALED = [
+    'grossCash', 'entryFee', 'netCash', 'instantClosePnl', 'settleLastPnl', 'settleClosePnl',
+    'maxProfit', 'staticPnl', 'capital', 'margin', 'marginNet', 'conditionalMargin',
+    'marginRequired', 'blockedAsset', 'sharesLocked', 'notional', 'marketValue', 'intrinsic',
+    'timeValue', 'bsValue', 'delta', 'gamma', 'vega', 'theta', 'rho', 'deltaShares',
+    'execCost', 'costCommission', 'costCrossing', 'costSlippage', 'costFunding',
+  ];
+  for (const k of SCALED) {
+    check(`«${k}» با حجم مقیاس می‌خورد`,
+      Number.isFinite(one58[k]) && near(many58[k], one58[k] * 300, Math.abs(one58[k] * 300) * 1e-9 + 1e-6),
+      `${one58[k]} → ${many58[k]}`);
+  }
+
+  // ——— چه چیزی مقیاس نمی‌خورد: قیمت، درصد، و آنچه مال بازار است ———
+  const FIXED = [
+    'S', 'Sclose', 'beNear', 'beLow', 'beHigh', 'be1', 'be2',
+    'retMaxPct', 'retStaticPct', 'retMonthPct', 'retAnnPct', 'maxProfitPct', 'maxLossPct',
+    'rewardRisk', 'popPct', 'sigmaUse', 'leverage', 'thetaToCapitalPct', 'marginToMaxLoss',
+    'beDistPct', 'beRoomPct', 'volTotal', 'oiTotal', 'valueTotal', 'tradeCount',
+  ];
+  for (const k of FIXED) {
+    check(`«${k}» با حجم عوض نمی‌شود`,
+      Number.isFinite(one58[k]) ? near(many58[k], one58[k], Math.abs(one58[k]) * 1e-9 + 1e-9) : !Number.isFinite(many58[k]),
+      `${one58[k]} → ${many58[k]}`);
+  }
+  // زیان نامحدودِ استرانگل فروش، با هیچ ضریبی متناهی نمی‌شود؛ برای «بیشترین
+  // زیان» باید ترکیب کراندار سنجید.
+  check('زیان نامحدود، با حجم هم نامحدود می‌ماند',
+    !Number.isFinite(one58.maxLoss) && !Number.isFinite(many58.maxLoss));
+  const defBox58 = byId('bull-call-spread');
+  const legsBox58 = buildLegs(defBox58, { strikes: [100000, 110000], size: size58, days: [30] });
+  const quotesBox58 = [deep58(6000, 6200), deep58(2600, 2800)];
+  const boxOne58 = evaluate({ legs: legsBox58, quotes: quotesBox58, ctx: { ...ctx58(1), def: defBox58 } });
+  const boxMany58 = evaluate({ legs: legsBox58, quotes: quotesBox58, ctx: { ...ctx58(300), def: defBox58 } });
+  check('بیشترین زیانِ کراندار با حجم مقیاس می‌خورد',
+    Number.isFinite(boxOne58.maxLoss) && near(boxMany58.maxLoss, boxOne58.maxLoss * 300, boxOne58.maxLoss * 3e-7),
+    `${Math.round(boxOne58.maxLoss)} → ${Math.round(boxMany58.maxLoss)}`);
+
+  check('قیمت اعمال و سربه‌سری، با حجم جابه‌جا نمی‌شوند',
+    one58.breakevens.length === many58.breakevens.length
+    && one58.breakevens.every((b, i) => near(b, many58.breakevens[i])));
+  check('قیمت اجرای هر پا، مالِ یک سهم است و ضرب نمی‌شود',
+    one58.legPrices.every((l, i) => near(l.price, many58.legPrices[i].price)));
+  check('متن پاها همان نسبت الگو را می‌گوید، نه نسبت ضرب‌شده',
+    one58.legsText === many58.legsText, many58.legsText);
+  check('تلاطم ضمنی هر پا، پس از مقیاس هم سر جایش است',
+    many58.legPrices.every((l) => Number.isFinite(l.sigma))
+    && many58.ivList.every((v) => Number.isFinite(v)));
+
+  // سقف حجم جوابش خودش «تعداد قرارداد» است؛ اگر ورودی سرمایه‌اش مقیاس‌خورده
+  // بماند، سقف بر حجم تقسیم می‌شود و کاربرِ ۳۰۰ قرارداد سقف یک‌سیصدم می‌بیند.
+  check('سقف حجم، به‌ازای یک واحد می‌ماند',
+    one58.maxQty === many58.maxQty, `${one58.maxQty} → ${many58.maxQty}`);
+
+  // نمودار بازده و پنل سناریو، `__legs` را با `netCash` جفت می‌کنند. اگر یکی
+  // مقیاس‌خورده باشد و دیگری نه، نمودار و جدول دو عدد متفاوت می‌گویند.
+  check('پاهای همراه ردیف، همان مقیاس نقد خالص را دارند',
+    near(pnlAtExpiry(many58.__legs, many58.S, many58.netCash), many58.staticPnl)
+    && near(many58.staticPnl, one58.staticPnl * 300));
+  check('نسبت پاهای همراه، در تعداد قرارداد ضرب شده است',
+    many58.__legs.every((l, i) => near(l.ratio, one58.__legs[i].ratio * 300)));
+
+  // اسکن هم باید همان حجم را رد کند — نه `qtyDefault` پیش‌فرض
+  const mkRow58 = (strike) => ({
+    uaInsCode: '1', lval30_UA: 'نمونه', pDrCotVal_UA: 100000, pClosing_UA: 100000, priceYesterday_UA: 99000,
+    insCode_C: `c${strike}`, lVal18AFC_C: `ض${strike}`, insCode_P: `p${strike}`, lVal18AFC_P: `ط${strike}`,
+    strikePrice: strike, contractSize: size58, remainedDay: 30, endDate: 20260101,
+    pMeDem_C: 3000, qTitMeDem_C: 1e6, pMeOf_C: 3200, qTitMeOf_C: 1e6,
+    pDrCotVal_C: 3100, pClosing_C: 3100, oP_C: 500, qTotTran5J_C: 1000,
+    pMeDem_P: 2600, qTitMeDem_P: 1e6, pMeOf_P: 2800, qTitMeOf_P: 1e6,
+    pDrCotVal_P: 2700, pClosing_P: 2700, oP_P: 400, qTotTran5J_P: 800,
+  });
+  const rows58 = [90000, 95000, 100000, 105000, 110000].map(mkRow58);
+  const chain58 = buildChain(rows58, s58);
+  const scanOne = scanFn({ def: def58, chain: chain58, uaKeys: ['1'], settings: s58, qty: 1 });
+  const scanMany = scanFn({ def: def58, chain: chain58, uaKeys: ['1'], settings: s58, qty: 50 });
+  const pick58 = (res, id) => res.rows.find((r) => r.id === id);
+  check('اسکن، حجم را تا ردیف می‌برد',
+    scanOne.rows.length > 0 && scanOne.rows.every((r) => {
+      const m = pick58(scanMany, r.id);
+      return m && m.qty === 50 && near(m.netCash, r.netCash * 50, Math.abs(r.netCash * 50) * 1e-9 + 1e-6);
+    }), `${scanOne.rows.length} ردیف`);
+
+  // ستون حجم باید در قرارداد ستونی باشد، وگرنه هیچ‌جای جدول نمی‌گوید این
+  // اعداد مال چند قرارداد است.
+  check('ستون «حجم من» در قرارداد ستونی هست',
+    COLUMNS.some((c) => c.key === 'qty' && c.fmt === 'int'));
+
+  // تب‌ها باید حجمِ همان تب را به پنل سناریو و انتقال بدهند، نه پیش‌فرض
+  // تنظیمات — وگرنه کاربر حجم را عوض می‌کند و پنل جزئیات همان عدد قبلی را
+  // نگه می‌دارد.
+  const stratSrc58 = fs.readFileSync(new URL('../ui/tabs/strategy.mjs', import.meta.url), 'utf8');
+  check('تب استراتژی، حجم کنترل خودش را به پنل جزئیات می‌دهد',
+    !/units: Math\.max\(1, Number\(s\(\)\.qtyDefault\)/.test(stratSrc58)
+    && stratSrc58.includes('units: unitsOf(r)'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

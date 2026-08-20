@@ -205,7 +205,8 @@ export async function mount(root, { state, api }) {
     root.querySelector('#to-backtest')?.addEventListener('click', () => {
       state.handoff = handoffPlan(r, {
         from: 'top', strategyId: r.strategyId || '', strategyName: r.strategy || '',
-        units: Math.max(1, Number(s().qtyDefault) || 1),
+        // حجم همان ردیف، نه پیش‌فرض تنظیمات؛ ردیف با همین حجم سنجیده شده
+        units: Math.max(1, Math.trunc(Number(r.qty) || Number(s().qtyDefault) || 1)),
         entryBasis: 'LAST', exitBasis: 'LAST',
       });
       location.hash = 'backtest';
