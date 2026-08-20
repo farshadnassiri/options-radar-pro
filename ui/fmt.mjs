@@ -83,6 +83,10 @@ export const fmt = {
     return d2 === null ? grouped(r) : faNum(stripNegZero(r.toFixed(d2)));
   },
   int: (v) => (Number.isFinite(v) ? grouped(v) : '—'),
+  // پرچم دو حالته. `text` جوابگو نبود: `String(true)` می‌شد «true» و ستون
+  // فارسی، وسطش یک واژه انگلیسی می‌گرفت. نامعلوم هم باید از «خیر» جدا
+  // بماند — «نمی‌دانم» با «نه» یکی نیست.
+  bool: (v) => (v == null ? '—' : v ? 'بله' : 'خیر'),
   text: (v) => (v == null ? '—' : faDigits(String(v))),
   list: (v) => (Array.isArray(v)
     ? (v.length ? v.map((x) => (typeof x === 'number' ? grouped(x) : faDigits(x))).join(' , ') : '—')
@@ -227,6 +231,22 @@ export const numCell = (value, kind = 'money', extra = '') =>
 
 export function signTone(value) {
   return Number.isFinite(value) ? (value >= 0 ? 'gain' : 'loss') : '';
+}
+
+/**
+ * سلول «اگر همین حالا ببندی».
+ *
+ * وقتی سمت خروجِ یک پا خالی است، موتور عمداً عددی نمی‌سازد. اینجا هم نباید
+ * «—» خنثی چاپ شود: خالی‌بودن می‌تواند «هنوز نیامده» خوانده شود، در حالی که
+ * حرفِ این ردیف روشن است — آفست ممکن نیست. نام پای بی‌عرضه هم می‌آید، چون
+ * کاربر باید بداند کدام پا گیر است.
+ */
+export function offsetCell(row) {
+  if (row?.offsettable === false) {
+    const where = (row.noExitLegs || []).map((x) => ltr(String(x))).join(' , ');
+    return `<span class="tag warn">آفست ناممکن</span>${where ? ` <span class="unit">${where}</span>` : ''}`;
+  }
+  return `<span class="${negClass(row?.instantClosePnl)}" style="color:${signTone(row?.instantClosePnl) === 'gain' ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(row?.instantClosePnl)}</span>`;
 }
 
 /**

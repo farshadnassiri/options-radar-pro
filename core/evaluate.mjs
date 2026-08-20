@@ -128,10 +128,19 @@ export function evaluate({ legs, quotes, ctx }) {
   // تسویه کنم چه می‌شود؟ — سه مبنا روی همان مظنه‌های استفاده‌شده برای ورود.
   // مبنای دفتر سفارش ادعای اجرا دارد (bid/ask واقعی)؛ آخرین و پایانی فقط
   // مرجع‌اند، چون لحظه وقوعشان با لحظه این محاسبه هم‌زمان نیست.
+  //
+  // «بستن فوری» ادعای اجرا دارد، پس اگر سمت خروجِ حتی یک پا خالی باشد عدد
+  // ساخته نمی‌شود. مبنای آخرین و پایانی از اول مرجع‌اند و همیشه عدد دارند.
   const quotesForClose = pos.map((l) => l.quote || {});
-  const instantClosePnl = netCash + closeValuation(pos, quotesForClose, 'BOOK', fees).net;
+  const instantClose = closeValuation(pos, quotesForClose, 'BOOK', fees, { strict: true });
+  const offsettable = instantClose.offsettable !== false;
+  const instantClosePnl = offsettable ? netCash + instantClose.net : NaN;
   const settleLastPnl = netCash + closeValuation(pos, quotesForClose, 'LAST', fees).net;
   const settleClosePnl = netCash + closeValuation(pos, quotesForClose, 'CLOSE', fees).net;
+  // کدام پا سمت خروج ندارد — تا کاربر بداند کجا گیر است، نه فقط اینکه گیر است
+  const noExitLegs = instantClose.perLeg
+    .map((x, i) => (x.offsettable ? null : (pos[i].name || pos[i].key || `پای ${i + 1}`)))
+    .filter(Boolean);
 
   // ——— ۳. بازده در سررسید ———
   // اگر سررسید پاها یکی نباشد، موتور تکه‌ای-خطی جواب غلط می‌دهد: فروش و خرید
@@ -308,6 +317,7 @@ export function evaluate({ legs, quotes, ctx }) {
   if (priced.some((l) => l.exec?.simultaneous === false)) warn.push('قیمت ناهم‌زمان');
   if (priced.some((l) => num(l.exec?.slipPct) > s.maxSlipPct)) warn.push('افت مظنه بالا');
   if (!singleExpiry) warn.push('چند سررسید — بازده تقریبی');
+  if (!offsettable) warn.push('آفست ناممکن');
 
   return {
     // هویت
@@ -342,6 +352,7 @@ export function evaluate({ legs, quotes, ctx }) {
     grossCash: gross, entryFee, netCash, isCredit,
     cashLabel: isCredit ? 'بستانکار' : 'بدهکار',
     instantClosePnl, settleLastPnl, settleClosePnl,
+    offsettable, noExitLegs,
 
     // سود و زیان
     breakevens: payoff.breakevens,
@@ -503,6 +514,8 @@ export const COLUMNS = [
   { key: 'entryFee', label: 'کارمزد ورود', fmt: 'money', group: 'جریان نقد' },
   { key: 'netCash', label: 'نقد خالص', fmt: 'money', group: 'جریان نقد' },
   { key: 'instantClosePnl', label: 'آفست — سود/زیان بستن فوری با دفتر سفارش', fmt: 'money', group: 'جریان نقد', heat: 'gain' },
+  { key: 'offsettable', label: 'آفست ممکن است', fmt: 'bool', group: 'جریان نقد' },
+  { key: 'noExitLegs', label: 'پای بدون سمت خروج', fmt: 'sym', group: 'جریان نقد' },
   { key: 'settleLastPnl', label: 'سود/زیان اگر تسویه با آخرین معامله', fmt: 'money', group: 'جریان نقد' },
   { key: 'settleClosePnl', label: 'سود/زیان اگر تسویه با قیمت پایانی', fmt: 'money', group: 'جریان نقد' },
   { key: 'S', label: 'قیمت پایه', fmt: 'money', group: 'سود و زیان' },

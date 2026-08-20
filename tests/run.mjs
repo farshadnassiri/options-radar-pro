@@ -27,7 +27,7 @@ import {
   withoutBlockedExpiries,
 } from '../core/chain.mjs';
 import { scan as scanFn, scanAll, generateCombos, unexecutableReason, blockedExpirySet, expiryBlocked, emptyFunnel } from '../core/scan.mjs';
-import { markToMarket, rollAnalysis } from '../core/positions.mjs';
+import { markToMarket, rollAnalysis, closeValuation } from '../core/positions.mjs';
 import { timeMachine } from '../core/timemachine.mjs';
 import { jalaliToGregorian, gregorianToJalali, parseJalali, todayJalali } from '../core/jalali.mjs';
 import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from '../server/guard.mjs';
@@ -589,6 +589,40 @@ group('۹. ارزیاب ردیف، سرتاسری');
     rowSpFee.instantClosePnl < rowSpFee.settleLastPnl && rowSpFee.instantClosePnl < rowSpFee.settleClosePnl,
     `فوری ${Math.round(rowSpFee.instantClosePnl)} | آخرین ${Math.round(rowSpFee.settleLastPnl)} | پایانی ${Math.round(rowSpFee.settleClosePnl)}`);
 
+  // ——— بازار یک‌طرفه: آفست ممکن نیست ———
+  //
+  // گزارش حسابرسی: در ۷٬۰۹۳ ردیفِ یک‌طرفه، ۱٬۲۳۶ «سود فوری مثبت» ساخته شد
+  // که هیچ‌کدام اجراشدنی نبود؛ در ردیف‌های دوطرفه، صفر. ریشه: مبنای دفتر
+  // سفارش وقتی سمت خروج خالی بود به آخرین معامله پس می‌افتاد. اینجا پوتی
+  // فروخته می‌شود که فقط تقاضا دارد و هیچ عرضه‌ای ندارد — یعنی بازخریدش
+  // ممکن نیست — و آخرین معامله‌اش ۱۰۰ ریالِ کهنه است.
+  const qOneSide = [{ bid: 8000, bidQty: 500, ask: 0, askQty: 0, last: 100, close: 100,
+    book: [{ bid: 8000, bidQty: 500, ask: 0, askQty: 0 }], state: 'A', staleSec: 1 }];
+  const rowOne = evaluate({
+    legs: legsSp, quotes: qOneSide,
+    ctx: { S: 100000, Sclose: 100000, days: 30, size, qty: 1, settings: s0, def: sp, underlying: 'نمونه', sigmaHist: 0.6 },
+  });
+  check('پای بدون سمت خروج، آفست‌ناپذیر علامت می‌خورد', rowOne.offsettable === false);
+  check('و «سود فوری» ۷٬۹۰۰٬۰۰۰ ریالیِ کاذب دیگر ساخته نمی‌شود',
+    !Number.isFinite(rowOne.instantClosePnl), rowOne.instantClosePnl);
+  check('هشدارش در ردیف دیده می‌شود', rowOne.warn.includes('آفست ناممکن'), rowOne.warn.join('، '));
+  check('و نام پای گیر گزارش می‌شود', rowOne.noExitLegs.length === 1, rowOne.noExitLegs.join('، '));
+  // مبنای مرجع ادعای اجرا ندارد، پس همچنان عدد می‌دهد
+  check('تسویه با آخرین معامله دست‌نخورده می‌ماند — مرجع است نه اجرا',
+    Number.isFinite(rowOne.settleLastPnl) && Number.isFinite(rowOne.settleClosePnl));
+  // و ردیف دوطرفه هیچ تغییری نمی‌کند
+  check('ردیف دوطرفه همچنان آفست‌پذیر است و عددش همان است',
+    rowSp.offsettable === true && near(rowSp.instantClosePnl, (8000 - 8400) * size, 1e-6));
+
+  const cv = closeValuation(
+    [{ kind: 'put', side: 'sell', ratio: 1, size: 1000 }], [{ bid: 8000, ask: 0 }], 'BOOK',
+    { option: 0, buyStock: 0, sellStock: 0 }, { strict: true });
+  check('closeValuation در حالت سخت‌گیر، به‌جای عدد، ناعدد می‌دهد',
+    !Number.isFinite(cv.net) && cv.offsettable === false);
+  const cvLast = closeValuation(
+    [{ kind: 'put', side: 'sell', ratio: 1, size: 1000 }], [{ bid: 8000, ask: 0, last: 100 }], 'LAST',
+    { option: 0, buyStock: 0, sellStock: 0 }, { strict: true });
+  check('مبنای مرجع پرچم آفست ندارد، چون ادعای اجرا ندارد', cvLast.offsettable === null);
 }
 
 group('۱۰. فهرست استراتژی‌ها');
@@ -3040,8 +3074,10 @@ group('۴۵. ستون‌های مشخصات قرارداد');
   // در انتخابگر فقط سردرگمی می‌سازد.
   const empty = COLUMNS.filter((c) => !(c.key in cc)).map((c) => c.key);
   check('هیچ ستونی بدون کلید متناظر روی ردیف نمانده', empty.length === 0, empty.join('، '));
-  const badFmt = COLUMNS.filter((c) => !['money', 'pct', 'num', 'int', 'text', 'list', 'sym', 'pctList'].includes(c.fmt));
-  check('قالب هر ستون معتبر است', badFmt.length === 0, badFmt.map((c) => c.key).join('، '));
+  // فهرست قالب‌ها از خودِ `ui/fmt.mjs` می‌آید، نه از رونوشتی اینجا. رونوشت
+  // با افزودن هر قالب تازه کهنه می‌شد و آزمون، ستونِ درست را رد می‌کرد.
+  const badFmt = COLUMNS.filter((c) => typeof uiFmt[c.fmt] !== 'function');
+  check('قالب هر ستون در ui/fmt.mjs تعریف شده', badFmt.length === 0, badFmt.map((c) => `${c.key}:${c.fmt}`).join('، '));
 }
 
 // ═══════════ ۴۶. نوار فرض‌های نمودار بازده ═══════════

@@ -29,14 +29,38 @@ export function closePrice(leg, quote, basis = 'BOOK') {
 }
 
 /**
+ * آیا سمت خروجِ این پا اصلاً مظنه دارد؟
+ *
+ * بستن یعنی معامله در جهت مخالف: موقعیت خرید روی تقاضا فروخته می‌شود و
+ * موقعیت فروش روی عرضه بازخرید. اگر همان یک سمت خالی باشد، هیچ قیمتی برای
+ * آفست وجود ندارد — نه اینکه قیمتش نامعلوم باشد، اصلاً معامله‌ای ممکن نیست.
+ */
+export function canOffset(leg, quote) {
+  const q = quote || {};
+  return num(leg.side === 'buy' ? q.bid : q.ask) > 0;
+}
+
+/**
  * هزینه/بستانکار بستن هر پا با یک مبنای قیمت مشخص — بدون فرض قبلی درباره
  * قیمت ورود. markToMarket (موقعیت واقعی، با قیمت ورود ثبت‌شده) و evaluate
  * (ردیف غربال، «اگر همین حالا بگیرم و ببندم») هر دو از همین یک تابع
  * می‌آیند، پس رفتار «بستن یعنی معامله در جهت مخالف» یک‌بار نوشته شده.
+ *
+ * ——— چرا `strict` ———
+ *
+ * مبنای دفتر سفارش، وقتی سمت خروج خالی است، به آخرین معامله یا قیمت پایانی
+ * پس می‌افتد. برای «ارزش امروزِ موقعیتم» درست است؛ برای «اگر همین حالا
+ * ببندم» فاجعه است: پایی که فقط تقاضا دارد و هیچ عرضه‌ای ندارد، با آخرین
+ * معاملهٔ کهنه‌اش «بازخرید» می‌شود و ردیف، سود فوریِ بزرگ نشان می‌دهد که در
+ * بازار هیچ‌کس نمی‌تواند بگیردش. حسابرسی ۱٬۲۳۶ چنین ردیفی شمرد، همگی
+ * یک‌طرفه؛ در ردیف‌های دوطرفه صفر.
+ *
+ * پس با `strict`، عددی ساخته نمی‌شود. خالی‌بودن، خودش پاسخ است.
  */
-export function closeValuation(legs, quotes, basis, fees) {
+export function closeValuation(legs, quotes, basis, fees, opt = {}) {
   let gross = 0;
   let fee = 0;
+  let allOffsettable = true;
   const perLeg = legs.map((l, i) => {
     const px = closePrice(l, quotes[i], basis);
     const units = Math.abs(signedQty(l));
@@ -46,9 +70,21 @@ export function closeValuation(legs, quotes, basis, fees) {
       : px * units * num(fees.option);
     gross += proceeds;
     fee += feeOut;
-    return { price: px, proceeds, fee: feeOut };
+    const offsettable = canOffset(l, quotes[i]);
+    if (!offsettable) allOffsettable = false;
+    return { price: px, proceeds, fee: feeOut, offsettable };
   });
-  return { gross, fee, net: gross - fee, perLeg };
+  // ادعای آفست فقط از مبنای دفتر سفارش برمی‌آید. آخرین و پایانی از اول
+  // مرجع‌اند و ادعای اجرا ندارند، پس این پرچم برایشان معنا ندارد.
+  const offsettable = basis === 'BOOK' ? allOffsettable : null;
+  const blocked = opt.strict === true && offsettable === false;
+  return {
+    gross: blocked ? NaN : gross,
+    fee: blocked ? NaN : fee,
+    net: blocked ? NaN : gross - fee,
+    offsettable,
+    perLeg,
+  };
 }
 
 /**
