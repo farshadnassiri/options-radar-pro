@@ -78,6 +78,11 @@ export async function mount(root, { tab, state, api }) {
   let hasScanned = false;
   const NOT_SCANNED_MSG = 'هنوز اسکن نزدی — نماد را انتخاب کن و دکمه اسکن را بزن.';
   let qty = s().qtyDefault;
+  // حجم یک ردیف، همان حجمی است که هنگام اسکنِ آن ردیف در کنترل بوده و در
+  // خود ردیف ثبت شده. پنل جزئیات و انتقال به بک‌تست باید همان را ادامه
+  // دهند، نه `qtyDefault` تنظیمات — وگرنه کاربر حجم را ۳۰۰ می‌کند، جدول
+  // ۳۰۰ قرارداد نشان می‌دهد و پنل کنارش هنوز یک قرارداد را می‌سنجد.
+  const unitsOf = (r) => Math.max(1, Math.trunc(Number(r?.qty) || qty || 1));
   // آخرین اسکن دومرحله‌ای تمام‌شده — پایه مقایسه برای نشان «تغییر کرد»ی
   // اسکن پیوسته بعدی. اولین اسکن هر نشست null می‌ماند، پس چیزی فلش نمی‌زند.
   let lastFullRows = null;
@@ -100,7 +105,7 @@ export async function mount(root, { tab, state, api }) {
 
       <section class="card">
         <h3>کنترل اسکن</h3>
-        <p class="note">حجم، مبنای قیمت و حالت اجرا مستقیم روی قیمت اجرای هر پا اثر می‌گذارند.</p>
+        <p class="note">حجم من، مقیاس کل ردیف است: هر عدد ریالی جدول، نمودار و پنل جزئیات برای همین تعداد قرارداد حساب می‌شود — نه یک دست. مبنای قیمت و حالت اجرا روی قیمت اجرای هر پا اثر می‌گذارند.</p>
         <div class="grid" id="ctrl"></div>
         <div class="bar" style="margin-top:12px">
           <button class="btn" id="run">اسکن</button>
@@ -418,14 +423,14 @@ export async function mount(root, { tab, state, api }) {
     disposeScen?.();
     disposeScen = mountScenarioPanel(root.querySelector('#scen-wrap'), r, {
       rFree: s().rFree, divYield: s().divYield, yearDays: s().dayCountYear,
-      units: Math.max(1, Number(s().qtyDefault) || 1),
+      units: unitsOf(r),
     });
 
     // ——— انتقال به بک‌تست ———
     root.querySelector('#to-backtest')?.addEventListener('click', () => {
       state.handoff = handoffPlan(r, {
         from: 'strategy', strategyId: def.id, strategyName: def.name,
-        units: Math.max(1, Number(s().qtyDefault) || 1),
+        units: unitsOf(r),
         entryBasis: 'LAST', exitBasis: 'LAST',
       });
       location.hash = 'backtest';
