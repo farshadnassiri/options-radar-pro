@@ -8,6 +8,7 @@ import { defaults } from '/core/settings.mjs';
 import { CATALOG, GROUPS as SGROUPS } from '/strategies/catalog.mjs';
 import { mountCapacityPicker } from '/ui/expiries.mjs';
 import { icon, sectionIcon, TAB_ICON, GROUP_ICON } from '/ui/icons.mjs';
+import { installGlobalCapture, logError } from '/ui/errlog.mjs';
 
 export const state = {
   settings: defaults(),
@@ -50,10 +51,50 @@ export async function putSettings(next) {
 
 const rowKey = (r) => `${r.insCode_C ?? ''}|${r.insCode_P ?? ''}`;
 
+/**
+ * عکس پشتیبان، برای وقتی که جریان زنده چیزی نمی‌فرستد.
+ *
+ * حلقه دیده‌بان سرور بیرون از ساعت بازار عمداً پارک می‌شود، پس رویداد
+ * `watch` هیچ‌وقت پخش نمی‌شود و `/api/watch` هم آرایه خالی می‌دهد. نتیجه
+ * این بود که شب‌ها و روزهای تعطیل، *همهٔ* تب‌ها کور می‌ماندند: فهرست نماد
+ * خالی، و پیام «نمادی انتخاب نشده» — بدون اینکه چیزی بگوید چرا.
+ *
+ * `/api/history/universe` برای همین هست و شب و روز پاسخ می‌دهد. همان
+ * ردیف‌های دیده‌بان را می‌دهد، فقط زنده نیست.
+ *
+ * و چون زنده نیست، برچسب می‌خورد. نشان‌دادن عکس آخرین جلسه به‌جای داده
+ * زنده، بدون گفتنش، از خالی‌ماندن بدتر است — کاربر روی قیمتی تصمیم می‌گیرد
+ * که دیگر قیمت بازار نیست.
+ */
+let seeding = null;
+function seedWatch() {
+  if (seeding || state.watch.rows.length) return seeding;
+  seeding = (async () => {
+    try {
+      const response = await fetch('/api/history/universe');
+      const payload = await response.json();
+      if (!response.ok || payload.error) throw new Error(payload.error || 'عکس پشتیبان نیامد');
+      const rows = payload.rows || [];
+      if (!rows.length || state.watch.rows.length) return;
+      state.watch.byKey = new Map(rows.map((r) => [rowKey(r), r]));
+      state.watch.rows = rows;
+      state.watch.at = payload.at || null;
+      state.watch.changed = null;
+      state.watch.stale = true;                 // زنده نیست
+      setLink('snapshot');
+      for (const fn of state.subscribers) { try { fn(state.watch); } catch (err) { logError('پخش عکس پشتیبان', err); } }
+    } catch (err) {
+      logError('گرفتن عکس پشتیبان', err);
+    } finally { seeding = null; }
+  })();
+  return seeding;
+}
+
 export function subscribeWatch(fn) {
   state.subscribers.add(fn);
   openStream();
   if (state.watch.rows.length) fn(state.watch);
+  else seedWatch();
   return () => state.subscribers.delete(fn);
 }
 
@@ -80,6 +121,7 @@ function openStream() {
       for (const r of msg.rows) state.watch.byKey.set(rowKey(r), r);
     }
     state.watch.at = msg.at;
+    state.watch.stale = false;   // داده زنده رسید؛ برچسب عکس پشتیبان برداشته می‌شود
     state.watch.rows = [...state.watch.byKey.values()];
     state.watch.changed = msg.full ? null : msg.rows.length;
     for (const fn of state.subscribers) { try { fn(state.watch); } catch (err) { console.error(err); } }
@@ -98,6 +140,10 @@ const LINK_TEXT = {
   connecting: ['در حال اتصال', 'wait'],
   live: ['متصل', 'open'],
   down: ['قطع', 'down'],
+  // بازار بسته است و آنچه می‌بینی عکس آخرین جلسه است، نه قیمت زنده. این
+  // برچسب اختیاری نیست: بدون آن کاربر روی قیمتی تصمیم می‌گیرد که دیگر
+  // قیمت بازار نیست و هیچ نشانه‌ای هم نمی‌بیند.
+  snapshot: ['عکس آخرین جلسه — زنده نیست', 'wait'],
 };
 
 /**
@@ -111,9 +157,17 @@ const LINK_TEXT = {
 function paintLink() {
   const pill = el('h-link');
   if (!pill) return;
-  const [text, cls] = LINK_TEXT[state.link.status] || LINK_TEXT.idle;
+  // وضعیت سوکت با تازگی داده یکی نیست. سوکت می‌تواند سالم باز باشد و هیچ
+  // داده‌ای نیاید — بیرون از ساعت بازار دقیقاً همین است. اگر آنچه روی صفحه
+  // است عکس آخرین جلسه باشد، برچسب باید همان را بگوید، وگرنه «متصل» به
+  // کاربر می‌گوید قیمت‌ها زنده‌اند در حالی که نیستند.
+  const key = state.watch.stale && state.watch.rows.length ? 'snapshot' : state.link.status;
+  const [text, cls] = LINK_TEXT[key] || LINK_TEXT.idle;
   pill.textContent = text;
   pill.className = `pill link ${cls}`;
+  pill.title = key === 'snapshot'
+    ? 'بازار بسته است. این ردیف‌ها از آخرین جلسه‌اند و تغییر نمی‌کنند.'
+    : 'وضعیت اتصال جریان داده';
 
   const fresh = el('h-fresh');
   if (!fresh) return;
@@ -166,6 +220,7 @@ const TABS = [
   { id: 'backtest', title: 'بک‌تست سریع', section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },
   { id: 'portfolio-backtest', title: 'آزمون همه استراتژی‌ها', section: 'پایه', mod: '/ui/tabs/portfolio-backtest.mjs', phase: 3 },
   { id: 'top', title: 'برترین موقعیت‌ها', section: 'پایه', mod: '/ui/tabs/top.mjs', phase: 3 },
+  { id: 'logs', title: 'دفتر خطاها', section: 'پایه', mod: '/ui/tabs/logs.mjs', phase: 1 },
 ];
 
 // تب هر استراتژی از همان فهرست ساخته می‌شود و همه یک ماژول دارند. این نتیجه
@@ -376,6 +431,7 @@ async function open(id) {
     scrollToStage();
   } catch (e) {
     if (gen !== openGen) return; // خطای یک تلاش کهنه، دیگر ربطی به تب باز فعلی ندارد
+    logError(`باز کردن تب ${id}`, e);
     stage.innerHTML = `<div class="card"><h3>تب باز نشد</h3><p class="note">${e.message}</p></div>`;
     console.error(e);
     scrollToStage();
@@ -455,6 +511,7 @@ document.addEventListener('keydown', (e) => {
 // از رسیدن به فهرست کناری می‌ترکد، نه فقط پوسته اشتباه بماند.
 const getTheme = () => { try { return localStorage.getItem('theme'); } catch { return null; } };
 
+installGlobalCapture();
 applyTheme(getTheme() || 'ledger');
 buildRail();
 await loadSettings();

@@ -28,6 +28,7 @@ const PATHS = {
   swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
   briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/>',
   rotate: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>',
+  alert: '<path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4M12 17.5v.01"/>',
   dot: '<circle cx="12" cy="12" r="3.5"/>',
 };
 
@@ -48,7 +49,7 @@ export const GROUP_ICON = {
 /** آیکون تب‌هایی که استراتژی نیستند. */
 export const TAB_ICON = {
   settings: 'sliders', chain: 'grid', history: 'clock', backtest: 'play',
-  'portfolio-backtest': 'layers', top: 'trophy',
+  'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert',
   positions: 'briefcase', roll: 'rotate',
 };
 
