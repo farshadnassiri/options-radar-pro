@@ -632,6 +632,25 @@ document.addEventListener('keydown', (e) => {
 const getTheme = () => { try { return localStorage.getItem('theme'); } catch { return null; } };
 
 installGlobalCapture();
+
+/**
+ * چرخ ماوس روی یک فهرست کشویی، مقدارش را عوض نمی‌کند.
+ *
+ * بعضی مرورگرها روی `select` فوکوس‌دار، هر درجهٔ چرخ را یک گزینه جلو
+ * می‌برند. کاربری که فقط می‌خواهد صفحه را پایین ببرد و اشاره‌گرش از روی
+ * فهرست ترکیب‌ها رد می‌شود، بی‌آنکه بخواهد قرارداد دیگری را انتخاب می‌کند —
+ * و هیچ چیزی هم نمی‌گوید که عوض شد.
+ *
+ * `blur` به‌جای `preventDefault`: جلوگیری از رویداد، اسکرول صفحه را هم
+ * می‌گیرد و کاربر داخل فهرست حبس می‌شود. برداشتن فوکوس، هم انتخاب را حفظ
+ * می‌کند هم می‌گذارد صفحه مثل هر جای دیگری اسکرول شود. باز کردن فهرست با
+ * کلیک یا صفحه‌کلید، دست‌نخورده است.
+ */
+document.addEventListener('wheel', (event) => {
+  const select = event.target?.closest?.('select');
+  if (select && document.activeElement === select) select.blur();
+}, { passive: true, capture: true });
+
 applyTheme(getTheme() || 'ledger');
 buildRail();
 await loadSettings();

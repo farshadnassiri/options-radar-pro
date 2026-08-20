@@ -4423,6 +4423,15 @@ group('۶۳. انتخاب ترکیب با تغییر قیمت یا اسکرول 
     && !hSrc63.includes('if (sorted[0]) selectAutoCombo(sorted[0]);'));
   check('و تعریف دوم هویت پا در رابط نمانده — یکی است، در موتور',
     !hSrc63.includes('legSignature'));
+
+  // بعضی مرورگرها روی `select` فوکوس‌دار، هر درجهٔ چرخ را یک گزینه جلو
+  // می‌برند. `blur` به‌جای `preventDefault` است چون جلوگیری از رویداد،
+  // اسکرول صفحه را هم می‌گیرد و کاربر داخل فهرست حبس می‌شود.
+  const appSrc63 = readSrc('../ui/app.mjs');
+  check('چرخ ماوس روی فهرست کشویی، مقدارش را عوض نمی‌کند',
+    /document\.addEventListener\('wheel'[\s\S]*?select\.blur\(\);/.test(appSrc63));
+  check('و صفحه همچنان اسکرول می‌شود — رویداد گرفته نمی‌شود',
+    /addEventListener\('wheel'[\s\S]*?\{ passive: true, capture: true \}\)/.test(appSrc63));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════
