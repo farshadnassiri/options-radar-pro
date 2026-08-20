@@ -406,12 +406,26 @@ group('۶. مخرج بازده');
   check('با زیان نامحدود، وجه تضمین لنگر می‌ماند و مخرج بی‌نهایت نمی‌شود',
     nakedUnlimited.value === 25000 && Number.isFinite(nakedUnlimited.value));
 
-  // مرز مهم: اسپرد بدهکارِ کاملاً پوشیده وجه تضمین صفر می‌گیرد و باید
-  // مو‌به‌مو همان بدهکار خالص بماند — این اصلاح نباید هر ردیف عادی را
-  // جابه‌جا کند.
+  // ——— بدهکارِ پوشیده، با وجه تضمین صفر ———
+  //
+  // مرحلهٔ اول این اصلاح، «بیشینه» را فقط وقتی اعمال می‌کرد که وجه تضمین
+  // مثبت باشد، تا اسپرد پوشیده جابه‌جا نشود. حسابرسی نشان داد همان استثنا
+  // یک خانوادهٔ کامل را باز می‌گذارد: اسپرد پوت نزولی با بدهکارِ ۸٫۲۴ ریال،
+  // وجه تضمین صفر و بیشترین زیانِ ۴٬۴۴۷٫۶۹، بازده ماهانهٔ ۳٬۶۲۳٬۲۶۰٪ می‌داد.
+  // وجه تضمین صفر است چون پوشش برقرار است؛ ولی هزینهٔ تسویه در سررسید پول
+  // واقعی است و مخرج باید ببیندش.
   const coveredDebit = capitalBase({ legs: [{ kind: 'call' }], netCash: -4100000, marginNet: 0, maxLoss: 5030000 });
-  check('اسپرد بدهکارِ پوشیده دست‌نخورده می‌ماند، حتی اگر بیشترین زیان بزرگ‌تر باشد',
-    coveredDebit.kind === 'DEBIT' && coveredDebit.value === 4100000, coveredDebit.label);
+  check('اسپرد بدهکارِ پوشیده هم بیشترین زیان را در مخرج می‌آورد',
+    coveredDebit.kind === 'DEBIT_BLOCKED' && coveredDebit.value === 5030000, coveredDebit.label);
+
+  const tinyDebit = capitalBase({ legs: [{ kind: 'put' }], netCash: -8.24, marginNet: 0, maxLoss: 4447.69 });
+  check('بدهکارِ ناچیز با زیانِ چندصدبرابر، دیگر بازده نجومی نمی‌سازد',
+    tinyDebit.value === 4447.69 && (300 / tinyDebit.value) < (300 / 8.24) / 500, tinyDebit.label);
+
+  // و آن‌جا که بدهکاری خودش بزرگ‌ترین جزء است، هیچ‌چیز عوض نمی‌شود
+  const plainDebit = capitalBase({ legs: [{ kind: 'call' }], netCash: -4100000, marginNet: 0, maxLoss: 4100000 });
+  check('وقتی بدهکاری خودش بزرگ‌ترین جزء است، مخرج همان بدهکاری می‌ماند',
+    plainDebit.kind === 'DEBIT' && plainDebit.value === 4100000, plainDebit.label);
 }
 
 // ═══════════════════════════ ۷. لایه اجرا ═══════════════════════════
@@ -574,6 +588,7 @@ group('۹. ارزیاب ردیف، سرتاسری');
   check('بستن فوری همیشه هزینه اسپرد کامل را می‌پردازد، بدتر از تسویه مرجع',
     rowSpFee.instantClosePnl < rowSpFee.settleLastPnl && rowSpFee.instantClosePnl < rowSpFee.settleClosePnl,
     `فوری ${Math.round(rowSpFee.instantClosePnl)} | آخرین ${Math.round(rowSpFee.settleLastPnl)} | پایانی ${Math.round(rowSpFee.settleClosePnl)}`);
+
 }
 
 group('۱۰. فهرست استراتژی‌ها');
