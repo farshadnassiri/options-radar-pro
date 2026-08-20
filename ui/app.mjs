@@ -3,10 +3,11 @@
 // قاعده تب تنبل: ماژول هر تب فقط لحظه اولین کلیک وارد می‌شود و اشتراک
 // عکس لحظه‌ای هم فقط برای تب باز برقرار می‌شود. تب بسته، هیچ هزینه‌ای ندارد.
 
-import { fmt, faDigits, faAgo, faClock, pageTitle, normFa } from '/ui/fmt.mjs';
+import { fmt, faDigits, faAgo, faClock, pageTitle, normFa, ltr } from '/ui/fmt.mjs';
 import { defaults } from '/core/settings.mjs';
 import { CATALOG, GROUPS as SGROUPS } from '/strategies/catalog.mjs';
 import { mountCapacityPicker } from '/ui/expiries.mjs';
+import { icon, sectionIcon, TAB_ICON, GROUP_ICON } from '/ui/icons.mjs';
 
 export const state = {
   settings: defaults(),
@@ -174,7 +175,7 @@ for (const [key, label] of Object.entries(SGROUPS)) {
   for (const d of CATALOG.filter((s) => s.group === key)) {
     TABS.push({
       id: d.id, title: d.name, section: label, phase: d.phase, def: d,
-      mod: '/ui/tabs/strategy.mjs',
+      group: key, mod: '/ui/tabs/strategy.mjs',
     });
   }
 }
@@ -192,16 +193,30 @@ TABS.push({ id: 'roll', title: 'تحلیل رول', section: 'موقعیت من'
 // همان کار دستی را می‌خواهد.
 
 const FOLD_KEY = 'rail:folded';
-const loadFolded = () => {
-  try { return new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || '[]')); }
-  catch { return new Set(); }
+
+/**
+ * وضعیت تاشدگی گروه‌های ریل.
+ *
+ * پیش‌فرض عوض شد: همهٔ گروه‌ها بسته باز می‌شوند، نه باز. با سی‌وچند تب در یک
+ * ستون، «همه باز» یعنی کاربر همیشه در حال پیمایش است و هیچ‌وقت کل ساختار را
+ * یک‌جا نمی‌بیند. بسته یعنی اول ده سرگروه را می‌بینی و بعد یکی را باز می‌کنی.
+ *
+ * فرق «هرگز چیزی ذخیره نشده» با «کاربر همه را باز کرده» مهم است: اولی باید
+ * پیش‌فرضِ بسته بگیرد، دومی باید همان انتخاب کاربر بماند. پس نبودِ کلید در
+ * حافظه با آرایهٔ خالی یکی گرفته نمی‌شود.
+ */
+const loadFolded = (allSections) => {
+  let raw = null;
+  try { raw = localStorage.getItem(FOLD_KEY); } catch { raw = null; }
+  if (raw == null) return new Set(allSections);
+  try { return new Set(JSON.parse(raw)); } catch { return new Set(allSections); }
 };
-const folded = loadFolded();
+const folded = loadFolded([...new Set(TABS.map((t) => t.section))]);
 const saveFolded = () => {
   try { localStorage.setItem(FOLD_KEY, JSON.stringify([...folded])); } catch { /* بی‌اهمیت */ }
 };
 
-/** جهت هر استراتژی، برای برچسب رنگی کنار نامش. */
+/** جهت هر استراتژی — یک نقطهٔ رنگی کنار نام، با عنوان راهنما. */
 function dirTone(def) {
   const d = String(def?.dir || '');
   if (/صعودی/.test(d)) return ['صعودی', 'up'];
@@ -230,7 +245,9 @@ function buildRail() {
 
   const matches = (t) => {
     if (!q) return true;
-    const hay = normFa(`${t.title} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
+    // نام فارسی هم در انبار جست‌وجو هست، گرچه هیچ‌جا نشان داده نمی‌شود:
+    // کسی که «کاوردکال» را می‌شناسد باید Covered Call را پیدا کند.
+    const hay = normFa(`${t.title} ${t.def?.fa || ''} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
     return hay.includes(q);
   };
 
@@ -253,6 +270,7 @@ function buildRail() {
     head.className = 'rail-head';
     head.setAttribute('aria-expanded', isFolded ? 'false' : 'true');
     head.innerHTML = `<span class="caret" aria-hidden="true"></span>
+      ${icon(sectionIcon(sec, tabs[0]?.group), 'ic rail-head-ic')}
       <span class="rail-head-name">${sec}</span>
       <span class="rail-head-n">${faDigits(tabs.length)}</span>`;
     head.addEventListener('click', () => {
@@ -274,16 +292,21 @@ function buildRail() {
       const infeasible = t.def && !t.def.feasible;
       b.title = infeasible ? t.def.infeasibleWhy : (t.def?.note || t.def?.dir || t.title);
       const [tone, cls] = dirTone(t.def);
-      // دو سطر: نام بالا، و زیرش برچسب‌های کوتاه.
+      // یک سطر: آیکون، نام، نقطهٔ جهت.
+      //
+      // برچسب «۲ پا / ۳ پا» برداشته شد. تعداد پا در فهرست تصمیمی را عوض
+      // نمی‌کند — کسی بین دو استراتژی بر پایهٔ شمار پا انتخاب نمی‌کند — و
+      // در عوض هر ردیف را دوسطری می‌کرد و طول فهرست را دوبرابر.
+      //
+      // جهت هم از برچسب متنی به نقطهٔ رنگی رسید. متنش («صعودی») در هر ردیف
+      // تکرار می‌شد و کنار نام لاتین، سطر را شلوغ می‌کرد؛ رنگ همان را در یک
+      // نقطه می‌گوید و متنش در `title` می‌ماند.
+      const glyph = t.def ? GROUP_ICON[t.group] : TAB_ICON[t.id];
       b.innerHTML = `
-        <span class="tab-main">
-          <span class="tab-name">${t.title}</span>
-          ${infeasible ? '<span class="tab-flag" title="اجرا در تابلو ممکن نیست">⃰</span>' : ''}
-        </span>
-        <span class="tab-meta">
-          ${tone ? `<span class="tone ${cls}">${tone}</span>` : ''}
-          ${t.def?.legs?.length ? `<span class="phase">${faDigits(t.def.legs.length)} پا</span>` : ''}
-        </span>`;
+        ${icon(glyph, 'ic tab-ic')}
+        <span class="tab-name">${ltr(t.title)}</span>
+        ${infeasible ? '<span class="tab-flag" title="اجرا در تابلو ممکن نیست">⃰</span>' : ''}
+        ${tone ? `<span class="tone-dot ${cls}" title="${tone}"></span>` : ''}`;
       b.addEventListener('click', () => open(t.id));
       items.appendChild(b);
     }
@@ -316,6 +339,11 @@ let openGen = 0;
 async function open(id) {
   const t = TABS.find((x) => x.id === id);
   if (!t || current === id) return;
+  // گروه‌ها پیش‌فرض بسته‌اند، پس تبی که از بیرون باز می‌شود — پیوند مستقیم،
+  // تعویض از تب دیگر، انتقال به بک‌تست — می‌تواند در گروهی بسته گم بماند.
+  // باز کردن گروهش ذخیره نمی‌شود: تصمیمِ کاربر نبوده، پس نباید جای تصمیم او
+  // بنشیند.
+  if (folded.has(t.section)) { folded.delete(t.section); buildRail(); }
   const gen = ++openGen;
   if (disposer) { try { disposer(); } catch {} disposer = null; }
   current = id;

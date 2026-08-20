@@ -16,7 +16,7 @@ import { timeMachine } from '/core/timemachine.mjs';
 import { priceQuantile } from '/core/bs.mjs';
 import { gregorianToJalali } from '/core/jalali.mjs';
 import { makeTable, funnelBar, changedIds } from '/ui/table.mjs';
-import { fmt, faNum, faDigits, coverageInfo, signTone } from '/ui/fmt.mjs';
+import { fmt, faNum, faDigits, coverageInfo, signTone, ltr } from '/ui/fmt.mjs';
 import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
@@ -66,7 +66,7 @@ export async function mount(root, { tab, state, api }) {
 
   root.innerHTML = `
     <div class="page-head">
-      <h2>${def.name}</h2>
+      <h2>${ltr(def.name)}</h2>
       <p>${def.feasible
         ? `${def.dir}${def.note ? ' — ' + def.note : ''}`
         : `<span class="tag warn">اجرا در تابلو ممکن نیست</span> ${def.infeasibleWhy}`}</p>

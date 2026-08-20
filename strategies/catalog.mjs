@@ -8,6 +8,10 @@
 // exp:  شماره سررسید. صفر یعنی نزدیک، یک یعنی دور. فقط تقویمی و مورب
 //       بیش از یک سررسید دارند.
 //
+// name: نام استاندارد بازار، انگلیسی. در سراسر رابط همین نشان داده می‌شود.
+// fa:   برابر فارسی، فقط برای پیدا شدن در جست‌وجوی ریل. هیچ‌جا رندر نمی‌شود —
+//       کسی که «کاوردکال» را می‌شناسد باید بتواند Covered Call را پیدا کند.
+//
 // feasible: در تابلوی ایران فروش سهم به‌سادگی ممکن نیست. استراتژی‌هایی که
 // به فروش پایه نیاز دارند حذف نمی‌شوند، برچسب می‌خورند — دیدنشان بهتر از
 // نبودنشان است.
@@ -27,148 +31,148 @@ const L = (kind, side, slot = 1, ratio = 1, exp = 0) => ({ kind, side, slot, rat
 
 export const CATALOG = [
   // ——— کسب درآمد ———
-  { id: 'covered-call', name: 'کاوردکال', group: 'income', dir: 'صعودی ملایم',
+  { id: 'covered-call', name: 'Covered Call', fa: 'کاوردکال', group: 'income', dir: 'صعودی ملایم',
     legs: [L('underlying', 'buy'), L('call', 'sell', 1)],
     strikes: 1, expiries: 1, feasible: true, phase: 4,
     note: 'سهم پایه، پوشش موقعیت فروش کال است؛ وجه تضمین نقدی ندارد.' },
 
-  { id: 'cash-secured-put', name: 'فروش پوت با پشتوانه نقد', group: 'income', dir: 'صعودی ملایم',
+  { id: 'cash-secured-put', name: 'Cash-Secured Put', fa: 'فروش پوت با پشتوانه نقد', group: 'income', dir: 'صعودی ملایم',
     legs: [L('put', 'sell', 1)],
     strikes: 1, expiries: 1, feasible: true, phase: 4,
     note: 'سرمایه درگیر، بیشینه وجه تضمین و ارزش تعهد خرید است.' },
 
-  { id: 'naked-call', name: 'فروش کال بدون پوشش', group: 'income', dir: 'نزولی',
+  { id: 'naked-call', name: 'Naked Call', fa: 'فروش کال بدون پوشش', group: 'income', dir: 'نزولی',
     legs: [L('call', 'sell', 1)],
     strikes: 1, expiries: 1, feasible: true, phase: 4, risk: 'زیان نامحدود',
     note: 'زیان نامحدود. وجه تضمین کامل و کال مارجین جدی است.' },
 
-  { id: 'naked-put', name: 'فروش پوت بدون پوشش', group: 'income', dir: 'صعودی',
+  { id: 'naked-put', name: 'Naked Put', fa: 'فروش پوت بدون پوشش', group: 'income', dir: 'صعودی',
     legs: [L('put', 'sell', 1)],
     strikes: 1, expiries: 1, feasible: true, phase: 4, risk: 'زیان بزرگ',
     note: 'بیشترین زیان تا صفر شدن پایه.' },
 
   // ——— اسپرد عمودی ———
-  { id: 'bull-call-spread', name: 'اسپرد صعودی کال', group: 'vertical', dir: 'صعودی',
+  { id: 'bull-call-spread', name: 'Bull Call Spread', fa: 'اسپرد صعودی کال', group: 'vertical', dir: 'صعودی',
     legs: [L('call', 'buy', 1), L('call', 'sell', 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 5, expect: 'debit' },
 
-  { id: 'bear-call-spread', name: 'اسپرد نزولی کال', group: 'vertical', dir: 'نزولی',
+  { id: 'bear-call-spread', name: 'Bear Call Spread', fa: 'اسپرد نزولی کال', group: 'vertical', dir: 'نزولی',
     legs: [L('call', 'sell', 1), L('call', 'buy', 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 5, expect: 'credit' },
 
-  { id: 'bull-put-spread', name: 'اسپرد صعودی پوت', group: 'vertical', dir: 'صعودی',
+  { id: 'bull-put-spread', name: 'Bull Put Spread', fa: 'اسپرد صعودی پوت', group: 'vertical', dir: 'صعودی',
     legs: [L('put', 'buy', 1), L('put', 'sell', 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 5, expect: 'credit',
     note: 'صعودی است ولی بستانکار؛ پس وجه تضمین می‌گیرد. جهت و بستانکاری یکی نیستند.' },
 
-  { id: 'bear-put-spread', name: 'اسپرد نزولی پوت', group: 'vertical', dir: 'نزولی',
+  { id: 'bear-put-spread', name: 'Bear Put Spread', fa: 'اسپرد نزولی پوت', group: 'vertical', dir: 'نزولی',
     legs: [L('put', 'sell', 1), L('put', 'buy', 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 5, expect: 'debit',
     note: 'نزولی است ولی بدهکار؛ پس وجه تضمین نمی‌گیرد.' },
 
   // ——— تقویمی ———
-  { id: 'calendar-call', name: 'تقویمی کال', group: 'calendar', dir: 'خنثی',
+  { id: 'calendar-call', name: 'Calendar Call Spread', fa: 'تقویمی کال', group: 'calendar', dir: 'خنثی',
     legs: [L('call', 'sell', 1, 1, 0), L('call', 'buy', 1, 1, 1)],
     strikes: 1, expiries: 2, feasible: true, phase: 5, expect: 'debit',
     note: 'پس از سررسید پای نزدیک، پای دور تنها می‌ماند. وجه تضمین شرطی مهم است.' },
 
-  { id: 'calendar-put', name: 'تقویمی پوت', group: 'calendar', dir: 'خنثی',
+  { id: 'calendar-put', name: 'Calendar Put Spread', fa: 'تقویمی پوت', group: 'calendar', dir: 'خنثی',
     legs: [L('put', 'sell', 1, 1, 0), L('put', 'buy', 1, 1, 1)],
     strikes: 1, expiries: 2, feasible: true, phase: 5, expect: 'debit' },
 
-  { id: 'diagonal-call', name: 'مورب کال', group: 'calendar', dir: 'صعودی ملایم',
+  { id: 'diagonal-call', name: 'Diagonal Call Spread', fa: 'مورب کال', group: 'calendar', dir: 'صعودی ملایم',
     legs: [L('call', 'sell', 2, 1, 0), L('call', 'buy', 1, 1, 1)],
     strikes: 2, expiries: 2, feasible: true, phase: 6, expect: 'debit' },
 
   // ——— تلاطم ———
-  { id: 'long-straddle', name: 'استرادل خرید', group: 'vol', dir: 'تلاطم بالا',
+  { id: 'long-straddle', name: 'Long Straddle', fa: 'استرادل خرید', group: 'vol', dir: 'تلاطم بالا',
     legs: [L('call', 'buy', 1), L('put', 'buy', 1)],
     strikes: 1, expiries: 1, feasible: true, phase: 6, expect: 'debit' },
 
-  { id: 'short-straddle', name: 'استرادل فروش', group: 'vol', dir: 'تلاطم پایین',
+  { id: 'short-straddle', name: 'Short Straddle', fa: 'استرادل فروش', group: 'vol', dir: 'تلاطم پایین',
     legs: [L('call', 'sell', 1), L('put', 'sell', 1)],
     strikes: 1, expiries: 1, feasible: true, phase: 6, expect: 'credit', risk: 'زیان نامحدود' },
 
-  { id: 'long-strangle', name: 'استرانگل خرید', group: 'vol', dir: 'تلاطم بالا',
+  { id: 'long-strangle', name: 'Long Strangle', fa: 'استرانگل خرید', group: 'vol', dir: 'تلاطم بالا',
     legs: [L('put', 'buy', 1), L('call', 'buy', 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 6, expect: 'debit' },
 
-  { id: 'short-strangle', name: 'استرانگل فروش', group: 'vol', dir: 'تلاطم پایین',
+  { id: 'short-strangle', name: 'Short Strangle', fa: 'استرانگل فروش', group: 'vol', dir: 'تلاطم پایین',
     legs: [L('put', 'sell', 1), L('call', 'sell', 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 6, expect: 'credit', risk: 'زیان نامحدود' },
 
   // ——— باترفلای و کندور ———
-  { id: 'long-call-butterfly', name: 'باترفلای کال خرید', group: 'wing', dir: 'خنثی',
+  { id: 'long-call-butterfly', name: 'Long Call Butterfly', fa: 'باترفلای کال خرید', group: 'wing', dir: 'خنثی',
     legs: [L('call', 'buy', 1), L('call', 'sell', 2, 2), L('call', 'buy', 3)],
     strikes: 3, expiries: 1, feasible: true, phase: 6, expect: 'debit' },
 
-  { id: 'short-call-butterfly', name: 'باترفلای کال فروش', group: 'wing', dir: 'تلاطم بالا',
+  { id: 'short-call-butterfly', name: 'Short Call Butterfly', fa: 'باترفلای کال فروش', group: 'wing', dir: 'تلاطم بالا',
     legs: [L('call', 'sell', 1), L('call', 'buy', 2, 2), L('call', 'sell', 3)],
     strikes: 3, expiries: 1, feasible: true, phase: 6, expect: 'credit' },
 
-  { id: 'long-put-butterfly', name: 'باترفلای پوت خرید', group: 'wing', dir: 'خنثی',
+  { id: 'long-put-butterfly', name: 'Long Put Butterfly', fa: 'باترفلای پوت خرید', group: 'wing', dir: 'خنثی',
     legs: [L('put', 'buy', 1), L('put', 'sell', 2, 2), L('put', 'buy', 3)],
     strikes: 3, expiries: 1, feasible: true, phase: 6, expect: 'debit' },
 
-  { id: 'iron-butterfly', name: 'باترفلای آهنی', group: 'wing', dir: 'خنثی',
+  { id: 'iron-butterfly', name: 'Iron Butterfly', fa: 'باترفلای آهنی', group: 'wing', dir: 'خنثی',
     legs: [L('put', 'buy', 1), L('put', 'sell', 2), L('call', 'sell', 2), L('call', 'buy', 3)],
     strikes: 3, expiries: 1, feasible: true, phase: 6, expect: 'credit',
     note: 'چهار پا یعنی چهار بار کارمزد و چهار بار عبور از اسپرد.' },
 
-  { id: 'iron-condor', name: 'کندور آهنی', group: 'wing', dir: 'خنثی',
+  { id: 'iron-condor', name: 'Iron Condor', fa: 'کندور آهنی', group: 'wing', dir: 'خنثی',
     legs: [L('put', 'buy', 1), L('put', 'sell', 2), L('call', 'sell', 3), L('call', 'buy', 4)],
     strikes: 4, expiries: 1, feasible: true, phase: 6, expect: 'credit',
     note: 'در بازار ایران معمولاً یکی از چهار پا مظنه ندارد و کل ترکیب می‌افتد.' },
 
-  { id: 'long-call-condor', name: 'کندور کال خرید', group: 'wing', dir: 'خنثی',
+  { id: 'long-call-condor', name: 'Long Call Condor', fa: 'کندور کال خرید', group: 'wing', dir: 'خنثی',
     legs: [L('call', 'buy', 1), L('call', 'sell', 2), L('call', 'sell', 3), L('call', 'buy', 4)],
     strikes: 4, expiries: 1, feasible: true, phase: 6, expect: 'debit' },
 
   // ——— نسبت ———
-  { id: 'call-ratio-spread', name: 'نسبت‌اسپرد کال', group: 'ratio', dir: 'صعودی ملایم',
+  { id: 'call-ratio-spread', name: 'Call Ratio Spread', fa: 'نسبت‌اسپرد کال', group: 'ratio', dir: 'صعودی ملایم',
     legs: [L('call', 'buy', 1), L('call', 'sell', 2, 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 6, risk: 'زیان نامحدود',
     note: 'فروش بیشتر از خرید؛ بخشی از موقعیت لخت است و وجه تضمین کامل می‌گیرد.' },
 
-  { id: 'put-ratio-spread', name: 'نسبت‌اسپرد پوت', group: 'ratio', dir: 'نزولی ملایم',
+  { id: 'put-ratio-spread', name: 'Put Ratio Spread', fa: 'نسبت‌اسپرد پوت', group: 'ratio', dir: 'نزولی ملایم',
     legs: [L('put', 'buy', 2), L('put', 'sell', 1, 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 6, risk: 'زیان بزرگ' },
 
-  { id: 'call-backspread', name: 'بک‌اسپرد کال', group: 'ratio', dir: 'صعودی تند',
+  { id: 'call-backspread', name: 'Call Backspread', fa: 'بک‌اسپرد کال', group: 'ratio', dir: 'صعودی تند',
     legs: [L('call', 'sell', 1), L('call', 'buy', 2, 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 6 },
 
   // ——— پوشش ریسک ———
-  { id: 'protective-put', name: 'پوت محافظ', group: 'hedge', dir: 'صعودی با بیمه',
+  { id: 'protective-put', name: 'Protective Put', fa: 'پوت محافظ', group: 'hedge', dir: 'صعودی با بیمه',
     legs: [L('underlying', 'buy'), L('put', 'buy', 1)],
     strikes: 1, expiries: 1, feasible: true, phase: 6, expect: 'debit' },
 
-  { id: 'collar', name: 'کولار', group: 'hedge', dir: 'محافظه‌کارانه',
+  { id: 'collar', name: 'Collar', fa: 'کولار', group: 'hedge', dir: 'محافظه‌کارانه',
     legs: [L('underlying', 'buy'), L('put', 'buy', 1), L('call', 'sell', 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 6,
     note: 'سود و زیان هر دو محدود. مناسب قفل کردن سود سهمی که داری.' },
 
   // ——— آربیتراژ ———
-  { id: 'synthetic-long', name: 'سهم مصنوعی خرید', group: 'arb', dir: 'صعودی',
+  { id: 'synthetic-long', name: 'Synthetic Long Stock', fa: 'سهم مصنوعی خرید', group: 'arb', dir: 'صعودی',
     legs: [L('call', 'buy', 1), L('put', 'sell', 1)],
     strikes: 1, expiries: 1, feasible: true, phase: 7,
     note: 'اگر ارزان‌تر از خود سهم تمام شود، جای خرید سهم می‌نشیند.' },
 
-  { id: 'box', name: 'جعبه‌اسپرد', group: 'arb', dir: 'بی‌جهت',
+  { id: 'box', name: 'Box Spread', fa: 'جعبه‌اسپرد', group: 'arb', dir: 'بی‌جهت',
     legs: [L('call', 'buy', 1), L('call', 'sell', 2), L('put', 'buy', 2), L('put', 'sell', 1)],
     strikes: 2, expiries: 1, feasible: true, phase: 7,
     note: 'بازده قطعی؛ فقط اگر بستانکار خالص از فاصله قیمت اعمال بیشتر باشد. چهار کارمزد آن را معمولاً می‌خورد.' },
 
-  { id: 'conversion', name: 'تبدیل', group: 'arb', dir: 'بی‌جهت',
+  { id: 'conversion', name: 'Conversion', fa: 'تبدیل', group: 'arb', dir: 'بی‌جهت',
     legs: [L('underlying', 'buy'), L('call', 'sell', 1), L('put', 'buy', 1)],
     strikes: 1, expiries: 1, feasible: true, phase: 7 },
 
-  { id: 'reversal', name: 'برگردان', group: 'arb', dir: 'بی‌جهت',
+  { id: 'reversal', name: 'Reversal', fa: 'برگردان', group: 'arb', dir: 'بی‌جهت',
     legs: [L('underlying', 'sell'), L('call', 'buy', 1), L('put', 'sell', 1)],
     strikes: 1, expiries: 1, feasible: false, phase: 7,
     infeasibleWhy: 'به فروش سهم پایه نیاز دارد؛ در تابلو به‌سادگی ممکن نیست.' },
 
-  { id: 'covered-put', name: 'کاورد پوت', group: 'income', dir: 'نزولی',
+  { id: 'covered-put', name: 'Covered Put', fa: 'کاورد پوت', group: 'income', dir: 'نزولی',
     legs: [L('underlying', 'sell'), L('put', 'sell', 1)],
     strikes: 1, expiries: 1, feasible: false, phase: 7,
     infeasibleWhy: 'به فروش سهم پایه نیاز دارد؛ در تابلو به‌سادگی ممکن نیست.' },

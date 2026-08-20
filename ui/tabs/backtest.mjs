@@ -12,7 +12,7 @@ import {
   INTRADAY_START_SECOND, INTRADAY_END_SECOND,
 } from '/core/backtest.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
-import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
+import { fmt, faDigits, signTone, ltr } from '/ui/fmt.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -201,7 +201,7 @@ export async function mount(root, { state }) {
   for (const [group, title] of Object.entries(GROUPS)) {
     const optgroup = document.createElement('optgroup'); optgroup.label = title;
     for (const def of CATALOG.filter((item) => item.group === group && item.feasible)) {
-      const option = document.createElement('option'); option.value = def.id; option.textContent = def.name; optgroup.appendChild(option);
+      const option = document.createElement('option'); option.value = def.id; option.textContent = ltr(def.name); optgroup.appendChild(option);
     }
     strategySelect.appendChild(optgroup);
   }

@@ -37,6 +37,9 @@ import { fmt as uiFmt, axisNum, toEnDigits, faAgo, faClock, humanizeUpstreamErro
 import { moveColumn, insertColumn, changedIds } from '../ui/table.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '../ui/compare.mjs';
 import { strandedKeys } from '../ui/expiries.mjs';
+import { icon, GROUP_ICON, TAB_ICON, sectionIcon } from '../ui/icons.mjs';
+import * as uiFmt48 from '../ui/fmt.mjs';
+import { GROUPS as STRAT_GROUPS48 } from '../strategies/catalog.mjs';
 import {
   historyPrice, normalizeHistoryDate, historyDateLabel, historyDayName,
   replayHistory, summarizeReplay, basisMatrix, entrySensitivity, generateHistoricalCombos,
@@ -3030,6 +3033,70 @@ group('۴۷. نوار سقف سررسید، وقتی زنجیره نیست');
     src47.includes('data-capacity-clear') && !/paintPanel = \(\) => \{\n\s+if \(loading\)/.test(src47));
   check('خطای بالادست به فارسی ترجمه می‌شود و متن خام در `title` می‌ماند',
     src47.includes('humanizeUpstreamError(errorRaw)') && src47.includes('title="${esc(errorRaw)}"'));
+}
+
+// ═══════════════════════════ ۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی ═══════════════════════════
+group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
+{
+  // ——— نام استراتژی ———
+  const latin = /^[A-Za-z][A-Za-z\- ]*$/;
+  check('نام هر ۳۱ استراتژی انگلیسی است',
+    CATALOG.every((d) => latin.test(d.name)),
+    CATALOG.filter((d) => !latin.test(d.name)).map((d) => d.id).join(' , ') || 'همه');
+  check('هیچ نامی تکراری نیست', new Set(CATALOG.map((d) => d.name)).size === CATALOG.length);
+  // برابر فارسی نمایش داده نمی‌شود ولی باید بماند، وگرنه کسی که استراتژی را
+  // با نام فارسی می‌شناسد هیچ راهی برای پیدا کردنش ندارد.
+  check('برابر فارسی برای جست‌وجو نگه داشته شده',
+    CATALOG.every((d) => typeof d.fa === 'string' && d.fa.length > 0));
+  const appSrc48 = fs.readFileSync(new URL('../ui/app.mjs', import.meta.url), 'utf8');
+  check('جست‌وجوی ریل نام فارسی را هم می‌بیند', appSrc48.includes("${t.def?.fa || ''}"));
+
+  // ——— جزیرهٔ جهت‌دار ———
+  //
+  // بدون این، «Covered Call — مطالعه‌ای» می‌تواند وارونه دیده شود: خط تیره
+  // خنثی است و به بافت راست‌به‌چپ می‌چسبد.
+  check('نام لاتین در جزیرهٔ جهت‌دار بسته می‌شود',
+    uiFmt48.ltr('Covered Call') === '\u2068Covered Call\u2069');
+  check('مقدار تهی رشتهٔ خالی می‌دهد', uiFmt48.ltr(null) === '' && uiFmt48.ltr(undefined) === '');
+  for (const [file, what] of [['../ui/app.mjs', 'ریل'], ['../ui/tabs/strategy.mjs', 'سرصفحهٔ استراتژی'],
+    ['../ui/tabs/backtest.mjs', 'فهرست بک‌تست'], ['../ui/tabs/history.mjs', 'فهرست تاریخچه']]) {
+    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    check(`نام استراتژی در ${what} ایزوله می‌شود`, /ltr\(/.test(src));
+  }
+
+  // ——— رنگ عدد منفی ———
+  check('کلاس منفی فقط به عدد منفی می‌خورد',
+    uiFmt48.negClass(-1) === 'neg' && uiFmt48.negClass(0) === '' && uiFmt48.negClass(5) === ''
+    && uiFmt48.negClass(NaN) === '' && uiFmt48.negClass(Infinity) === '');
+  check('سلول عددی آماده، کلاس و قالب را با هم می‌دهد',
+    uiFmt48.numCell(-5000, 'money').includes('class="n neg') && uiFmt48.numCell(-5000, 'money').includes('<td'));
+  const css48 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  // `signTone` ده‌ها جا کلاس loss می‌گذاشت و هیچ قاعدهٔ سراسری‌ای رنگش
+  // نمی‌کرد — یعنی بیشترشان بی‌اثر بودند.
+  check('کلاس زیان و سود روی سلول جدول قاعدهٔ سراسری دارد',
+    /td\.loss, dd\.loss \{ color: var\(--loss\); \}/.test(css48)
+    && /td\.gain, dd\.gain \{ color: var\(--gain\); \}/.test(css48));
+  check('کلاس neg هم سراسری است', /\.neg, td\.neg, dd\.neg \{ color: var\(--loss\); \}/.test(css48));
+
+  // ——— ریل ———
+  check('هر گروه استراتژی آیکون دارد',
+    Object.keys(STRAT_GROUPS48).every((k) => GROUP_ICON[k]),
+    Object.keys(STRAT_GROUPS48).filter((k) => !GROUP_ICON[k]).join(' , ') || 'همه');
+  check('هر تب غیراستراتژی هم آیکون دارد',
+    ['settings', 'chain', 'history', 'backtest', 'portfolio-backtest', 'top', 'positions', 'roll']
+      .every((id) => TAB_ICON[id]));
+  check('آیکون رنگ را از متن می‌گیرد، نه رنگ ثابت',
+    icon('coins').includes('stroke="currentColor"') && !/stroke="#/.test(icon('coins')));
+  check('آیکون ناشناخته به‌جای شکستن، نقطه می‌دهد', icon('چیزی-که-نیست').includes('<circle'));
+  check('بخش بی‌گروه هم آیکون می‌گیرد',
+    sectionIcon('پایه') === 'sliders' && sectionIcon('موقعیت من') === 'briefcase');
+  // پیش‌فرض «همه بسته» فقط وقتی درست است که نبودِ کلید از آرایهٔ خالی جدا
+  // شود، وگرنه کاربری که همه را باز کرده هر بار دوباره بسته می‌بیند.
+  check('نبودِ کلید حافظه با آرایهٔ خالی یکی گرفته نمی‌شود',
+    appSrc48.includes('if (raw == null) return new Set(allSections);'));
+  check('برچسب «n پا» از ریل برداشته شد', !appSrc48.includes('پا</span>'));
+  check('باز شدن تب، گروه بسته‌اش را باز می‌کند',
+    appSrc48.includes('if (folded.has(t.section)) { folded.delete(t.section); buildRail(); }'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════
