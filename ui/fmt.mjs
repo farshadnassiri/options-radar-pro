@@ -87,6 +87,23 @@ export const fmt = {
   list: (v) => (Array.isArray(v)
     ? (v.length ? v.map((x) => (typeof x === 'number' ? grouped(x) : faDigits(x))).join(' , ') : '—')
     : faDigits(String(v ?? '—'))),
+  // فهرست درصدها. `list` برای عدد از `grouped` رد می‌شود که تا رقم صحیح
+  // گرد می‌کند — برای ریال درست است، برای درصد نه: ۱۰٫۲۹٪ و ۱۰٫۹۴٪ هر دو
+  // «۱۰» می‌شدند و همان تفاوتی که ستون برایش ساخته شده گم می‌شد.
+  pctList: (v) => {
+    const arr = Array.isArray(v) ? v : (Number.isFinite(v) ? [v] : []);
+    const kept = arr.filter((x) => Number.isFinite(x));
+    return kept.length ? kept.map((x) => faNum(stripNegZero(x.toFixed(2)))).join(' , ') : '—';
+  },
+  // نام قرارداد، شناسه است نه عدد. «طهرم7058» با رقم فارسی می‌شود
+  // «طهرم۷۰۵۸» که دیگر در جست‌وجوی کارگزار پیدا نمی‌شود و کپی‌کردنش هم
+  // به جایی نمی‌رسد. پس رقم دست‌نخورده می‌ماند و فقط جهتش جدا می‌شود تا
+  // حرف فارسی و رقم لاتین کنار هم جابه‌جا نشوند.
+  sym: (v) => {
+    const arr = Array.isArray(v) ? v : (v == null || v === '' ? [] : [v]);
+    const kept = arr.filter((x) => x != null && String(x) !== '');
+    return kept.length ? kept.map((x) => ltr(String(x))).join(' , ') : '—';
+  },
 };
 
 /**

@@ -240,6 +240,10 @@ export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, qty }) {
             sizeMixed: c.sizeMixed,
             qty: qty ?? s.qtyDefault, settings: s, def,
             underlying: c.underlying, sigmaHist: sigmaByUa[key],
+            // سررسید تا امروز فقط به‌شکل «روز مانده» می‌رسید. دو ترکیب با
+            // ۲۳ روز مانده می‌توانند دو سررسید متفاوت باشند و «روز» این را
+            // نمی‌گوید؛ ستون «تاریخ سررسید» بدون این، خالی می‌ماند.
+            endDate: c.endDate,
             greeks: s.greeksInScan,
           },
         });

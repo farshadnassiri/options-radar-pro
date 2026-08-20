@@ -19,8 +19,19 @@
 import { toEnDigits } from './fmt.mjs';
 
 /** یک خانه، آمادهٔ CSV. نقل‌قول درون متن دوبار می‌شود، طبق RFC 4180. */
+/**
+ * نشانه‌های جهت‌دهی دوسویه — جداساز (U+2066…U+2069)، نشانگر چپ و راست
+ * (U+200E/U+200F) و بازنویسی‌های U+202A…U+202E.
+ *
+ * اینها فقط برای نمایش‌اند: می‌گویند «این تکه را جدا بخوان» تا نام قراردادِ
+ * فارسی با رقم لاتین در متن راست‌به‌چپ جابه‌جا نشود. در فایل CSV هیچ جهتی
+ * برای کنترل نیست و همان‌ها به‌صورت نویسهٔ نامرئی داخل خانه می‌نشینند —
+ * «ضهرم7058» در اکسل با «ضهرم7058» برابر نمی‌شود و جست‌وجو پیدایش نمی‌کند.
+ */
+const BIDI_MARKS = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
 export function csvCell(value) {
-  const s = String(value ?? '').replace(/\s+/g, ' ').trim();
+  const s = String(value ?? '').replace(BIDI_MARKS, '').replace(/\s+/g, ' ').trim();
   return `"${s.replaceAll('"', '""')}"`;
 }
 
@@ -31,7 +42,7 @@ export function csvCell(value) {
  * متن بماند، وگرنه واحدش را از دست می‌دهد و ۳۰ ثانیه از ۳۰ روز جدا نمی‌شود.
  */
 export function numericCell(text) {
-  const en = toEnDigits(String(text ?? '').trim());
+  const en = toEnDigits(String(text ?? '').replace(BIDI_MARKS, '').trim());
   if (/^-?\d+(\.\d+)?$/.test(en)) return en;
   // نشانهٔ درصد از خانه برداشته می‌شود، چون واحد در سرستون هست. با «٪» چسبیده
   // اکسل ستون را متن می‌گیرد و جمع و میانگین از کار می‌افتد. فقط وقتی که

@@ -42,8 +42,15 @@ const VIEWS = {
   // قبل در قرارداد ستونی بود ولی در هیچ نمای آماده‌ای نبود — یعنی عملاً کسی
   // نمی‌دیدشان. عدد ریالیِ زیان بدون درصد، دو ترکیب با سرمایهٔ متفاوت را
   // قابل مقایسه نمی‌کند.
-  خلاصه: ['underlying', 'legsText', 'days', 'cashLabel', 'netCash', 'breakevens', 'beDistPct',
-    'beRoomPct', 'maxProfit', 'retMaxPct', 'maxLoss', 'maxLossPct', 'rewardRisk',
+  // سررسید، قیمت اعمال و نام قرارداد پاها: «روز مانده» نمی‌گوید کدام
+  // سررسید، و بدون نام قرارداد نمی‌شود سفارش را در سامانه کارگزار پیدا کرد.
+  //
+  // سربه‌سری‌ها ستون جدا گرفتند. یک ستونِ فهرستی («۹۴٬۰۰۰ , ۱۰۸٬۰۰۰») نه
+  // مرتب می‌شود نه با ردیف کناری مقایسه — و استرادل و کندور همیشه دو تا
+  // دارند. ستون فهرستی در انتخابگر می‌ماند، برای وقتی که بیش از چهار باشد.
+  خلاصه: ['underlying', 'legNames', 'expiryLabel', 'strikes', 'days', 'cashLabel', 'netCash',
+    'be1', 'be1DistPct', 'be2', 'be2DistPct', 'beRoomPct',
+    'maxProfit', 'maxProfitPct', 'retMaxPct', 'maxLoss', 'maxLossPct', 'rewardRisk',
     'capital', 'retMonthPct', 'popPct', 'execCost', 'maxQty', 'binding',
     'qualityLabel', 'warn'],
   سرمایه: ['underlying', 'legsText', 'days', 'capital', 'capitalLabel', 'margin', 'marginToMaxLoss',
