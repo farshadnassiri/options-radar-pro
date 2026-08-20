@@ -9,7 +9,7 @@ import {
   holdingPeriodProfile, replayTradeDetail,
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
-import { fmt, faDigits, signTone, toEnDigits, normFa } from '/ui/fmt.mjs';
+import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
@@ -359,7 +359,7 @@ export async function mount(root, { state }) {
     for (const def of CATALOG.filter((d) => d.group === group)) {
       const option = document.createElement('option');
       option.value = def.id;
-      option.textContent = `${def.name}${def.feasible ? '' : ' — مطالعه‌ای'}`;
+      option.textContent = `${ltr(def.name)}${def.feasible ? '' : ' — مطالعه‌ای'}`;
       optgroup.appendChild(option);
     }
     strategySelect.appendChild(optgroup);
@@ -1031,7 +1031,7 @@ export async function mount(root, { state }) {
     $('h-selected-label').textContent = label || legs.map((l) => l.name).join(' · ');
     renderFrozenStrategy(replay, args, label);
     if (!rollingCandidates.length) {
-      setRollingCandidates([{ legs, label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')}` }], legs);
+      setRollingCandidates([{ legs, label: `${ltr(byId(strategySelect.value)?.name) || 'استراتژی'} — ${legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')}` }], legs);
     } else {
       setRollingCandidates(rollingCandidates, legs);
     }
@@ -1064,7 +1064,7 @@ export async function mount(root, { state }) {
     autoRows = sorted;
     setRollingCandidates(sorted.slice(0, 1000).map((row) => ({
       legs: row.legs,
-      label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${row.legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')} — اعمال ${row.strikes.map((strike) => fmt.int(strike)).join(' / ')} — ${fmt.pct(row.summary.last?.returnPct)}`,
+      label: `${ltr(byId(strategySelect.value)?.name) || 'استراتژی'} — ${row.legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')} — اعمال ${row.strikes.map((strike) => fmt.int(strike)).join(' / ')} — ${fmt.pct(row.summary.last?.returnPct)}`,
     })));
     $('h-combos').innerHTML = sorted.slice(0, 1000).map((r, index) => `<tr tabindex="0" data-combo="${index}">
       <td>${esc(r.legs.map((l) => l.name).join(' + '))}</td><td>${r.strikes.map((k) => fmt.int(k)).join(' · ')}</td><td>${r.expiries.map(historyDateLabel).join(' · ')}</td>
@@ -1104,7 +1104,7 @@ export async function mount(root, { state }) {
         if (legs.length !== byId(strategySelect.value).legs.length) throw new Error('برای همه پاها قرارداد انتخاب نشده است');
         const manual = manualPrices();
         if (entrySelect.value === 'MANUAL' && Object.keys(manual).length !== legs.length) throw new Error('قیمت دستی ورود همه پاها را وارد کن');
-        setRollingCandidates([{ legs, label: `${byId(strategySelect.value)?.name || 'استراتژی'} — ${legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')}` }], legs);
+        setRollingCandidates([{ legs, label: `${ltr(byId(strategySelect.value)?.name) || 'استراتژی'} — ${legs.map((leg, index) => displayName(leg, `پای ${faDigits(index + 1)}`)).join(' + ')}` }], legs);
         renderReplay(legs, manual);
       } else {
         if (entrySelect.value === 'MANUAL') throw new Error('در حالت تمام ترکیب‌ها ابتدا یکی از چهار قیمت تاریخی را انتخاب کن');
@@ -1160,7 +1160,7 @@ export async function mount(root, { state }) {
     const liquidity = rollingArgs.liquidity || {};
     const meta = [
       ['عنوان گزارش', 'خروجی جامع ماتریس ورود × خروج'],
-      ['استراتژی', def.name || 'ترکیب انتخابی'],
+      ['استراتژی', ltr(def.name) || 'ترکیب انتخابی'],
       ['گروه', GROUPS[def.group] || '—'],
       ['جهت مورد انتظار', def.dir || '—'],
       ['شرح استراتژی', def.note || '—'],
@@ -1183,7 +1183,7 @@ export async function mount(root, { state }) {
       ['زمان تولید', new Date().toLocaleString('fa-IR')],
     ];
     const fields = [
-      ['استراتژی', () => def.name || 'ترکیب انتخابی'], ['گروه', () => GROUPS[def.group] || '—'],
+      ['استراتژی', () => ltr(def.name) || 'ترکیب انتخابی'], ['گروه', () => GROUPS[def.group] || '—'],
       ['جهت مورد انتظار', () => def.dir || '—'], ['دارایی پایه', () => displayName(ua, 'دارایی پایه')],
       ['مبنای ورود', () => basisName(rollingArgs.entryBasis)], ['مبنای خروج', () => basisName(rollingArgs.exitBasis)],
       ['تعداد واحد', () => rollingArgs.units],

@@ -230,22 +230,65 @@ export function buildChain(rows) {
  * کاربر ساخته می‌شود (در ریسه اسکن، مستقل از هر تب)، اگر داده نشود پیش‌فرض
  * معقول همان پیش‌فرض `core/settings.mjs` است — عددی نمایشی، نه اجرایی.
  */
+/**
+ * تجمیع مظنه‌های یک دارایی پایه در یک گذر.
+ *
+ * پیش از این هر سنجه یک `reduce` جدا روی همان درخت داشت — سه گذر برای سه
+ * عدد. با ستون‌های بیشتر این می‌شد ده گذر. یک گذر، همه را می‌سازد.
+ *
+ * تفکیک کال و پوت جداست چون نسبت پوت به کال روی حجم، چیزی می‌گوید که همان
+ * نسبت روی موقعیت باز نمی‌گوید: یکی امروز را می‌گوید، دیگری انباشتهٔ تعهد را.
+ *
+ * فاصلهٔ مظنه فقط از قراردادهای دوطرفه گرفته می‌شود و میانه است نه میانگین —
+ * یک قرارداد بی‌رمق با فاصلهٔ ۳۰۰ درصد، میانگین را بی‌معنی می‌کند.
+ */
+function rollupQuotes(u) {
+  let contracts = 0, quoted = 0, callVol = 0, putVol = 0, callOi = 0, putOi = 0;
+  let value = 0, trades = 0;
+  const strikes = new Set();
+  const spreads = [];
+  for (const ex of u.expiryList) {
+    for (const st of ex.strikeList) {
+      strikes.add(st.strike);
+      for (const [q, isCall] of [[st.call, true], [st.put, false]]) {
+        contracts += 1;
+        if (q.bid > 0 || q.ask > 0) quoted += 1;
+        if (isCall) { callVol += q.vol; callOi += q.oi; } else { putVol += q.vol; putOi += q.oi; }
+        value += q.value; trades += q.trades || 0;
+        if (q.bid > 0 && q.ask > 0) {
+          const mid = (q.bid + q.ask) / 2;
+          if (mid > 0) spreads.push(((q.ask - q.bid) / mid) * 100);
+        }
+      }
+    }
+  }
+  spreads.sort((a, b) => a - b);
+  const mid = spreads.length ? (spreads.length % 2
+    ? spreads[(spreads.length - 1) / 2]
+    : (spreads[spreads.length / 2 - 1] + spreads[spreads.length / 2]) / 2) : NaN;
+  const days = u.expiryList.map((ex) => ex.days).filter(Number.isFinite);
+  return {
+    contracts, quoted, strikes: strikes.size,
+    volume: callVol + putVol, oi: callOi + putOi,
+    callVol, putVol, callOi, putOi,
+    pcVolRatio: callVol > 0 ? putVol / callVol : NaN,
+    value, trades,
+    spreadMedPct: spreads.length ? mid : NaN,
+    twoSided: spreads.length,
+    farDays: days.length ? Math.max(...days) : null,
+  };
+}
+
 export function underlyingList(chain, opt = {}) {
   const rFree = Number.isFinite(opt.rFree) ? opt.rFree : 0.30;
   const divYield = Number.isFinite(opt.divYield) ? opt.divYield : 0;
   const yearDays = Number.isFinite(opt.yearDays) ? opt.yearDays : 365;
   return [...chain.values()]
     .map((u) => ({
-      ins: u.ins, name: u.name, last: u.last || u.close,
-      contracts: u.contracts,
+      ins: u.ins, name: u.name, last: u.last || u.close, close: u.close,
       expiries: u.expiryList.length,
       nearestDays: u.expiryList[0]?.days ?? null,
-      volume: u.expiryList.reduce((a, ex) => a
-        + ex.strikeList.reduce((b, s) => b + s.call.vol + s.put.vol, 0), 0),
-      oi: u.expiryList.reduce((a, ex) => a
-        + ex.strikeList.reduce((b, s) => b + s.call.oi + s.put.oi, 0), 0),
-      quoted: u.expiryList.reduce((a, ex) => a
-        + ex.strikeList.reduce((b, s) => b + (s.call.bid > 0 ? 1 : 0) + (s.put.bid > 0 ? 1 : 0), 0), 0),
+      ...rollupQuotes(u),
       pcRatio: pcOpenInterestRatio(u),
       atmIv: atmIv(u, rFree, divYield, yearDays),
     }))
@@ -275,17 +318,24 @@ export function underlyingQuote(ua) {
 /** آمار کل بازار اختیار، برای نوار شاخص تب دیده‌بان. */
 export function chainStats(chain) {
   let contracts = 0, quoted = 0, vol = 0, oi = 0, value = 0, expiries = new Set();
+  let callOi = 0, putOi = 0;
   for (const ua of chain.values()) {
     for (const ex of ua.expiryList) {
       expiries.add(ex.days);
       for (const s of ex.strikeList) {
-        for (const q of [s.call, s.put]) {
+        for (const [q, isCall] of [[s.call, true], [s.put, false]]) {
           contracts += 1;
           if (q.bid > 0 || q.ask > 0) quoted += 1;
           vol += q.vol; oi += q.oi; value += q.value;
+          if (isCall) callOi += q.oi; else putOi += q.oi;
         }
       }
     }
   }
-  return { underlyings: chain.size, contracts, quoted, vol, oi, value, expiries: expiries.size };
+  return {
+    underlyings: chain.size, contracts, quoted, vol, oi, value, expiries: expiries.size,
+    callOi, putOi,
+    // کالِ صفر یعنی نسبت تعریف‌نشده، نه بی‌نهایت و نه صفر.
+    pcOi: callOi > 0 ? putOi / callOi : NaN,
+  };
 }

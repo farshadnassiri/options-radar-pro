@@ -532,7 +532,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   border-inline-end: 5px solid currentColor;
   transition: transform .15s ease;
 }
-.rail-head-name { flex: 1; min-width: 0; }
+.rail-head-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-head-n {
   font-family: var(--mono); font-size: var(--fs-sm);
   background: var(--panel-2); border: 1px solid var(--line-soft);
@@ -541,19 +541,18 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .rail-group[data-folded="0"] .caret { transform: rotate(-90deg); }
 .rail-group[data-folded="1"] .rail-items { display: none; }
 
-/* دو سطری: نام در سطر اول با قلم درشت‌تر، و سطر دوم برای نشان شکل بازده و
-   برچسب‌های کوتاه. سطر دوم کم‌رنگ است تا نام همچنان اول خوانده شود. */
+/* یک سطری: آیکون، نام، نقطهٔ جهت. پیش از این دوسطری بود و سطر دومش فقط
+   برچسب جهت و شمار پا را حمل می‌کرد؛ هر دو حالا در همان سطر اول جا شده‌اند
+   و طول فهرست نصف شده. */
 .tab-btn {
-  display: flex; flex-direction: column; align-items: stretch; gap: 4px; width: 100%;
-  padding: 9px 12px; margin-bottom: 3px;
+  display: flex; flex-direction: row; align-items: center; gap: 9px; width: 100%;
+  padding: 8px 11px; margin-bottom: 2px;
   background: none; border: 0; border-radius: var(--radius-md);
   color: var(--ink-2); font: inherit; font-size: var(--fs-md); text-align: start; cursor: pointer;
   position: relative;
   transition: background var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 .tab-btn:hover { background: var(--panel-2); color: var(--ink); }
-.tab-main { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.tab-meta { display: flex; align-items: center; gap: 6px; min-width: 0; }
 
 .tab-btn[aria-current="true"] {
   background: var(--accent-soft); color: var(--accent); font-weight: 800;
@@ -566,20 +565,25 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 .tab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tab-btn .phase {
-  flex: none; font-family: var(--mono); font-size: var(--fs-xs);
-  color: var(--muted); background: var(--panel-2);
-  border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0 5px;
+
+/* آیکون‌های ریل. رنگ را از متن می‌گیرند تا در حالت انتخاب و شناور خودبه‌خود
+   همرنگ نام شوند و لازم نباشد هر حالت جدا رنگ بگیرد. */
+.ic { flex: none; display: block; }
+.tab-ic { opacity: .62; transition: opacity var(--transition-fast); }
+.tab-btn:hover .tab-ic { opacity: .95; }
+.tab-btn[aria-current="true"] .tab-ic { opacity: 1; }
+.rail-head-ic { opacity: .75; }
+
+/* جهت استراتژی: نقطه به‌جای برچسب متنی. متنش در title است. */
+.tone-dot {
+  flex: none; width: 9px; height: 9px; border-radius: 50%;
+  border: 1px solid transparent;
 }
+.tone-dot.up { background: var(--gain); border-color: var(--gain); }
+.tone-dot.down { background: var(--loss); border-color: var(--loss); }
+.tone-dot.flat { background: var(--muted); border-color: var(--muted); }
+.tone-dot.vol { background: var(--warn); border-color: var(--warn); }
 .tab-btn .tab-flag { flex: none; color: var(--warn); font-weight: 700; }
-.tab-btn .tone {
-  flex: none; font-size: var(--fs-sm); font-weight: 700; padding: 1px 7px;
-  border-radius: var(--radius-pill); border: 1px solid transparent; line-height: 1.6;
-}
-.tone.up { background: var(--gain-soft); color: var(--gain); border-color: var(--gain); }
-.tone.down { background: var(--loss-soft); color: var(--loss); border-color: var(--loss); }
-.tone.flat { background: var(--panel-2); color: var(--muted); border-color: var(--line); }
-.tone.vol { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
 .tab-btn[data-locked="1"] { color: var(--muted); }
 
 /* برجستگی صفحه‌کلید (بالا/پایین در جست‌وجوی فهرست)، جدا از تب باز */
@@ -1085,9 +1089,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .saved { color: var(--gain); font-size: var(--fs-md); font-weight: 600; }
 
 /* ——— جدول ——— */
-table.data { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+table.data { width: 100%; border-collapse: collapse; font-size: var(--fs-lg); }
 table.data th, table.data td {
-  padding: 6px 8px; border-bottom: 1px solid var(--line-soft); text-align: start; white-space: nowrap;
+  padding: 8px 10px; border-bottom: 1px solid var(--line-soft); text-align: start; white-space: nowrap;
 }
 table.data thead th {
   position: sticky; top: 46px; z-index: 2;
@@ -1266,7 +1270,7 @@ table.data td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; 
 .chip:hover:not([aria-pressed="true"]) { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
-dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; font-size: var(--fs-md); }
+dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; margin: 0; font-size: var(--fs-lg); }
 dl.kv dt { color: var(--muted); }
 dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; text-align: start; }
 
@@ -1292,6 +1296,81 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .tbl-body table.data thead th[data-sorted="desc"],
 .tbl-body table.data thead th[data-sorted="asc"] { color: var(--accent); }
 .tbl-body { overflow: auto; height: 56vh; position: relative; }
+
+/* ——— پنل سناریو، حساسیت، و عمق دفتر ——— */
+.scen-card { margin: 16px 0; }
+.scen-note { color: var(--muted); font-size: var(--fs-sm); }
+.scen-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.scen-controls label, .scen-units {
+  display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--muted);
+}
+.scen-controls select, .scen-controls input, .scen-units input {
+  min-height: 36px; padding: 5px 10px; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
+}
+.scen-units input { width: 108px; }
+.scen-caption { caption-side: top; text-align: start; padding: 8px 10px; color: var(--muted); font-size: var(--fs-sm); }
+/* ردیف «قیمت امروز» مرزِ خوانش است: بالای آن سناریوهای بدتر، پایینش بهترها. */
+.history-table tr.scen-spot > td { background: var(--accent-soft); font-weight: 700; }
+/* خانه‌های ماتریس حساسیت — شدت از --weight که جاوااسکریپت روی خود خانه می‌گذارد */
+.scen-matrix td.gain { background: color-mix(in srgb, var(--gain) calc(var(--weight, 0) * 40%), transparent); }
+.scen-matrix td.loss { background: color-mix(in srgb, var(--loss) calc(var(--weight, 0) * 40%), transparent); }
+.scen-sum { margin: 0 0 10px; font-size: var(--fs-md); color: var(--ink-2); line-height: 1.9; }
+.history-table tr.scen-short > td { background: var(--warn-soft); }
+
+/* دکمهٔ انتقال به بک‌تست، در پنل جزئیات یک ترکیب زنده. */
+.detail-actions { display: flex; gap: 8px; margin: 12px 0 4px; }
+.handoff-btn { cursor: pointer; font-weight: 700; }
+.handoff-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ——— نمودار میله‌ای رصد بازار ——— */
+.market-chart-card { margin: 16px 0; }
+.market-metric { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }
+.market-metric select {
+  min-height: 34px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
+}
+.market-bars { display: grid; gap: 7px; margin-top: 10px; }
+.market-bar { display: grid; grid-template-columns: 128px 1fr 116px; gap: 12px; align-items: center; }
+.market-bar > b {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: var(--fs-md); font-weight: 700;
+}
+.market-bar > i { display: block; height: 15px; border-radius: var(--radius-pill); background: var(--panel-2); overflow: hidden; }
+.market-bar-fill { display: flex; height: 100%; border-radius: var(--radius-pill); overflow: hidden; }
+.market-bar-fill .seg-call { background: var(--gain); }
+.market-bar-fill .seg-put { background: var(--loss); }
+.market-bar-fill .seg-one { background: var(--accent); }
+.market-bar-v {
+  font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr;
+  font-size: var(--fs-sm); color: var(--ink-2); text-align: start;
+}
+
+/* ——— طیف رنگی ردیف بر پایهٔ ستون مرتب‌شده ———
+   شدت از `--heat-t` می‌آید که جاوااسکریپت روی خود ردیف می‌گذارد. رنگ در CSS
+   می‌ماند تا با پوسته عوض شود، و عدد در جاوااسکریپت تا با داده. */
+.tbl-body tr[data-heat] { background: color-mix(in srgb, var(--accent) calc(var(--heat-t) * 20%), transparent); }
+.tbl-body tr[data-heat="gain"] { background: color-mix(in srgb, var(--gain) calc(var(--heat-t) * 24%), transparent); }
+.tbl-body tr[data-heat="loss"] { background: color-mix(in srgb, var(--loss) calc(var(--heat-t) * 24%), transparent); }
+.tbl-body tr[data-heat]:hover { background: var(--panel-2); }
+
+/* راهنمای طیف. بدون آن رنگ فقط تزیین است و کسی نمی‌داند کم یعنی چه. */
+.heat-legend { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--muted); }
+.heat-legend b { color: var(--ink-2); font-weight: 700; }
+.heat-legend i { font-style: normal; font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; }
+.heat-legend .heat-ramp {
+  width: 92px; height: 10px; border-radius: var(--radius-pill); border: 1px solid var(--line-soft);
+  background: linear-gradient(to left, color-mix(in srgb, var(--accent) 24%, transparent), transparent);
+}
+.heat-legend[data-kind="gain"] .heat-ramp { background: linear-gradient(to left, color-mix(in srgb, var(--gain) 28%, transparent), transparent); }
+.heat-legend[data-kind="loss"] .heat-ramp { background: linear-gradient(to left, color-mix(in srgb, var(--loss) 28%, transparent), transparent); }
+/* واگرا: منفی سرخ، صفر بی‌رنگ، مثبت سبز — و در راست‌به‌چپ کمینه سمت راست است */
+.heat-legend[data-kind="div"] .heat-ramp {
+  background: linear-gradient(to left,
+    color-mix(in srgb, var(--loss) 28%, transparent), transparent 50%,
+    color-mix(in srgb, var(--gain) 28%, transparent));
+}
+.heat-legend .heat-lo { color: var(--muted); }
 
 /* ——— نوار ابزار جدول و انتخابگر ستون ——— */
 /* ——— جابه‌جایی ستون با کشیدن ——— */
@@ -1335,7 +1414,17 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
    (زیر) برنده می‌شد، دقیقاً همان مشکل دورهای ۲۴/۳۰؛ اینجا با کلاس، سلول
    زیانِ همان ردیفی که کاربر باید کمتر از همه بهش اعتماد کند (مظنه کهنه)
    درست خاکستری می‌ماند، نه قرمز عادی. */
-.tbl-body td.neg { color: var(--loss); }
+/* عدد منفی، هرجای برنامه. رنگ نشانه است نه تزیین: علامت منها در عدد فارسی
+   ریز است و در یک ستون پرِ عدد اصلاً به چشم نمی‌آید.
+
+   `signTone()` از قدیم کلاس loss/gain را روی ده‌ها سلول می‌گذاشت، ولی هیچ
+   قاعدهٔ سراسری‌ای آن را رنگ نمی‌کرد — فقط چند قاعدهٔ موضعی (جدول تاریخچه،
+   ماتریس همبستگی). یعنی بیشتر آن کلاس‌ها بی‌اثر بودند.
+   دامنه عمداً به سلول و مقدار محدود است: `.loss` روی کارت و نوار و برچسب
+   هم به کار می‌رود و آن‌جا رنگِ حاشیه است، نه رنگِ متن. */
+.neg, td.neg, dd.neg { color: var(--loss); }
+td.loss, dd.loss { color: var(--loss); }
+td.gain, dd.gain { color: var(--gain); }
 .tbl-body tr { height: 27px; cursor: pointer; }
 .tbl-body tr:hover td { background: var(--panel-2) !important; }
 .tbl-body tr.unexec td { opacity: .55; font-style: italic; }

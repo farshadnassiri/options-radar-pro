@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { bsPrice, bsGreeks, impliedVol, probBelow, probAbove, histVol, npdf, d1d2, ncdf, ninv, priceQuantile } from '../core/bs.mjs';
-import { grossCash, entryFees, analyzePayoff, signedQty } from '../core/payoff.mjs';
+import { grossCash, entryFees, analyzePayoff, signedQty, pnlAtExpiry } from '../core/payoff.mjs';
 import { analyzeMixed } from '../core/mixed.mjs';
 import {
   initialMargin, requiredMargin, minMargin, verifyMargin, impliedUnderlying,
@@ -34,9 +34,14 @@ import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeSta
 import { evictOldest } from '../server/cache.mjs';
 import { watchBackoffSec } from '../server/backoff.mjs';
 import { fmt as uiFmt, axisNum, toEnDigits, faAgo, faClock, humanizeUpstreamError, coverageInfo, kpiTone, signTone, pageTitle, normFa } from '../ui/fmt.mjs';
-import { moveColumn, insertColumn, changedIds } from '../ui/table.mjs';
+import { moveColumn, insertColumn, changedIds, heatRamp } from '../ui/table.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '../ui/compare.mjs';
 import { strandedKeys } from '../ui/expiries.mjs';
+import { icon, GROUP_ICON, TAB_ICON, sectionIcon } from '../ui/icons.mjs';
+import { canHandoff, handoffPlan } from '../ui/handoff.mjs';
+import { scenarioLadder, sensitivityGrid, bookDepthRisk } from '../core/scenario.mjs';
+import * as uiFmt48 from '../ui/fmt.mjs';
+import { GROUPS as STRAT_GROUPS48 } from '../strategies/catalog.mjs';
 import {
   historyPrice, normalizeHistoryDate, historyDateLabel, historyDayName,
   replayHistory, summarizeReplay, basisMatrix, entrySensitivity, generateHistoricalCombos,
@@ -3030,6 +3035,350 @@ group('۴۷. نوار سقف سررسید، وقتی زنجیره نیست');
     src47.includes('data-capacity-clear') && !/paintPanel = \(\) => \{\n\s+if \(loading\)/.test(src47));
   check('خطای بالادست به فارسی ترجمه می‌شود و متن خام در `title` می‌ماند',
     src47.includes('humanizeUpstreamError(errorRaw)') && src47.includes('title="${esc(errorRaw)}"'));
+}
+
+// ═══════════════════════════ ۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی ═══════════════════════════
+group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
+{
+  // ——— نام استراتژی ———
+  const latin = /^[A-Za-z][A-Za-z\- ]*$/;
+  check('نام هر ۳۱ استراتژی انگلیسی است',
+    CATALOG.every((d) => latin.test(d.name)),
+    CATALOG.filter((d) => !latin.test(d.name)).map((d) => d.id).join(' , ') || 'همه');
+  check('هیچ نامی تکراری نیست', new Set(CATALOG.map((d) => d.name)).size === CATALOG.length);
+  // برابر فارسی نمایش داده نمی‌شود ولی باید بماند، وگرنه کسی که استراتژی را
+  // با نام فارسی می‌شناسد هیچ راهی برای پیدا کردنش ندارد.
+  check('برابر فارسی برای جست‌وجو نگه داشته شده',
+    CATALOG.every((d) => typeof d.fa === 'string' && d.fa.length > 0));
+  const appSrc48 = fs.readFileSync(new URL('../ui/app.mjs', import.meta.url), 'utf8');
+  check('جست‌وجوی ریل نام فارسی را هم می‌بیند', appSrc48.includes("${t.def?.fa || ''}"));
+
+  // ——— جزیرهٔ جهت‌دار ———
+  //
+  // بدون این، «Covered Call — مطالعه‌ای» می‌تواند وارونه دیده شود: خط تیره
+  // خنثی است و به بافت راست‌به‌چپ می‌چسبد.
+  check('نام لاتین در جزیرهٔ جهت‌دار بسته می‌شود',
+    uiFmt48.ltr('Covered Call') === '\u2068Covered Call\u2069');
+  check('مقدار تهی رشتهٔ خالی می‌دهد', uiFmt48.ltr(null) === '' && uiFmt48.ltr(undefined) === '');
+  for (const [file, what] of [['../ui/app.mjs', 'ریل'], ['../ui/tabs/strategy.mjs', 'سرصفحهٔ استراتژی'],
+    ['../ui/tabs/backtest.mjs', 'فهرست بک‌تست'], ['../ui/tabs/history.mjs', 'فهرست تاریخچه']]) {
+    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    check(`نام استراتژی در ${what} ایزوله می‌شود`, /ltr\(/.test(src));
+  }
+
+  // ——— رنگ عدد منفی ———
+  check('کلاس منفی فقط به عدد منفی می‌خورد',
+    uiFmt48.negClass(-1) === 'neg' && uiFmt48.negClass(0) === '' && uiFmt48.negClass(5) === ''
+    && uiFmt48.negClass(NaN) === '' && uiFmt48.negClass(Infinity) === '');
+  check('سلول عددی آماده، کلاس و قالب را با هم می‌دهد',
+    uiFmt48.numCell(-5000, 'money').includes('class="n neg') && uiFmt48.numCell(-5000, 'money').includes('<td'));
+  const css48 = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8');
+  // `signTone` ده‌ها جا کلاس loss می‌گذاشت و هیچ قاعدهٔ سراسری‌ای رنگش
+  // نمی‌کرد — یعنی بیشترشان بی‌اثر بودند.
+  check('کلاس زیان و سود روی سلول جدول قاعدهٔ سراسری دارد',
+    /td\.loss, dd\.loss \{ color: var\(--loss\); \}/.test(css48)
+    && /td\.gain, dd\.gain \{ color: var\(--gain\); \}/.test(css48));
+  check('کلاس neg هم سراسری است', /\.neg, td\.neg, dd\.neg \{ color: var\(--loss\); \}/.test(css48));
+
+  // ——— ریل ———
+  check('هر گروه استراتژی آیکون دارد',
+    Object.keys(STRAT_GROUPS48).every((k) => GROUP_ICON[k]),
+    Object.keys(STRAT_GROUPS48).filter((k) => !GROUP_ICON[k]).join(' , ') || 'همه');
+  check('هر تب غیراستراتژی هم آیکون دارد',
+    ['settings', 'chain', 'history', 'backtest', 'portfolio-backtest', 'top', 'positions', 'roll']
+      .every((id) => TAB_ICON[id]));
+  check('آیکون رنگ را از متن می‌گیرد، نه رنگ ثابت',
+    icon('coins').includes('stroke="currentColor"') && !/stroke="#/.test(icon('coins')));
+  check('آیکون ناشناخته به‌جای شکستن، نقطه می‌دهد', icon('چیزی-که-نیست').includes('<circle'));
+  check('بخش بی‌گروه هم آیکون می‌گیرد',
+    sectionIcon('پایه') === 'sliders' && sectionIcon('موقعیت من') === 'briefcase');
+  // پیش‌فرض «همه بسته» فقط وقتی درست است که نبودِ کلید از آرایهٔ خالی جدا
+  // شود، وگرنه کاربری که همه را باز کرده هر بار دوباره بسته می‌بیند.
+  check('نبودِ کلید حافظه با آرایهٔ خالی یکی گرفته نمی‌شود',
+    appSrc48.includes('if (raw == null) return new Set(allSections);'));
+  check('برچسب «n پا» از ریل برداشته شد', !appSrc48.includes('پا</span>'));
+  check('باز شدن تب، گروه بسته‌اش را باز می‌کند',
+    appSrc48.includes('if (folded.has(t.section)) { folded.delete(t.section); buildRail(); }'));
+}
+
+// ═══════════════════════════ ۴۹. سنجه‌های رصدگر لحظه‌ای ═══════════════════════════
+group('۴۹. سنجه‌های رصدگر لحظه‌ای');
+{
+  // کندور آهنی: خرید پوت ۸۰ به ۱ ، فروش پوت ۹۰ به ۳ ، فروش کال ۱۱۰ به ۳ ، خرید کال ۱۲۰ به ۱
+  const legs49 = [
+    { kind: 'put', side: 'buy', strike: 80, price: 1, ratio: 1, size: 1000 },
+    { kind: 'put', side: 'sell', strike: 90, price: 3, ratio: 1, size: 1000 },
+    { kind: 'call', side: 'sell', strike: 110, price: 3, ratio: 1, size: 1000 },
+    { kind: 'call', side: 'buy', strike: 120, price: 1, ratio: 1, size: 1000 },
+  ];
+  const an49 = analyzePayoff(legs49, grossCash(legs49));
+  const be49 = breakevenMetrics(an49.breakevens, 100);
+  // سربه‌سری‌ها ۸۶ و ۱۱۴ ، پایه ۱۰۰ → نزدیک‌ترین ۱۱۴ نیست، هر دو ۱۴ فاصله دارند
+  check('نزدیک‌ترین سربه‌سری، اولین با کمترین فاصله است', near(be49.beNear, 86), be49.beNear);
+  check('فاصله علامت‌دار است — پایین پایه یعنی منفی', be49.beDistPct < 0 && near(be49.beDistPct, -14));
+  check('حاشیه امن بی‌علامت است', near(be49.beRoomPct, 14));
+  check('پهنای سربه‌سری برای ترکیب دوسره معنی دارد', near(be49.beWidthPct, 28), be49.beWidthPct);
+
+  // تک‌سربه‌سری: پهنا نباید عدد بسازد
+  const one49 = breakevenMetrics([95], 100);
+  check('یک سربه‌سری یعنی پهنا خالی، نه صفر', !Number.isFinite(one49.beWidthPct) && near(one49.beDistPct, -5));
+  check('بدون سربه‌سری یا بدون پایه، همه خالی می‌مانند',
+    !Number.isFinite(breakevenMetrics([], 100).beNear) && !Number.isFinite(breakevenMetrics([95], 0).beNear));
+
+  // ——— درصد سمت زیان و نسبت پاداش به ریسک ———
+  const cols49 = new Set(COLUMNS.map((c) => c.key));
+  check('ستون درصد بیشترین زیان هست', cols49.has('maxLossPct'));
+  check('ستون پاداش به ریسک هست', cols49.has('rewardRisk'));
+  const src49 = fs.readFileSync(new URL('../core/evaluate.mjs', import.meta.url), 'utf8');
+  // بی‌نهایت در مخرج، صفر می‌دهد و صفرِ ساختگی بدتر از خالی است.
+  check('زیان نامحدود، نسبت پاداش به ریسک نمی‌سازد',
+    src49.includes('ok(bestPnl) && ok(payoff.maxLoss) && payoff.maxLoss > 0'));
+  check('درصد زیان به سرمایه سنجیده می‌شود، نه به چیز دیگر',
+    src49.includes('(payoff.maxLoss / cap) * 100'));
+
+  // ——— دیده شدن در نمای پیش‌فرض ———
+  //
+  // ستون‌های سربه‌سری از قبل در قرارداد ستونی بودند ولی در هیچ نمای آماده‌ای
+  // نبودند؛ یعنی عملاً کسی نمی‌دیدشان. آزمون، همان دیده‌شدن را قفل می‌کند.
+  const stratSrc49 = fs.readFileSync(new URL('../ui/tabs/strategy.mjs', import.meta.url), 'utf8');
+  const topSrc49 = fs.readFileSync(new URL('../ui/tabs/top.mjs', import.meta.url), 'utf8');
+  const summary49 = /خلاصه: \[([\s\S]*?)\],\n/.exec(stratSrc49)?.[1] || '';
+  for (const k of ['beDistPct', 'beRoomPct', 'maxProfit', 'retMaxPct', 'maxLoss', 'maxLossPct', 'rewardRisk']) {
+    check(`نمای خلاصهٔ استراتژی ستون ${k} را دارد`, summary49.includes(`'${k}'`));
+  }
+  for (const k of ['beDistPct', 'beRoomPct', 'maxLossPct', 'rewardRisk']) {
+    check(`نمای برترین موقعیت‌ها ستون ${k} را دارد`, topSrc49.includes(`'${k}'`));
+  }
+}
+
+// ═══════════════════════════ ۵۰. رصد بازار: ستون کامل، طیف مرتب‌سازی، نمودار ═══════════════════════════
+group('۵۰. رصد بازار — ستون، طیف، نمودار');
+{
+  const mk50 = (strike, days, cBid, pBid) => ({
+    uaInsCode: '1', lval30_UA: 'نمونه', pDrCotVal_UA: 100000, pClosing_UA: 99500,
+    insCode_C: `c${strike}_${days}`, insCode_P: `p${strike}_${days}`,
+    strikePrice: strike, contractSize: 1000, remainedDay: days, endDate: 20260101,
+    pMeDem_C: cBid, qTitMeDem_C: 10, pMeOf_C: cBid * 1.05, qTitMeOf_C: 10,
+    pDrCotVal_C: cBid, pClosing_C: cBid, oP_C: 50, qTotTran5J_C: 100, qTotCap_C: 500, zTotTran_C: 5,
+    pMeDem_P: pBid, qTitMeDem_P: 10, pMeOf_P: pBid * 1.05, qTitMeOf_P: 10,
+    pDrCotVal_P: pBid, pClosing_P: pBid, oP_P: 40, qTotTran5J_P: 80, qTotCap_P: 400, zTotTran_P: 4,
+  });
+  const chain50 = buildChain([mk50(90000, 30, 900, 300), mk50(100000, 30, 500, 500), mk50(110000, 60, 300, 900)]);
+  const u50 = underlyingList(chain50)[0];
+
+  // ——— تجمیع یک‌گذری ———
+  check('قرارداد و قیمت اعمال و سررسید شمرده می‌شوند',
+    u50.contracts === 6 && u50.strikes === 3 && u50.expiries === 2, `${u50.contracts}/${u50.strikes}/${u50.expiries}`);
+  check('حجم و موقعیت باز، جمعِ دو سمت‌اند',
+    u50.volume === u50.callVol + u50.putVol && u50.oi === u50.callOi + u50.putOi
+    && u50.volume === 540 && u50.oi === 270, `حجم ${u50.volume} | موقعیت ${u50.oi}`);
+  check('تفکیک کال و پوت درست است',
+    u50.callVol === 300 && u50.putVol === 240 && u50.callOi === 150 && u50.putOi === 120);
+  // نسبت روی حجم چیزی می‌گوید که نسبت روی موقعیت باز نمی‌گوید
+  check('دو نسبت پوت به کال جدا محاسبه می‌شوند',
+    near(u50.pcVolRatio, 240 / 300) && near(u50.pcRatio, 120 / 150));
+  check('ارزش و تعداد معامله جمع می‌شوند', u50.value === 2700 && u50.trades === 27);
+  check('دورترین سررسید هم گزارش می‌شود', u50.nearestDays === 30 && u50.farDays === 60);
+  // فاصلهٔ مظنه میانه است نه میانگین: یک قرارداد بی‌رمق میانگین را بی‌معنی می‌کند
+  check('میانه فاصله مظنه از قراردادهای دوطرفه می‌آید',
+    u50.twoSided === 6 && near(u50.spreadMedPct, (0.05 / 1.025) * 100), u50.spreadMedPct);
+  const noQuote50 = underlyingList(buildChain([{ ...mk50(100000, 30, 0, 0),
+    pMeDem_C: 0, pMeOf_C: 0, pMeDem_P: 0, pMeOf_P: 0 }]))[0];
+  check('بدون مظنه دوطرفه، فاصله خالی می‌ماند نه صفر',
+    noQuote50.twoSided === 0 && !Number.isFinite(noQuote50.spreadMedPct));
+
+  const st50 = chainStats(chain50);
+  check('آمار کل، تفکیک موقعیت باز را هم می‌دهد',
+    st50.callOi === 150 && st50.putOi === 120 && near(st50.pcOi, 0.8));
+  check('کالِ صفر یعنی نسبت تعریف‌نشده، نه بی‌نهایت',
+    !Number.isFinite(chainStats(buildChain([{ ...mk50(100000, 30, 500, 500), oP_C: 0 }])).pcOi));
+
+  // ——— طیف رنگی ———
+  //
+  // دامنهٔ دوعلامتی باید هر طرف را با مقیاس خودش بسنجد. با یک مقیاس مشترک،
+  // دامنه‌ای مثل [−۱۰، ۱۰۰۰] کل سمت زیان را بی‌رنگ می‌کند.
+  check('دامنه دوعلامتی، واگرا می‌شود و هر طرف رنگ خودش را می‌گیرد',
+    heatRamp(-10, -10, 1000, null).tone === 'loss' && heatRamp(500, -10, 1000, null).tone === 'gain');
+  check('کوچک‌ترین زیان هم دیده می‌شود، چون مقیاس هر طرف جداست',
+    near(heatRamp(-10, -10, 1000, null).t, 1));
+  check('صفر در دامنه واگرا بی‌رنگ است', near(heatRamp(0, -50, 50, null).t, 0));
+  check('دامنه یک‌طرفه رنگ اعلان‌شده ستون را می‌گیرد',
+    heatRamp(5, 0, 10, 'loss').tone === 'loss' && heatRamp(5, 0, 10, 'gain').tone === 'gain'
+    && heatRamp(5, 0, 10, null).tone === 'flat');
+  // ریشهٔ دوم: بدون آن یک مقدار پرت بقیه را بی‌رنگ می‌کند
+  check('شدت با ریشه دوم بالا می‌رود، نه خطی', near(heatRamp(25, 0, 100, null).t, 0.5));
+  check('مقدار بیرون از دامنه مهار می‌شود',
+    heatRamp(500, 0, 100, null).t === 1 && heatRamp(-5, 0, 100, null).t === 0);
+  check('دامنه صفرپهنا یا مقدار نامعتبر، طیف نمی‌سازد',
+    heatRamp(5, 5, 5, null) === null && heatRamp(NaN, 0, 10, null) === null
+    && heatRamp(5, NaN, 10, null) === null);
+
+  const tblSrc50 = fs.readFileSync(new URL('../ui/table.mjs', import.meta.url), 'utf8');
+  // ردیف رصد بازار مفهوم «قابل اجرا» ندارد. با `!r.executable` همه‌شان
+  // خاکستریِ غیرقابل‌اجرا می‌شدند و چون آن کلاس طیف را کنار می‌زند، هیچ ردیفی
+  // در رصد بازار رنگ نمی‌گرفت.
+  check('نبودِ فیلد «قابل اجرا» با «قابل اجرا نیست» یکی گرفته نمی‌شود',
+    tblSrc50.includes("if (r.executable === false) return 'unexec';"));
+  check('ردیف هشداردار رنگ خودش را نگه می‌دارد، نه طیف را',
+    /if \(!cls\) \{[\s\S]{0,200}?dataset\.heat/.test(tblSrc50));
+  check('راهنمای طیف با هر مرتب‌سازی دوباره کشیده می‌شود',
+    /computeRanges\(\);\n\s+drawLegend\(\);/.test(tblSrc50));
+  check('ستون مرتب‌شده حتی بدون heat اعلان‌شده دامنه می‌گیرد',
+    tblSrc50.includes("if (!c.heat && c.key !== sortKey) continue;"));
+
+  const chainSrc50 = fs.readFileSync(new URL('../ui/tabs/chain.mjs', import.meta.url), 'utf8');
+  check('انتخابگر و ماندگاری ستون در رصد بازار روشن است',
+    chainSrc50.includes('all: ALL_COLS') && chainSrc50.includes("storeKey: 'chain:market'"));
+  check('نمودار میله‌ای با سنجهٔ قابل تعویض هست',
+    chainSrc50.includes("id=\"mkt-metric\"") && chainSrc50.includes('function drawBars()'));
+  // سنجه‌ای که تفکیک کال و پوت ندارد نباید نصف ساختگی بگیرد
+  check('فقط سنجه‌های تفکیک‌پذیر دوتکه کشیده می‌شوند',
+    /SPLIT = \{ volume: \['callVol', 'putVol'\], oi: \['callOi', 'putOi'\] \}/.test(chainSrc50));
+}
+
+// ═══════════════════════════ ۵۱. انتقال ترکیب زنده به بک‌تست ═══════════════════════════
+group('۵۱. انتقال ترکیب زنده به بک‌تست');
+{
+  const row51 = {
+    uaIns: '77', underlying: 'اهرم', strategyId: 'bull-call-spread', strategy: 'Bull Call Spread',
+    legsText: '+۱ کال ۲۰۰۰۰  −۱ کال ۲۲۰۰۰',
+    __legs: [
+      { kind: 'call', side: 'buy', strike: 20000, ins: 'c1', name: 'ضهرم1' },
+      { kind: 'call', side: 'sell', strike: 22000, ins: 'c2', name: 'ضهرم2' },
+    ],
+  };
+  check('ردیف دارای نماد و شناسه پا، قابل انتقال است', canHandoff(row51));
+  check('ردیف بدون نماد پایه قابل انتقال نیست', !canHandoff({ ...row51, uaIns: '' }));
+  // بدون شناسه قرارداد، مقصد باید ترکیب را از روی قیمت اعمال حدس بزند و دو
+  // قرارداد هم‌اعمال در دو سررسید یکی گرفته می‌شوند.
+  check('ردیف بدون شناسه قرارداد قابل انتقال نیست',
+    !canHandoff({ ...row51, __legs: [{ kind: 'call', side: 'buy', strike: 20000, ins: '' }] }));
+  check('ردیف تهی، برنامه را نمی‌شکند', !canHandoff(null) && !canHandoff({}));
+
+  const plan51 = handoffPlan(row51, { from: 'strategy', strategyId: 'bull-call-spread', units: 3 });
+  check('نقشه، مقصد و مبدأ را می‌برد', plan51.to === 'backtest' && plan51.from === 'strategy');
+  check('فقط پاهای اختیار منتقل می‌شوند', plan51.legIns.join(',') === 'c1,c2');
+  // پای سهم در تب بک‌تست از خود ترکیب ساخته می‌شود، نه از فهرست قرارداد
+  const withStock51 = handoffPlan({ ...row51,
+    __legs: [...row51.__legs, { kind: 'underlying', side: 'buy', ins: 'u9' }] });
+  check('پای دارایی پایه در فهرست قرارداد نمی‌آید', withStock51.legIns.join(',') === 'c1,c2');
+  check('تعداد واحد دست‌کم یک است و صحیح',
+    handoffPlan(row51, { units: 0 }).units === 1 && handoffPlan(row51, { units: 2.7 }).units === 2
+    && handoffPlan(row51, {}).units === 1);
+  // ردیف زنده تاریخ ندارد؛ حدس‌زدن یک بازهٔ ثابت، بازه‌ای می‌سازد که ممکن
+  // است برای این قرارداد اصلاً وجود نداشته باشد.
+  check('تاریخ‌ها خودکارند، نه حدسی', plan51.entryDate === 'auto' && plan51.exitDate === 'auto');
+  check('مبنای قیمت پیش‌فرض آخرین معامله است',
+    plan51.entryBasis === 'LAST' && plan51.exitBasis === 'LAST');
+  // انتقال باید انتخاب ببرد نه نتیجه: اگر عددی کپی شود، دو تب می‌توانند دو
+  // حرف بزنند و معلوم نیست کدام مال کدام محاسبه است.
+  for (const k of ['maxProfit', 'maxLoss', 'retMaxPct', 'netCash', 'capital', 'popPct']) {
+    check(`نتیجهٔ «${k}» در نقشه منتقل نمی‌شود`, !(k in plan51));
+  }
+
+  const btSrc51 = fs.readFileSync(new URL('../ui/tabs/backtest.mjs', import.meta.url), 'utf8');
+  check('مقصد، تاریخ خودکار را به بلندترین بازهٔ موجود ترجمه می‌کند',
+    btSrc51.includes("plan.entryDate === 'auto' ? entryDates[0]")
+    && btSrc51.includes("plan.exitDate === 'auto' ? exitDates.at(-1)"));
+  for (const [file, what] of [['../ui/tabs/strategy.mjs', 'تب استراتژی'], ['../ui/tabs/top.mjs', 'برترین موقعیت‌ها']]) {
+    const src = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
+    check(`${what} دکمهٔ انتقال دارد و فقط برای ردیف قابل انتقال`,
+      src.includes('canHandoff(r) ? handoffButtonHtml()') && src.includes("location.hash = 'backtest'"));
+  }
+}
+
+// ═══════════════════════════ ۵۲. سناریو، حساسیت، و ریسک عمق دفتر ═══════════════════════════
+group('۵۲. سناریو، حساسیت، و ریسک عمق دفتر');
+{
+  // Bull Call Spread: خرید کال ۱۰۰ به ۸ ، فروش کال ۱۱۰ به ۳ ، اندازه ۱۰۰۰
+  const legs52 = [
+    { kind: 'call', side: 'buy', strike: 100, price: 8, ratio: 1, size: 1000, name: 'C100' },
+    { kind: 'call', side: 'sell', strike: 110, price: 3, ratio: 1, size: 1000, name: 'C110' },
+  ];
+  const net52 = grossCash(legs52);
+  const base52 = { legs: legs52, spot: 100, days: 60, sigma: 0.4, rFree: 0.25, divYield: 0, yearDays: 365 };
+  const lad52 = scenarioLadder(base52);
+
+  check('نردبان سناریو ساخته می‌شود', lad52.length >= 8, `${lad52.length} سطح`);
+  // مهم‌ترین ثابت این ماژول: اگر جدول و نمودار از دو راه حساب کنند، دو حرف
+  // می‌زنند و کاربر نمی‌فهمد کدام درست است.
+  check('سود و زیان هر سطح، دقیقاً همان چیزی است که نمودار بازده می‌کشد',
+    lad52.every((r) => near(r.pnl, pnlAtExpiry(legs52, r.level, net52))));
+  check('تفکیک هر پا با جمع کل می‌خواند',
+    lad52.every((r) => near(r.pnl, r.perLeg.reduce((a, l) => a + l.pnl, 0))));
+  check('از بدترین به بهترین مرتب است',
+    lad52.every((r, i) => i === 0 || lad52[i - 1].pnl <= r.pnl));
+  // در ترکیب سقف‌دار همهٔ سطوح بالای سقف یک عدد می‌دهند؛ بدون مرتب‌سازی دوم
+  // «صدک ۹۵» بعد از «صدک ۹۹» می‌نشیند.
+  check('سطوح هم‌سود بر پایه قیمت مرتب می‌مانند',
+    lad52.every((r, i) => i === 0 || lad52[i - 1].pnl < r.pnl || lad52[i - 1].level <= r.level));
+  check('سقف سود و کف زیان همان اسپرد است',
+    near(Math.max(...lad52.map((r) => r.pnl)), 5000) && near(Math.min(...lad52.map((r) => r.pnl)), -5000));
+  check('قیمت امروز همیشه در فهرست هست', lad52.some((r) => r.kind === 'spot' && near(r.level, 100)));
+  check('احتمال هر سطح با صدکش می‌خواند',
+    lad52.filter((r) => r.kind === 'percentile').every((r) => near(r.probBelow * 100, r.pct, 0.5)));
+  // بدون تلاطم، صدک ساخته نمی‌شود ولی قیمت امروز باید بماند
+  const noVol52 = scenarioLadder({ ...base52, sigma: 0 });
+  check('بدون تلاطم، فقط قیمت امروز می‌ماند — نه صدکِ ساختگی',
+    noVol52.length === 1 && noVol52[0].kind === 'spot');
+  check('ورودی تهی، خروجی تهی می‌دهد',
+    scenarioLadder({}).length === 0 && scenarioLadder({ legs: legs52, spot: 0 }).length === 0);
+
+  // ——— حساسیت ———
+  const grid52 = sensitivityGrid({ ...base52, axis: 'days', moves: [-20, 0, 20] });
+  check('جدول حساسیت، سطر و ستون درست دارد',
+    grid52.rows.length === 3 && grid52.axisValues.length === 3);
+  check('هر خانه، تفکیک پا دارد و با جمعش می‌خواند',
+    grid52.rows.every((r) => r.cells.every((c) => near(c.pnl, c.perLeg.reduce((a, v) => a + v, 0)))));
+  // روی محور روز، صفر یعنی سررسید — و آن‌جا باید دقیقاً منحنی سررسید باشد،
+  // نه بلک‌شولز با تی خیلی کوچک که عددی شبیه درست می‌دهد.
+  const atExpiry52 = grid52.axisValues.indexOf(0);
+  check('روز صفر، دقیقاً همان سود و زیان سررسید است',
+    atExpiry52 >= 0 && grid52.rows.every((r) => near(r.cells[atExpiry52].pnl, pnlAtExpiry(legs52, r.level, net52))));
+  check('پیش از سررسید، ارزش زمانی هنوز هست',
+    grid52.rows.find((r) => r.movePct === -20).cells[0].pnl > grid52.rows.find((r) => r.movePct === -20).cells[atExpiry52].pnl);
+  for (const axis of ['days', 'sigma', 'rFree']) {
+    check(`محور «${axis}» جدول می‌سازد`, sensitivityGrid({ ...base52, axis }).rows.length > 0);
+  }
+  check('محور ناشناخته به روز مانده برمی‌گردد', sensitivityGrid({ ...base52, axis: 'چیزی' }).axis === 'days');
+
+  // ——— ریسک عمق دفتر ———
+  const books52 = [
+    { book: [{ bid: 7.9, bidQty: 2, ask: 8.1, askQty: 5 }, { bid: 7.5, bidQty: 10, ask: 8.6, askQty: 9 }] },
+    { book: [{ bid: 2.8, bidQty: 1, ask: 3.2, askQty: 2 }, { bid: 2.4, bidQty: 4, ask: 3.9, askQty: 20 }] },
+  ];
+  const d52 = bookDepthRisk({ legs: legs52, quotes: books52, units: 5 });
+  // بستن یعنی جهت معکوس: پای خرید به تقاضا می‌خورد، پای فروش به عرضه
+  check('جهت بستن، معکوس جهت باز کردن است',
+    d52.perLeg[0].closeSide === 'sell' && d52.perLeg[1].closeSide === 'buy');
+  // پای خرید: ۲ در ۷٫۹ و ۳ در ۷٫۵ → میانگین وزنی ۷٫۶۶ ، هزینه ۱٬۲۰۰
+  check('میانگین وزنی از پیمایش دفتر می‌آید', near(d52.perLeg[0].vwap, 7.66));
+  check('هزینه بستن هر پا، اختلاف با بهترین مظنه است',
+    near(d52.perLeg[0].exitCost, 1200) && near(d52.perLeg[1].exitCost, 2100));
+  check('هزینه بستن کل، جمع پاهاست', near(d52.exitCostTotal, 3300));
+  check('بدترین لغزش، بزرگ‌ترین قدرمطلق است', near(d52.worstSlipPct, 13.125), d52.worstSlipPct);
+  // دفتر سفارش سهم در دیده‌بان اختیار نیست؛ «نامعلوم» با «صفر» یکی نیست
+  const withStock52 = bookDepthRisk({
+    legs: [...legs52, { kind: 'underlying', side: 'buy', price: 100, ratio: 1, size: 1000 }],
+    quotes: [...books52, {}], units: 5 });
+  check('پای دارایی پایه اصلاً وارد سنجش عمق نمی‌شود', withStock52.perLeg.length === 2);
+  const noBook52 = bookDepthRisk({ legs: legs52, quotes: [{}, {}], units: 5 });
+  check('پای بی‌دفتر، «نامعلوم» است نه «صفر»',
+    noBook52.unknownLegs === 2 && !Number.isFinite(noBook52.exitCostTotal));
+  const thin52 = bookDepthRisk({ legs: legs52, quotes: [
+    { book: [{ bid: 7.9, bidQty: 1, ask: 8.1, askQty: 1 }] }, books52[1]], units: 5 });
+  check('پای کم‌عمق، کسری و قفل‌بودن را گزارش می‌کند',
+    thin52.blockedLegs === 1 && thin52.perLeg[0].short === 4 && thin52.closableUnits === 1,
+    `کسری ${thin52.perLeg[0].short} | واحد ${thin52.closableUnits}`);
+
+  const panelSrc52 = fs.readFileSync(new URL('../ui/scenario-panel.mjs', import.meta.url), 'utf8');
+  check('پنل هیچ محاسبه‌ای ندارد و همه را از موتور می‌خواند',
+    panelSrc52.includes("from '/core/scenario.mjs'")
+    && !/Math\.exp|bsPrice|Math\.log/.test(panelSrc52));
+  check('پارامترهای حساسیت قابل تنظیم‌اند',
+    ['scen-axis', 'scen-range', 'scen-steps', 'scen-units'].every((id) => panelSrc52.includes(id)));
+  // پله فرد لازم است تا «بدون تغییر» همیشه وسط جدول بیفتد
+  check('تعداد پله فرد می‌شود تا صفر وسط بماند', panelSrc52.includes('if (steps % 2 === 0) steps += 1;'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

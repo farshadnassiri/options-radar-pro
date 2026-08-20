@@ -7,6 +7,7 @@
 import { SCHEMA, GROUPS, defaults } from '/core/settings.mjs';
 import { FORMULAS, FORMULA_GROUPS, STRATEGY_FORMULAS, SYMBOLS } from '/core/formulas.mjs';
 import { CATALOG, GROUPS as STRAT_GROUPS } from '/strategies/catalog.mjs';
+import { ltr } from '/ui/fmt.mjs';
 
 const SCOPE_LABEL = { server: 'سرور', client: 'مرورگر', both: 'هر دو' };
 
@@ -52,7 +53,7 @@ function renderFormulas(host, { labelOf, focusKey }) {
         : '';
       return `
         <details class="fx-strategy">
-          <summary><b>${esc(d.name)}</b><span>${esc(d.dir)}</span></summary>
+          <summary><b>${ltr(esc(d.name))}</b><span>${esc(d.dir)}</span></summary>
           <div class="fx-strategy-body">
             <p class="fx-capital"><span>سرمایه درگیر</span> ${esc(c.capital)}</p>
             <table class="fx-rows"><tbody>

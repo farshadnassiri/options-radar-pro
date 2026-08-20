@@ -16,10 +16,12 @@ import { timeMachine } from '/core/timemachine.mjs';
 import { priceQuantile } from '/core/bs.mjs';
 import { gregorianToJalali } from '/core/jalali.mjs';
 import { makeTable, funnelBar, changedIds } from '/ui/table.mjs';
-import { fmt, faNum, faDigits, coverageInfo, signTone } from '/ui/fmt.mjs';
+import { fmt, faNum, faDigits, coverageInfo, signTone, ltr } from '/ui/fmt.mjs';
 import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
+import { canHandoff, handoffPlan, handoffButtonHtml } from '/ui/handoff.mjs';
+import { mountScenarioPanel } from '/ui/scenario-panel.mjs';
 import { runScan, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 
 /** dEven عددی (مثلاً ۲۰۲۶۰۱۰۱) به تاریخ شمسی خوانا. */
@@ -32,8 +34,17 @@ function jalaliFromDEven(dEven) {
 }
 
 const VIEWS = {
-  خلاصه: ['underlying', 'legsText', 'days', 'cashLabel', 'netCash', 'breakevens', 'maxProfit',
-    'maxLoss', 'capital', 'retMaxPct', 'retMonthPct', 'popPct', 'execCost', 'maxQty', 'binding',
+  // نمای خلاصه، ترتیبِ خواندن یک ردیف است: چه چیزی، چند روز، چقدر نقد،
+  // سربه‌سری کجاست و چقدر با آن فاصله داریم، سود و زیان و درصدهایشان، و بعد
+  // سرمایه و اجرا.
+  //
+  // «فاصله تا سربه‌سری ٪» و «بیشترین زیان ٪ سرمایه» تازه‌اند. ستون‌هایشان از
+  // قبل در قرارداد ستونی بود ولی در هیچ نمای آماده‌ای نبود — یعنی عملاً کسی
+  // نمی‌دیدشان. عدد ریالیِ زیان بدون درصد، دو ترکیب با سرمایهٔ متفاوت را
+  // قابل مقایسه نمی‌کند.
+  خلاصه: ['underlying', 'legsText', 'days', 'cashLabel', 'netCash', 'breakevens', 'beDistPct',
+    'beRoomPct', 'maxProfit', 'retMaxPct', 'maxLoss', 'maxLossPct', 'rewardRisk',
+    'capital', 'retMonthPct', 'popPct', 'execCost', 'maxQty', 'binding',
     'qualityLabel', 'warn'],
   سرمایه: ['underlying', 'legsText', 'days', 'capital', 'capitalLabel', 'margin', 'marginToMaxLoss',
     'conditionalMargin', 'netCash', 'maxLoss', 'retMaxPct', 'retAnnPct', 'warn'],
@@ -52,6 +63,7 @@ export async function mount(root, { tab, state, api }) {
   // می‌خوانندش؛ تغییر اینجا بدون این لایه، بی‌صدا روی همه‌شان اثر می‌گذاشت.
   const overrides = {};
   const s = () => ({ ...state.settings, ...overrides });
+  let disposeScen = null;
   let rows = [];
   let picked = null;
   let view = 'خلاصه';
@@ -66,7 +78,7 @@ export async function mount(root, { tab, state, api }) {
 
   root.innerHTML = `
     <div class="page-head">
-      <h2>${def.name}</h2>
+      <h2>${ltr(def.name)}</h2>
       <p>${def.feasible
         ? `${def.dir}${def.note ? ' — ' + def.note : ''}`
         : `<span class="tag warn">اجرا در تابلو ممکن نیست</span> ${def.infeasibleWhy}`}</p>
@@ -109,6 +121,7 @@ export async function mount(root, { tab, state, api }) {
     <section class="card" id="detail-card" style="margin-top:16px;display:none">
       <h3 id="detail-title">جزئیات ردیف</h3>
       <div class="detail" id="detail"></div>
+      <div id="scen-wrap"></div>
       <div id="tm-wrap" style="margin-top:16px"></div>
     </section>`;
 
@@ -291,6 +304,7 @@ export async function mount(root, { tab, state, api }) {
           <span>بیشترین سود: ${fmt.money(an.maxProfit)}</span>
           <span>بیشترین زیان: <b style="color:${Number.isFinite(an.maxLoss) ? 'inherit' : 'var(--loss)'}">${fmt.money(an.maxLoss)}</b></span>
         </div>
+        <div class="detail-actions">${canHandoff(r) ? handoffButtonHtml() : ''}</div>
         <div id="cmp-picker"></div>
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">قیمت و عمق هر پا</h4>
         <table class="mini">
@@ -392,6 +406,24 @@ export async function mount(root, { tab, state, api }) {
       });
     }
     renderCmpPicker();
+
+    // ——— سناریو، حساسیت، عمق دفتر ———
+    disposeScen?.();
+    disposeScen = mountScenarioPanel(root.querySelector('#scen-wrap'), r, {
+      rFree: s().rFree, divYield: s().divYield, yearDays: s().dayCountYear,
+      units: Math.max(1, Number(s().qtyDefault) || 1),
+    });
+
+    // ——— انتقال به بک‌تست ———
+    root.querySelector('#to-backtest')?.addEventListener('click', () => {
+      state.handoff = handoffPlan(r, {
+        from: 'strategy', strategyId: def.id, strategyName: def.name,
+        units: Math.max(1, Number(s().qtyDefault) || 1),
+        entryBasis: 'LAST', exitBasis: 'LAST',
+      });
+      location.hash = 'backtest';
+    });
+
     // نمودار بعد از نشستن قالب سوار می‌شود، چون به اندازه واقعی قاب نیاز دارد
     mountChart();
 
@@ -531,5 +563,5 @@ export async function mount(root, { tab, state, api }) {
   });
 
   setStatus();
-  return () => { offWatch(); offChain(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); };
+  return () => { offWatch(); offChain(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); disposeScen?.(); };
 }

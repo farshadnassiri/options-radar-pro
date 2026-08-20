@@ -74,6 +74,37 @@ export function insertColumn(keys, k, order) {
 }
 
 /**
+ * طیف رنگی یک مقدار در دامنهٔ `[lo, hi]`.
+ *
+ * دو خانواده دارد و انتخاب بینشان از خودِ داده می‌آید، نه از اعلان ستون:
+ *
+ *   واگرا    اگر دامنه هر دو علامت را داشته باشد (مثل سود و زیان). هر طرف
+ *            به رنگ خودش می‌رود و صفر بی‌رنگ می‌ماند، پس مرزِ سود و زیان
+ *            جایی است که رنگ عوض می‌شود، نه جایی که پررنگ‌تر است. مقیاس هر
+ *            طرف جداست، وگرنه دامنه‌ای مثل ‎[−۱۰، ۱۰۰۰]‎ کل سمت زیان را
+ *            بی‌رنگ می‌کند و زیان‌ها دیده نمی‌شوند.
+ *   هم‌سو    اگر دامنه یک‌طرفه باشد (حجم، تعداد، روز). یک رنگ، از کم‌رنگ به
+ *            پررنگ، با رنگِ اعلان‌شدهٔ ستون.
+ *
+ * شدت با ریشهٔ دوم بالا می‌رود نه خطی، وگرنه یک مقدار پرت همهٔ ردیف‌های دیگر
+ * را بی‌رنگ می‌کند.
+ *
+ * خالص و بی‌نیاز از مرورگر، تا آزمون‌شدنی بماند.
+ */
+export function heatRamp(value, lo, hi, declared) {
+  if (!Number.isFinite(value) || !Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+  if (lo < 0 && hi > 0) {
+    const side = value >= 0 ? hi : -lo;
+    if (!(side > 0)) return null;
+    return { tone: value >= 0 ? 'gain' : 'loss', t: Math.sqrt(Math.min(1, Math.abs(value) / side)) };
+  }
+  const span = hi - lo;
+  if (!(span > 0)) return null;
+  const t = Math.sqrt(Math.min(1, Math.max(0, (value - lo) / span)));
+  return { tone: declared === 'loss' ? 'loss' : declared === 'gain' ? 'gain' : 'flat', t };
+}
+
+/**
  * شناسه ردیف‌هایی که مقدار ستون `key` نسبت به اسکن تمام‌شده قبلی تغییر
  * کرده — پایه نشانگر «تغییر کرد» در اسکن پیوسته (`rowClass`ی این فایل از
  * قبل `r.__flash` را می‌خواند، فقط چیزی آن را نمی‌نوشت).
@@ -139,6 +170,7 @@ export function makeTable(host, cols, opts = {}) {
           ستون‌ها <b class="tbl-cols-n"></b>
         </button>
         <span class="tbl-sort" role="status" aria-live="polite"></span>
+        <span class="heat-legend" hidden></span>
         <span class="sp"></span>
         <span class="tbl-count"></span>
       </div>
@@ -152,6 +184,7 @@ export function makeTable(host, cols, opts = {}) {
   const tbody = host.querySelector('tbody');
   const countLbl = host.querySelector('.tbl-count');
   const sortLbl = host.querySelector('.tbl-sort');
+  const legend = host.querySelector('.heat-legend');
   const colsBtn = host.querySelector('.tbl-cols-btn');
   const colsN = host.querySelector('.tbl-cols-n');
   const panel = host.querySelector('.col-panel');
@@ -335,8 +368,10 @@ export function makeTable(host, cols, opts = {}) {
 
   function computeRanges() {
     ranges.clear();
+    // ستون مرتب‌شده همیشه دامنه می‌گیرد، چه heat اعلام‌شده داشته باشد چه نه —
+    // رنگ ردیف از همان ساخته می‌شود.
     for (const c of active()) {
-      if (!c.heat) continue;
+      if (!c.heat && c.key !== sortKey) continue;
       let lo = Infinity, hi = -Infinity;
       for (const r of view) {
         const v = r[c.key];
@@ -357,9 +392,38 @@ export function makeTable(host, cols, opts = {}) {
     return `background:color-mix(in srgb, var(${strong}) ${Math.round(t * 26)}%, var(${soft}) ${Math.round((1 - t) * 40)}%)`;
   }
 
+  /** طیف ردیف بر پایهٔ ستون مرتب‌شده. `heatRamp` قاعده را دارد. */
+  function heatOf(r) {
+    const rg = ranges.get(sortKey);
+    const col = byKey.get(sortKey);
+    if (!rg || !col || !NUM_FMT.has(col.fmt)) return null;
+    return heatRamp(r[sortKey], rg[0], rg[1], col.heat);
+  }
+
+  /** راهنمای طیف: بدون آن، رنگ فقط یک تزیین است و کسی نمی‌داند کم یعنی چه. */
+  function drawLegend() {
+    const rg = ranges.get(sortKey);
+    const col = byKey.get(sortKey);
+    if (!rg || !col || !NUM_FMT.has(col.fmt)) { legend.hidden = true; return; }
+    const [lo, hi] = rg;
+    const f = fmt[col.fmt] || fmt.text;
+    const diverging = lo < 0 && hi > 0;
+    legend.hidden = false;
+    legend.dataset.kind = diverging ? 'div' : (col.heat || 'flat');
+    legend.innerHTML = `<b>${col.label}</b><i class="heat-lo">${f(lo)}</i>
+      <span class="heat-ramp" aria-hidden="true"></span><i class="heat-hi">${f(hi)}</i>`;
+    legend.title = diverging
+      ? 'رنگ ردیف از همین ستون می‌آید. صفر بی‌رنگ است و هر طرف رنگ خودش را دارد.'
+      : 'رنگ ردیف از همین ستون می‌آید: کم‌رنگ یعنی کمینه، پررنگ یعنی بیشینه.';
+  }
+
   function rowClass(r) {
     if (r.__flash) return 'flash';
-    if (!r.executable) return 'unexec';
+    // `=== false` عمدی است. این جدول فقط ردیف استراتژی نمی‌گیرد؛ ردیف رصد
+    // بازار اصلاً مفهوم «قابل اجرا» ندارد و `undefined` می‌آورد. با `!r.executable`
+    // همهٔ آن ردیف‌ها خاکستریِ «غیرقابل اجرا» می‌شدند — و چون این کلاس طیف
+    // رنگی را کنار می‌زند، هیچ ردیفی در رصد بازار رنگ نمی‌گرفت.
+    if (r.executable === false) return 'unexec';
     if (r.warn?.includes('زیان نامحدود')) return 'risky';
     if (r.shortDte) return 'soon';
     if (r.warn?.includes('مظنه کهنه')) return 'stale';
@@ -380,6 +444,7 @@ export function makeTable(host, cols, opts = {}) {
       return String(x ?? '').localeCompare(String(y ?? ''), 'fa') * dir;
     });
     computeRanges();
+    drawLegend();
     if (activeIdx >= view.length) activeIdx = view.length - 1;
     for (const th of headRow.children) {
       const sorted = th.dataset.key === k ? (dir < 0 ? 'desc' : 'asc') : '';
@@ -405,7 +470,15 @@ export function makeTable(host, cols, opts = {}) {
     for (let i = first; i < last; i++) {
       const r = view[i];
       const tr = document.createElement('tr');
-      tr.className = rowClass(r);
+      const cls = rowClass(r);
+      tr.className = cls;
+      // ردیفی که وضعیت هشدار دارد رنگ خودش را نگه می‌دارد. «زیان نامحدود» و
+      // «مظنه کهنه» خبرِ مهم‌تری از جای این ردیف در طیف‌اند، و دو رنگ روی هم
+      // یعنی هیچ‌کدام خوانده نمی‌شود.
+      if (!cls) {
+        const heat = heatOf(r);
+        if (heat) { tr.dataset.heat = heat.tone; tr.style.setProperty('--heat-t', heat.t.toFixed(3)); }
+      }
       tr.dataset.i = i;
       tr.setAttribute('data-kbd-active', i === activeIdx ? '1' : '0');
       for (const c of shown) {
