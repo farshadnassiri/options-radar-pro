@@ -11,6 +11,7 @@ import { fmt } from '/ui/table.mjs';
 import { faDigits, kpiTone } from '/ui/fmt.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
+import { emptyReason } from '/ui/feed-state.mjs';
 
 const KINDS = [
   ['covered-call', 'کاوردکال — سهم + فروش کال'],
@@ -30,6 +31,7 @@ export async function mount(root, { state, api }) {
   let positions = [];
   let quotesByIns = new Map();
   let uaList = [];
+  let feed = { status: 'idle', error: '' };
   let expanded = null;
   let chart = null;
   let chartRange = null;
@@ -119,9 +121,16 @@ export async function mount(root, { state, api }) {
     return picked ? jalaliOf(picked) : todayJalali();
   };
 
+  // فهرست خالی هم باید حرف بزند. «— انتخاب کن —» روی فهرست بی‌نماد،
+  // کاربر را دنبال چیزی می‌فرستد که آنجا نیست.
+  function uaPlaceholder() {
+    if (uaList.length) return '— انتخاب کن —';
+    return emptyReason({ listCount: 0, feedStatus: feed.status, error: feed.error }).text;
+  }
+
   function refreshUaOptions() {
     const cur = F.ua.value;
-    F.ua.innerHTML = '<option value="">— انتخاب کن —</option>'
+    F.ua.innerHTML = `<option value="">${uaPlaceholder()}</option>`
       + uaList.map((u) => `<option value="${u.ins}" ${u.ins === cur ? 'selected' : ''}>${displayName(u.name, u.ins, 'دارایی پایه بدون نام')}</option>`).join('');
   }
 
@@ -424,6 +433,7 @@ export async function mount(root, { state, api }) {
     } catch { /* نوار بالا خبر می‌دهد */ }
   }
 
+  const offFeed = api.onFeed((f) => { feed = f; refreshUaOptions(); });
   const offChain = onChain((cs) => { uaList = cs.list; refreshUaOptions(); });
   if (chainState.list.length) { uaList = chainState.list; refreshUaOptions(); }
   const offWatch = api.subscribeWatch((w) => pushRows(w, !w.changed));
@@ -431,5 +441,5 @@ export async function mount(root, { state, api }) {
   await load();
   await priceAll();
   const timer = setInterval(priceAll, 15000);
-  return () => { offChain(); offWatch(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); };
+  return () => { offChain(); offWatch(); offFeed(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); };
 }

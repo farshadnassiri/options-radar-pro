@@ -4,6 +4,8 @@
 // ورودی محاسبه نیست — چیزی که تایپ می‌کنی هیچ‌وقت مستقیم به موتور نمی‌رود.
 
 import { fmt, normFa } from '/ui/fmt.mjs';
+import { onFeed, retryFeed } from '/ui/app.mjs';
+import { emptyReason } from '/ui/feed-state.mjs';
 
 const KEY = 'picker.selected';
 const displayName = (entity) => {
@@ -32,6 +34,7 @@ export function makePicker(host, opts = {}) {
   // چهارتا نداشتند. با اولین ویرایش دستی (تیک زدن یک ردیف) پاک می‌شود،
   // چون انتخاب دیگر دقیقاً همان پیش‌تنظیم نیست.
   let activePreset = null;
+  let feed = { status: 'idle', error: '' };
 
   host.innerHTML = `
     <div class="picker">
@@ -82,9 +85,27 @@ export function makePicker(host, opts = {}) {
       frag.appendChild(row);
     }
     listHost.appendChild(frag);
-    if (!shown.length) listHost.innerHTML = '<div style="padding:14px;color:var(--muted);font-size:var(--fs-sm)">نمادی با این نام در دیده‌بان نیست.</div>';
+    if (!shown.length) listHost.innerHTML = emptyHtml();
     summary();
   }
+
+  /**
+   * چرا هیچ ردیفی نیست.
+   *
+   * «خالی» چهار دلیل جدا دارد و تا وقتی همه یک شکل دیده می‌شدند، کاربر
+   * نمی‌دانست باید صبر کند، دوباره بزند، جست‌وجو را پاک کند، یا اصلاً
+   * منتظر نماند.
+   */
+  function emptyHtml() {
+    const why = emptyReason({ listCount: list.length, filtered: !!filter, feedStatus: feed.status, error: feed.error });
+    if (!why.retry) return note(why.text);
+    return `${note(why.text)}
+      <div class="picker-empty-act"><button class="ghost" data-pk-retry>تلاش دوباره</button>
+      <a class="ghost" href="#logs">دفتر خطاها</a></div>`;
+  }
+
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const note = (text) => `<div class="picker-empty">${esc(text)}</div>`;
 
   function summary() {
     const picked = list.filter((u) => selected.has(u.ins));
@@ -115,8 +136,17 @@ export function makePicker(host, opts = {}) {
     b.addEventListener('click', () => preset(b.dataset.pre));
   }
   q.addEventListener('input', () => { filter = q.value.trim(); render(); });
+  listHost.addEventListener('click', (e) => {
+    if (e.target.closest('[data-pk-retry]')) retryFeed();
+  });
+
+  // بدون این، جعبه تا رسیدن اولین ردیف اصلاً رسم نمی‌شد — نه پیامی، نه
+  // خلاصه‌ای. کاربر یک مستطیل خالی می‌دید که هیچ نمی‌گفت.
+  const offFeed = onFeed((f) => { feed = f; render(); });
+  render();
 
   return {
+    dispose() { offFeed(); },
     setList(next) {
       list = next;
       // نمادهایی که دیگر در دیده‌بان نیستند از انتخاب بیرون می‌روند

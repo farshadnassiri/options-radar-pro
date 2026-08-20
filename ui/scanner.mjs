@@ -9,6 +9,7 @@
 // دریافت عمق دوباره مرتب می‌شوند.
 
 import { CATALOG } from '/strategies/catalog.mjs';
+import { logError } from '/ui/errlog.mjs';
 
 let worker = null;
 let seq = 0;
@@ -32,7 +33,10 @@ function ensureWorker() {
     if (w) { waiting.delete(m.id); w(m); }
   };
   worker.onerror = (err) => {
-    console.error('ریسه اسکن:', err.message);
+    // پیش از این فقط به کنسول می‌رفت. خرابی ریسه یعنی زنجیره هرگز ساخته
+    // نمی‌شود و فهرست نماد تا ابد خالی می‌ماند؛ این باید در دفتر خطاها
+    // دیده شود، نه جایی که کاربر هیچ‌وقت باز نمی‌کند.
+    logError('ریسه اسکن', err?.message ? err : new Error(err?.message || 'خطای ریسه اسکن'));
     // نگهبان آخر — اگر خطا هرگز به یک id مشخص نرسید (مثلاً خرابی سطح
     // ماژول، پیش از رسیدن به try/catch داخل ریسه)، همه منتظرها آزاد
     // می‌شوند تا دکمه اسکن برای همیشه «در حال اسکن…» قفل نماند

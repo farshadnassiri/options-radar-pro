@@ -296,5 +296,5 @@ export async function mount(root, { state, api }) {
   drawFlow();
   const timer = setInterval(drawFlow, 4000);
 
-  return () => { offWatch(); offChain(); clearInterval(timer); };
+  return () => { offWatch(); offChain(); picker.dispose?.(); clearInterval(timer); };
 }

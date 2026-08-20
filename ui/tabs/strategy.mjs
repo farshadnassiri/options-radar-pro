@@ -563,5 +563,5 @@ export async function mount(root, { tab, state, api }) {
   });
 
   setStatus();
-  return () => { offWatch(); offChain(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); disposeScen?.(); };
+  return () => { offWatch(); offChain(); picker.dispose?.(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); disposeScen?.(); };
 }

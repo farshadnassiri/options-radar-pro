@@ -9,6 +9,7 @@ import { CATALOG, GROUPS as SGROUPS } from '/strategies/catalog.mjs';
 import { mountCapacityPicker } from '/ui/expiries.mjs';
 import { icon, sectionIcon, TAB_ICON, GROUP_ICON } from '/ui/icons.mjs';
 import { installGlobalCapture, logError } from '/ui/errlog.mjs';
+import { linkLabelKey } from '/ui/feed-state.mjs';
 
 export const state = {
   settings: defaults(),
@@ -19,6 +20,12 @@ export const state = {
   // است نه زمان سرور، چون همان چیزی است که کاربر می‌خواهد بداند: از کی تا
   // حالا چیزی تازه نیامده.
   link: { status: 'idle', since: Date.now(), lastData: null },
+  // چرا فهرست نماد خالی است. «خالی» یک حالت نیست، سه تاست: هنوز نیامده،
+  // نیامد و دلیلش این بود، یا آمد و خودِ تابلو چیزی نداشت. تا وقتی این سه
+  // یک شکل دیده می‌شدند، کاربر هیچ راهی نداشت بفهمد باید صبر کند، دوباره
+  // بزند، یا اصلاً منتظر نماند.
+  feed: { status: 'idle', error: '' },
+  feedSubs: new Set(),
   // تحویل بین تب‌ها. تبی که تب دیگری را باز می‌کند، آنچه را کاربر همین حالا
   // انتخاب کرده اینجا می‌گذارد و تب مقصد سر جای خودش برش می‌دارد و پاک
   // می‌کند. از localStorage استفاده نمی‌شود چون این داده عمر یک کلیک دارد.
@@ -67,23 +74,51 @@ const rowKey = (r) => `${r.insCode_C ?? ''}|${r.insCode_P ?? ''}`;
  * که دیگر قیمت بازار نیست.
  */
 let seeding = null;
+/** وضعیت خوراک را می‌نشاند و همه شنونده‌ها را خبر می‌کند. */
+function setFeed(status, error = '') {
+  if (state.feed.status === status && state.feed.error === error) return;
+  state.feed.status = status;
+  state.feed.error = error;
+  for (const fn of state.feedSubs) { try { fn(state.feed); } catch (err) { console.error(err); } }
+  paintLink();
+}
+
+export function onFeed(fn) {
+  state.feedSubs.add(fn);
+  fn(state.feed);
+  return () => state.feedSubs.delete(fn);
+}
+
+/** تلاش دوباره، بدون اینکه کاربر مجبور باشد تب را ببندد و باز کند. */
+export function retryFeed() {
+  if (seeding) return seeding;
+  state.feed.status = 'idle';
+  return seedWatch();
+}
+
 function seedWatch() {
   if (seeding || state.watch.rows.length) return seeding;
+  setFeed('loading');
   seeding = (async () => {
     try {
       const response = await fetch('/api/history/universe');
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || 'عکس پشتیبان نیامد');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
       const rows = payload.rows || [];
-      if (!rows.length || state.watch.rows.length) return;
+      if (state.watch.rows.length) { setFeed('ok'); return; }
+      // تابلو پاسخ داد ولی چیزی نداشت. این با «نگرفتیم» یکی نیست و نباید
+      // مثل آن دیده شود؛ تلاش دوباره هم دردی از آن دوا نمی‌کند.
+      if (!rows.length) { setFeed('empty'); return; }
       state.watch.byKey = new Map(rows.map((r) => [rowKey(r), r]));
       state.watch.rows = rows;
       state.watch.at = payload.at || null;
       state.watch.changed = null;
       state.watch.stale = true;                 // زنده نیست
+      setFeed('ok');
       setLink('snapshot');
       for (const fn of state.subscribers) { try { fn(state.watch); } catch (err) { logError('پخش عکس پشتیبان', err); } }
     } catch (err) {
+      setFeed('failed', err?.message ? String(err.message) : String(err));
       logError('گرفتن عکس پشتیبان', err);
     } finally { seeding = null; }
   })();
@@ -122,6 +157,7 @@ function openStream() {
     }
     state.watch.at = msg.at;
     state.watch.stale = false;   // داده زنده رسید؛ برچسب عکس پشتیبان برداشته می‌شود
+    setFeed('ok');
     state.watch.rows = [...state.watch.byKey.values()];
     state.watch.changed = msg.full ? null : msg.rows.length;
     for (const fn of state.subscribers) { try { fn(state.watch); } catch (err) { console.error(err); } }
@@ -135,6 +171,13 @@ function openStream() {
 
 const el = (id) => document.getElementById(id);
 
+const linkKey = () => linkLabelKey({
+  rowCount: state.watch.rows.length,
+  stale: state.watch.stale,
+  feedStatus: state.feed.status,
+  linkStatus: state.link.status,
+});
+
 const LINK_TEXT = {
   idle: ['بی‌اتصال', 'idle'],
   connecting: ['در حال اتصال', 'wait'],
@@ -144,6 +187,12 @@ const LINK_TEXT = {
   // برچسب اختیاری نیست: بدون آن کاربر روی قیمتی تصمیم می‌گیرد که دیگر
   // قیمت بازار نیست و هیچ نشانه‌ای هم نمی‌بیند.
   snapshot: ['عکس آخرین جلسه — زنده نیست', 'wait'],
+  // سوکتِ باز با «داده دارم» یکی نیست. وقتی هیچ ردیفی نداریم، «متصل» یک
+  // دروغ آرام است: کاربر فهرست خالی را می‌بیند و فکر می‌کند خودش اشتباه
+  // می‌کند، نه اینکه داده‌ای نرسیده.
+  waiting: ['در انتظار داده', 'wait'],
+  nodata: ['داده‌ای نیامد — دفتر خطاها', 'down'],
+  blank: ['تابلو خالی است', 'idle'],
 };
 
 /**
@@ -161,13 +210,17 @@ function paintLink() {
   // داده‌ای نیاید — بیرون از ساعت بازار دقیقاً همین است. اگر آنچه روی صفحه
   // است عکس آخرین جلسه باشد، برچسب باید همان را بگوید، وگرنه «متصل» به
   // کاربر می‌گوید قیمت‌ها زنده‌اند در حالی که نیستند.
-  const key = state.watch.stale && state.watch.rows.length ? 'snapshot' : state.link.status;
+  const key = linkKey();
   const [text, cls] = LINK_TEXT[key] || LINK_TEXT.idle;
   pill.textContent = text;
   pill.className = `pill link ${cls}`;
   pill.title = key === 'snapshot'
     ? 'بازار بسته است. این ردیف‌ها از آخرین جلسه‌اند و تغییر نمی‌کنند.'
-    : 'وضعیت اتصال جریان داده';
+    : key === 'nodata'
+      ? `فهرست نماد خالی ماند: ${state.feed.error || 'دلیل نامعلوم'}`
+      : key === 'blank'
+        ? 'تابلو پاسخ داد ولی هیچ قراردادی نداشت.'
+        : 'وضعیت اتصال جریان داده';
 
   const fresh = el('h-fresh');
   if (!fresh) return;
@@ -425,7 +478,7 @@ async function open(id) {
     const mod = t.mod ? await import(t.mod) : await import('/ui/tabs/soon.mjs');
     if (gen !== openGen) return; // تب دیگری وسط import کلیک شد؛ این تلاش کهنه است
     stage.innerHTML = '';
-    const d = await mod.mount(stage, { tab: t, state, api: { loadSettings, putSettings, subscribeWatch } });
+    const d = await mod.mount(stage, { tab: t, state, api: { loadSettings, putSettings, subscribeWatch, onFeed, retryFeed } });
     if (gen !== openGen) { try { d?.(); } catch {} return; } // وسط mount هم کهنه شد؛ بی‌صدا خودش را جمع می‌کند
     disposer = d;
     scrollToStage();
