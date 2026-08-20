@@ -263,5 +263,5 @@ export async function mount(root, { state, api }) {
 
   const offWatch = api.subscribeWatch((w) => pushRows(w, !w.changed));
   setStatus();
-  return () => { offWatch(); offChain(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); };
+  return () => { offWatch(); offChain(); picker.dispose?.(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); };
 }

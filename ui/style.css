@@ -1509,6 +1509,11 @@ td.gain, dd.gain { color: var(--gain); }
 .picker-row .m { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); direction: ltr; }
 .picker-sum { font-size: var(--fs-md); color: var(--muted); }
 
+/* جعبه خالی، با دلیل. تا وقتی این نبود، فهرست بی‌نماد یک مستطیل ساکت بود. */
+.picker-empty { padding: 14px; color: var(--muted); font-size: var(--fs-sm); line-height: 1.9; }
+.picker-empty-act { display: flex; gap: 8px; padding: 0 14px 14px; }
+.picker-empty-act .ghost { font-size: var(--fs-sm); text-decoration: none; }
+
 /* ——— پانل جزئیات ——— */
 .detail { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; }
 @media (max-width: 1100px) { .detail { grid-template-columns: 1fr; } }
