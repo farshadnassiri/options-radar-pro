@@ -4526,6 +4526,7 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
     workbook64.includes('میانگین ۵روزه فاصله کال ٪') && workbook64.includes('میانگین ۵روزه IV پوت ٪')
     && workbook64.includes('وزن شاخص ٪') && workbook64.includes('وزن IV ٪'));
   check('خانه نامعتبر اکسل خالی می‌ماند، نه متن NaN', !workbook64.includes('>NaN<'));
+  check('اکسل سررسید فعال هنگام خروجی را در راهنما ثبت می‌کند', workbook64.includes('سررسید فعال هنگام خروجی'));
 
   const app64 = readSrc('../ui/app.mjs'), server64 = readSrc('../server/server.mjs'), ui64 = readSrc('../ui/tabs/open-view.mjs');
   check('نگاه باز یک تب پایه تنبل است', app64.includes("id: 'open-view'") && app64.includes("mod: '/ui/tabs/open-view.mjs'"));
@@ -4535,6 +4536,12 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
   check('نمای اصلی فقط جدول روزانه دارد و جدول سررسید/همبستگی حذف شده', ui64.includes('open-view-daily-table') && !ui64.includes('ov-expiry-table') && !ui64.includes('correlationTable'));
   check('تولتیپ قیمت، فاصله درصدی هر دو شاخص را می‌گوید', ui64.includes('فاصله پایه تا کال') && ui64.includes('فاصله پایه از پوت'));
   check('جدول قرارداد، وزن سربه‌سر و IV را جدا رنگ می‌کند', ui64.includes('indexWeightPct') && ui64.includes('ivWeightPct') && ui64.includes('open-view-weight-cell'));
+  check('نمودار فاصله، کال و پوت را ستونی رسم می‌کند', ui64.includes("kind: 'bar'") && ui64.includes('open-view-chart-bar'));
+  check('میانگین‌های فاصله و IV از راهنمای نمودار قابل خاموش‌کردن‌اند', ui64.includes('data-series-toggle') && ui64.includes('hiddenSeries') && ui64.includes('aria-pressed'));
+  check('گزینه همه سررسیدها حذف شده و فقط سررسید واقعی انتخاب می‌شود', !ui64.includes('value="all"') && ui64.includes('selectedExpiry'));
+  check('جدول روزانه و جزئیات روز از ردیف‌های همان سررسید می‌خوانند', ui64.includes('dailyTable(rows, selectedDate)') && ui64.includes('item.expiry === selectedExpiry()'));
+  check('ریزمعامله فقط قراردادهای سررسید انتخابی را دریافت می‌کند', ui64.includes('contractsInView()') && ui64.includes('contracts: viewContracts'));
+  check('پارامترهای مدل IV در خود نگاه باز قابل تنظیم‌اند', ['ov-rfree', 'ov-divyield', 'ov-year-days', 'ov-iv-lo', 'ov-iv-hi', 'ov-apply-iv'].every((id) => ui64.includes(id)) && ui64.includes('toEnDigits'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════
