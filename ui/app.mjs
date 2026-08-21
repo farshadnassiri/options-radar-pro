@@ -269,6 +269,7 @@ async function tickHealth() {
 const TABS = [
   { id: 'settings', title: 'تنظیمات', section: 'پایه', mod: '/ui/tabs/settings.mjs', phase: 1 },
   { id: 'chain', title: 'دیده‌بان زنجیره اختیار', section: 'پایه', mod: '/ui/tabs/chain.mjs', phase: 3 },
+  { id: 'open-view', title: 'نگاه باز', section: 'پایه', mod: '/ui/tabs/open-view.mjs', phase: 3 },
   { id: 'history', title: 'تحلیل تاریخی استراتژی', section: 'پایه', mod: '/ui/tabs/history.mjs', phase: 3 },
   { id: 'backtest', title: 'بک‌تست سریع', section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },
   { id: 'portfolio-backtest', title: 'آزمون همه استراتژی‌ها', section: 'پایه', mod: '/ui/tabs/portfolio-backtest.mjs', phase: 3 },
@@ -292,7 +293,7 @@ TABS.push({ id: 'roll', title: 'تحلیل رول', section: 'موقعیت من'
 
 // ————————————————————————————————— فهرست کناری —————————————————————————————————
 //
-// چهل تب در یک ستون، بدون کمک، یعنی پیمایش. سه چیز آن را قابل استفاده
+// چهل‌ویک تب در یک ستون، بدون کمک، یعنی پیمایش. سه چیز آن را قابل استفاده
 // می‌کند: جست‌وجو که فهرست را کوتاه می‌کند، بخش‌های تاشو که آنچه امروز کار
 // نداری را جمع می‌کند، و برچسب جهت هر استراتژی که بدون باز کردن تب می‌گوید
 // صعودی است یا نزولی یا خنثی.

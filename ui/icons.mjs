@@ -50,7 +50,7 @@ export const GROUP_ICON = {
 
 /** آیکون تب‌هایی که استراتژی نیستند. */
 export const TAB_ICON = {
-  settings: 'sliders', chain: 'grid', history: 'clock', backtest: 'play',
+  settings: 'sliders', chain: 'grid', 'open-view': 'wave', history: 'clock', backtest: 'play',
   'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert',
   positions: 'briefcase', roll: 'rotate',
 };
