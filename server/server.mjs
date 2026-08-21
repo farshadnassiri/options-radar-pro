@@ -381,6 +381,36 @@ async function handle(req, res) {
       return sendJson(res, 200, { at: watch.at, count: watch.rows.length, rows: watch.rows });
     }
 
+    // ریزمعامله چند قرارداد/روز برای تب «نگاه باز».
+    // بدنه آرایه جفت‌های دقیق است تا قرارداد بی‌معامله در یک روز، درخواست
+    // اضافه نسازد. صف مشترک سرور همچنان سقف هم‌زمانی و سهمیه بالادست را
+    // اعمال می‌کند؛ این نقطه پایانی راه فرار از rate limit نیست.
+    if (p === '/api/trades/batch') {
+      if (req.method !== 'POST') return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
+      const body = JSON.parse(await readBody(req, MAX_BODY) || '{}');
+      const raw = Array.isArray(body.requests) ? body.requests : [];
+      if (!raw.length) return sendJson(res, 400, { error: 'فهرست قرارداد/روز خالی است' });
+      if (raw.length > 1200) return sendJson(res, 413, { error: 'بازه برای ریزمعامله بزرگ است؛ تاریخ را کوتاه‌تر کن (سقف ۱۲۰۰ قرارداد/روز)' });
+      const seen = new Set(), requests = [];
+      for (const item of raw) {
+        const code = String(item?.ins ?? ''), date = String(item?.date ?? '');
+        if (!validIns(code) || !validCompactDate(date)) {
+          return sendJson(res, 400, { error: 'هر درخواست باید کد ابزار رقمی و تاریخ هشت‌رقمی میلادی داشته باشد' });
+        }
+        const key = `${date}:${code}`;
+        if (!seen.has(key)) { seen.add(key); requests.push({ key, code, date }); }
+      }
+      const one = async ({ key, code, date }) => {
+        try {
+          const rows = firstList(await get(historicalTradesPath(code, date), S.ttlDailySec, 6));
+          return [key, { rows: normalizeTrades(rows) }];
+        } catch (e) {
+          return [key, { rows: [], error: `${e.name}: ${e.message}` }];
+        }
+      };
+      return sendJson(res, 200, { count: requests.length, items: Object.fromEntries(await Promise.all(requests.map(one))) });
+    }
+
     // فهرست قراردادهای فعال برای تحلیل تاریخی، حتی بیرون از ساعت بازار.
     // حلقه زنده عمداً پشت دروازه ساعت بازار می‌ایستد؛ این نقطه پایانی نباید
     // بایستد چون تاریخچه باید شب و روز قابل بررسی باشد.

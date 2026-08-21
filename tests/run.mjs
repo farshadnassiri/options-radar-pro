@@ -62,6 +62,11 @@ import {
 import { summarizePortfolio } from '../core/portfolio.mjs';
 import { linkLabelKey, emptyReason } from '../ui/feed-state.mjs';
 import { BE_SLOTS } from '../core/evaluate.mjs';
+import {
+  analyzeDailyOpenView, analyzeIntradayOpenView, optionBreakeven, pearson,
+  relationMatrix, weightedMean,
+} from '../core/open-view.mjs';
+import { buildOpenViewWorkbook } from '../ui/open-view-export.mjs';
 
 let pass = 0, fail = 0;
 const results = [];
@@ -4432,6 +4437,81 @@ group('۶۳. انتخاب ترکیب با تغییر قیمت یا اسکرول 
     /document\.addEventListener\('wheel'[\s\S]*?select\.blur\(\);/.test(appSrc63));
   check('و صفحه همچنان اسکرول می‌شود — رویداد گرفته نمی‌شود',
     /addEventListener\('wheel'[\s\S]*?\{ passive: true, capture: true \}\)/.test(appSrc63));
+}
+
+// ═══════════════════════════ ۶۴. نگاه باز ═══════════════════════════
+group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و بازه زمانی');
+{
+  check('سربه‌سر کال = اعمال + پریمیوم', near(optionBreakeven('call', 100, 12), 112));
+  check('سربه‌سر پوت = اعمال − پریمیوم', near(optionBreakeven('put', 100, 7), 93));
+  const weighted = weightedMean([{ v: 10, w: 1 }, { v: 20, w: 3 }, { v: 999, w: 0 }], (r) => r.v, (r) => r.w);
+  check('میانگین وزنی، وزن صفر را وارد شاخص نمی‌کند', near(weighted.value, 17.5) && weighted.count === 2 && weighted.weight === 4);
+
+  const expiry = 20240630;
+  const ua64 = { ins: '1', name: 'پایه آزمایشی' };
+  const contracts64 = [
+    { ins: '11', name: 'کال ۱۰۰', kind: 'call', strike: 100, expiry, size: 1000 },
+    { ins: '12', name: 'کال ۱۲۰', kind: 'call', strike: 120, expiry, size: 1000 },
+    { ins: '21', name: 'پوت ۱۰۰', kind: 'put', strike: 100, expiry, size: 1000 },
+  ];
+  const series64 = {
+    1: [
+      { date: 20240101, close: 100, value: 1000000, vol: 10000 },
+      { date: 20240102, close: 105, value: 1200000, vol: 11000 },
+    ],
+    11: [
+      { date: 20240101, close: 10, value: 100, vol: 10, trades: 2 },
+      { date: 20240102, close: 12, value: 200, vol: 20, trades: 3 },
+    ],
+    12: [
+      { date: 20240101, close: 5, value: 300, vol: 30, trades: 4 },
+      // ارزش رسمی صفر: قیمت دیده می‌شود ولی حق ندارد وزن شاخص شود.
+      { date: 20240102, close: 6, value: 0, vol: 10, trades: 1 },
+    ],
+    21: [
+      { date: 20240101, close: 8, value: 200, vol: 20, trades: 3 },
+      { date: 20240102, close: 7, value: 400, vol: 40, trades: 5 },
+    ],
+  };
+  const daily64 = analyzeDailyOpenView({ ua: ua64, contracts: contracts64, seriesByIns: series64, from: 20240101, to: 20240102, settings: { rFree: 0.2, yearDays: 365 } });
+  check('شاخص روزانه کال با ارزش رسمی وزن می‌گیرد', near(daily64.rows[0].callBreakeven, 121.25), daily64.rows[0].callBreakeven);
+  check('قرارداد با ارزش رسمی صفر از شاخص روزانه کنار می‌رود', near(daily64.rows[1].callBreakeven, 112) && daily64.rows[1].callContracts === 1);
+  check('شاخص پوت جدا ساخته می‌شود', near(daily64.rows[0].putBreakeven, 92));
+  check('تغییر پایه روز دوم محاسبه می‌شود', near(daily64.rows[1].baseChangePct, 5));
+  check('تفکیک تاریخ×سررسید موجود است', daily64.expiryRows.length === 2 && daily64.expiryRows.every((r) => r.expiry === expiry));
+  check('IV قراردادهای معتبر بدون ساخت عدد برای نامعتبرها ثبت می‌شود', daily64.contractRows.some((r) => Number.isFinite(r.iv)));
+
+  const trade = (time, price, quantity, canceledKnown = true) => ({ time, price, quantity, canceled: false, canceledKnown });
+  const intraday64 = analyzeIntradayOpenView({
+    ua: ua64, contracts: contracts64, dates: [20240101], intervalMinutes: 15,
+    tradesByKey: {
+      '20240101:1': [trade(90100, 100, 100), trade(91000, 110, 100)],
+      '20240101:11': [trade(90200, 10, 2), trade(92000, 11, 1)],
+      '20240101:12': [trade(90600, 5, 6)],
+      '20240101:21': [trade(90400, 8, 1, false)],
+    }, settings: { rFree: 0.2, yearDays: 365 },
+  });
+  check('پایه در همان سطل با VWAP ساخته می‌شود', intraday64.rows.length === 2 && near(intraday64.rows[0].basePrice, 105));
+  check('قیمت پایه به سطل بی‌معامله بعدی حمل نمی‌شود', !Number.isFinite(intraday64.rows[1].basePrice));
+  check('ارزش ریزمعامله × اندازه قرارداد وزن کال است', near(intraday64.rows[0].callBreakeven, 119));
+  check('ابهام وضعیت ابطال تا خروجی حفظ می‌شود', intraday64.rows[0].unknownCancel === true);
+  check('ریز هر قرارداد و هر سررسید برای حسابرسی نگه داشته می‌شود', intraday64.contractRows.length === 4 && intraday64.expiryRows.length === 2);
+
+  const corr = pearson([{ a: 1, b: 2 }, { a: 2, b: 4 }, { a: 3, b: 6 }], 'a', 'b');
+  check('همبستگی پیرسون همراه تعداد نمونه محاسبه می‌شود', near(corr.value, 1) && corr.samples === 3);
+  check('ماتریس رابطه همه متغیرها مربع است', relationMatrix(daily64.rows).length === 49);
+
+  const workbook64 = buildOpenViewWorkbook({ ua: ua64, daily: daily64, intraday: intraday64, dailyRelations: relationMatrix(daily64.rows), intradayRelations: relationMatrix(intraday64.rows) });
+  check('اکسل جامع، راهنما و برگه‌های روزانه/بازه/همبستگی دارد',
+    workbook64.includes('ss:Name="راهنما"') && workbook64.includes('ss:Name="روزانه سررسید"')
+    && workbook64.includes('ss:Name="قراردادهای بازه"') && workbook64.includes('ss:Name="همبستگی روزانه"'));
+  check('عددهای اکسل Numeric می‌مانند', workbook64.includes('<Data ss:Type="Number">121.25</Data>'));
+  check('خانه نامعتبر اکسل خالی می‌ماند، نه متن NaN', !workbook64.includes('>NaN<'));
+
+  const app64 = readSrc('../ui/app.mjs'), server64 = readSrc('../server/server.mjs'), ui64 = readSrc('../ui/tabs/open-view.mjs');
+  check('نگاه باز یک تب پایه تنبل است', app64.includes("id: 'open-view'") && app64.includes("mod: '/ui/tabs/open-view.mjs'"));
+  check('ریزمعامله دسته‌ای سقف صریح دارد', server64.includes("p === '/api/trades/batch'") && server64.includes('raw.length > 1200'));
+  check('رابط بازه، تایم‌فریم و خروجی جامع دارد', ui64.includes('ov-from') && ui64.includes('ov-interval') && ui64.includes('downloadOpenViewExcel'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════
