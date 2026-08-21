@@ -1,8 +1,6 @@
 import { buildChain, legContractSize } from '/core/chain.mjs';
 import { flattenActiveContracts, historyDateLabel, indexHistory, normalizeHistoryDate } from '/core/history.mjs';
-import {
-  OPEN_VIEW_RELATIONS, analyzeDailyOpenView, analyzeIntradayOpenView, relationMatrix,
-} from '/core/open-view.mjs';
+import { analyzeDailyOpenView, analyzeIntradayOpenView, relationMatrix } from '/core/open-view.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 
@@ -27,19 +25,22 @@ const SERIES_PRICE = [
   { key: 'callBreakeven', label: 'سربه‌سر وزنی کال', color: 'var(--gain)' },
   { key: 'putBreakeven', label: 'سربه‌سر وزنی پوت', color: 'var(--loss)' },
 ];
+const SERIES_GAP = [
+  { key: 'callBreakevenGapPct', label: 'فاصله تا کال', color: 'var(--gain)' },
+  { key: 'callBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله کال', color: 'var(--cmp2)' },
+  { key: 'putBreakevenGapPct', label: 'فاصله از پوت', color: 'var(--loss)' },
+  { key: 'putBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله پوت', color: 'var(--cmp3)' },
+];
+const SERIES_GAP_INTRADAY = [SERIES_GAP[0], SERIES_GAP[2]];
 const SERIES_IV = [
   { key: 'callIvPct', label: 'IV وزنی کال', color: 'var(--cmp1)' },
+  { key: 'callIvPctMa5', label: 'میانگین ۵روزه IV کال', color: 'var(--cmp2)' },
   { key: 'putIvPct', label: 'IV وزنی پوت', color: 'var(--cmp4)' },
+  { key: 'putIvPctMa5', label: 'میانگین ۵روزه IV پوت', color: 'var(--cmp3)' },
 ];
-const SERIES_CHANGE = [
-  { key: 'baseChangePct', label: 'تغییر پایه', color: 'var(--warn)' },
-  { key: 'callBreakevenChangePct', label: 'تغییر سربه‌سر کال', color: 'var(--gain)' },
-  { key: 'putBreakevenChangePct', label: 'تغییر سربه‌سر پوت', color: 'var(--loss)' },
-  { key: 'callIvChangePp', label: 'تغییر IV کال', color: 'var(--cmp1)' },
-  { key: 'putIvChangePp', label: 'تغییر IV پوت', color: 'var(--cmp4)' },
-];
+const SERIES_IV_INTRADAY = [SERIES_IV[0], SERIES_IV[2]];
 
-function chart(host, sourceRows, series, { percent = false, intraday = false, yLabel = '' } = {}) {
+function chart(host, sourceRows, series, { percent = false, intraday = false, yLabel = '', extra = null } = {}) {
   const rows = sourceRows.filter((row) => series.some((item) => Number.isFinite(row[item.key])));
   if (rows.length < 2) { host.innerHTML = '<p class="empty-note">برای رسم نمودار دست‌کم دو مشاهده معتبر لازم است.</p>'; return; }
   const values = rows.flatMap((row) => series.map((item) => row[item.key]).filter(Number.isFinite));
@@ -50,7 +51,7 @@ function chart(host, sourceRows, series, { percent = false, intraday = false, yL
   const x = (index) => L + (index / Math.max(1, rows.length - 1)) * (W - L - R);
   const y = (value) => T + ((high - value) / (high - low)) * (H - T - B);
   const ticks = Array.from({ length: 5 }, (_, index) => low + ((high - low) * index) / 4);
-  const axis = (value) => percent ? fmt.pct(value) : fmt.money(value);
+  const axis = (value) => percent ? `${fmt.pct(value)}٪` : fmt.money(value);
   const label = (row) => intraday ? `${dateLabel(row.date)} · ${clock(row.second)}` : dateLabel(row.date);
   const paths = series.map((item) => {
     let d = '', drawing = false;
@@ -78,113 +79,120 @@ function chart(host, sourceRows, series, { percent = false, intraday = false, yL
     cursor.querySelector('line').setAttribute('x1', px); cursor.querySelector('line').setAttribute('x2', px);
     cursor.querySelector('g').innerHTML = series.map((item) => Number.isFinite(row[item.key]) ? `<circle cx="${px}" cy="${y(row[item.key])}" r="4" fill="${item.color}"/>` : '').join('');
     tip.hidden = false;
-    tip.innerHTML = `<b>${label(row)}</b>${series.map((item) => `<span>${item.label}: <strong>${Number.isFinite(row[item.key]) ? axis(row[item.key]) : '—'}</strong></span>`).join('')}`;
+    tip.innerHTML = `<b>${label(row)}</b>${series.map((item) => `<span>${item.label}: <strong>${Number.isFinite(row[item.key]) ? axis(row[item.key]) : '—'}</strong></span>`).join('')}${extra ? extra(row) : ''}`;
     tip.style.insetInlineStart = `${Math.min(74, Math.max(2, ((px / W) * 100) - 8))}%`; tip.style.top = '8px';
   });
   svg.addEventListener('pointerleave', () => { cursor.hidden = true; tip.hidden = true; });
 }
 
-function metricTable(rows, intraday = false, withExpiry = false) {
+function dailyTable(rows, selectedDate) {
   if (!rows.length) return '<p class="empty-note">مشاهده معتبری در این بازه نیست.</p>';
-  return `<table class="history-table open-view-table"><thead><tr><th>تاریخ</th>${intraday ? '<th>زمان</th>' : ''}${withExpiry ? '<th>سررسید</th>' : ''}<th>پایه</th><th>تغییر پایه</th><th>سربه‌سر کال</th><th>تغییر کال</th><th>فاصله کال</th><th>IV کال</th><th>ارزش کال</th><th>سربه‌سر پوت</th><th>تغییر پوت</th><th>فاصله پوت</th><th>IV پوت</th><th>ارزش پوت</th><th>اعمال وزنی کال / پوت</th><th>قرارداد معتبر</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${dateLabel(r.date)}</td>${intraday ? `<td>${clock(r.second)}</td>` : ''}${withExpiry ? `<td>${dateLabel(r.expiry)}</td>` : ''}<td>${fmt.money(r.basePrice)}</td><td class="${signTone(r.baseChangePct)}">${fmt.pct(r.baseChangePct)}٪</td><td>${fmt.money(r.callBreakeven)}</td><td class="${signTone(r.callBreakevenChangePct)}">${fmt.pct(r.callBreakevenChangePct)}٪</td><td>${fmt.money(r.callBreakevenGap)} · ${fmt.pct(r.callBreakevenGapPct)}٪</td><td>${fmt.pct(r.callIvPct)}٪</td><td>${fmt.money(r.callValue)}</td><td>${fmt.money(r.putBreakeven)}</td><td class="${signTone(r.putBreakevenChangePct)}">${fmt.pct(r.putBreakevenChangePct)}٪</td><td>${fmt.money(r.putBreakevenGap)} · ${fmt.pct(r.putBreakevenGapPct)}٪</td><td>${fmt.pct(r.putIvPct)}٪</td><td>${fmt.money(r.putValue)}</td><td>${fmt.money(r.callStrike)} / ${fmt.money(r.putStrike)}</td><td>${fmt.int(r.callContracts)} / ${fmt.int(r.putContracts)}</td></tr>`).join('')}</tbody></table>`;
+  return `<table class="history-table open-view-daily-table"><thead><tr><th>تاریخ</th><th>پایه / تغییر</th><th>سربه‌سر کال / فاصله</th><th>میانگین ۵روزه فاصله کال</th><th>سربه‌سر پوت / فاصله</th><th>میانگین ۵روزه فاصله پوت</th><th>IV کال / میانگین ۵روزه</th><th>IV پوت / میانگین ۵روزه</th><th>ارزش کال / پوت</th><th>قرارداد معتبر</th><th>جزئیات</th></tr></thead><tbody>${[...rows].reverse().map((r) => `<tr data-day="${r.date}" tabindex="0" role="button" aria-selected="${r.date === selectedDate}" class="${r.date === selectedDate ? 'picked' : ''}"><td><b>${dateLabel(r.date)}</b></td><td>${fmt.money(r.basePrice)}<small class="${signTone(r.baseChangePct)}">${fmt.pct(r.baseChangePct)}٪</small></td><td>${fmt.money(r.callBreakeven)}<small>${fmt.pct(r.callBreakevenGapPct)}٪</small></td><td>${fmt.pct(r.callBreakevenGapPctMa5)}٪</td><td>${fmt.money(r.putBreakeven)}<small>${fmt.pct(r.putBreakevenGapPct)}٪</small></td><td>${fmt.pct(r.putBreakevenGapPctMa5)}٪</td><td>${fmt.pct(r.callIvPct)}٪<small>${fmt.pct(r.callIvPctMa5)}٪</small></td><td>${fmt.pct(r.putIvPct)}٪<small>${fmt.pct(r.putIvPctMa5)}٪</small></td><td>${fmt.money(r.callValue)}<small>${fmt.money(r.putValue)}</small></td><td>${fmt.int(r.callContracts)} کال / ${fmt.int(r.putContracts)} پوت</td><td><span class="open-view-row-action">بازکردن محاسبه</span></td></tr>`).join('')}</tbody></table>`;
 }
 
-function correlationTable(matrix) {
-  const defs = OPEN_VIEW_RELATIONS, find = (a, b) => matrix.find((item) => item.rowKey === a && item.columnKey === b);
-  return `<table class="history-table backtest-correlation open-view-correlation"><thead><tr><th>متغیر</th>${defs.map(([, label]) => `<th>${label}</th>`).join('')}</tr></thead><tbody>${defs.map(([rowKey, rowLabel]) => `<tr><th>${rowLabel}</th>${defs.map(([columnKey]) => {
-    const item = find(rowKey, columnKey), value = item?.value;
-    return `<td data-correlation="${Number.isFinite(value) ? Math.abs(value).toFixed(2) : ''}" title="${fmt.int(item?.samples || 0)} جفت معتبر" class="${signTone(value)}">${fmt.num(value)}</td>`;
-  }).join('')}</tr>`).join('')}</tbody></table>`;
+function weightedFormula(items, kind, metric) {
+  const valid = items.filter((item) => item.kind === kind && item.included && Number.isFinite(metric === 'iv' ? item.iv : item.breakeven));
+  const total = valid.reduce((sum, item) => sum + item.value, 0);
+  const value = total > 0 ? valid.reduce((sum, item) => sum + (metric === 'iv' ? item.iv * 100 : item.breakeven) * item.value, 0) / total : NaN;
+  return { count: valid.length, total, value };
+}
+
+function contractTable(items) {
+  if (!items.length) return '<p class="empty-note">برای این روز قرارداد تاریخی موجود نیست.</p>';
+  const sorted = [...items].sort((a, b) => a.kind.localeCompare(b.kind) || (b.indexWeightPct || 0) - (a.indexWeightPct || 0));
+  return `<table class="history-table open-view-contract-table"><thead><tr><th>قرارداد</th><th>نوع</th><th>سررسید</th><th>اعمال</th><th>پریمیوم</th><th>سربه‌سر</th><th>ارزش معامله</th><th>وزن شاخص</th><th>IV</th><th>وزن IV</th><th>حجم / معامله</th><th>وضعیت</th></tr></thead><tbody>${sorted.map((item) => {
+    const tone = item.kind === 'call' ? 'call' : 'put';
+    const status = item.included ? (Number.isFinite(item.iv) ? 'وارد هر دو شاخص' : 'فقط شاخص سربه‌سر؛ IV نامعتبر') : item.premium > 0 ? 'ارزش رسمی ندارد' : 'قیمت ندارد';
+    return `<tr class="open-view-contract-${tone}"><td><b>${esc(nameOf(item, 'قرارداد اختیار'))}</b></td><td>${item.kind === 'call' ? 'کال' : 'پوت'}</td><td>${dateLabel(item.expiry)}</td><td>${fmt.money(item.strike)}</td><td>${fmt.money(item.premium)}</td><td>${fmt.money(item.breakeven)}</td><td>${fmt.money(item.value)}</td><td class="open-view-weight-cell" style="--weight:${Number.isFinite(item.indexWeightPct) ? Math.min(100, item.indexWeightPct) : 0}%">${fmt.pct(item.indexWeightPct)}٪</td><td>${Number.isFinite(item.iv) ? `${fmt.pct(item.iv * 100)}٪` : '—'}</td><td class="open-view-weight-cell open-view-iv-weight" style="--weight:${Number.isFinite(item.ivWeightPct) ? Math.min(100, item.ivWeightPct) : 0}%">${fmt.pct(item.ivWeightPct)}٪</td><td>${fmt.int(item.volume)} / ${fmt.int(item.trades)}</td><td>${status}</td></tr>`;
+  }).join('')}</tbody></table>`;
 }
 
 export async function mount(root, { state }) {
-  root.innerHTML = `<section class="open-view-hero"><div><p class="eyebrow">نقشه انتظارات بازار اختیار</p><h1>نگاه باز</h1><p>سربه‌سر و نوسان ضمنی همه کال‌ها و پوت‌های یک نماد، جدا برای هر سررسید و با وزن ارزش معامله.</p></div><span>روزانه + درون‌روزی چندروزه</span></section>
-  <section class="card open-view-controls"><div class="section-head"><div><p class="eyebrow">مرحله اول</p><h2>نماد و دامنه تحلیل</h2></div><b id="ov-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
-    <div class="open-view-form"><label>نماد پایه<select id="ov-base"><option value="">در حال دریافت…</option></select></label><label>مبنای روزانه<select id="ov-basis"><option value="CLOSE">قیمت پایانی</option><option value="LAST">آخرین معامله</option><option value="FIRST">اولین معامله</option></select></label><label>از تاریخ<select id="ov-from" disabled></select></label><label>تا تاریخ<select id="ov-to" disabled></select></label><label>نمای نمودار<select id="ov-expiry" disabled><option value="all">همه سررسیدها</option></select></label><label>تایم‌فریم<select id="ov-interval"><option value="5">۵ دقیقه</option><option value="15" selected>۱۵ دقیقه</option><option value="30">۳۰ دقیقه</option><option value="60">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="ov-load">دریافت تاریخچه روزانه</button><button type="button" class="primary" id="ov-intraday" disabled>محاسبه بازه‌های زمانی</button><button type="button" class="ghost" id="ov-excel" disabled>خروجی جامع Excel</button></div>
-    <p class="portfolio-note">شاخص سربه‌سر کال = میانگین وزنی «اعمال + پریمیوم» و شاخص پوت = میانگین وزنی «اعمال − پریمیوم». وزن روزانه فقط ارزش رسمی معامله است؛ درون‌روزی از ارزش دقیق ریزمعامله همان سطل استفاده می‌کند.</p>
+  root.innerHTML = `<section class="open-view-hero"><div><p class="eyebrow">نقشه انتظارات بازار اختیار</p><h1>نگاه باز</h1><p>سربه‌سر و نوسان ضمنی همه کال‌ها و پوت‌های یک نماد، جدا برای هر سررسید و با وزن ارزش معامله.</p></div><span>روزانه → جزئیات هر روز</span></section>
+  <section class="card open-view-controls"><div class="section-head"><div><p class="eyebrow">مرحله اول</p><h2>نماد و دامنه تحلیل روزانه</h2></div><b id="ov-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
+    <div class="open-view-form"><label>نماد پایه<select id="ov-base"><option value="">در حال دریافت…</option></select></label><label>مبنای روزانه<select id="ov-basis"><option value="CLOSE">قیمت پایانی</option><option value="LAST">آخرین معامله</option><option value="FIRST">اولین معامله</option></select></label><label>از تاریخ<select id="ov-from" disabled></select></label><label>تا تاریخ<select id="ov-to" disabled></select></label><label>نمای نمودار<select id="ov-expiry" disabled><option value="all">همه سررسیدها</option></select></label><button type="button" class="primary" id="ov-load">دریافت تاریخچه روزانه</button><button type="button" class="ghost" id="ov-excel" disabled>خروجی جامع Excel</button></div>
+    <p class="portfolio-note">برای دیدن فرمول، وزن هر قرارداد و نمودار ریز همان روز، روی ردیف روز کلیک کن. قیمت یا ارزش گمشده با مشاهده قبلی پر نمی‌شود.</p>
   </section>
   <section id="ov-report" hidden>
-    <div class="backtest-kpis" id="ov-kpis"></div>
-    <div class="open-view-chart-grid"><section class="card"><div class="section-head"><h2>روند روزانه سربه‌سر و پایه</h2><span id="ov-daily-scope">همه سررسیدها</span></div><div id="ov-daily-price" class="open-view-chart"></div></section><section class="card"><div class="section-head"><h2>روند روزانه نوسان ضمنی</h2><span>وزن ارزش معامله</span></div><div id="ov-daily-iv" class="open-view-chart"></div></section></div>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">نمای کلی روزانه</p><h2>پایه، سربه‌سر، IV و جریان ارزش</h2></div><span>بدون پرکردن روزهای ناقص</span></div><div id="ov-daily-table" class="history-table-wrap"></div></section>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">تفکیک سررسید</p><h2>هر تاریخ × هر سررسید</h2></div><span>کال و پوت مستقل</span></div><div id="ov-expiry-table" class="history-table-wrap"></div></section>
-    <div class="open-view-chart-grid"><section class="card"><div class="section-head"><h2>روند چندروزه در تایم‌فریم انتخابی</h2><span id="ov-interval-label">۱۵ دقیقه</span></div><div id="ov-intraday-price" class="open-view-chart"><p class="empty-note">برای دریافت ریزمعامله، «محاسبه بازه‌های زمانی» را بزن.</p></div></section><section class="card"><div class="section-head"><h2>رابطه تغییرات پایه، سربه‌سر و IV</h2><span>تغییر هر سطل نسبت به سطل قبلی</span></div><div id="ov-intraday-change" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section></div>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">ریز بازه</p><h2>جدول چندروزه تایم‌فریم</h2></div><span id="ov-intraday-count">—</span></div><div id="ov-intraday-table" class="history-table-wrap"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section>
-    <div class="open-view-chart-grid"><section class="card"><div class="section-head"><h2>همبستگی روزانه</h2><span>پیرسون · فقط جفت‌های معتبر</span></div><div id="ov-daily-correlation" class="history-table-wrap"></div></section><section class="card"><div class="section-head"><h2>همبستگی تایم‌فریم</h2><span>پیرسون · رابطه، نه علیت</span></div><div id="ov-intraday-correlation" class="history-table-wrap"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section></div>
+    <div class="open-view-chart-grid"><section class="card"><div class="section-head"><h2>روند روزانه سربه‌سر و پایه</h2><span id="ov-daily-scope">همه سررسیدها</span></div><div id="ov-daily-price" class="open-view-chart"></div></section><section class="card"><div class="section-head"><h2>فاصله پایه از دو شاخص</h2><span>روزانه + میانگین متحرک ۵روزه</span></div><div id="ov-daily-gap" class="open-view-chart"></div></section><section class="card open-view-wide-card"><div class="section-head"><h2>نوسان ضمنی وزنی کال و پوت</h2><span>روزانه + میانگین متحرک ۵روزه</span></div><div id="ov-daily-iv" class="open-view-chart"></div></section></div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">تنها جدول نمای اصلی</p><h2>خلاصه روزانه</h2></div><span>برای بازکردن محاسبه روی روز کلیک کن</span></div><div id="ov-daily-table" class="history-table-wrap"></div></section>
+    <section id="ov-day-detail" class="card open-view-day-detail" hidden>
+      <div class="section-head"><div><p class="eyebrow">جزئیات روز انتخاب‌شده</p><h2 id="ov-day-title">—</h2></div><span id="ov-day-base">—</span></div>
+      <div id="ov-day-formulas" class="open-view-formula-grid"></div>
+      <div class="section-head open-view-contract-head"><div><h3>قراردادها و سهم هرکدام در شاخص</h3><p>رنگ هر خانه متناسب با وزن همان قرارداد در سمت کال یا پوت است.</p></div><span id="ov-day-contract-count">—</span></div>
+      <div id="ov-day-contracts" class="history-table-wrap"></div>
+      <div class="open-view-intraday-controls"><div><p class="eyebrow">ریز همان روز</p><h3>تایم‌فریم نمودارهای روز انتخاب‌شده</h3></div><label>بازه زمانی<select id="ov-day-interval"><option value="5">۵ دقیقه</option><option value="15" selected>۱۵ دقیقه</option><option value="30">۳۰ دقیقه</option><option value="60">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="ov-day-intraday">محاسبه ریز این روز</button><b id="ov-day-status" role="status" aria-live="polite">هنوز محاسبه نشده است.</b></div>
+      <div class="open-view-chart-grid"><section><div class="section-head"><h3>پایه و سربه‌سر در طول روز</h3><span id="ov-day-timeframe">—</span></div><div id="ov-day-price" class="open-view-chart"><p class="empty-note">تایم‌فریم را انتخاب و محاسبه را اجرا کن.</p></div></section><section><div class="section-head"><h3>فاصله درصدی از دو شاخص</h3><span>همان سطل زمانی</span></div><div id="ov-day-gap" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section class="open-view-wide-card"><div class="section-head"><h3>IV وزنی در طول روز</h3><span>وزن ریزمعامله هر قرارداد</span></div><div id="ov-day-iv" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section></div>
+    </section>
     <p class="history-caveat">این شاخص از معاملات مشاهده‌شده ساخته می‌شود و قیمت قابل اجرای هم‌زمان نیست. IV مدل بلک–شولز است و دامنه نوسان، توقف نماد و پرش قیمت را مدل نمی‌کند.</p>
   </section>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
   const status = $('ov-status'), baseSelect = $('ov-base');
   let chain = new Map(), ua = null, contracts = [], seriesByIns = {}, daily = null, intraday = null;
-  let dailyRelations = [], intradayRelations = [];
+  let dailyRelations = [], intradayRelations = [], selectedDate = 0;
+  const tradeCache = new Map();
   const setStatus = (text, bad = false) => { status.textContent = text; status.className = bad ? 'loss' : ''; };
-  const settings = () => ({
-    rFree: state.settings.rFree, divYield: state.settings.divYield,
-    yearDays: state.settings.dayCountYear || 365, ivLo: state.settings.ivLo, ivHi: state.settings.ivHi,
-  });
-  const chosenDates = () => {
-    const from = normalizeHistoryDate($('ov-from').value), to = normalizeHistoryDate($('ov-to').value);
-    return (seriesByIns[String(ua?.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter((date) => date && date >= from && date <= to).sort((a, b) => a - b);
-  };
-  const viewRows = (kind) => {
-    const data = kind === 'daily' ? daily : intraday, expiry = $('ov-expiry').value;
-    if (!data) return [];
-    return expiry === 'all' ? data.rows : data.expiryRows.filter((row) => String(row.expiry) === expiry);
-  };
-  const resetIntradayView = () => {
-    intraday = null; intradayRelations = [];
-    $('ov-intraday-price').innerHTML = '<p class="empty-note">برای دریافت ریزمعامله، «محاسبه بازه‌های زمانی» را بزن.</p>';
-    $('ov-intraday-change').innerHTML = '<p class="empty-note">هنوز محاسبه نشده است.</p>';
-    $('ov-intraday-table').innerHTML = '<p class="empty-note">هنوز محاسبه نشده است.</p>';
-    $('ov-intraday-correlation').innerHTML = '<p class="empty-note">هنوز محاسبه نشده است.</p>';
-    $('ov-intraday-count').textContent = '—';
-  };
+  const settings = () => ({ rFree: state.settings.rFree, divYield: state.settings.divYield, yearDays: state.settings.dayCountYear || 365, ivLo: state.settings.ivLo, ivHi: state.settings.ivHi });
+  const viewRows = () => $('ov-expiry').value === 'all' ? daily?.rows || [] : (daily?.expiryRows || []).filter((row) => String(row.expiry) === $('ov-expiry').value);
 
-  function paint() {
+  function resetIntraday() {
+    intraday = null; intradayRelations = [];
+    $('ov-day-status').textContent = 'هنوز محاسبه نشده است.'; $('ov-day-timeframe').textContent = '—';
+    $('ov-day-price').innerHTML = '<p class="empty-note">تایم‌فریم را انتخاب و محاسبه را اجرا کن.</p>';
+    $('ov-day-gap').innerHTML = '<p class="empty-note">هنوز محاسبه نشده است.</p>';
+    $('ov-day-iv').innerHTML = '<p class="empty-note">هنوز محاسبه نشده است.</p>';
+  }
+
+  function paintIntraday() {
+    if (!intraday) return;
+    const minutes = Number($('ov-day-interval').value);
+    $('ov-day-timeframe').textContent = `${faDigits(minutes)} دقیقه`;
+    const priceExtra = (row) => `<span>فاصله پایه تا کال: <strong>${fmt.pct(row.callBreakevenGapPct)}٪</strong></span><span>فاصله پایه از پوت: <strong>${fmt.pct(row.putBreakevenGapPct)}٪</strong></span>`;
+    chart($('ov-day-price'), intraday.rows, SERIES_PRICE, { intraday: true, yLabel: 'قیمت (ریال)', extra: priceExtra });
+    chart($('ov-day-gap'), intraday.rows, SERIES_GAP_INTRADAY, { percent: true, intraday: true, yLabel: 'فاصله (درصد)' });
+    chart($('ov-day-iv'), intraday.rows, SERIES_IV_INTRADAY, { percent: true, intraday: true, yLabel: 'نوسان ضمنی (درصد)' });
+  }
+
+  function paintDayDetail() {
+    const day = daily?.rows.find((row) => row.date === selectedDate);
+    if (!day) { $('ov-day-detail').hidden = true; return; }
+    const items = daily.contractRows.filter((item) => item.date === selectedDate);
+    $('ov-day-detail').hidden = false; $('ov-day-title').textContent = dateLabel(selectedDate);
+    $('ov-day-base').textContent = `پایه ${fmt.money(day.basePrice)} · تغییر ${fmt.pct(day.baseChangePct)}٪`;
+    const cards = [
+      ['سربه‌سر کال', 'Σ(سربه‌سر × ارزش) ÷ Σارزش', weightedFormula(items, 'call', 'breakeven'), 'gain'],
+      ['سربه‌سر پوت', 'Σ(سربه‌سر × ارزش) ÷ Σارزش', weightedFormula(items, 'put', 'breakeven'), 'loss'],
+      ['IV کال', 'Σ(IV × ارزش) ÷ Σارزش معتبر IV', weightedFormula(items, 'call', 'iv'), 'cmp1'],
+      ['IV پوت', 'Σ(IV × ارزش) ÷ Σارزش معتبر IV', weightedFormula(items, 'put', 'iv'), 'cmp4'],
+    ];
+    $('ov-day-formulas').innerHTML = cards.map(([label, formula, result, tone], index) => `<article class="open-view-formula ${tone}"><span>${label}</span><b>${index < 2 ? fmt.money(result.value) : `${fmt.pct(result.value)}٪`}</b><code>${formula}</code><small>${fmt.int(result.count)} قرارداد · مجموع ارزش ${fmt.money(result.total)}</small></article>`).join('');
+    $('ov-day-contract-count').textContent = `${fmt.int(items.length)} قرارداد`;
+    $('ov-day-contracts').innerHTML = contractTable(items);
+  }
+
+  function paintDaily() {
     if (!daily) return;
-    const rows = viewRows('daily'), last = rows.at(-1) || {};
-    $('ov-report').hidden = false; $('ov-excel').disabled = false; $('ov-intraday').disabled = false;
+    const rows = viewRows();
+    $('ov-report').hidden = false; $('ov-excel').disabled = false;
     $('ov-daily-scope').textContent = $('ov-expiry').value === 'all' ? 'همه سررسیدها' : `سررسید ${dateLabel($('ov-expiry').value)}`;
-    $('ov-kpis').innerHTML = [
-      ['پایه آخر', fmt.money(last.basePrice), `${fmt.pct(last.baseChangePct)}٪`, signTone(last.baseChangePct)],
-      ['سربه‌سر کال', fmt.money(last.callBreakeven), `فاصله ${fmt.pct(last.callBreakevenGapPct)}٪`, 'gain'],
-      ['سربه‌سر پوت', fmt.money(last.putBreakeven), `فاصله ${fmt.pct(last.putBreakevenGapPct)}٪`, 'loss'],
-      ['IV کال / پوت', `${fmt.pct(last.callIvPct)}٪ / ${fmt.pct(last.putIvPct)}٪`, 'وزن ارزش معامله', ''],
-      ['ارزش کال / پوت', `${fmt.money(last.callValue)} / ${fmt.money(last.putValue)}`, `${fmt.int(last.totalContracts)} قرارداد معتبر`, ''],
-    ].map(([label, value, note, tone]) => `<article class="${tone}"><span>${label}</span><b>${value}</b><small>${note}</small></article>`).join('');
-    chart($('ov-daily-price'), rows, SERIES_PRICE, { yLabel: 'قیمت (ریال)' });
+    const priceExtra = (row) => `<span>فاصله پایه تا کال: <strong>${fmt.pct(row.callBreakevenGapPct)}٪</strong></span><span>فاصله پایه از پوت: <strong>${fmt.pct(row.putBreakevenGapPct)}٪</strong></span>`;
+    chart($('ov-daily-price'), rows, SERIES_PRICE, { yLabel: 'قیمت (ریال)', extra: priceExtra });
+    chart($('ov-daily-gap'), rows, SERIES_GAP, { percent: true, yLabel: 'فاصله (درصد)' });
     chart($('ov-daily-iv'), rows, SERIES_IV, { percent: true, yLabel: 'نوسان ضمنی (درصد)' });
-    $('ov-daily-table').innerHTML = metricTable(daily.rows);
-    $('ov-expiry-table').innerHTML = metricTable(daily.expiryRows, false, true);
-    $('ov-daily-correlation').innerHTML = correlationTable(dailyRelations);
-    if (intraday) {
-      const intervalRows = viewRows('intraday');
-      $('ov-interval-label').textContent = `${faDigits($('ov-interval').value)} دقیقه`;
-      $('ov-intraday-count').textContent = `${fmt.int(intraday.rows.length)} سطل · ${fmt.int(intraday.contractRows.length)} مشاهده قراردادی`;
-      chart($('ov-intraday-price'), intervalRows, SERIES_PRICE, { intraday: true, yLabel: 'قیمت (ریال)' });
-      chart($('ov-intraday-change'), intervalRows, SERIES_CHANGE, { percent: true, intraday: true, yLabel: 'تغییر (درصد / واحد درصد)' });
-      $('ov-intraday-table').innerHTML = metricTable(intraday.rows, true);
-      $('ov-intraday-correlation').innerHTML = correlationTable(intradayRelations);
-    }
+    $('ov-daily-table').innerHTML = dailyTable(daily.rows, selectedDate); paintDayDetail();
   }
 
   function computeDaily() {
     const from = normalizeHistoryDate($('ov-from').value), to = normalizeHistoryDate($('ov-to').value);
     if (!from || !to || from > to) { setStatus('تاریخ شروع باید پیش از تاریخ پایان یا برابر آن باشد.', true); return; }
-    daily = analyzeDailyOpenView({
-      ua, contracts, seriesByIns, from, to,
-      settings: settings(), basis: $('ov-basis').value,
-    });
-    resetIntradayView();
-    dailyRelations = relationMatrix(daily.rows);
-    const expiries = [...new Set(daily.expiryRows.map((row) => row.expiry))].sort((a, b) => a - b);
-    const previous = $('ov-expiry').value;
+    daily = analyzeDailyOpenView({ ua, contracts, seriesByIns, from, to, settings: settings(), basis: $('ov-basis').value });
+    dailyRelations = relationMatrix(daily.rows); selectedDate = daily.rows.at(-1)?.date || 0; resetIntraday();
+    const expiries = [...new Set(daily.expiryRows.map((row) => row.expiry))].sort((a, b) => a - b), previous = $('ov-expiry').value;
     $('ov-expiry').innerHTML = '<option value="all">همه سررسیدها</option>' + expiries.map((expiry) => `<option value="${expiry}">${dateLabel(expiry)}</option>`).join('');
     $('ov-expiry').disabled = false;
     if ([...$('ov-expiry').options].some((option) => option.value === previous)) $('ov-expiry').value = previous;
-    paint();
-    setStatus(`${fmt.int(daily.rows.length)} روز و ${fmt.int(daily.expiryRows.length)} ردیف سررسید محاسبه شد.`);
+    paintDaily(); setStatus(`${fmt.int(daily.rows.length)} روز محاسبه شد؛ برای ریزمحاسبه روی هر روز کلیک کن.`);
   }
 
   async function loadDaily() {
@@ -196,63 +204,63 @@ export async function mount(root, { state }) {
         const sized = legContractSize(contract.size, state.settings.contractSize);
         return { ...contract, size: sized.size, sizeAssumed: sized.assumed };
       });
-      const codes = [String(ua.ins), ...contracts.map((contract) => String(contract.ins))];
-      seriesByIns = {};
+      const codes = [String(ua.ins), ...contracts.map((contract) => String(contract.ins))]; seriesByIns = {};
       for (const group of chunks(codes, 100)) {
-        const response = await fetch(`/api/dailies?ins=${encodeURIComponent(group.join(','))}&n=0`);
-        const payload = await response.json();
+        const response = await fetch(`/api/dailies?ins=${encodeURIComponent(group.join(','))}&n=0`), payload = await response.json();
         if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
         for (const [ins, result] of Object.entries(payload)) seriesByIns[ins] = result.rows || [];
       }
       const dates = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
       if (!dates.length) throw new Error('برای نماد پایه تاریخچه‌ای دریافت نشد');
       const options = dates.map((date) => `<option value="${date}">${dateLabel(date)}</option>`).join('');
-      $('ov-from').innerHTML = options; $('ov-to').innerHTML = options;
-      $('ov-from').disabled = false; $('ov-to').disabled = false;
-      $('ov-from').value = String(dates[Math.max(0, dates.length - 20)]); $('ov-to').value = String(dates.at(-1));
-      computeDaily();
+      $('ov-from').innerHTML = options; $('ov-to').innerHTML = options; $('ov-from').disabled = false; $('ov-to').disabled = false;
+      $('ov-from').value = String(dates[Math.max(0, dates.length - 20)]); $('ov-to').value = String(dates.at(-1)); computeDaily();
     } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); }
     finally { $('ov-load').disabled = false; }
   }
 
-  async function loadIntraday() {
-    if (!daily) return;
-    const dates = chosenDates(), requests = [], seen = new Set();
-    const add = (ins, date) => { const key = `${date}:${ins}`; if (!seen.has(key)) { seen.add(key); requests.push({ ins: String(ins), date: String(date) }); } };
-    const optionIndexes = new Map(contracts.map((contract) => [String(contract.ins), indexHistory(seriesByIns[String(contract.ins)] || [])]));
-    for (const date of dates) {
-      add(ua.ins, date);
-      for (const contract of contracts) {
-        const row = optionIndexes.get(String(contract.ins))?.get(date);
-        if ((Number(row?.value) > 0 || Number(row?.vol) > 0) && contract.size > 0) add(contract.ins, date);
-      }
-    }
-    if (!requests.length) { setStatus('در این بازه ریزمعامله فعالی برای محاسبه پیدا نشد.', true); return; }
-    if (requests.length > 1200) { setStatus(`این بازه ${fmt.int(requests.length)} قرارداد/روز دارد؛ بازه تاریخ را کوتاه‌تر کن (سقف ${fmt.int(1200)}).`, true); return; }
-    setStatus(`در حال دریافت ${fmt.int(requests.length)} قرارداد/روز ریزمعامله…`); $('ov-intraday').disabled = true;
+  async function loadDayIntraday() {
+    if (!daily || !selectedDate) return;
+    const dayStatus = $('ov-day-status'), minutes = Number($('ov-day-interval').value);
+    $('ov-day-intraday').disabled = true; dayStatus.textContent = 'در حال دریافت ریزمعامله‌های همین روز…';
     try {
-      const response = await fetch('/api/trades/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests }) });
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
-      const tradesByKey = Object.fromEntries(Object.entries(payload.items || {}).map(([key, item]) => [key, item.rows || []]));
-      intraday = analyzeIntradayOpenView({ ua, contracts, dates, tradesByKey, intervalMinutes: Number($('ov-interval').value), settings: settings() });
-      intradayRelations = relationMatrix(intraday.rows);
-      paint();
-      const failed = Object.values(payload.items || {}).filter((item) => item.error).length;
-      setStatus(`${fmt.int(intraday.rows.length)} سطل زمانی ساخته شد${failed ? `؛ ${fmt.int(failed)} درخواست فاقد داده بود` : ''}.`, !!failed);
-    } catch (error) { setStatus(errorText(error, 'ریزمعامله دریافت نشد.'), true); }
-    finally { $('ov-intraday').disabled = false; }
+      let tradesByKey = tradeCache.get(selectedDate);
+      if (!tradesByKey) {
+        const requests = [{ ins: String(ua.ins), date: String(selectedDate) }];
+        const optionIndexes = new Map(contracts.map((contract) => [String(contract.ins), indexHistory(seriesByIns[String(contract.ins)] || [])]));
+        for (const contract of contracts) {
+          const row = optionIndexes.get(String(contract.ins))?.get(selectedDate);
+          if ((Number(row?.value) > 0 || Number(row?.vol) > 0) && contract.size > 0) requests.push({ ins: String(contract.ins), date: String(selectedDate) });
+        }
+        const response = await fetch('/api/trades/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests }) }), payload = await response.json();
+        if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
+        tradesByKey = Object.fromEntries(Object.entries(payload.items || {}).map(([key, item]) => [key, item.rows || []])); tradeCache.set(selectedDate, tradesByKey);
+      }
+      intraday = analyzeIntradayOpenView({ ua, contracts, dates: [selectedDate], tradesByKey, intervalMinutes: minutes, settings: settings() });
+      intradayRelations = relationMatrix(intraday.rows); paintIntraday();
+      dayStatus.textContent = `${fmt.int(intraday.rows.length)} سطل ${faDigits(minutes)} دقیقه‌ای ساخته شد.`;
+    } catch (error) { dayStatus.textContent = errorText(error, 'ریزمعامله دریافت نشد.'); }
+    finally { $('ov-day-intraday').disabled = false; }
   }
 
   $('ov-load').addEventListener('click', loadDaily);
-  $('ov-intraday').addEventListener('click', loadIntraday);
   $('ov-basis').addEventListener('change', () => { if (daily) computeDaily(); });
   $('ov-from').addEventListener('change', () => { if (daily) computeDaily(); });
   $('ov-to').addEventListener('change', () => { if (daily) computeDaily(); });
-  $('ov-expiry').addEventListener('change', paint);
-  $('ov-interval').addEventListener('change', () => { resetIntradayView(); paint(); });
-  $('ov-excel').addEventListener('click', () => downloadOpenViewExcel({ ua, daily, intraday, dailyRelations, intradayRelations, basis: $('ov-basis').value, intervalMinutes: Number($('ov-interval').value) }));
-  baseSelect.addEventListener('change', () => { ua = chain.get(baseSelect.value) || null; daily = null; intraday = null; $('ov-report').hidden = true; $('ov-excel').disabled = true; $('ov-intraday').disabled = true; });
+  $('ov-expiry').addEventListener('change', paintDaily);
+  $('ov-day-interval').addEventListener('change', resetIntraday);
+  $('ov-day-intraday').addEventListener('click', loadDayIntraday);
+  $('ov-daily-table').addEventListener('click', (event) => {
+    const row = event.target.closest('[data-day]'); if (!row) return;
+    const next = Number(row.dataset.day); if (next !== selectedDate) { selectedDate = next; resetIntraday(); paintDaily(); }
+    $('ov-day-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  $('ov-daily-table').addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const row = event.target.closest('[data-day]'); if (!row) return; event.preventDefault(); row.click();
+  });
+  $('ov-excel').addEventListener('click', () => downloadOpenViewExcel({ ua, daily, intraday, dailyRelations, intradayRelations, basis: $('ov-basis').value, intervalMinutes: Number($('ov-day-interval').value) }));
+  baseSelect.addEventListener('change', () => { ua = chain.get(baseSelect.value) || null; daily = null; intraday = null; selectedDate = 0; tradeCache.clear(); $('ov-report').hidden = true; $('ov-excel').disabled = true; });
 
   try {
     const response = await fetch('/api/history/universe'), payload = await response.json();

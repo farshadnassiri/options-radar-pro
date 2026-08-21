@@ -43,13 +43,23 @@ export function weightedMean(rows = [], valueOf = (row) => row.value, weightOf =
   return { value: weight > 0 ? numerator / weight : NaN, weight, count };
 }
 
+/** میانگین متحرک سخت‌گیر: هر پنج ردیف باید عدد معتبر داشته باشند. */
+export function movingAverage(rows = [], key, window = 5) {
+  const width = Math.max(1, Math.trunc(num(window, 5)));
+  return rows.map((_, index) => {
+    if (index + 1 < width) return NaN;
+    const values = rows.slice(index + 1 - width, index + 1).map((row) => num(row?.[key], NaN));
+    return values.every(Number.isFinite) ? values.reduce((sum, value) => sum + value, 0) / width : NaN;
+  });
+}
+
 function pctChange(value, previous) {
   return Number.isFinite(value) && previous > 0 ? ((value / previous) - 1) * 100 : NaN;
 }
 
-function enrichChanges(rows) {
+function enrichChanges(rows, movingWindow = 0) {
   let previous = null;
-  return rows.map((row) => {
+  const out = rows.map((row) => {
     const next = {
       ...row,
       baseChangePct: pctChange(row.basePrice, previous?.basePrice),
@@ -63,17 +73,43 @@ function enrichChanges(rows) {
     previous = row;
     return next;
   });
+  if (movingWindow > 0) {
+    const fields = [
+      ['callBreakevenGapPct', 'callBreakevenGapPctMa5'],
+      ['putBreakevenGapPct', 'putBreakevenGapPctMa5'],
+      ['callIvPct', 'callIvPctMa5'],
+      ['putIvPct', 'putIvPctMa5'],
+    ];
+    for (const [source, target] of fields) {
+      const averages = movingAverage(out, source, movingWindow);
+      out.forEach((row, index) => { row[target] = averages[index]; });
+    }
+  }
+  return out;
 }
 
-function enrichExpiryChanges(rows) {
+function enrichExpiryChanges(rows, movingWindow = 0) {
   const groups = new Map();
   for (const row of rows) {
     const key = String(row.expiry || '');
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   }
-  return [...groups.values()].flatMap((group) => enrichChanges(group.sort((a, b) => a.date - b.date || num(a.second) - num(b.second))))
+  return [...groups.values()].flatMap((group) => enrichChanges(group.sort((a, b) => a.date - b.date || num(a.second) - num(b.second)), movingWindow))
     .sort((a, b) => a.date - b.date || num(a.second) - num(b.second) || a.expiry - b.expiry);
+}
+
+function addContractWeights(items) {
+  for (const kind of ['call', 'put']) {
+    const side = items.filter((item) => item.kind === kind);
+    const total = side.reduce((sum, item) => sum + (item.included ? item.value : 0), 0);
+    const ivTotal = side.reduce((sum, item) => sum + (item.included && Number.isFinite(item.iv) ? item.value : 0), 0);
+    for (const item of side) {
+      item.indexWeightPct = item.included && total > 0 ? (item.value / total) * 100 : NaN;
+      item.ivWeightPct = item.included && Number.isFinite(item.iv) && ivTotal > 0 ? (item.value / ivTotal) * 100 : NaN;
+    }
+  }
+  return items;
 }
 
 function aggregate(items, basePrice, meta = {}) {
@@ -151,7 +187,7 @@ export function analyzeDailyOpenView({
   for (const date of dates) {
     const baseRow = baseIndex.get(date);
     const basePrice = historyPrice(baseRow, basis);
-    const items = [];
+    const items = [], dayContracts = [];
     for (const contract of contracts) {
       const market = optionIndexes.get(String(contract.ins))?.get(date);
       const premium = historyPrice(market, basis);
@@ -165,9 +201,10 @@ export function analyzeDailyOpenView({
         included: premium > 0 && value > 0,
       };
       item.iv = ivFor(item, basePrice, date, cfg);
-      contractRows.push(item);
+      dayContracts.push(item);
       if (item.included) items.push(item);
     }
+    contractRows.push(...addContractWeights(dayContracts));
     rows.push(aggregate(items, basePrice, {
       date, baseValue: Math.max(0, num(baseRow?.value)), baseVolume: Math.max(0, num(baseRow?.vol)),
     }));
@@ -176,7 +213,7 @@ export function analyzeDailyOpenView({
       expiryRows.push(aggregate(items.filter((item) => item.expiry === expiry), basePrice, { date, expiry }));
     }
   }
-  return { rows: enrichChanges(rows), expiryRows: enrichExpiryChanges(expiryRows), contractRows, settings: cfg };
+  return { rows: enrichChanges(rows, 5), expiryRows: enrichExpiryChanges(expiryRows, 5), contractRows, settings: cfg };
 }
 
 function bucketTrades(trades, intervalMinutes, size = 1) {
@@ -226,7 +263,7 @@ export function analyzeIntradayOpenView({
     for (const second of seconds) {
       const base = baseBuckets.get(second);
       const basePrice = base?.price;
-      const items = [];
+      const items = [], bucketContracts = [];
       for (const contract of contracts) {
         const market = optionBuckets.get(String(contract.ins))?.get(second);
         if (!market) continue;
@@ -238,9 +275,10 @@ export function analyzeIntradayOpenView({
           iv: NaN, included: market.value > 0, unknownCancel: market.unknownCancel,
         };
         item.iv = ivFor(item, basePrice, date, cfg);
-        contractRows.push(item);
+        bucketContracts.push(item);
         if (item.included) items.push(item);
       }
+      contractRows.push(...addContractWeights(bucketContracts));
       rows.push(aggregate(items, basePrice, {
         date, second, intervalMinutes: Math.max(1, Math.trunc(num(intervalMinutes, 15))),
         baseValue: base?.value || 0, baseVolume: base?.volume || 0,

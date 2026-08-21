@@ -1831,16 +1831,48 @@ td.gain, dd.gain { color: var(--gain); }
 .open-view-chart-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 4px 0 8px; color: var(--ink-2); font-size: var(--fs-small); font-weight: 700; }
 .open-view-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .open-view-chart-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--series); }
-.open-view-table { min-width: 1850px; }
-.open-view-correlation { min-width: 760px; }
-.open-view-correlation td { text-align: center; }
+.open-view-wide-card { grid-column: 1 / -1; }
+.open-view-daily-table { min-width: 1680px; }
+.open-view-daily-table tbody tr { cursor: pointer; }
+.open-view-daily-table tbody tr[aria-selected="true"] { box-shadow: inset 3px 0 var(--accent); background: var(--accent-soft); }
+.open-view-daily-table td small, .open-view-contract-table td small { display: block; margin-top: 4px; color: var(--muted); }
+.open-view-row-action { color: var(--accent); font-weight: 800; white-space: nowrap; }
+.open-view-day-detail { margin-top: 16px; scroll-margin-top: 16px; }
+.open-view-formula-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0 20px; }
+.open-view-formula { display: grid; gap: 7px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.open-view-formula.gain { border-inline-start: 3px solid var(--gain); }
+.open-view-formula.loss { border-inline-start: 3px solid var(--loss); }
+.open-view-formula.cmp1 { border-inline-start: 3px solid var(--cmp1); }
+.open-view-formula.cmp4 { border-inline-start: 3px solid var(--cmp4); }
+.open-view-formula > span, .open-view-formula > small { color: var(--muted); }
+.open-view-formula > b { font-size: var(--fs-xl); }
+.open-view-formula code { overflow-wrap: anywhere; color: var(--ink-2); font-family: var(--sans); font-size: var(--fs-sm); }
+.open-view-contract-head { margin-top: 10px; }
+.open-view-contract-head p { margin: 4px 0 0; color: var(--muted); }
+.open-view-contract-table { min-width: 1480px; }
+.open-view-contract-table td { position: relative; }
+.open-view-weight-cell { isolation: isolate; font-weight: 800; }
+.open-view-weight-cell::before { content: ""; position: absolute; z-index: -1; inset-block: 4px; inset-inline-start: 3px; width: var(--weight); max-width: calc(100% - 6px); border-radius: 7px; background: var(--weight-tone); opacity: .18; }
+.open-view-contract-call .open-view-weight-cell { --weight-tone: var(--gain); }
+.open-view-contract-put .open-view-weight-cell { --weight-tone: var(--loss); }
+.open-view-contract-call .open-view-iv-weight { --weight-tone: var(--cmp1); }
+.open-view-contract-put .open-view-iv-weight { --weight-tone: var(--cmp4); }
+.open-view-intraday-controls { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(150px, .35fr) auto minmax(190px, .5fr); gap: 12px; align-items: end; margin: 20px 0 12px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
+.open-view-intraday-controls h3 { margin: 2px 0 0; }
+.open-view-intraday-controls label { display: grid; gap: 5px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+.open-view-intraday-controls select { min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); font: inherit; }
+.open-view-day-detail .open-view-chart-grid > section { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
 
 @media (max-width: 900px) {
   .open-view-hero { align-items: flex-start; flex-direction: column; }
   .open-view-form { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .open-view-chart-grid { grid-template-columns: 1fr; }
+  .open-view-formula-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .open-view-intraday-controls { grid-template-columns: 1fr 1fr; }
+  .open-view-wide-card { grid-column: auto; }
 }
 
 @media (max-width: 560px) {
   .open-view-form { grid-template-columns: 1fr; }
+  .open-view-formula-grid, .open-view-intraday-controls { grid-template-columns: 1fr; }
 }

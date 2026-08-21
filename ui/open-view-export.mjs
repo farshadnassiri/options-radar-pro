@@ -24,19 +24,19 @@ const clock = (second) => {
 };
 
 const METRIC_HEADERS = [
-  'قیمت پایه', 'تغییر پایه ٪', 'سربه‌سر کال', 'تغییر سربه‌سر کال ٪', 'فاصله کال تا پایه', 'فاصله کال ٪',
-  'سربه‌سر پوت', 'تغییر سربه‌سر پوت ٪', 'فاصله پایه تا پوت', 'فاصله پوت ٪', 'پهنای باند سربه‌سر',
+  'قیمت پایه', 'تغییر پایه ٪', 'سربه‌سر کال', 'تغییر سربه‌سر کال ٪', 'فاصله کال تا پایه', 'فاصله کال ٪', 'میانگین ۵روزه فاصله کال ٪',
+  'سربه‌سر پوت', 'تغییر سربه‌سر پوت ٪', 'فاصله پایه تا پوت', 'فاصله پوت ٪', 'میانگین ۵روزه فاصله پوت ٪', 'پهنای باند سربه‌سر',
   'اعمال وزنی کال', 'اعمال وزنی پوت', 'پریمیوم وزنی کال', 'پریمیوم وزنی پوت',
-  'IV وزنی کال ٪', 'تغییر IV کال (واحد درصد)', 'IV وزنی پوت ٪', 'تغییر IV پوت (واحد درصد)',
+  'IV وزنی کال ٪', 'میانگین ۵روزه IV کال ٪', 'تغییر IV کال (واحد درصد)', 'IV وزنی پوت ٪', 'میانگین ۵روزه IV پوت ٪', 'تغییر IV پوت (واحد درصد)',
   'ارزش کال', 'ارزش پوت', 'ارزش کال واردشده در IV', 'ارزش پوت واردشده در IV',
   'قرارداد کال', 'قرارداد پوت', 'ارزش پایه', 'حجم پایه',
 ];
 
 const metricValues = (r) => [
-  r.basePrice, r.baseChangePct, r.callBreakeven, r.callBreakevenChangePct, r.callBreakevenGap, r.callBreakevenGapPct,
-  r.putBreakeven, r.putBreakevenChangePct, r.putBreakevenGap, r.putBreakevenGapPct, r.breakevenBand,
+  r.basePrice, r.baseChangePct, r.callBreakeven, r.callBreakevenChangePct, r.callBreakevenGap, r.callBreakevenGapPct, r.callBreakevenGapPctMa5,
+  r.putBreakeven, r.putBreakevenChangePct, r.putBreakevenGap, r.putBreakevenGapPct, r.putBreakevenGapPctMa5, r.breakevenBand,
   r.callStrike, r.putStrike, r.callPremium, r.putPremium,
-  r.callIvPct, r.callIvChangePp, r.putIvPct, r.putIvChangePp,
+  r.callIvPct, r.callIvPctMa5, r.callIvChangePp, r.putIvPct, r.putIvPctMa5, r.putIvChangePp,
   r.callValue, r.putValue, r.callIvValue, r.putIvValue,
   r.callContracts, r.putContracts, r.baseValue, r.baseVolume,
 ];
@@ -70,8 +70,8 @@ export function buildOpenViewWorkbook({ ua, daily, intraday, dailyRelations = []
   const dailyExpiryRows = (daily?.expiryRows || []).map((r) => [date(r.date), date(r.expiry), ...metricValues(r)]);
   const intervalRows = (intraday?.rows || []).map((r) => [date(r.date), clock(r.second), r.intervalMinutes, r.unknownCancel ? 'وضعیت ابطال برخی معاملات نامعلوم' : '', ...metricValues(r)]);
   const intervalExpiryRows = (intraday?.expiryRows || []).map((r) => [date(r.date), clock(r.second), date(r.expiry), ...metricValues(r)]);
-  const contractHeaders = ['تاریخ', 'زمان', 'نماد قرارداد', 'نام قرارداد', 'نوع', 'سررسید', 'اعمال', 'پریمیوم', 'سربه‌سر', 'IV ٪', 'ارزش معامله', 'حجم', 'تعداد معامله', 'وارد شاخص شد', 'وضعیت ابطال نامعلوم'];
-  const contractRow = (r) => [date(r.date), clock(r.second), r.ins, r.name, r.kind === 'call' ? 'کال' : 'پوت', date(r.expiry), r.strike, r.premium, r.breakeven, Number.isFinite(r.iv) ? r.iv * 100 : NaN, r.value, r.volume, r.trades, r.included ? 'بله' : 'خیر', r.unknownCancel ? 'بله' : 'خیر'];
+  const contractHeaders = ['تاریخ', 'زمان', 'نماد قرارداد', 'نام قرارداد', 'نوع', 'سررسید', 'اعمال', 'پریمیوم', 'سربه‌سر', 'وزن شاخص ٪', 'IV ٪', 'وزن IV ٪', 'ارزش معامله', 'حجم', 'تعداد معامله', 'وارد شاخص شد', 'وضعیت ابطال نامعلوم'];
+  const contractRow = (r) => [date(r.date), clock(r.second), r.ins, r.name, r.kind === 'call' ? 'کال' : 'پوت', date(r.expiry), r.strike, r.premium, r.breakeven, r.indexWeightPct, Number.isFinite(r.iv) ? r.iv * 100 : NaN, r.ivWeightPct, r.value, r.volume, r.trades, r.included ? 'بله' : 'خیر', r.unknownCancel ? 'بله' : 'خیر'];
   const cfg = daily?.settings || intraday?.settings || {};
   const guideRows = [
     ['موضوع', 'توضیح'],
@@ -80,6 +80,7 @@ export function buildOpenViewWorkbook({ ua, daily, intraday, dailyRelations = []
     ['شاخص سربه‌سر وزنی', 'جمع (سربه‌سر هر قرارداد × ارزش معامله همان قرارداد) تقسیم بر جمع ارزش معامله قراردادهای معتبر.'],
     ['شاخص اعمال وزنی', 'همان وزن ارزش معامله، روی قیمت اعمال؛ برای جداکردن اثر جابه‌جایی تمرکز معاملات از اثر تغییر پریمیوم.'],
     ['IV وزنی', 'نوسان ضمنی بلک–شولز هر قرارداد با قیمت پایه همان مشاهده؛ وزن برابر ارزش معامله قراردادهایی است که IV معتبر دارند.'],
+    ['میانگین ۵روزه', 'فقط وقتی پنج مشاهده روزانه معتبر و پیاپی وجود دارد ساخته می‌شود؛ روز گمشده با روز قدیمی‌تر جایگزین نمی‌شود.'],
     ['داده گمشده', 'قیمت یا ارزش گمشده با روز/بازه قبلی پر نشده و در محاسبه وارد نمی‌شود. خانه خالی به معنی نبود عدد معتبر است.'],
     ['وزن روزانه', 'فقط ارزش رسمی روزانه qTotCap. برآورد حجم × قیمت پایانی وارد شاخص نشده است.'],
     ['وزن درون‌روزی', 'قیمت معامله × تعداد × اندازه قرارداد در همان سطل زمانی. معامله ابطال‌شده کنار گذاشته می‌شود.'],
