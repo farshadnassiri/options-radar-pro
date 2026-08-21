@@ -64,7 +64,7 @@ function relationRows(matrix = []) {
   return { header, rows };
 }
 
-export function buildOpenViewWorkbook({ ua, daily, intraday, dailyRelations = [], intradayRelations = [], basis = 'CLOSE', intervalMinutes = 15 } = {}) {
+export function buildOpenViewWorkbook({ ua, daily, intraday, dailyRelations = [], intradayRelations = [], basis = 'CLOSE', intervalMinutes = 15, selectedExpiry = 0 } = {}) {
   const intradayRelation = relationRows(intradayRelations), dailyRelation = relationRows(dailyRelations);
   const dailyRows = (daily?.rows || []).map((r) => [date(r.date), ...metricValues(r)]);
   const dailyExpiryRows = (daily?.expiryRows || []).map((r) => [date(r.date), date(r.expiry), ...metricValues(r)]);
@@ -89,6 +89,7 @@ export function buildOpenViewWorkbook({ ua, daily, intraday, dailyRelations = []
     ['محدودیت اجرا', 'قیمت‌های تاریخی و آخرین معامله، مظنه قابل اجرای هم‌زمان نیستند. این گزارش ابزار تحلیل است نه تضمین اجرا.'],
     ['نماد پایه', ua?.name || ''],
     ['کد نماد پایه', String(ua?.ins || '')],
+    ['سررسید فعال هنگام خروجی', selectedExpiry ? date(selectedExpiry) : ''],
     ['مبنای قیمت روزانه', basis],
     ['تایم‌فریم درون‌روزی (دقیقه)', intervalMinutes],
     ['نرخ بدون ریسک سالانه', cfg.rFree],

@@ -1822,14 +1822,26 @@ td.gain, dd.gain { color: var(--gain); }
 .open-view-form label { display: grid; gap: 6px; color: var(--ink-2); font-size: var(--fs-small); font-weight: 700; }
 .open-view-form select { width: 100%; min-height: 42px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); color: var(--ink); font: inherit; }
 .open-view-form button { min-height: 42px; }
+.open-view-model-settings { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(520px, 2fr) auto; gap: 14px; align-items: end; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
+.open-view-model-settings h3 { margin: 2px 0 4px; }
+.open-view-model-settings small { color: var(--muted); }
+.open-view-model-grid { display: grid; grid-template-columns: repeat(5, minmax(105px, 1fr)); gap: 9px; }
+.open-view-model-grid label { display: grid; gap: 5px; color: var(--ink-2); font-size: var(--fs-xs); font-weight: 700; }
+.open-view-model-grid input, .open-view-model-grid select { width: 100%; min-height: 40px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); font: inherit; }
+.open-view-model-grid input { direction: ltr; text-align: start; font-family: var(--mono); }
 .open-view-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
 .open-view-chart { min-height: 245px; min-width: 0; }
 .open-view-chart-stage { position: relative; min-width: 0; }
 .open-view-chart-stage svg { display: block; width: 100%; height: auto; overflow: visible; }
 .open-view-chart-stage svg text { fill: var(--ink-2); font-family: inherit; font-size: var(--fs-chart); font-weight: 700; direction: ltr; }
 .open-view-chart-stage path { stroke-width: 2.6; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+.open-view-chart-bar { opacity: .72; }
 .open-view-chart-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 4px 0 8px; color: var(--ink-2); font-size: var(--fs-small); font-weight: 700; }
-.open-view-chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.open-view-chart-legend span, .open-view-chart-legend button { display: inline-flex; align-items: center; gap: 6px; }
+.open-view-chart-legend button { padding: 4px 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2); color: inherit; font: inherit; cursor: pointer; }
+.open-view-chart-legend button:hover { border-color: var(--accent); }
+.open-view-chart-legend button.is-off { opacity: .48; text-decoration: line-through; }
+.open-view-chart-legend button small { color: var(--muted); font-size: var(--fs-xs); }
 .open-view-chart-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--series); }
 .open-view-wide-card { grid-column: 1 / -1; }
 .open-view-daily-table { min-width: 1680px; }
@@ -1867,6 +1879,8 @@ td.gain, dd.gain { color: var(--gain); }
   .open-view-hero { align-items: flex-start; flex-direction: column; }
   .open-view-form { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .open-view-chart-grid { grid-template-columns: 1fr; }
+  .open-view-model-settings { grid-template-columns: 1fr; }
+  .open-view-model-grid { grid-template-columns: repeat(3, minmax(105px, 1fr)); }
   .open-view-formula-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .open-view-intraday-controls { grid-template-columns: 1fr 1fr; }
   .open-view-wide-card { grid-column: auto; }
@@ -1874,5 +1888,6 @@ td.gain, dd.gain { color: var(--gain); }
 
 @media (max-width: 560px) {
   .open-view-form { grid-template-columns: 1fr; }
+  .open-view-model-grid { grid-template-columns: 1fr 1fr; }
   .open-view-formula-grid, .open-view-intraday-controls { grid-template-columns: 1fr; }
 }
