@@ -518,6 +518,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   min-width: 290px;
   width: 290px;
   flex: none;
+  --rail-stub: 46px;
 }
 .rail > * { direction: rtl; }
 
@@ -531,6 +532,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 }
 .rail-toggle:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .rail-toggle svg { transition: transform var(--transition-med); }
+/* پنل سمت راست است: باز یعنی به چپ می‌رود، جمع یعنی به راست. پیکان همان را می‌گوید. */
+.rail-toggle[aria-expanded="true"] .rail-toggle-ic { transform: rotate(180deg); }
+.rail-toggle-text { font-size: var(--fs-xs); }
 
 .rail-search {
   position: sticky; top: 0; z-index: 2;
@@ -623,34 +627,20 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-/* دکمه شناور — فقط وقتی پنل جمع است */
-.rail-floating {
-  position: fixed; top: 50%; inset-inline-end: 8px;
-  transform: translateY(-50%);
-  z-index: 30;
-  display: grid; place-items: center;
-  width: 42px; height: 50px;
-  border: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--panel) 75%, transparent);
-  backdrop-filter: blur(16px) saturate(1.6);
-  -webkit-backdrop-filter: blur(16px) saturate(1.6);
-  box-shadow: var(--shadow-lg);
-  color: var(--accent); cursor: pointer;
-  transition: background var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
-}
-.rail-floating:hover {
-  background: var(--accent-soft);
-  box-shadow: var(--shadow-lg);
-  transform: translateY(-50%) scale(1.06);
-}
-
-/* حالت جمع‌شده ریل */
+/* ——— حالت جمع‌شده ———
+   ریل ناپدید نمی‌شود؛ به یک نوار باریک در همان سمت راست می‌نشیند و همان
+   دکمهٔ بالا سرش را نگه می‌دارد. یک دکمه، هر دو جهت، همیشه سر جای خودش. */
 .shell[data-rail-collapsed="true"] .rail {
-  width: 0; min-width: 0; opacity: 0; overflow: hidden;
-  padding: 0; margin: 0; border: 0;
-  pointer-events: none;
+  width: var(--rail-stub); min-width: var(--rail-stub);
+  padding-bottom: 8px; overflow: hidden;
 }
+.shell[data-rail-collapsed="true"] .rail-search,
+.shell[data-rail-collapsed="true"] .rail-list { display: none; }
+.shell[data-rail-collapsed="true"] .rail-toggle {
+  /* تنها راه بازگشت است، پس باید دیده شود — نه به رنگ متن کم‌رنگ */
+  padding: 12px 0; border-bottom: 0; color: var(--accent);
+}
+.shell[data-rail-collapsed="true"] .rail-toggle-text { display: none; }
 
 /* ——— زیرمنوی افقی شناور ———
    وقتی بخشی باز می‌شود، آیتم‌هایش به صورت پنل افقی شناور از کنار ریل باز می‌شوند */
@@ -771,8 +761,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   }
   .shell { min-height: 0; overflow: visible; }
   .stage { height: auto; overflow: visible; direction: rtl; }
-  .rail-floating { display: none; }
-  .shell[data-rail-collapsed="true"] .rail { display: none; }
+  .shell[data-rail-collapsed="true"] .rail { padding-bottom: 0; }
+  .shell[data-rail-collapsed="true"] .rail-toggle { padding: 8px 10px; }
+  .shell[data-rail-collapsed="true"] .rail-toggle-text { display: inline; }
 }
 
 /* ——————————————————————— تحلیل تاریخی ——————————————————————— */
