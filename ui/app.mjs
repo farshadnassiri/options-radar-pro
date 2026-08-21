@@ -344,14 +344,15 @@ try { isRailCollapsed = localStorage.getItem(COLLAPSED_KEY) === 'true'; } catch 
 function updateRailCollapsed() {
   const shell = el('shell');
   const toggleBtn = el('rail-toggle-btn');
-  const floatingBtn = el('rail-floating-btn');
   if (shell) shell.setAttribute('data-rail-collapsed', isRailCollapsed ? 'true' : 'false');
   if (toggleBtn) {
     toggleBtn.setAttribute('aria-expanded', isRailCollapsed ? 'false' : 'true');
     toggleBtn.classList.toggle('active', !isRailCollapsed);
-  }
-  if (floatingBtn) {
-    floatingBtn.hidden = !isRailCollapsed;
+    // همان یک دکمه هر دو جهت را می‌گیرد، پس نامش باید کاری را بگوید که
+    // کلیک بعدی انجام می‌دهد، نه حالتی را که الان در آن هستیم.
+    const label = isRailCollapsed ? 'باز کردن پنل استراتژی‌ها' : 'جمع کردن پنل استراتژی‌ها';
+    toggleBtn.title = label;
+    toggleBtn.setAttribute('aria-label', label);
   }
   if (isRailCollapsed) {
     closeSubmenu();
@@ -701,13 +702,12 @@ el('theme-btn').addEventListener('click', () => {
   applyTheme(document.body.dataset.theme === 'ledger' ? 'board' : 'ledger');
 });
 
-// دکمه‌های جمع/باز پنل
+// تنها دکمهٔ جمع/باز پنل — روی نوار جمع‌شده هم همین یکی می‌ماند
 el('rail-toggle-btn').addEventListener('click', () => toggleRail());
-el('rail-floating-btn').addEventListener('click', () => toggleRail(false));
 
 // بستن زیرمنو با کلیک بیرون
 document.addEventListener('click', (e) => {
-  if (!e.target.closest('.rail') && !e.target.closest('.rail-submenu') && !e.target.closest('.rail-floating')) {
+  if (!e.target.closest('.rail') && !e.target.closest('.rail-submenu')) {
     closeSubmenu();
   }
 });
