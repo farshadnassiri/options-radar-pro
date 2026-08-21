@@ -301,17 +301,11 @@ TABS.push({ id: 'roll', title: 'تحلیل رول', section: 'موقعیت من'
 // همان کار دستی را می‌خواهد.
 
 const FOLD_KEY = 'rail:folded';
+const ORDER_KEY = 'rail:order';
+const COLLAPSED_KEY = 'rail:collapsed';
 
 /**
  * وضعیت تاشدگی گروه‌های ریل.
- *
- * پیش‌فرض عوض شد: همهٔ گروه‌ها بسته باز می‌شوند، نه باز. با سی‌وچند تب در یک
- * ستون، «همه باز» یعنی کاربر همیشه در حال پیمایش است و هیچ‌وقت کل ساختار را
- * یک‌جا نمی‌بیند. بسته یعنی اول ده سرگروه را می‌بینی و بعد یکی را باز می‌کنی.
- *
- * فرق «هرگز چیزی ذخیره نشده» با «کاربر همه را باز کرده» مهم است: اولی باید
- * پیش‌فرضِ بسته بگیرد، دومی باید همان انتخاب کاربر بماند. پس نبودِ کلید در
- * حافظه با آرایهٔ خالی یکی گرفته نمی‌شود.
  */
 const loadFolded = (allSections) => {
   let raw = null;
@@ -325,13 +319,52 @@ const saveFolded = () => {
   try { localStorage.setItem(FOLD_KEY, JSON.stringify([...folded])); } catch { /* بی‌اهمیت */ }
 };
 
+const loadGroupOrder = (defaultSections) => {
+  try {
+    const raw = localStorage.getItem(ORDER_KEY);
+    if (!raw) return defaultSections;
+    const ordered = JSON.parse(raw);
+    if (!Array.isArray(ordered)) return defaultSections;
+    const missing = defaultSections.filter((s) => !ordered.includes(s));
+    const valid = ordered.filter((s) => defaultSections.includes(s));
+    return [...valid, ...missing];
+  } catch {
+    return defaultSections;
+  }
+};
+
+const saveGroupOrder = (order) => {
+  try { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); } catch { /* بی‌اهمیت */ }
+};
+
+let isRailCollapsed = false;
+try { isRailCollapsed = localStorage.getItem(COLLAPSED_KEY) === 'true'; } catch {}
+
+function updateRailCollapsed() {
+  const shell = el('shell');
+  const toggleBtn = el('rail-toggle-btn');
+  const floatingBtn = el('rail-floating-btn');
+  if (shell) shell.setAttribute('data-rail-collapsed', isRailCollapsed ? 'true' : 'false');
+  if (toggleBtn) {
+    toggleBtn.setAttribute('aria-expanded', isRailCollapsed ? 'false' : 'true');
+    toggleBtn.classList.toggle('active', !isRailCollapsed);
+  }
+  if (floatingBtn) {
+    floatingBtn.hidden = !isRailCollapsed;
+  }
+  if (isRailCollapsed) {
+    closeSubmenu();
+  }
+  try { localStorage.setItem(COLLAPSED_KEY, isRailCollapsed ? 'true' : 'false'); } catch {}
+}
+
+function toggleRail(force) {
+  isRailCollapsed = typeof force === 'boolean' ? force : !isRailCollapsed;
+  updateRailCollapsed();
+}
+
 /**
  * فقط یک بخش هم‌زمان باز می‌ماند.
- *
- * با ده سرگروه و چهل تب، «چند بخشِ هم‌زمان باز» یعنی ستون کناری بلندتر از
- * صفحه می‌شود و کاربر برای رسیدن به سرگروه بعدی باید از کنار فهرستی رد شود
- * که کاری با آن ندارد. آکاردئون همان چیزی را نگه می‌دارد که همین حالا لازم
- * است و بقیه را جمع می‌کند، پس کل ساختار همیشه در یک نگاه دیده می‌شود.
  */
 function revealSection(sec) {
   for (const other of ALL_SECTIONS) {
@@ -342,15 +375,6 @@ function revealSection(sec) {
 
 /**
  * رنگ هر بخش ریل — همه از توکن‌های خودِ پوسته.
- *
- * هدف تزئین نیست. با ده سرگروهِ هم‌شکل، پیدا کردن بخش درست یعنی خواندن ده
- * عنوان؛ با رنگ، یعنی یک نگاه. هیچ رنگ تازه‌ای ساخته نشد: همان توکن‌هایی که
- * نمودار مقایسه‌ای و سود و زیان از آن‌ها می‌خوانند، اینجا هم به کار می‌روند،
- * پس هر دو پوسته خودبه‌خود درست درمی‌آیند.
- *
- * رنگ‌ها با معنیِ بخش خوانده شده‌اند، نه تصادفی: کسب درآمد سبزِ سود، پوشش
- * ریسک همان سبز کم‌رنگ‌تر، نسبت و بک‌اسپرد قرمزِ زیان (بازِ زیان دارند)، و
- * تلاطم نارنجیِ هشدار.
  */
 const SECTION_TONE = {
   'پایه': '--accent',
@@ -367,9 +391,6 @@ const SECTION_TONE = {
 
 /**
  * نام بخش، به شکلی که در گزینشگر CSS بنشیند.
- *
- * نام بخش فارسی است و می‌تواند نیم‌فاصله و فاصله داشته باشد؛ گذاشتنش خام در
- * `querySelector` گزینشگر را می‌شکند. کد ثابتِ حرف‌ها، هم یکتاست هم امن.
  */
 const cssId = (text) => [...String(text)].map((ch) => ch.codePointAt(0).toString(36)).join('-');
 
@@ -384,26 +405,115 @@ function dirTone(def) {
 }
 
 let railQuery = '';
-let railActiveId = null; // آیتم برجسته با صفحه‌کلید، جدا از تب باز (aria-current)
+let railActiveId = null;
+let activeSubmenuSec = null;
+
+function closeSubmenu() {
+  activeSubmenuSec = null;
+  const sub = el('rail-submenu');
+  if (sub) sub.hidden = true;
+  const list = el('rail-list');
+  if (list) {
+    for (const grp of list.querySelectorAll('.rail-group')) {
+      grp.removeAttribute('data-open');
+      grp.querySelector('.rail-head')?.setAttribute('aria-expanded', 'false');
+    }
+  }
+}
+
+function openSubmenu(sec, headEl) {
+  const sub = el('rail-submenu');
+  if (!sub) return;
+  activeSubmenuSec = sec;
+
+  const list = el('rail-list');
+  if (list) {
+    for (const grp of list.querySelectorAll('.rail-group')) {
+      const isOpen = grp.dataset.secRaw === sec;
+      grp.toggleAttribute('data-open', isOpen);
+      grp.querySelector('.rail-head')?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    }
+  }
+
+  const q = normFa(railQuery).toLowerCase();
+  const matches = (t) => {
+    if (!q) return true;
+    const hay = normFa(`${t.title} ${t.def?.fa || ''} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
+    return hay.includes(q);
+  };
+  const tabs = TABS.filter((x) => x.section === sec && matches(x));
+
+  const toneVar = SECTION_TONE[sec] || '--accent';
+  sub.style.setProperty('--sec', `var(${toneVar})`);
+  sub.hidden = false;
+
+  const chipIcon = sectionIcon(sec, tabs[0]?.group);
+  sub.innerHTML = `
+    <div class="rail-submenu-head">
+      <span class="rail-submenu-chip">${icon(chipIcon, 'ic rail-head-ic')}</span>
+      <span class="rail-submenu-title">${sec}</span>
+      <span class="rail-submenu-count">${faDigits(tabs.length)} تب</span>
+      <button type="button" class="rail-submenu-close" id="rail-sub-close" title="بستن">✕</button>
+    </div>
+    <div class="rail-submenu-list" id="rail-sub-list"></div>
+  `;
+
+  sub.querySelector('#rail-sub-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeSubmenu();
+  });
+
+  const listEl = sub.querySelector('#rail-sub-list');
+  for (const t of tabs) {
+    const b = document.createElement('button');
+    b.className = 'tab-btn';
+    b.type = 'button';
+    b.dataset.tab = t.id;
+    b.dataset.locked = t.mod ? '0' : '1';
+    b.setAttribute('aria-current', current === t.id ? 'true' : 'false');
+    const infeasible = t.def && !t.def.feasible;
+    b.title = infeasible ? t.def.infeasibleWhy : (t.def?.note || t.def?.dir || t.title);
+    const [tone, cls] = dirTone(t.def);
+    const glyph = t.def ? GROUP_ICON[t.group] : TAB_ICON[t.id];
+    b.innerHTML = `
+      ${icon(glyph, 'ic tab-ic')}
+      <span class="tab-name">${ltr(t.title)}</span>
+      ${infeasible ? '<span class="tab-flag" title="اجرا در تابلو ممکن نیست">⃰</span>' : ''}
+      ${tone ? `<span class="tone-dot ${cls}" title="${tone}"></span>` : ''}`;
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      open(t.id);
+    });
+    listEl.appendChild(b);
+  }
+
+  // موقعیت‌دهی در سمت چپ ریل در چیدمان راست‌به‌چپ
+  const rect = headEl.getBoundingClientRect();
+  const rightPos = Math.max(12, window.innerWidth - rect.left + 10);
+  const topPos = Math.max(12, Math.min(rect.top - 4, window.innerHeight - 380));
+  sub.style.top = `${topPos}px`;
+  sub.style.right = `${rightPos}px`;
+}
 
 /** برجستگی صفحه‌کلید را روی دکمه‌ی متناظر می‌گذارد و در دید نگه می‌دارد. */
 function setRailActive(id) {
   railActiveId = id;
-  for (const b of el('rail-list').querySelectorAll('.tab-btn')) {
-    b.setAttribute('data-kbd-active', b.dataset.tab === id ? '1' : '0');
+  const list = el('rail-submenu');
+  if (list && !list.hidden) {
+    for (const b of list.querySelectorAll('.tab-btn')) {
+      b.setAttribute('data-kbd-active', b.dataset.tab === id ? '1' : '0');
+    }
   }
-  if (id) el('rail-list').querySelector(`.tab-btn[data-tab="${id}"]`)?.scrollIntoView({ block: 'nearest' });
 }
 
 function buildRail() {
   const list = el('rail-list');
-  const sections = [...new Set(TABS.map((t) => t.section))];
+  const allSecs = [...new Set(TABS.map((t) => t.section))];
+  const sections = loadGroupOrder(allSecs);
   const q = normFa(railQuery).toLowerCase();
 
   const matches = (t) => {
     if (!q) return true;
-    // نام فارسی هم در انبار جست‌وجو هست، گرچه هیچ‌جا نشان داده نمی‌شود:
-    // کسی که «کاوردکال» را می‌شناسد باید Covered Call را پیدا کند.
     const hay = normFa(`${t.title} ${t.def?.fa || ''} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
     return hay.includes(q);
   };
@@ -415,72 +525,76 @@ function buildRail() {
     if (!tabs.length) continue;
     shown += tabs.length;
 
-    // جست‌وجو، تاشدگی را موقتاً باز می‌کند — وگرنه نتیجه پیدا شده پنهان می‌ماند
-    const isFolded = !q && folded.has(sec);
-
+    const isOpen = activeSubmenuSec === sec;
     const grp = document.createElement('section');
     grp.className = 'rail-group';
-    grp.dataset.folded = isFolded ? '1' : '0';
+    grp.dataset.secRaw = sec;
     grp.dataset.section = cssId(sec);
-    // رنگ بخش، از توکن‌های خودِ پوسته. هدف تزئین نیست: با ده سرگروه هم‌شکل،
-    // پیدا کردن بخش درست یعنی خواندن ده عنوان؛ با رنگ، یعنی یک نگاه.
+    if (isOpen) grp.setAttribute('data-open', '1');
     grp.style.setProperty('--sec', `var(${SECTION_TONE[sec] || '--accent'})`);
+
+    // دراگ و دراپ برای جابجایی ردیف‌های منوی راست
+    grp.draggable = true;
+    grp.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', sec);
+      e.dataTransfer.effectAllowed = 'move';
+      grp.classList.add('dragging');
+    });
+    grp.addEventListener('dragend', () => {
+      grp.classList.remove('dragging');
+      list.querySelectorAll('.rail-group').forEach((g) => g.classList.remove('drag-over'));
+    });
+    grp.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      grp.classList.add('drag-over');
+    });
+    grp.addEventListener('dragleave', () => {
+      grp.classList.remove('drag-over');
+    });
+    grp.addEventListener('drop', (e) => {
+      e.preventDefault();
+      grp.classList.remove('drag-over');
+      const srcSec = e.dataTransfer.getData('text/plain');
+      if (srcSec && srcSec !== sec) {
+        const curOrder = loadGroupOrder(allSecs);
+        const srcIdx = curOrder.indexOf(srcSec);
+        const dstIdx = curOrder.indexOf(sec);
+        if (srcIdx !== -1 && dstIdx !== -1) {
+          curOrder.splice(srcIdx, 1);
+          curOrder.splice(dstIdx, 0, srcSec);
+          saveGroupOrder(curOrder);
+          buildRail();
+          if (activeSubmenuSec) {
+            const targetHead = list.querySelector(`.rail-group[data-sec-raw="${activeSubmenuSec}"] .rail-head`);
+            if (targetHead) openSubmenu(activeSubmenuSec, targetHead);
+          }
+        }
+      }
+    });
 
     const head = document.createElement('button');
     head.type = 'button';
     head.className = 'rail-head';
-    head.setAttribute('aria-expanded', isFolded ? 'false' : 'true');
-    // آیکون داخل یک مربعِ رنگ‌گرفته از بخش می‌نشیند. آیکون خطیِ تنها، کنار
-    // یک متن پررنگ گم می‌شد؛ مربع، لنگر بصری سرگروه است.
-    head.innerHTML = `${icon('chevron', 'ic caret')}
+    head.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    head.innerHTML = `
+      <span class="rail-head-grip" title="جابجایی ترتیب">${icon('grip', 'ic rail-grip-ic')}</span>
+      ${icon('chevron', 'ic caret')}
       <span class="rail-head-chip">${icon(sectionIcon(sec, tabs[0]?.group), 'ic rail-head-ic')}</span>
       <span class="rail-head-name">${sec}</span>
       <span class="rail-head-n">${faDigits(tabs.length)}</span>`;
-    head.addEventListener('click', () => {
-      if (folded.has(sec)) revealSection(sec); else folded.add(sec);
-      saveFolded();
-      buildRail();
-      // بخشی که تازه باز شد باید کامل دیده شود. بستن بخش‌های بالاتر، فهرست
-      // را کوتاه می‌کند و سرگروه از جایی که بود بالاتر می‌پرد؛ بدون این خط
-      // کاربر بعد از کلیک، جای دیگری از فهرست را می‌بیند.
-      if (!folded.has(sec)) {
-        list.querySelector(`.rail-group[data-section="${cssId(sec)}"]`)
-          ?.scrollIntoView({ block: 'nearest' });
+
+    head.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (activeSubmenuSec === sec) {
+        closeSubmenu();
+      } else {
+        revealSection(sec);
+        saveFolded();
+        openSubmenu(sec, head);
       }
     });
     grp.appendChild(head);
-
-    const items = document.createElement('div');
-    items.className = 'rail-items';
-    for (const t of tabs) {
-      const b = document.createElement('button');
-      b.className = 'tab-btn';
-      b.type = 'button';
-      b.dataset.tab = t.id;
-      b.dataset.locked = t.mod ? '0' : '1';
-      b.setAttribute('aria-current', current === t.id ? 'true' : 'false');
-      const infeasible = t.def && !t.def.feasible;
-      b.title = infeasible ? t.def.infeasibleWhy : (t.def?.note || t.def?.dir || t.title);
-      const [tone, cls] = dirTone(t.def);
-      // یک سطر: آیکون، نام، نقطهٔ جهت.
-      //
-      // برچسب «۲ پا / ۳ پا» برداشته شد. تعداد پا در فهرست تصمیمی را عوض
-      // نمی‌کند — کسی بین دو استراتژی بر پایهٔ شمار پا انتخاب نمی‌کند — و
-      // در عوض هر ردیف را دوسطری می‌کرد و طول فهرست را دوبرابر.
-      //
-      // جهت هم از برچسب متنی به نقطهٔ رنگی رسید. متنش («صعودی») در هر ردیف
-      // تکرار می‌شد و کنار نام لاتین، سطر را شلوغ می‌کرد؛ رنگ همان را در یک
-      // نقطه می‌گوید و متنش در `title` می‌ماند.
-      const glyph = t.def ? GROUP_ICON[t.group] : TAB_ICON[t.id];
-      b.innerHTML = `
-        ${icon(glyph, 'ic tab-ic')}
-        <span class="tab-name">${ltr(t.title)}</span>
-        ${infeasible ? '<span class="tab-flag" title="اجرا در تابلو ممکن نیست">⃰</span>' : ''}
-        ${tone ? `<span class="tone-dot ${cls}" title="${tone}"></span>` : ''}`;
-      b.addEventListener('click', () => open(t.id));
-      items.appendChild(b);
-    }
-    grp.appendChild(items);
     list.appendChild(grp);
   }
 
@@ -491,10 +605,11 @@ function buildRail() {
     ? `${faDigits(shown)} از ${faDigits(TABS.length)}`
     : `${faDigits(TABS.length)} تب`;
 
-  // اگر آیتم برجسته با فیلتر تازه دیگر دیده نیست، برجستگی به اولی برمی‌گردد
-  const visibleIds = [...list.querySelectorAll('.tab-btn')].map((b) => b.dataset.tab);
-  if (!visibleIds.includes(railActiveId)) railActiveId = visibleIds[0] || null;
-  setRailActive(railActiveId);
+  if (activeSubmenuSec) {
+    const activeHead = list.querySelector(`.rail-group[data-sec-raw="${activeSubmenuSec}"] .rail-head`);
+    if (activeHead) openSubmenu(activeSubmenuSec, activeHead);
+    else closeSubmenu();
+  }
 }
 
 let current = null;
@@ -580,9 +695,26 @@ function applyTheme(name) {
   btn.textContent = `پوسته: ${THEME_NAME[name] || name}`;
   btn.title = `تعویض به پوسته ${THEME_NAME[THEME_NEXT[name]] || ''}`;
 }
+
 el('theme-btn').addEventListener('click', () => {
   applyTheme(document.body.dataset.theme === 'ledger' ? 'board' : 'ledger');
 });
+
+// دکمه‌های جمع/باز پنل
+el('rail-toggle-btn').addEventListener('click', () => toggleRail());
+el('rail-floating-btn').addEventListener('click', () => toggleRail(false));
+
+// بستن زیرمنو با کلیک بیرون
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.rail') && !e.target.closest('.rail-submenu') && !e.target.closest('.rail-floating')) {
+    closeSubmenu();
+  }
+});
+
+// بستن زیرمنو با اسکرول ریل
+el('rail')?.addEventListener('scroll', () => {
+  if (activeSubmenuSec) closeSubmenu();
+}, { passive: true });
 
 el('rail-q').addEventListener('input', (e) => {
   railQuery = e.target.value;
@@ -626,32 +758,17 @@ document.addEventListener('keydown', (e) => {
 
 // ————————————————————————————————— شروع —————————————————————————————————
 
-// این دو خط پیش از buildRail اجرا می‌شوند — اگر localStorage همین‌جا
-// بی‌نگهبان پرتاب کند (حافظه خصوصی/محدودشده مرورگر)، کل بوت برنامه قبل
-// از رسیدن به فهرست کناری می‌ترکد، نه فقط پوسته اشتباه بماند.
 const getTheme = () => { try { return localStorage.getItem('theme'); } catch { return null; } };
 
 installGlobalCapture();
 
-/**
- * چرخ ماوس روی یک فهرست کشویی، مقدارش را عوض نمی‌کند.
- *
- * بعضی مرورگرها روی `select` فوکوس‌دار، هر درجهٔ چرخ را یک گزینه جلو
- * می‌برند. کاربری که فقط می‌خواهد صفحه را پایین ببرد و اشاره‌گرش از روی
- * فهرست ترکیب‌ها رد می‌شود، بی‌آنکه بخواهد قرارداد دیگری را انتخاب می‌کند —
- * و هیچ چیزی هم نمی‌گوید که عوض شد.
- *
- * `blur` به‌جای `preventDefault`: جلوگیری از رویداد، اسکرول صفحه را هم
- * می‌گیرد و کاربر داخل فهرست حبس می‌شود. برداشتن فوکوس، هم انتخاب را حفظ
- * می‌کند هم می‌گذارد صفحه مثل هر جای دیگری اسکرول شود. باز کردن فهرست با
- * کلیک یا صفحه‌کلید، دست‌نخورده است.
- */
 document.addEventListener('wheel', (event) => {
   const select = event.target?.closest?.('select');
   if (select && document.activeElement === select) select.blur();
 }, { passive: true, capture: true });
 
 applyTheme(getTheme() || 'ledger');
+updateRailCollapsed();
 buildRail();
 await loadSettings();
 applyTheme(getTheme() || state.settings.theme || 'ledger');
@@ -663,9 +780,6 @@ mountCapacityPicker(el('capacity'), {
   putSettings,
 });
 
-// تعویض تب از داخل یک تب دیگر: تب مبدأ فقط `location.hash` را عوض می‌کند.
-// راه جایگزین این بود که تب‌ها `open` را از همین فایل وارد کنند، که یک حلقه
-// وارد‌کردن می‌سازد — این فایل هر تب را به‌صورت پویا وارد می‌کند.
 window.addEventListener('hashchange', () => {
   const next = location.hash.replace('#', '');
   if (next && next !== current && TABS.some((t) => t.id === next)) open(next);
