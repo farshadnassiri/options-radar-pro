@@ -33,7 +33,12 @@ const ALL_COLS = [
   { key: 'volume', label: 'حجم اختیار', fmt: 'int', group: 'گردش امروز', heat: 'gain' },
   { key: 'callVol', label: 'حجم کال', fmt: 'int', group: 'گردش امروز' },
   { key: 'putVol', label: 'حجم پوت', fmt: 'int', group: 'گردش امروز' },
-  { key: 'value', label: 'ارزش معاملات', fmt: 'money', group: 'گردش امروز', heat: 'gain' },
+  // «ارزش معاملات اختیار» و «ارزش معاملات نماد پایه» دو عدد جدا هستند و
+  // نامشان هم باید جدا باشد: اولی مجموع گردش کل زنجیره است، دومی گردش خودِ
+  // سهم. برچسب قبلی فقط «ارزش معاملات» بود و کنار «حجم اختیار» این را
+  // می‌رساند که هر دو یک چیز را می‌شمارند.
+  { key: 'value', label: 'ارزش معاملات اختیار', fmt: 'money', group: 'گردش امروز', heat: 'gain' },
+  { key: 'uaValue', label: 'ارزش معاملات نماد پایه', fmt: 'money', group: 'گردش امروز', heat: 'gain' },
   { key: 'trades', label: 'تعداد معامله', fmt: 'int', group: 'گردش امروز' },
 
   { key: 'oi', label: 'موقعیت باز', fmt: 'int', group: 'تعهد انباشته', heat: 'gain' },
@@ -47,7 +52,7 @@ const ALL_COLS = [
 
 const COLS = ALL_COLS.filter((c) => [
   'name', 'last', 'contracts', 'strikes', 'quoted', 'quotedPct', 'spreadMedPct',
-  'expiries', 'nearestDays', 'volume', 'value', 'oi', 'pcRatio', 'atmIvPct',
+  'expiries', 'nearestDays', 'volume', 'value', 'uaValue', 'oi', 'pcRatio', 'atmIvPct',
 ].includes(c.key));
 export async function mount(root, { state, api }) {
   root.innerHTML = `

@@ -288,6 +288,10 @@ export function underlyingList(chain, opt = {}) {
       ins: u.ins, name: u.name, last: u.last || u.close, close: u.close,
       expiries: u.expiryList.length,
       nearestDays: u.expiryList[0]?.days ?? null,
+      // گردش خودِ نماد پایه، جدا از گردش زنجیره اختیارش. تا امروز خوانده
+      // می‌شد ولی به هیچ ستونی نمی‌رسید، و ستون «ارزش معاملات» جدول در
+      // واقع مجموع زنجیره بود — دو عدد کاملاً متفاوت با یک نام.
+      uaValue: u.value,
       ...rollupQuotes(u),
       pcRatio: pcOpenInterestRatio(u),
       atmIv: atmIv(u, rFree, divYield, yearDays),

@@ -9,7 +9,7 @@
 //   جدول مرتب‌شدنی ، پانل جزئیات ردیف
 
 import { byId } from '/strategies/catalog.mjs';
-import { COLUMNS } from '/core/evaluate.mjs';
+import { COLUMNS, columnsForStrategy } from '/core/evaluate.mjs';
 import { analyzePayoff, scenarioGrid } from '/core/payoff.mjs';
 import { analyzeMixed, isSingleExpiry } from '/core/mixed.mjs';
 import { timeMachine } from '/core/timemachine.mjs';
@@ -48,10 +48,17 @@ const VIEWS = {
   // سربه‌سری‌ها ستون جدا گرفتند. یک ستونِ فهرستی («۹۴٬۰۰۰ , ۱۰۸٬۰۰۰») نه
   // مرتب می‌شود نه با ردیف کناری مقایسه — و استرادل و کندور همیشه دو تا
   // دارند. ستون فهرستی در انتخابگر می‌ماند، برای وقتی که بیش از چهار باشد.
+  //
+  // ارزش معاملات پاها هم ستون جدا گرفت، به همان دلیل سربه‌سری‌ها: مجموع
+  // گردش یک ترکیب نمی‌گوید گردش پخش است یا روی یک پا جمع شده، و پایی که
+  // امروز نخوابیده با پایی که خوابیده در یک عدد گم می‌شود. کنار «هزینه
+  // اجرا» نشسته چون هر دو یک سؤال را جواب می‌دهند: این ردیف را می‌شود بست؟
   خلاصه: ['underlying', 'legNames', 'expiryLabel', 'strikes', 'days', 'cashLabel', 'netCash',
     'be1', 'be1DistPct', 'be2', 'be2DistPct', 'beRoomPct',
     'maxProfit', 'maxProfitPct', 'retMaxPct', 'maxLoss', 'maxLossPct', 'rewardRisk',
-    'capital', 'retMonthPct', 'popPct', 'execCost', 'maxQty', 'binding',
+    'capital', 'retMonthPct', 'popPct',
+    'legValue1', 'legValue2', 'legValue3', 'legValue4',
+    'execCost', 'maxQty', 'binding',
     'qualityLabel', 'warn'],
   سرمایه: ['underlying', 'legsText', 'days', 'capital', 'capitalLabel', 'margin', 'marginToMaxLoss',
     'conditionalMargin', 'netCash', 'maxLoss', 'retMaxPct', 'retAnnPct', 'warn'],
@@ -207,13 +214,31 @@ export async function mount(root, { tab, state, api }) {
 
   // ——— جدول ———
   let table = null;
+  // ستون‌های «ارزش معاملات پای n» به تعداد پاهای همین استراتژی بریده
+  // می‌شوند. «پای ۴» یک اسپرد دوپا همیشه «—» است و فقط پهنا می‌گیرد.
+  // نمای «همه» معاف است، چون معنی‌اش «هر ستونی که هست» است، و انتخابگر هم
+  // هر چهار را نگه می‌دارد — ترکیب دستی می‌تواند پای بیشتری داشته باشد.
+  const legCount = (def.legs || []).length;
+  const fitsLegs = (k) => {
+    const m = /^legValue(\d+)$/.exec(k);
+    return !m || Number(m[1]) <= legCount;
+  };
+
+  // سرستون هر پا، خودِ پا را می‌گوید نه فقط شماره‌اش — «ارزش معاملات پای ۲
+  // — فروش کال». قاعده‌اش در `columnsForStrategy` است، کنار خودِ قرارداد
+  // ستونی، تا آزمون بتواند بی‌نیاز از مرورگر بسنجدش.
+  const colsAll = columnsForStrategy(def);
+
   function buildTable() {
-    const cols = VIEWS[view].map((k) => COLUMNS.find((c) => c.key === k)).filter(Boolean);
+    const wanted = view === 'همه' ? VIEWS[view] : VIEWS[view].filter(fitsLegs);
+    const cols = wanted.map((k) => colsAll.find((c) => c.key === k)).filter(Boolean);
     table = makeTable(root.querySelector('#table'), cols, {
       sortKey: s().rankBy, onPick: showDetail,
       // نما نقطه شروع است، نه قفس: هر ستون دیگری از قرارداد ستونی مشترک را
       // می‌شود اضافه یا کم کرد، و انتخاب هر استراتژی و هر نما جدا می‌ماند.
-      all: COLUMNS, storeKey: `${def.id}:${view}`,
+      // `colsAll` همان قرارداد مشترک است با سرستون پاهای همین استراتژی، تا
+      // انتخابگر هم همان نامی را نشان بدهد که روی جدول می‌نشیند.
+      all: colsAll, storeKey: `${def.id}:${view}`,
     });
     table.set(rows);
     if (!hasScanned) table.setEmptyMessage(NOT_SCANNED_MSG);

@@ -241,6 +241,15 @@ export function evaluate({ legs, quotes, ctx }) {
   let notional = 0, intrinsic = 0, timeValue = 0, bsValue = 0, bsKnown = true;
   let oiTotal = 0, oiChange = 0, volTotal = 0, tradeCount = 0, valueTotal = 0;
   const bidList = [], askList = [], lastList = [], closeList = [], ivList = [], headlineList = [];
+  // ارزش معاملات، برخلاف فهرست‌های بالا، هم‌ترتیب با **همه** پاهاست — پای
+  // سهم پایه هم خانه خودش را دارد. دلیلش تطبیق با ستون‌های هویت است:
+  // `legNames` و `legsText` پای سهم را می‌شمارند، پس اگر این فهرست آن را
+  // بیندازد، «پای ۱» کاوردکال در یک ستون سهم است و در ستون دیگر کال.
+  //
+  // خانهٔ پای سهم `NaN` می‌ماند نه صفر (قاعده ۲-۴): دیده‌بان اختیار، گردش
+  // خودِ نماد پایه را در مظنه پا نمی‌دهد. صفر یعنی «امروز معامله نشد» و
+  // این ادعا، ساختگی است.
+  const valueList = [];
   let spreadWorst = NaN, bidQtyMin = Infinity, askQtyMin = Infinity;
 
   pos.forEach((l, i) => {
@@ -250,7 +259,7 @@ export function evaluate({ legs, quotes, ctx }) {
     const intr = intrinsicOf(l);
     intrinsic += qty * intr;
     timeValue += qty * (num(l.price) - intr);
-    if (l.kind === 'underlying') { bsValue += qty * Sclose; return; }
+    if (l.kind === 'underlying') { bsValue += qty * Sclose; valueList.push(NaN); return; }
 
     const Tl = Math.max(1, num(l.days, days)) / Y;
     // تلاطم روی پای یک‌دستی نشسته است، نه روی کپیِ مقیاس‌خورده
@@ -263,6 +272,7 @@ export function evaluate({ legs, quotes, ctx }) {
     volTotal += num(q.vol);
     tradeCount += num(q.trades);
     valueTotal += num(q.value);
+    valueList.push(num(q.value));
 
     bidList.push(num(q.bid));
     askList.push(num(q.ask));
@@ -385,6 +395,7 @@ export function evaluate({ legs, quotes, ctx }) {
     bidQtyMin: Number.isFinite(bidQtyMin) ? bidQtyMin : NaN,
     askQtyMin: Number.isFinite(askQtyMin) ? askQtyMin : NaN,
     bidList, askList, lastList, closeList, ivList, headlineList,
+    valueList, ...legValueSlots(valueList),
     blockedAsset: num(margin.sharesLocked) * Sclose,
     sharesLocked: num(margin.sharesLocked),
     marginRequired: num(margin.requiredTotal),
@@ -509,6 +520,34 @@ export function breakevenMetrics(bes, S) {
   };
 }
 
+/** چند پا ستون ارزش معاملات جدا می‌گیرد. کاتالوگ حداکثر چهار پا دارد. */
+export const LEG_VALUE_SLOTS = 4;
+
+/**
+ * ارزش معاملات امروزِ هر پا، هر کدام در ستون خودش.
+ *
+ * چرا ستون جدا و نه فقط `valueTotal`: مجموع ارزش معاملات یک ترکیب نمی‌گوید
+ * که گردش، پخش است یا روی یک پا جمع شده. کندوری که ۹۰٪ ارزشش مال یک پاست،
+ * سه پای دیگرش عملاً نمی‌شود بست — و ردیفش با کندوری که گردش متوازن دارد
+ * دقیقاً یک عدد نشان می‌داد. `valueList` هم می‌ماند، برای ترکیب دستی‌ای که
+ * بیش از `LEG_VALUE_SLOTS` پا داشته باشد؛ همان قاعده‌ای که `beDistList`
+ * کنار `be1..be4` دارد.
+ *
+ * خانه‌های خالی `NaN`اند نه صفر: ستون «پای ۴» یک اسپرد دوپا اصلاً پایی
+ * ندارد که گردشش صفر باشد.
+ *
+ * تابع خالص است تا بی‌نیاز از مرورگر آزمون شود.
+ */
+export function legValueSlots(values) {
+  const list = Array.isArray(values) ? values : [];
+  const slots = {};
+  for (let i = 1; i <= LEG_VALUE_SLOTS; i++) slots[`legValue${i}`] = NaN;
+  for (let i = 0; i < Math.min(LEG_VALUE_SLOTS, list.length); i++) {
+    slots[`legValue${i + 1}`] = ok(list[i]) ? list[i] : NaN;
+  }
+  return slots;
+}
+
 export const COLUMNS = [
   { key: 'strategy', label: 'استراتژی', fmt: 'text', group: 'هویت', pin: true },
   { key: 'underlying', label: 'پایه', fmt: 'text', group: 'هویت', pin: true },
@@ -562,6 +601,11 @@ export const COLUMNS = [
   { key: 'spreadWorstPct', label: 'فاصله ٪ — بدترین پا', fmt: 'pct', group: 'مظنه', heat: 'loss' },
   { key: 'volTotal', label: 'حجم', fmt: 'int', group: 'بازار' },
   { key: 'valueTotal', label: 'ارزش معاملات', fmt: 'money', group: 'بازار' },
+  { key: 'valueList', label: 'ارزش معاملات هر پا', fmt: 'moneyList', group: 'بازار' },
+  { key: 'legValue1', label: 'ارزش معاملات پای ۱', fmt: 'money', group: 'بازار', heat: 'gain' },
+  { key: 'legValue2', label: 'ارزش معاملات پای ۲', fmt: 'money', group: 'بازار', heat: 'gain' },
+  { key: 'legValue3', label: 'ارزش معاملات پای ۳', fmt: 'money', group: 'بازار', heat: 'gain' },
+  { key: 'legValue4', label: 'ارزش معاملات پای ۴', fmt: 'money', group: 'بازار', heat: 'gain' },
   { key: 'tradeCount', label: 'تعداد معامله', fmt: 'int', group: 'بازار' },
   { key: 'oiTotal', label: 'موقعیت باز', fmt: 'int', group: 'بازار' },
   { key: 'oiChange', label: 'تغییر موقعیت باز', fmt: 'int', group: 'بازار' },
@@ -605,3 +649,40 @@ export const COLUMNS = [
   { key: 'qualityLabel', label: 'کیفیت داده', fmt: 'text', group: 'سلامت' },
   { key: 'warn', label: 'هشدار', fmt: 'list', group: 'سلامت' },
 ];
+
+const LEG_KIND_FA = { call: 'کال', put: 'پوت', underlying: 'سهم' };
+
+// رقم فارسی، همان‌جا. `ui/fmt.mjs` این را دارد ولی هسته به رابط وابسته
+// نمی‌شود؛ ورودی اینجا یک عدد صحیح کوچک است (نسبت پا)، نه عدد پولی.
+const faInt = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+
+/**
+ * قرارداد ستونی، با سرستون پاهای یک استراتژی مشخص.
+ *
+ * «ارزش معاملات پای ۲» به‌تنهایی هیچ‌چیز نمی‌گوید: در استرانگل فروش یکی
+ * پوت است و دیگری کال، و کاربر برای فهمیدنِ کدام باید ستون «نام قرارداد
+ * پاها» را جدا بخواند و با ترتیب تطبیق بدهد. هر تب استراتژی دقیقاً یک الگو
+ * دارد، پس نوع و جهت هر پا از خودِ تعریف استراتژی معلوم است و می‌تواند در
+ * سرستون بنشیند.
+ *
+ * شماره پا می‌ماند و حذف نمی‌شود: باترفلای سه پای کال دارد و بدون شماره،
+ * سه سرستون هم‌نام می‌شوند.
+ *
+ * جدولی که ردیف‌هایش از استراتژی‌های مختلف می‌آیند (برترین موقعیت‌ها) این
+ * را صدا نمی‌زند — آنجا نگاشت واحدی از «پای ۲» به یک نوع پا وجود ندارد.
+ *
+ * تابع خالص است و همان `COLUMNS` را برمی‌گرداند اگر استراتژی پا نداشته
+ * باشد، تا فراخوانی‌اش هیچ‌جا شرط لازم نداشته باشد.
+ */
+export function columnsForStrategy(def) {
+  const legs = def?.legs || [];
+  if (!legs.length) return COLUMNS;
+  return COLUMNS.map((c) => {
+    const m = /^legValue(\d+)$/.exec(c.key);
+    const leg = m ? legs[Number(m[1]) - 1] : null;
+    if (!leg) return c;
+    const side = leg.side === 'sell' ? 'فروش' : 'خرید';
+    const ratio = num(leg.ratio, 1) > 1 ? ` ×${faInt(leg.ratio)}` : '';
+    return { ...c, label: `${c.label} — ${side} ${LEG_KIND_FA[leg.kind] || ''}${ratio}` };
+  });
+}
