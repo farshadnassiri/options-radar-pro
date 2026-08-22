@@ -15,7 +15,7 @@ import {
   coverage, strategyMargin, capitalBase, marginBase, DEFAULT_PARAMS,
 } from '../core/margin.mjs';
 import { walkBook, resolvePrice, maxSize, bookCapacity } from '../core/exec.mjs';
-import { evaluate, profitRegions, probOfProfit, breakevenMetrics, legValueSlots, LEG_VALUE_SLOTS, COLUMNS } from '../core/evaluate.mjs';
+import { evaluate, profitRegions, probOfProfit, breakevenMetrics, legValueSlots, LEG_VALUE_SLOTS, columnsForStrategy, COLUMNS } from '../core/evaluate.mjs';
 import { CATALOG, buildLegs, byId } from '../strategies/catalog.mjs';
 import { flattenActiveContracts, generateHistoricalCombos as histCombos } from '../core/history.mjs';
 import { defaults, SCHEMA, feesOf, assetClassMap, assetClassOf } from '../core/settings.mjs';
@@ -4690,9 +4690,40 @@ group('۶۶. ارزش معاملات هر پا');
     stratSrc66.includes("view === 'همه' ? VIEWS[view] : VIEWS[view].filter(fitsLegs)"));
   // «اضافه و حذف» همان انتخابگر ستون است: هر جدولی که `all` بگیرد پنل دارد.
   check('هر دو جدول انتخابگر ستون دارند، پس ستون‌ها اضافه و حذف می‌شوند',
-    /all: COLUMNS, storeKey/.test(stratSrc66) && /all: COLUMNS, storeKey/.test(topSrc66));
+    /all: colsAll, storeKey/.test(stratSrc66) && /all: COLUMNS, storeKey/.test(topSrc66));
   check('و هر چهار ستون در انتخابگر می‌مانند، حتی وقتی از نما بریده شده‌اند',
     need66.slice(1).every((k) => keys66.has(k)));
+
+  // ——— سرستون، خودِ پا را می‌گوید نه فقط شماره‌اش ———
+  //
+  // خواسته کاربر با یک مثال روشن شد: «برای شورت استرانگل یک کال داریم و یک
+  // پوت — ارزش معاملاتی هر کدوم». پس «پای ۲» کافی نیست؛ سرستون باید بگوید
+  // کدام پا.
+  const strangleCols = columnsForStrategy(byId('short-strangle'));
+  const labelOf = (cols, k) => cols.find((c) => c.key === k).label;
+  check('سرستون استرانگل فروش می‌گوید کدام پا پوت است و کدام کال',
+    labelOf(strangleCols, 'legValue1') === 'ارزش معاملات پای ۱ — فروش پوت'
+    && labelOf(strangleCols, 'legValue2') === 'ارزش معاملات پای ۲ — فروش کال',
+    labelOf(strangleCols, 'legValue1'));
+  // شماره پا حذف نمی‌شود: باترفلای سه پای کال دارد و بدون شماره، سه سرستون
+  // هم‌نام می‌شوند و ستون سوم از ستون اول جدا نمی‌ماند.
+  const flyCols = columnsForStrategy(byId('long-call-butterfly'));
+  check('شماره پا می‌ماند، پس سه پای هم‌نوع باترفلای از هم جدا می‌مانند',
+    new Set(['legValue1', 'legValue2', 'legValue3'].map((k) => labelOf(flyCols, k))).size === 3);
+  check('نسبت پا در سرستون با رقم فارسی می‌آید',
+    labelOf(flyCols, 'legValue2') === 'ارزش معاملات پای ۲ — فروش کال ×۲',
+    labelOf(flyCols, 'legValue2'));
+  check('پای سهم کاوردکال هم در سرستون نام دارد',
+    labelOf(columnsForStrategy(byId('covered-call')), 'legValue1') === 'ارزش معاملات پای ۱ — خرید سهم');
+  // ستون بی‌پا دست‌نخورده می‌ماند، وگرنه «— undefined» می‌گیرد
+  check('ستون پای نداشته، برچسب خام خودش را نگه می‌دارد',
+    labelOf(strangleCols, 'legValue3') === 'ارزش معاملات پای ۳'
+    && labelOf(strangleCols, 'valueTotal') === labelOf(COLUMNS, 'valueTotal'));
+  check('بدون تعریف استراتژی، همان قرارداد ستونی مشترک برمی‌گردد',
+    columnsForStrategy(null) === COLUMNS && columnsForStrategy({ legs: [] }) === COLUMNS);
+  check('تب استراتژی همین قاعده را صدا می‌زند، نه رونوشتی از خودش',
+    stratSrc66.includes('columnsForStrategy(def)')
+    && !/const KIND_FA/.test(stratSrc66));
 
   // ——— جدول دیده‌بان: گردش خودِ نماد پایه ———
   //

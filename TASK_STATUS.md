@@ -111,7 +111,7 @@
 | ۵۹ | نمودار ستونی فاصله کال/پوت و امکان حذف/بازگرداندن میانگین‌های فاصله و IV | انجام‌شده | `kind: 'bar'` و `data-series-toggle` |
 | ۶۰ | حذف تجمیع همه سررسیدها و همگام‌سازی تمام نمودارها، جدول‌ها و ریزروز با یک سررسید | انجام‌شده | `selectedExpiry` و `contractsInView` |
 | ۶۱ | تنظیم مستقیم نرخ، بازده نقدی، روزهای سال و کران‌های حل نوسان ضمنی | انجام‌شده | `open-view-model-settings` و `ov-apply-iv` |
-| ۶۲ | ارزش معاملات هر پا در ستون جدا، قابل اضافه و حذف از جدول | انجام‌شده | `valueList` و `legValue1..4` در `core/evaluate.mjs`، `moneyList` در `ui/fmt.mjs`، `uaValue` در `core/chain.mjs`؛ آزمون ۶۶ |
+| ۶۲ | ارزش معاملات هر پا در ستون جدا (کال و پوت هر کدام ستون خودش)، قابل اضافه و حذف از جدول | انجام‌شده | `valueList`، `legValue1..4` و `columnsForStrategy` در `core/evaluate.mjs`، `moneyList` در `ui/fmt.mjs`، `uaValue` در `core/chain.mjs`؛ آزمون ۶۶ |
 
 ## اجرا، ذخیره و انتشار کد
 
