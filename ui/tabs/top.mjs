@@ -19,9 +19,13 @@ import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE }
 import { canHandoff, handoffPlan, handoffButtonHtml } from '/ui/handoff.mjs';
 import { runScanAll, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 
+// ارزش معاملات هر پا، ستون جدا. اینجا برخلاف تب استراتژی هر چهار ستون
+// می‌مانند: ردیف‌ها از استراتژی‌های مختلف با تعداد پای متفاوت می‌آیند، پس
+// هیچ عدد واحدی برای «تعداد پا» وجود ندارد که ستون را با آن برید.
 const DEFAULT_COLS = ['strategy', 'underlying', 'legsText', 'days', 'netCash', 'capital',
   'beDistPct', 'beRoomPct', 'retMaxPct', 'retMonthPct', 'popPct',
-  'maxProfit', 'maxLoss', 'maxLossPct', 'rewardRisk', 'warn'];
+  'maxProfit', 'maxLoss', 'maxLossPct', 'rewardRisk',
+  'legValue1', 'legValue2', 'legValue3', 'legValue4', 'warn'];
 
 export async function mount(root, { state, api }) {
   const s = () => state.settings;
