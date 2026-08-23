@@ -1,5 +1,5 @@
 import { CATALOG, GROUPS, byId } from '/strategies/catalog.mjs';
-import { buildChain } from '/core/chain.mjs';
+import { buildChain, comboContractSize } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, comboKey, flattenActiveContracts, generateHistoricalCombos, historyDateLabel,
@@ -813,7 +813,45 @@ export async function mount(root, { state }) {
   }
 
   /**
-   * موقعیتی که تب «آزمون همه استراتژی‌ها» فرستاده را اینجا می‌چیند.
+   * موقعیت دستیِ تحلیل تاریخی را بدون حدس‌زدن یک ترکیب دیگر بازسازی می‌کند.
+   *
+   * فهرست معمول بک‌تست از ترکیب‌ساز خودکار می‌آید، اما تحلیل تاریخی حالت
+   * دستی هم دارد. ممکن است همان قراردادها در فهرست خودکار نباشند؛ در آن
+   * صورت شناسه هر قرارداد به داده زنجیره وصل و سمت/نسبت از تعریف مشترک
+   * استراتژی گرفته می‌شود. اگر حتی یک قرارداد یا قیمت ورود معتبر نباشد،
+   * null برمی‌گردد تا مقصد صریحاً بگوید بازسازی نشد.
+   */
+  function exactHandoffCombo(plan, entryDate) {
+    const def = byId(strategySelect.value);
+    if (!def || !Array.isArray(plan.legIns)) return null;
+    const selected = plan.legIns.map((ins) => contracts.find((contract) => String(contract.ins) === String(ins)));
+    const optionTemplates = def.legs.filter((leg) => leg.kind !== 'underlying');
+    if (selected.length !== optionTemplates.length || selected.some((contract) => !contract)) return null;
+    const nearestExpiry = Math.min(...selected.map((contract) => Number(contract.expiry)).filter(Number.isFinite));
+    const size = comboContractSize(selected.map((contract) => contract.size), state.settings.contractSize).size;
+    let optionIndex = 0;
+    const exactLegs = def.legs.map((template) => {
+      if (template.kind === 'underlying') {
+        return { kind: 'underlying', side: template.side, ratio: template.ratio, size, ins: String(ua.ins), name: ua.name, expiry: nearestExpiry };
+      }
+      const contract = selected[optionIndex++];
+      if (contract.kind !== template.kind) return null;
+      return { ...contract, side: template.side, ratio: template.ratio, slot: template.slot, exp: template.exp };
+    });
+    if (exactLegs.some((leg) => !leg)) return null;
+    const basis = entryRail.dataset.value || 'LAST';
+    const pricesReady = exactLegs.every((leg, index) => Number(plan.manualEntry?.[index]) > 0
+      || Number(historyPrice(rowAt(leg.ins, entryDate), basis)) > 0);
+    if (!pricesReady) return null;
+    return {
+      legs: exactLegs,
+      strikes: exactLegs.filter((leg) => leg.kind !== 'underlying').map((leg) => leg.strike),
+      expiries: [...new Set(exactLegs.filter((leg) => leg.kind !== 'underlying').map((leg) => leg.expiry))],
+    };
+  }
+
+  /**
+   * موقعیتی که یکی از تب‌های تحلیلی فرستاده را اینجا می‌چیند.
    *
    * هر چیزی که برداشته نشد، صریح گفته می‌شود. مثلاً اگر همان ترکیب قرارداد
    * در روز ورود انتخابی، ترکیب معتبری برای این استراتژی نباشد، بی‌صدا ترکیب
@@ -821,6 +859,9 @@ export async function mount(root, { state }) {
    */
   async function applyHandoff(plan) {
     const skipped = [];
+    const sourceName = plan.from === 'history' ? 'تحلیل تاریخی'
+      : plan.from === 'portfolio-backtest' ? 'آزمون همه استراتژی‌ها'
+        : plan.from === 'top' ? 'برترین موقعیت‌ها' : 'تب استراتژی';
     if (!chain.has(String(plan.uaIns))) { setStatus(`نماد پایه «${plan.uaName}» در فهرست این تب نیست.`, true); return; }
     baseSelect.value = String(plan.uaIns);
     if ([...strategySelect.options].some((option) => option.value === plan.strategyId)) strategySelect.value = plan.strategyId;
@@ -835,7 +876,8 @@ export async function mount(root, { state }) {
     // ثابت از تب مبدأ، بازه‌ای می‌ساخت که ممکن است برای این قرارداد وجود
     // نداشته باشد.
     const wantEntry = plan.entryDate === 'auto' ? entryDates[0] : plan.entryDate;
-    if (entryDates.includes(wantEntry)) entryWheel.select(wantEntry);
+    const entryReady = entryDates.includes(wantEntry);
+    if (entryReady) entryWheel.select(wantEntry);
     else skipped.push(`روز ورود ${dateLabel(plan.entryDate)} برای این استراتژی ترکیب قابل اجرا ندارد`);
 
     // همان کلیدی که `refreshCombos` با آن انتخاب را نگه می‌دارد. تحویل فقط
@@ -844,15 +886,43 @@ export async function mount(root, { state }) {
     const wanted = [...plan.legIns].map(String).sort().join('|');
     const index = combos.findIndex((combo) => insOf(comboKey(combo.legs)) === wanted);
     if (index >= 0) { $('bt-combo').value = String(index); renderCombo(); }
-    else skipped.push(`ترکیب «${plan.comboName}» بین ترکیب‌های این روز نبود`);
+    else {
+      const exact = entryReady ? exactHandoffCombo(plan, wantEntry) : null;
+      if (exact) {
+        const exactIndex = combos.length;
+        combos.push(exact);
+        const option = document.createElement('option');
+        option.value = String(exactIndex);
+        option.textContent = `موقعیت دقیق منتقل‌شده · ${comboLabel(exact)}`;
+        $('bt-combo').appendChild(option);
+        $('bt-combo').value = String(exactIndex);
+        $('bt-combo-count').textContent = `${fmt.int(combos.length)} ترکیب · موقعیت دقیق تحلیل تاریخی افزوده شد`;
+        renderCombo();
+      } else skipped.push(`ترکیب «${plan.comboName}» با داده معتبر این روز بازسازی نشد`);
+    }
 
     const wantExit = plan.exitDate === 'auto' ? exitDates.at(-1) : plan.exitDate;
     if (exitDates.includes(wantExit)) exitWheel.select(wantExit);
     else skipped.push(`روز سنجش ${dateLabel(plan.exitDate)} برای همه پاها قیمت کامل ندارد`);
 
+    // قیمت دستی تحلیل تاریخی، ورودی محاسبه است نه نتیجه؛ پس همراه همان پای
+    // شماره‌دار بازسازی می‌شود. پس از انتخاب تاریخ خروج می‌نشیند، چون ساخت
+    // دوباره چرخ تاریخ، کارت‌های قیمت را از نو رسم می‌کند.
+    manualEntry = Object.fromEntries(Object.entries(plan.manualEntry || {})
+      .filter(([index, value]) => Number.isInteger(Number(index))
+        && Number(index) >= 0 && Number(index) < (legs?.length || 0)
+        && Number.isFinite(Number(value)) && Number(value) > 0)
+      .map(([index, value]) => [String(index), Number(value)]));
+    if (Object.keys(manualEntry).length) paintSnapshots();
+
+    if (!skipped.length && plan.autoRun) {
+      setStatus(`موقعیت از ${sourceName} با همان پارامترها چیده شد؛ در حال اجرای بک‌تست…`);
+      await runBacktest();
+      return;
+    }
     setStatus(skipped.length
-      ? `موقعیت از آزمون همه استراتژی‌ها آمد، ولی ${skipped.join('؛ ')}.`
-      : 'موقعیت از آزمون همه استراتژی‌ها چیده شد؛ دکمه اجرای بک‌تست را بزن.', skipped.length > 0);
+      ? `موقعیت از ${sourceName} آمد، ولی ${skipped.join('؛ ')}.`
+      : `موقعیت از ${sourceName} چیده شد؛ دکمه اجرای بک‌تست را بزن.`, skipped.length > 0);
     $('bt-work').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
