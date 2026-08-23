@@ -253,6 +253,50 @@ group('۸. شمار تب در کد و مستندات یکی است');
     readme.includes(`${totalFa} تب`) && agents.includes(`${totalFa} تب`), totalFa);
 }
 
+// ═════════ ۹. هر شناسه‌ای که به کار می‌رود، وارد هم شده است ═════════
+//
+// ماژول‌های مشترک `ui/` (fmt، table، chart، export، …) ده‌ها کمک‌تابع صادر
+// می‌کنند و هر تب چند تایشان را می‌خواهد. یک `import` جاافتاده در نود
+// نمی‌ترکد و در آزمون هم پیدا نمی‌شود — فقط در مرورگر، همان لحظه‌ای که
+// کاربر روی همان دکمه کلیک می‌کند، «X is not defined» می‌دهد.
+//
+// همین اتفاق افتاد: `ui/tabs/backtest.mjs` از `faClock` استفاده می‌کرد و
+// وارد نکرده بود؛ خطا فقط با زدن دکمه «رصد زنده» دیده می‌شد.
+//
+// نگهبان محافظه‌کار است: فقط فراخوانی `نام(` را می‌شمارد، و نامی را که
+// همان فایل خودش تعریف کرده یا از هر جای دیگری وارد کرده، نادیده می‌گیرد.
+group('۹. هر کمک‌تابع مشترک، وارد شده است');
+{
+  const shared = sources.filter((f) => /^ui\/[^/]+\.mjs$/.test(rel(f)));
+  const exportsOf = (file) => [...fs.readFileSync(file, 'utf8')
+    .matchAll(/export\s+(?:async\s+)?(?:function|const|let|class)\s+(\w+)/g)].map((m) => m[1]);
+  const misses = [];
+  for (const file of sources) {
+    const name = rel(file);
+    if (!name.startsWith('ui/') || name === 'ui/app.mjs') continue;
+    const src = fs.readFileSync(file, 'utf8');
+    // هرچه وارد شده (با هر نام مستعار) یا همین‌جا تعریف شده، شناخته است
+    const imported = [...src.matchAll(/import\s*\{([^}]*)\}\s*from/g)]
+      .flatMap((m) => m[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop().trim()));
+    const declared = [...src.matchAll(/(?:function|const|let|var|class)\s+(\w+)/g)].map((m) => m[1]);
+    const known = new Set([...imported, ...declared].filter(Boolean));
+    // نام واشکافته هم تعریف است: `f(host, { getSettings, putSettings })` یعنی
+    // `putSettings` پارامتر همین تابع است، نه صدا زدنِ کمک‌تابعی از جای دیگر.
+    const destructured = (symbol) =>
+      new RegExp(`\\{[^{}]*\\b${symbol}\\b[^{}]*\\}\\s*(?:=[^=]|\\)|=>)`).test(src);
+    for (const mod of shared) {
+      if (rel(mod) === name) continue;
+      for (const symbol of exportsOf(mod)) {
+        if (known.has(symbol) || destructured(symbol)) continue;
+        // `نام(` و نه `x.نام(` یا `foo_نام(` — تا متد و پسوند اشتباه گرفته نشود
+        if (new RegExp(`(?<![\\w.$])${symbol}\\s*\\(`).test(src)) misses.push(`${name} → ${symbol}`);
+      }
+    }
+  }
+  check('هیچ فایل رابطی، کمک‌تابع وارد‌نشده صدا نمی‌زند',
+    misses.length === 0, misses.join('، '));
+}
+
 // ═══════════════════════════ گزارش ═══════════════════════════
 const W = 62;
 console.log('\n' + '═'.repeat(W));

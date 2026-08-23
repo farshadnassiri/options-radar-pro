@@ -12,7 +12,7 @@ import {
   INTRADAY_START_SECOND, INTRADAY_END_SECOND,
 } from '/core/backtest.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
-import { fmt, faDigits, signTone, ltr } from '/ui/fmt.mjs';
+import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { logError } from '/ui/errlog.mjs';
 
