@@ -92,10 +92,26 @@ const volatilityViews = [
   ['open-view-history', 'نگاه باز چندروزه', 'open-view', 'contracts', 'ivPct'],
 ];
 
+// دو تب پایه که در همین تب ادغام شدند.
+//
+// «دیده‌بان زنجیره» و «برترین موقعیت‌ها» هر دو از همان عکس لحظه‌ای بازار
+// تغذیه می‌شوند که این تب می‌سازد و هر دو یک کار می‌کنند: نگاه کلی به بازار
+// پیش از تصمیم. سه تب جدا برای یک کار، یعنی کاربر باید بین سه نشانی
+// جابه‌جا شود تا یک تصمیم بگیرد.
+//
+// ماژولشان دست‌نخورده می‌ماند و همان‌جا که هست تنبل بار می‌شود — همان
+// الگویی که «نگاه باز» از قبل داشت. ادغام یعنی یک در ورودی، نه بازنویسی
+// دو تب کارکرده.
+const EMBEDDED_MODES = [
+  { id: 'chain', title: 'دیده‌بان زنجیره', hint: 'یک درخواست، کل بازار اختیار', mod: '/ui/tabs/chain.mjs' },
+  { id: 'top', title: 'برترین موقعیت‌ها', hint: 'غربال روی کل کاتالوگ استراتژی', mod: '/ui/tabs/top.mjs' },
+];
+
 export const DASHBOARD_MODES = [
   { id: 'pulse', title: 'نبض و جهت بازار', hint: 'وسعت، روند و تغییر نسبت به دیروز', views: pulseViews },
   { id: 'liquidity', title: 'نقدینگی و سررسید', hint: 'ارزش، حجم، موقعیت باز و تمرکز', views: liquidityViews },
   { id: 'volatility', title: 'تلاطم و انتظارات', hint: 'IV لحظه‌ای و تحلیل نگاه باز', views: volatilityViews },
+  ...EMBEDDED_MODES.map((mode) => ({ ...mode, views: [] })),
 ];
 
 const METRICS = {
@@ -330,15 +346,17 @@ function tapeRows(tape) {
   })).reverse();
 }
 
-export async function mount(root, { state }) {
+export async function mount(root, { state, api }) {
   root.innerHTML = `<section class="live-dashboard-hero"><div><p class="eyebrow">مرکز تصمیم‌گیری زنده بازار اختیار</p><h1>داشبورد معاملاتی لحظه‌ای</h1><p>هر جدول و نمودار از عکس واقعی بازار و معاملات امروز بازسازی می‌شود. درصد تغییر، آخرین قیمت را فقط با قیمت پایانی دیروز مقایسه می‌کند.</p></div><div><button type="button" class="ghost" id="dd-refresh">به‌روزرسانی اکنون</button><button type="button" class="ghost" id="dd-pause">توقف خودکار</button><span id="dd-status" role="status">در انتظار نخستین عکس…</span></div></section>
     <section class="card decision-toolbar"><div class="decision-refresh-control"><label for="dd-interval">زمان به‌روزرسانی</label><input id="dd-interval" type="range" min="5" max="60" step="5"><output id="dd-interval-label"></output></div><div class="decision-scope-controls"><label>دامنه<select id="dd-scope"><option value="market">کل بازار</option><option value="underlying">یک نماد پایه</option><option value="expiry">یک سررسید از پایه</option><option value="contract">یک قرارداد از سررسید</option></select></label><label>نماد پایه<select id="dd-underlying"></select></label><label>سررسید<select id="dd-expiry"></select></label><label>قرارداد<select id="dd-contract"></select></label></div><p id="dd-scope-note" class="note">کل بازار اختیار</p></section>
-    <div class="decision-shell"><aside class="decision-mode-rail" aria-label="حالت‌های تصمیم‌گیری">${DASHBOARD_MODES.map((mode, index) => `<button type="button" data-mode="${mode.id}" aria-pressed="${index === 0}"><b>${mode.title}</b><small>${mode.hint}</small><span>${fmt.int(mode.views.length)} نما</span></button>`).join('')}</aside><main class="decision-main">${DASHBOARD_MODES.map((mode, modeIndex) => `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div><div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</main></div>`;
+    <div class="decision-shell"><aside class="decision-mode-rail" aria-label="حالت‌های تصمیم‌گیری">${DASHBOARD_MODES.map((mode, index) => `<button type="button" data-mode="${mode.id}" aria-pressed="${index === 0}"><b>${mode.title}</b><small>${mode.hint}</small><span>${mode.mod ? 'تب کامل' : `${fmt.int(mode.views.length)} نما`}</span></button>`).join('')}</aside><main class="decision-main">${DASHBOARD_MODES.map((mode, modeIndex) => mode.mod
+      ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
+      : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div><div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</main></div>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
   let payload = { universe: { underlyings: [], expiries: [], marketExpiries: [], contracts: [] }, timeline: [], snapshot: { rows: [] } };
   let activeMode = DASHBOARD_MODES[0].id;
-  const activeViews = Object.fromEntries(DASHBOARD_MODES.map((mode) => [mode.id, mode.views[0][0]]));
+  const activeViews = Object.fromEntries(DASHBOARD_MODES.filter((mode) => mode.views.length).map((mode) => [mode.id, mode.views[0][0]]));
   let loading = false, paused = false, timer = null, nextAt = 0, tape = [], openViewMounted = false;
   let intervalSec = Math.max(5, Math.min(60, Number(localStorage.getItem('options-radar:dashboard-interval')) || Number(state.settings.watchIntervalSec) || 15));
   $('dd-interval').value = String(intervalSec);
@@ -346,7 +364,7 @@ export async function mount(root, { state }) {
   const selected = () => ({ level: $('dd-scope').value, uaIns: $('dd-underlying').value, endDate: $('dd-expiry').value, contractIns: $('dd-contract').value });
   const activeContract = () => payload.universe.contracts.find((row) => String(row.ins) === $('dd-contract').value);
   const modeOf = () => DASHBOARD_MODES.find((mode) => mode.id === activeMode);
-  const viewOf = () => modeOf().views.find((view) => view[0] === activeViews[activeMode]);
+  const viewOf = () => (modeOf()?.views || []).find((view) => view[0] === activeViews[activeMode]);
 
   function paintInterval() {
     $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه`;
@@ -460,7 +478,29 @@ export async function mount(root, { state }) {
     if (!table.__seeded && cols.some((c) => c.key === view[4])) { table.sortBy(view[4]); table.__seeded = true; }
   }
 
+  // تب ادغام‌شده فقط یک بار سوار می‌شود و تابع برچیدنش نگه داشته می‌شود،
+  // وگرنه اشتراک‌های دیده‌بان و تایمر اسکن پس از رفتن از این تب زنده می‌مانند.
+  const embedded = new Map();
+  async function mountEmbedded(mode) {
+    if (embedded.has(mode.id)) return;
+    const host = root.querySelector(`[data-mode-panel="${mode.id}"] [data-embedded-host]`);
+    if (!host) return;
+    embedded.set(mode.id, null);
+    host.innerHTML = '<p class="empty-note">در حال آماده‌سازی…</p>';
+    try {
+      const module = await import(mode.mod);
+      host.innerHTML = '';
+      embedded.set(mode.id, await module.mount(host, { state, api }));
+    } catch (error) {
+      embedded.delete(mode.id);
+      host.innerHTML = '<p class="empty-note">این بخش بار نشد.</p>';
+      logError(`سوارکردن ${mode.title} در رصد لحظه‌ای`, error);
+    }
+  }
+
   async function paintView() {
+    const mode = modeOf();
+    if (mode?.mod) { await mountEmbedded(mode); return; }
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
     if (!panel || !view) return;
     const scoped = dashboardScope(payload.universe, selected()), host = panel.querySelector('[data-view-host]'), openHost = panel.querySelector('[data-open-view-host]');
@@ -531,5 +571,8 @@ export async function mount(root, { state }) {
     if (!paused && nextAt > Date.now() && !loading) $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه · نوبت بعد ${faDigits(Math.ceil((nextAt - Date.now()) / 1000))} ثانیه`;
   }, 1000);
   paintInterval(); await refresh();
-  return () => { clearTimeout(timer); clearInterval(countdown); };
+  return () => {
+    clearTimeout(timer); clearInterval(countdown);
+    for (const dispose of embedded.values()) { try { dispose?.(); } catch { /* برچیدن نباید بترکد */ } }
+  };
 }
