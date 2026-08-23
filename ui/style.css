@@ -56,6 +56,11 @@
      فقط ده رنگ بی‌ربط کنار هم می‌گذارد. یک فام، برای همه میله‌ها. */
   --bar-fill: #2c84ff;
 
+  /* فلش انتخابگر. data URI هیچ var() نمی‌خواند، پس رنگش نمی‌تواند از داخل
+     SVG به توکن وصل شود؛ به‌جایش خود تصویر برای هر پوسته یک‌بار نوشته شده
+     تا رنگ باز هم از `--muted` همان پوسته بیاید، نه از یک خاکستری ثابت. */
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+
   /* ——— مقیاس فاصله‌گذاری سیستماتیک ——— */
   --space-1: 4px;
   --space-2: 8px;
@@ -159,6 +164,7 @@ body[data-theme="board"] {
   --shadow-md: 0 4px 14px -2px rgba(0, 0, 0, .5), 0 2px 6px -1px rgba(0, 0, 0, .35);
   --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, .6), 0 6px 12px -2px rgba(0, 0, 0, .4);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
 }
 
 * { box-sizing: border-box; }
@@ -273,7 +279,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-form { display: grid; grid-template-columns: 1.2fr 1.2fr .65fr auto; gap: var(--space-3, 12px); align-items: end; }
 .backtest-form label, .backtest-combo { display: grid; gap: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
 .backtest-form select, .backtest-form input, .backtest-combo select {
-  width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); color: var(--ink); font: inherit;
+  width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background-color: var(--panel); color: var(--ink); font: inherit;
 }
 .backtest-date-grid, .backtest-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4, 16px); margin-bottom: var(--space-4, 16px); }
 .backtest-date-grid > *, .backtest-chart-grid > * { min-width: 0; }
@@ -438,7 +444,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .history-table tbody tr[data-day][aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .backtest-timeframe { margin: 14px 0; border-top: 4px solid var(--cmp1); }
 .backtest-tf-field { display: grid; gap: 5px; color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
-.backtest-tf-field select { min-height: 34px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; }
+.backtest-tf-field select { min-height: 34px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background-color: var(--panel); color: var(--ink); font: inherit; }
 .backtest-timeframe > #bt-tf-body > .backtest-chart-grid { margin-top: 14px; }
 .backtest-timeframe > #bt-tf-body > .backtest-chart-grid > section { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel-2) 70%, var(--panel)); }
 /* شدت رنگ خانه ماتریس ورود×خروج با قدر مطلق میانه، تا چشم بزرگی را ببیند
@@ -466,7 +472,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .portfolio-controls { margin-bottom: var(--space-4, 16px); }
 .portfolio-form { display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: var(--space-3, 12px); align-items: end; }
 .portfolio-form label, .portfolio-manual label, .portfolio-shock-controls label { display: grid; gap: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
-.portfolio-form input, .portfolio-form select, .portfolio-manual input, .portfolio-shock-controls input { width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); color: var(--ink); font: inherit; }
+.portfolio-form input, .portfolio-form select, .portfolio-manual input, .portfolio-shock-controls input { width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background-color: var(--panel); color: var(--ink); font: inherit; }
 .portfolio-form button { min-height: var(--control-h, 40px); }
 .portfolio-note { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-normal); }
 .portfolio-run { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin: 14px 0; border-inline-start: 4px solid var(--accent); }
@@ -927,7 +933,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: var(--panel-2);
+  background-color: var(--panel-2);
   color: var(--ink);
   padding: 8px 10px;
   font: inherit;
@@ -1125,7 +1131,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .rolling-controls label { display: grid; gap: 5px; min-width: 0; color: var(--muted); font-size: var(--fs-2xs); font-weight: 700; }
 .rolling-controls select, .rolling-controls input {
   width: 100%; min-width: 0; min-height: 37px; padding: 6px 8px;
-  border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); font: inherit;
+  border: 1px solid var(--line); border-radius: 8px; background-color: var(--panel-2); color: var(--ink); font: inherit;
 }
 .rolling-strategy-field { grid-column: span 2; }
 .rolling-table { border-collapse: separate; border-spacing: 1px; min-width: 100%; font-size: var(--matrix-font, 12.5px); }
@@ -1261,7 +1267,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .field .hint { font-size: var(--fs-xs); color: var(--muted); line-height: var(--lh-normal); margin-top: 2px; }
 .field input, .field select,
 select, input[type="text"], input[type="search"], input[type="number"], input[type="date"] {
-  background: var(--panel-2); color: var(--ink);
+  background-color: var(--panel-2); color: var(--ink);
   border: 1px solid var(--line); border-radius: var(--radius-md);
   min-height: var(--control-h, 40px);
   padding: 8px 12px; font: inherit; font-size: var(--fs-md); width: 100%;
@@ -1272,7 +1278,7 @@ select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-image: var(--select-arrow);
   background-repeat: no-repeat;
   background-position: left 12px center;
   padding-inline-end: 12px;
@@ -1283,13 +1289,13 @@ select {
 .field input:focus, .field select:focus,
 select:focus, input[type="text"]:focus, input[type="search"]:focus, input[type="number"]:focus, input[type="date"]:focus {
   border-color: var(--accent); outline: none;
-  background: var(--panel);
+  background-color: var(--panel);
   box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 3%, transparent), var(--focus-ring);
 }
 .field input:disabled, .field select:disabled,
 select:disabled, input:disabled {
   opacity: 0.5; cursor: not-allowed;
-  background: color-mix(in srgb, var(--panel-2) 65%, var(--ground));
+  background-color: color-mix(in srgb, var(--panel-2) 65%, var(--ground));
 }
 
 /* فیلد بولی: تیک و برچسب کنار هم، توضیح زیر هر دو. با `flex` ساده، توضیح
@@ -1605,7 +1611,7 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .log-filter { display: grid; gap: 4px; font-size: var(--fs-sm); color: var(--muted); }
 .log-filter select {
   min-height: 34px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius-md);
-  background: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
+  background-color: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
 }
 .log-actions button { cursor: pointer; }
 .log-actions button:hover { border-color: var(--accent); color: var(--accent); }
@@ -1635,7 +1641,7 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 }
 .scen-controls select, .scen-controls input, .scen-units input {
   min-height: 36px; padding: 5px 10px; border: 1px solid var(--line); border-radius: var(--radius-md);
-  background: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
+  background-color: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
 }
 .scen-units input { width: 108px; }
 /* دو ردیف کنترل حساسیت: بالا شکل جدول، پایین فرض‌های بازار. */
@@ -1665,7 +1671,7 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .market-metric { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }
 .market-metric select {
   min-height: 34px; padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--radius-md);
-  background: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
+  background-color: var(--panel); color: var(--ink); font: inherit; font-size: var(--fs-sm);
 }
 .market-bars { display: grid; gap: 7px; margin-top: 10px; }
 .market-bar { display: grid; grid-template-columns: 128px 1fr 116px; gap: 12px; align-items: center; }
@@ -1955,14 +1961,14 @@ td.gain, dd.gain { color: var(--gain); }
 .open-view-controls { margin-bottom: var(--space-4, 16px); }
 .open-view-form { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: var(--space-3, 12px); align-items: end; }
 .open-view-form label { display: grid; gap: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
-.open-view-form select { width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); color: var(--ink); font: inherit; }
+.open-view-form select { width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background-color: var(--panel); color: var(--ink); font: inherit; }
 .open-view-form button { min-height: var(--control-h, 40px); }
 .open-view-model-settings { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(520px, 2fr) auto; gap: 14px; align-items: end; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
 .open-view-model-settings h3 { margin: 2px 0 4px; }
 .open-view-model-settings small { color: var(--muted); }
 .open-view-model-grid { display: grid; grid-template-columns: repeat(5, minmax(105px, 1fr)); gap: 9px; }
 .open-view-model-grid label { display: grid; gap: 5px; color: var(--ink-2); font-size: var(--fs-xs); font-weight: 700; }
-.open-view-model-grid input, .open-view-model-grid select { width: 100%; min-height: 40px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); font: inherit; }
+.open-view-model-grid input, .open-view-model-grid select { width: 100%; min-height: 40px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; background-color: var(--panel); color: var(--ink); font: inherit; }
 .open-view-model-grid input { direction: ltr; text-align: start; font-family: var(--mono); }
 .open-view-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
 .open-view-chart { min-height: 245px; min-width: 0; }
@@ -2011,7 +2017,7 @@ td.gain, dd.gain { color: var(--gain); }
 .open-view-intraday-controls { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(150px, .35fr) auto minmax(190px, .5fr); gap: 12px; align-items: end; margin: 20px 0 12px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
 .open-view-intraday-controls h3 { margin: 2px 0 0; }
 .open-view-intraday-controls label { display: grid; gap: 5px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
-.open-view-intraday-controls select { min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--ink); font: inherit; }
+.open-view-intraday-controls select { min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; background-color: var(--panel); color: var(--ink); font: inherit; }
 .open-view-day-detail .open-view-chart-grid > section { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
 
 @media (max-width: 900px) {
@@ -2036,7 +2042,7 @@ td.gain, dd.gain { color: var(--gain); }
 .live-market-control-head, .live-market-pick-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 9px; }
 .live-market-control-head { justify-content: space-between; }
 .live-market-control-head > label { display: grid; gap: 5px; min-width: min(420px, 100%); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 800; }
-.live-market-control-head select, .live-market-pick-tools input { min-height: 42px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); color: var(--ink); font: inherit; }
+.live-market-control-head select, .live-market-pick-tools input { min-height: 42px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background-color: var(--panel-2); color: var(--ink); font: inherit; }
 .live-market-pick-tools input { min-width: 220px; }
 .live-market-pick-tools > span { margin-inline-start: auto; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
 .live-market-model { padding: 10px 12px; border-inline-start: 3px solid var(--cmp1); border-radius: 9px; background: var(--panel-2); color: var(--ink-2); font-size: var(--fs-sm); }
@@ -2134,7 +2140,7 @@ td.gain, dd.gain { color: var(--gain); }
 .decision-refresh-control output { color: var(--accent); font-weight: 900; text-align: end; }
 .decision-scope-controls { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
 .decision-scope-controls label { display: grid; gap: 5px; color: var(--muted); font-size: var(--fs-sm); font-weight: 800; }
-.decision-scope-controls select { width: 100%; min-height: 42px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); color: var(--ink); font: inherit; }
+.decision-scope-controls select { width: 100%; min-height: 42px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; background-color: var(--panel-2); color: var(--ink); font: inherit; }
 .decision-shell { display: grid; grid-template-columns: 230px minmax(0, 1fr); align-items: start; gap: 14px; direction: ltr; }
 .decision-mode-rail, .decision-main { direction: rtl; }
 .decision-mode-rail { position: sticky; top: 12px; display: grid; gap: 9px; }
