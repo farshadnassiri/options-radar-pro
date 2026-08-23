@@ -395,6 +395,37 @@ group('۱۰. رنگ سری‌ها جداپذیر است');
     rankColored.length === 0, rankColored.join('، '));
 }
 
+// ═══ ۱۱. فلش انتخابگر با فوکوس و غیرفعال‌شدن گم نمی‌شود ═══
+// `background` میان‌بر است و `background-image` را هم صفر می‌کند. قاعدهٔ
+// `select` فلش را با تصویر می‌گذارد، پس هر قاعدهٔ بعدی که همان انتخابگر را
+// می‌گیرد و میان‌بر بنویسد، فلش را بی‌صدا پاک می‌کند — دقیقاً همان اتفاقی
+// که در :focus و :disabled افتاد و هیچ آزمونی نگرفت.
+{
+  group('۱۱. فلش انتخابگر با فوکوس و غیرفعال‌شدن گم نمی‌شود');
+  const css = fs.readFileSync(path.join(ROOT, 'ui/style.css'), 'utf8');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .map((m) => ({ sel: m[1].trim(), body: m[2], at: m.index }));
+
+  const arrowRule = rules.find((r) => /background-image:\s*var\(--select-arrow\)/.test(r.body));
+  check('فلش از توکن می‌آید نه از رنگ ثابت داخل قاعده', !!arrowRule,
+    arrowRule ? arrowRule.sel : 'قاعده‌ای با var(--select-arrow) نبود');
+
+  // توکن باید در هر دو پوسته تعریف شده باشد، وگرنه در پوستهٔ تیره
+  // خاکستری روشنِ نامناسب یا هیچ‌چیز می‌ماند.
+  const arrowDefs = [...css.matchAll(/--select-arrow:/g)].length;
+  check('توکن فلش برای هر دو پوسته تعریف شده', arrowDefs === 2, `${arrowDefs} تعریف`);
+
+  // هر قاعده‌ای که پس از قاعدهٔ فلش می‌آید و انتخابگری از جنس select دارد
+  const touchesSelect = (sel) => sel.split(',').some((s) => /(^|[\s>+~])select\b/.test(s.trim()));
+  const shorthand = /(^|;)\s*background\s*:/;
+  const offenders = arrowRule
+    ? rules.filter((r) => r !== arrowRule && touchesSelect(r.sel) && shorthand.test(r.body))
+      .map((r) => r.sel.replace(/\s+/g, ' ').slice(0, 40))
+    : [];
+  check('هیچ قاعده‌ای برای select، background میان‌بر ندارد',
+    offenders.length === 0, offenders.join('، '));
+}
+
 // ═══════════════════════════ گزارش ═══════════════════════════
 const W = 62;
 console.log('\n' + '═'.repeat(W));
