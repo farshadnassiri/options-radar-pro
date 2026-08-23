@@ -106,6 +106,7 @@ export function decisionDashboardSnapshot(rows, settings = {}) {
             changePct: pctVsYesterday(last, quote.yday), bid: quote.bid, ask: quote.ask,
             spreadPct: mid > 0 ? ((quote.ask - quote.bid) / mid) * 100 : NaN,
             volume: quote.vol, trades: quote.trades, value: quote.value,
+            spot,
             oi: quote.oi, oiYday: quote.oiYday,
             oiChange: Number(quote.oi) - Number(quote.oiYday),
             ivPct: liveQuoteIv({ ...quote, strike: strike.strike, days: expiry.days }, spot, settings),
@@ -141,4 +142,145 @@ export function dashboardScope(snapshot, scope = {}) {
     underlyings: level === 'market' ? (snapshot?.underlyings || []) : (snapshot?.underlyings || []).filter((row) => uaKeys.has(String(row.ins))),
     expiries: level === 'market' ? (snapshot?.marketExpiries || []) : (snapshot?.expiries || []).filter((row) => expiryKeys.has(row.key)),
   };
+}
+
+// ————————————————————————————————————————————————————————————————
+// تابلوی اختیارهای پرمعامله
+//
+// خواسته کاربر: بخشی از داشبورد که اختیارهای پرمعامله را بدهد، با سنجه
+// انتخابی کاربر (حجم، ارزش، تعداد معامله، موقعیت باز)، و برای هر سررسید
+// میانگین وزنی سربه‌سر و فاصله‌اش از قیمت جاری.
+//
+// همان تعریف سربه‌سر که `core/open-view.mjs` دارد، ولی روی عکس لحظه‌ای:
+//
+//     کال   سربه‌سر = اعمال + پریمیوم
+//     پوت   سربه‌سر = اعمال − پریمیوم
+//
+// وزن، همان سنجه انتخابی کاربر است نه همیشه ارزش. اگر کاربر «حجم» را
+// انتخاب کند و وزنِ شاخص همچنان ارزش بماند، عددی که می‌بیند جواب سؤالی
+// نیست که پرسیده.
+// ————————————————————————————————————————————————————————————————
+
+/** سنجه‌هایی که هم رتبه‌بندی می‌کنند هم وزن شاخص می‌شوند. */
+export const BOARD_METRICS = ['value', 'volume', 'trades', 'oi'];
+
+/** پریمیوم اجرایی هر قرارداد: آخرین معامله، وگرنه پایانی. بدون هیچ‌کدام، هیچ. */
+const premiumOf = (row) => {
+  const last = Number(row.last);
+  return last > 0 ? last : NaN;
+};
+
+export function contractBreakeven(row) {
+  const strike = Number(row.strike), premium = premiumOf(row);
+  if (!(strike > 0) || !Number.isFinite(premium)) return NaN;
+  return row.kind === 'put' ? strike - premium : strike + premium;
+}
+
+/**
+ * تابلوی اختیارهای پرمعامله و شاخص سربه‌سر هر سررسید.
+ *
+ * `side` یکی از `both` / `call` / `put`. تفکیک، فقط فیلتر نیست: سربه‌سر کال و
+ * پوت دو طرف مخالف‌اند و میانگین‌گیری از هر دو با هم، عددی می‌سازد که هیچ
+ * قراردادی ندارد. پس در حالت `both` هم شاخص هر سمت جدا می‌ماند و فقط
+ * رتبه‌بندی مشترک است.
+ *
+ * گروه‌بندی سررسید با کلید «پایه:سررسید» است، نه فقط سررسید: سربه‌سرِ وزنیِ
+ * دو پایه با دو سطح قیمت کاملاً متفاوت، عددی می‌سازد که به هیچ‌کدام نمی‌خورد.
+ * فاصله درصدی اما بین پایه‌ها قابل مقایسه است و در سطح بازار هم داده می‌شود.
+ */
+export function activeOptionsBoard(contracts = [], { metric = 'value', side = 'both', limit = 24 } = {}) {
+  const key = BOARD_METRICS.includes(metric) ? metric : 'value';
+  const rows = contracts
+    .filter((row) => side === 'both' || row.kind === side)
+    .map((row) => {
+      const breakeven = contractBreakeven(row);
+      const spot = Number(row.spot);
+      return {
+        ...row,
+        breakeven,
+        // فاصله از دید همان سمت خوانده می‌شود: کال باید بالا برود تا به
+        // سربه‌سر برسد، پوت باید پایین بیاید. با یک علامت مشترک، دو سمت
+        // در یک ستون وارونه دیده می‌شوند.
+        breakevenGapPct: Number.isFinite(breakeven) && spot > 0
+          ? (row.kind === 'put' ? (1 - breakeven / spot) : (breakeven / spot - 1)) * 100
+          : NaN,
+        moneynessPct: Number.isFinite(Number(row.strike)) && spot > 0
+          ? ((Number(row.strike) / spot) - 1) * 100 : NaN,
+        rank: Number(row[key]) || 0,
+      };
+    });
+  const ranked = [...rows].sort((a, b) => b.rank - a.rank).slice(0, limit);
+
+  const groups = new Map();
+  for (const row of rows) {
+    const id = `${row.uaIns}:${row.endDate}`;
+    let group = groups.get(id);
+    if (!group) {
+      group = { key: id, uaIns: row.uaIns, uaName: row.uaName, endDate: row.endDate, days: row.days,
+        spot: Number(row.spot), contracts: 0, weight: 0,
+        call: { weight: 0, be: 0, gap: 0, count: 0 }, put: { weight: 0, be: 0, gap: 0, count: 0 } };
+      groups.set(id, group);
+    }
+    group.contracts += 1;
+    const weight = Number(row[key]) || 0;
+    group.weight += weight;
+    const bucket = row.kind === 'put' ? group.put : group.call;
+    if (weight > 0 && Number.isFinite(row.breakeven)) {
+      bucket.weight += weight; bucket.be += row.breakeven * weight;
+      bucket.gap += row.breakevenGapPct * weight; bucket.count += 1;
+    }
+  }
+  const expiries = [...groups.values()].map((group) => {
+    const mean = (bucket) => ({
+      breakeven: bucket.weight > 0 ? bucket.be / bucket.weight : NaN,
+      gapPct: bucket.weight > 0 ? bucket.gap / bucket.weight : NaN,
+      count: bucket.count, weight: bucket.weight,
+    });
+    const call = mean(group.call), put = mean(group.put);
+    return {
+      key: group.key, uaIns: group.uaIns, uaName: group.uaName, endDate: group.endDate,
+      days: group.days, spot: group.spot, contracts: group.contracts, weight: group.weight,
+      callBreakeven: call.breakeven, callGapPct: call.gapPct, callCount: call.count, callWeight: call.weight,
+      putBreakeven: put.breakeven, putGapPct: put.gapPct, putCount: put.count, putWeight: put.weight,
+      // پهنای باند: از سربه‌سر پوت تا سربه‌سر کال. بازار انتظار دارد قیمت
+      // تا پایان این سررسید بیرون از این بازه نرود — وگرنه یک سمت در سود
+      // می‌رود.
+      band: Number.isFinite(call.breakeven) && Number.isFinite(put.breakeven)
+        ? call.breakeven - put.breakeven : NaN,
+      bandPct: Number.isFinite(call.breakeven) && Number.isFinite(put.breakeven) && group.spot > 0
+        ? ((call.breakeven - put.breakeven) / group.spot) * 100 : NaN,
+    };
+  }).sort((a, b) => b.weight - a.weight || a.days - b.days);
+
+  const total = rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+  return { metric: key, side, rows: ranked, expiries, total, counted: rows.length };
+}
+
+/**
+ * توزیع یک سنجه روی سطل‌های «فاصله اعمال از قیمت جاری».
+ *
+ * یک هیستوگرام، نه یک رتبه‌بندی: می‌گوید پول بازار روی چه فاصله‌ای از قیمت
+ * امروز نشسته — نزدیک پول، یا دور. سطل‌ها ثابت‌اند تا دو نماد و دو روز با هم
+ * مقایسه شوند؛ سطل پویا هر بار مرز جای دیگری می‌گذارد.
+ */
+export const MONEYNESS_BUCKETS = [-30, -20, -10, -5, 0, 5, 10, 20, 30];
+
+export function moneynessDistribution(contracts = [], metric = 'value') {
+  const key = BOARD_METRICS.includes(metric) ? metric : 'value';
+  const edges = MONEYNESS_BUCKETS;
+  const make = (from, to, label) => ({ from, to, label, call: 0, put: 0, total: 0, contracts: 0 });
+  const buckets = [make(-Infinity, edges[0], `کمتر از ${edges[0]}٪`)];
+  for (let i = 0; i < edges.length - 1; i++) buckets.push(make(edges[i], edges[i + 1], `${edges[i]} تا ${edges[i + 1]}٪`));
+  buckets.push(make(edges[edges.length - 1], Infinity, `بیش از ${edges[edges.length - 1]}٪`));
+  for (const row of contracts) {
+    const spot = Number(row.spot), strike = Number(row.strike);
+    if (!(spot > 0) || !(strike > 0)) continue;
+    const moneyness = ((strike / spot) - 1) * 100;
+    const bucket = buckets.find((b) => moneyness >= b.from && moneyness < b.to);
+    if (!bucket) continue;
+    const weight = Number(row[key]) || 0;
+    bucket.contracts += 1; bucket.total += weight;
+    if (row.kind === 'put') bucket.put += weight; else bucket.call += weight;
+  }
+  return buckets;
 }

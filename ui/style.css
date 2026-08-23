@@ -2044,6 +2044,30 @@ td.gain, dd.gain { color: var(--gain); }
 .decision-bars header { display: flex; justify-content: space-between; gap: 12px; }
 .decision-bars article > i { display: block; height: 11px; overflow: hidden; border-radius: var(--radius-pill); background: var(--line-soft); }
 .decision-bars article > i b { display: block; width: var(--bar); height: 100%; border-radius: inherit; background: var(--series); }
+
+/* ————— تابلوی اختیارهای پرمعامله ————— */
+.decision-board-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  margin: 10px 0 14px; padding: 10px 12px; border: 1px solid var(--line-soft);
+  border-radius: var(--radius-md); background: var(--panel-2); }
+.decision-board-controls label { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--ink-2); }
+.decision-board-controls .note { flex: 1 1 100%; margin: 0; }
+.decision-side-switch { display: inline-flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.decision-side-switch button { border: 0; background: var(--panel); color: var(--ink-2);
+  padding: 6px 14px; font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.decision-side-switch button + button { border-inline-start: 1px solid var(--line); }
+.decision-side-switch button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+
+/* میله انباشته: کال و پوت روی یک میله، با فاصله ۲ پیکسلی زمینه بینشان تا
+   دو بخش هم‌مرز به هم نچسبند و مرزشان دیده شود. */
+.decision-stack { display: flex; gap: 2px; }
+.decision-stack b { display: block; width: var(--bar); height: 100%; background: var(--series); border-radius: 3px; }
+.decision-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: var(--fs-xs); color: var(--muted); }
+.decision-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.decision-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--series); }
+.decision-legend-marker i { width: 16px; height: 0; border-radius: 0; background: none;
+  border-top: 2px dashed var(--muted); }
+.decision-dot { fill: var(--series); fill-opacity: .75; stroke: var(--panel); stroke-width: 1.5; }
+.decision-marker { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 6 4; }
 .decision-bars small { color: var(--muted); font-size: var(--fs-xs); }
 .decision-open-view .open-view-hero { display: none; }
 .decision-open-view .open-view-controls { margin-top: 0; }

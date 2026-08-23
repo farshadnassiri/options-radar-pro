@@ -4,7 +4,7 @@
 import { fmt, faDigits, faClock } from '/ui/fmt.mjs';
 import { makeTable } from '/ui/table.mjs';
 import { liveOptionTape, liveReferenceTape, marketBreadthSnapshot } from '/core/live-market.mjs';
-import { dashboardScope } from '/core/decision-dashboard.mjs';
+import { dashboardScope, activeOptionsBoard, moneynessDistribution, BOARD_METRICS } from '/core/decision-dashboard.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -107,10 +107,35 @@ const EMBEDDED_MODES = [
   { id: 'top', title: 'برترین موقعیت‌ها', hint: 'غربال روی کل کاتالوگ استراتژی', mod: '/ui/tabs/top.mjs' },
 ];
 
+// ————— تابلوی اختیارهای پرمعامله —————
+//
+// خواسته کاربر: بخشی از داشبورد که اختیارهای پرمعامله را بدهد، با سنجه
+// انتخابی کاربر، و برای هر سررسید میانگین وزنی سربه‌سر و فاصله‌اش از قیمت
+// جاری — با تفکیک کال، پوت و هر دو.
+//
+// این حالت نماهای خودش را دارد و شبیه سه حالت دیگر نیست: آن‌ها سنجه‌های
+// خام بازار را رتبه می‌کنند، این یکی یک زنجیره قرارداد را می‌خواند.
+const BOARD_METRIC_LABELS = [
+  ['value', 'ارزش معامله'], ['volume', 'حجم'], ['trades', 'تعداد معامله'], ['oi', 'موقعیت باز'],
+];
+const BOARD_SIDES = [['both', 'هر دو'], ['call', 'اختیار خرید'], ['put', 'اختیار فروش']];
+
+const boardViews = [
+  ['board-table', 'تابلوی پرمعامله', 'board-rows'],
+  ['board-share', 'سهم هر قرارداد از سنجه', 'board-share'],
+  ['board-expiry-table', 'سربه‌سر وزنی هر سررسید', 'board-expiries'],
+  ['board-expiry-gap', 'فاصله سربه‌سر از قیمت جاری', 'board-gap'],
+  ['board-band', 'باند سربه‌سر پوت تا کال', 'board-band'],
+  ['board-moneyness', 'توزیع روی فاصله از قیمت جاری', 'board-moneyness'],
+  ['board-scatter', 'اعمال در برابر سربه‌سر', 'board-scatter'],
+  ['board-smile', 'لبخند تلاطم ضمنی روی اعمال', 'board-smile'],
+];
+
 export const DASHBOARD_MODES = [
   { id: 'pulse', title: 'نبض و جهت بازار', hint: 'وسعت، روند و تغییر نسبت به دیروز', views: pulseViews },
   { id: 'liquidity', title: 'نقدینگی و سررسید', hint: 'ارزش، حجم، موقعیت باز و تمرکز', views: liquidityViews },
   { id: 'volatility', title: 'تلاطم و انتظارات', hint: 'IV لحظه‌ای و تحلیل نگاه باز', views: volatilityViews },
+  { id: 'board', title: 'اختیارهای پرمعامله', hint: 'سربه‌سر وزنی هر سررسید و فاصله از قیمت جاری', views: boardViews, board: true },
   ...EMBEDDED_MODES.map((mode) => ({ ...mode, views: [] })),
 ];
 
@@ -122,6 +147,8 @@ const METRICS = {
   ivPct: ['تلاطم ضمنی ٪', (value) => `${fmt.pct(value)}٪`],
   spreadPct: ['فاصله مظنه ٪', (value) => `${fmt.pct(value)}٪`],
   putCallOi: ['نسبت OI پوت به کال', fmt.num], putCallVolume: ['نسبت حجم پوت به کال', fmt.num],
+  breakevenGapPct: ['فاصله تا سربه‌سر ٪', (value) => `${fmt.pct(value)}٪`],
+  bandPct: ['باند سربه‌سر ٪ قیمت جاری', (value) => `${fmt.pct(value)}٪`],
 };
 
 // ————— ستون‌ها، به‌ازای هر سطح —————
@@ -277,6 +304,48 @@ function ranked(view, scoped, limit = 24) {
   return filtered.slice(0, limit);
 }
 
+// ————— ستون‌های تابلوی پرمعامله —————
+const COLS_BOARD = [
+  col('title', 'قرارداد', 'sym', { group: 'شناسه', base: true }),
+  col('uaName', 'نماد پایه', 'text', { group: 'شناسه', base: true }),
+  col('kindLabel', 'نوع', 'text', { group: 'شناسه', base: true }),
+  col('strike', 'قیمت اعمال', 'money', { group: 'شناسه', base: true }),
+  col('expiryText', 'سررسید', 'text', { group: 'شناسه', base: true }),
+  col('days', 'روز مانده', 'int', { group: 'شناسه' }),
+  col('spot', 'قیمت جاری پایه', 'money', { group: 'سربه‌سر', base: true }),
+  col('last', 'پریمیوم (آخرین)', 'money', { group: 'سربه‌سر', base: true }),
+  col('breakeven', 'سربه‌سر', 'money', { group: 'سربه‌سر', base: true }),
+  col('breakevenGapPct', 'فاصله تا سربه‌سر ٪', 'pct', { group: 'سربه‌سر', base: true, heat: 'loss' }),
+  col('moneynessPct', 'فاصله اعمال از قیمت جاری ٪', 'pct', { group: 'سربه‌سر', base: true }),
+  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'گردش امروز', heat: 'gain' }),
+  col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز', base: true }),
+  col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
+  col('sharePct', 'سهم از سنجه ٪', 'pct', { group: 'تمرکز', base: true, heat: 'gain' }),
+  col('ivPct', 'تلاطم ضمنی ٪', 'pct', { group: 'تلاطم', base: true }),
+  col('spreadPct', 'فاصله مظنه ٪', 'pct', { group: 'تلاطم', heat: 'loss' }),
+];
+
+const COLS_BOARD_EXPIRY = [
+  col('title', 'سررسید', 'text', { group: 'شناسه', base: true }),
+  col('uaName', 'نماد پایه', 'text', { group: 'شناسه', base: true }),
+  col('days', 'روز مانده', 'int', { group: 'شناسه', base: true }),
+  col('spot', 'قیمت جاری پایه', 'money', { group: 'شناسه', base: true }),
+  col('contracts', 'قرارداد', 'int', { group: 'اندازه', base: true }),
+  col('callCount', 'کال شمرده‌شده', 'int', { group: 'اندازه' }),
+  col('putCount', 'پوت شمرده‌شده', 'int', { group: 'اندازه' }),
+  col('callBreakeven', 'سربه‌سر وزنی کال', 'money', { group: 'سربه‌سر', base: true }),
+  col('callGapPct', 'فاصله تا سربه‌سر کال ٪', 'pct', { group: 'سربه‌سر', base: true, heat: 'loss' }),
+  col('putBreakeven', 'سربه‌سر وزنی پوت', 'money', { group: 'سربه‌سر', base: true }),
+  col('putGapPct', 'فاصله تا سربه‌سر پوت ٪', 'pct', { group: 'سربه‌سر', base: true, heat: 'loss' }),
+  col('band', 'باند سربه‌سر', 'money', { group: 'سربه‌سر', base: true }),
+  col('bandPct', 'باند ٪ قیمت جاری', 'pct', { group: 'سربه‌سر', base: true }),
+  col('weight', 'وزن سنجه', 'money', { group: 'تمرکز', base: true, heat: 'gain' }),
+  col('sharePct', 'سهم از سنجه ٪', 'pct', { group: 'تمرکز', base: true, heat: 'gain' }),
+];
+
 // کدام مجموعه ستون، برای کدام ردیف.
 //
 // از خودِ ردیف تشخیص داده می‌شود نه از نام نما، چون یک نما می‌تواند در
@@ -321,6 +390,59 @@ function barChart(rows, metric) {
   }).join('')}</div>`;
 }
 
+// ————— نمودارهای تابلوی پرمعامله —————
+//
+// هر کدام یک شکل متفاوت‌اند چون یک سؤال متفاوت می‌پرسند. میله رتبه‌ای برای
+// «کدام بیشتر»، میله انباشته برای «سهم کال و پوت»، هیستوگرام برای «پول
+// کجا نشسته»، و پراکنش برای «رابطه دو عدد».
+
+/** میله انباشته: کال و پوت روی یک میله، برای سهم هر سمت در هر سطل. */
+function stackedBars(items, { label, formatter = fmt.money }) {
+  const usable = items.filter((item) => item.total > 0);
+  if (!usable.length) return '<p class="empty-note">در دامنه انتخابی داده معتبر برای این نما نیست.</p>';
+  const max = Math.max(...usable.map((item) => item.total));
+  return `<div class="decision-bars decision-stacked" aria-label="${esc(label)}">${usable.map((item) => {
+    const callPct = (item.call / max) * 100, putPct = (item.put / max) * 100;
+    return `<article><header><b>${esc(item.label)}</b><strong>${formatter(item.total)}</strong></header>
+      <i class="decision-stack"><b style="--bar:${callPct}%;--series:var(--call)"></b><b style="--bar:${putPct}%;--series:var(--put)"></b></i>
+      <small>کال ${formatter(item.call)} · پوت ${formatter(item.put)} · ${fmt.int(item.contracts)} قرارداد</small></article>`;
+  }).join('')}</div><div class="decision-legend"><span style="--series:var(--call)"><i></i>اختیار خرید</span><span style="--series:var(--put)"><i></i>اختیار فروش</span></div>`;
+}
+
+/**
+ * پراکنش دو عدد، با نشانگر قیمت جاری.
+ *
+ * چرا پراکنش و نه جدول: رابطه «اعمال ← سربه‌سر» را فقط وقتی می‌شود دید که
+ * هر دو روی یک صفحه باشند. خط چین قیمت جاری، مرز سود را می‌گذارد.
+ */
+function scatterChart(points, { xLabel, yLabel, marker = NaN }) {
+  const usable = points.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (usable.length < 2) return '<p class="empty-note">برای رسم پراکنش دست‌کم دو نقطه معتبر لازم است.</p>';
+  const xs = usable.map((p) => p.x), ys = usable.map((p) => p.y);
+  let xMin = Math.min(...xs, Number.isFinite(marker) ? marker : Infinity);
+  let xMax = Math.max(...xs, Number.isFinite(marker) ? marker : -Infinity);
+  let yMin = Math.min(...ys, Number.isFinite(marker) ? marker : Infinity);
+  let yMax = Math.max(...ys, Number.isFinite(marker) ? marker : -Infinity);
+  if (!(xMax > xMin)) { xMin -= 1; xMax += 1; }
+  if (!(yMax > yMin)) { yMin -= 1; yMax += 1; }
+  const padX = (xMax - xMin) * 0.08, padY = (yMax - yMin) * 0.08;
+  xMin -= padX; xMax += padX; yMin -= padY; yMax += padY;
+  const W = 920, H = 340, P = { l: 96, r: 24, t: 22, b: 52 };
+  const X = (v) => P.l + ((v - xMin) / (xMax - xMin)) * (W - P.l - P.r);
+  const Y = (v) => P.t + (1 - ((v - yMin) / (yMax - yMin))) * (H - P.t - P.b);
+  const ticks = (lo, hi) => Array.from({ length: 5 }, (_, i) => lo + ((hi - lo) * i) / 4);
+  const grid = ticks(yMin, yMax).map((v) => `<line class="live-market-grid-line" x1="${P.l}" x2="${W - P.r}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${P.l - 9}" y="${Y(v) + 4}" text-anchor="end">${fmt.money(v)}</text>`).join('');
+  const xAxis = ticks(xMin, xMax).map((v) => `<text x="${X(v)}" y="${H - 18}" text-anchor="middle">${fmt.money(v)}</text>`).join('');
+  const dots = usable.map((p) => `<circle class="decision-dot" cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="5" style="--series:${p.kind === 'put' ? 'var(--put)' : 'var(--call)'}"><title>${esc(p.label)}</title></circle>`).join('');
+  const cross = Number.isFinite(marker)
+    ? `<line class="decision-marker" x1="${X(marker)}" x2="${X(marker)}" y1="${P.t}" y2="${H - P.b}"/><line class="decision-marker" x1="${P.l}" x2="${W - P.r}" y1="${Y(marker)}" y2="${Y(marker)}"/>`
+    : '';
+  return `<div class="live-market-chart-stage"><svg viewBox="0 0 ${W} ${H}" aria-label="${esc(yLabel)} در برابر ${esc(xLabel)}">${grid}${xAxis}${cross}${dots}
+    <text class="axis-title" transform="translate(18 ${(P.t + H - P.b) / 2}) rotate(-90)" text-anchor="middle">${esc(yLabel)}</text>
+    <text class="axis-title" x="${(P.l + W - P.r) / 2}" y="${H - 2}" text-anchor="middle">${esc(xLabel)}</text></svg></div>
+    <div class="decision-legend"><span style="--series:var(--call)"><i></i>اختیار خرید</span><span style="--series:var(--put)"><i></i>اختیار فروش</span>${Number.isFinite(marker) ? '<span class="decision-legend-marker"><i></i>قیمت جاری پایه</span>' : ''}</div>`;
+}
+
 function scopedBreadth(scoped) {
   const rows = (scoped.contracts || []).map((row) => ({
     ...row, ins: row.ins, name: row.name, last: row.last, yday: row.yday,
@@ -351,7 +473,7 @@ export async function mount(root, { state, api }) {
     <section class="card decision-toolbar"><div class="decision-refresh-control"><label for="dd-interval">زمان به‌روزرسانی</label><input id="dd-interval" type="range" min="5" max="60" step="5"><output id="dd-interval-label"></output></div><div class="decision-scope-controls"><label>دامنه<select id="dd-scope"><option value="market">کل بازار</option><option value="underlying">یک نماد پایه</option><option value="expiry">یک سررسید از پایه</option><option value="contract">یک قرارداد از سررسید</option></select></label><label>نماد پایه<select id="dd-underlying"></select></label><label>سررسید<select id="dd-expiry"></select></label><label>قرارداد<select id="dd-contract"></select></label></div><p id="dd-scope-note" class="note">کل بازار اختیار</p></section>
     <div class="decision-shell"><aside class="decision-mode-rail" aria-label="حالت‌های تصمیم‌گیری">${DASHBOARD_MODES.map((mode, index) => `<button type="button" data-mode="${mode.id}" aria-pressed="${index === 0}"><b>${mode.title}</b><small>${mode.hint}</small><span>${mode.mod ? 'تب کامل' : `${fmt.int(mode.views.length)} نما`}</span></button>`).join('')}</aside><main class="decision-main">${DASHBOARD_MODES.map((mode, modeIndex) => mode.mod
       ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
-      : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div><div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</main></div>`;
+      : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</main></div>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
   let payload = { universe: { underlyings: [], expiries: [], marketExpiries: [], contracts: [] }, timeline: [], snapshot: { rows: [] } };
@@ -453,6 +575,9 @@ export async function mount(root, { state, api }) {
     // قبلی را برمی‌گرداند. نمونه‌شان در `tables` زنده می‌ماند، پس مرتب‌سازی
     // و ستون‌های انتخابیِ کاربر با برگشتن به همان نما سر جایشان‌اند.
     for (const other of tables.values()) if (other !== entry) other.el.remove();
+    // هر چه نمای قبلی با `innerHTML` گذاشته بود هم می‌رود. بدون این، نمودار
+    // نمای قبلی بالای جدول می‌ماند و دو نما هم‌زمان دیده می‌شوند.
+    for (const child of [...host.children]) if (child !== entry.el) child.remove();
     if (entry.el.parentElement !== host) host.appendChild(entry.el);
     return entry.table;
   }
@@ -498,6 +623,78 @@ export async function mount(root, { state, api }) {
     }
   }
 
+  // ————— تابلوی اختیارهای پرمعامله —————
+  let boardMetric = localStorage.getItem('options-radar:board-metric') || 'value';
+  let boardSide = localStorage.getItem('options-radar:board-side') || 'both';
+
+  function paintBoard(panel, view, scoped) {
+    const host = panel.querySelector('[data-view-host]');
+    const board = activeOptionsBoard(scoped.contracts || [], { metric: boardMetric, side: boardSide, limit: 400 });
+    const metricLabel = BOARD_METRIC_LABELS.find(([key]) => key === board.metric)?.[1] || board.metric;
+    const share = (weight) => (board.total > 0 ? (weight / board.total) * 100 : NaN);
+    const note = panel.querySelector('#dd-board-note');
+    if (note) note.textContent = `${metricLabel} هم ترتیب تابلو را می‌دهد هم وزن شاخص سربه‌سر است · ${fmt.int(board.counted)} قرارداد در دامنه`;
+
+    if (view[2] === 'board-rows' || view[2] === 'board-expiries') {
+      const isExpiry = view[2] === 'board-expiries';
+      const rows = isExpiry
+        ? board.expiries.map((row) => ({ ...row, title: dateLabel(row.endDate), sharePct: share(row.weight) }))
+        : board.rows.map((row) => ({ ...row, title: rowName(row), kindLabel: kindLabel(row.kind),
+          expiryText: dateLabel(row.endDate), sharePct: share(Number(row[board.metric]) || 0) }));
+      const table = tableFor(host, `board:${view[2]}`, isExpiry ? COLS_BOARD_EXPIRY : COLS_BOARD, view[2]);
+      table.setEmptyMessage('در دامنه انتخابی قرارداد معامله‌شده‌ای نیست.');
+      table.set(rows);
+      if (!table.__seeded) { table.sortBy(isExpiry ? 'weight' : board.metric); table.__seeded = true; }
+      return;
+    }
+    for (const entry of tables.values()) entry.el.remove();
+
+    if (view[2] === 'board-share') {
+      const rows = board.rows.slice(0, 16).map((row) => ({ ...row,
+        label: `${rowName(row)} · ${kindLabel(row.kind)}`, total: Number(row[board.metric]) || 0,
+        call: row.kind === 'call' ? Number(row[board.metric]) || 0 : 0,
+        put: row.kind === 'put' ? Number(row[board.metric]) || 0 : 0, contracts: 1 }));
+      host.innerHTML = stackedBars(rows, { label: `سهم هر قرارداد از ${metricLabel}`,
+        formatter: board.metric === 'value' ? fmt.money : fmt.int });
+      return;
+    }
+    if (view[2] === 'board-gap') {
+      const rows = board.expiries.slice(0, 16).flatMap((row) => [
+        { label: `${row.uaName} · ${dateLabel(row.endDate)} · کال`, value: row.callGapPct },
+        { label: `${row.uaName} · ${dateLabel(row.endDate)} · پوت`, value: row.putGapPct },
+      ]).filter((row) => Number.isFinite(row.value));
+      host.innerHTML = rows.length
+        ? `<p class="note">فاصله از دید همان سمت خوانده می‌شود: کال باید بالا برود تا به سربه‌سر برسد و پوت پایین بیاید. عدد کمتر یعنی نزدیک‌تر.</p>${barChart(rows.map((row) => ({ ...row, changePct: NaN, value: row.value, breakevenGapPct: row.value })), 'breakevenGapPct')}`
+        : '<p class="empty-note">در دامنه انتخابی سربه‌سر وزنی معتبری ساخته نشد.</p>';
+      return;
+    }
+    if (view[2] === 'board-band') {
+      const rows = board.expiries.slice(0, 16).filter((row) => Number.isFinite(row.bandPct))
+        .map((row) => ({ label: `${row.uaName} · ${dateLabel(row.endDate)}`, bandPct: row.bandPct, changePct: NaN }));
+      host.innerHTML = rows.length
+        ? `<p class="note">باند، فاصله سربه‌سر پوت تا سربه‌سر کال است — بازه‌ای که بازار انتظار دارد قیمت تا سررسید از آن بیرون نرود.</p>${barChart(rows, 'bandPct')}`
+        : '<p class="empty-note">باند وقتی ساخته می‌شود که هر دو سمت سررسید سربه‌سر معتبر داشته باشند.</p>';
+      return;
+    }
+    if (view[2] === 'board-moneyness') {
+      host.innerHTML = `<p class="note">هر سطل، فاصله قیمت اعمال از قیمت جاری پایه است. سطل‌ها ثابت‌اند تا دو نماد و دو روز با هم مقایسه شوند.</p>${stackedBars(moneynessDistribution(scoped.contracts || [], board.metric), { label: `توزیع ${metricLabel}`, formatter: board.metric === 'value' ? fmt.money : fmt.int })}`;
+      return;
+    }
+    if (view[2] === 'board-scatter') {
+      const spot = board.rows.find((row) => Number(row.spot) > 0)?.spot;
+      host.innerHTML = `<p class="note">هر نقطه یک قرارداد از تابلو. خط‌های چین، قیمت جاری پایه‌اند؛ نقطه بالای خط افقی یعنی سربه‌سر بالاتر از قیمت امروز.</p>${scatterChart(board.rows.map((row) => ({
+        x: Number(row.strike), y: Number(row.breakeven), kind: row.kind,
+        label: `${rowName(row)} · اعمال ${fmt.money(row.strike)} · سربه‌سر ${fmt.money(row.breakeven)}`,
+      })), { xLabel: 'قیمت اعمال', yLabel: 'سربه‌سر', marker: Number(spot) })}`;
+      return;
+    }
+    // لبخند تلاطم: IV در برابر فاصله اعمال از قیمت جاری
+    host.innerHTML = `<p class="note">لبخند تلاطم: نوسان ضمنی هر قرارداد در برابر فاصله اعمالش از قیمت جاری. صفر یعنی نزدیک پول.</p>${scatterChart(board.rows.map((row) => ({
+      x: Number(row.moneynessPct), y: Number(row.ivPct), kind: row.kind,
+      label: `${rowName(row)} · فاصله ${fmt.pct(row.moneynessPct)}٪ · IV ${fmt.pct(row.ivPct)}٪`,
+    })), { xLabel: 'فاصله اعمال از قیمت جاری ٪', yLabel: 'تلاطم ضمنی ٪', marker: NaN })}`;
+  }
+
   async function paintView() {
     const mode = modeOf();
     if (mode?.mod) { await mountEmbedded(mode); return; }
@@ -507,6 +704,7 @@ export async function mount(root, { state, api }) {
     panel.querySelector('[data-view-title]').textContent = view[1]; panel.querySelector('[data-view-scope]').textContent = scopeLabel(scoped);
     $('dd-scope-note').textContent = scopeLabel(scoped);
     host.hidden = view[2] === 'open-view'; openHost.hidden = view[2] !== 'open-view';
+    if (mode?.board) { paintBoard(panel, view, scoped); return; }
     const tabular = ['table', 'table-asc', 'table-zero', 'tape', 'expiry-leaders'].includes(view[2]);
     // جدول‌ها نمونه ماندگار دارند، پس فقط وقتی نما جدول نیست پاک می‌شوند.
     if (!tabular) { for (const entry of tables.values()) entry.el.remove(); host.innerHTML = ''; }
@@ -563,6 +761,23 @@ export async function mount(root, { state, api }) {
   $('dd-underlying').addEventListener('change', async () => { fillSelectors(true); await fetchTape(); await paintView(); });
   $('dd-expiry').addEventListener('change', async () => { fillSelectors(true); await fetchTape(); await paintView(); });
   $('dd-contract').addEventListener('change', async () => { await fetchTape(); await paintView(); });
+  root.querySelectorAll('#dd-board-metric').forEach((select) => {
+    select.value = boardMetric;
+    select.addEventListener('change', async () => {
+      boardMetric = select.value; localStorage.setItem('options-radar:board-metric', boardMetric);
+      // سنجه که عوض شد، مرتب‌سازیِ لنگرشده به سنجه قبلی دیگر جواب سؤال
+      // تازه نیست؛ جدول‌های تابلو دوباره لنگر می‌گیرند.
+      for (const [key, entry] of tables) if (key.startsWith('board:')) entry.table.__seeded = false;
+      await paintView();
+    });
+  });
+  root.querySelectorAll('[data-board-side]').forEach((button) => button.addEventListener('click', async () => {
+    boardSide = button.dataset.boardSide; localStorage.setItem('options-radar:board-side', boardSide);
+    root.querySelectorAll('[data-board-side]').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+    await paintView();
+  }));
+  root.querySelectorAll('[data-board-side]').forEach((button) =>
+    button.setAttribute('aria-pressed', String(button.dataset.boardSide === boardSide)));
   $('dd-refresh').addEventListener('click', refresh);
   $('dd-pause').addEventListener('click', () => { paused = !paused; $('dd-pause').textContent = paused ? 'ادامه خودکار' : 'توقف خودکار'; if (paused) clearTimeout(timer); else refresh(); });
   $('dd-interval').addEventListener('input', () => { intervalSec = Number($('dd-interval').value); paintInterval(); });
