@@ -21,22 +21,22 @@ const errorText = (error, fallback = 'خطای نامعلوم') => /fetch failed
   ? 'اتصال به منبع داده برقرار نشد.' : (String(error?.message || '').trim() || fallback);
 
 const SERIES_PRICE = [
-  { key: 'basePrice', label: 'قیمت پایه', color: 'var(--warn)' },
-  { key: 'callBreakeven', label: 'سربه‌سر وزنی کال', color: 'var(--gain)' },
-  { key: 'putBreakeven', label: 'سربه‌سر وزنی پوت', color: 'var(--loss)' },
+  { key: 'basePrice', label: 'قیمت پایه', color: 'var(--series-1)' },
+  { key: 'callBreakeven', label: 'سربه‌سر وزنی کال', color: 'var(--series-3)' },
+  { key: 'putBreakeven', label: 'سربه‌سر وزنی پوت', color: 'var(--series-6)' },
 ];
 const SERIES_GAP = [
-  { key: 'callBreakevenGapPct', label: 'فاصله تا کال', color: 'var(--gain)', kind: 'bar' },
-  { key: 'callBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله کال', color: 'var(--cmp2)', toggleable: true },
-  { key: 'putBreakevenGapPct', label: 'فاصله از پوت', color: 'var(--loss)', kind: 'bar' },
-  { key: 'putBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله پوت', color: 'var(--cmp3)', toggleable: true },
+  { key: 'callBreakevenGapPct', label: 'فاصله تا کال', color: 'var(--series-3)', kind: 'bar' },
+  { key: 'callBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله کال', color: 'var(--series-2)', toggleable: true },
+  { key: 'putBreakevenGapPct', label: 'فاصله از پوت', color: 'var(--series-6)', kind: 'bar' },
+  { key: 'putBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله پوت', color: 'var(--series-5)', toggleable: true },
 ];
 const SERIES_GAP_INTRADAY = [SERIES_GAP[0], SERIES_GAP[2]];
 const SERIES_IV = [
-  { key: 'callIvPct', label: 'IV وزنی کال', color: 'var(--cmp1)' },
-  { key: 'callIvPctMa5', label: 'میانگین ۵روزه IV کال', color: 'var(--cmp2)', toggleable: true },
-  { key: 'putIvPct', label: 'IV وزنی پوت', color: 'var(--cmp4)' },
-  { key: 'putIvPctMa5', label: 'میانگین ۵روزه IV پوت', color: 'var(--cmp3)', toggleable: true },
+  { key: 'callIvPct', label: 'IV وزنی کال', color: 'var(--series-7)' },
+  { key: 'callIvPctMa5', label: 'میانگین ۵روزه IV کال', color: 'var(--series-2)', toggleable: true },
+  { key: 'putIvPct', label: 'IV وزنی پوت', color: 'var(--series-8)' },
+  { key: 'putIvPctMa5', label: 'میانگین ۵روزه IV پوت', color: 'var(--series-5)', toggleable: true },
 ];
 const SERIES_IV_INTRADAY = [SERIES_IV[0], SERIES_IV[2]];
 
