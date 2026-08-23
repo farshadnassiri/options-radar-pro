@@ -1885,3 +1885,46 @@ td.gain, dd.gain { color: var(--gain); }
   .open-view-model-grid { grid-template-columns: 1fr 1fr; }
   .open-view-formula-grid, .open-view-intraday-controls { grid-template-columns: 1fr; }
 }
+
+/* ═══════════════════ رصد لحظه‌ای بازار ═══════════════════ */
+.live-market-controls { display: grid; gap: 12px; margin-bottom: 16px; }
+.live-market-control-head, .live-market-pick-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 9px; }
+.live-market-control-head { justify-content: space-between; }
+.live-market-control-head > label { display: grid; gap: 5px; min-width: min(420px, 100%); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 800; }
+.live-market-control-head select, .live-market-pick-tools input { min-height: 42px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); color: var(--ink); font: inherit; }
+.live-market-pick-tools input { min-width: 220px; }
+.live-market-pick-tools > span { margin-inline-start: auto; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+.live-market-model { padding: 10px 12px; border-inline-start: 3px solid var(--cmp1); border-radius: 9px; background: var(--panel-2); color: var(--ink-2); font-size: var(--fs-sm); }
+.live-market-contracts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-height: 260px; overflow: auto; padding: 4px; }
+.live-market-contract { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); cursor: pointer; }
+.live-market-contract:has(input:checked) { border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); background: var(--accent-soft); }
+.live-market-contract input { margin-top: 3px; accent-color: var(--accent); }
+.live-market-contract span { display: grid; gap: 3px; min-width: 0; }
+.live-market-contract b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-market-contract small { color: var(--muted); font-size: var(--fs-xs); line-height: 1.55; }
+.live-market-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
+.live-market-chart-grid > section { min-width: 0; }
+.live-market-wide { grid-column: 1 / -1; }
+.live-market-chart-stage { position: relative; min-width: 0; }
+.live-market-chart-stage svg { display: block; width: 100%; height: auto; overflow: visible; }
+.live-market-chart-stage svg text { fill: var(--ink-2); font-family: inherit; font-size: var(--fs-chart); font-weight: 700; direction: ltr; }
+.live-market-grid-line { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.live-market-series { fill: none; stroke: var(--series); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.live-market-cursor { stroke: var(--warn); stroke-width: 1.4; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+.live-market-legend { display: flex; flex-wrap: wrap; gap: 7px 13px; margin: 4px 0 8px; color: var(--ink-2); font-size: var(--fs-sm); font-weight: 700; }
+.live-market-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.live-market-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--series); }
+.live-market-tip { position: absolute; z-index: 4; inset-block-start: 10px; display: grid; gap: 4px; min-width: 150px; max-width: 260px; padding: 9px 10px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: var(--shadow); color: var(--ink-2); font-size: var(--fs-xs); pointer-events: none; }
+.live-market-tip b { color: var(--ink); }
+
+@media (max-width: 980px) {
+  .live-market-contracts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .live-market-chart-grid { grid-template-columns: 1fr; }
+  .live-market-wide { grid-column: auto; }
+}
+
+@media (max-width: 560px) {
+  .live-market-contracts { grid-template-columns: 1fr; }
+  .live-market-control-head > label, .live-market-pick-tools input { min-width: 100%; width: 100%; }
+  .live-market-pick-tools > span { margin-inline-start: 0; width: 100%; }
+}
