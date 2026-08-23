@@ -240,6 +240,7 @@ export function evaluate({ legs, quotes, ctx }) {
 
   let notional = 0, intrinsic = 0, timeValue = 0, bsValue = 0, bsKnown = true;
   let oiTotal = 0, oiChange = 0, volTotal = 0, tradeCount = 0, valueTotal = 0;
+  let oiChangeKnown = true;
   const bidList = [], askList = [], lastList = [], closeList = [], ivList = [], headlineList = [];
   // ارزش معاملات، برخلاف فهرست‌های بالا، هم‌ترتیب با **همه** پاهاست — پای
   // سهم پایه هم خانه خودش را دارد. دلیلش تطبیق با ستون‌های هویت است:
@@ -268,7 +269,10 @@ export function evaluate({ legs, quotes, ctx }) {
     if (ok(theo)) bsValue += qty * theo; else bsKnown = false;
 
     oiTotal += num(q.oi);
-    oiChange += num(q.oi) - num(q.oiYday);
+    // موقعیت باز دیروزِ نامعلوم با صفر پر نمی‌شود، وگرنه تغییرِ آن پا دقیقاً
+    // برابر خودِ موقعیت بازش می‌شود و ترکیب، جهش ساختگی نشان می‌دهد.
+    if (Number.isFinite(q.oiYday)) oiChange += num(q.oi) - q.oiYday;
+    else oiChangeKnown = false;
     volTotal += num(q.vol);
     tradeCount += num(q.trades);
     valueTotal += num(q.value);
@@ -390,7 +394,7 @@ export function evaluate({ legs, quotes, ctx }) {
     // مشخصات قرارداد و بازار
     notional, intrinsic, timeValue,
     bsValue: bsKnown ? bsValue : NaN, bsDiffPct, marketValue, leverage,
-    oiTotal, oiChange, volTotal, tradeCount, valueTotal,
+    oiTotal, oiChange: oiChangeKnown ? oiChange : NaN, volTotal, tradeCount, valueTotal,
     spreadWorstPct: ok(spreadWorst) ? spreadWorst : NaN,
     bidQtyMin: Number.isFinite(bidQtyMin) ? bidQtyMin : NaN,
     askQtyMin: Number.isFinite(askQtyMin) ? askQtyMin : NaN,

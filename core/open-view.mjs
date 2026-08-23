@@ -79,6 +79,10 @@ function enrichChanges(rows, movingWindow = 0) {
       ['putBreakevenGapPct', 'putBreakevenGapPctMa5'],
       ['callIvPct', 'callIvPctMa5'],
       ['putIvPct', 'putIvPctMa5'],
+      ['callStrikeGapPct', 'callStrikeGapPctMa5'],
+      ['putStrikeGapPct', 'putStrikeGapPctMa5'],
+      ['callPremiumPct', 'callPremiumPctMa5'],
+      ['putPremiumPct', 'putPremiumPctMa5'],
     ];
     for (const [source, target] of fields) {
       const averages = movingAverage(out, source, movingWindow);
@@ -146,6 +150,23 @@ function aggregate(items, basePrice, meta = {}) {
     putBreakevenGapPct: Number.isFinite(put.be.value) && basePrice > 0 ? (1 - (put.be.value / basePrice)) * 100 : NaN,
     breakevenBand: Number.isFinite(call.be.value) && Number.isFinite(put.be.value)
       ? call.be.value - put.be.value : NaN,
+    // فاصله شاخص اعمال وزنی از قیمت پایه، هم‌الگوی فاصله سربه‌سر.
+    //
+    // چرا جدا از فاصله سربه‌سر لازم است: سربه‌سر، اعمال به‌علاوه پریمیوم
+    // است. وقتی سربه‌سر جابه‌جا می‌شود، این ستون می‌گوید کدام نیمه‌اش
+    // تکان خورده — تمرکز معاملات روی اعمال‌های دورتر، یا گران‌تر شدن
+    // پریمیوم همان اعمال‌ها. بدون آن، دو علت کاملاً متفاوت یک شکل دیده
+    // می‌شوند.
+    callStrikeGapPct: Number.isFinite(call.strike.value) && basePrice > 0
+      ? ((call.strike.value / basePrice) - 1) * 100 : NaN,
+    putStrikeGapPct: Number.isFinite(put.strike.value) && basePrice > 0
+      ? (1 - (put.strike.value / basePrice)) * 100 : NaN,
+    // پریمیوم وزنی، درصدی از قیمت پایه — تا دو روز با قیمت پایه متفاوت
+    // قابل مقایسه بماند.
+    callPremiumPct: Number.isFinite(call.premium.value) && basePrice > 0
+      ? (call.premium.value / basePrice) * 100 : NaN,
+    putPremiumPct: Number.isFinite(put.premium.value) && basePrice > 0
+      ? (put.premium.value / basePrice) * 100 : NaN,
   };
   return result;
 }

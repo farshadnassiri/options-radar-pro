@@ -268,12 +268,14 @@ async function tickHealth() {
 
 const TABS = [
   { id: 'settings', title: 'تنظیمات', section: 'پایه', mod: '/ui/tabs/settings.mjs', phase: 1 },
-  { id: 'chain', title: 'دیده‌بان زنجیره اختیار', section: 'پایه', mod: '/ui/tabs/chain.mjs', phase: 3 },
+  // «دیده‌بان زنجیره» و «برترین موقعیت‌ها» تب مستقل ندارند: هر دو از همان
+  // عکس لحظه‌ای بازار تغذیه می‌شوند که «رصد لحظه‌ای» می‌سازد و هر دو یک کار
+  // می‌کنند — نگاه کلی پیش از تصمیم. حالا دو حالت از همان تب‌اند و ماژول
+  // خودشان همان‌جا تنبل بار می‌شود؛ همان الگویی که «نگاه باز» دارد.
   { id: 'live-market', title: 'رصد لحظه‌ای بازار', section: 'پایه', mod: '/ui/tabs/live-market.mjs', phase: 3 },
   { id: 'history', title: 'تحلیل تاریخی استراتژی', section: 'پایه', mod: '/ui/tabs/history.mjs', phase: 3 },
   { id: 'backtest', title: 'بک‌تست سریع', section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },
   { id: 'portfolio-backtest', title: 'آزمون همه استراتژی‌ها', section: 'پایه', mod: '/ui/tabs/portfolio-backtest.mjs', phase: 3 },
-  { id: 'top', title: 'برترین موقعیت‌ها', section: 'پایه', mod: '/ui/tabs/top.mjs', phase: 3 },
   { id: 'logs', title: 'دفتر خطاها', section: 'پایه', mod: '/ui/tabs/logs.mjs', phase: 1 },
 ];
 

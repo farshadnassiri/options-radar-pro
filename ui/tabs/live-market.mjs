@@ -10,7 +10,10 @@ import {
 import { historyDateLabel } from '/core/history.mjs';
 import { logError } from '/ui/errlog.mjs';
 
-const COLORS = ['var(--accent)', 'var(--cmp1)', 'var(--cmp2)', 'var(--cmp3)', 'var(--cmp4)', 'var(--gain)', 'var(--loss)', 'var(--warn)'];
+// رنگ وضعیت (سود، زیان، هشدار) سری نیست و نباید سری بشود: وقتی «قرارداد
+// ششم» سبزِ سود می‌گیرد، سبز دیگر معنی «در سود» نمی‌دهد. فهرست از همان شش
+// سری معتبر می‌آید و چرخش ندارد.
+const COLORS = Array.from({ length: 6 }, (_, index) => `var(--series-${index + 1})`);
 const MAX_OPTIONS = 23; // فقط برای پیاده‌سازی نسخه پیشینِ نگه‌داشته‌شده در همین ماژول
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (ch) => ({

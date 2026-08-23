@@ -20,23 +20,57 @@ const chunks = (rows, size) => Array.from({ length: Math.ceil(rows.length / size
 const errorText = (error, fallback = 'خطای نامعلوم') => /fetch failed|network|failed to fetch/i.test(String(error?.message || error))
   ? 'اتصال به منبع داده برقرار نشد.' : (String(error?.message || '').trim() || fallback);
 
+// دو تصمیم رنگی، هر دو از یک قاعده: رنگ، هویت را می‌گوید نه ردیف را.
+//
+//   کال و پوت    یک جفت ثابت‌اند و رنگ معنایی می‌گیرند (`--call`/`--put`).
+//                پیش از این «سربه‌سر کال» سبز بود و «IV کال» بنفش — یک
+//                موجودیت، دو رنگ، در دو نمودارِ کنار هم.
+//   میانگین ۵روزه  همان سری است، هموارشده — نه موجودیتی تازه. پس هم‌فامِ
+//                خودش می‌ماند و با خط‌چین از آن جدا می‌شود. با رنگ چهارم،
+//                نمودار IV چهار رنگ داشت برای دو چیز، و دوتاشان شبیه هم.
 const SERIES_PRICE = [
-  { key: 'basePrice', label: 'قیمت پایه', color: 'var(--series-1)' },
-  { key: 'callBreakeven', label: 'سربه‌سر وزنی کال', color: 'var(--series-3)' },
-  { key: 'putBreakeven', label: 'سربه‌سر وزنی پوت', color: 'var(--series-6)' },
+  { key: 'basePrice', label: 'قیمت پایه', color: 'var(--series-3)' },
+  { key: 'callBreakeven', label: 'سربه‌سر وزنی کال', color: 'var(--call)' },
+  { key: 'putBreakeven', label: 'سربه‌سر وزنی پوت', color: 'var(--put)' },
 ];
 const SERIES_GAP = [
-  { key: 'callBreakevenGapPct', label: 'فاصله تا کال', color: 'var(--series-3)', kind: 'bar' },
-  { key: 'callBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله کال', color: 'var(--series-2)', toggleable: true },
-  { key: 'putBreakevenGapPct', label: 'فاصله از پوت', color: 'var(--series-6)', kind: 'bar' },
-  { key: 'putBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله پوت', color: 'var(--series-5)', toggleable: true },
+  { key: 'callBreakevenGapPct', label: 'فاصله تا کال', color: 'var(--call)', kind: 'bar' },
+  { key: 'callBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله کال', color: 'var(--call)', dashed: true, toggleable: true },
+  { key: 'putBreakevenGapPct', label: 'فاصله از پوت', color: 'var(--put)', kind: 'bar' },
+  { key: 'putBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله پوت', color: 'var(--put)', dashed: true, toggleable: true },
 ];
 const SERIES_GAP_INTRADAY = [SERIES_GAP[0], SERIES_GAP[2]];
+// شاخص اعمال وزنی و پریمیوم وزنی، هر دو را موتور از روز اول می‌ساخت
+// (`callStrike`/`putStrike`/`callPremium`/`putPremium` در `aggregate`) ولی
+// وقتی این تب روزمحور شد، نمودارشان جا ماند و هیچ‌جای رابط نمی‌آمدند.
+//
+// چرا هر دو لازم‌اند: سربه‌سر = اعمال + پریمیوم. وقتی سربه‌سر جابه‌جا
+// می‌شود، این دو می‌گویند کدام نیمه‌اش تکان خورده — تمرکز معاملات روی
+// اعمال دورتر، یا گران‌تر شدن پریمیومِ همان اعمال‌ها.
+const SERIES_STRIKE = [
+  { key: 'basePrice', label: 'قیمت پایه', color: 'var(--series-3)' },
+  { key: 'callStrike', label: 'اعمال وزنی کال', color: 'var(--call)' },
+  { key: 'putStrike', label: 'اعمال وزنی پوت', color: 'var(--put)' },
+];
+const SERIES_STRIKE_GAP = [
+  { key: 'callStrikeGapPct', label: 'فاصله اعمال کال از پایه', color: 'var(--call)', kind: 'bar' },
+  { key: 'callStrikeGapPctMa5', label: 'میانگین ۵روزه اعمال کال', color: 'var(--call)', dashed: true, toggleable: true },
+  { key: 'putStrikeGapPct', label: 'فاصله اعمال پوت از پایه', color: 'var(--put)', kind: 'bar' },
+  { key: 'putStrikeGapPctMa5', label: 'میانگین ۵روزه اعمال پوت', color: 'var(--put)', dashed: true, toggleable: true },
+];
+const SERIES_STRIKE_INTRADAY = [SERIES_STRIKE[0], SERIES_STRIKE[1], SERIES_STRIKE[2]];
+const SERIES_PREMIUM = [
+  { key: 'callPremiumPct', label: 'پریمیوم وزنی کال ٪ پایه', color: 'var(--call)' },
+  { key: 'callPremiumPctMa5', label: 'میانگین ۵روزه پریمیوم کال', color: 'var(--call)', dashed: true, toggleable: true },
+  { key: 'putPremiumPct', label: 'پریمیوم وزنی پوت ٪ پایه', color: 'var(--put)' },
+  { key: 'putPremiumPctMa5', label: 'میانگین ۵روزه پریمیوم پوت', color: 'var(--put)', dashed: true, toggleable: true },
+];
+const SERIES_PREMIUM_INTRADAY = [SERIES_PREMIUM[0], SERIES_PREMIUM[2]];
 const SERIES_IV = [
-  { key: 'callIvPct', label: 'IV وزنی کال', color: 'var(--series-7)' },
-  { key: 'callIvPctMa5', label: 'میانگین ۵روزه IV کال', color: 'var(--series-2)', toggleable: true },
-  { key: 'putIvPct', label: 'IV وزنی پوت', color: 'var(--series-8)' },
-  { key: 'putIvPctMa5', label: 'میانگین ۵روزه IV پوت', color: 'var(--series-5)', toggleable: true },
+  { key: 'callIvPct', label: 'IV وزنی کال', color: 'var(--call)' },
+  { key: 'callIvPctMa5', label: 'میانگین ۵روزه IV کال', color: 'var(--call)', dashed: true, toggleable: true },
+  { key: 'putIvPct', label: 'IV وزنی پوت', color: 'var(--put)' },
+  { key: 'putIvPctMa5', label: 'میانگین ۵روزه IV پوت', color: 'var(--put)', dashed: true, toggleable: true },
 ];
 const SERIES_IV_INTRADAY = [SERIES_IV[0], SERIES_IV[2]];
 
@@ -76,15 +110,18 @@ function chart(host, sourceRows, series, {
       d += `${drawing ? 'L' : 'M'}${x(index).toFixed(1)},${y(value).toFixed(1)} `;
       drawing = true;
     });
-    return `<path fill="none" stroke="${item.color}" d="${d.trim()}"/>`;
+    return `<path fill="none" stroke="${item.color}"${item.dashed ? ' stroke-dasharray="7 5"' : ''} d="${d.trim()}"/>`;
   }).join('');
   const xIndexes = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])];
   const legend = series.map((item) => {
     const off = hiddenSeries.has(item.key);
     const content = `<i></i>${item.label}${item.toggleable ? `<small>${off ? 'نمایش' : 'حذف'}</small>` : ''}`;
+    // نشان راهنما هم باید خط‌چین را بگوید، وگرنه دو سریِ هم‌فام در راهنما
+    // یک‌شکل‌اند و تفکیکشان فقط روی خودِ نمودار دیده می‌شود.
+    const cls = [off ? 'is-off' : '', item.dashed ? 'is-dashed' : ''].filter(Boolean).join(' ');
     return item.toggleable
-      ? `<button type="button" data-series-toggle="${item.key}" aria-pressed="${!off}" class="${off ? 'is-off' : ''}" style="--series:${item.color}">${content}</button>`
-      : `<span style="--series:${item.color}">${content}</span>`;
+      ? `<button type="button" data-series-toggle="${item.key}" aria-pressed="${!off}" class="${cls}" style="--series:${item.color}">${content}</button>`
+      : `<span class="${cls}" style="--series:${item.color}">${content}</span>`;
   }).join('');
   host.innerHTML = `<div class="open-view-chart-legend">${legend}</div><div class="open-view-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار روند نگاه باز">
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="portfolio-grid"/><text x="${L - 9}" y="${y(value) + 4}" text-anchor="end">${axis(value)}</text>`).join('')}
@@ -110,7 +147,7 @@ function chart(host, sourceRows, series, {
 
 function dailyTable(rows, selectedDate) {
   if (!rows.length) return '<p class="empty-note">مشاهده معتبری در این بازه نیست.</p>';
-  return `<table class="history-table open-view-daily-table"><thead><tr><th>تاریخ</th><th>پایه / تغییر</th><th>سربه‌سر کال / فاصله</th><th>میانگین ۵روزه فاصله کال</th><th>سربه‌سر پوت / فاصله</th><th>میانگین ۵روزه فاصله پوت</th><th>IV کال / میانگین ۵روزه</th><th>IV پوت / میانگین ۵روزه</th><th>ارزش کال / پوت</th><th>قرارداد معتبر</th><th>جزئیات</th></tr></thead><tbody>${[...rows].reverse().map((r) => `<tr data-day="${r.date}" tabindex="0" role="button" aria-selected="${r.date === selectedDate}" class="${r.date === selectedDate ? 'picked' : ''}"><td><b>${dateLabel(r.date)}</b></td><td>${fmt.money(r.basePrice)}<small class="${signTone(r.baseChangePct)}">${fmt.pct(r.baseChangePct)}٪</small></td><td>${fmt.money(r.callBreakeven)}<small>${fmt.pct(r.callBreakevenGapPct)}٪</small></td><td>${fmt.pct(r.callBreakevenGapPctMa5)}٪</td><td>${fmt.money(r.putBreakeven)}<small>${fmt.pct(r.putBreakevenGapPct)}٪</small></td><td>${fmt.pct(r.putBreakevenGapPctMa5)}٪</td><td>${fmt.pct(r.callIvPct)}٪<small>${fmt.pct(r.callIvPctMa5)}٪</small></td><td>${fmt.pct(r.putIvPct)}٪<small>${fmt.pct(r.putIvPctMa5)}٪</small></td><td>${fmt.money(r.callValue)}<small>${fmt.money(r.putValue)}</small></td><td>${fmt.int(r.callContracts)} کال / ${fmt.int(r.putContracts)} پوت</td><td><span class="open-view-row-action">بازکردن محاسبه</span></td></tr>`).join('')}</tbody></table>`;
+  return `<table class="history-table open-view-daily-table"><thead><tr><th>تاریخ</th><th>پایه / تغییر</th><th>سربه‌سر کال / فاصله</th><th>میانگین ۵روزه فاصله کال</th><th>سربه‌سر پوت / فاصله</th><th>میانگین ۵روزه فاصله پوت</th><th>اعمال وزنی کال / فاصله</th><th>اعمال وزنی پوت / فاصله</th><th>پریمیوم وزنی کال / پوت ٪</th><th>IV کال / میانگین ۵روزه</th><th>IV پوت / میانگین ۵روزه</th><th>ارزش کال / پوت</th><th>قرارداد معتبر</th><th>جزئیات</th></tr></thead><tbody>${[...rows].reverse().map((r) => `<tr data-day="${r.date}" tabindex="0" role="button" aria-selected="${r.date === selectedDate}" class="${r.date === selectedDate ? 'picked' : ''}"><td><b>${dateLabel(r.date)}</b></td><td>${fmt.money(r.basePrice)}<small class="${signTone(r.baseChangePct)}">${fmt.pct(r.baseChangePct)}٪</small></td><td>${fmt.money(r.callBreakeven)}<small>${fmt.pct(r.callBreakevenGapPct)}٪</small></td><td>${fmt.pct(r.callBreakevenGapPctMa5)}٪</td><td>${fmt.money(r.putBreakeven)}<small>${fmt.pct(r.putBreakevenGapPct)}٪</small></td><td>${fmt.pct(r.putBreakevenGapPctMa5)}٪</td><td>${fmt.money(r.callStrike)}<small>${fmt.pct(r.callStrikeGapPct)}٪</small></td><td>${fmt.money(r.putStrike)}<small>${fmt.pct(r.putStrikeGapPct)}٪</small></td><td>${fmt.pct(r.callPremiumPct)}٪<small>${fmt.pct(r.putPremiumPct)}٪</small></td><td>${fmt.pct(r.callIvPct)}٪<small>${fmt.pct(r.callIvPctMa5)}٪</small></td><td>${fmt.pct(r.putIvPct)}٪<small>${fmt.pct(r.putIvPctMa5)}٪</small></td><td>${fmt.money(r.callValue)}<small>${fmt.money(r.putValue)}</small></td><td>${fmt.int(r.callContracts)} کال / ${fmt.int(r.putContracts)} پوت</td><td><span class="open-view-row-action">بازکردن محاسبه</span></td></tr>`).join('')}</tbody></table>`;
 }
 
 function weightedFormula(items, kind, metric) {
@@ -159,7 +196,7 @@ export async function mount(root, { state }) {
     <p class="portfolio-note">برای دیدن فرمول، وزن هر قرارداد و نمودار ریز همان روز، روی ردیف روز کلیک کن. قیمت یا ارزش گمشده با مشاهده قبلی پر نمی‌شود.</p>
   </section>
   <section id="ov-report" hidden>
-    <div class="open-view-chart-grid"><section class="card"><div class="section-head"><h2>روند روزانه سربه‌سر و پایه</h2><span id="ov-daily-scope">سررسید انتخابی</span></div><div id="ov-daily-price" class="open-view-chart"></div></section><section class="card"><div class="section-head"><h2>فاصله پایه از دو شاخص</h2><span>ستونی؛ میانگین‌ها از راهنما خاموش می‌شوند</span></div><div id="ov-daily-gap" class="open-view-chart"></div></section><section class="card open-view-wide-card"><div class="section-head"><h2>نوسان ضمنی وزنی کال و پوت</h2><span>میانگین‌ها از راهنمای نمودار خاموش می‌شوند</span></div><div id="ov-daily-iv" class="open-view-chart"></div></section></div>
+    <div class="open-view-chart-grid"><section class="card"><div class="section-head"><h2>روند روزانه سربه‌سر و پایه</h2><span id="ov-daily-scope">سررسید انتخابی</span></div><div id="ov-daily-price" class="open-view-chart"></div></section><section class="card"><div class="section-head"><h2>فاصله پایه از دو شاخص</h2><span>ستونی؛ میانگین‌ها از راهنما خاموش می‌شوند</span></div><div id="ov-daily-gap" class="open-view-chart"></div></section><section class="card"><div class="section-head"><h2>شاخص اعمال وزنی و پایه</h2><span>وزن ارزش معامله هر قرارداد</span></div><div id="ov-daily-strike" class="open-view-chart"></div></section><section class="card"><div class="section-head"><h2>فاصله اعمال وزنی از پایه</h2><span>ستونی؛ میانگین‌ها از راهنما خاموش می‌شوند</span></div><div id="ov-daily-strike-gap" class="open-view-chart"></div></section><section class="card open-view-wide-card"><div class="section-head"><h2>نوسان ضمنی وزنی کال و پوت</h2><span>میانگین‌ها از راهنمای نمودار خاموش می‌شوند</span></div><div id="ov-daily-iv" class="open-view-chart"></div></section><section class="card open-view-wide-card"><div class="section-head"><h2>پریمیوم وزنی کال و پوت</h2><span>درصدی از قیمت پایه، تا روزهای با پایه متفاوت قابل مقایسه بمانند</span></div><div id="ov-daily-premium" class="open-view-chart"></div></section></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">تنها جدول نمای اصلی</p><h2>خلاصه روزانه</h2></div><span>برای بازکردن محاسبه روی روز کلیک کن</span></div><div id="ov-daily-table" class="history-table-wrap"></div></section>
     <section id="ov-day-detail" class="card open-view-day-detail" hidden>
       <div class="section-head"><div><p class="eyebrow">جزئیات روز انتخاب‌شده</p><h2 id="ov-day-title">—</h2></div><span id="ov-day-base">—</span></div>
@@ -167,7 +204,7 @@ export async function mount(root, { state }) {
       <div class="section-head open-view-contract-head"><div><h3>قراردادها و سهم هرکدام در شاخص</h3><p>رنگ هر خانه متناسب با وزن همان قرارداد در سمت کال یا پوت است.</p></div><span id="ov-day-contract-count">—</span></div>
       <div id="ov-day-contracts" class="history-table-wrap"></div>
       <div class="open-view-intraday-controls"><div><p class="eyebrow">ریز همان روز</p><h3>تایم‌فریم نمودارهای روز انتخاب‌شده</h3></div><label>بازه زمانی<select id="ov-day-interval"><option value="5">۵ دقیقه</option><option value="15" selected>۱۵ دقیقه</option><option value="30">۳۰ دقیقه</option><option value="60">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="ov-day-intraday">محاسبه ریز این روز</button><b id="ov-day-status" role="status" aria-live="polite">هنوز محاسبه نشده است.</b></div>
-      <div class="open-view-chart-grid"><section><div class="section-head"><h3>پایه و سربه‌سر در طول روز</h3><span id="ov-day-timeframe">—</span></div><div id="ov-day-price" class="open-view-chart"><p class="empty-note">تایم‌فریم را انتخاب و محاسبه را اجرا کن.</p></div></section><section><div class="section-head"><h3>فاصله درصدی از دو شاخص</h3><span>همان سطل زمانی</span></div><div id="ov-day-gap" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section class="open-view-wide-card"><div class="section-head"><h3>IV وزنی در طول روز</h3><span>وزن ریزمعامله هر قرارداد</span></div><div id="ov-day-iv" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section></div>
+      <div class="open-view-chart-grid"><section><div class="section-head"><h3>پایه و سربه‌سر در طول روز</h3><span id="ov-day-timeframe">—</span></div><div id="ov-day-price" class="open-view-chart"><p class="empty-note">تایم‌فریم را انتخاب و محاسبه را اجرا کن.</p></div></section><section><div class="section-head"><h3>فاصله درصدی از دو شاخص</h3><span>همان سطل زمانی</span></div><div id="ov-day-gap" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section><div class="section-head"><h3>شاخص اعمال وزنی در طول روز</h3><span>همان سطل زمانی</span></div><div id="ov-day-strike" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section><div class="section-head"><h3>پریمیوم وزنی در طول روز</h3><span>درصدی از قیمت پایه</span></div><div id="ov-day-premium" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section class="open-view-wide-card"><div class="section-head"><h3>IV وزنی در طول روز</h3><span>وزن ریزمعامله هر قرارداد</span></div><div id="ov-day-iv" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section></div>
     </section>
     <p class="history-caveat">این شاخص از معاملات مشاهده‌شده ساخته می‌شود و قیمت قابل اجرای هم‌زمان نیست. IV مدل بلک–شولز است و دامنه نوسان، توقف نماد و پرش قیمت را مدل نمی‌کند.</p>
   </section>`;
@@ -204,6 +241,8 @@ export async function mount(root, { state }) {
     $('ov-day-price').innerHTML = '<p class="empty-note">تایم‌فریم را انتخاب و محاسبه را اجرا کن.</p>';
     $('ov-day-gap').innerHTML = '<p class="empty-note">هنوز محاسبه نشده است.</p>';
     $('ov-day-iv').innerHTML = '<p class="empty-note">هنوز محاسبه نشده است.</p>';
+    $('ov-day-strike').innerHTML = '<p class="empty-note">هنوز محاسبه نشده است.</p>';
+    $('ov-day-premium').innerHTML = '<p class="empty-note">هنوز محاسبه نشده است.</p>';
   }
 
   function paintIntraday() {
@@ -213,6 +252,8 @@ export async function mount(root, { state }) {
     const priceExtra = (row) => `<span>فاصله پایه تا کال: <strong>${fmt.pct(row.callBreakevenGapPct)}٪</strong></span><span>فاصله پایه از پوت: <strong>${fmt.pct(row.putBreakevenGapPct)}٪</strong></span>`;
     chart($('ov-day-price'), intraday.rows, SERIES_PRICE, { intraday: true, yLabel: 'قیمت (ریال)', extra: priceExtra });
     chart($('ov-day-gap'), intraday.rows, SERIES_GAP_INTRADAY, { percent: true, intraday: true, yLabel: 'فاصله (درصد)' });
+    chart($('ov-day-strike'), intraday.rows, SERIES_STRIKE_INTRADAY, { intraday: true, yLabel: 'قیمت اعمال (ریال)' });
+    chart($('ov-day-premium'), intraday.rows, SERIES_PREMIUM_INTRADAY, { percent: true, intraday: true, yLabel: 'پریمیوم (٪ پایه)' });
     chart($('ov-day-iv'), intraday.rows, SERIES_IV_INTRADAY, { percent: true, intraday: true, yLabel: 'نوسان ضمنی (درصد)' });
   }
 
@@ -242,7 +283,10 @@ export async function mount(root, { state }) {
     const priceExtra = (row) => `<span>فاصله پایه تا کال: <strong>${fmt.pct(row.callBreakevenGapPct)}٪</strong></span><span>فاصله پایه از پوت: <strong>${fmt.pct(row.putBreakevenGapPct)}٪</strong></span>`;
     chart($('ov-daily-price'), rows, SERIES_PRICE, { yLabel: 'قیمت (ریال)', extra: priceExtra });
     chart($('ov-daily-gap'), rows, SERIES_GAP, { percent: true, yLabel: 'فاصله (درصد)', hiddenSeries, onToggle: toggleSeries });
+    chart($('ov-daily-strike'), rows, SERIES_STRIKE, { yLabel: 'قیمت اعمال (ریال)', extra: priceExtra });
+    chart($('ov-daily-strike-gap'), rows, SERIES_STRIKE_GAP, { percent: true, yLabel: 'فاصله (درصد)', hiddenSeries, onToggle: toggleSeries });
     chart($('ov-daily-iv'), rows, SERIES_IV, { percent: true, yLabel: 'نوسان ضمنی (درصد)', hiddenSeries, onToggle: toggleSeries });
+    chart($('ov-daily-premium'), rows, SERIES_PREMIUM, { percent: true, yLabel: 'پریمیوم (٪ پایه)', hiddenSeries, onToggle: toggleSeries });
     $('ov-daily-table').innerHTML = dailyTable(rows, selectedDate); paintDayDetail();
   }
 

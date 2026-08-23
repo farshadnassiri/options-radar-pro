@@ -71,7 +71,11 @@ import {
   activeLiveTrades, breadthInstruments, liveOptionTape, liveQuoteIv, liveReferenceTape,
   marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
-import { dashboardScope, decisionDashboardSnapshot, pctVsYesterday } from '../core/decision-dashboard.mjs';
+import {
+  dashboardScope, decisionDashboardSnapshot, pctVsYesterday,
+  activeOptionsBoard, contractBreakeven, moneynessDistribution, BOARD_METRICS,
+  strikeLadder, maxPain, termStructure,
+} from '../core/decision-dashboard.mjs';
 
 let pass = 0, fail = 0;
 const results = [];
@@ -3319,7 +3323,7 @@ group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
     Object.keys(STRAT_GROUPS48).every((k) => GROUP_ICON[k]),
     Object.keys(STRAT_GROUPS48).filter((k) => !GROUP_ICON[k]).join(' , ') || 'همه');
   check('هر تب غیراستراتژی هم آیکون دارد',
-    ['settings', 'chain', 'history', 'backtest', 'portfolio-backtest', 'top', 'positions', 'roll']
+    ['settings', 'live-market', 'history', 'backtest', 'portfolio-backtest', 'positions', 'roll']
       .every((id) => TAB_ICON[id]));
   check('آیکون رنگ را از متن می‌گیرد، نه رنگ ثابت',
     icon('coins').includes('stroke="currentColor"') && !/stroke="#/.test(icon('coins')));
@@ -4985,16 +4989,482 @@ group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دا�
     `${viewCount('pulseViews')}/${viewCount('liquidityViews')}/${viewCount('volatilityViews')}`);
   check('دستگیره زمان، تایمر بازسازی و توقف خودکار هم‌زمان وجود دارند',
     ui70.includes('id="dd-interval" type="range"') && ui70.includes('timer = setTimeout(refresh') && ui70.includes('id="dd-pause"'));
-  check('ریزمعامله کامل محاسبه و برای روانی DOM به آخرین چهارصد ردیف محدود می‌شود',
-    ui70.includes('tape.slice(-400).reverse()') && ui70.includes('محاسبات تجمعی روی نوار کامل'));
-  check('رنگ سری‌ها فقط از ده توکن متمایز می‌آید', ui70.includes('var(--series-${index + 1})') && !ui70.includes("const COLORS ="));
-  check('ارزش بالا برای کل و سررسید و نگاه باز درون داشبورد است',
-    ui70.includes("'high-value-overall'") && ui70.includes("'high-value-expiry'")
-    && ui70.includes("'open-view-history'") && !app70.includes("id: 'open-view'"));
+  // سقف چهارصدردیفی برداشته شد چون دلیلش رفت: آن سقف برای روانی DOM بود،
+  // وقتی جدول `innerHTML` خام می‌ساخت. جدول مشترک مجازی‌سازی‌شده است و فقط
+  // ردیف‌های داخل قاب را رسم می‌کند، پس نوار کامل هم مرتب می‌شود هم صادر.
+  check('نوار ریزمعامله کامل به جدول مجازی‌سازی‌شده می‌رود، نه بریده',
+    ui70.includes('function tapeRows(tape)') && !ui70.includes('tape.slice(-400)'));
+  // شش توکن، نه ده — و بدون چرخش. جداپذیری خودِ رنگ‌ها را نگهبان ۱۰ در
+  // `tests/guards.mjs` حساب می‌کند؛ اینجا فقط مصرفشان سنجیده می‌شود.
+  check('رنگ سری‌ها از توکن‌های سنجیده می‌آید و میله رتبه‌ای یک فام دارد',
+    ui70.includes('var(--series-${index + 1})') && ui70.includes('length: 6')
+    && ui70.includes("'var(--bar-fill)'")
+    && !ui70.includes('--series:${SERIES[index % SERIES.length]}'));
+  // «رهبران ارزش کل بازار» حذف شد: با جدول سورت‌پذیر، همان «تابلوی
+  // قراردادها»ی مرتب بر ارزش است. رهبر هر سررسید و نگاه باز مانده‌اند،
+  // چون هیچ‌کدام با مرتب‌سازی یک ستون ساخته نمی‌شوند.
+  check('رهبر هر سررسید و نگاه باز درون داشبورد است',
+    ui70.includes("'high-value-expiry'") && ui70.includes("'open-view-history'")
+    && !app70.includes("id: 'open-view'"));
   const server70 = readSrc('../server/server.mjs');
   check('endpoint زنده عکس فشرده چهار دامنه را تحویل می‌دهد',
     server70.includes('universe: decisionDashboardSnapshot(sourceRows, S)'));
 }
+// ═════════ ۷۱. موقعیت باز و تغییرش، در همه سطح‌ها و بی‌ادعای دروغ ═════════
+//
+// گزارش کاربر: «قسمت موقعیت‌های باز هر نماد و تغییرات آن، در لحظه درست
+// نمی‌باشد.» دو نقص واقعی پشت آن بود:
+//
+//   هیچ منبعی    `rollupQuotes` فقط `oi` را جمع می‌کرد و `oiYday` را نه، پس
+//                «تغییر موقعیت باز» هر نماد اصلاً ساخته نمی‌شد.
+//   جمع تجمیعی   `finishAggregate` هر دو را جمع می‌کرد ولی تفاضلشان را
+//                نمی‌ساخت، پس همان ستون در هر نمای تجمیعی تهی بود.
+//
+// و یک تله سوم: اگر تابلو `yesterdayOP` را ندهد، `num` صفر می‌داد و تغییر
+// دقیقاً برابر خودِ موقعیت باز می‌شد — یعنی «تمام تعهد این قرارداد امروز
+// باز شده»، که ادعای ساختگی است (قاعده ۲-۴).
+group('۷۱. موقعیت باز و تغییر آن');
+{
+  const row71 = (extra = {}) => ({
+    uaInsCode: '11', lval30_UA: 'نمونه', pDrCotVal_UA: 1050, pClosing_UA: 1040, priceYesterday_UA: 1000,
+    strikePrice: 1000, remainedDay: 30, endDate: 20260101, contractSize: 1000,
+    insCode_C: '111', lVal18AFC_C: 'ضنمو-الف', pDrCotVal_C: 120, pClosing_C: 115,
+    pMeDem_C: 118, pMeOf_C: 122, qTotTran5J_C: 20, zTotTran_C: 4, qTotCap_C: 2400,
+    oP_C: 90, yesterdayOP_C: 80,
+    insCode_P: '112', lVal18AFC_P: 'طنمو-الف', pDrCotVal_P: 80, pClosing_P: 82,
+    pMeDem_P: 78, pMeOf_P: 82, qTotTran5J_P: 10, zTotTran_P: 2, qTotCap_P: 800,
+    oP_P: 70, yesterdayOP_P: 75,
+    ...extra,
+  });
+
+  // ——— سطح نماد ———
+  const ua71 = underlyingList(buildChain([row71()]))[0];
+  check('موقعیت باز دیروز هر نماد جمع می‌شود، نه فقط امروز',
+    ua71.oi === 160 && ua71.oiYday === 155, `${ua71.oi} / ${ua71.oiYday}`);
+  check('تغییر موقعیت باز هر نماد ساخته می‌شود',
+    ua71.oiChange === 5 && near(ua71.oiChangePct, (160 / 155 - 1) * 100),
+    `${ua71.oiChange} · ${uiFmt.pct(ua71.oiChangePct)}٪`);
+  check('و کال و پوت تغییر خودشان را جدا دارند',
+    ua71.callOiChange === 10 && ua71.putOiChange === -5);
+
+  // ——— تابلو بی‌داده: نامعلوم، نه جهش ساختگی ———
+  const gapRow = row71(); delete gapRow.yesterdayOP_C;
+  const uaGap = underlyingList(buildChain([gapRow]))[0];
+  check('بدون موقعیت باز دیروز، تغییرِ نماد نامعلوم می‌ماند نه برابر خودِ موقعیت باز',
+    Number.isNaN(uaGap.oiChange) && Number.isNaN(uaGap.oiYday) && uaGap.oi === 160,
+    `تغییر ${uiFmt.int(uaGap.oiChange)}`);
+  // اگر این نبود، `oiChange` می‌شد ۱۶۰−۷۵=۸۵ و ردیف، جهش ۱۱۳٪ گزارش می‌کرد
+  check('و همین تله در موتور ارزیابی هم بسته است', (() => {
+    const q = (oiYday) => ({ bid: 100, bidQty: 50, ask: 110, askQty: 50, last: 105, close: 105,
+      oi: 500, oiYday, vol: 10, trades: 2, value: 1e6, state: 'A', staleSec: 0,
+      book: [{ level: 1, bid: 100, bidQty: 50, ask: 110, askQty: 50 }] });
+    const def = byId('bull-call-spread');
+    const run = (oiYday) => evaluate({
+      legs: buildLegs(def, { strikes: [95000, 105000], size: 1000, days: [30] }),
+      quotes: [q(400), q(oiYday)],
+      ctx: { S: 100000, Sclose: 100000, days: 30, size: 1000, qty: 1, settings: defaults(), def, underlying: 'نمونه', sigmaHist: 0.6 },
+    });
+    return run(450).oiChange === 150 && Number.isNaN(run(NaN).oiChange);
+  })());
+
+  // ——— سطح تجمیعی داشبورد ———
+  const snap71 = decisionDashboardSnapshot([row71()], defaults());
+  const call71 = snap71.contracts.find((row) => row.ins === '111');
+  check('هر قرارداد داشبورد تغییر موقعیت باز خودش را دارد', call71.oiChange === 10);
+  check('تجمیع سررسید هم تغییر موقعیت باز می‌دهد، نه فقط جمع دو ستون',
+    snap71.expiries[0].oi === 160 && snap71.expiries[0].oiYday === 155
+    && snap71.expiries[0].oiChange === 5,
+    `${snap71.expiries[0].oiChange}`);
+  const snapGap = decisionDashboardSnapshot([gapRow], defaults());
+  check('و تجمیعِ دارای خلأ، تغییرش نامعلوم است نه ناقص',
+    Number.isNaN(snapGap.expiries[0].oiChange));
+
+  // ——— جدول‌ها این ستون‌ها را نشان می‌دهند ———
+  const chain71 = readSrc('../ui/tabs/chain.mjs'), dash71 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+  check('جدول دیده‌بان ستون تغییر موقعیت باز دارد و در نمای آماده هم هست',
+    /key: 'oiChange'/.test(chain71) && /'oi', 'oiChange', 'oiChangePct'/.test(chain71));
+  check('هر مجموعه ستون داشبورد، تغییر موقعیت باز دارد',
+    ['COLS_CONTRACT', 'COLS_UNDERLYING', 'COLS_EXPIRY', 'COLS_GROUP'].every((name) => {
+      const block = new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash71)?.[1] || '';
+      return /col\('oiChange'/.test(block);
+    }));
+}
+
+
+// ═════════ ۷۲. جدول‌های رصد لحظه‌ای: مرتب‌شونده، صادرشونده، هم‌قد دامنه ═════════
+//
+// دو خواسته کاربر، یک ریشه:
+//
+//   «همه جدول‌های رصد لحظه‌ای قابلیت سرت کردن و خروجی اکسل داشته باشند»
+//   «اطلاعاتی که از کل نماد می‌گیریم با اطلاعات یک سررسید یا یک قرارداد
+//    متفاوت است — لازم نیست بیست تب شبیه هم باشند»
+//
+// ریشه، یک `innerHTML` خام دوازده‌ستونه بود که برای هر سطحی یک قالب داشت:
+// نه مرتب می‌شد، نه خروجی داشت، و ردیف نماد پایه ستون «سررسید» می‌گرفت که
+// همیشه «—» بود.
+group('۷۲. جدول‌های داشبورد رصد لحظه‌ای');
+{
+  const dash72 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+  const setOf = (name) => {
+    const block = new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash72)?.[1] || '';
+    return [...block.matchAll(/col\('(\w+)'/g)].map((m) => m[1]);
+  };
+  const contract = setOf('COLS_CONTRACT'), underlying = setOf('COLS_UNDERLYING');
+  const expiry = setOf('COLS_EXPIRY'), group = setOf('COLS_GROUP'), tape = setOf('COLS_TAPE');
+
+  check('جدول‌ها از جدول مشترک می‌آیند، نه از innerHTML خام',
+    dash72.includes("import { makeTable } from '/ui/table.mjs'")
+    && !dash72.includes('<table class="history-table decision-table"')
+    && !dash72.includes('<table class="history-table decision-tape"'));
+  // جدول مشترک، مرتب‌سازی و انتخابگر ستون و دکمه خروجی اکسل را با هم دارد
+  check('هر جدول، انتخابگر ستون و نام خروجی می‌گیرد',
+    /all: cols, storeKey: `dashboard:\$\{key\}`, exportName: `dashboard-\$\{exportName\}`/.test(dash72));
+  check('و نمونه هر نما نگه داشته می‌شود تا مرتب‌سازی کاربر با هر دریافت پاک نشود',
+    dash72.includes('const tables = new Map()') && dash72.includes('tables.set(key, entry)'));
+  // با پنهان‌کردن به‌جای جداکردن، هر querySelector روی میزبان جدولِ نمای
+  // قبلی را برمی‌گرداند — این را کنترل مرورگر پیدا کرد، نه بازخوانی کد.
+  check('جدول غیرفعال از DOM جدا می‌شود، نه فقط پنهان',
+    dash72.includes('other.el.remove()') && !dash72.includes('other.el.hidden = true'));
+
+  check('هر سطح دامنه مجموعه ستون خودش را دارد', new Set([
+    contract.join(','), underlying.join(','), expiry.join(','), group.join(','), tape.join(','),
+  ]).size === 5);
+  // ستون‌هایی که فقط به یک سطح می‌خورند، به سطح دیگر نشت نکنند
+  check('ستون قرارداد به ردیف نماد پایه نمی‌رود',
+    contract.includes('strike') && contract.includes('kindLabel')
+    && !underlying.includes('strike') && !underlying.includes('kindLabel'));
+  check('ستون گروه ساختگی، قیمت و سررسید ندارد — برای یک گروه معنی نمی‌دهد',
+    !group.includes('last') && !group.includes('expiryText') && !group.includes('strike'));
+  check('ردیف نماد پایه ستون‌های مخصوص خودش را دارد',
+    ['expiries', 'atmIvPct', 'pcRatio', 'uaValue'].every((k) => underlying.includes(k))
+    && !contract.includes('atmIvPct'));
+  check('ردیف سررسید، تفکیک کال و پوت و نسبت‌ها را دارد',
+    ['callValue', 'putValue', 'putCallOi', 'tradedContracts'].every((k) => expiry.includes(k)));
+  check('نوار ریزمعامله ستون‌های تجمعی و مرجع خودش را دارد',
+    ['cumulativeVolume', 'cumulativeValue', 'basePrice', 'sequence'].every((k) => tape.includes(k)));
+  // هر ستونی که اعلام می‌شود باید قالبی داشته باشد که `ui/fmt.mjs` بشناسد
+  const fmts = [...dash72.matchAll(/col\('\w+', '[^']*', '(\w+)'/g)].map((m) => m[1]);
+  check('قالب هر ستون داشبورد در ui/fmt.mjs تعریف شده',
+    fmts.length > 0 && fmts.every((f) => typeof uiFmt[f] === 'function'),
+    [...new Set(fmts.filter((f) => typeof uiFmt[f] !== 'function'))].join('، '));
+}
+
+
+// ═════════ ۷۳. ادغام دیده‌بان و برترین موقعیت‌ها در رصد لحظه‌ای ═════════
+//
+// خواسته کاربر: «تب دیده‌بان و تب برترین موقعیت‌ها را در تب رصد لحظه‌ای
+// ادغام کن.» هر سه از یک عکس لحظه‌ای بازار تغذیه می‌شوند و یک کار می‌کنند:
+// نگاه کلی پیش از تصمیم. سه نشانی برای یک تصمیم، یعنی کاربر باید بین سه تب
+// جابه‌جا شود.
+//
+// ادغام یعنی یک در ورودی، نه بازنویسی دو تب کارکرده: ماژولشان دست‌نخورده
+// می‌ماند و همان‌جا تنبل بار می‌شود — همان الگویی که «نگاه باز» از قبل داشت.
+group('۷۳. ادغام تب‌های نگاه کلی');
+{
+  const app73 = readSrc('../ui/app.mjs'), dash73 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+  const tabLiteral = /const TABS = \[([\s\S]*?)\n\];/.exec(app73)?.[1] || '';
+  check('دیده‌بان و برترین موقعیت‌ها دیگر تب مستقل نیستند',
+    !/id: 'chain'/.test(tabLiteral) && !/id: 'top'/.test(tabLiteral));
+  check('و رصد لحظه‌ای سر جایش مانده', /id: 'live-market'/.test(tabLiteral));
+  check('هر دو به‌صورت حالت داخل همان تب اعلام شده‌اند',
+    dash73.includes("{ id: 'chain', title: 'دیده‌بان زنجیره'") && dash73.includes("mod: '/ui/tabs/chain.mjs'")
+    && dash73.includes("{ id: 'top', title: 'برترین موقعیت‌ها'") && dash73.includes("mod: '/ui/tabs/top.mjs'"));
+  check('ماژول هر دو تنبل بار می‌شود، نه در بارگذاری تب',
+    dash73.includes('const module = await import(mode.mod)'));
+  // بدون نگه‌داشتن تابع برچیدن، اشتراک دیده‌بان و تایمر اسکنِ تب ادغام‌شده
+  // پس از رفتن از این تب زنده می‌ماند و در پس‌زمینه درخواست می‌زند.
+  check('تابع برچیدن تب ادغام‌شده نگه داشته و صدا زده می‌شود',
+    dash73.includes('embedded.set(mode.id, await module.mount(host, { state, api }))')
+    && dash73.includes('for (const dispose of embedded.values())'));
+  check('و ادغام‌شده فقط یک بار سوار می‌شود',
+    dash73.includes('if (embedded.has(mode.id)) return;'));
+  // حالت ادغام‌شده نمای شماره‌دار ندارد؛ کد نباید روی آن بترکد
+  check('حالت بدون نما، مسیر نمای شماره‌دار را نمی‌رود',
+    dash73.includes('if (mode?.mod) { await mountEmbedded(mode); return; }')
+    && dash73.includes('(modeOf()?.views || [])'));
+  check('سه حالت تصمیم‌گیری هنوز بیست نما دارند',
+    DASHBOARD_VIEW_COUNTS73().every((n) => n === 20), DASHBOARD_VIEW_COUNTS73().join('/'));
+  function DASHBOARD_VIEW_COUNTS73() {
+    return ['pulseViews', 'liquidityViews', 'volatilityViews'].map((name) =>
+      ((new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash73)?.[1] || '').match(/^\s*\['/gm) || []).length);
+  }
+}
+
+
+// ═════════ ۷۴. شاخص اعمال و پریمیوم وزنی، به نگاه باز برگشت ═════════
+//
+// گزارش کاربر: «قسمتی از تب نگاه باز که در نسخه‌های قبلی میانگین وزنی قیمت
+// اعمال‌ها و نمودارهای آن و همچنین IV و نمودارهایش بود — هر چیزی که در نگاه
+// باز بود را برگردان و در جای خود بگذار.»
+//
+// موتور این دو را از روز اول می‌ساخت (`callStrike`/`putStrike` و
+// `callPremium`/`putPremium` در `aggregate`) ولی وقتی این تب روزمحور شد،
+// نمودار و ستونشان جا ماند و هیچ‌جای رابط نمی‌آمدند — عددی که حساب می‌شود و
+// دیده نمی‌شود.
+group('۷۴. شاخص اعمال و پریمیوم وزنی نگاه باز');
+{
+  const expiry74 = 20240630;
+  const ua74 = { ins: '1', name: 'پایه آزمایشی' };
+  const contracts74 = [
+    { ins: '11', name: 'کال ۱۰۰', kind: 'call', strike: 100, expiry: expiry74, size: 1000 },
+    { ins: '12', name: 'کال ۱۲۰', kind: 'call', strike: 120, expiry: expiry74, size: 1000 },
+    { ins: '21', name: 'پوت ۹۰', kind: 'put', strike: 90, expiry: expiry74, size: 1000 },
+  ];
+  // وزن‌ها عمداً نامساوی‌اند تا «وزنی» بودن از «میانگین ساده» جدا شود:
+  // اعمال کال = (۱۰۰×۱۰۰ + ۱۲۰×۳۰۰) / ۴۰۰ = ۱۱۵
+  const series74 = {
+    1: [{ date: 20240101, close: 100, value: 1e6, vol: 1e4 }],
+    11: [{ date: 20240101, close: 10, value: 100, vol: 10, trades: 2 }],
+    12: [{ date: 20240101, close: 5, value: 300, vol: 30, trades: 4 }],
+    21: [{ date: 20240101, close: 8, value: 200, vol: 20, trades: 3 }],
+  };
+  const daily74 = analyzeDailyOpenView({ ua: ua74, contracts: contracts74, seriesByIns: series74, settings: { rFree: 0.2, yearDays: 365 } });
+  const row74 = daily74.rows[0];
+  check('شاخص اعمال وزنی کال با وزن ارزش معامله ساخته می‌شود',
+    near(row74.callStrike, 115), row74.callStrike);
+  check('و فاصله‌اش از قیمت پایه، هم‌الگوی فاصله سربه‌سر است',
+    near(row74.callStrikeGapPct, 15) && near(row74.putStrikeGapPct, 10),
+    `${uiFmt.pct(row74.callStrikeGapPct)} / ${uiFmt.pct(row74.putStrikeGapPct)}`);
+  // پریمیوم وزنی کال = (۱۰×۱۰۰ + ۵×۳۰۰) / ۴۰۰ = ۶٫۲۵ ، یعنی ۶٫۲۵٪ پایه ۱۰۰
+  check('پریمیوم وزنی هم درصدی از پایه می‌گیرد، تا روزهای با پایه متفاوت مقایسه شوند',
+    near(row74.callPremium, 6.25) && near(row74.callPremiumPct, 6.25) && near(row74.putPremiumPct, 8),
+    `${row74.callPremium}`);
+
+  // میانگین ۵روزه برای همین دو، مثل فاصله سربه‌سر و IV
+  const flat74 = {
+    1: [1, 2, 3, 4, 5].map((d) => ({ date: 20240100 + d, close: 100, value: 1000, vol: 10 })),
+    11: [1, 2, 3, 4, 5].map((d) => ({ date: 20240100 + d, close: 10, value: 100, vol: 10 })),
+    21: [1, 2, 3, 4, 5].map((d) => ({ date: 20240100 + d, close: 8, value: 100, vol: 10 })),
+  };
+  const ma74 = analyzeDailyOpenView({ ua: ua74, contracts: [contracts74[0], contracts74[2]], seriesByIns: flat74, settings: { rFree: 0.2, yearDays: 365 } });
+  check('فاصله اعمال و پریمیوم، میانگین ۵روزه مستقل دارند',
+    near(ma74.rows[4].callStrikeGapPctMa5, 0) && near(ma74.rows[4].putStrikeGapPctMa5, 10)
+    && near(ma74.rows[4].callPremiumPctMa5, 10) && near(ma74.rows[4].putPremiumPctMa5, 8));
+
+  // ——— و حالا واقعاً در رابط دیده می‌شوند ———
+  const ov74 = readSrc('../ui/tabs/open-view.mjs');
+  check('نمودار روزانه شاخص اعمال و فاصله‌اش در تب هست',
+    ov74.includes("id=\"ov-daily-strike\"") && ov74.includes("id=\"ov-daily-strike-gap\"")
+    && ov74.includes("chart($('ov-daily-strike')") && ov74.includes("chart($('ov-daily-strike-gap')"));
+  check('نمودار روزانه پریمیوم وزنی هم هست',
+    ov74.includes("id=\"ov-daily-premium\"") && ov74.includes("chart($('ov-daily-premium')"));
+  check('و هر دو در جزئیات درون‌روزی هم رسم می‌شوند',
+    ov74.includes("chart($('ov-day-strike')") && ov74.includes("chart($('ov-day-premium')"));
+  check('جدول روزانه ستون اعمال وزنی و پریمیوم گرفت',
+    ov74.includes('<th>اعمال وزنی کال / فاصله</th>') && ov74.includes('r.callStrikeGapPct')
+    && ov74.includes('<th>پریمیوم وزنی کال / پوت ٪</th>'));
+  // نمودار درون‌روزی، سری خط‌چینِ میانگین ۵روزه ندارد: میانگین پنج‌روزه روی
+  // سطل‌های یک روز معنی ندارد.
+  check('نمودار درون‌روزی میانگین ۵روزه را حمل نمی‌کند',
+    ov74.includes('const SERIES_PREMIUM_INTRADAY = [SERIES_PREMIUM[0], SERIES_PREMIUM[2]]'));
+  const exp74 = readSrc('../ui/open-view-export.mjs');
+  check('خروجی اکسل هم ستون‌های تازه را می‌برد',
+    exp74.includes('r.callStrikeGapPct') && exp74.includes('r.callPremiumPct')
+    && exp74.includes("'فاصله اعمال کال ٪'"));
+}
+
+
+// ═════════ ۷۵. تابلوی اختیارهای پرمعامله ═════════
+//
+// خواسته کاربر: بخشی از داشبورد که اختیارهای پرمعامله را بدهد — سنجه‌اش را
+// خود کاربر عوض کند (حجم، ارزش، …) — و برای هر سررسید میانگین وزنی سربه‌سر
+// و فاصله‌اش از قیمت جاری را بدهد، با تفکیک کال، پوت و هر دو.
+group('۷۵. تابلوی اختیارهای پرمعامله');
+{
+  const board75 = (rows, opt) => activeOptionsBoard(rows, opt);
+  const c = (over) => ({ ins: '1', name: 'ض', kind: 'call', uaIns: '9', uaName: 'نمونه',
+    endDate: 20260101, days: 30, strike: 1000, last: 100, spot: 1000,
+    value: 1000, volume: 10, trades: 2, oi: 50, ivPct: 40, ...over });
+
+  // ——— سربه‌سر هر قرارداد ———
+  check('سربه‌سر کال، اعمال به‌علاوه پریمیوم است و پوت، اعمال منهای آن',
+    contractBreakeven(c({ strike: 1000, last: 120 })) === 1120
+    && contractBreakeven(c({ kind: 'put', strike: 1000, last: 120 })) === 880);
+  // بدون پریمیوم اجرایی، سربه‌سر ساخته نمی‌شود (قاعده ۲-۴)
+  check('بی‌پریمیوم، سربه‌سر ساخته نمی‌شود نه اینکه برابر اعمال گرفته شود',
+    Number.isNaN(contractBreakeven(c({ last: 0 }))));
+
+  // ——— فاصله، از دید همان سمت ———
+  const sided = board75([c({ last: 100 }), c({ ins: '2', kind: 'put', last: 100 })]).rows;
+  const callRow = sided.find((row) => row.kind === 'call'), putRow = sided.find((row) => row.kind === 'put');
+  check('فاصله تا سربه‌سر از دید همان سمت خوانده می‌شود، پس هر دو مثبت‌اند',
+    near(callRow.breakevenGapPct, 10) && near(putRow.breakevenGapPct, 10),
+    `${uiFmt.pct(callRow.breakevenGapPct)} / ${uiFmt.pct(putRow.breakevenGapPct)}`);
+
+  // ——— سنجه انتخابی، هم رتبه می‌دهد هم وزن ———
+  const many = [
+    c({ ins: 'a', strike: 1000, last: 100, value: 100, volume: 900 }),
+    c({ ins: 'b', strike: 1200, last: 100, value: 900, volume: 100 }),
+  ];
+  check('رتبه‌بندی با سنجه انتخابی عوض می‌شود',
+    board75(many, { metric: 'value' }).rows[0].ins === 'b'
+    && board75(many, { metric: 'volume' }).rows[0].ins === 'a');
+  // وزن شاخص هم باید همان سنجه باشد، وگرنه عددی که کاربر می‌بیند جواب
+  // سؤالی نیست که پرسیده. سربه‌سر a برابر ۱۱۰۰ و b برابر ۱۳۰۰ است، پس:
+  //   وزن ارزش  (۱۱۰۰×۱۰۰ + ۱۳۰۰×۹۰۰) ÷ ۱۰۰۰ = ۱۲۸۰
+  //   وزن حجم   (۱۱۰۰×۹۰۰ + ۱۳۰۰×۱۰۰) ÷ ۱۰۰۰ = ۱۱۲۰
+  check('وزن شاخص سربه‌سر هم همان سنجه است، نه همیشه ارزش',
+    near(board75(many, { metric: 'value' }).expiries[0].callBreakeven, 1280)
+    && near(board75(many, { metric: 'volume' }).expiries[0].callBreakeven, 1120),
+    `${board75(many, { metric: 'volume' }).expiries[0].callBreakeven}`);
+  check('سنجه ناشناخته به ارزش برمی‌گردد و نمی‌ترکد',
+    board75(many, { metric: 'چیزی-که-نیست' }).metric === 'value' && BOARD_METRICS.includes('oi'));
+
+  // ——— تفکیک سمت ———
+  const mixed = [c({ ins: 'a' }), c({ ins: 'b', kind: 'put' })];
+  check('تفکیک کال و پوت و هر دو، ردیف‌ها را درست فیلتر می‌کند',
+    board75(mixed, { side: 'both' }).rows.length === 2
+    && board75(mixed, { side: 'call' }).rows.every((row) => row.kind === 'call')
+    && board75(mixed, { side: 'put' }).rows.every((row) => row.kind === 'put'));
+  // در حالت «هر دو» هم شاخص هر سمت جدا می‌ماند: میانگین سربه‌سر کال و پوت
+  // با هم، عددی است که هیچ قراردادی ندارد.
+  const both = board75(mixed, { side: 'both' }).expiries[0];
+  check('در حالت هر دو، شاخص هر سمت جدا می‌ماند',
+    Number.isFinite(both.callBreakeven) && Number.isFinite(both.putBreakeven)
+    && both.callBreakeven !== both.putBreakeven);
+  check('باند سربه‌سر، فاصله پوت تا کال است',
+    near(both.band, both.callBreakeven - both.putBreakeven)
+    && near(both.bandPct, (both.band / 1000) * 100));
+
+  // ——— گروه‌بندی سررسید ———
+  // دو پایه با دو سطح قیمت کاملاً متفاوت نباید در یک شاخص سربه‌سر جمع شوند.
+  const twoUa = [c({ ins: 'a', uaIns: '9', spot: 1000, strike: 1000, last: 100 }),
+    c({ ins: 'b', uaIns: '8', uaName: 'دیگری', spot: 50000, strike: 50000, last: 5000 })];
+  check('گروه سررسید با کلید «پایه:سررسید» ساخته می‌شود، نه فقط سررسید',
+    board75(twoUa).expiries.length === 2);
+
+  // ——— هیستوگرام فاصله از قیمت جاری ———
+  const dist = moneynessDistribution([
+    c({ strike: 1000, spot: 1000, value: 100 }),
+    c({ kind: 'put', strike: 1120, spot: 1000, value: 300 }),
+    c({ strike: 700, spot: 1000, value: 50 }),
+  ], 'value');
+  const atm = dist.find((b) => b.from === 0 && b.to === 5);
+  const far = dist.find((b) => b.from === 10 && b.to === 20);
+  check('توزیع، هر قرارداد را در سطل فاصله‌اش می‌گذارد و کال و پوت را جدا نگه می‌دارد',
+    atm.call === 100 && atm.put === 0 && far.put === 300 && far.call === 0);
+  check('سطل‌های بیرون از دامنه هم جا دارند',
+    dist[0].total === 50 && dist.reduce((sum, b) => sum + b.total, 0) === 450);
+
+  // ——— رابط ———
+  const ui75 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+  const boardViews75 = (/const boardViews = \[((?:.|\n)*?)\n\];/.exec(ui75)?.[1] || '').match(/^\s*\['/gm) || [];
+  check('حالت تابلو نماهای منحصر به خودش را دارد، نه رونوشت بیست‌تایی',
+    boardViews75.length === 8 && ui75.includes("id: 'board'") && ui75.includes('board: true'),
+    `${boardViews75.length} نما`);
+  check('سنجه و تفکیک سمت، کنترل کاربر دارند و ذخیره می‌شوند',
+    ui75.includes('id="dd-board-metric"') && ui75.includes('data-board-side')
+    && ui75.includes("localStorage.setItem('options-radar:board-metric'")
+    && ui75.includes("localStorage.setItem('options-radar:board-side'"));
+  // شکل نمودار باید با سؤالش بخواند: هیستوگرام و پراکنش و میله انباشته،
+  // نه اینکه همه‌چیز میله رتبه‌ای شود.
+  check('نمودارهای تازه از شکل‌های متفاوت‌اند، نه همه میله رتبه‌ای',
+    ui75.includes('function stackedBars(') && ui75.includes('function scatterChart(')
+    && ui75.includes('moneynessDistribution(') && ui75.includes("'board-smile'"));
+  check('جدول تابلو و جدول سررسید، ستون‌های خودشان را دارند',
+    /const COLS_BOARD = \[/.test(ui75) && /const COLS_BOARD_EXPIRY = \[/.test(ui75)
+    && ui75.includes("col('breakevenGapPct'") && ui75.includes("col('callGapPct'"));
+  check('عوض‌شدن سنجه، لنگر مرتب‌سازی تابلو را هم تازه می‌کند',
+    ui75.includes("if (key.startsWith('board:')) entry.table.__seeded = false"));
+}
+
+
+// ═════════ ۷۶. بازبینی نماهای سه حالت و سنجه‌های ساختاری ═════════
+//
+// خواسته کاربر: «منطق نبض و جهت بازار / نقدینگی و سررسید / تلاطم و انتظارات
+// را دوباره بررسی کن و همچنین تب‌های ۲۰گانه… لازم نیست ۲۰ تب هر یک از این
+// سه شبیه هم باشد، بعضی اطلاعات مناسبی نمی‌دهد… نمودارهای مختلف و متنوع
+// دیگری نیز بساز.»
+//
+// ریشهٔ شباهت، همان سورت‌پذیر شدن جدول‌ها بود: «رهبران ارزش» و «رهبران حجم»
+// وقتی جدول خام بودند دو نمای واقعی بودند؛ حالا یک جدول‌اند با دو
+// مرتب‌سازی. پس تکراری‌ها رفتند و جایشان سنجه‌هایی نشست که از **ساختار**
+// زنجیره می‌آیند، نه از رتبه‌بندی یک ستون.
+group('۷۶. نماهای سه حالت و سنجه‌های ساختاری');
+{
+  const L = (over) => ({ ins: 'x', name: 'ض', kind: 'call', uaIns: '9', uaName: 'نمونه',
+    endDate: 20260101, days: 30, spot: 1000, strike: 1000, last: 100,
+    oi: 0, volume: 0, value: 0, ivPct: NaN, ...over });
+
+  // ——— نردبان اعمال ———
+  const ladder = strikeLadder([
+    L({ strike: 900, oi: 100, volume: 10 }),
+    L({ strike: 900, kind: 'put', oi: 40, volume: 4 }),
+    L({ strike: 1100, kind: 'put', oi: 300, volume: 30 }),
+  ]);
+  check('نردبان، یک گروه به‌ازای هر پایه:سررسید می‌سازد و پله‌ها را مرتب می‌کند',
+    ladder.length === 1 && ladder[0].rungs.map((r) => r.strike).join(',') === '900,1100');
+  check('هر پله، کال و پوت را جدا نگه می‌دارد و نسبتشان را می‌دهد',
+    ladder[0].rungs[0].callOi === 100 && ladder[0].rungs[0].putOi === 40
+    && near(ladder[0].rungs[0].putCallOi, 0.4) && ladder[0].rungs[0].oi === 140);
+  // پله بدون کال، نسبت پوت به کال ندارد — تقسیم بر صفر عدد نمی‌سازد
+  check('پله بدون کال، نسبت نامعلوم می‌دهد نه بی‌نهایت',
+    Number.isNaN(ladder[0].rungs[1].putCallOi));
+  check('فاصله هر پله از قیمت جاری هم ثبت می‌شود',
+    near(ladder[0].rungs[0].moneynessPct, -10) && near(ladder[0].rungs[1].moneynessPct, 10));
+
+  // ——— بیشترین درد ———
+  // اعمال ۹۰۰ با ۱۰۰ کال، اعمال ۱۱۰۰ با ۳۰۰ پوت:
+  //   تسویه در ۹۰۰  → پوت‌ها ۲۰۰ در سود × ۳۰۰ = ۶۰٬۰۰۰
+  //   تسویه در ۱۱۰۰ → کال‌ها ۲۰۰ در سود × ۱۰۰ = ۲۰٬۰۰۰   ← کمینه
+  const pain = maxPain(strikeLadder([
+    L({ strike: 900, oi: 100 }), L({ strike: 1100, kind: 'put', oi: 300 }),
+  ]));
+  check('بیشترین درد، کمینه ارزش ذاتی تعهد باز را پیدا می‌کند',
+    pain[0].maxPain === 1100 && near(pain[0].maxPainGapPct, 10), `${pain[0].maxPain}`);
+  check('و منحنی درد روی همان اعمال‌های واقعی ساخته می‌شود، نه شبکه ساختگی',
+    pain[0].curve.length === 2 && pain[0].curve.map((c) => c.pain).join(',') === '60000,20000');
+  check('با کمتر از دو پله تعهددار، بیشترین درد ساخته نمی‌شود',
+    Number.isNaN(maxPain(strikeLadder([L({ strike: 900, oi: 100 })]))[0].maxPain));
+
+  // ——— ساختار زمانی و چولگی ———
+  const term = termStructure([
+    L({ endDate: 20260101, days: 30, ivPct: 60, value: 100 }),
+    L({ endDate: 20260101, days: 30, kind: 'put', ivPct: 70, value: 100 }),
+    L({ endDate: 20260201, days: 60, ivPct: 40, value: 100 }),
+    L({ endDate: 20260201, days: 60, kind: 'put', ivPct: 44, value: 100 }),
+  ]);
+  check('ساختار زمانی به‌ترتیب روز مانده مرتب می‌شود', term.map((r) => r.days).join(',') === '30,60');
+  check('تلاطم هر سررسید با وزن ارزش ساخته می‌شود', near(term[0].ivPct, 65) && near(term[1].ivPct, 42));
+  check('چولگی، پوت منهای کال است', near(term[0].skewPp, 10) && near(term[1].skewPp, 4));
+  // قراردادی که امروز معامله نشده نباید ساختار امروز را جابه‌جا کند
+  check('قرارداد بی‌گردش وارد ساختار زمانی نمی‌شود',
+    termStructure([L({ ivPct: 90, value: 0 })]).length === 0);
+
+  // ——— بازبینی نماها ———
+  const ui76 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+  const viewsOf = (name) => [...(new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(ui76)?.[1] || '')
+    .matchAll(/\['([^']+)', '[^']*', '([^']+)', '([^']+)', '([^']+)'\]/g)]
+    .map((m) => ({ id: m[1], kind: m[2], source: m[3], metric: m[4] }));
+  const lists = { pulseViews: viewsOf('pulseViews'), liquidityViews: viewsOf('liquidityViews'), volatilityViews: viewsOf('volatilityViews') };
+  for (const [name, views] of Object.entries(lists)) {
+    check(`${name} هنوز بیست نما دارد`, views.length === 20, `${views.length}`);
+    // دو نما با یک شکل و یک منبع و یک سنجه، یک نما هستند — و چون جدول‌ها
+    // خودشان سورت‌پذیرند، «جدول X» و «میله X» هم دیگر تفاوت واقعی نیستند.
+    const signatures = views.map((view) => `${view.kind}|${view.source}|${view.metric}`);
+    const duplicated = signatures.filter((sig, index) => signatures.indexOf(sig) !== index);
+    check(`${name} نمای تکراری ندارد`, duplicated.length === 0, [...new Set(duplicated)].join('، '));
+  }
+  // تنوع شکل: هر حالت باید بیش از یک شکل نمودار داشته باشد، وگرنه همان
+  // «بیست تب شبیه هم» است.
+  for (const [name, views] of Object.entries(lists)) {
+    check(`${name} از چند شکل نمودار استفاده می‌کند`,
+      new Set(views.map((v) => v.kind)).size >= 5, [...new Set(views.map((v) => v.kind))].join('، '));
+  }
+  // و شکل‌های تازه واقعاً پیاده شده‌اند
+  check('شکل‌های تازه ساخته شده‌اند: گرمانما، نردبان، منحنی درد، هیستوگرام، پراکنش',
+    ['function heatmap(', 'function ladderChart(', 'function painCurve(', 'function histogram(', 'function scatterChart(']
+      .every((needle) => ui76.includes(needle)));
+  check('و هر سه حالت به سنجه‌های ساختاری وصل شده‌اند',
+    ui76.includes("'max-pain'") && ui76.includes("'strike-ladder'")
+    && ui76.includes("'iv-term'") && ui76.includes("'iv-skew'")
+    && ui76.includes("'liquidity-heatmap'") && ui76.includes("'iv-heatmap'"));
+  // گرمانما دو بُعد دسته‌ای دارد؛ رنگش باید طیف تک‌فام باشد نه رنگین‌کمان
+  check('گرمانما طیف تک‌فام دارد، نه رنگین‌کمان',
+    ui76.includes('color-mix(in srgb, var(--series-1)') && !/heatRainbow|hsl\(/.test(ui76));
+}
+
+
 // ═══════════════════════════ گزارش ═══════════════════════════
 const W = 62;
 console.log('\n' + '═'.repeat(W));

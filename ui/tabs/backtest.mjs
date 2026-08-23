@@ -12,7 +12,7 @@ import {
   INTRADAY_START_SECOND, INTRADAY_END_SECOND,
 } from '/core/backtest.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
-import { fmt, faDigits, signTone, ltr } from '/ui/fmt.mjs';
+import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { logError } from '/ui/errlog.mjs';
 
@@ -26,7 +26,10 @@ const nameOf = (entity, fallback = 'بدون نام') => {
 const dateLabel = (value) => faDigits(historyDateLabel(value));
 const chunks = (list, size) => Array.from({ length: Math.ceil(list.length / size) }, (_, index) => list.slice(index * size, (index + 1) * size));
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
-const LEG_COLORS = ['var(--accent)', 'var(--cmp1)', 'var(--cmp2)', 'var(--cmp3)', 'var(--cmp4)'];
+// پای استراتژی حداکثر چهار تاست، پس چهار اسلات اول کافی است و چرخش لازم
+// نمی‌شود. `--accent` و `--cmp*` کنار گذاشته شدند: اولی رنگ رابط است و
+// دومی‌ها با هم و با رنگ وضعیت، جداپذیریِ سنجیده‌شده ندارند.
+const LEG_COLORS = Array.from({ length: 5 }, (_, index) => `var(--series-${index + 1})`);
 const errorText = (error, fallback) => /fetch failed|network|failed to fetch/i.test(String(error?.message || error))
   ? 'اتصال به منبع داده برقرار نشد.' : (String(error?.message || '').trim() || fallback);
 const clockLabel = (second) => {
