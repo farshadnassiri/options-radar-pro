@@ -14,6 +14,7 @@ import {
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, signTone, ltr } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
+import { logError } from '/ui/errlog.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -33,6 +34,12 @@ const clockLabel = (second) => {
   return `${String(Math.floor(value / 3600)).padStart(2, '0')}:${String(Math.floor((value % 3600) / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 };
 const ageLabel = (second) => Number.isFinite(Number(second)) ? `${fmt.int(second)} ثانیه` : '—';
+const tehranDateNumber = (at = Date.now()) => {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(at)).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
+  return Number(`${parts.year || ''}${parts.month || ''}${parts.day || ''}`) || 0;
+};
 
 /**
  * نقاط ریزمعامله را برای نمودار آماده می‌کند.
@@ -186,7 +193,7 @@ export async function mount(root, { state }) {
     <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><div id="bt-legs" class="backtest-legs"></div></section>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت پاها در روز ایجاد</h2></div><span>هر کارت یک پای استراتژی</span></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت پاها در روز خروج</h2></div><span>همان قراردادهای ترکیب</span></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
-    <section class="card backtest-runbar"><p id="bt-run-note">برای هر ثانیهٔ معامله بین ۹:۰۰ تا ۱۲:۳۰، آخرین قیمت مشاهده‌شده تمام پاها روی یک خط زمانی مشترک قرار می‌گیرد. این ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.</p><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button></section>
+    <section class="card backtest-runbar"><p id="bt-run-note">برای هر ثانیهٔ معامله بین ۹:۰۰ تا ۱۲:۳۰، آخرین قیمت مشاهده‌شده تمام پاها روی یک خط زمانی مشترک قرار می‌گیرد. این ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.</p><div class="backtest-run-actions"><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button><button type="button" class="ghost" id="bt-live">رصد زنده موقعیت از ورود تاریخی</button></div></section>
     <section id="bt-result" hidden>
       <section class="card backtest-overview"><div class="section-head"><div><p class="eyebrow">گام اول نتیجه</p><h2>عملکرد کلی این بازه</h2></div><span id="bt-overview-range">—</span></div>
         <div class="backtest-kpis" id="bt-kpis"></div>
@@ -245,6 +252,7 @@ export async function mount(root, { state }) {
   // نگه‌داشتنش یعنی نسبت‌دادن یک قیمت به جایی که هرگز آنجا نبوده.
   let manualEntry = {}, manualExit = {};
   let entryWheel = null, exitWheel = null;
+  let liveTimer = null, liveWatching = false, liveLoading = false;
   const setStatus = (text, error = false) => { status.textContent = text; status.toggleAttribute('data-error', error); };
 
   for (const [group, title] of Object.entries(GROUPS)) {
@@ -454,6 +462,7 @@ export async function mount(root, { state }) {
   /** ریزمعامله یک روز از مسیر را باز می‌کند و پنل درون‌روزی را روی همان روز می‌نشاند. */
   async function openDayIntraday(date, { scroll = true } = {}) {
     if (!replay?.ok || !legs) return;
+    if (liveWatching) stopLiveWatch();
     setStatus(`دریافت ریزمعامله ${dateLabel(date)}…`);
     try {
       const day = await fetchDayTrades(date);
@@ -791,7 +800,67 @@ export async function mount(root, { state }) {
       : base;
   }
 
+  function stopLiveWatch(note = '') {
+    clearInterval(liveTimer); liveTimer = null; liveWatching = false;
+    $('bt-live').textContent = 'رصد زنده موقعیت از ورود تاریخی';
+    $('bt-live').removeAttribute('data-active');
+    if (note) setStatus(note);
+  }
+
+  /**
+   * ورود از تاریخ انتخابی ثابت می‌ماند و فقط ارزش مشاهده‌شده امروز عوض
+   * می‌شود. برای خروج زنده از آخرین معامله هر پا استفاده می‌شود؛ نه مظنه،
+   * نه قیمت مدل و نه آخرین قیمت روز تاریخی.
+   */
+  async function refreshLivePosition() {
+    if (!liveWatching || liveLoading || !replay?.ok || !legs || !ua) return;
+    liveLoading = true; $('bt-live').disabled = true;
+    try {
+      const codes = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua.ins)])];
+      const response = await fetch(`/api/live-trades?ins=${encodeURIComponent(codes.join(','))}`, { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok || payload.error) throw new Error(payload.error || 'معاملات زنده دریافت نشد');
+      const byIns = Object.fromEntries(codes.map((ins) => [ins, payload.items?.[ins]?.rows || []]));
+      const failed = codes.filter((ins) => payload.items?.[ins]?.error);
+      intradayDate = tehranDateNumber(payload.at);
+      lastDayFetch = { byIns, failed, date: intradayDate };
+      intraday = replayIntraday({ replay, tradesByIns: byIns, baseTrades: byIns[String(ua.ins)] || [], fees: feesOf(state.settings) });
+      $('bt-result').hidden = false;
+      paintResult();
+      $('bt-intraday-title').textContent = `رصد زنده موقعیت در ${dateLabel(intradayDate)} · ۹:۰۰ تا ۱۲:۳۰`;
+      $('bt-run-note').textContent = 'قیمت ورود از تاریخ انتخابی ثابت است؛ نتیجه زنده فقط با آخرین معاملات واقعی امروز محاسبه و در هر دریافت از نو ساخته می‌شود. این ارزش مشاهده‌شده است و تضمین آفست هم‌زمان نیست.';
+      const warning = tradeWarningText(lastDayFetch);
+      setStatus(intraday.length
+        ? `رصد زنده ${faClock(new Date(payload.at))} · ${fmt.int(intraday.length)} نقطه مشترک${warning ? ` · ${warning}` : ''}`
+        : `رصد زنده برقرار است؛ ${warning || 'هنوز همه پاها امروز معامله نشده‌اند'}.`, Boolean(warning));
+    } catch (error) {
+      setStatus(errorText(error, 'رصد زنده موقعیت به‌روز نشد.'), true);
+      logError('رصد زنده بک‌تست', error);
+    } finally { liveLoading = false; $('bt-live').disabled = false; }
+  }
+
+  async function startLiveWatch() {
+    if (liveWatching) { stopLiveWatch('رصد زنده متوقف شد؛ آخرین مشاهده روی صفحه مانده است.'); return; }
+    const startDate = Number($('bt-entry-date').dataset.value);
+    const endDate = exitDates.at(-1);
+    if (!legs || !startDate || !endDate) { setStatus('ابتدا تاریخ ورود و ترکیب معتبر را انتخاب کن.', true); return; }
+    replay = replayHistory({
+      legs, seriesByIns, baseIns: String(ua.ins), startDate, endDate,
+      entryBasis: entryRail.dataset.value, exitBasis: exitRail.dataset.value,
+      manualEntry, manualExit: {}, units: Math.max(1, Math.trunc(Number($('bt-units').value) || 1)),
+      fees: feesOf(state.settings), settings: state.settings,
+    });
+    if (!replay.ok) { setStatus(replay.error || 'موقعیت تاریخی برای رصد ساخته نشد.', true); return; }
+    tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true;
+    liveWatching = true; $('bt-live').textContent = 'توقف رصد زنده'; $('bt-live').setAttribute('data-active', 'true');
+    setStatus('در حال دریافت معاملات امروز برای موقعیت تاریخی…');
+    await refreshLivePosition();
+    liveTimer = setInterval(refreshLivePosition, Math.max(3000, Math.min(30000, Number(state.settings.watchIntervalSec || 5) * 1000)));
+    $('bt-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   async function runBacktest() {
+    if (liveWatching) stopLiveWatch();
     const startDate = Number($('bt-entry-date').dataset.value), endDate = Number($('bt-exit-date').dataset.value);
     if (!legs || !startDate || !endDate) { setStatus('تاریخ و ترکیب معتبر را انتخاب کن.', true); return; }
     $('bt-run').disabled = true; setStatus('در حال محاسبه مسیر و دریافت ریزمعامله روز سنجش…');
@@ -916,8 +985,10 @@ export async function mount(root, { state }) {
     if (Object.keys(manualEntry).length) paintSnapshots();
 
     if (!skipped.length && plan.autoRun) {
-      setStatus(`موقعیت از ${sourceName} با همان پارامترها چیده شد؛ در حال اجرای بک‌تست…`);
-      await runBacktest();
+      setStatus(plan.live
+        ? `موقعیت از ${sourceName} چیده شد؛ در حال اتصال به معاملات امروز…`
+        : `موقعیت از ${sourceName} با همان پارامترها چیده شد؛ در حال اجرای بک‌تست…`);
+      if (plan.live) await startLiveWatch(); else await runBacktest();
       return;
     }
     setStatus(skipped.length
@@ -929,7 +1000,7 @@ export async function mount(root, { state }) {
   entryRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(entryRail, button.dataset.basis); if (entryDates.length) refreshCombos(); } });
   exitRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(exitRail, button.dataset.basis); refreshExitDates(); } });
   $('bt-combo').addEventListener('change', renderCombo);
-  $('bt-load').addEventListener('click', loadHistory); $('bt-run').addEventListener('click', runBacktest);
+  $('bt-load').addEventListener('click', loadHistory); $('bt-run').addEventListener('click', runBacktest); $('bt-live').addEventListener('click', startLiveWatch);
   $('bt-export-intraday').addEventListener('click', exportIntraday);
   $('bt-days-table').addEventListener('click', (event) => {
     const row = event.target.closest('[data-day]');
@@ -948,8 +1019,8 @@ export async function mount(root, { state }) {
   });
   $('bt-entry-market').addEventListener('input', onManualInput);
   $('bt-exit-market').addEventListener('input', onManualInput);
-  baseSelect.addEventListener('change', () => { $('bt-work').hidden = true; $('bt-result').hidden = true; });
-  strategySelect.addEventListener('change', () => { $('bt-work').hidden = true; $('bt-result').hidden = true; });
+  baseSelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; });
+  strategySelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; });
 
   try {
     const response = await fetch('/api/history/universe'), payload = await response.json();
@@ -969,5 +1040,5 @@ export async function mount(root, { state }) {
     if (chain.size) await applyHandoff(plan);
   }
 
-  return () => {};
+  return () => { clearInterval(liveTimer); };
 }

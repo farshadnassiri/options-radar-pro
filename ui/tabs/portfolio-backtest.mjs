@@ -259,7 +259,7 @@ export async function mount(root, { state }) {
     const detail = $('pb-detail'); detail.hidden = false;
     const replay = replayHistory(replayArgs(item));
     if (!replay.ok) { detail.innerHTML = `<section class="card"><p class="empty-note">${esc(replay.error)}</p></section>`; return; }
-    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">رصد در بک‌تست سریع</button></div></div><div id="pb-detail-result"></div></section>
+    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">ادامه در بک‌تست سریع</button><button type="button" class="ghost" id="pb-live-watch">رصد زنده با معاملات امروز</button></div></div><div id="pb-detail-result"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">قیمت دستی واقعی برای هر قرارداد</p><h2>بازمحاسبه بدون دست‌کاری قیمت سایر پاها</h2></div><button type="button" class="primary" id="pb-manual-run">بازمحاسبه دستی</button></div><div class="portfolio-manual">${replay.priced.map((leg, index) => `<label>${fmt.int(index + 1)} · ${esc(nameOf(leg, 'پایه'))}<input type="number" min="0" step="1" data-manual="${index}" value="${leg.price}"></label>`).join('')}</div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">تحلیل حساسیت پویا</p><h2>اگر قیمت ورود یا مبنای خروج فرق می‌کرد</h2></div><div class="portfolio-shock-controls"><label>دامنه شوک<input id="pb-shock-range" type="number" min="1" max="50" step="1" value="10"></label><label>گام<input id="pb-shock-step" type="number" min="1" max="25" step="1" value="5"></label></div></div><div id="pb-sensitivity"></div></section>`;
     renderReplay(item, replay);
@@ -270,7 +270,8 @@ export async function mount(root, { state }) {
       if (manualReplay.ok) renderReplay(item, manualReplay, true);
       else detail.querySelector('#pb-detail-result').innerHTML = `<p class="empty-note">${esc(manualReplay.error)}</p>`;
     };
-    detail.querySelector('#pb-watch').onclick = () => watchInBacktest(item);
+    detail.querySelector('#pb-watch').onclick = () => watchInBacktest(item, false);
+    detail.querySelector('#pb-live-watch').onclick = () => watchInBacktest(item, true);
     const updateSensitivity = () => renderSensitivity(item, replayArgs(item));
     detail.querySelector('#pb-shock-range').oninput = updateSensitivity;
     detail.querySelector('#pb-shock-step').oninput = updateSensitivity;
@@ -285,7 +286,7 @@ export async function mount(root, { state }) {
    * از نو محاسبه می‌کند — اگر عددی از اینجا کپی می‌شد، دو تب می‌توانستند دو
    * حرف بزنند و معلوم نبود کدام مال کدام محاسبه است.
    */
-  function watchInBacktest(item) {
+  function watchInBacktest(item, live = false) {
     state.handoff = {
       to: 'backtest', from: 'portfolio-backtest',
       uaIns: String(ua.ins), uaName: nameOf(ua, 'نماد پایه'),
@@ -297,6 +298,8 @@ export async function mount(root, { state }) {
       entryBasis: entryRail.dataset.value || 'LAST',
       exitBasis: exitRail.dataset.value || 'LAST',
       units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
+      live: live === true,
+      autoRun: live === true,
     };
     location.hash = 'backtest';
   }

@@ -449,6 +449,7 @@ export async function mount(root, { state }) {
         <small>پایه ${esc(displayName(ua, 'دارایی پایه'))} · ${esc(GROUPS[def?.group] || 'ترکیب دستی')}${def?.dir ? ` · ${esc(def.dir)}` : ''}</small></div>
       <div class="frozen-actions">
         <button type="button" class="primary" data-history-backtest${backtestDisabled ? ' disabled title="این استراتژی به فروش دارایی پایه نیاز دارد و در بک‌تست سریع اجرایی نیست."' : ''}>ریز بک‌تست همین موقعیت</button>
+        <button type="button" class="ghost" data-history-live${backtestDisabled ? ' disabled title="این استراتژی در بک‌تست سریع اجرایی نیست."' : ''}>رصد زنده با معاملات امروز</button>
         <button type="button" class="ghost" data-frozen-fold>${frozenFolded() ? 'باز کردن' : 'جمع کردن'}</button>
       </div>
     </div>
@@ -466,7 +467,7 @@ export async function mount(root, { state }) {
   }
 
   function handleFrozenClick(event) {
-    if (event.target.closest('[data-history-backtest]')) {
+    if (event.target.closest('[data-history-backtest], [data-history-live]')) {
       const def = byId(strategySelect.value);
       if (!currentReplay || !currentArgs) { setStatus('ابتدا یک موقعیت را تحلیل کن.', true); return; }
       if (!def?.feasible) { setStatus('این استراتژی به فروش دارایی پایه نیاز دارد و در بک‌تست سریع اجرایی نیست.', true); return; }
@@ -477,6 +478,7 @@ export async function mount(root, { state }) {
         replay: currentReplay,
         args: currentArgs,
         comboName: $('h-selected-label').textContent,
+        live: Boolean(event.target.closest('[data-history-live]')),
       });
       location.hash = 'backtest';
       return;

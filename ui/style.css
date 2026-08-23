@@ -295,6 +295,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-manual-note[data-state="empty"] { display: none; }
 .backtest-runbar { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: center; margin: 14px 0; border-inline-start: 4px solid var(--accent); }
 .backtest-runbar p { margin: 0; color: var(--muted); font-size: var(--fs-sm); line-height: 1.8; }
+.backtest-run-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 8px; }
+.backtest-run-actions button[data-active="true"] { border-color: var(--gain); background: var(--gain-soft); color: var(--gain); }
 .backtest-kpis {
   display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   margin: 14px 0 18px;
@@ -453,6 +455,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .backtest-hero, .backtest-date-grid, .backtest-chart-grid, .backtest-analysis-grid { grid-template-columns: 1fr; display: grid; }
   .backtest-hero > span { justify-self: start; }
   .backtest-form, .backtest-runbar { grid-template-columns: 1fr; }
+  .backtest-run-actions { justify-content: stretch; }
   .backtest-kpis, .backtest-matrix-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .backtest-price-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .portfolio-hero, .portfolio-report-grid { grid-template-columns: 1fr; }
@@ -1916,15 +1919,73 @@ td.gain, dd.gain { color: var(--gain); }
 .live-market-legend i { width: 10px; height: 10px; border-radius: 50%; background: var(--series); }
 .live-market-tip { position: absolute; z-index: 4; inset-block-start: 10px; display: grid; gap: 4px; min-width: 150px; max-width: 260px; padding: 9px 10px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: var(--shadow); color: var(--ink-2); font-size: var(--fs-xs); pointer-events: none; }
 .live-market-tip b { color: var(--ink); }
+.live-dashboard-hero { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 16px; padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(135deg, var(--panel), var(--panel-2)); box-shadow: var(--shadow); }
+.live-dashboard-hero h1 { margin: 4px 0 8px; font-size: var(--fs-4xl); }
+.live-dashboard-hero p { max-width: 760px; margin: 0; color: var(--ink-2); line-height: 1.8; }
+.live-dashboard-hero > div:last-child { display: grid; justify-items: end; gap: 8px; min-width: 220px; }
+.live-dashboard-hero span { color: var(--muted); font-size: var(--fs-sm); text-align: end; }
+.live-dashboard-kpis { margin-bottom: 14px; }
+.live-dashboard-overview { display: grid; grid-template-columns: minmax(320px, .85fr) minmax(440px, 1.15fr); gap: 14px; }
+.live-breadth-donut { display: grid; grid-template-columns: minmax(180px, .75fr) minmax(210px, 1fr); align-items: center; gap: 12px; }
+.live-breadth-donut svg { width: 100%; max-height: 240px; overflow: visible; }
+.live-breadth-track, .live-breadth-segment { fill: none; stroke-width: 18; }
+.live-breadth-track { stroke: var(--line); }
+.live-breadth-segment { stroke: var(--segment); stroke-dasharray: var(--dash); stroke-dashoffset: var(--offset); stroke-linecap: butt; transform: rotate(-90deg); transform-origin: center; }
+.live-breadth-donut svg text:first-of-type { fill: var(--ink); font-size: var(--fs-3xl); font-weight: 900; }
+.live-breadth-donut svg text:last-of-type { fill: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
+.live-breadth-donut > div { display: grid; gap: 8px; }
+.live-breadth-donut span { display: grid; grid-template-columns: 10px 1fr auto auto; align-items: center; gap: 8px; color: var(--ink-2); }
+.live-breadth-donut span i { width: 9px; height: 9px; border-radius: 50%; background: var(--segment); }
+.live-breadth-donut span strong { color: var(--ink); }
+.live-breadth-donut span small { min-width: 66px; color: var(--muted); text-align: end; }
+.live-breadth-bars { display: grid; gap: 14px; padding-top: 8px; }
+.live-breadth-bars article { display: grid; gap: 7px; }
+.live-breadth-bars header, .live-breadth-bars footer { display: flex; justify-content: space-between; gap: 10px; }
+.live-breadth-bars header strong { color: var(--ink); }
+.live-breadth-bars footer { color: var(--muted); font-size: var(--fs-xs); }
+.live-breadth-bars article > i, .live-mover-bars article > i { display: block; height: 9px; overflow: hidden; border-radius: 999px; background: var(--line-soft); }
+.live-breadth-bars article > i b, .live-mover-bars article > i b { display: block; width: var(--bar); height: 100%; border-radius: inherit; background: var(--accent); }
+.live-breadth-bars article.gain > i b, .live-mover-bars article.gain > i b { background: var(--gain); }
+.live-breadth-bars article.loss > i b, .live-mover-bars article.loss > i b { background: var(--loss); }
+.live-breadth-bars article.warn > i b { background: var(--warn); }
+.live-dashboard-charts { align-items: stretch; }
+.live-dashboard-charts > .card { display: flex; flex-direction: column; }
+.live-dashboard-charts > .card > div:last-child { flex: 1; }
+.live-mover-bars { display: grid; gap: 8px; padding-top: 5px; }
+.live-mover-bars article { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(100px, 2fr) auto auto; align-items: center; gap: 8px; }
+.live-mover-bars article span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 800; }
+.live-mover-bars article strong { min-width: 58px; text-align: end; }
+.live-mover-bars article small { color: var(--muted); }
+.live-market-picker { display: grid; gap: 14px; margin-top: 14px; }
+.live-market-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.live-base-search { display: grid; gap: 5px; max-width: 340px; color: var(--ink-2); font-size: var(--fs-sm); font-weight: 800; }
+.live-base-search input { min-height: 42px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); color: var(--ink); font: inherit; }
+.live-base-rail, .live-expiry-rail { display: flex; gap: 8px; overflow: auto; padding: 3px 2px 8px; scrollbar-width: thin; }
+.live-base-rail button, .live-expiry-rail button { display: grid; flex: 0 0 auto; gap: 3px; min-width: 150px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); color: var(--ink); text-align: start; cursor: pointer; }
+.live-base-rail button[aria-pressed="true"], .live-expiry-rail button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 -3px var(--accent); }
+.live-base-rail small, .live-expiry-rail small { color: var(--muted); font-size: var(--fs-xs); }
+.live-selection-step { display: grid; gap: 8px; }
+.live-selection-step > span { color: var(--ink-2); font-size: var(--fs-sm); font-weight: 900; }
+.live-contract-table tr[data-contract] { cursor: pointer; }
+.live-contract-table tr[data-contract][aria-selected="true"] { background: var(--accent-soft); box-shadow: inset -3px 0 var(--accent); }
+.live-contract-table td:first-child b, .live-contract-table td:first-child small { display: block; }
+.live-contract-table td:first-child small { margin-top: 3px; color: var(--muted); font-size: var(--fs-xs); direction: ltr; }
 
 @media (max-width: 980px) {
   .live-market-contracts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .live-market-chart-grid { grid-template-columns: 1fr; }
   .live-market-wide { grid-column: auto; }
+  .live-dashboard-overview { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 560px) {
   .live-market-contracts { grid-template-columns: 1fr; }
   .live-market-control-head > label, .live-market-pick-tools input { min-width: 100%; width: 100%; }
   .live-market-pick-tools > span { margin-inline-start: 0; width: 100%; }
+  .live-dashboard-hero { align-items: stretch; flex-direction: column; padding: 16px; }
+  .live-dashboard-hero > div:last-child { justify-items: stretch; min-width: 0; }
+  .live-dashboard-hero span { text-align: start; }
+  .live-breadth-donut { grid-template-columns: 1fr; }
+  .live-mover-bars article { grid-template-columns: minmax(65px, 1fr) minmax(80px, 1.5fr) auto; }
+  .live-mover-bars article small { display: none; }
 }
