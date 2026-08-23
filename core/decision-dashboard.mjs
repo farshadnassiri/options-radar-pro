@@ -284,3 +284,139 @@ export function moneynessDistribution(contracts = [], metric = 'value') {
   }
   return buckets;
 }
+
+// ————————————————————————————————————————————————————————————————
+// سنجه‌های استاندارد تابلوی اختیار که تا امروز اینجا نبودند.
+//
+// نماهای قبلی داشبورد، بیشترشان یک جدول بودند با مرتب‌سازی متفاوت — و حالا
+// که جدول‌ها خودشان روی هر ستون مرتب می‌شوند، آن تفاوت اصلاً تفاوت نیست.
+// چیزی که نبود، سنجه‌هایی است که از **ساختار** زنجیره درمی‌آیند نه از
+// رتبه‌بندی یک ستون.
+// ————————————————————————————————————————————————————————————————
+
+/**
+ * نردبان قیمت اعمال: موقعیت باز و حجم هر اعمال، کال و پوت جدا.
+ *
+ * این همان چیزی است که تابلوخوان‌ها «دیوار» می‌نامند: اعمالی که موقعیت باز
+ * سنگینی رویش جمع شده، در عمل مثل سطح حمایت یا مقاومت رفتار می‌کند، چون
+ * فروشندهٔ آن قرارداد انگیزه دارد قیمت را از آن دور نگه دارد.
+ *
+ * یک گروه به‌ازای هر «پایه:سررسید» ساخته می‌شود، چون نردبانِ دو سررسید
+ * روی هم، دو ساختار متفاوت را یکی نشان می‌دهد.
+ */
+export function strikeLadder(contracts = []) {
+  const groups = new Map();
+  for (const row of contracts) {
+    const strike = Number(row.strike);
+    if (!(strike > 0)) continue;
+    const groupKey = `${row.uaIns}:${row.endDate}`;
+    let group = groups.get(groupKey);
+    if (!group) {
+      group = { key: groupKey, uaIns: row.uaIns, uaName: row.uaName, endDate: row.endDate,
+        days: row.days, spot: Number(row.spot), strikes: new Map() };
+      groups.set(groupKey, group);
+    }
+    let rung = group.strikes.get(strike);
+    if (!rung) {
+      rung = { strike, callOi: 0, putOi: 0, callVolume: 0, putVolume: 0,
+        callValue: 0, putValue: 0, callIvPct: NaN, putIvPct: NaN };
+      group.strikes.set(strike, rung);
+    }
+    const side = row.kind === 'put' ? 'put' : 'call';
+    rung[`${side}Oi`] += Number(row.oi) || 0;
+    rung[`${side}Volume`] += Number(row.volume) || 0;
+    rung[`${side}Value`] += Number(row.value) || 0;
+    if (Number.isFinite(row.ivPct)) rung[`${side}IvPct`] = row.ivPct;
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    rungs: [...group.strikes.values()].sort((a, b) => a.strike - b.strike).map((rung) => ({
+      ...rung,
+      oi: rung.callOi + rung.putOi,
+      volume: rung.callVolume + rung.putVolume,
+      // نسبت پوت به کال روی همین اعمال — نه روی کل زنجیره. تمرکز پوت روی
+      // یک اعمال خاص، چیزی می‌گوید که نسبت کلِ زنجیره پنهانش می‌کند.
+      putCallOi: rung.callOi > 0 ? rung.putOi / rung.callOi : NaN,
+      moneynessPct: group.spot > 0 ? ((rung.strike / group.spot) - 1) * 100 : NaN,
+    })),
+    strikes: undefined,
+  })).map(({ strikes, ...rest }) => rest);
+}
+
+/**
+ * بیشترین درد (Max Pain): قیمتی که در آن، مجموع ارزش ذاتیِ همه قراردادهای
+ * باز در سررسید کمینه است — یعنی بیشترین حجم تعهد بی‌ارزش منقضی می‌شود.
+ *
+ * تفسیرش ادعای پیش‌بینی نیست: فقط می‌گوید سنگینیِ تعهدِ باز کجاست. با این
+ * حال همان عدد، پرکاربردترین خلاصهٔ یک نردبان موقعیت باز است.
+ *
+ * فقط روی اعمال‌های واقعیِ همان سررسید حساب می‌شود، نه روی شبکه‌ای ساختگی:
+ * قیمتی که هیچ قراردادی رویش نیست، جواب این سؤال نمی‌شود.
+ */
+export function maxPain(ladder = []) {
+  return ladder.map((group) => {
+    const rungs = group.rungs.filter((rung) => rung.oi > 0);
+    if (rungs.length < 2) {
+      return { ...group, maxPain: NaN, maxPainGapPct: NaN, totalOi: rungs.reduce((s, r) => s + r.oi, 0), curve: [] };
+    }
+    const curve = rungs.map((candidate) => {
+      // در قیمت تسویه S، کالِ اعمال K وقتی ارزش دارد که S > K، و پوت وقتی S < K
+      let pain = 0;
+      for (const rung of rungs) {
+        pain += Math.max(0, candidate.strike - rung.strike) * rung.callOi;
+        pain += Math.max(0, rung.strike - candidate.strike) * rung.putOi;
+      }
+      return { strike: candidate.strike, pain };
+    });
+    const best = curve.reduce((a, b) => (b.pain < a.pain ? b : a));
+    return {
+      ...group,
+      maxPain: best.strike,
+      maxPainGapPct: group.spot > 0 ? ((best.strike / group.spot) - 1) * 100 : NaN,
+      totalOi: rungs.reduce((sum, rung) => sum + rung.oi, 0),
+      curve,
+    };
+  });
+}
+
+/**
+ * ساختار زمانی تلاطم: IV وزنی به‌ازای روزهای مانده تا سررسید.
+ *
+ * شیب مثبت (سررسید دور، IV بالاتر) حالت عادی بازار آرام است؛ وارونه‌شدنش
+ * یعنی بازار برای کوتاه‌مدت تلاطم بیشتری قیمت می‌زند — معمولاً پیش از یک
+ * رویداد تاریخ‌دار.
+ *
+ * وزن، ارزش معامله است: قراردادی که امروز معامله نشده، IV دیروزش نباید
+ * ساختار امروز را جابه‌جا کند.
+ */
+export function termStructure(contracts = []) {
+  const groups = new Map();
+  for (const row of contracts) {
+    if (!Number.isFinite(row.ivPct)) continue;
+    const weight = Number(row.value) || 0;
+    if (!(weight > 0)) continue;
+    const key = `${row.uaIns}:${row.endDate}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, uaIns: row.uaIns, uaName: row.uaName, endDate: row.endDate, days: row.days,
+        call: { iv: 0, weight: 0 }, put: { iv: 0, weight: 0 } };
+      groups.set(key, group);
+    }
+    const bucket = row.kind === 'put' ? group.put : group.call;
+    bucket.iv += row.ivPct * weight; bucket.weight += weight;
+  }
+  return [...groups.values()].map((group) => {
+    const callIv = group.call.weight > 0 ? group.call.iv / group.call.weight : NaN;
+    const putIv = group.put.weight > 0 ? group.put.iv / group.put.weight : NaN;
+    const totalWeight = group.call.weight + group.put.weight;
+    return {
+      key: group.key, uaIns: group.uaIns, uaName: group.uaName, endDate: group.endDate, days: group.days,
+      callIvPct: callIv, putIvPct: putIv,
+      ivPct: totalWeight > 0 ? (group.call.iv + group.put.iv) / totalWeight : NaN,
+      // اختلاف پوت منهای کال: چولگی. مثبت یعنی بازار برای ریزش گران‌تر
+      // قیمت می‌زند تا برای رشد.
+      skewPp: Number.isFinite(callIv) && Number.isFinite(putIv) ? putIv - callIv : NaN,
+      weight: totalWeight,
+    };
+  }).sort((a, b) => a.days - b.days);
+}

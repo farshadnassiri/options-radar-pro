@@ -4,7 +4,10 @@
 import { fmt, faDigits, faClock } from '/ui/fmt.mjs';
 import { makeTable } from '/ui/table.mjs';
 import { liveOptionTape, liveReferenceTape, marketBreadthSnapshot } from '/core/live-market.mjs';
-import { dashboardScope, activeOptionsBoard, moneynessDistribution, BOARD_METRICS } from '/core/decision-dashboard.mjs';
+import {
+  dashboardScope, activeOptionsBoard, moneynessDistribution, BOARD_METRICS,
+  strikeLadder, maxPain, termStructure,
+} from '/core/decision-dashboard.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -23,6 +26,19 @@ const timeLabel = (value) => {
   return faDigits(`${raw.slice(0, 2)}:${raw.slice(2, 4)}:${raw.slice(4)}`);
 };
 
+// ————— نماهای سه حالت تصمیم‌گیری —————
+//
+// بازبینی پس از سورت‌پذیر شدن جدول‌ها. تا وقتی جدول‌ها `innerHTML` خام
+// بودند، «رهبران ارزش» و «رهبران حجم» دو نمای واقعاً متفاوت بودند. حالا که
+// هر جدول روی هر ستون مرتب می‌شود و انتخابگر ستون دارد، آن دو **یک نما**
+// هستند با دو مرتب‌سازی — و کاربر درست گفت که بعضی از این بیست‌تا اطلاعات
+// مناسبی نمی‌دهند.
+//
+// پس هر جفتِ «جدول X / میله X» و هر «همان جدول، مرتب بر ستون دیگر» حذف شد
+// و جایش سنجه‌هایی نشست که از **ساختار** زنجیره درمی‌آیند نه از رتبه‌بندی
+// یک ستون: نردبان اعمال، بیشترین درد، ساختار زمانی تلاطم، چولگی، و توزیع.
+//
+// ستون چهارم (`kind`) شکل نما را می‌گوید و پنجمی، منبع ردیف.
 const pulseViews = [
   ['breadth-donut', 'دایره جهت بازار', 'donut', 'contracts', 'changePct'],
   ['breadth-bars', 'میله قدرت جهت‌ها', 'breadth', 'contracts', 'changePct'],
@@ -30,81 +46,66 @@ const pulseViews = [
   ['breadth-net', 'روند خالص وسعت', 'timeline', 'timeline', 'breadth'],
   ['base-volume-path', 'حجم تجمعی پایه‌ها', 'timeline', 'timeline', 'cumulativeVolume'],
   ['base-change-table', 'تغییر همه پایه‌ها', 'table', 'underlyings', 'changePct'],
-  ['gainers-table', 'بیشترین رشد', 'table', 'contracts', 'changePct'],
-  ['losers-table', 'بیشترین افت', 'table-asc', 'contracts', 'changePct'],
-  ['change-bars', 'میله تغییر آخرین', 'bar', 'contracts', 'changePct'],
+  ['contract-change-table', 'تغییر همه قراردادها', 'table', 'contracts', 'changePct'],
+  ['gainers-bars', 'بیشترین رشد', 'bar', 'contracts', 'changePct'],
+  ['losers-bars', 'بیشترین افت', 'bar-asc', 'contracts', 'changePct'],
   ['direction-value', 'ارزش به تفکیک جهت', 'bar', 'directions', 'value'],
   ['direction-volume', 'حجم به تفکیک جهت', 'bar', 'directions', 'volume'],
-  ['direction-trades', 'تعداد معامله به تفکیک جهت', 'bar', 'directions', 'trades'],
+  ['direction-table', 'جدول جهت‌ها', 'table', 'directions', 'value'],
   ['calls-change', 'جهت اختیار خرید', 'table', 'calls', 'changePct'],
   ['puts-change', 'جهت اختیار فروش', 'table', 'puts', 'changePct'],
   ['expiry-change', 'جهت سررسیدها', 'table', 'expiries', 'changePct'],
-  ['strike-change', 'جهت قیمت‌های اعمال', 'bar', 'strikes', 'changePct'],
   ['unchanged', 'نمادهای بدون تغییر', 'table-zero', 'contracts', 'changePct'],
-  ['traded-snapshot', 'عکس نمادهای معامله‌شده', 'table', 'contracts', 'trades'],
-  ['market-snapshot', 'عکس کامل دامنه', 'table', 'contracts', 'value'],
+  ['change-distribution', 'توزیع تغییر قیمت', 'histogram-change', 'contracts', 'changePct'],
+  ['change-vs-volume', 'تغییر در برابر حجم', 'scatter-xy', 'contracts', 'changePct'],
+  ['sides-direction', 'جهت کال در برابر پوت', 'bar', 'sides', 'changePct'],
   ['pulse-tape', 'ریزمعامله قرارداد', 'tape', 'contracts', 'value'],
 ];
 
 const liquidityViews = [
-  ['base-value-table', 'ارزش بالای نمادهای پایه', 'table', 'underlyings', 'value'],
-  ['base-value-bars', 'میله ارزش پایه‌ها', 'bar', 'underlyings', 'value'],
-  ['contract-value-table', 'ارزش بالای قراردادها', 'table', 'contracts', 'value'],
-  ['contract-value-bars', 'میله ارزش قراردادها', 'bar', 'contracts', 'value'],
-  ['expiry-value-table', 'ارزش به تفکیک سررسید', 'table', 'expiries', 'value'],
-  ['expiry-value-bars', 'میله ارزش سررسیدها', 'bar', 'expiries', 'value'],
-  ['high-value-overall', 'رهبران ارزش کل بازار', 'table', 'contracts', 'value'],
-  ['high-value-expiry', 'رهبران ارزش هر سررسید', 'expiry-leaders', 'contracts', 'value'],
-  ['volume-table', 'رهبران حجم', 'table', 'contracts', 'volume'],
-  ['volume-bars', 'میله حجم', 'bar', 'contracts', 'volume'],
-  ['trades-table', 'رهبران تعداد معامله', 'table', 'contracts', 'trades'],
-  ['trades-bars', 'میله تعداد معامله', 'bar', 'contracts', 'trades'],
-  ['oi-table', 'بیشترین موقعیت باز', 'table', 'contracts', 'oi'],
-  ['oi-bars', 'میله موقعیت باز', 'bar', 'contracts', 'oi'],
-  ['spread-table', 'فاصله مظنه دوطرفه', 'table-asc', 'contracts', 'spreadPct'],
-  ['spread-bars', 'میله فاصله مظنه', 'bar', 'contracts', 'spreadPct'],
+  ['contract-value-table', 'تابلوی قراردادها', 'table', 'contracts', 'value'],
+  ['base-value-table', 'تابلوی نمادهای پایه', 'table', 'underlyings', 'value'],
+  ['expiry-value-table', 'تابلوی سررسیدها', 'table', 'expiries', 'value'],
+  ['value-bars', 'رهبران ارزش', 'bar', 'contracts', 'value'],
+  ['volume-bars', 'رهبران حجم', 'bar', 'contracts', 'volume'],
+  ['oi-bars', 'رهبران موقعیت باز', 'bar', 'contracts', 'oi'],
+  ['oi-change-bars', 'بیشترین تغییر موقعیت باز', 'bar', 'contracts', 'oiChange'],
+  ['expiry-value-bars', 'تمرکز ارزش روی سررسیدها', 'bar', 'expiries', 'value'],
+  ['expiry-oi-bars', 'تمرکز موقعیت باز روی سررسیدها', 'bar', 'expiries', 'oi'],
+  ['high-value-expiry', 'رهبر ارزش هر سررسید', 'expiry-leaders', 'contracts', 'value'],
   ['call-put-value', 'ارزش کال و پوت', 'bar', 'sides', 'value'],
   ['call-put-volume', 'حجم کال و پوت', 'bar', 'sides', 'volume'],
-  ['expiry-concentration', 'تمرکز ارزش سررسید', 'bar', 'expiries', 'value'],
+  ['strike-ladder', 'نردبان موقعیت باز روی اعمال', 'ladder-oi', 'contracts', 'oi'],
+  ['strike-ladder-volume', 'نردبان حجم روی اعمال', 'ladder-volume', 'contracts', 'volume'],
+  ['max-pain', 'بیشترین درد هر سررسید', 'max-pain', 'contracts', 'oi'],
+  ['max-pain-curve', 'منحنی درد سررسید انتخابی', 'pain-curve', 'contracts', 'oi'],
+  ['liquidity-heatmap', 'گرمانمای سررسید × فاصله اعمال', 'heatmap-value', 'contracts', 'value'],
+  ['spread-table', 'فاصله مظنه دوطرفه', 'table-asc', 'contracts', 'spreadPct'],
+  ['value-distribution', 'توزیع ارزش روی فاصله اعمال', 'histogram-money', 'contracts', 'value'],
   ['liquidity-tape', 'مسیر ارزش قرارداد', 'tape', 'contracts', 'value'],
 ];
 
 const volatilityViews = [
-  ['iv-table', 'IV همه قراردادها', 'table', 'contracts', 'ivPct'],
-  ['iv-bars', 'میله IV قراردادها', 'bar', 'contracts', 'ivPct'],
-  ['iv-sides', 'IV کال در برابر پوت', 'bar', 'sides', 'ivPct'],
-  ['iv-expiry-table', 'IV به تفکیک سررسید', 'table', 'expiries', 'ivPct'],
-  ['iv-expiry-bars', 'میله IV سررسیدها', 'bar', 'expiries', 'ivPct'],
-  ['iv-strike-table', 'IV به تفکیک اعمال', 'table', 'strikes', 'ivPct'],
-  ['iv-smile', 'لبخند IV قیمت اعمال', 'bar', 'strikes', 'ivPct'],
-  ['iv-value', 'IV قراردادهای پُرارزش', 'table', 'contracts', 'value'],
-  ['iv-change', 'IV و تغییر آخرین', 'table', 'contracts', 'changePct'],
-  ['oi-change', 'تغییر موقعیت باز', 'table', 'contracts', 'oiChange'],
-  ['oi-change-bars', 'میله تغییر موقعیت باز', 'bar', 'contracts', 'oiChange'],
-  ['pc-oi-expiry', 'نسبت OI پوت به کال', 'table', 'expiries', 'putCallOi'],
-  ['pc-volume-expiry', 'نسبت حجم پوت به کال', 'table', 'expiries', 'putCallVolume'],
+  ['iv-table', 'تابلوی تلاطم قراردادها', 'table', 'contracts', 'ivPct'],
+  ['iv-expiry-table', 'تلاطم به تفکیک سررسید', 'table', 'expiries', 'ivPct'],
+  ['iv-strike-table', 'تلاطم به تفکیک اعمال', 'table', 'strikes', 'ivPct'],
+  ['iv-bars', 'رهبران تلاطم', 'bar', 'contracts', 'ivPct'],
+  ['iv-sides', 'تلاطم کال در برابر پوت', 'bar', 'sides', 'ivPct'],
+  ['iv-smile', 'لبخند تلاطم روی فاصله اعمال', 'iv-smile', 'contracts', 'ivPct'],
+  ['iv-term', 'ساختار زمانی تلاطم', 'term-structure', 'contracts', 'ivPct'],
+  ['iv-skew', 'چولگی پوت منهای کال هر سررسید', 'term-skew', 'contracts', 'ivPct'],
+  ['iv-heatmap', 'گرمانمای سررسید × فاصله اعمال', 'heatmap-iv', 'contracts', 'ivPct'],
+  ['iv-distribution', 'توزیع تلاطم', 'histogram-iv', 'contracts', 'ivPct'],
+  ['iv-vs-value', 'تلاطم در برابر ارزش معامله', 'scatter-iv-value', 'contracts', 'ivPct'],
+  ['iv-vs-spread', 'تلاطم در برابر فاصله مظنه', 'scatter-iv-spread', 'contracts', 'ivPct'],
+  ['pc-oi-expiry', 'نسبت موقعیت باز پوت به کال', 'bar', 'expiries', 'putCallOi'],
+  ['pc-volume-expiry', 'نسبت حجم پوت به کال', 'bar', 'expiries', 'putCallVolume'],
+  ['pc-strike-ladder', 'نسبت پوت به کال روی هر اعمال', 'ladder-pc', 'contracts', 'oi'],
+  ['oi-change-table', 'تغییر موقعیت باز قراردادها', 'table', 'contracts', 'oiChange'],
   ['call-iv-table', 'تلاطم اختیار خرید', 'table', 'calls', 'ivPct'],
   ['put-iv-table', 'تلاطم اختیار فروش', 'table', 'puts', 'ivPct'],
-  ['iv-spread', 'IV در کنار فاصله مظنه', 'table', 'contracts', 'spreadPct'],
-  ['iv-liquidity', 'IV در کنار نقدشوندگی', 'table', 'contracts', 'volume'],
-  ['iv-direction', 'IV به تفکیک جهت', 'bar', 'directions', 'ivPct'],
   ['iv-tape', 'IV ریزمعامله قرارداد', 'tape', 'contracts', 'ivPct'],
   ['open-view-history', 'نگاه باز چندروزه', 'open-view', 'contracts', 'ivPct'],
-];
-
-// دو تب پایه که در همین تب ادغام شدند.
-//
-// «دیده‌بان زنجیره» و «برترین موقعیت‌ها» هر دو از همان عکس لحظه‌ای بازار
-// تغذیه می‌شوند که این تب می‌سازد و هر دو یک کار می‌کنند: نگاه کلی به بازار
-// پیش از تصمیم. سه تب جدا برای یک کار، یعنی کاربر باید بین سه نشانی
-// جابه‌جا شود تا یک تصمیم بگیرد.
-//
-// ماژولشان دست‌نخورده می‌ماند و همان‌جا که هست تنبل بار می‌شود — همان
-// الگویی که «نگاه باز» از قبل داشت. ادغام یعنی یک در ورودی، نه بازنویسی
-// دو تب کارکرده.
-const EMBEDDED_MODES = [
-  { id: 'chain', title: 'دیده‌بان زنجیره', hint: 'یک درخواست، کل بازار اختیار', mod: '/ui/tabs/chain.mjs' },
-  { id: 'top', title: 'برترین موقعیت‌ها', hint: 'غربال روی کل کاتالوگ استراتژی', mod: '/ui/tabs/top.mjs' },
 ];
 
 // ————— تابلوی اختیارهای پرمعامله —————
@@ -129,6 +130,21 @@ const boardViews = [
   ['board-moneyness', 'توزیع روی فاصله از قیمت جاری', 'board-moneyness'],
   ['board-scatter', 'اعمال در برابر سربه‌سر', 'board-scatter'],
   ['board-smile', 'لبخند تلاطم ضمنی روی اعمال', 'board-smile'],
+];
+
+// دو تب پایه که در همین تب ادغام شدند.
+//
+// «دیده‌بان زنجیره» و «برترین موقعیت‌ها» هر دو از همان عکس لحظه‌ای بازار
+// تغذیه می‌شوند که این تب می‌سازد و هر دو یک کار می‌کنند: نگاه کلی به بازار
+// پیش از تصمیم. سه تب جدا برای یک کار، یعنی کاربر باید بین سه نشانی
+// جابه‌جا شود تا یک تصمیم بگیرد.
+//
+// ماژولشان دست‌نخورده می‌ماند و همان‌جا که هست تنبل بار می‌شود — همان
+// الگویی که «نگاه باز» از قبل داشت. ادغام یعنی یک در ورودی، نه بازنویسی
+// دو تب کارکرده.
+const EMBEDDED_MODES = [
+  { id: 'chain', title: 'دیده‌بان زنجیره', hint: 'یک درخواست، کل بازار اختیار', mod: '/ui/tabs/chain.mjs' },
+  { id: 'top', title: 'برترین موقعیت‌ها', hint: 'غربال روی کل کاتالوگ استراتژی', mod: '/ui/tabs/top.mjs' },
 ];
 
 export const DASHBOARD_MODES = [
@@ -443,6 +459,111 @@ function scatterChart(points, { xLabel, yLabel, marker = NaN }) {
     <div class="decision-legend"><span style="--series:var(--call)"><i></i>اختیار خرید</span><span style="--series:var(--put)"><i></i>اختیار فروش</span>${Number.isFinite(marker) ? '<span class="decision-legend-marker"><i></i>قیمت جاری پایه</span>' : ''}</div>`;
 }
 
+/**
+ * گرمانما: سررسید (سطر) × فاصله اعمال از قیمت جاری (ستون).
+ *
+ * شکل درست برای «کجای زنجیره سنگین است»: دو بُعد دسته‌ای و یک عدد. با میله
+ * باید یکی از دو بُعد را قربانی کرد.
+ *
+ * رنگ، طیف تک‌فام است نه رنگین‌کمان — این سنجهٔ اندازه است نه هویت، پس از
+ * کم‌رنگ به پررنگ می‌رود. شدت با ریشه دوم بالا می‌رود تا یک خانهٔ پرت،
+ * بقیه را بی‌رنگ نکند؛ همان قاعده‌ای که طیف جدول‌ها دارد.
+ */
+function heatmap(rows, { metric, formatter = fmt.money, label }) {
+  const cells = new Map();
+  const cols = MONEYNESS_COLS;
+  const bucketOf = (row) => {
+    const spot = Number(row.spot), strike = Number(row.strike);
+    if (!(spot > 0) || !(strike > 0)) return null;
+    const money = ((strike / spot) - 1) * 100;
+    return cols.findIndex((edge, index) => money >= edge[0] && money < edge[1]);
+  };
+  for (const row of rows) {
+    const column = bucketOf(row);
+    if (column == null || column < 0) continue;
+    const key = `${row.uaIns}:${row.endDate}`;
+    let line = cells.get(key);
+    if (!line) {
+      line = { key, label: `${row.uaName} · ${dateLabel(row.endDate)}`, days: row.days, values: cols.map(() => ({ sum: 0, count: 0 })) };
+      cells.set(key, line);
+    }
+    const value = Number(row[metric]);
+    if (!Number.isFinite(value)) continue;
+    line.values[column].sum += value; line.values[column].count += 1;
+  }
+  // IV میانگین می‌خواهد و ارزش، جمع. جمعِ IV عددی است که هیچ قراردادی ندارد.
+  const averaged = metric === 'ivPct';
+  const lines = [...cells.values()].sort((a, b) => a.days - b.days).map((line) => ({
+    ...line, cells: line.values.map((cell) => (cell.count === 0 ? NaN : averaged ? cell.sum / cell.count : cell.sum)),
+  }));
+  const all = lines.flatMap((line) => line.cells).filter(Number.isFinite);
+  if (!all.length) return '<p class="empty-note">در دامنه انتخابی داده معتبر برای گرمانما نیست.</p>';
+  const lo = Math.min(...all), hi = Math.max(...all);
+  const shade = (value) => {
+    if (!Number.isFinite(value)) return 'background:var(--panel-2)';
+    const t = hi > lo ? Math.sqrt((value - lo) / (hi - lo)) : 1;
+    return `background:color-mix(in srgb, var(--series-1) ${Math.round(t * 72)}%, var(--panel) ${Math.round(100 - t * 72)}%)`;
+  };
+  return `<div class="history-table-wrap"><table class="history-table decision-heatmap"><thead><tr><th>سررسید</th>${cols.map(([from, to]) => `<th>${from === -Infinity ? `کمتر از ${faDigits(String(to))}` : to === Infinity ? `بیش از ${faDigits(String(from))}` : `${faDigits(String(from))} تا ${faDigits(String(to))}`}٪</th>`).join('')}</tr></thead><tbody>${lines.map((line) => `<tr><th scope="row">${esc(line.label)}</th>${line.cells.map((value) => `<td style="${shade(value)}">${Number.isFinite(value) ? formatter(value) : '—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="note">ستون‌ها فاصله قیمت اعمال از قیمت جاری پایه‌اند. ${esc(label)} — کم‌رنگ یعنی کمینه، پررنگ یعنی بیشینه.</p>`;
+}
+
+const MONEYNESS_COLS = [[-Infinity, -20], [-20, -10], [-10, -5], [-5, 0], [0, 5], [5, 10], [10, 20], [20, Infinity]];
+
+/**
+ * نردبان اعمال: میله دوطرفه، کال یک سمت و پوت سمت دیگر، حول قیمت جاری.
+ *
+ * شکل آشنای «دیوارها»: اعمالی که تعهد باز سنگینی رویش نشسته، در عمل مثل
+ * سطح حمایت یا مقاومت رفتار می‌کند.
+ */
+function ladderChart(group, { metric, formatter = fmt.int, label }) {
+  if (!group) return '<p class="empty-note">برای نردبان، دامنه را روی یک پایه یا یک سررسید بگذار.</p>';
+  const rungs = group.rungs.filter((rung) => rung[`call${metric}`] > 0 || rung[`put${metric}`] > 0);
+  if (!rungs.length) return '<p class="empty-note">در این سررسید تعهد یا گردشی روی اعمال‌ها ثبت نشده است.</p>';
+  const max = Math.max(...rungs.map((rung) => Math.max(rung[`call${metric}`], rung[`put${metric}`])), 1);
+  const spot = Number(group.spot);
+  return `<p class="note">${esc(group.uaName)} · سررسید ${dateLabel(group.endDate)} · قیمت جاری ${fmt.money(spot)}. ${esc(label)}</p>
+    <div class="decision-ladder">${rungs.map((rung) => {
+      const near = spot > 0 && Math.abs(rung.strike / spot - 1) <= 0.025;
+      return `<article class="${near ? 'is-atm' : ''}">
+        <i class="ladder-side"><b style="--bar:${(rung[`call${metric}`] / max) * 100}%;--series:var(--call)"></b></i>
+        <span>${fmt.money(rung.strike)}${near ? '<small>نزدیک پول</small>' : ''}</span>
+        <i class="ladder-side ladder-put"><b style="--bar:${(rung[`put${metric}`] / max) * 100}%;--series:var(--put)"></b></i>
+        <small class="ladder-value">${formatter(rung[`call${metric}`])} / ${formatter(rung[`put${metric}`])}</small>
+      </article>`;
+    }).join('')}</div>
+    <div class="decision-legend"><span style="--series:var(--call)"><i></i>اختیار خرید</span><span style="--series:var(--put)"><i></i>اختیار فروش</span></div>`;
+}
+
+/** منحنی درد: مجموع ارزش ذاتی تعهد باز، در هر قیمت تسویه ممکن. */
+function painCurve(group) {
+  if (!group || !group.curve?.length) return '<p class="empty-note">برای منحنی درد، دامنه را روی یک سررسید بگذار.</p>';
+  const points = group.curve.map((point) => ({ second: point.strike, value: point.pain }));
+  const host = document.createElement('div');
+  liveChart(host, [{ label: 'مجموع ارزش ذاتی تعهد باز', color: 'var(--series-1)', points }],
+    { valueFmt: fmt.money, unit: 'ریال', zeroFloor: true });
+  // محور افقی این نمودار قیمت است نه زمان؛ برچسب‌های ساعتش را برمی‌داریم.
+  host.querySelectorAll('svg text').forEach((node) => {
+    if (/^[۰-۹]{2}:[۰-۹]{2}$/.test(node.textContent.trim())) node.remove();
+  });
+  return `<p class="note">${esc(group.uaName)} · سررسید ${dateLabel(group.endDate)} · بیشترین درد ${fmt.money(group.maxPain)} (${fmt.pct(group.maxPainGapPct)}٪ از قیمت جاری). محور افقی، قیمت اعمال است نه زمان.</p>${host.innerHTML}`;
+}
+
+/** هیستوگرام یک سنجه پیوسته روی سطل‌های مساوی. */
+function histogram(values, { buckets = 12, formatter = fmt.pct, label, unit = '' }) {
+  const usable = values.filter(Number.isFinite);
+  if (usable.length < 2) return '<p class="empty-note">برای هیستوگرام دست‌کم دو مقدار معتبر لازم است.</p>';
+  const lo = Math.min(...usable), hi = Math.max(...usable);
+  if (!(hi > lo)) return '<p class="empty-note">همه مقادیر یکی‌اند؛ توزیع شکلی ندارد.</p>';
+  const width = (hi - lo) / buckets;
+  const bins = Array.from({ length: buckets }, (_, index) => ({
+    from: lo + index * width, to: lo + (index + 1) * width, count: 0,
+  }));
+  for (const value of usable) bins[Math.min(buckets - 1, Math.floor((value - lo) / width))].count += 1;
+  const max = Math.max(...bins.map((bin) => bin.count), 1);
+  return `<p class="note">${esc(label)} · ${fmt.int(usable.length)} مقدار معتبر در ${faDigits(String(buckets))} سطل مساوی.</p>
+    <div class="decision-histogram">${bins.map((bin) => `<article><i><b style="--bar:${(bin.count / max) * 100}%"></b></i><span>${formatter(bin.from)}${unit}</span><strong>${fmt.int(bin.count)}</strong></article>`).join('')}</div>`;
+}
+
 function scopedBreadth(scoped) {
   const rows = (scoped.contracts || []).map((row) => ({
     ...row, ins: row.ins, name: row.name, last: row.last, yday: row.yday,
@@ -695,6 +816,82 @@ export async function mount(root, { state, api }) {
     })), { xLabel: 'فاصله اعمال از قیمت جاری ٪', yLabel: 'تلاطم ضمنی ٪', marker: NaN })}`;
   }
 
+  // نماهایی که از ساختار زنجیره می‌آیند، نه از رتبه‌بندی یک ستون.
+  // برمی‌گرداند که خودش رسم کرد یا نه، تا مسیر پیش‌فرض میله رتبه‌ای بماند.
+  function paintStructural(host, view, scoped) {
+    const contracts = scoped.contracts || [];
+    const kind = view[2];
+    // نردبان و منحنی درد ذاتاً یک‌سررسیدی‌اند: روی هم گذاشتنِ دو سررسید،
+    // دو ساختار متفاوت را یکی نشان می‌دهد. پرگردش‌ترین گروه دامنه انتخاب
+    // می‌شود و نامش هم بالای نمودار نوشته است.
+    const ladders = () => strikeLadder(contracts)
+      .sort((a, b) => b.rungs.reduce((s, r) => s + r.oi, 0) - a.rungs.reduce((s, r) => s + r.oi, 0));
+    if (kind === 'ladder-oi') { host.innerHTML = ladderChart(ladders()[0], { metric: 'Oi', label: 'موقعیت باز هر اعمال، کال یک سمت و پوت سمت دیگر.' }); return true; }
+    if (kind === 'ladder-volume') { host.innerHTML = ladderChart(ladders()[0], { metric: 'Volume', label: 'حجم امروز روی هر اعمال.' }); return true; }
+    if (kind === 'ladder-pc') {
+      const group = ladders()[0];
+      host.innerHTML = group
+        ? `<p class="note">نسبت پوت به کال روی هر اعمال — نه روی کل زنجیره. تمرکز پوت روی یک اعمال خاص، چیزی می‌گوید که نسبت کل پنهانش می‌کند.</p>${barChart(group.rungs.filter((rung) => Number.isFinite(rung.putCallOi)).map((rung) => ({ label: `اعمال ${fmt.money(rung.strike)}`, putCallOi: rung.putCallOi, changePct: NaN })), 'putCallOi')}`
+        : '<p class="empty-note">برای این نما، دامنه را روی یک پایه یا سررسید بگذار.</p>';
+      return true;
+    }
+    if (kind === 'max-pain') {
+      const rows = maxPain(strikeLadder(contracts)).filter((row) => Number.isFinite(row.maxPain));
+      host.innerHTML = rows.length
+        ? `<p class="note">بیشترین درد، قیمتی است که در آن مجموع ارزش ذاتی تعهدهای باز کمینه می‌شود. ادعای پیش‌بینی نیست؛ می‌گوید سنگینی تعهد کجاست.</p>${barChart(rows.map((row) => ({ label: `${row.uaName} · ${dateLabel(row.endDate)}`, maxPainGapPct: row.maxPainGapPct, changePct: NaN })), 'maxPainGapPct')}`
+        : '<p class="empty-note">تعهد باز کافی برای ساختن بیشترین درد نیست.</p>';
+      return true;
+    }
+    if (kind === 'pain-curve') {
+      host.innerHTML = painCurve(maxPain(ladders())[0]);
+      return true;
+    }
+    if (kind === 'heatmap-value') { host.innerHTML = heatmap(contracts, { metric: 'value', formatter: fmt.money, label: 'جمع ارزش معامله هر خانه.' }); return true; }
+    if (kind === 'heatmap-iv') { host.innerHTML = heatmap(contracts, { metric: 'ivPct', formatter: (v) => `${fmt.pct(v)}٪`, label: 'میانگین تلاطم ضمنی هر خانه.' }); return true; }
+    if (kind === 'histogram-money') { host.innerHTML = stackedBars(moneynessDistribution(contracts, 'value'), { label: 'توزیع ارزش روی فاصله اعمال', formatter: fmt.money }); return true; }
+    if (kind === 'histogram-change') { host.innerHTML = histogram(contracts.map((row) => row.changePct), { label: 'توزیع تغییر نسبت به پایانی دیروز', unit: '٪' }); return true; }
+    if (kind === 'histogram-iv') { host.innerHTML = histogram(contracts.map((row) => row.ivPct), { label: 'توزیع تلاطم ضمنی', unit: '٪' }); return true; }
+    if (kind === 'term-structure' || kind === 'term-skew') {
+      const rows = termStructure(contracts);
+      if (!rows.length) { host.innerHTML = '<p class="empty-note">تلاطم معتبری برای ساختن ساختار زمانی نیست.</p>'; return true; }
+      const skew = kind === 'term-skew';
+      host.innerHTML = `<p class="note">${skew
+        ? 'چولگی: تلاطم پوت منهای کال. مثبت یعنی بازار برای ریزش گران‌تر قیمت می‌زند تا برای رشد.'
+        : 'ساختار زمانی: تلاطم وزنی به‌ازای روز مانده. شیب وارونه یعنی بازار برای کوتاه‌مدت تلاطم بیشتری قیمت می‌زند.'}</p>${barChart(rows.map((row) => ({
+        label: `${row.uaName} · ${fmt.int(row.days)} روز`, changePct: NaN,
+        ivPct: row.ivPct, skewPp: row.skewPp,
+      })), skew ? 'skewPp' : 'ivPct')}`;
+      return true;
+    }
+    if (kind === 'iv-smile') {
+      host.innerHTML = `<p class="note">لبخند تلاطم: نوسان ضمنی هر قرارداد در برابر فاصله اعمالش از قیمت جاری. صفر یعنی نزدیک پول.</p>${scatterChart(contracts.map((row) => ({
+        x: Number(row.spot) > 0 ? ((Number(row.strike) / Number(row.spot)) - 1) * 100 : NaN,
+        y: Number(row.ivPct), kind: row.kind, label: `${row.name} · IV ${fmt.pct(row.ivPct)}٪`,
+      })), { xLabel: 'فاصله اعمال از قیمت جاری ٪', yLabel: 'تلاطم ضمنی ٪', marker: NaN })}`;
+      return true;
+    }
+    const scatters = {
+      'scatter-xy': ['volume', 'changePct', 'حجم', 'تغییر نسبت به پایانی دیروز ٪'],
+      'scatter-iv-value': ['value', 'ivPct', 'ارزش معامله', 'تلاطم ضمنی ٪'],
+      'scatter-iv-spread': ['spreadPct', 'ivPct', 'فاصله مظنه ٪', 'تلاطم ضمنی ٪'],
+    };
+    if (scatters[kind]) {
+      const [xKey, yKey, xLabel, yLabel] = scatters[kind];
+      host.innerHTML = scatterChart(contracts.map((row) => ({
+        x: Number(row[xKey]), y: Number(row[yKey]), kind: row.kind,
+        label: `${row.name} · ${xLabel} ${fmt.num(row[xKey])} · ${yLabel} ${fmt.num(row[yKey])}`,
+      })), { xLabel, yLabel, marker: NaN });
+      return true;
+    }
+    if (kind === 'bar-asc') {
+      const rows = [...(rowsFor(view, scoped))].filter((row) => Number.isFinite(row[view[4]]))
+        .sort((a, b) => a[view[4]] - b[view[4]]).slice(0, 16);
+      host.innerHTML = barChart(rows, view[4]);
+      return true;
+    }
+    return false;
+  }
+
   async function paintView() {
     const mode = modeOf();
     if (mode?.mod) { await mountEmbedded(mode); return; }
@@ -713,6 +910,7 @@ export async function mount(root, { state, api }) {
     if (view[2] === 'breadth') { breadthBars(host, scopedBreadth(scoped)); return; }
     if (view[2] === 'timeline') { paintTimeline(host, view, scoped); return; }
     if (tabular) { paintTable(host, view, scoped); return; }
+    if (paintStructural(host, view, scoped)) return;
     host.innerHTML = barChart(ranked(view, scoped, 16), view[4]);
   }
 
