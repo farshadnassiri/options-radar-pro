@@ -269,6 +269,7 @@ async function tickHealth() {
 const TABS = [
   { id: 'settings', title: 'تنظیمات', section: 'پایه', mod: '/ui/tabs/settings.mjs', phase: 1 },
   { id: 'chain', title: 'دیده‌بان زنجیره اختیار', section: 'پایه', mod: '/ui/tabs/chain.mjs', phase: 3 },
+  { id: 'live-market', title: 'رصد لحظه‌ای بازار', section: 'پایه', mod: '/ui/tabs/live-market.mjs', phase: 3 },
   { id: 'open-view', title: 'نگاه باز', section: 'پایه', mod: '/ui/tabs/open-view.mjs', phase: 3 },
   { id: 'history', title: 'تحلیل تاریخی استراتژی', section: 'پایه', mod: '/ui/tabs/history.mjs', phase: 3 },
   { id: 'backtest', title: 'بک‌تست سریع', section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },

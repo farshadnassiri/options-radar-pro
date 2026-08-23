@@ -19,6 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
+import { summarizeLiveTrades } from '../core/live-market.mjs';
 import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { createLog } from './errlog.mjs';
@@ -195,6 +196,46 @@ async function get(pathname, ttlSec, priority = 5) {
 
   inflight.set(url, p);
   return p;
+}
+
+/**
+ * عکس تازه نوار معاملات روز.
+ *
+ * CDN تی‌اس‌ای‌تی‌ام‌سی پاسخ بدون query را گاهی چند دقیقه نگه می‌دارد؛
+ * برای رصد زنده، timestamp فقط در URL بالادست می‌نشیند. کلید کش محلی ثابت
+ * می‌ماند تا چند تب/کلیک هم‌زمان یک درخواست را ادغام کنند و سهمیه دور زده
+ * نشود. پاسخ ناموفق مثل get() کش نمی‌شود.
+ */
+async function getFresh(pathname, ttlSec = 2, priority = 2) {
+  const key = `fresh:${pathname}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; return hit.data; }
+  if (inflight.has(key)) return inflight.get(key);
+
+  const pending = (async () => {
+    let lastErr;
+    for (let attempt = 0; attempt <= S.retries; attempt++) {
+      try {
+        stat.requests += 1;
+        const join = pathname.includes('?') ? '&' : '?';
+        const url = `${S.baseUrl}${pathname}${join}_=${Date.now()}`;
+        const data = await schedule(() => fetchUpstream(url), priority);
+        cache.set(key, { at: Date.now(), data });
+        evictOldest(cache, S.maxCacheEntries);
+        return data;
+      } catch (e) {
+        lastErr = e;
+        stat.errors += 1;
+        stat.lastError = `${e.name}: ${e.message}`;
+        stat.lastErrorAt = Date.now();
+        if (attempt < S.retries) await sleep(300 * 2 ** attempt);
+      }
+    }
+    throw lastErr;
+  })().finally(() => inflight.delete(key));
+
+  inflight.set(key, pending);
+  return pending;
 }
 
 /** کلید ریشه پاسخ‌های تی‌اس‌ای‌تی‌ام‌سی ثابت نیست؛ اولین لیست را برمی‌گرداند. */
@@ -379,6 +420,25 @@ async function handle(req, res) {
     if (p === '/api/watch') {
       if (!watch.rows.length) await watchTick();
       return sendJson(res, 200, { at: watch.at, count: watch.rows.length, rows: watch.rows });
+    }
+
+    // کل معاملات امروز برای پایه و قراردادهای انتخابی. هر پاسخ snapshot
+    // کامل از شروع بازار است؛ مرورگر با sequence ردیف تازه را تشخیص می‌دهد.
+    // سقف ۲۴ ابزار جلوی یک انتخاب اشتباه و کوبیدن API بالادست را می‌گیرد.
+    if (p === '/api/live-trades') {
+      const codes = parseInsList(u.searchParams.get('ins'), 24);
+      if (!codes.length) return sendJson(res, 400, { error: 'دست‌کم یک کد ابزار معتبر لازم است' });
+      const one = async (code) => {
+        try {
+          const rows = normalizeTrades(firstList(await getFresh(`/Trade/GetTrade/${code}`, 2, 2)));
+          return [code, { ins: code, rows, summary: summarizeLiveTrades(rows) }];
+        } catch (e) {
+          return [code, { ins: code, rows: [], error: `${e.name}: ${e.message}` }];
+        }
+      };
+      const items = Object.fromEntries(await Promise.all(codes.map(one)));
+      res.setHeader('Cache-Control', 'no-store');
+      return sendJson(res, 200, { at: Date.now(), count: codes.length, items });
     }
 
     // ریزمعامله چند قرارداد/روز برای تب «نگاه باز».
