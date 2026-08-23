@@ -4985,8 +4985,11 @@ group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دا�
     `${viewCount('pulseViews')}/${viewCount('liquidityViews')}/${viewCount('volatilityViews')}`);
   check('دستگیره زمان، تایمر بازسازی و توقف خودکار هم‌زمان وجود دارند',
     ui70.includes('id="dd-interval" type="range"') && ui70.includes('timer = setTimeout(refresh') && ui70.includes('id="dd-pause"'));
-  check('ریزمعامله کامل محاسبه و برای روانی DOM به آخرین چهارصد ردیف محدود می‌شود',
-    ui70.includes('tape.slice(-400).reverse()') && ui70.includes('محاسبات تجمعی روی نوار کامل'));
+  // سقف چهارصدردیفی برداشته شد چون دلیلش رفت: آن سقف برای روانی DOM بود،
+  // وقتی جدول `innerHTML` خام می‌ساخت. جدول مشترک مجازی‌سازی‌شده است و فقط
+  // ردیف‌های داخل قاب را رسم می‌کند، پس نوار کامل هم مرتب می‌شود هم صادر.
+  check('نوار ریزمعامله کامل به جدول مجازی‌سازی‌شده می‌رود، نه بریده',
+    ui70.includes('function tapeRows(tape)') && !ui70.includes('tape.slice(-400)'));
   // شش توکن، نه ده — و بدون چرخش. جداپذیری خودِ رنگ‌ها را نگهبان ۱۰ در
   // `tests/guards.mjs` حساب می‌کند؛ اینجا فقط مصرفشان سنجیده می‌شود.
   check('رنگ سری‌ها از توکن‌های سنجیده می‌آید و میله رتبه‌ای یک فام دارد',
@@ -5073,8 +5076,70 @@ group('۷۱. موقعیت باز و تغییر آن');
   const chain71 = readSrc('../ui/tabs/chain.mjs'), dash71 = readSrc('../ui/tabs/live-market-dashboard.mjs');
   check('جدول دیده‌بان ستون تغییر موقعیت باز دارد و در نمای آماده هم هست',
     /key: 'oiChange'/.test(chain71) && /'oi', 'oiChange', 'oiChangePct'/.test(chain71));
-  check('جدول عکس داشبورد هم ستون تغییر موقعیت باز گرفت',
-    dash71.includes('<th>تغییر موقعیت باز</th>') && dash71.includes('fmt.int(row.oiChange)'));
+  check('هر مجموعه ستون داشبورد، تغییر موقعیت باز دارد',
+    ['COLS_CONTRACT', 'COLS_UNDERLYING', 'COLS_EXPIRY', 'COLS_GROUP'].every((name) => {
+      const block = new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash71)?.[1] || '';
+      return /col\('oiChange'/.test(block);
+    }));
+}
+
+
+// ═════════ ۷۲. جدول‌های رصد لحظه‌ای: مرتب‌شونده، صادرشونده، هم‌قد دامنه ═════════
+//
+// دو خواسته کاربر، یک ریشه:
+//
+//   «همه جدول‌های رصد لحظه‌ای قابلیت سرت کردن و خروجی اکسل داشته باشند»
+//   «اطلاعاتی که از کل نماد می‌گیریم با اطلاعات یک سررسید یا یک قرارداد
+//    متفاوت است — لازم نیست بیست تب شبیه هم باشند»
+//
+// ریشه، یک `innerHTML` خام دوازده‌ستونه بود که برای هر سطحی یک قالب داشت:
+// نه مرتب می‌شد، نه خروجی داشت، و ردیف نماد پایه ستون «سررسید» می‌گرفت که
+// همیشه «—» بود.
+group('۷۲. جدول‌های داشبورد رصد لحظه‌ای');
+{
+  const dash72 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+  const setOf = (name) => {
+    const block = new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash72)?.[1] || '';
+    return [...block.matchAll(/col\('(\w+)'/g)].map((m) => m[1]);
+  };
+  const contract = setOf('COLS_CONTRACT'), underlying = setOf('COLS_UNDERLYING');
+  const expiry = setOf('COLS_EXPIRY'), group = setOf('COLS_GROUP'), tape = setOf('COLS_TAPE');
+
+  check('جدول‌ها از جدول مشترک می‌آیند، نه از innerHTML خام',
+    dash72.includes("import { makeTable } from '/ui/table.mjs'")
+    && !dash72.includes('<table class="history-table decision-table"')
+    && !dash72.includes('<table class="history-table decision-tape"'));
+  // جدول مشترک، مرتب‌سازی و انتخابگر ستون و دکمه خروجی اکسل را با هم دارد
+  check('هر جدول، انتخابگر ستون و نام خروجی می‌گیرد',
+    /all: cols, storeKey: `dashboard:\$\{key\}`, exportName: `dashboard-\$\{exportName\}`/.test(dash72));
+  check('و نمونه هر نما نگه داشته می‌شود تا مرتب‌سازی کاربر با هر دریافت پاک نشود',
+    dash72.includes('const tables = new Map()') && dash72.includes('tables.set(key, entry)'));
+  // با پنهان‌کردن به‌جای جداکردن، هر querySelector روی میزبان جدولِ نمای
+  // قبلی را برمی‌گرداند — این را کنترل مرورگر پیدا کرد، نه بازخوانی کد.
+  check('جدول غیرفعال از DOM جدا می‌شود، نه فقط پنهان',
+    dash72.includes('other.el.remove()') && !dash72.includes('other.el.hidden = true'));
+
+  check('هر سطح دامنه مجموعه ستون خودش را دارد', new Set([
+    contract.join(','), underlying.join(','), expiry.join(','), group.join(','), tape.join(','),
+  ]).size === 5);
+  // ستون‌هایی که فقط به یک سطح می‌خورند، به سطح دیگر نشت نکنند
+  check('ستون قرارداد به ردیف نماد پایه نمی‌رود',
+    contract.includes('strike') && contract.includes('kindLabel')
+    && !underlying.includes('strike') && !underlying.includes('kindLabel'));
+  check('ستون گروه ساختگی، قیمت و سررسید ندارد — برای یک گروه معنی نمی‌دهد',
+    !group.includes('last') && !group.includes('expiryText') && !group.includes('strike'));
+  check('ردیف نماد پایه ستون‌های مخصوص خودش را دارد',
+    ['expiries', 'atmIvPct', 'pcRatio', 'uaValue'].every((k) => underlying.includes(k))
+    && !contract.includes('atmIvPct'));
+  check('ردیف سررسید، تفکیک کال و پوت و نسبت‌ها را دارد',
+    ['callValue', 'putValue', 'putCallOi', 'tradedContracts'].every((k) => expiry.includes(k)));
+  check('نوار ریزمعامله ستون‌های تجمعی و مرجع خودش را دارد',
+    ['cumulativeVolume', 'cumulativeValue', 'basePrice', 'sequence'].every((k) => tape.includes(k)));
+  // هر ستونی که اعلام می‌شود باید قالبی داشته باشد که `ui/fmt.mjs` بشناسد
+  const fmts = [...dash72.matchAll(/col\('\w+', '[^']*', '(\w+)'/g)].map((m) => m[1]);
+  check('قالب هر ستون داشبورد در ui/fmt.mjs تعریف شده',
+    fmts.length > 0 && fmts.every((f) => typeof uiFmt[f] === 'function'),
+    [...new Set(fmts.filter((f) => typeof uiFmt[f] !== 'function'))].join('، '));
 }
 
 

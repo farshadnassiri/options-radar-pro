@@ -2,6 +2,7 @@
 // سه تب عمودی، هر کدام بیست نمای تنبل دارند و انتخاب دامنه در همه مشترک است.
 
 import { fmt, faDigits, faClock } from '/ui/fmt.mjs';
+import { makeTable } from '/ui/table.mjs';
 import { liveOptionTape, liveReferenceTape, marketBreadthSnapshot } from '/core/live-market.mjs';
 import { dashboardScope } from '/core/decision-dashboard.mjs';
 import { historyDateLabel } from '/core/history.mjs';
@@ -107,6 +108,111 @@ const METRICS = {
   putCallOi: ['نسبت OI پوت به کال', fmt.num], putCallVolume: ['نسبت حجم پوت به کال', fmt.num],
 };
 
+// ————— ستون‌ها، به‌ازای هر سطح —————
+//
+// خواسته کاربر: «اطلاعاتی که از کل نماد می‌گیریم با اطلاعاتی که از سررسید
+// یا یک قرارداد می‌گیریم متفاوت است.» جدول قبلی یک قالب دوازده‌ستونه برای
+// همه بود، پس ردیف نماد پایه ستون «سررسید» می‌گرفت که همیشه «—» بود، و
+// ردیف سررسید ستون «آخرین» می‌گرفت که برای یک گروه معنی ندارد.
+//
+// `base: true` یعنی در نمای آماده هست؛ بقیه از انتخابگر ستون اضافه می‌شوند.
+const col = (key, label, fmtName, opt = {}) => ({ key, label, fmt: fmtName, ...opt });
+
+const COLS_CONTRACT = [
+  col('title', 'قرارداد', 'sym', { group: 'شناسه', base: true }),
+  col('uaName', 'نماد پایه', 'text', { group: 'شناسه', base: true }),
+  col('kindLabel', 'نوع', 'text', { group: 'شناسه', base: true }),
+  col('strike', 'قیمت اعمال', 'money', { group: 'شناسه', base: true }),
+  col('expiryText', 'سررسید', 'text', { group: 'شناسه', base: true }),
+  col('days', 'روز مانده', 'int', { group: 'شناسه' }),
+  col('last', 'آخرین', 'money', { group: 'قیمت', base: true }),
+  col('yday', 'پایانی دیروز', 'money', { group: 'قیمت' }),
+  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت', base: true, heat: 'gain' }),
+  col('bid', 'تقاضا', 'money', { group: 'مظنه' }),
+  col('ask', 'عرضه', 'money', { group: 'مظنه' }),
+  col('spreadPct', 'فاصله مظنه ٪', 'pct', { group: 'مظنه', base: true, heat: 'loss' }),
+  col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
+  col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
+  col('oiYday', 'موقعیت باز دیروز', 'int', { group: 'تعهد انباشته' }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
+  col('ivPct', 'تلاطم ضمنی ٪', 'pct', { group: 'تلاطم', base: true }),
+];
+
+const COLS_UNDERLYING = [
+  col('title', 'نماد پایه', 'text', { group: 'شناسه', base: true }),
+  col('last', 'آخرین', 'money', { group: 'قیمت پایه', base: true }),
+  col('close', 'پایانی', 'money', { group: 'قیمت پایه' }),
+  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت پایه', base: true, heat: 'gain' }),
+  col('contracts', 'قرارداد', 'int', { group: 'اندازه تابلو', base: true }),
+  col('strikes', 'قیمت اعمال', 'int', { group: 'اندازه تابلو' }),
+  col('expiries', 'سررسید', 'int', { group: 'اندازه تابلو', base: true }),
+  col('nearestDays', 'نزدیک‌ترین سررسید', 'int', { group: 'اندازه تابلو' }),
+  col('quoted', 'دارای مظنه', 'int', { group: 'نقدشوندگی' }),
+  col('spreadMedPct', 'میانه فاصله مظنه ٪', 'pct', { group: 'نقدشوندگی', heat: 'loss' }),
+  col('volume', 'حجم اختیار', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('value', 'ارزش معاملات اختیار', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('uaValue', 'ارزش معاملات نماد پایه', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
+  col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
+  col('oiChangePct', 'تغییر موقعیت باز ٪', 'pct', { group: 'تعهد انباشته' }),
+  col('callOi', 'موقعیت باز کال', 'int', { group: 'تعهد انباشته' }),
+  col('putOi', 'موقعیت باز پوت', 'int', { group: 'تعهد انباشته' }),
+  col('pcRatio', 'نسبت پوت به کال — موقعیت باز', 'num', { group: 'تعهد انباشته', base: true }),
+  col('pcVolRatio', 'نسبت پوت به کال — حجم', 'num', { group: 'تعهد انباشته' }),
+  col('atmIvPct', 'تلاطم ضمنی ٪ — نزدیک‌ترین پول', 'pct', { group: 'تلاطم', base: true }),
+];
+
+const COLS_EXPIRY = [
+  col('title', 'سررسید', 'text', { group: 'شناسه', base: true }),
+  col('uaName', 'نماد پایه', 'text', { group: 'شناسه', base: true }),
+  col('days', 'روز مانده', 'int', { group: 'شناسه', base: true }),
+  col('contracts', 'قرارداد', 'int', { group: 'اندازه', base: true }),
+  col('tradedContracts', 'قرارداد معامله‌شده', 'int', { group: 'اندازه', base: true }),
+  col('positive', 'مثبت', 'int', { group: 'جهت' }),
+  col('negative', 'منفی', 'int', { group: 'جهت' }),
+  col('changePct', 'تغییر وزنی ٪', 'pct', { group: 'جهت', base: true, heat: 'gain' }),
+  col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('callValue', 'ارزش کال', 'money', { group: 'گردش امروز', base: true }),
+  col('putValue', 'ارزش پوت', 'money', { group: 'گردش امروز', base: true }),
+  col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
+  col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
+  col('putCallOi', 'نسبت OI پوت به کال', 'num', { group: 'تعهد انباشته', base: true }),
+  col('putCallVolume', 'نسبت حجم پوت به کال', 'num', { group: 'تعهد انباشته' }),
+  col('ivPct', 'تلاطم ضمنی وزنی ٪', 'pct', { group: 'تلاطم', base: true }),
+  col('spreadPct', 'میانه فاصله مظنه ٪', 'pct', { group: 'تلاطم', heat: 'loss' }),
+];
+
+// گروه‌های ساختگی (کال/پوت، قیمت اعمال، جهت) نه قیمت دارند نه سررسید.
+const COLS_GROUP = [
+  col('title', 'گروه', 'text', { group: 'شناسه', base: true }),
+  col('contractCount', 'قرارداد', 'int', { group: 'اندازه', base: true }),
+  col('changePct', 'تغییر وزنی ٪', 'pct', { group: 'جهت', base: true, heat: 'gain' }),
+  col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز', base: true }),
+  col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
+  col('ivPct', 'تلاطم ضمنی وزنی ٪', 'pct', { group: 'تلاطم', base: true }),
+  col('spreadPct', 'میانگین فاصله مظنه ٪', 'pct', { group: 'تلاطم', heat: 'loss' }),
+];
+
+const COLS_TAPE = [
+  col('timeText', 'زمان', 'text', { group: 'معامله', base: true }),
+  col('price', 'قیمت', 'money', { group: 'معامله', base: true }),
+  col('quantity', 'حجم', 'int', { group: 'معامله', base: true }),
+  col('value', 'ارزش', 'money', { group: 'معامله', base: true, heat: 'gain' }),
+  col('cumulativeVolume', 'حجم تجمعی', 'int', { group: 'تجمعی', base: true }),
+  col('cumulativeValue', 'ارزش تجمعی', 'money', { group: 'تجمعی', base: true }),
+  col('basePrice', 'قیمت پایه هم‌زمان', 'money', { group: 'مرجع', base: true }),
+  col('ivPct', 'تلاطم ضمنی ٪', 'pct', { group: 'مرجع', base: true }),
+  col('sequence', 'ترتیب', 'int', { group: 'معامله' }),
+];
+
 const rowName = (row) => row.name || row.uaName || row.label
   || (row.endDate ? `سررسید ${dateLabel(row.endDate)}` : row.strike ? `اعمال ${fmt.money(row.strike)}` : '—');
 
@@ -155,10 +261,27 @@ function ranked(view, scoped, limit = 24) {
   return filtered.slice(0, limit);
 }
 
-function snapshotTable(rows, metric) {
-  if (!rows.length) return '<p class="empty-note">در دامنه انتخابی داده معتبر برای این نما نیست.</p>';
-  const [metricLabel, metricFmt] = METRICS[metric] || [metric, fmt.num];
-  return `<div class="history-table-wrap"><table class="history-table decision-table"><thead><tr><th>رتبه</th><th>نماد / گروه</th><th>آخرین</th><th>پایانی دیروز</th><th>تغییر آخرین نسبت به پایانی دیروز ٪</th><th>${metricLabel}</th><th>حجم</th><th>تعداد معامله</th><th>ارزش</th><th>موقعیت باز</th><th>تغییر موقعیت باز</th><th>IV ٪</th><th>سررسید</th></tr></thead><tbody>${rows.map((row, index) => `<tr><td>${fmt.int(index + 1)}</td><td><b>${esc(rowName(row))}</b>${row.uaName && row.name ? `<small>${esc(row.uaName)}</small>` : ''}</td><td>${fmt.money(row.last)}</td><td>${fmt.money(row.yday)}</td><td class="${tone(row.changePct)}">${fmt.pct(row.changePct)}٪</td><td>${metricFmt(row[metric])}</td><td>${fmt.int(row.volume)}</td><td>${fmt.int(row.trades)}</td><td>${fmt.money(row.value)}</td><td>${fmt.int(row.oi)}</td><td class="${tone(row.oiChange)}">${fmt.int(row.oiChange)}</td><td>${fmt.pct(row.ivPct)}٪</td><td>${row.endDate ? dateLabel(row.endDate) : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+// کدام مجموعه ستون، برای کدام ردیف.
+//
+// از خودِ ردیف تشخیص داده می‌شود نه از نام نما، چون یک نما می‌تواند در
+// دامنه‌های مختلف ردیف‌های متفاوتی بدهد.
+function colsFor(kindKey) {
+  if (kindKey === 'underlyings') return COLS_UNDERLYING;
+  if (kindKey === 'expiries') return COLS_EXPIRY;
+  if (['sides', 'strikes', 'directions'].includes(kindKey)) return COLS_GROUP;
+  return COLS_CONTRACT;
+}
+
+// ردیف خام را به چیزی تبدیل می‌کند که جدول مشترک بتواند مرتب و صادر کند:
+// یک ستون عنوانِ متنی، و متن سررسید به‌جای عدد خام تاریخ.
+function decorate(rows, kindKey) {
+  return rows.map((row) => ({
+    ...row,
+    title: kindKey === 'expiries' ? dateLabel(row.endDate) : rowName(row),
+    kindLabel: row.kind ? kindLabel(row.kind) : '',
+    expiryText: row.endDate ? dateLabel(row.endDate) : '',
+    contractCount: row.contracts ?? row.contractCount,
+  }));
 }
 
 // نمودار میله‌ای رتبه‌ای: یک فام برای همه میله‌ها.
@@ -196,16 +319,15 @@ function expiryLeaders(scoped) {
     const key = `${row.uaIns}:${row.endDate}`, list = groups.get(key) || [];
     list.push(row); groups.set(key, list);
   }
-  const leaders = [...groups.values()].map((rows) => [...rows].sort((a, b) => b.value - a.value)[0]).filter(Boolean)
+  return [...groups.values()].map((rows) => [...rows].sort((a, b) => b.value - a.value)[0]).filter(Boolean)
     .sort((a, b) => b.value - a.value);
-  return snapshotTable(leaders, 'value');
 }
 
-function tapeTable(tape, contract) {
-  if (!contract) return '<p class="empty-note">دامنه را روی «قرارداد» بگذار و یک قرارداد انتخاب کن.</p>';
-  if (!tape?.length) return '<p class="empty-note">برای قرارداد انتخابی ریزمعامله معتبر دریافت نشده است.</p>';
-  const shown = tape.slice(-400).reverse();
-  return `<p class="note">${fmt.int(shown.length)} معامله آخر از ${fmt.int(tape.length)} معامله معتبر؛ محاسبات تجمعی روی نوار کامل انجام شده است.</p><div class="history-table-wrap"><table class="history-table decision-tape"><thead><tr><th>زمان</th><th>نماد</th><th>قیمت</th><th>تغییر آخرین نسبت به پایانی دیروز ٪</th><th>حجم</th><th>ارزش</th><th>حجم تجمعی</th><th>ارزش تجمعی</th><th>پایه مرجع</th><th>IV ٪</th></tr></thead><tbody>${shown.map((row) => `<tr><td>${timeLabel(row.time)}</td><td>${esc(contract.name)}</td><td>${fmt.money(row.price)}</td><td class="${tone(contract.changePct)}">${fmt.pct(contract.changePct)}٪</td><td>${fmt.int(row.quantity)}</td><td>${fmt.money(row.value)}</td><td>${fmt.int(row.cumulativeVolume)}</td><td>${fmt.money(row.cumulativeValue)}</td><td>${fmt.money(row.basePrice)}</td><td>${fmt.pct(row.ivPct)}٪</td></tr>`).join('')}</tbody></table></div>`;
+// نوار ریزمعامله هم ردیف می‌دهد، نه HTML — تا مثل بقیه مرتب و صادر شود.
+function tapeRows(tape) {
+  return (tape || []).map((row, index) => ({
+    ...row, sequence: index + 1, timeText: timeLabel(row.time),
+  })).reverse();
 }
 
 export async function mount(root, { state }) {
@@ -286,6 +408,58 @@ export async function mount(root, { state }) {
     }
   }
 
+  // ————— جدول‌های مرتب‌شونده و دارای خروجی اکسل —————
+  //
+  // خواسته کاربر: «همه جدول‌های رصد لحظه‌ای قابلیت سرت کردن و خروجی اکسل
+  // داشته باشند.» جدول‌های این تب `innerHTML` خام بودند: نه مرتب می‌شدند،
+  // نه ستون‌هایشان انتخابی بود، نه خروجی داشتند. حالا از همان
+  // `makeTable` مشترک می‌آیند که هر سه را دارد.
+  //
+  // نمونه جدول برای هر نما یک بار ساخته و نگه داشته می‌شود، نه هر بار از
+  // نو: با ساخت دوباره، ستون مرتب‌سازیِ کاربر در هر دریافت خودکار (هر ۵ تا
+  // ۶۰ ثانیه) به حالت اول برمی‌گشت.
+  const tables = new Map();
+  function tableFor(host, key, cols, exportName) {
+    let entry = tables.get(key);
+    if (!entry) {
+      const el = document.createElement('div');
+      host.appendChild(el);
+      const base = cols.filter((c) => c.base);
+      entry = { el, table: makeTable(el, base.length ? base : cols, {
+        all: cols, storeKey: `dashboard:${key}`, exportName: `dashboard-${exportName}`,
+      }) };
+      tables.set(key, entry);
+    }
+    // جدول‌های دیگر از DOM جدا می‌شوند، نه فقط پنهان: با پنهان‌کردن، عنصر
+    // در همان میزبان می‌ماند و هر `querySelector` روی میزبان، جدولِ نمای
+    // قبلی را برمی‌گرداند. نمونه‌شان در `tables` زنده می‌ماند، پس مرتب‌سازی
+    // و ستون‌های انتخابیِ کاربر با برگشتن به همان نما سر جایشان‌اند.
+    for (const other of tables.values()) if (other !== entry) other.el.remove();
+    if (entry.el.parentElement !== host) host.appendChild(entry.el);
+    return entry.table;
+  }
+
+  function paintTable(host, view, scoped) {
+    const kindKey = view[2] === 'tape' ? 'tape' : view[2] === 'expiry-leaders' ? 'contracts' : view[3];
+    let rows, cols, empty = null;
+    if (view[2] === 'tape') {
+      cols = COLS_TAPE;
+      if (selected().level !== 'contract' || !activeContract()) empty = 'دامنه را روی «قرارداد» بگذار و یک قرارداد انتخاب کن.';
+      else if (!tape?.length) empty = 'برای قرارداد انتخابی ریزمعامله معتبر دریافت نشده است.';
+      rows = tapeRows(tape);
+    } else if (view[2] === 'expiry-leaders') {
+      cols = COLS_CONTRACT; rows = decorate(expiryLeaders(scoped), 'contracts');
+    } else {
+      cols = colsFor(kindKey); rows = decorate(ranked(view, scoped, 400), kindKey);
+    }
+    const table = tableFor(host, `${view[2]}:${kindKey}`, cols, `${kindKey}`);
+    table.setEmptyMessage(empty || 'در دامنه انتخابی داده معتبر برای این نما نیست.');
+    table.set(empty ? [] : rows);
+    // مرتب‌سازی اولیه روی همان سنجه‌ای که نما برایش ساخته شده؛ بعد از آن
+    // انتخاب کاربر است و دست نمی‌خورد.
+    if (!table.__seeded && cols.some((c) => c.key === view[4])) { table.sortBy(view[4]); table.__seeded = true; }
+  }
+
   async function paintView() {
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
     if (!panel || !view) return;
@@ -293,14 +467,15 @@ export async function mount(root, { state }) {
     panel.querySelector('[data-view-title]').textContent = view[1]; panel.querySelector('[data-view-scope]').textContent = scopeLabel(scoped);
     $('dd-scope-note').textContent = scopeLabel(scoped);
     host.hidden = view[2] === 'open-view'; openHost.hidden = view[2] !== 'open-view';
+    const tabular = ['table', 'table-asc', 'table-zero', 'tape', 'expiry-leaders'].includes(view[2]);
+    // جدول‌ها نمونه ماندگار دارند، پس فقط وقتی نما جدول نیست پاک می‌شوند.
+    if (!tabular) { for (const entry of tables.values()) entry.el.remove(); host.innerHTML = ''; }
     if (view[2] === 'open-view') { await syncOpenView(); return; }
     if (view[2] === 'donut') { breadthDonut(host, scopedBreadth(scoped)); return; }
     if (view[2] === 'breadth') { breadthBars(host, scopedBreadth(scoped)); return; }
     if (view[2] === 'timeline') { paintTimeline(host, view, scoped); return; }
-    if (view[2] === 'expiry-leaders') { host.innerHTML = expiryLeaders(scoped); return; }
-    if (view[2] === 'tape') { host.innerHTML = tapeTable(tape, selected().level === 'contract' ? activeContract() : null); return; }
-    const rows = ranked(view, scoped, view[2] === 'bar' ? 16 : 40);
-    host.innerHTML = view[2] === 'bar' ? barChart(rows, view[4]) : snapshotTable(rows, view[4]);
+    if (tabular) { paintTable(host, view, scoped); return; }
+    host.innerHTML = barChart(ranked(view, scoped, 16), view[4]);
   }
 
   async function fetchTape() {
