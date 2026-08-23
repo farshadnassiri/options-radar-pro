@@ -71,6 +71,7 @@ import {
   activeLiveTrades, breadthInstruments, liveOptionTape, liveQuoteIv, liveReferenceTape,
   marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
+import { dashboardScope, decisionDashboardSnapshot, pctVsYesterday } from '../core/decision-dashboard.mjs';
 
 let pass = 0, fail = 0;
 const results = [];
@@ -4533,7 +4534,9 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
   check('اکسل سررسید فعال هنگام خروجی را در راهنما ثبت می‌کند', workbook64.includes('سررسید فعال هنگام خروجی'));
 
   const app64 = readSrc('../ui/app.mjs'), server64 = readSrc('../server/server.mjs'), ui64 = readSrc('../ui/tabs/open-view.mjs');
-  check('نگاه باز یک تب پایه تنبل است', app64.includes("id: 'open-view'") && app64.includes("mod: '/ui/tabs/open-view.mjs'"));
+  const liveDashboard64 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+  check('نگاه باز از ریل اصلی حذف و داخل داشبورد تنبل شده است',
+    !app64.includes("id: 'open-view'") && liveDashboard64.includes("import('/ui/tabs/open-view.mjs')"));
   check('ریزمعامله دسته‌ای سقف صریح دارد', server64.includes("p === '/api/trades/batch'") && server64.includes('raw.length > 1200'));
   check('رابط بازه، تایم‌فریم روز و خروجی جامع دارد', ui64.includes('ov-from') && ui64.includes('ov-day-interval') && ui64.includes('downloadOpenViewExcel'));
   check('دکمه تایم‌فریم از بالای صفحه حذف و داخل جزئیات روز نشسته', !ui64.includes('id="ov-intraday"') && ui64.includes('id="ov-day-intraday"'));
@@ -4922,15 +4925,15 @@ group('۶۹. داشبورد تجمعی بازار و رصد زنده موقعی�
     server69.includes("p === '/api/live-dashboard'")
     && server69.includes('marketBreadthTimeline(instruments, tradesByIns')
     && server69.includes('Promise.all(instruments.map(async (item)'));
-  check('داشبورد دایره‌ای، میله‌ای و سه مسیر تجمعی دارد',
-    ui69.includes('lm-breadth-donut') && ui69.includes('lm-breadth-bars')
-    && ui69.includes('lm-breadth-pct') && ui69.includes('lm-breadth-line') && ui69.includes('lm-market-volume'));
-  check('انتخاب قرارداد دقیقاً از پایه به سررسید و سپس جدول قرارداد می‌رود',
-    ui69.includes('lm-base-rail') && ui69.includes('lm-expiry-rail')
-    && ui69.includes('data-contract=') && ui69.includes('renderContractTable()'));
-  check('کلیک قرارداد فقط پایه و همان قرارداد را برای جدول و نمودار می‌گیرد',
-    ui69.includes('`${selectedUa},${selectedContract}`')
-    && ui69.includes('liveOptionTape({ trades: optionRows') && ui69.includes('tapeTable.set(tapeRows)'));
+  check('داشبورد دایره‌ای، میله‌ای و سه مسیر تجمعی را در کاتالوگ تصمیم نگه می‌دارد',
+    ui69.includes("'breadth-donut'") && ui69.includes("'breadth-bars'")
+    && ui69.includes("'breadth-pct'") && ui69.includes("'breadth-net'") && ui69.includes("'base-volume-path'"));
+  check('انتخاب قرارداد دقیقاً از پایه به سررسید و سپس قرارداد می‌رود',
+    ui69.includes('id="dd-underlying"') && ui69.includes('id="dd-expiry"')
+    && ui69.includes('id="dd-contract"') && ui69.includes('fillSelectors'));
+  check('دامنه قرارداد فقط پایه و همان قرارداد را برای ریزمعامله می‌گیرد',
+    ui69.includes('`${pick.uaIns},${contract.ins}`')
+    && ui69.includes('liveOptionTape({ trades: optionRows') && ui69.includes('tape ='));
   check('هر سه تب، گزینه رصد زنده موقعیت تاریخی دارند',
     backtest69.includes('id="bt-live"') && backtest69.includes('async function refreshLivePosition()')
     && history69.includes('data-history-live') && portfolio69.includes('id="pb-live-watch"'));
@@ -4939,6 +4942,58 @@ group('۶۹. داشبورد تجمعی بازار و رصد زنده موقعی�
   check('رصد زنده، همان موتور ریزمعامله مشترک و endpoint امروز را به کار می‌گیرد',
     backtest69.includes("fetch(`/api/live-trades?ins=${encodeURIComponent(codes.join(','))}`")
     && backtest69.includes('intraday = replayIntraday({ replay, tradesByIns: byIns'));
+}
+
+group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دامنه');
+{
+  const raw70 = [
+    {
+      uaInsCode: '11', lval30_UA: 'اهرم', pDrCotVal_UA: 1050, pClosing_UA: 1040, priceYesterday_UA: 1000,
+      strikePrice: 1000, remainedDay: 30, endDate: 20260101, contractSize: 1000,
+      insCode_C: '111', lVal18AFC_C: 'ضهرم-الف', pDrCotVal_C: 120, pClosing_C: 115, priceYesterday_C: 100,
+      pMeDem_C: 118, pMeOf_C: 122, qTotTran5J_C: 20, zTotTran_C: 4, qTotCap_C: 2400, oP_C: 90, yesterdayOP_C: 80,
+      insCode_P: '112', lVal18AFC_P: 'طهرم-الف', pDrCotVal_P: 80, pClosing_P: 82, priceYesterday_P: 100,
+      pMeDem_P: 78, pMeOf_P: 82, qTotTran5J_P: 10, zTotTran_P: 2, qTotCap_P: 800, oP_P: 70, yesterdayOP_P: 75,
+    },
+    {
+      uaInsCode: '11', lval30_UA: 'اهرم', pDrCotVal_UA: 1050, pClosing_UA: 1040, priceYesterday_UA: 1000,
+      strikePrice: 1100, remainedDay: 60, endDate: 20260201, contractSize: 1000,
+      insCode_C: '113', lVal18AFC_C: 'ضهرم-ب', pDrCotVal_C: 70, pClosing_C: 72, priceYesterday_C: 70,
+      pMeDem_C: 68, pMeOf_C: 72, qTotTran5J_C: 100, zTotTran_C: 20, qTotCap_C: 7000, oP_C: 120, yesterdayOP_C: 100,
+      insCode_P: '114', lVal18AFC_P: 'طهرم-ب', pDrCotVal_P: 130, pClosing_P: 128, priceYesterday_P: 100,
+      pMeDem_P: 128, pMeOf_P: 132, qTotTran5J_P: 50, zTotTran_P: 10, qTotCap_P: 6500, oP_P: 110, yesterdayOP_P: 90,
+    },
+  ];
+  check('درصد آخرین نسبت به پایانی دیروز و فقط همان مبنا محاسبه می‌شود', near(pctVsYesterday(120, 100), 20));
+  const snap70 = decisionDashboardSnapshot(raw70, defaults());
+  check('عکس تصمیم چهار قرارداد و دو سررسید را بی‌افت نگه می‌دارد',
+    snap70.contracts.length === 4 && snap70.expiries.length === 2 && snap70.marketExpiries.length === 2);
+  check('رهبر ارزش کل بازار از داده واقعی و با ترتیب نزولی می‌آید',
+    snap70.contracts[0].ins === '113' && snap70.contracts[0].value === 7000);
+  check('تجمیع سررسید ارزش کال و پوت را جدا نگه می‌دارد',
+    snap70.expiries[0].value === 13500 && snap70.expiries[0].callValue === 7000 && snap70.expiries[0].putValue === 6500);
+  check('چهار دامنه بازار، پایه، سررسید و قرارداد دقیق فیلتر می‌شوند',
+    dashboardScope(snap70, { level: 'market' }).contracts.length === 4
+    && dashboardScope(snap70, { level: 'underlying', uaIns: '11' }).contracts.length === 4
+    && dashboardScope(snap70, { level: 'expiry', uaIns: '11', endDate: '20260101' }).contracts.length === 2
+    && dashboardScope(snap70, { level: 'contract', uaIns: '11', endDate: '20260101', contractIns: '112' }).contracts.length === 1);
+
+  const ui70 = readSrc('../ui/tabs/live-market-dashboard.mjs'), app70 = readSrc('../ui/app.mjs');
+  const viewCount = (name) => ((new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(ui70)?.[1] || '').match(/^\s*\['/gm) || []).length;
+  check('هر سه حالت تصمیم‌گیری دقیقاً بیست جدول یا نمودار تنبل دارند',
+    viewCount('pulseViews') === 20 && viewCount('liquidityViews') === 20 && viewCount('volatilityViews') === 20,
+    `${viewCount('pulseViews')}/${viewCount('liquidityViews')}/${viewCount('volatilityViews')}`);
+  check('دستگیره زمان، تایمر بازسازی و توقف خودکار هم‌زمان وجود دارند',
+    ui70.includes('id="dd-interval" type="range"') && ui70.includes('timer = setTimeout(refresh') && ui70.includes('id="dd-pause"'));
+  check('ریزمعامله کامل محاسبه و برای روانی DOM به آخرین چهارصد ردیف محدود می‌شود',
+    ui70.includes('tape.slice(-400).reverse()') && ui70.includes('محاسبات تجمعی روی نوار کامل'));
+  check('رنگ سری‌ها فقط از ده توکن متمایز می‌آید', ui70.includes('var(--series-${index + 1})') && !ui70.includes("const COLORS ="));
+  check('ارزش بالا برای کل و سررسید و نگاه باز درون داشبورد است',
+    ui70.includes("'high-value-overall'") && ui70.includes("'high-value-expiry'")
+    && ui70.includes("'open-view-history'") && !app70.includes("id: 'open-view'"));
+  const server70 = readSrc('../server/server.mjs');
+  check('endpoint زنده عکس فشرده چهار دامنه را تحویل می‌دهد',
+    server70.includes('universe: decisionDashboardSnapshot(sourceRows, S)'));
 }
 // ═══════════════════════════ گزارش ═══════════════════════════
 const W = 62;

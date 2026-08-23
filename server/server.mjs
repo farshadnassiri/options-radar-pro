@@ -22,6 +22,7 @@ import { normalizeTrades } from '../core/backtest.mjs';
 import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
+import { decisionDashboardSnapshot } from '../core/decision-dashboard.mjs';
 import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { createLog } from './errlog.mjs';
@@ -478,7 +479,7 @@ async function handle(req, res) {
       res.setHeader('Cache-Control', 'no-store');
       return sendJson(res, 200, {
         at: Date.now(), count: instruments.length, traded: snapshot.traded,
-        failed, snapshot, timeline,
+        failed, snapshot, timeline, universe: decisionDashboardSnapshot(sourceRows, S),
       });
     }
 
