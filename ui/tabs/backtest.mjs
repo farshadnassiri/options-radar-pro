@@ -11,6 +11,9 @@ import {
   bucketIntradayPath, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
   INTRADAY_START_SECOND, INTRADAY_END_SECOND,
 } from '/core/backtest.mjs';
+import {
+  ivParams, IV_PARAMS, annotateDailyIv, annotateIntradayIv, annotateBucketIv, ivSummary, legDaysToExpiry,
+} from '/core/leg-iv.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
@@ -30,12 +33,22 @@ const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve))
 // نمی‌شود. `--accent` و `--cmp*` کنار گذاشته شدند: اولی رنگ رابط است و
 // دومی‌ها با هم و با رنگ وضعیت، جداپذیریِ سنجیده‌شده ندارند.
 const LEG_COLORS = Array.from({ length: 5 }, (_, index) => `var(--series-${index + 1})`);
+
+// پارامترهای تلاطم ضمنی، فقط برای همین تب.
+//
+// پیش‌فرض از تنظیمات سراسری می‌آید تا رفتار با بقیهٔ برنامه یکی باشد. ولی
+// کسی که می‌خواهد اثر نرخ بدون ریسک را روی همین یک بک‌تست ببیند، نباید
+// مجبور شود تنظیمات سراسری را عوض کند و بعد یادش برود برگرداند — پس
+// بازنویسی اینجا می‌ماند و با بستن تب می‌رود.
+const ivOverride = {};
 const errorText = (error, fallback) => /fetch failed|network|failed to fetch/i.test(String(error?.message || error))
   ? 'اتصال به منبع داده برقرار نشد.' : (String(error?.message || '').trim() || fallback);
 const clockLabel = (second) => {
   const value = Math.max(0, Math.trunc(Number(second) || 0));
   return `${String(Math.floor(value / 3600)).padStart(2, '0')}:${String(Math.floor((value % 3600) / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 };
+// تلاطم نبوده باید «—» بماند. صفر یعنی «تلاطم صفر» که ادعای دیگری است.
+const ivCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
 const ageLabel = (second) => Number.isFinite(Number(second)) ? `${fmt.int(second)} ثانیه` : '—';
 const tehranDateNumber = (at = Date.now()) => {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
@@ -208,6 +221,13 @@ export async function mount(root, { state }) {
         <div id="bt-days-table" class="history-table-wrap"></div>
       </section>
 
+      <section class="card backtest-iv"><div class="section-head"><div><p class="eyebrow">تلاطم ضمنی · هر پا جدا</p><h2>تلاطم پاها در هر سه تایم‌فریم</h2></div><span id="bt-iv-source">—</span></div>
+        <p class="backtest-table-note">تلاطم هر پا از قیمت مشاهده‌شدهٔ خودش، قیمت پایهٔ همان لحظه و روز مانده تا سررسید <b>همان پا</b> درمی‌آید. پای سهم پایه تلاطم ضمنی ندارد و ستونش خالی می‌ماند. لحظه‌ای که قیمت پایه یا قیمت پا نبوده، تلاطمی هم ساخته نشده — «—» یعنی نداریم، نه صفر.</p>
+        <div class="backtest-iv-params" id="bt-iv-params"></div>
+        <div id="bt-iv-summary" class="history-table-wrap"></div>
+        <div class="backtest-chart-grid"><section><div class="section-head"><h3>تلاطم روزبه‌روز</h3><span>درصد · مسیر روزانه</span></div><div id="bt-iv-daily-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>تلاطم درون‌روز</h3><span>درصد · ثانیه‌به‌ثانیه</span></div><div id="bt-iv-intraday-chart" class="backtest-chart"></div></section></div>
+        <div class="backtest-chart-grid"><section><div class="section-head"><h3>تلاطم روی تایم‌فریم انتخابی</h3><span>درصد · هر نقطه یک سطل</span></div><div id="bt-iv-tf-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>پراکندگی تلاطم و قیمت پایه</h3><span>حساسیت تلاطم به حرکت پایه</span></div><div id="bt-iv-base-chart" class="backtest-chart"></div></section></div>
+      </section>
       <section class="card backtest-intraday-panel"><div class="section-head"><div><p class="eyebrow">خط زمانی مشترک همه پاها</p><h2 id="bt-intraday-title">تحلیل درون‌روزی ۹:۰۰ تا ۱۲:۳۰</h2></div><div class="backtest-head-actions"><span id="bt-intraday-source">—</span><button type="button" id="bt-export-intraday">خروجی همه نقاط</button></div></div><div id="bt-intraday-kpis" class="backtest-kpis"></div>
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>ارزش مشاهده‌شدهٔ موقعیت</h3><span>ریال · مرجع، نه قابل آفست</span></div><div id="bt-intraday-pnl-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>اثر خالص هر پا</h3><span>تفکیک ریالی</span></div><div id="bt-intraday-leg-chart" class="backtest-chart"></div></section></div>
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>حرکت قیمت هر پا</h3><span>نسبت به اولین معامله همان پا</span></div><div id="bt-intraday-price-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>حجم تجمعی هر پا</h3><span>قرارداد</span></div><div id="bt-intraday-volume-chart" class="backtest-chart"></div></section></div>
@@ -319,6 +339,18 @@ export async function mount(root, { state }) {
     const selected = exitDates.includes(Number($('bt-exit-date').dataset.value)) ? Number($('bt-exit-date').dataset.value) : exitDates[Math.min(exitDates.length - 1, 4)];
     exitWheel = mountDateWheel($('bt-exit-date'), exitDates, selected, () => { manualExit = {}; paintSnapshots(); }, { empty: 'روز دارای قیمت همه پاها پیدا نشد.' });
     paintSnapshots();
+  }
+
+  /** پارامترهای مؤثر تلاطم: تنظیمات سراسری، با بازنویسی همین تب. */
+  const ivP = () => ivParams(state.settings, ivOverride);
+
+  /** بازپخش درون‌روز، همیشه با مهر تلاطم؛ تا هیچ مسیری بی‌تلاطم نماند. */
+  function replayDay(day, date) {
+    const points = replayIntraday({
+      replay, tradesByIns: day.byIns, baseTrades: day.byIns[String(ua.ins)] || [],
+      fees: feesOf(state.settings),
+    });
+    return annotateIntradayIv(points, { legs: replay.priced, date }, ivP());
   }
 
   function paintSnapshots() {
@@ -470,7 +502,7 @@ export async function mount(root, { state }) {
     try {
       const day = await fetchDayTrades(date);
       intradayDate = date;
-      intraday = replayIntraday({ replay, tradesByIns: day.byIns, baseTrades: day.byIns[String(ua.ins)] || [], fees: feesOf(state.settings) });
+      intraday = replayDay(day, date);
       const warning = tradeWarningText(day);
       paintIntradayAnalysis();
       paintDayTable();
@@ -481,13 +513,116 @@ export async function mount(root, { state }) {
     } catch (error) { setStatus(errorText(error, 'ریزمعامله دریافت نشد.'), true); }
   }
 
+  // ═══════════════════ تلاطم ضمنی پاها ═══════════════════
+  //
+  // یک بار ساخته می‌شود و با هر تغییر پارامتر، هر سه تایم‌فریم از نو مهر
+  // می‌خورند. جدا کردن این پنل از هر تایم‌فریم عمدی است: کاربر یک مجموعه
+  // پارامتر دارد، نه سه تا، و اگر هر تایم‌فریم پارامتر خودش را داشت، سه
+  // عدد تلاطم روی صفحه می‌ماند که هیچ‌کدام با آن یکی قابل‌مقایسه نبود.
+
+  /**
+   * فرم پارامترها؛ خالی‌گذاشتن هر خانه یعنی «همان تنظیمات سراسری».
+   *
+   * یک‌بار ساخته می‌شود و بس. ساختن دوباره در هر رنگ‌آمیزی، فوکوس را وسط
+   * تایپ از خانه می‌پراند — کاربر «۰٫۳۵» را نمی‌توانست بنویسد چون بعد از
+   * اولین رقم، خانه از نو ساخته می‌شد.
+   */
+  function paintIvParams() {
+    const host = $('bt-iv-params');
+    if (host.children.length) return;
+    const p = ivP();
+    host.innerHTML = IV_PARAMS.map((item) => `<label>${esc(item.label)}
+      <input type="number" data-iv-param="${item.key}" min="${item.min}" max="${item.max}" step="${item.step}"
+             value="${Number.isFinite(p[item.key]) ? p[item.key] : ''}"></label>`).join('')
+      + '<button type="button" class="ghost" id="bt-iv-reset">بازگشت به تنظیمات سراسری</button>';
+  }
+
+  /** مقدار خانه‌ها را با تنظیمات سراسری هم‌تراز می‌کند؛ فقط برای دکمهٔ بازگشت. */
+  function syncIvParams() {
+    const p = ivParams(state.settings, {});
+    for (const field of $('bt-iv-params').querySelectorAll('[data-iv-param]')) {
+      field.value = Number.isFinite(p[field.dataset.ivParam]) ? p[field.dataset.ivParam] : '';
+    }
+  }
+
+  /** سری تلاطم هر پا برای نمودار؛ کلید ثابت تا افسانه و خط جابه‌جا نشوند. */
+  const ivSeries = () => replay.priced
+    .map((leg, index) => ({ leg, index }))
+    .filter(({ leg }) => leg.kind === 'call' || leg.kind === 'put')
+    .map(({ leg, index }) => ({
+      key: `legIv${index}`, label: `${faDigits(index + 1)} · ${nameOf(leg, 'پا')}`,
+      color: LEG_COLORS[index % LEG_COLORS.length],
+    }));
+
+  /** نقاط را به شکلی می‌آورد که `chart` می‌خواهد: هر پا یک کلید مسطح. */
+  const ivRows = (points, extra = () => ({})) => points.map((point, index) => ({
+    ...extra(point, index),
+    ...Object.fromEntries((point.legIvPct || []).map((value, at) => [`legIv${at}`, value])),
+    meanIvPct: point.meanIvPct,
+  }));
+
+  function paintIv() {
+    if (!replay?.ok) return;
+    paintIvParams();
+    const series = ivSeries();
+    const daily = replay.rows.filter((row) => row.status !== 'missing');
+    const tfBuckets = timeframeDays.length
+      ? annotateBucketIv(bucketIntradayPath(timeframeDays, { bucketSeconds: timeframeSeconds }), { legs: replay.priced }, ivP())
+      : [];
+
+    $('bt-iv-source').textContent = [
+      `${fmt.int(daily.length)} روز`,
+      intraday.length ? `${fmt.int(intraday.length)} نقطهٔ درون‌روز` : '',
+      tfBuckets.length ? `${fmt.int(tfBuckets.length)} سطل تایم‌فریم` : '',
+    ].filter(Boolean).join(' · ') || '—';
+
+    chart($('bt-iv-daily-chart'), ivRows(daily), series, { xLabel: 'روز', yLabel: 'تلاطم ضمنی (٪)' });
+    chart($('bt-iv-intraday-chart'), ivRows(intraday, (point) => ({ second: point.second })), series,
+      { timeScale: true, step: true, xLabel: 'ساعت', yLabel: 'تلاطم ضمنی (٪)' });
+    chart($('bt-iv-tf-chart'), ivRows(tfBuckets), series, { step: true, xLabel: 'سطل', yLabel: 'تلاطم ضمنی (٪)' });
+
+    // تلاطم در برابر قیمت پایه: نقاط به‌ترتیب قیمت پایه چیده می‌شوند تا
+    // شیب خط، حساسیت تلاطم به حرکت پایه را نشان دهد نه گذر زمان را.
+    const bySpot = [...(intraday.length ? intraday : daily)]
+      .map((point) => ({ ...point, spot: Number(point.basePrice ?? point.baseClose) }))
+      .filter((point) => Number.isFinite(point.spot))
+      .sort((a, b) => a.spot - b.spot);
+    chart($('bt-iv-base-chart'), ivRows(bySpot), series, { xLabel: 'قیمت پایه — از کم به زیاد', yLabel: 'تلاطم ضمنی (٪)' });
+
+    paintIvSummary(daily, tfBuckets);
+  }
+
+  /** خلاصهٔ هر پا در هر تایم‌فریم: دامنه، میانگین و تغییر سرتاسری. */
+  function paintIvSummary(daily, tfBuckets) {
+    const frames = [
+      ['روزانه', daily],
+      ['درون‌روز', intraday],
+      ['تایم‌فریم', tfBuckets],
+    ].filter(([, list]) => list.length);
+    const legs = replay.priced
+      .map((leg, index) => ({ leg, index }))
+      .filter(({ leg }) => leg.kind === 'call' || leg.kind === 'put');
+    if (!legs.length) {
+      $('bt-iv-summary').innerHTML = '<p class="empty-note">این ترکیب پای اختیاری ندارد؛ تلاطم ضمنی تعریف نمی‌شود.</p>';
+      return;
+    }
+    const rows = [];
+    for (const { leg, index } of legs) {
+      for (const [name, list] of frames) {
+        const stats = ivSummary(list.map((point) => point.legIvPct?.[index]));
+        rows.push({ leg, index, name, stats });
+      }
+    }
+    $('bt-iv-summary').innerHTML = `<table class="history-table backtest-compact-table"><thead><tr><th>پا</th><th>تایم‌فریم</th><th>مشاهده</th><th>بی‌تلاطم</th><th>ابتدا</th><th>انتها</th><th>تغییر</th><th>کمینه</th><th>بیشینه</th><th>میانگین</th></tr></thead><tbody>${rows.map((row) => `<tr><td>${faDigits(row.index + 1)} · ${esc(nameOf(row.leg, 'پا'))}</td><td>${esc(row.name)}</td><td>${fmt.int(row.stats.samples)}</td><td>${fmt.int(row.stats.gaps)}</td><td>${ivCell(row.stats.first)}</td><td>${ivCell(row.stats.last)}</td><td class="${signTone(row.stats.changePp)}">${Number.isFinite(row.stats.changePp) ? `${fmt.pct(row.stats.changePp)} واحد` : '—'}</td><td>${ivCell(row.stats.min)}</td><td>${ivCell(row.stats.max)}</td><td>${ivCell(row.stats.mean)}</td></tr>`).join('')}</tbody></table>`;
+  }
+
   /** جدول روزبه‌روز مسیر؛ هر ردیف دروازه ورود به ریزمعامله همان روز است. */
   function paintDayTable() {
     const rows = replay.rows;
     const legHeads = replay.priced.map((leg, index) => `<th>${faDigits(index + 1)} · ${esc(nameOf(leg, `پای ${index + 1}`))}</th>`).join('');
     $('bt-days-count').textContent = `${fmt.int(rows.filter((row) => row.status === 'ok').length)} روز معتبر از ${fmt.int(rows.length)} روز`;
     $('bt-days-table').innerHTML = `<table class="history-table"><thead><tr><th>روز</th><th>پایانی پایه</th><th>تغییر روز</th><th>تغییر از ورود</th>${legHeads}<th>سود ناخالص</th><th>کارمزد</th><th>سود خالص</th><th>تغییر روز</th><th>بازده</th><th>افت از قله</th><th>وجه تضمین خالص</th><th>وضعیت</th></tr></thead><tbody>${rows.map((row) => {
-      const legCells = row.perLeg.map((leg) => `<td><b>${Number.isFinite(leg.exitPrice) ? fmt.money(leg.exitPrice) : '—'}</b><small class="${signTone(leg.netPnl)}">اثر ${Number.isFinite(leg.netPnl) ? fmt.money(leg.netPnl) : '—'}</small><small>حجم ${fmt.int(leg.volume)}</small></td>`).join('');
+      const legCells = row.perLeg.map((leg) => `<td><b>${Number.isFinite(leg.exitPrice) ? fmt.money(leg.exitPrice) : '—'}</b><small class="${signTone(leg.netPnl)}">اثر ${Number.isFinite(leg.netPnl) ? fmt.money(leg.netPnl) : '—'}</small><small>حجم ${fmt.int(leg.volume)}</small><small>${ivCell(leg.ivPct)}</small></td>`).join('');
       const statusText = row.status === 'ok' ? 'معتبر'
         : row.status === 'liquidity' ? 'حذف نقدشوندگی'
           : `فاقد داده · پای ${faDigits((row.missingLegs || []).map((index) => index + 1).join('،'))}`;
@@ -589,8 +724,8 @@ export async function mount(root, { state }) {
     const maxTape = 300, stride = Math.max(1, Math.ceil(intraday.length / maxTape));
     const tape = intraday.filter((_, index) => index % stride === 0 || index === intraday.length - 1);
     $('bt-tape-count').textContent = `${fmt.int(tape.length)} از ${fmt.int(intraday.length)} نقطه`;
-    const tapeHeads = summary.legs.map((leg, index) => `<th>قیمت پای ${faDigits(index + 1)}</th><th>حجم ثانیه/تجمعی</th><th>سن</th>`).join('');
-    $('bt-tape-table').innerHTML = `<table class="history-table backtest-tape-table"><thead><tr><th>زمان</th><th>آفست</th><th>بازده</th><th>قیمت پایه</th><th>سن بیشینه</th>${tapeHeads}</tr></thead><tbody>${tape.map((row) => `<tr data-fresh="${row.allFresh}"><td>${faDigits(row.timeLabel)}</td><td class="${signTone(row.netPnl)}">${fmt.money(row.netPnl)}</td><td class="${signTone(row.returnPct)}">${fmt.pct(row.returnPct)}٪</td><td>${fmt.money(row.basePrice)}</td><td>${ageLabel(row.maxAgeSec)}</td>${row.perLeg.map((leg) => `<td>${fmt.money(leg.exitPrice)}</td><td>${fmt.int(leg.secondVolume)} / ${fmt.int(leg.cumulativeVolume)}</td><td>${ageLabel(leg.ageSec)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    const tapeHeads = summary.legs.map((leg, index) => `<th>قیمت پای ${faDigits(index + 1)}</th><th>تلاطم ${faDigits(index + 1)}</th><th>حجم ثانیه/تجمعی</th><th>سن</th>`).join('');
+    $('bt-tape-table').innerHTML = `<table class="history-table backtest-tape-table"><thead><tr><th>زمان</th><th>آفست</th><th>بازده</th><th>قیمت پایه</th><th>سن بیشینه</th>${tapeHeads}</tr></thead><tbody>${tape.map((row) => `<tr data-fresh="${row.allFresh}"><td>${faDigits(row.timeLabel)}</td><td class="${signTone(row.netPnl)}">${fmt.money(row.netPnl)}</td><td class="${signTone(row.returnPct)}">${fmt.pct(row.returnPct)}٪</td><td>${fmt.money(row.basePrice)}</td><td>${ageLabel(row.maxAgeSec)}</td>${row.perLeg.map((leg) => `<td>${fmt.money(leg.exitPrice)}</td><td>${ivCell(leg.ivPct)}</td><td>${fmt.int(leg.secondVolume)} / ${fmt.int(leg.cumulativeVolume)}</td><td>${ageLabel(leg.ageSec)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   }
 
   function exportIntraday() {
@@ -647,16 +782,17 @@ export async function mount(root, { state }) {
     paintOverview();
     paintDayTable();
     paintIntradayAnalysis();
+    paintIv();
     const lastDaily = replay.summary.last, lastTick = intraday.at(-1);
     const finalLegs = lastTick?.perLeg || lastDaily?.perLeg || [];
     const manualExitCount = Object.keys(replay.manualExit || {}).length;
     $('bt-final-source').textContent = lastTick
       ? `آخرین ریزمعامله کامل در ${faDigits(lastTick.timeLabel)}`
       : manualExitCount ? `قیمت روزانه انتخاب‌شده، با قیمت دستی ${fmt.int(manualExitCount)} پا` : 'قیمت روزانه انتخاب‌شده';
-    $('bt-leg-table').innerHTML = `<table class="history-table"><thead><tr><th>پا</th><th>جهت</th><th>قیمت ورود</th><th>قیمت سنجش</th><th>اثر ناخالص</th><th>کارمزد</th><th>اثر خالص</th><th>حجم/ارزش روز</th></tr></thead><tbody>${finalLegs.map((leg, index) => {
+    $('bt-leg-table').innerHTML = `<table class="history-table"><thead><tr><th>پا</th><th>جهت</th><th>قیمت ورود</th><th>قیمت سنجش</th><th>اثر ناخالص</th><th>کارمزد</th><th>اثر خالص</th><th>تلاطم ضمنی</th><th>روز تا سررسید</th><th>حجم/ارزش روز</th></tr></thead><tbody>${finalLegs.map((leg, index) => {
       const dailyLeg = lastDaily?.perLeg?.[index];
       const activity = lastTick ? `حجم ${fmt.int(leg.cumulativeVolume)} · ${fmt.int(leg.tradeCount)} معامله · سن ${ageLabel(leg.ageSec)}` : `حجم ${fmt.int(dailyLeg?.volume)} · ارزش ${fmt.money(dailyLeg?.value)}`;
-      return `<tr><td>${faDigits(index + 1)} · ${esc(nameOf(leg, `پای ${index + 1}`))}</td><td>${replay.priced[index]?.side === 'buy' ? 'خرید' : 'فروش'}</td><td>${fmt.money(leg.entryPrice)}</td><td>${fmt.money(leg.exitPrice)}</td><td class="${signTone(leg.grossPnl)}">${fmt.money(leg.grossPnl)}</td><td>${fmt.money((leg.entryFee || 0) + (leg.exitFee || 0))}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td><td>${activity}</td></tr>`;
+      return `<tr><td>${faDigits(index + 1)} · ${esc(nameOf(leg, `پای ${index + 1}`))}</td><td>${replay.priced[index]?.side === 'buy' ? 'خرید' : 'فروش'}</td><td>${fmt.money(leg.entryPrice)}</td><td>${fmt.money(leg.exitPrice)}</td><td class="${signTone(leg.grossPnl)}">${fmt.money(leg.grossPnl)}</td><td>${fmt.money((leg.entryFee || 0) + (leg.exitFee || 0))}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td><td>${ivCell(Number.isFinite(leg.ivPct) ? leg.ivPct : dailyLeg?.ivPct)}</td><td>${fmt.int(legDaysToExpiry(replay.priced[index], lastTick ? intradayDate : lastDaily?.date))}</td><td>${activity}</td></tr>`;
     }).join('')}</tbody></table>`;
 
     const args = { legs, seriesByIns, baseIns: String(ua.ins), startDate: entryDates[0], endDate: Number($('bt-exit-date').dataset.value), entryBasis: entryRail.dataset.value, exitBasis: exitRail.dataset.value, units: Math.max(1, Math.trunc(Number($('bt-units').value) || 1)), fees: feesOf(state.settings), settings: state.settings };
@@ -686,7 +822,7 @@ export async function mount(root, { state }) {
       setStatus(`دریافت ریزمعامله ${fmt.int(index + 1)} از ${fmt.int(wanted.length)} روز…`);
       await nextFrame();
       const day = await fetchDayTrades(wanted[index]);
-      const points = replayIntraday({ replay, tradesByIns: day.byIns, baseTrades: day.byIns[String(ua.ins)] || [], fees: feesOf(state.settings) });
+      const points = replayDay(day, wanted[index]);
       if (points.length) out.push({ date: wanted[index], points }); else empty += 1;
     }
     return { days: out, empty, skipped: dates.length - wanted.length };
@@ -695,6 +831,7 @@ export async function mount(root, { state }) {
   function paintTimeframe(loaded) {
     const seconds = timeframeSeconds;
     const buckets = bucketIntradayPath(timeframeDays, { bucketSeconds: seconds });
+    annotateBucketIv(buckets, { legs: replay.priced }, ivP());
     if (!buckets.length) {
       $('bt-tf-body').hidden = true;
       $('bt-tf-note').textContent = 'در هیچ روزی از این بازه، ثانیه‌ای پیدا نشد که همه پاها در آن قیمت مشاهده‌شده داشته باشند.';
@@ -761,10 +898,10 @@ export async function mount(root, { state }) {
         + ' این توصیف گذشته است، نه پیشنهاد اجرا.';
     }
 
-    const legHeads = replay.priced.map((leg, index) => `<th>قیمت ${faDigits(index + 1)}</th><th>اثر ${faDigits(index + 1)}</th>`).join('');
+    const legHeads = replay.priced.map((leg, index) => `<th>قیمت ${faDigits(index + 1)}</th><th>اثر ${faDigits(index + 1)}</th><th>تلاطم ${faDigits(index + 1)}</th>`).join('');
     const shown = buckets.slice(-400);
     $('bt-tf-count').textContent = `${fmt.int(shown.length)} از ${fmt.int(buckets.length)} سطل`;
-    $('bt-tf-table').innerHTML = `<table class="history-table backtest-tape-table"><thead><tr><th>روز</th><th>بازه</th><th>مشاهده</th><th>باز</th><th>بسته</th><th>بیشینه</th><th>کمینه</th><th>تغییر سطل</th><th>تغییر پیاپی</th><th>بازده</th><th>پایه</th><th>حجم پاها</th>${legHeads}</tr></thead><tbody>${shown.map((row) => `<tr><td>${dateLabel(row.date)}</td><td>${rangeLabel(row)}</td><td>${fmt.int(row.observations)}</td><td class="${signTone(row.openPnl)}">${fmt.money(row.openPnl)}</td><td class="${signTone(row.closePnl)}">${fmt.money(row.closePnl)}</td><td class="gain">${fmt.money(row.highPnl)}</td><td class="loss">${fmt.money(row.lowPnl)}</td><td class="${signTone(row.changePnl)}">${fmt.money(row.changePnl)}</td><td class="${signTone(row.stepPnl)}">${Number.isFinite(row.stepPnl) ? fmt.money(row.stepPnl) : '—'}</td><td class="${signTone(row.returnPct)}">${fmt.pct(row.returnPct)}٪</td><td>${fmt.money(row.basePrice)}</td><td>${fmt.int(row.volume)}</td>${row.perLeg.map((leg) => `<td>${fmt.money(leg.price)}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    $('bt-tf-table').innerHTML = `<table class="history-table backtest-tape-table"><thead><tr><th>روز</th><th>بازه</th><th>مشاهده</th><th>باز</th><th>بسته</th><th>بیشینه</th><th>کمینه</th><th>تغییر سطل</th><th>تغییر پیاپی</th><th>بازده</th><th>پایه</th><th>حجم پاها</th>${legHeads}</tr></thead><tbody>${shown.map((row) => `<tr><td>${dateLabel(row.date)}</td><td>${rangeLabel(row)}</td><td>${fmt.int(row.observations)}</td><td class="${signTone(row.openPnl)}">${fmt.money(row.openPnl)}</td><td class="${signTone(row.closePnl)}">${fmt.money(row.closePnl)}</td><td class="gain">${fmt.money(row.highPnl)}</td><td class="loss">${fmt.money(row.lowPnl)}</td><td class="${signTone(row.changePnl)}">${fmt.money(row.changePnl)}</td><td class="${signTone(row.stepPnl)}">${Number.isFinite(row.stepPnl) ? fmt.money(row.stepPnl) : '—'}</td><td class="${signTone(row.returnPct)}">${fmt.pct(row.returnPct)}٪</td><td>${fmt.money(row.basePrice)}</td><td>${fmt.int(row.volume)}</td>${row.perLeg.map((leg) => `<td>${fmt.money(leg.price)}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td><td>${ivCell(leg.ivPct)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   }
 
   async function runTimeframe() {
@@ -827,7 +964,7 @@ export async function mount(root, { state }) {
       const failed = codes.filter((ins) => payload.items?.[ins]?.error);
       intradayDate = tehranDateNumber(payload.at);
       lastDayFetch = { byIns, failed, date: intradayDate };
-      intraday = replayIntraday({ replay, tradesByIns: byIns, baseTrades: byIns[String(ua.ins)] || [], fees: feesOf(state.settings) });
+      intraday = replayDay({ byIns }, intradayDate);
       $('bt-result').hidden = false;
       paintResult();
       $('bt-intraday-title').textContent = `رصد زنده موقعیت در ${dateLabel(intradayDate)} · ۹:۰۰ تا ۱۲:۳۰`;
@@ -854,6 +991,7 @@ export async function mount(root, { state }) {
       fees: feesOf(state.settings), settings: state.settings,
     });
     if (!replay.ok) { setStatus(replay.error || 'موقعیت تاریخی برای رصد ساخته نشد.', true); return; }
+    annotateDailyIv(replay, ivP());
     tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true;
     liveWatching = true; $('bt-live').textContent = 'توقف رصد زنده'; $('bt-live').setAttribute('data-active', 'true');
     setStatus('در حال دریافت معاملات امروز برای موقعیت تاریخی…');
@@ -870,12 +1008,13 @@ export async function mount(root, { state }) {
     try {
       replay = replayHistory({ legs, seriesByIns, baseIns: String(ua.ins), startDate, endDate, entryBasis: entryRail.dataset.value, exitBasis: exitRail.dataset.value, manualEntry, manualExit, units: Math.max(1, Math.trunc(Number($('bt-units').value) || 1)), fees: feesOf(state.settings), settings: state.settings });
       if (!replay.ok) throw new Error(replay.error);
+      annotateDailyIv(replay, ivP());
       // ترکیب یا بازه عوض شده؛ ریزمعامله‌های کش‌شده مال بازپخش قبلی‌اند.
       tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true;
       const day = await fetchDayTrades(endDate);
       paintRunNote(day);
       intradayDate = endDate;
-      intraday = replayIntraday({ replay, tradesByIns: day.byIns, baseTrades: day.byIns[String(ua.ins)] || [], fees: feesOf(state.settings) });
+      intraday = replayDay(day, endDate);
       $('bt-result').hidden = false; paintResult();
       const warning = tradeWarningText(day);
       if (intraday.length) setStatus(`${fmt.int(replay.summary.validDays)} روز و ${fmt.int(intraday.length)} نقطه مشترک درون‌روزی محاسبه شد${warning ? `؛ ${warning}` : ''}.`, Boolean(warning));
@@ -1014,6 +1153,37 @@ export async function mount(root, { state }) {
     if (row && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDayIntraday(Number(row.dataset.day)); }
   });
   $('bt-tf-run').addEventListener('click', runTimeframe);
+
+  // عوض‌شدن پارامتر یعنی هر سه تایم‌فریم باید از نو مهر بخورند. جدول‌هایی
+  // که تلاطم را در خانه‌هایشان نشان می‌دهند هم دوباره کشیده می‌شوند، وگرنه
+  // عدد جدول و عدد نمودار دو حرف می‌زدند.
+  function reapplyIv() {
+    if (!replay?.ok) return;
+    annotateDailyIv(replay, ivP());
+    annotateIntradayIv(intraday, { legs: replay.priced, date: intradayDate }, ivP());
+    paintDayTable();
+    paintIntradayAnalysis();
+    paintIv();
+    if (!$('bt-tf-body').hidden) paintTimeframe(true);
+  }
+
+  paintIvParams();
+
+  $('bt-iv-params').addEventListener('input', (event) => {
+    const field = event.target.closest('[data-iv-param]');
+    if (!field) return;
+    const raw = field.value.trim();
+    // خانهٔ خالی یعنی «همان تنظیمات سراسری»، نه صفر.
+    if (raw === '') delete ivOverride[field.dataset.ivParam];
+    else ivOverride[field.dataset.ivParam] = Number(raw);
+    reapplyIv();
+  });
+  $('bt-iv-params').addEventListener('click', (event) => {
+    if (!event.target.closest('#bt-iv-reset')) return;
+    for (const key of Object.keys(ivOverride)) delete ivOverride[key];
+    syncIvParams();
+    reapplyIv();
+  });
   $('bt-tf-size').addEventListener('change', () => {
     // تایم‌فریم فقط سطل‌بندی را عوض می‌کند، نه داده را. اگر روزها گرفته شده‌اند
     // دوباره درخواستی نمی‌رود.

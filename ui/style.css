@@ -413,6 +413,19 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-tip b { color: var(--ink); font-family: var(--mono); }
 .backtest-tip strong.gain { color: var(--gain); }
 .backtest-tip strong.loss { color: var(--loss); }
+/* ——— تلاطم ضمنی پاها در بک‌تست ——— */
+.backtest-iv-params {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3, 12px); align-items: end;
+  margin: var(--space-3, 12px) 0 var(--space-4, 16px);
+  padding: var(--space-3, 12px); border: 1px solid var(--line);
+  border-radius: var(--radius-md); background: var(--panel-2);
+}
+.backtest-iv-params label { display: grid; gap: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+.backtest-iv-params input { width: 100%; min-height: var(--control-h, 40px); }
+.backtest-iv-params button { justify-self: start; }
+.backtest-iv .history-table-wrap { margin-bottom: var(--space-4, 16px); }
+
 .backtest-matrix-link { margin-top: 14px; background: linear-gradient(145deg, var(--panel), color-mix(in srgb, var(--accent) 6%, var(--panel))); }
 .backtest-matrix-kpis { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)); gap: 9px; }
 .backtest-matrix-kpis article { display: grid; gap: 7px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
