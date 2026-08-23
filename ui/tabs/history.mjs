@@ -12,6 +12,7 @@ import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
+import { historyHandoffPlan } from '/ui/handoff.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -442,10 +443,14 @@ export async function mount(root, { state }) {
     const host = $('h-frozen-strategy');
     host.dataset.empty = 'false';
     host.dataset.folded = frozenFolded() ? '1' : '0';
+    const backtestDisabled = !def?.feasible;
     host.innerHTML = `<div class="frozen-head">
       <div class="frozen-summary"><span>مشخصات موقعیت</span><b>${esc(title)}</b>
         <small>پایه ${esc(displayName(ua, 'دارایی پایه'))} · ${esc(GROUPS[def?.group] || 'ترکیب دستی')}${def?.dir ? ` · ${esc(def.dir)}` : ''}</small></div>
-      <button type="button" class="ghost" data-frozen-fold>${frozenFolded() ? 'باز کردن' : 'جمع کردن'}</button>
+      <div class="frozen-actions">
+        <button type="button" class="primary" data-history-backtest${backtestDisabled ? ' disabled title="این استراتژی به فروش دارایی پایه نیاز دارد و در بک‌تست سریع اجرایی نیست."' : ''}>ریز بک‌تست همین موقعیت</button>
+        <button type="button" class="ghost" data-frozen-fold>${frozenFolded() ? 'باز کردن' : 'جمع کردن'}</button>
+      </div>
     </div>
     <div class="frozen-facts">${facts.map(([key, value, tone]) => `<div><span>${esc(key)}</span><b class="${tone}">${esc(value)}</b></div>`).join('')}</div>
     <div class="frozen-legs">${cards}</div>`;
@@ -461,6 +466,21 @@ export async function mount(root, { state }) {
   }
 
   function handleFrozenClick(event) {
+    if (event.target.closest('[data-history-backtest]')) {
+      const def = byId(strategySelect.value);
+      if (!currentReplay || !currentArgs) { setStatus('ابتدا یک موقعیت را تحلیل کن.', true); return; }
+      if (!def?.feasible) { setStatus('این استراتژی به فروش دارایی پایه نیاز دارد و در بک‌تست سریع اجرایی نیست.', true); return; }
+      state.handoff = historyHandoffPlan({
+        ua: analysisUa || ua,
+        strategyId: def.id,
+        strategyName: def.name,
+        replay: currentReplay,
+        args: currentArgs,
+        comboName: $('h-selected-label').textContent,
+      });
+      location.hash = 'backtest';
+      return;
+    }
     if (event.target.closest('[data-frozen-fold]')) toggleFrozenFold();
   }
 

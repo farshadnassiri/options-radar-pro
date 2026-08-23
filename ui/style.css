@@ -897,6 +897,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .history-frozen[data-folded="1"] .frozen-legs { display: none; }
 .history-frozen[data-empty="true"] { border-style: dashed; box-shadow: none; }
 .frozen-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.frozen-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 7px; }
+.frozen-actions .primary { min-height: 34px; padding: 6px 14px; border-radius: var(--radius-md); white-space: nowrap; }
+.frozen-actions .primary:disabled { cursor: not-allowed; opacity: .55; }
 .frozen-head .ghost {
   background: var(--panel); border: 1px solid var(--line-soft); color: var(--ink-2);
   box-shadow: var(--shadow-2xs);
