@@ -142,7 +142,7 @@ function sideQuote(r, sfx) {
     kind: sfx === 'C' ? 'call' : 'put',
     bid, bidQty: n(r[`qTitMeDem_${sfx}`]),
     ask, askQty: n(r[`qTitMeOf_${sfx}`]),
-    last, close,
+    last, close, yday: n(r[`priceYesterday_${sfx}`]),
     low: 0, high: 0,               // مرحله دو پر می‌کند
     oi: n(r[`oP_${sfx}`]), oiYday: n(r[`yesterdayOP_${sfx}`]),
     vol: n(r[`qTotTran5J_${sfx}`]), trades: n(r[`zTotTran_${sfx}`]),
@@ -285,13 +285,14 @@ export function underlyingList(chain, opt = {}) {
   const yearDays = Number.isFinite(opt.yearDays) ? opt.yearDays : 365;
   return [...chain.values()]
     .map((u) => ({
-      ins: u.ins, name: u.name, last: u.last || u.close, close: u.close,
+      ins: u.ins, name: u.name, last: u.last || u.close, close: u.close, yday: u.yday,
+      changePct: (u.last || u.close) > 0 && u.yday > 0 ? (((u.last || u.close) / u.yday) - 1) * 100 : NaN,
       expiries: u.expiryList.length,
       nearestDays: u.expiryList[0]?.days ?? null,
       // گردش خودِ نماد پایه، جدا از گردش زنجیره اختیارش. تا امروز خوانده
       // می‌شد ولی به هیچ ستونی نمی‌رسید، و ستون «ارزش معاملات» جدول در
       // واقع مجموع زنجیره بود — دو عدد کاملاً متفاوت با یک نام.
-      uaValue: u.value,
+      uaValue: u.value, uaVolume: u.vol, uaTrades: u.trades,
       ...rollupQuotes(u),
       pcRatio: pcOpenInterestRatio(u),
       atmIv: atmIv(u, rFree, divYield, yearDays),

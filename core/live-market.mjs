@@ -122,3 +122,140 @@ export function liveReferenceTape(rows = [], instrument = {}) {
     };
   });
 }
+
+/**
+ * ابزارهای پایهٔ یکتای عکس دیده‌بان؛ ورودی همان ردیف خام TSETMC است.
+ *
+ * هر ردیف دیده‌بان یک جفت کال/پوت دارد و مشخصات پایه را تکرار می‌کند. این
+ * تابع آن تکرار را حذف می‌کند و فقط میدان‌هایی را نگه می‌دارد که واقعاً از
+ * تابلو آمده‌اند. نماد بدون حجم امروز بعداً «بی‌معامله» می‌ماند، نه خنثی.
+ */
+export function breadthInstruments(rows = []) {
+  const byIns = new Map();
+  for (const row of rows || []) {
+    const ins = String(row?.uaInsCode ?? '');
+    if (!/^\d+$/.test(ins) || byIns.has(ins)) continue;
+    const rawName = String(row?.lval30_UA ?? '').trim();
+    byIns.set(ins, {
+      ins,
+      name: rawName && rawName !== ins ? rawName : 'دارایی پایه بدون نام',
+      last: finite(row?.pDrCotVal_UA),
+      close: finite(row?.pClosing_UA),
+      yday: finite(row?.priceYesterday_UA),
+      volume: Math.max(0, finite(row?.qTotTran5J_UA) || 0),
+      value: Math.max(0, finite(row?.qTotCap_UA) || 0),
+      trades: Math.max(0, finite(row?.zTotTran_UA) || 0),
+    });
+  }
+  return [...byIns.values()];
+}
+
+const breadthState = (price, yday, traded) => {
+  if (!traded) return 'untraded';
+  if (!(finite(price) > 0) || !(finite(yday) > 0)) return 'unknown';
+  if (finite(price) > finite(yday)) return 'positive';
+  if (finite(price) < finite(yday)) return 'negative';
+  return 'flat';
+};
+
+/** عکس همین لحظهٔ وسعت بازار پایه؛ درصدها فقط میان نمادهای معامله‌شده‌اند. */
+export function marketBreadthSnapshot(instruments = []) {
+  const rows = (instruments || []).map((item) => {
+    const price = finite(item.last) > 0 ? finite(item.last) : finite(item.close);
+    const volume = Math.max(0, finite(item.uaVolume !== undefined ? item.uaVolume : item.volume) || 0);
+    const trades = Math.max(0, finite(item.uaTrades !== undefined ? item.uaTrades : item.trades) || 0);
+    const value = Math.max(0, finite(item.uaValue !== undefined ? item.uaValue : item.value) || 0);
+    const state = breadthState(price, item.yday, volume > 0 || trades > 0);
+    return {
+      ...item, price, volume, value, trades, state,
+      changePct: price > 0 && finite(item.yday) > 0 ? ((price / finite(item.yday)) - 1) * 100 : NaN,
+    };
+  });
+  const count = (state) => rows.filter((row) => row.state === state).length;
+  const positive = count('positive'), negative = count('negative'), flat = count('flat');
+  const untraded = count('untraded'), unknown = count('unknown');
+  const traded = positive + negative + flat;
+  const pct = (value) => traded > 0 ? (value / traded) * 100 : NaN;
+  const volumeOf = (state) => rows.filter((row) => row.state === state).reduce((sum, row) => sum + row.volume, 0);
+  const valueOf = (state) => rows.filter((row) => row.state === state).reduce((sum, row) => sum + row.value, 0);
+  return {
+    total: rows.length, traded, positive, negative, flat, untraded, unknown,
+    positivePct: pct(positive), negativePct: pct(negative), flatPct: pct(flat),
+    breadth: positive - negative,
+    positiveVolume: volumeOf('positive'), negativeVolume: volumeOf('negative'), flatVolume: volumeOf('flat'),
+    positiveValue: valueOf('positive'), negativeValue: valueOf('negative'), flatValue: valueOf('flat'),
+    rows,
+    gainers: rows.filter((row) => row.state === 'positive').sort((a, b) => b.changePct - a.changePct),
+    losers: rows.filter((row) => row.state === 'negative').sort((a, b) => a.changePct - b.changePct),
+  };
+}
+
+/**
+ * مسیر دقیقه‌ای وسعت بازار از اولین معاملات امروز.
+ *
+ * تا نخستین معاملهٔ هر نماد، وضعیت آن `untraded` است. معاملات داخل یک دقیقه
+ * روی هم اعمال و فقط عکس انتهای همان دقیقه ثبت می‌شود؛ قیمت یا دقیقهٔ خالی
+ * درون‌یابی نمی‌شود. حجم و ارزش هم فقط از خود معاملات معتبر جمع می‌شوند.
+ */
+export function marketBreadthTimeline(instruments = [], tradesByIns = {}, { bucketSeconds = 60 } = {}) {
+  const source = new Map((instruments || []).map((item) => [String(item.ins), item]));
+  const width = Math.max(60, Math.trunc(finite(bucketSeconds) || 60));
+  const events = [];
+  for (const [ins, item] of source) {
+    for (const trade of activeLiveTrades(tradesByIns[ins] || [])) {
+      const second = tradeSecond(trade.time);
+      events.push({ ins, item, ...trade, second, bucket: Math.floor(second / width) * width });
+    }
+  }
+  events.sort((a, b) => a.second - b.second || a.sequence - b.sequence || a.ins.localeCompare(b.ins));
+  if (!events.length) return [];
+
+  const latest = new Map();
+  let cumulativeVolume = 0, cumulativeValue = 0, cumulativeTrades = 0;
+  const out = [];
+  for (let at = 0; at < events.length;) {
+    const bucket = events[at].bucket;
+    let lastTime = events[at].time;
+    while (at < events.length && events[at].bucket === bucket) {
+      const event = events[at];
+      latest.set(event.ins, event.price);
+      cumulativeVolume += event.quantity;
+      cumulativeValue += event.quantity * event.price;
+      cumulativeTrades += 1;
+      lastTime = event.time;
+      at += 1;
+    }
+    let positive = 0, negative = 0, flat = 0, unknown = 0;
+    for (const [ins, price] of latest) {
+      const state = breadthState(price, source.get(ins)?.yday, true);
+      if (state === 'positive') positive += 1;
+      else if (state === 'negative') negative += 1;
+      else if (state === 'flat') flat += 1;
+      else unknown += 1;
+    }
+    const traded = positive + negative + flat;
+    out.push({
+      second: bucket + width - 1, time: lastTime,
+      total: source.size, traded, untraded: source.size - latest.size, unknown,
+      positive, negative, flat, breadth: positive - negative,
+      positivePct: traded > 0 ? (positive / traded) * 100 : NaN,
+      negativePct: traded > 0 ? (negative / traded) * 100 : NaN,
+      flatPct: traded > 0 ? (flat / traded) * 100 : NaN,
+      cumulativeVolume, cumulativeValue, cumulativeTrades,
+    });
+  }
+  return out;
+}
+
+/** IV آخرین قیمت مشاهده‌شده قرارداد در عکس زنجیره. */
+export function liveQuoteIv(contract = {}, basePrice, settings = {}) {
+  const price = finite(contract.last) > 0 ? finite(contract.last) : finite(contract.close);
+  const days = finite(contract.days);
+  const yearDays = finite(settings.dayCountYear);
+  const T = days > 0 && yearDays > 0 ? days / yearDays : NaN;
+  const strike = finite(contract.strike);
+  if (!(price > 0) || !(finite(basePrice) > 0) || !(strike > 0) || !Number.isFinite(T)) return NaN;
+  const iv = impliedVol(contract.kind === 'put' ? 'put' : 'call', price, finite(basePrice), strike, T,
+    finite(settings.rFree), finite(settings.divYield), { lo: finite(settings.ivLo), hi: finite(settings.ivHi) });
+  return Number.isFinite(iv) ? iv * 100 : NaN;
+}

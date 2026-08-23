@@ -4,11 +4,14 @@
 import { fmt, faDigits, faClock } from '/ui/fmt.mjs';
 import { makeTable } from '/ui/table.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
-import { liveOptionTape, liveReferenceTape } from '/core/live-market.mjs';
+import {
+  liveOptionTape, liveQuoteIv, liveReferenceTape, marketBreadthSnapshot,
+} from '/core/live-market.mjs';
+import { historyDateLabel } from '/core/history.mjs';
 import { logError } from '/ui/errlog.mjs';
 
 const COLORS = ['var(--accent)', 'var(--cmp1)', 'var(--cmp2)', 'var(--cmp3)', 'var(--cmp4)', 'var(--gain)', 'var(--loss)', 'var(--warn)'];
-const MAX_OPTIONS = 23; // پایه ابزار بیست‌وچهارمِ سقف سرور است
+const MAX_OPTIONS = 23; // فقط برای پیاده‌سازی نسخه پیشینِ نگه‌داشته‌شده در همین ماژول
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (ch) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -20,6 +23,40 @@ const timeLabel = (value, seconds = false) => {
 };
 
 const kindLabel = (kind) => kind === 'call' ? 'اختیار خرید' : kind === 'put' ? 'اختیار فروش' : 'نماد پایه';
+const expiryLabel = (endDate, days) => `${faDigits(historyDateLabel(endDate))} · ${fmt.int(days)} روز`;
+
+export function breadthDonut(host, summary) {
+  const parts = [
+    ['مثبت', summary.positive, summary.positivePct, 'var(--gain)'],
+    ['منفی', summary.negative, summary.negativePct, 'var(--loss)'],
+    ['بدون تغییر', summary.flat, summary.flatPct, 'var(--warn)'],
+  ];
+  let offset = 0;
+  const rings = parts.map(([, , pct, color]) => {
+    const value = Number.isFinite(pct) ? Math.max(0, Math.min(100, pct)) : 0;
+    const ring = `<circle class="live-breadth-segment" pathLength="100" style="--segment:${color};--dash:${value} ${100 - value};--offset:${-offset}" cx="80" cy="80" r="54"/>`;
+    offset += value;
+    return ring;
+  }).join('');
+  host.innerHTML = `<div class="live-breadth-donut"><svg viewBox="0 0 160 160" aria-label="نمودار دایره‌ای نمادهای مثبت و منفی"><circle class="live-breadth-track" pathLength="100" cx="80" cy="80" r="54"/>${rings}<text x="80" y="76" text-anchor="middle">${fmt.int(summary.traded)}</text><text x="80" y="96" text-anchor="middle">نماد معامله‌شده</text></svg><div>${parts.map(([label, count, pct, color]) => `<span style="--segment:${color}"><i></i><b>${label}</b><strong>${fmt.int(count)}</strong><small>${fmt.pct(pct)}٪</small></span>`).join('')}<span style="--segment:var(--muted)"><i></i><b>بی‌معامله</b><strong>${fmt.int(summary.untraded)}</strong><small>خارج از درصد</small></span></div></div>`;
+}
+
+export function breadthBars(host, summary) {
+  const maxCount = Math.max(1, summary.positive, summary.negative, summary.flat);
+  const parts = [
+    ['نماد مثبت', summary.positive, summary.positivePct, summary.positiveVolume, summary.positiveValue, 'gain'],
+    ['نماد منفی', summary.negative, summary.negativePct, summary.negativeVolume, summary.negativeValue, 'loss'],
+    ['بدون تغییر', summary.flat, summary.flatPct, summary.flatVolume, summary.flatValue, 'warn'],
+  ];
+  host.innerHTML = `<div class="live-breadth-bars">${parts.map(([label, count, pct, volume, value, tone]) => `<article class="${tone}"><header><b>${label}</b><strong>${fmt.int(count)} · ${fmt.pct(pct)}٪</strong></header><i><b style="--bar:${(count / maxCount) * 100}%"></b></i><footer><span>حجم ${fmt.int(volume)}</span><span>ارزش ${fmt.money(value)}</span></footer></article>`).join('')}</div>`;
+}
+
+export function moverBars(host, summary) {
+  const rows = [...summary.gainers.slice(0, 5), ...summary.losers.slice(0, 5)];
+  if (!rows.length) { host.innerHTML = '<p class="empty-note">هنوز نماد مثبت یا منفی معامله‌شده‌ای نیست.</p>'; return; }
+  const bound = Math.max(1, ...rows.map((row) => Math.abs(row.changePct)));
+  host.innerHTML = `<div class="live-mover-bars">${rows.map((row) => `<article class="${row.changePct >= 0 ? 'gain' : 'loss'}"><span>${esc(row.name)}</span><i><b style="--bar:${Math.abs(row.changePct) / bound * 100}%"></b></i><strong>${fmt.pct(row.changePct)}٪</strong><small>حجم ${fmt.int(row.volume)}</small></article>`).join('')}</div>`;
+}
 
 // جدول همه ردیف‌ها را نگه می‌دارد، اما فرستادن ده‌ها هزار نقطه به یک path
 // SVG هر پنج ثانیه رابط را سنگین می‌کند. هر سطل، ابتدا/انتها و کمینه/بیشینه
@@ -42,7 +79,7 @@ function chartSample(points, limit = 1600) {
   return out;
 }
 
-function liveChart(host, series, { valueFmt = fmt.pct, unit = 'درصد', zeroFloor = false } = {}) {
+export function liveChart(host, series, { valueFmt = fmt.pct, unit = 'درصد', zeroFloor = false } = {}) {
   const usable = series.map((item) => ({ ...item, points: chartSample(item.points.filter((point) => Number.isFinite(point.value) && Number.isFinite(point.second))) }))
     .filter((item) => item.points.length);
   if (!usable.length) {
@@ -130,7 +167,7 @@ const TAPE_COLS = [
   { key: 'ivPct', label: 'تلاطم ضمنی ٪', fmt: 'pct', group: 'اختیار', heat: 'prob' },
 ];
 
-export async function mount(root, { state, api }) {
+async function legacyMount(root, { state, api }) {
   root.innerHTML = `<div class="page-head"><div><p class="eyebrow">نوار معاملات امروز</p><h2>رصد لحظه‌ای بازار</h2><p>همه معاملات ثبت‌شده از شروع بازار تا آخرین پاسخ برای نماد پایه و قراردادهای انتخابی. آخرین معامله مرجع مشاهده بازار است، نه قیمت تضمین‌شده اجرا.</p></div></div>
     <section class="card live-market-controls"><div class="live-market-control-head"><label>نماد پایه<select id="lm-base"><option>در حال دریافت…</option></select></label><div><button type="button" class="ghost" id="lm-refresh">دریافت الآن</button><button type="button" class="ghost" id="lm-toggle">توقف خودکار</button></div></div>
       <div class="live-market-model" id="lm-model"></div><div class="live-market-pick-tools"><input id="lm-search" type="search" placeholder="جست‌وجوی قرارداد"><button type="button" class="ghost" data-lm-pick="top">پرحجم‌ها</button><button type="button" class="ghost" data-lm-pick="call">همه کال</button><button type="button" class="ghost" data-lm-pick="put">همه پوت</button><button type="button" class="ghost" data-lm-pick="none">پاک‌کردن</button><span id="lm-selected"></span></div>
@@ -344,4 +381,12 @@ export async function mount(root, { state, api }) {
   schedule();
 
   return () => { offWatch(); offChain(); clearInterval(timer); loadSeq += 1; };
+}
+
+// پیاده‌سازی تازه در فایل مستقل نگه داشته شده تا موتور نمودار آزموده‌شدهٔ
+// همین ماژول بازاستفاده شود و مهاجرت داشبورد، تاریخچهٔ رفتاری نسخه قبل را
+// در یک تغییر عظیم و غیرقابل بازبینی پنهان نکند.
+export async function mount(root, context) {
+  const dashboard = await import('/ui/tabs/live-market-dashboard.mjs');
+  return dashboard.mount(root, context);
 }

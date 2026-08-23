@@ -138,6 +138,7 @@ function handleMessage(m) {
     if (!ua) { self.postMessage({ type: 'chain-detail', id: m.id, error: 'نماد در دیده‌بان نیست' }); return; }
     const out = {
       ins: ua.ins, name: ua.name, last: ua.last, close: ua.close, yday: ua.yday,
+      vol: ua.vol, value: ua.value, trades: ua.trades,
       expiries: ua.expiryList.map((ex) => ({
         days: ex.days, endDate: ex.endDate,
         strikes: ex.strikeList.map((st) => ({

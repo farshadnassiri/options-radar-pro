@@ -19,7 +19,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
-import { summarizeLiveTrades } from '../core/live-market.mjs';
+import {
+  breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
+} from '../core/live-market.mjs';
 import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { createLog } from './errlog.mjs';
@@ -439,6 +441,45 @@ async function handle(req, res) {
       const items = Object.fromEntries(await Promise.all(codes.map(one)));
       res.setHeader('Cache-Control', 'no-store');
       return sendJson(res, 200, { at: Date.now(), count: codes.length, items });
+    }
+
+    // داشبورد وسعت بازار پایه از اولین معامله امروز تا همین لحظه. نوار همه
+    // پایه‌ها دیده می‌شود تا «بی‌معامله» با «بدون تغییر» اشتباه نشود؛ نماد
+    // بی‌معامله در مخرج درصدهای مثبت/منفی وارد نمی‌شود و جدا می‌ماند.
+    if (p === '/api/live-dashboard') {
+      const sourceRows = watch.rows.length
+        ? watch.rows
+        : firstList(await get('/Instrument/GetInstrumentOptionMarketWatch/0', Math.max(60, S.ttlMetaSec), 4));
+      const instruments = breadthInstruments(sourceRows).slice(0, 80);
+      // دیده‌بان اختیار در پاسخ واقعی حجم/تعداد معامله پایه را نمی‌فرستد؛
+      // بنابراین برای تشخیص «بی‌معامله» باید نوار همه پایه‌های یکتا دیده
+      // شود. تعداد پایه‌ها کوچک و سقف این مسیر ۸۰ است؛ کش ۲۵ثانیه‌ای نیز
+      // اجازه نمی‌دهد چند مرورگر سهمیه بالادست را چندبرابر کنند.
+      const fetched = await Promise.all(instruments.map(async (item) => {
+        try {
+          const rows = normalizeTrades(firstList(await getFresh(`/Trade/GetTrade/${item.ins}`, 25, 3)));
+          return [item.ins, rows, ''];
+        } catch (e) {
+          return [item.ins, [], `${e.name}: ${e.message}`];
+        }
+      }));
+      const tradesByIns = Object.fromEntries(fetched.map(([ins, rows]) => [ins, rows]));
+      const failed = fetched.filter(([, , error]) => error).map(([ins, , error]) => ({ ins, error }));
+      const observed = instruments.map((item) => {
+        const summary = summarizeLiveTrades(tradesByIns[item.ins] || []);
+        return {
+          ...item,
+          last: summary.count ? summary.lastPrice : item.last,
+          volume: summary.volume, value: summary.value, trades: summary.count,
+        };
+      });
+      const snapshot = marketBreadthSnapshot(observed);
+      const timeline = marketBreadthTimeline(instruments, tradesByIns, { bucketSeconds: 60 });
+      res.setHeader('Cache-Control', 'no-store');
+      return sendJson(res, 200, {
+        at: Date.now(), count: instruments.length, traded: snapshot.traded,
+        failed, snapshot, timeline,
+      });
     }
 
     // ریزمعامله چند قرارداد/روز برای تب «نگاه باز».

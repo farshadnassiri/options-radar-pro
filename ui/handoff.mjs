@@ -43,6 +43,7 @@ export function handoffPlan(row, opt = {}) {
     entryBasis: opt.entryBasis || 'LAST',
     exitBasis: opt.exitBasis || 'LAST',
     units: Math.max(1, Math.trunc(Number(opt.units) || 1)),
+    live: opt.live === true,
   };
 }
 
@@ -54,7 +55,7 @@ export function handoffPlan(row, opt = {}) {
  * فقط وقتی معتبر و مثبت است همراه نقشه می‌رود؛ عدد خروجی مثل سود و بازده
  * عمداً جایی در این قرارداد ندارد.
  */
-export function historyHandoffPlan({ ua, strategyId = '', strategyName = '', replay, args = {}, comboName = '' } = {}) {
+export function historyHandoffPlan({ ua, strategyId = '', strategyName = '', replay, args = {}, comboName = '', live = false } = {}) {
   const legs = replay?.priced || args?.legs || [];
   const manualEntry = Object.fromEntries(Object.entries(args?.manualEntry || {})
     .filter(([, value]) => Number.isFinite(Number(value)) && Number(value) > 0)
@@ -73,6 +74,7 @@ export function historyHandoffPlan({ ua, strategyId = '', strategyName = '', rep
     units: Math.max(1, Math.trunc(Number(args?.units) || 1)),
     manualEntry,
     autoRun: true,
+    live: live === true,
   };
 }
 
