@@ -99,6 +99,7 @@ const METRICS = {
   changePct: ['تغییر آخرین نسبت به پایانی دیروز ٪', (value) => `${fmt.pct(value)}٪`],
   value: ['ارزش معامله', fmt.money], volume: ['حجم', fmt.int], trades: ['تعداد معامله', fmt.int],
   oi: ['موقعیت باز', fmt.int], oiChange: ['تغییر موقعیت باز', fmt.int],
+  oiChangePct: ['تغییر موقعیت باز ٪', (value) => `${fmt.pct(value)}٪`],
   ivPct: ['تلاطم ضمنی ٪', (value) => `${fmt.pct(value)}٪`],
   spreadPct: ['فاصله مظنه ٪', (value) => `${fmt.pct(value)}٪`],
   putCallOi: ['نسبت OI پوت به کال', fmt.num], putCallVolume: ['نسبت حجم پوت به کال', fmt.num],
@@ -155,7 +156,7 @@ function ranked(view, scoped, limit = 24) {
 function snapshotTable(rows, metric) {
   if (!rows.length) return '<p class="empty-note">در دامنه انتخابی داده معتبر برای این نما نیست.</p>';
   const [metricLabel, metricFmt] = METRICS[metric] || [metric, fmt.num];
-  return `<div class="history-table-wrap"><table class="history-table decision-table"><thead><tr><th>رتبه</th><th>نماد / گروه</th><th>آخرین</th><th>پایانی دیروز</th><th>تغییر آخرین نسبت به پایانی دیروز ٪</th><th>${metricLabel}</th><th>حجم</th><th>تعداد معامله</th><th>ارزش</th><th>موقعیت باز</th><th>IV ٪</th><th>سررسید</th></tr></thead><tbody>${rows.map((row, index) => `<tr><td>${fmt.int(index + 1)}</td><td><b>${esc(rowName(row))}</b>${row.uaName && row.name ? `<small>${esc(row.uaName)}</small>` : ''}</td><td>${fmt.money(row.last)}</td><td>${fmt.money(row.yday)}</td><td class="${tone(row.changePct)}">${fmt.pct(row.changePct)}٪</td><td>${metricFmt(row[metric])}</td><td>${fmt.int(row.volume)}</td><td>${fmt.int(row.trades)}</td><td>${fmt.money(row.value)}</td><td>${fmt.int(row.oi)}</td><td>${fmt.pct(row.ivPct)}٪</td><td>${row.endDate ? dateLabel(row.endDate) : '—'}</td></tr>`).join('')}</tbody></table></div>`;
+  return `<div class="history-table-wrap"><table class="history-table decision-table"><thead><tr><th>رتبه</th><th>نماد / گروه</th><th>آخرین</th><th>پایانی دیروز</th><th>تغییر آخرین نسبت به پایانی دیروز ٪</th><th>${metricLabel}</th><th>حجم</th><th>تعداد معامله</th><th>ارزش</th><th>موقعیت باز</th><th>تغییر موقعیت باز</th><th>IV ٪</th><th>سررسید</th></tr></thead><tbody>${rows.map((row, index) => `<tr><td>${fmt.int(index + 1)}</td><td><b>${esc(rowName(row))}</b>${row.uaName && row.name ? `<small>${esc(row.uaName)}</small>` : ''}</td><td>${fmt.money(row.last)}</td><td>${fmt.money(row.yday)}</td><td class="${tone(row.changePct)}">${fmt.pct(row.changePct)}٪</td><td>${metricFmt(row[metric])}</td><td>${fmt.int(row.volume)}</td><td>${fmt.int(row.trades)}</td><td>${fmt.money(row.value)}</td><td>${fmt.int(row.oi)}</td><td class="${tone(row.oiChange)}">${fmt.int(row.oiChange)}</td><td>${fmt.pct(row.ivPct)}٪</td><td>${row.endDate ? dateLabel(row.endDate) : '—'}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function barChart(rows, metric) {

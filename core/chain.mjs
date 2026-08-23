@@ -144,7 +144,11 @@ function sideQuote(r, sfx) {
     ask, askQty: n(r[`qTitMeOf_${sfx}`]),
     last, close, yday: n(r[`priceYesterday_${sfx}`]),
     low: 0, high: 0,               // مرحله دو پر می‌کند
-    oi: n(r[`oP_${sfx}`]), oiYday: n(r[`yesterdayOP_${sfx}`]),
+    // موقعیت باز دیروز، اگر تابلو اصلاً ندهد، «نامعلوم» است نه صفر. با صفر،
+    // تغییر موقعیت باز دقیقاً برابر خودِ موقعیت باز درمی‌آید و هر قرارداد
+    // قدیمی، «تمام تعهدش امروز باز شده» گزارش می‌شود (قاعده ۲-۴).
+    oi: n(r[`oP_${sfx}`]),
+    oiYday: r[`yesterdayOP_${sfx}`] == null ? NaN : n(r[`yesterdayOP_${sfx}`]),
     vol: n(r[`qTotTran5J_${sfx}`]), trades: n(r[`zTotTran_${sfx}`]),
     value: n(r[`qTotCap_${sfx}`]),
     book: null, state: 'A', staleSec: 0,
@@ -245,6 +249,13 @@ export function buildChain(rows) {
 function rollupQuotes(u) {
   let contracts = 0, quoted = 0, callVol = 0, putVol = 0, callOi = 0, putOi = 0;
   let value = 0, trades = 0;
+  // موقعیت باز دیروز کنار امروز جمع می‌شود تا «تغییر موقعیت باز» هر نماد
+  // ساخته شود. تا امروز فقط `oi` جمع می‌شد و ستون تغییر، هیچ منبعی نداشت.
+  //
+  // اگر حتی یک قرارداد این نماد، موقعیت باز دیروزش را ندهد، تغییرِ کلِ نماد
+  // نامعلوم می‌شود نه ناقص: جمعِ ناقص، عددی می‌سازد که به‌اندازه همان
+  // قرارداد غلط است و هیچ نشانی هم ندارد.
+  let callOiYday = 0, putOiYday = 0, oiYdayKnown = true;
   const strikes = new Set();
   const spreads = [];
   for (const ex of u.expiryList) {
@@ -254,6 +265,9 @@ function rollupQuotes(u) {
         contracts += 1;
         if (q.bid > 0 || q.ask > 0) quoted += 1;
         if (isCall) { callVol += q.vol; callOi += q.oi; } else { putVol += q.vol; putOi += q.oi; }
+        if (Number.isFinite(q.oiYday)) {
+          if (isCall) callOiYday += q.oiYday; else putOiYday += q.oiYday;
+        } else oiYdayKnown = false;
         value += q.value; trades += q.trades || 0;
         if (q.bid > 0 && q.ask > 0) {
           const mid = (q.bid + q.ask) / 2;
@@ -267,10 +281,17 @@ function rollupQuotes(u) {
     ? spreads[(spreads.length - 1) / 2]
     : (spreads[spreads.length / 2 - 1] + spreads[spreads.length / 2]) / 2) : NaN;
   const days = u.expiryList.map((ex) => ex.days).filter(Number.isFinite);
+  const oi = callOi + putOi;
+  const oiYday = oiYdayKnown ? callOiYday + putOiYday : NaN;
   return {
     contracts, quoted, strikes: strikes.size,
-    volume: callVol + putVol, oi: callOi + putOi,
+    volume: callVol + putVol, oi,
     callVol, putVol, callOi, putOi,
+    oiYday, callOiYday: oiYdayKnown ? callOiYday : NaN, putOiYday: oiYdayKnown ? putOiYday : NaN,
+    oiChange: oiYdayKnown ? oi - oiYday : NaN,
+    oiChangePct: oiYdayKnown && oiYday > 0 ? ((oi / oiYday) - 1) * 100 : NaN,
+    callOiChange: oiYdayKnown ? callOi - callOiYday : NaN,
+    putOiChange: oiYdayKnown ? putOi - putOiYday : NaN,
     pcVolRatio: callVol > 0 ? putVol / callVol : NaN,
     value, trades,
     spreadMedPct: spreads.length ? mid : NaN,

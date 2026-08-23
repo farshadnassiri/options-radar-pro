@@ -14,7 +14,7 @@ export function pctVsYesterday(last, yesterday) {
 
 const emptyAggregate = (seed = {}) => ({
   ...seed, contracts: 0, tradedContracts: 0, positive: 0, negative: 0, unchanged: 0,
-  volume: 0, value: 0, trades: 0, oi: 0, oiYday: 0,
+  volume: 0, value: 0, trades: 0, oi: 0, oiYday: 0, _oiYdayGap: false,
   callVolume: 0, putVolume: 0, callValue: 0, putValue: 0,
   callOi: 0, putOi: 0, twoSided: 0, changePct: NaN, ivPct: NaN,
   _changeWeighted: 0, _changeWeight: 0, _ivWeighted: 0, _ivWeight: 0, _spreads: [],
@@ -25,7 +25,10 @@ function addContract(target, row) {
   const traded = row.volume > 0 || row.trades > 0 || row.value > 0;
   if (traded) target.tradedContracts += 1;
   target.volume += row.volume; target.value += row.value; target.trades += row.trades;
-  target.oi += row.oi; target.oiYday += row.oiYday;
+  target.oi += row.oi;
+  // همان قاعده رده پایین: اگر موقعیت باز دیروزِ یک قرارداد نامعلوم باشد،
+  // تغییرِ کلِ گروه نامعلوم می‌شود نه ناقص.
+  if (Number.isFinite(row.oiYday)) target.oiYday += row.oiYday; else target._oiYdayGap = true;
   if (row.kind === 'call') {
     target.callVolume += row.volume; target.callValue += row.value; target.callOi += row.oi;
   } else {
@@ -51,7 +54,13 @@ function finishAggregate(row) {
   const spreadPct = spreads.length
     ? (spreads.length % 2 ? spreads[middle] : (spreads[middle - 1] + spreads[middle]) / 2)
     : NaN;
+  const oiYday = row._oiYdayGap ? NaN : row.oiYday;
   const out = { ...row,
+    oiYday,
+    // تا امروز `oi` و `oiYday` جمع می‌شدند ولی تفاضلشان هیچ‌جا ساخته نمی‌شد،
+    // پس ستون «تغییر موقعیت باز» در هر نمای تجمیعی تهی بود.
+    oiChange: Number.isFinite(oiYday) ? row.oi - oiYday : NaN,
+    oiChangePct: Number.isFinite(oiYday) && oiYday > 0 ? ((row.oi / oiYday) - 1) * 100 : NaN,
     changePct: row._changeWeight > 0 ? row._changeWeighted / row._changeWeight : NaN,
     ivPct: row._ivWeight > 0 ? row._ivWeighted / row._ivWeight : NaN,
     spreadPct,
@@ -59,7 +68,7 @@ function finishAggregate(row) {
     putCallOi: row.callOi > 0 ? row.putOi / row.callOi : NaN,
   };
   delete out._changeWeighted; delete out._changeWeight; delete out._ivWeighted;
-  delete out._ivWeight; delete out._spreads;
+  delete out._ivWeight; delete out._spreads; delete out._oiYdayGap;
   return out;
 }
 

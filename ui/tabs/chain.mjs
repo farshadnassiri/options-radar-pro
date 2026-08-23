@@ -42,8 +42,16 @@ const ALL_COLS = [
   { key: 'trades', label: 'تعداد معامله', fmt: 'int', group: 'گردش امروز' },
 
   { key: 'oi', label: 'موقعیت باز', fmt: 'int', group: 'تعهد انباشته', heat: 'gain' },
+  // تعهد انباشته بدون تغییرش، عکس است نه فیلم: نمادی که موقعیت بازش امروز
+  // ۲۰٪ بالا رفته با نمادی که همان عدد را از هفته پیش نگه داشته، در ستون
+  // «موقعیت باز» دقیقاً یک‌شکل دیده می‌شوند.
+  { key: 'oiYday', label: 'موقعیت باز دیروز', fmt: 'int', group: 'تعهد انباشته' },
+  { key: 'oiChange', label: 'تغییر موقعیت باز', fmt: 'int', group: 'تعهد انباشته', heat: 'gain' },
+  { key: 'oiChangePct', label: 'تغییر موقعیت باز ٪', fmt: 'pct', group: 'تعهد انباشته', heat: 'gain' },
   { key: 'callOi', label: 'موقعیت باز کال', fmt: 'int', group: 'تعهد انباشته' },
+  { key: 'callOiChange', label: 'تغییر موقعیت باز کال', fmt: 'int', group: 'تعهد انباشته' },
   { key: 'putOi', label: 'موقعیت باز پوت', fmt: 'int', group: 'تعهد انباشته' },
+  { key: 'putOiChange', label: 'تغییر موقعیت باز پوت', fmt: 'int', group: 'تعهد انباشته' },
   { key: 'pcRatio', label: 'نسبت پوت به کال — موقعیت باز', fmt: 'num', group: 'تعهد انباشته' },
   { key: 'pcVolRatio', label: 'نسبت پوت به کال — حجم', fmt: 'num', group: 'تعهد انباشته' },
 
@@ -52,7 +60,8 @@ const ALL_COLS = [
 
 const COLS = ALL_COLS.filter((c) => [
   'name', 'last', 'contracts', 'strikes', 'quoted', 'quotedPct', 'spreadMedPct',
-  'expiries', 'nearestDays', 'volume', 'value', 'uaValue', 'oi', 'pcRatio', 'atmIvPct',
+  'expiries', 'nearestDays', 'volume', 'value', 'uaValue', 'oi', 'oiChange', 'oiChangePct',
+  'pcRatio', 'atmIvPct',
 ].includes(c.key));
 export async function mount(root, { state, api }) {
   root.innerHTML = `
