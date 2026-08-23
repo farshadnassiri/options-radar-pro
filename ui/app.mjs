@@ -10,6 +10,7 @@ import { mountCapacityPicker } from '/ui/expiries.mjs';
 import { icon, sectionIcon, TAB_ICON, GROUP_ICON } from '/ui/icons.mjs';
 import { installGlobalCapture, logError } from '/ui/errlog.mjs';
 import { linkLabelKey } from '/ui/feed-state.mjs';
+import { takeHandoff } from '/ui/handoff.mjs';
 
 export const state = {
   settings: defaults(),
@@ -783,10 +784,29 @@ mountCapacityPicker(el('capacity'), {
   putSettings,
 });
 
-window.addEventListener('hashchange', () => {
-  const next = location.hash.replace('#', '');
-  if (next && next !== current && TABS.some((t) => t.id === next)) open(next);
-});
+// نشانی دو شکل دارد: `#tab` ساده، و `#tab!token` که token کلید یک‌بارمصرفِ
+// نقشهٔ انتقال در حافظهٔ مرورگر است. نقشه پیش از باز شدن تب برداشته می‌شود
+// تا `mount` همان تب آن را سرجایش ببیند، و کلید از نشانی پاک می‌شود تا
+// نوسازی صفحه دوباره همان انتقال را اجرا نکند.
+function routeFromHash(raw) {
+  const text = String(raw || '').replace('#', '');
+  if (!text) return null;
+  const at = text.indexOf('!');
+  const id = at < 0 ? text : text.slice(0, at);
+  const token = at < 0 ? '' : text.slice(at + 1);
+  return TABS.some((t) => t.id === id) ? { id, token } : null;
+}
 
-const hash = location.hash.replace('#', '');
-if (hash && TABS.some((t) => t.id === hash)) open(hash);
+function goRoute(route) {
+  if (!route) return;
+  if (route.token) {
+    const plan = takeHandoff(route.token);
+    if (plan) state.handoff = plan;
+    history.replaceState(null, '', `${location.pathname}${location.search}#${route.id}`);
+  }
+  if (route.id !== current) open(route.id);
+}
+
+window.addEventListener('hashchange', () => { goRoute(routeFromHash(location.hash)); });
+
+goRoute(routeFromHash(location.hash));

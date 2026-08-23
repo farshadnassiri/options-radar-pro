@@ -16,7 +16,7 @@ import { fmt, coverageInfo, signTone, offsetCell } from '/ui/fmt.mjs';
 import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
-import { canHandoff, handoffPlan, handoffButtonHtml } from '/ui/handoff.mjs';
+import { canHandoff, handoffPlan, handoffButtonHtml, goHandoff } from '/ui/handoff.mjs';
 import { runScanAll, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 
 // ارزش معاملات هر پا، ستون جدا. اینجا برخلاف تب استراتژی هر چهار ستون
@@ -207,13 +207,12 @@ export async function mount(root, { state, api }) {
     renderCmpPicker();
     // ——— انتقال به بک‌تست ———
     root.querySelector('#to-backtest')?.addEventListener('click', () => {
-      state.handoff = handoffPlan(r, {
+      goHandoff(state, handoffPlan(r, {
         from: 'top', strategyId: r.strategyId || '', strategyName: r.strategy || '',
         // حجم همان ردیف، نه پیش‌فرض تنظیمات؛ ردیف با همین حجم سنجیده شده
         units: Math.max(1, Math.trunc(Number(r.qty) || Number(s().qtyDefault) || 1)),
         entryBasis: 'LAST', exitBasis: 'LAST',
-      });
-      location.hash = 'backtest';
+      }));
     });
 
     mountChart();

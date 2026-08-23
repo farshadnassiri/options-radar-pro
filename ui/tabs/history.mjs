@@ -12,7 +12,7 @@ import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
-import { historyHandoffPlan } from '/ui/handoff.mjs';
+import { historyHandoffPlan, goHandoff } from '/ui/handoff.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -471,7 +471,7 @@ export async function mount(root, { state }) {
       const def = byId(strategySelect.value);
       if (!currentReplay || !currentArgs) { setStatus('ابتدا یک موقعیت را تحلیل کن.', true); return; }
       if (!def?.feasible) { setStatus('این استراتژی به فروش دارایی پایه نیاز دارد و در بک‌تست سریع اجرایی نیست.', true); return; }
-      state.handoff = historyHandoffPlan({
+      goHandoff(state, historyHandoffPlan({
         ua: analysisUa || ua,
         strategyId: def.id,
         strategyName: def.name,
@@ -479,8 +479,7 @@ export async function mount(root, { state }) {
         args: currentArgs,
         comboName: $('h-selected-label').textContent,
         live: Boolean(event.target.closest('[data-history-live]')),
-      });
-      location.hash = 'backtest';
+      }));
       return;
     }
     if (event.target.closest('[data-frozen-fold]')) toggleFrozenFold();

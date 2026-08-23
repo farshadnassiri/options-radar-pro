@@ -38,7 +38,7 @@ import { moveColumn, insertColumn, changedIds, heatRamp } from '../ui/table.mjs'
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '../ui/compare.mjs';
 import { strandedKeys } from '../ui/expiries.mjs';
 import { icon, GROUP_ICON, TAB_ICON, sectionIcon } from '../ui/icons.mjs';
-import { canHandoff, handoffPlan, historyHandoffPlan } from '../ui/handoff.mjs';
+import { canHandoff, handoffPlan, historyHandoffPlan, stashHandoff, takeHandoff, openHandoffPage } from '../ui/handoff.mjs';
 import {
   scenarioLadder, sensitivityGrid, sensitivityAxis, bookDepthRisk,
   SENS_AXES, SENS_METRICS,
@@ -2355,7 +2355,8 @@ group('۳۷. سپردن موقعیت به بک‌تست سریع');
   // می‌کند و هیچ تبی باز نمی‌شود.
   check('پوسته برنامه تغییر hash از داخل تب را به باز کردن تب ترجمه می‌کند',
     appSource37.includes("window.addEventListener('hashchange'")
-    && appSource37.includes('if (next && next !== current && TABS.some((t) => t.id === next)) open(next);'));
+    && appSource37.includes('goRoute(routeFromHash(location.hash))')
+    && appSource37.includes('if (route.id !== current) open(route.id);'));
   check('جعبه تحویل بین تب‌ها در وضعیت مشترک تعریف شده است', /^\s*handoff: null,$/m.test(appSource37));
   // وارد کردن `open` از app.mjs یک حلقه می‌ساخت، چون app.mjs خودش هر تب را
   // به‌صورت پویا وارد می‌کند.
@@ -2367,12 +2368,14 @@ group('۳۷. سپردن موقعیت به بک‌تست سریع');
   // فقط انتخاب‌ها منتقل می‌شوند، نه نتیجه‌ها؛ وگرنه دو تب می‌توانند دو عدد
   // نشان دهند و معلوم نباشد کدام مال کدام محاسبه است.
   for (const key of ['uaIns', 'strategyId', 'legIns', 'entryDate', 'exitDate', 'entryBasis', 'exitBasis', 'units']) {
-    check(`تحویل «${key}» را همراه می‌برد`, new RegExp(`^\\s*${key}:`, 'm').test(portfolioSource37.slice(portfolioSource37.indexOf('state.handoff = {'))));
+    check(`تحویل «${key}» را همراه می‌برد`, new RegExp(`^\\s*${key}:`, 'm').test(portfolioSource37.slice(portfolioSource37.indexOf('goHandoff(state, {'))));
   }
   check('تحویل هیچ عدد نتیجه‌ای را کپی نمی‌کند',
-    !/state\.handoff = \{[\s\S]*?\};/.exec(portfolioSource37)[0].match(/netPnl|returnPct|capital/));
-  check('آزمون همه استراتژی‌ها کاربر را به تب بک‌تست سریع می‌برد',
-    portfolioSource37.includes("location.hash = 'backtest';"));
+    !/goHandoff\(state, \{[\s\S]*?\}\);/.exec(portfolioSource37)[0].match(/netPnl|returnPct|capital/));
+  // انتقال دیگر تبِ همین صفحه را عوض نمی‌کند؛ `goHandoff` صفحهٔ تازه باز
+  // می‌کند و فقط اگر نشد به مسیر قدیمی برمی‌گردد.
+  check('آزمون همه استراتژی‌ها کاربر را به بک‌تست سریع می‌برد',
+    portfolioSource37.includes('goHandoff(state, {') && !portfolioSource37.includes("location.hash = 'backtest';"));
 
   check('بک‌تست سریع تحویل را برمی‌دارد و می‌چیند',
     backtestSource37.includes("state.handoff?.to === 'backtest'") && backtestSource37.includes('await applyHandoff(plan)'));
@@ -3539,7 +3542,7 @@ group('۵۱. انتقال ترکیب زنده به بک‌تست');
   for (const [file, what] of [['../ui/tabs/strategy.mjs', 'تب استراتژی'], ['../ui/tabs/top.mjs', 'برترین موقعیت‌ها']]) {
     const src = readSrc(file);
     check(`${what} دکمهٔ انتقال دارد و فقط برای ردیف قابل انتقال`,
-      src.includes('canHandoff(r) ? handoffButtonHtml()') && src.includes("location.hash = 'backtest'"));
+      src.includes('canHandoff(r) ? handoffButtonHtml()') && src.includes('goHandoff(state, handoffPlan(r, {'));
   }
 }
 
@@ -4801,8 +4804,7 @@ group('۶۷. انتقال موقعیت تحلیل تاریخی به ریز بک�
   const backtest67 = readSrc('../ui/tabs/backtest.mjs');
   check('مشخصات موقعیت تاریخی دکمه ریز بک‌تست دارد',
     history67.includes('data-history-backtest')
-    && history67.includes('historyHandoffPlan({')
-    && history67.includes("location.hash = 'backtest'"));
+    && history67.includes('goHandoff(state, historyHandoffPlan({'));
   check('استراتژی مطالعه‌ای به بک‌تست اجرایی اشتباه فرستاده نمی‌شود',
     history67.includes('const backtestDisabled = !def?.feasible')
     && history67.includes('این استراتژی به فروش دارایی پایه نیاز دارد'));
@@ -5464,6 +5466,95 @@ group('۷۶. نماهای سه حالت و سنجه‌های ساختاری');
     ui76.includes('color-mix(in srgb, var(--series-1)') && !/heatRainbow|hsl\(/.test(ui76));
 }
 
+
+// ═════════ ۷۷. انتقال در صفحهٔ تازه، نه روی صفحهٔ جاری ═════════
+//
+// خواسته کاربر: «وقتی با کلیک روی یک دکمه به قسمت بک‌تست سریع یا نمایش
+// زنده می‌رویم یک صفحه جدید باز شود… با کلیک روی آن دکمه صفحه جاری حفظ
+// شود و فعالیت جدید در صفحه جدید ظاهر شود.»
+//
+// نقشه دیگر از `state` این صفحه رد نمی‌شود، چون صفحهٔ تازه سند دیگری است.
+// پس این گروه سه چیز را می‌سنجد: نقشه سالم از حافظه رد می‌شود، کلید
+// یک‌بارمصرف است، و نبودِ حافظه به سکوت ختم نمی‌شود بلکه به مسیر قدیمی
+// برمی‌گردد.
+group('۷۷. انتقال در صفحهٔ تازه');
+{
+  const fakeStore = () => {
+    const map = new Map();
+    return {
+      get length() { return map.size; },
+      key: (i) => [...map.keys()][i] ?? null,
+      getItem: (k) => (map.has(k) ? map.get(k) : null),
+      setItem: (k, v) => { map.set(k, String(v)); },
+      removeItem: (k) => { map.delete(k); },
+      _map: map,
+    };
+  };
+
+  const prevWindow = globalThis.window;
+  const ls = fakeStore();
+  let opened = null;
+  globalThis.window = {
+    localStorage: ls,
+    open: (url) => { opened = url; return { closed: false }; },
+  };
+  globalThis.location = { pathname: '/', search: '' };
+
+  const plan = handoffPlan({ uaIns: '9', underlying: 'خودرو', strategy: 'استرنگل',
+    legsText: 'ض + ط', __legs: [{ kind: 'call', ins: '11' }, { kind: 'put', ins: '12' }] },
+  { from: 'top', units: 3 });
+
+  const token = stashHandoff(plan);
+  check('کلید ساخته می‌شود', !!token, token);
+  check('نقشه در حافظه نشسته است', ls._map.size === 1, `${ls._map.size} کلید`);
+
+  const back = takeHandoff(token);
+  check('نقشه دست‌نخورده برمی‌گردد',
+    back?.uaIns === '9' && back.units === 3 && back.legIns.join(',') === '11,12',
+    JSON.stringify({ ua: back?.uaIns, units: back?.units }));
+  // یک‌بارمصرف: نوسازی صفحه نباید همان انتقال را دوباره اجرا کند
+  check('کلید پس از برداشت پاک می‌شود', ls._map.size === 0 && takeHandoff(token) === null);
+
+  // پنجرهٔ تازه: نشانی باید تب و کلید را با هم داشته باشد
+  check('باز کردن صفحهٔ تازه موفق است', openHandoffPage(plan) === true);
+  check('نشانی صفحهٔ تازه تب و کلید دارد', /#backtest![a-z0-9]+$/.test(String(opened)), String(opened));
+  check('کلید پس از باز شدن هنوز در حافظه است تا صفحهٔ مقصد برش دارد',
+    ls._map.size === 1, `${ls._map.size} کلید`);
+
+  // نقشهٔ منقضی نباید بنشیند
+  const stale = stashHandoff(plan);
+  const staleKey = [...ls._map.keys()].find((k) => k.endsWith(stale));
+  ls.setItem(staleKey, JSON.stringify({ at: Date.now() - (11 * 60 * 1000), plan }));
+  check('نقشهٔ کهنه برداشته نمی‌شود', takeHandoff(stale) === null);
+
+  // پنجره باز نشد → فراخوان باید بفهمد، نه اینکه کلیک بی‌اثر بماند
+  globalThis.window.open = () => null;
+  const before = ls._map.size;
+  check('پنجرهٔ مسدود، شکست را اعلام می‌کند', openHandoffPage(plan) === false);
+  check('کلیدِ پنجرهٔ مسدود جا نمی‌ماند', ls._map.size === before, `${ls._map.size} کلید`);
+
+  // بدون حافظه هم نباید بترکد
+  globalThis.window = { open: () => ({}) };
+  check('نبود حافظه به استثنا ختم نمی‌شود', stashHandoff(plan) === '' && openHandoffPage(plan) === false);
+
+  globalThis.window = prevWindow;
+  delete globalThis.location;
+
+  // مسیر قدیمی باید در کد بماند: اگر پنجره باز نشد، تب همین صفحه عوض شود
+  const src = readSrc('../ui/handoff.mjs');
+  check('برگشت به مسیر قدیمی در goHandoff هست',
+    /export function goHandoff[\s\S]*openHandoffPage\(plan, tab\)[\s\S]*state\.handoff = plan;[\s\S]*location\.hash = tab;/.test(src));
+
+  // هیچ تبی نباید مستقیم hash را برای انتقال دست بزند
+  const direct = ['top', 'strategy', 'history', 'portfolio-backtest']
+    .filter((name) => /location\.hash *= *'backtest'/.test(readSrc(`../ui/tabs/${name}.mjs`)));
+  check('هیچ تبی دیگر مستقیم به بک‌تست پرش نمی‌کند', direct.length === 0, direct.join('، '));
+
+  // مسیریاب باید شکل «تب!کلید» را بشناسد و کلید را از نشانی پاک کند
+  const app = readSrc('../ui/app.mjs');
+  check('مسیریاب کلید را از نشانی جدا می‌کند', /const at = text\.indexOf\('!'\)/.test(app));
+  check('مسیریاب کلید را از نشانی پاک می‌کند', /history\.replaceState\(null, '', `\$\{location\.pathname\}\$\{location\.search\}#\$\{route\.id\}`\)/.test(app));
+}
 
 // ═══════════════════════════ گزارش ═══════════════════════════
 const W = 62;
