@@ -26,7 +26,10 @@ const clock = (second) => {
 const METRIC_HEADERS = [
   'قیمت پایه', 'تغییر پایه ٪', 'سربه‌سر کال', 'تغییر سربه‌سر کال ٪', 'فاصله کال تا پایه', 'فاصله کال ٪', 'میانگین ۵روزه فاصله کال ٪',
   'سربه‌سر پوت', 'تغییر سربه‌سر پوت ٪', 'فاصله پایه تا پوت', 'فاصله پوت ٪', 'میانگین ۵روزه فاصله پوت ٪', 'پهنای باند سربه‌سر',
-  'اعمال وزنی کال', 'اعمال وزنی پوت', 'پریمیوم وزنی کال', 'پریمیوم وزنی پوت',
+  'اعمال وزنی کال', 'فاصله اعمال کال ٪', 'میانگین ۵روزه فاصله اعمال کال ٪',
+  'اعمال وزنی پوت', 'فاصله اعمال پوت ٪', 'میانگین ۵روزه فاصله اعمال پوت ٪',
+  'پریمیوم وزنی کال', 'پریمیوم وزنی کال ٪ پایه', 'میانگین ۵روزه پریمیوم کال ٪',
+  'پریمیوم وزنی پوت', 'پریمیوم وزنی پوت ٪ پایه', 'میانگین ۵روزه پریمیوم پوت ٪',
   'IV وزنی کال ٪', 'میانگین ۵روزه IV کال ٪', 'تغییر IV کال (واحد درصد)', 'IV وزنی پوت ٪', 'میانگین ۵روزه IV پوت ٪', 'تغییر IV پوت (واحد درصد)',
   'ارزش کال', 'ارزش پوت', 'ارزش کال واردشده در IV', 'ارزش پوت واردشده در IV',
   'قرارداد کال', 'قرارداد پوت', 'ارزش پایه', 'حجم پایه',
@@ -35,7 +38,10 @@ const METRIC_HEADERS = [
 const metricValues = (r) => [
   r.basePrice, r.baseChangePct, r.callBreakeven, r.callBreakevenChangePct, r.callBreakevenGap, r.callBreakevenGapPct, r.callBreakevenGapPctMa5,
   r.putBreakeven, r.putBreakevenChangePct, r.putBreakevenGap, r.putBreakevenGapPct, r.putBreakevenGapPctMa5, r.breakevenBand,
-  r.callStrike, r.putStrike, r.callPremium, r.putPremium,
+  r.callStrike, r.callStrikeGapPct, r.callStrikeGapPctMa5,
+  r.putStrike, r.putStrikeGapPct, r.putStrikeGapPctMa5,
+  r.callPremium, r.callPremiumPct, r.callPremiumPctMa5,
+  r.putPremium, r.putPremiumPct, r.putPremiumPctMa5,
   r.callIvPct, r.callIvPctMa5, r.callIvChangePp, r.putIvPct, r.putIvPctMa5, r.putIvChangePp,
   r.callValue, r.putValue, r.callIvValue, r.putIvValue,
   r.callContracts, r.putContracts, r.baseValue, r.baseVolume,
