@@ -20,23 +20,31 @@ const chunks = (rows, size) => Array.from({ length: Math.ceil(rows.length / size
 const errorText = (error, fallback = 'خطای نامعلوم') => /fetch failed|network|failed to fetch/i.test(String(error?.message || error))
   ? 'اتصال به منبع داده برقرار نشد.' : (String(error?.message || '').trim() || fallback);
 
+// دو تصمیم رنگی، هر دو از یک قاعده: رنگ، هویت را می‌گوید نه ردیف را.
+//
+//   کال و پوت    یک جفت ثابت‌اند و رنگ معنایی می‌گیرند (`--call`/`--put`).
+//                پیش از این «سربه‌سر کال» سبز بود و «IV کال» بنفش — یک
+//                موجودیت، دو رنگ، در دو نمودارِ کنار هم.
+//   میانگین ۵روزه  همان سری است، هموارشده — نه موجودیتی تازه. پس هم‌فامِ
+//                خودش می‌ماند و با خط‌چین از آن جدا می‌شود. با رنگ چهارم،
+//                نمودار IV چهار رنگ داشت برای دو چیز، و دوتاشان شبیه هم.
 const SERIES_PRICE = [
-  { key: 'basePrice', label: 'قیمت پایه', color: 'var(--series-1)' },
-  { key: 'callBreakeven', label: 'سربه‌سر وزنی کال', color: 'var(--series-3)' },
-  { key: 'putBreakeven', label: 'سربه‌سر وزنی پوت', color: 'var(--series-6)' },
+  { key: 'basePrice', label: 'قیمت پایه', color: 'var(--series-3)' },
+  { key: 'callBreakeven', label: 'سربه‌سر وزنی کال', color: 'var(--call)' },
+  { key: 'putBreakeven', label: 'سربه‌سر وزنی پوت', color: 'var(--put)' },
 ];
 const SERIES_GAP = [
-  { key: 'callBreakevenGapPct', label: 'فاصله تا کال', color: 'var(--series-3)', kind: 'bar' },
-  { key: 'callBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله کال', color: 'var(--series-2)', toggleable: true },
-  { key: 'putBreakevenGapPct', label: 'فاصله از پوت', color: 'var(--series-6)', kind: 'bar' },
-  { key: 'putBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله پوت', color: 'var(--series-5)', toggleable: true },
+  { key: 'callBreakevenGapPct', label: 'فاصله تا کال', color: 'var(--call)', kind: 'bar' },
+  { key: 'callBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله کال', color: 'var(--call)', dashed: true, toggleable: true },
+  { key: 'putBreakevenGapPct', label: 'فاصله از پوت', color: 'var(--put)', kind: 'bar' },
+  { key: 'putBreakevenGapPctMa5', label: 'میانگین ۵روزه فاصله پوت', color: 'var(--put)', dashed: true, toggleable: true },
 ];
 const SERIES_GAP_INTRADAY = [SERIES_GAP[0], SERIES_GAP[2]];
 const SERIES_IV = [
-  { key: 'callIvPct', label: 'IV وزنی کال', color: 'var(--series-7)' },
-  { key: 'callIvPctMa5', label: 'میانگین ۵روزه IV کال', color: 'var(--series-2)', toggleable: true },
-  { key: 'putIvPct', label: 'IV وزنی پوت', color: 'var(--series-8)' },
-  { key: 'putIvPctMa5', label: 'میانگین ۵روزه IV پوت', color: 'var(--series-5)', toggleable: true },
+  { key: 'callIvPct', label: 'IV وزنی کال', color: 'var(--call)' },
+  { key: 'callIvPctMa5', label: 'میانگین ۵روزه IV کال', color: 'var(--call)', dashed: true, toggleable: true },
+  { key: 'putIvPct', label: 'IV وزنی پوت', color: 'var(--put)' },
+  { key: 'putIvPctMa5', label: 'میانگین ۵روزه IV پوت', color: 'var(--put)', dashed: true, toggleable: true },
 ];
 const SERIES_IV_INTRADAY = [SERIES_IV[0], SERIES_IV[2]];
 
@@ -76,15 +84,18 @@ function chart(host, sourceRows, series, {
       d += `${drawing ? 'L' : 'M'}${x(index).toFixed(1)},${y(value).toFixed(1)} `;
       drawing = true;
     });
-    return `<path fill="none" stroke="${item.color}" d="${d.trim()}"/>`;
+    return `<path fill="none" stroke="${item.color}"${item.dashed ? ' stroke-dasharray="7 5"' : ''} d="${d.trim()}"/>`;
   }).join('');
   const xIndexes = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])];
   const legend = series.map((item) => {
     const off = hiddenSeries.has(item.key);
     const content = `<i></i>${item.label}${item.toggleable ? `<small>${off ? 'نمایش' : 'حذف'}</small>` : ''}`;
+    // نشان راهنما هم باید خط‌چین را بگوید، وگرنه دو سریِ هم‌فام در راهنما
+    // یک‌شکل‌اند و تفکیکشان فقط روی خودِ نمودار دیده می‌شود.
+    const cls = [off ? 'is-off' : '', item.dashed ? 'is-dashed' : ''].filter(Boolean).join(' ');
     return item.toggleable
-      ? `<button type="button" data-series-toggle="${item.key}" aria-pressed="${!off}" class="${off ? 'is-off' : ''}" style="--series:${item.color}">${content}</button>`
-      : `<span style="--series:${item.color}">${content}</span>`;
+      ? `<button type="button" data-series-toggle="${item.key}" aria-pressed="${!off}" class="${cls}" style="--series:${item.color}">${content}</button>`
+      : `<span class="${cls}" style="--series:${item.color}">${content}</span>`;
   }).join('');
   host.innerHTML = `<div class="open-view-chart-legend">${legend}</div><div class="open-view-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار روند نگاه باز">
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="portfolio-grid"/><text x="${L - 9}" y="${y(value) + 4}" text-anchor="end">${axis(value)}</text>`).join('')}

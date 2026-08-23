@@ -8,7 +8,9 @@ import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
 
-const SERIES = Array.from({ length: 10 }, (_, index) => `var(--series-${index + 1})`);
+// شش اسلات، و بدون چرخش. اسلات هفتم یعنی رنگی که با یکی از شش تای قبلی
+// اشتباه گرفته می‌شود؛ سریِ هفتم باید در «بقیه» جمع شود، نه رنگ تازه بگیرد.
+const SERIES = Array.from({ length: 6 }, (_, index) => `var(--series-${index + 1})`);
 const esc = (value) => String(value ?? '').replace(/[&<>'\"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;',
 }[char]));
@@ -159,13 +161,24 @@ function snapshotTable(rows, metric) {
   return `<div class="history-table-wrap"><table class="history-table decision-table"><thead><tr><th>رتبه</th><th>نماد / گروه</th><th>آخرین</th><th>پایانی دیروز</th><th>تغییر آخرین نسبت به پایانی دیروز ٪</th><th>${metricLabel}</th><th>حجم</th><th>تعداد معامله</th><th>ارزش</th><th>موقعیت باز</th><th>تغییر موقعیت باز</th><th>IV ٪</th><th>سررسید</th></tr></thead><tbody>${rows.map((row, index) => `<tr><td>${fmt.int(index + 1)}</td><td><b>${esc(rowName(row))}</b>${row.uaName && row.name ? `<small>${esc(row.uaName)}</small>` : ''}</td><td>${fmt.money(row.last)}</td><td>${fmt.money(row.yday)}</td><td class="${tone(row.changePct)}">${fmt.pct(row.changePct)}٪</td><td>${metricFmt(row[metric])}</td><td>${fmt.int(row.volume)}</td><td>${fmt.int(row.trades)}</td><td>${fmt.money(row.value)}</td><td>${fmt.int(row.oi)}</td><td class="${tone(row.oiChange)}">${fmt.int(row.oiChange)}</td><td>${fmt.pct(row.ivPct)}٪</td><td>${row.endDate ? dateLabel(row.endDate) : '—'}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
+// نمودار میله‌ای رتبه‌ای: یک فام برای همه میله‌ها.
+//
+// پیش از این هر میله رنگ بعدیِ فهرست سری را می‌گرفت (`SERIES[index % ...]`).
+// این رنگ‌کردن «بر اساس رتبه» است نه بر اساس هویت: میله اول با عوض‌شدن
+// فیلتر رنگ عوض می‌کرد، و شانزده رنگ کنار هم چیزی جز شلوغی نمی‌ساخت —
+// طولِ میله خودش مقدار را می‌گوید.
+//
+// تنها استثنا، سنجه‌های علامت‌دار (تغییر قیمت، تغییر موقعیت باز) است: آنجا
+// علامت یک معنی واقعی دارد و رنگ سود/زیان همان را می‌گوید، نه هویت را.
 function barChart(rows, metric) {
   if (!rows.length) return '<p class="empty-note">داده معتبری برای رسم این نمودار نیست.</p>';
   const [label, formatter] = METRICS[metric] || [metric, fmt.num];
+  const signed = metric === 'changePct' || metric === 'oiChange' || metric === 'oiChangePct';
   const max = Math.max(...rows.map((row) => Math.abs(Number(row[metric]) || 0)), 1);
-  return `<div class="decision-bars" aria-label="${esc(label)}">${rows.slice(0, 16).map((row, index) => {
+  return `<div class="decision-bars" aria-label="${esc(label)}">${rows.slice(0, 16).map((row) => {
     const value = Number(row[metric]);
-    return `<article><header><b>${esc(rowName(row))}</b><strong class="${tone(metric === 'changePct' || metric === 'oiChange' ? value : 0)}">${formatter(value)}</strong></header><i><b style="--bar:${Math.min(100, Math.abs(value) / max * 100)}%;--series:${SERIES[index % SERIES.length]}"></b></i><small>تغییر آخرین با پایانی دیروز: ${fmt.pct(row.changePct)}٪ · ارزش ${fmt.money(row.value)}</small></article>`;
+    const fill = signed ? (value > 0 ? 'var(--gain)' : value < 0 ? 'var(--loss)' : 'var(--muted)') : 'var(--bar-fill)';
+    return `<article><header><b>${esc(rowName(row))}</b><strong class="${tone(signed ? value : 0)}">${formatter(value)}</strong></header><i><b style="--bar:${Math.min(100, Math.abs(value) / max * 100)}%;--series:${fill}"></b></i><small>تغییر آخرین با پایانی دیروز: ${fmt.pct(row.changePct)}٪ · ارزش ${fmt.money(row.value)}</small></article>`;
   }).join('')}</div>`;
 }
 
@@ -265,11 +278,11 @@ export async function mount(root, { state }) {
     if (view[0] === 'breadth-pct') {
       liveChart(host, [
         { label: 'مثبت', color: SERIES[0], points: timeline.map((row) => ({ ...row, value: row.positivePct })) },
-        { label: 'منفی', color: SERIES[5], points: timeline.map((row) => ({ ...row, value: row.negativePct })) },
+        { label: 'منفی', color: SERIES[1], points: timeline.map((row) => ({ ...row, value: row.negativePct })) },
       ], { valueFmt: fmt.pct, unit: 'درصد نمادهای معامله‌شده' });
     } else {
       const metric = view[4], label = metric === 'breadth' ? 'خالص وسعت' : 'حجم تجمعی پایه‌ها';
-      liveChart(host, [{ label, color: SERIES[2], points: timeline.map((row) => ({ ...row, value: row[metric] })) }], { valueFmt: fmt.int, unit: label, zeroFloor: metric !== 'breadth' });
+      liveChart(host, [{ label, color: SERIES[0], points: timeline.map((row) => ({ ...row, value: row[metric] })) }], { valueFmt: fmt.int, unit: label, zeroFloor: metric !== 'breadth' });
     }
   }
 

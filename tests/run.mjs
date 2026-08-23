@@ -4987,7 +4987,12 @@ group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دا�
     ui70.includes('id="dd-interval" type="range"') && ui70.includes('timer = setTimeout(refresh') && ui70.includes('id="dd-pause"'));
   check('ریزمعامله کامل محاسبه و برای روانی DOM به آخرین چهارصد ردیف محدود می‌شود',
     ui70.includes('tape.slice(-400).reverse()') && ui70.includes('محاسبات تجمعی روی نوار کامل'));
-  check('رنگ سری‌ها فقط از ده توکن متمایز می‌آید', ui70.includes('var(--series-${index + 1})') && !ui70.includes("const COLORS ="));
+  // شش توکن، نه ده — و بدون چرخش. جداپذیری خودِ رنگ‌ها را نگهبان ۱۰ در
+  // `tests/guards.mjs` حساب می‌کند؛ اینجا فقط مصرفشان سنجیده می‌شود.
+  check('رنگ سری‌ها از توکن‌های سنجیده می‌آید و میله رتبه‌ای یک فام دارد',
+    ui70.includes('var(--series-${index + 1})') && ui70.includes('length: 6')
+    && ui70.includes("'var(--bar-fill)'")
+    && !ui70.includes('--series:${SERIES[index % SERIES.length]}'));
   check('ارزش بالا برای کل و سررسید و نگاه باز درون داشبورد است',
     ui70.includes("'high-value-overall'") && ui70.includes("'high-value-expiry'")
     && ui70.includes("'open-view-history'") && !app70.includes("id: 'open-view'"));

@@ -297,6 +297,104 @@ group('۹. هر کمک‌تابع مشترک، وارد شده است');
     misses.length === 0, misses.join('، '));
 }
 
+// ═════════ ۱۰. رنگ سری‌ها، سنجیده می‌شود نه چشمی ═════════
+//
+// گزارش کاربر: «در یک نمودار سه تا رنگ شبیه هم هستند.» درست بود، و با نگاه
+// کردن هم پیدا نمی‌شد که کدام جفت مقصر است. پس اینجا حساب می‌شود:
+//
+//   ΔE   فاصله اقلیدسی در فضای OKLab ×۱۰۰. برای کوررنگی، رنگ اول با
+//        ماتریس‌های ماچادو (۲۰۰۹، شدت ۱) شبیه‌سازی می‌شود.
+//
+// مجموعه قبلی روی همین سنجه رد می‌شد: «قرمز و نارنجی» ΔE ۸٫۷ در دید عادی
+// (کف ۱۵) و «بنفش و آبی» ΔE ۰٫۴ در دید دوترانوپ (هدف ۸).
+//
+// این آزمون کتابخانه نمی‌خواهد (قاعده ۲-۱): کل ریاضی‌اش چند ده خط است و
+// همین‌جا نوشته شده. رنگ‌ها هم از خودِ `ui/style.css` خوانده می‌شوند، نه از
+// رونوشتی اینجا که می‌تواند کهنه شود.
+group('۱۰. رنگ سری‌ها جداپذیر است');
+{
+  const css = fs.readFileSync(path.join(ROOT, 'ui/style.css'), 'utf8');
+  const blockOf = (selector) => {
+    const at = css.indexOf(selector);
+    return at < 0 ? '' : css.slice(at, css.indexOf('\n}', at));
+  };
+  const seriesOf = (selector) => {
+    const out = [];
+    for (const m of blockOf(selector).matchAll(/--series-(\d+):\s*(#[0-9a-fA-F]{6})/g)) out[+m[1] - 1] = m[2];
+    return out.filter(Boolean);
+  };
+  const light = seriesOf(':root {'), dark = seriesOf('body[data-theme="board"] {');
+
+  const s2lin = (c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const lin = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map(s2lin);
+  const relLum = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const contrast = (a, b) => {
+    const [hi, lo] = [relLum(lin(a)), relLum(lin(b))].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const oklab = ([r, g, b]) => {
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return [0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+      1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+      0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s];
+  };
+  // ماچادو، اولیویرا و فرناندس (۲۰۰۹) — شدت ۱، روی RGB خطی
+  const MACHADO = {
+    protan: [[0.152286, 1.052583, -0.204868], [0.114503, 0.786281, 0.099216], [-0.003882, -0.048116, 1.051998]],
+    deutan: [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.011820, 0.042940, 0.968881]],
+    tritan: [[1.255528, -0.076749, -0.178779], [-0.078411, 0.930809, 0.147602], [0.004733, 0.691367, 0.303900]],
+  };
+  const simulate = (rgb, kind) => MACHADO[kind].map((row) =>
+    Math.max(0, Math.min(1, row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2])));
+  const dE = (a, b, kind) => {
+    const x = oklab(kind ? simulate(lin(a), kind) : lin(a));
+    const y = oklab(kind ? simulate(lin(b), kind) : lin(b));
+    return 100 * Math.hypot(x[0] - y[0], x[1] - y[1], x[2] - y[2]);
+  };
+  const chromaOf = (h) => { const [, a, b] = oklab(lin(h)); return Math.hypot(a, b); };
+  const lightnessOf = (h) => oklab(lin(h))[0];
+
+  check('پوسته روشن و تیره یک مجموعه سری دارند، تا سری با عوض‌شدن پوسته رنگ عوض نکند',
+    light.length > 0 && light.join(',') === dark.join(','), `${light.length} و ${dark.length}`);
+  check('شمار سری‌ها همان چیزی است که کد مصرف می‌کند',
+    light.length === 6 && !css.includes('--series-7'), `${light.length} اسلات`);
+
+  // بدترین جفت، روی **همه** جفت‌ها نه فقط همسایه‌ها: یک نمودار می‌تواند سری
+  // ۲ و ۵ را کنار هم بگذارد بی‌آنکه ۳ و ۴ در آن باشند.
+  const pairs = light.flatMap((a, i) => light.slice(i + 1).map((b) => [a, b]));
+  const worstCvd = pairs.reduce((acc, [a, b]) => {
+    const d = Math.min(dE(a, b, 'protan'), dE(a, b, 'deutan'), dE(a, b, 'tritan'));
+    return d < acc[0] ? [d, a, b] : acc;
+  }, [Infinity, '', '']);
+  const worstNormal = pairs.reduce((acc, [a, b]) => {
+    const d = dE(a, b);
+    return d < acc[0] ? [d, a, b] : acc;
+  }, [Infinity, '', '']);
+  check('هیچ جفتی در دید عادی زیر کف ΔE ۱۵ نیست',
+    worstNormal[0] >= 15, `بدترین ${worstNormal[1]}↔${worstNormal[2]} = ${worstNormal[0].toFixed(1)}`);
+  check('هیچ جفتی در دید کوررنگ زیر هدف ΔE ۸ نیست',
+    worstCvd[0] >= 8, `بدترین ${worstCvd[1]}↔${worstCvd[2]} = ${worstCvd[0].toFixed(1)}`);
+  check('هیچ سری‌ای خاکستری نمی‌زند (کف اشباع ۰٫۱)',
+    light.every((c) => chromaOf(c) >= 0.1),
+    light.filter((c) => chromaOf(c) < 0.1).join('، '));
+  // باند مشترک دو پوسته، چون یک مجموعه برای هر دو به کار می‌رود
+  check('روشنایی هر سری در باند مشترک دو پوسته است',
+    light.every((c) => lightnessOf(c) >= 0.48 && lightnessOf(c) <= 0.67),
+    light.map((c) => lightnessOf(c).toFixed(2)).join('، '));
+  check('هر سری روی هر دو زمینه کنتراست ۳:۱ دارد',
+    light.every((c) => contrast(c, '#ffffff') >= 3 && contrast(c, '#111827') >= 3),
+    light.filter((c) => contrast(c, '#ffffff') < 3 || contrast(c, '#111827') < 3).join('، '));
+
+  // رنگ باید هویت را بگوید نه رتبه را: میله n اُم رنگ n اُم نمی‌گیرد.
+  const rankColored = sources.filter((f) => rel(f).startsWith('ui/'))
+    .filter((f) => /--series:\$\{[A-Z_]+\[index % /.test(fs.readFileSync(f, 'utf8')))
+    .map(rel);
+  check('هیچ نموداری رنگ را بر اساس رتبه ردیف نمی‌دهد',
+    rankColored.length === 0, rankColored.join('، '));
+}
+
 // ═══════════════════════════ گزارش ═══════════════════════════
 const W = 62;
 console.log('\n' + '═'.repeat(W));
