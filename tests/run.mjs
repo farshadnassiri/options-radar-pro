@@ -31,7 +31,7 @@ import {
   withoutBlockedExpiries,
 } from '../core/chain.mjs';
 import { scan as scanFn, scanAll, generateCombos, unexecutableReason, blockedExpirySet, expiryBlocked, emptyFunnel, passesFilters } from '../core/scan.mjs';
-import { markToMarket, rollAnalysis, closeValuation } from '../core/positions.mjs';
+import { markToMarket, captureEntryRisk, rollAnalysis, closeValuation } from '../core/positions.mjs';
 import { timeMachine } from '../core/timemachine.mjs';
 import { jalaliToGregorian, gregorianToJalali, parseJalali, todayJalali } from '../core/jalali.mjs';
 import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from '../server/guard.mjs';
@@ -1005,6 +1005,52 @@ group('۱۳. موقعیت واقعی و تحلیل رول');
     'بدهی کال به قیمت روز لحاظ شده');
   check('اگر تا سررسید نگه داری، سود در قیمت فعلی', Number.isFinite(mtm.ifHeld.atSpot));
   check('روز نگه‌داری از تاریخ شمسی خوانده شد', mtm.daysHeld === 0, `${mtm.daysHeld}`);
+
+  // فروش لخت: سرمایه ورود باید عکس فوری باشد، نه ترکیب قیمت پایه امروز با
+  // پریمیوم روز ورود. با ثابت‌ماندن مظنه اختیار، P&L یکی است؛ تغییر قیمت
+  // پایه فقط وجه تضمین لازم امروز را عوض می‌کند و نباید مخرج بازده را بجنباند.
+  const naked = {
+    id: 'p-naked', qty: 1, entryDate: todayJalali(), uaIns: '1', entrySpot: 100000,
+    legs: [
+      { kind: 'call', side: 'sell', ratio: 1, size, strike: 110000, price: 5000, entryClose: 5200, days: 30 },
+    ],
+  };
+  naked.entryRisk = captureEntryRisk(naked, { fees, capitalMode: 'NET' });
+  const nakedLow = markToMarket(naked, [q(6900, 7100)], {
+    fees, spot: 100000, spotClose: 100000, capitalMode: 'NET',
+  });
+  const nakedHigh = markToMarket(naked, [q(6900, 7100)], {
+    fees, spot: 150000, spotClose: 150000, capitalMode: 'NET',
+  });
+  check('فروش لخت، عکس فوری معتبرِ سرمایه ورود دارد',
+    naked.entryRisk.available && nakedLow.entryRiskStored && nakedLow.capital > 0);
+  check('وجه تضمین ورود از قیمت پایانی ثبت‌شده اختیار می‌آید',
+    nakedLow.entryMargin === naked.entryRisk.margin && nakedLow.entryMargin !== nakedLow.currentMargin,
+    `${Math.round(nakedLow.entryMargin).toLocaleString()} / ${Math.round(nakedLow.currentMargin).toLocaleString()}`);
+  check('حرکت پایه امروز، سرمایه ورود و بازده را جابه‌جا نمی‌کند',
+    near(nakedLow.pnl, nakedHigh.pnl) && near(nakedLow.capital, nakedHigh.capital)
+      && near(nakedLow.retPct, nakedHigh.retPct),
+    `${nakedLow.retPct.toFixed(4)}٪ / ${nakedHigh.retPct.toFixed(4)}٪`);
+  check('حرکت پایه امروز فقط وجه تضمین جاری را به‌روز می‌کند',
+    nakedHigh.currentMargin > nakedLow.currentMargin,
+    `${Math.round(nakedLow.currentMargin).toLocaleString()} → ${Math.round(nakedHigh.currentMargin).toLocaleString()}`);
+
+  const legacyNaked = {
+    id: 'p-legacy', qty: 1, entryDate: todayJalali(), uaIns: '1',
+    legs: [{ kind: 'put', side: 'sell', ratio: 1, size, strike: 90000, price: 4000, days: 30 }],
+  };
+  const legacyMtm = markToMarket(legacyNaked, [q(4900, 5100)], {
+    fees, spot: 100000, spotClose: 100000,
+  });
+  check('موقعیت قدیمیِ فاقد قیمت پایه ورود، بازده ساختگی نمی‌سازد',
+    !legacyMtm.entryRiskAvailable && Number.isNaN(legacyMtm.capital) && Number.isNaN(legacyMtm.retPct)
+      && legacyMtm.entryRiskReason.includes('ثبت نشده'));
+
+  const noCloseToday = markToMarket(naked, [{ bid: 6900, ask: 7100, last: 7000, close: 0 }], {
+    fees, spot: 100000, spotClose: 100000,
+  });
+  check('بدون قیمت پایانی امروز اختیار، وجه تضمین جاری ساخته نمی‌شود',
+    !noCloseToday.currentMarginAvailable && Number.isNaN(noCloseToday.currentMargin));
 
   // رول: کال ۱۱۰ را ببند، کال ۱۲۰ سررسید دورتر بفروش
   const roll = rollAnalysis({
