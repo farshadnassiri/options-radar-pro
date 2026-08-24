@@ -50,10 +50,12 @@ import {
 } from '../core/scenario.mjs';
 import { csvCell, numericCell, toCsv, stamp } from '../ui/export.mjs';
 import { cell as wbCell, sheet as wbSheet, sheetParts as wbParts, workbook as wbWrap } from '../ui/workbook.mjs';
+import { inflateRawSync } from 'node:zlib';
 import { buildBacktestWorkbook } from '../ui/backtest-export.mjs';
 import {
   buildXlsx, crc32 as xCrc, colName as xCol, sheetName as xSheetName,
   sheet as xSheet, tidy as xTidy, zip as xZip,
+  deflateRaw as xDeflate, stripZlib as xStrip,
 } from '../ui/xlsx.mjs';
 import {
   GREEKS as GK, greekSeries, greekSummary, legGreekSummary, trackSummary,
@@ -5978,6 +5980,57 @@ group('۸۱. نویسندهٔ xlsx و حجم فایل');
   // یک برگ بدون فشرده‌سازی هم باید سالم بسته شود
   const noPack = await xZip([{ name: 'a.txt', data: 'x' }]);
   check('بسته با یک عضو هم درست بسته می‌شود', noPack.length > 22 && noPack[0] === 0x50);
+
+  // ——— مسیر پشتیبانِ فشرده‌سازی ———
+  //
+  // رگرسیون یک باگ واقعی: `deflate-raw` تازه است — نود از ۲۱٫۲ داردش،
+  // فایرفاکس از ۱۱۳، سافاری از ۱۶٫۴. روی هر چیزی قدیمی‌تر استثنا می‌داد و
+  // کل فایل بی‌فشرده نوشته می‌شد. CI که روی نود ۱۸ می‌ایستد همین را گرفت:
+  // به‌جای پانزده برابر، دو برابر.
+  //
+  // آزمون سکوی قدیمی را **شبیه‌سازی** می‌کند تا مسیر پشتیبان قطعی سنجیده
+  // شود، نه اینکه به نسخهٔ نودِ اجراکننده سپرده شود.
+  const sample81 = 'ردیف نمونه '.repeat(3000);
+  const raw81 = new TextEncoder().encode(sample81);
+  const realCS = globalThis.CompressionStream;
+  const oldPlatform = class {
+    constructor(format) {
+      if (format === 'deflate-raw') throw new TypeError('Unsupported compression format: deflate-raw');
+      return new realCS(format);
+    }
+  };
+
+  const packedNew = await xDeflate(raw81);
+  globalThis.CompressionStream = oldPlatform;
+  const packedOld = await xDeflate(raw81);
+  globalThis.CompressionStream = realCS;
+
+  check('سکوی بدون deflate-raw هم واقعاً فشرده می‌کند',
+    packedOld && packedOld.length < raw81.length / 5,
+    packedOld ? `${(raw81.length / packedOld.length).toFixed(0)} برابر` : 'اصلاً فشرده نشد');
+  // `!!packedOld` اینجا احتیاط نیست، شرط است: بدون آن، نبودِ مسیر پشتیبان
+  // به‌جای یک ردِ تمیز، کل اجرای آزمون را می‌انداخت و ادعاهای بعدی هرگز
+  // خوانده نمی‌شدند.
+  check('دو مسیر فشرده‌سازی یک خروجی می‌دهند',
+    !!packedOld && packedNew.length === packedOld.length
+    && packedNew.every((byte, at) => byte === packedOld[at]));
+  check('خروجی مسیر پشتیبان، همان دادهٔ اصلی را برمی‌گرداند',
+    !!packedOld && new TextDecoder().decode(inflateRawSync(Buffer.from(packedOld))) === sample81);
+
+  // بریدنِ کورکورانهٔ پوشش zlib، فایلی می‌سازد که باز می‌شود و محتوایش
+  // آشغال است — بدتر از فایلی که باز نمی‌شود. پس سرآیند بررسی می‌شود.
+  check('سرآیند zlib با روش ناشناخته رد می‌شود',
+    xStrip(Uint8Array.from([9, 0, 1, 2, 3, 4, 5, 6, 7])) === null);
+  check('سرآیند zlib با واژه‌نامهٔ از پیش‌تعیین‌شده رد می‌شود',
+    xStrip(Uint8Array.from([0x78, 0x20, 1, 2, 3, 4, 5, 6, 7])) === null);
+  check('دادهٔ کوتاه‌تر از پوشش zlib رد می‌شود', xStrip(Uint8Array.from([0x78, 0x9c, 1])) === null);
+
+  // و کل دفترکار روی همان سکوی قدیمی هم باید فشرده و سالم دربیاید
+  globalThis.CompressionStream = oldPlatform;
+  const bookOld = await buildXlsx([xSheet('برگ', head81, rows81)]);
+  globalThis.CompressionStream = realCS;
+  check('دفترکار روی سکوی قدیمی هم چند برابر کوچک‌تر است',
+    old81 / bookOld.length >= 5, `${(old81 / bookOld.length).toFixed(1)} برابر`);
 
   const bt81 = readSrc('../ui/tabs/backtest.mjs');
   check('فراخوان خروجی منتظر ساخت فایل می‌ماند', /await\s+downloadBacktestExcel/.test(bt81));

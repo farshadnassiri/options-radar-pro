@@ -204,13 +204,50 @@ export function crc32(bytes) {
   return (c ^ 0xFFFFFFFF) >>> 0;
 }
 
-/** فشرده‌سازی با موتور خودِ سکو. اگر نبود، `null` یعنی «بدون فشرده‌سازی بنویس». */
+const pack = async (bytes, format) => new Uint8Array(await new Response(
+  new Blob([bytes]).stream().pipeThrough(new CompressionStream(format)),
+).arrayBuffer());
+
+/**
+ * دادهٔ zlib را به deflate خام تبدیل می‌کند.
+ *
+ * جریان zlib یعنی دو بایت سرآیند، بعد دقیقاً همان deflate خام، بعد چهار
+ * بایت adler32. zip دومی را می‌خواهد و سرآیند و دنباله را نمی‌فهمد؛ پس
+ * کنده می‌شوند.
+ *
+ * سرآیند بررسی می‌شود نه فرض: بایت اول باید روش deflate را بگوید و بیت
+ * FDICT باید خاموش باشد، وگرنه چهار بایت شناسهٔ واژه‌نامه هم وسط است و
+ * بریدنِ کورکورانه، دادهٔ خراب می‌ساخت — فایلی که باز می‌شود و محتوایش
+ * آشغال است، از فایلی که باز نمی‌شود بدتر است.
+ */
+export function stripZlib(packed) {
+  if (!packed || packed.length <= 6) return null;
+  if ((packed[0] & 0x0F) !== 8) return null;
+  if (packed[1] & 0x20) return null;
+  return packed.slice(2, packed.length - 4);
+}
+
+/**
+ * فشرده‌سازی با موتور خودِ سکو. اگر نبود، `null` یعنی «بدون فشرده‌سازی بنویس».
+ *
+ * دو مسیر، و مسیر دوم اضافه‌کاری نیست: `deflate-raw` تازه است — نود از
+ * ۲۱٫۲ داردش، فایرفاکس از ۱۱۳، سافاری از ۱۶٫۴. روی هر چیزی قدیمی‌تر
+ * استثنا می‌داد و کل فایل بی‌فشرده نوشته می‌شد؛ کاربر به‌جای پانزده برابر
+ * کوچک‌تر، دو برابر کوچک‌تر می‌گرفت و هیچ‌جا هم نمی‌فهمید چرا.
+ *
+ * `deflate` ساده اما همه‌جا هست، و تفاوتش با `deflate-raw` فقط شش بایت
+ * پوششِ zlib است که `stripZlib` برمی‌دارد. یعنی همان فشرده‌سازی، روی
+ * سکوهای بسیار بیشتر.
+ */
 export async function deflateRaw(bytes) {
   if (typeof CompressionStream !== 'function') return null;
   try {
-    const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
-    const packed = new Uint8Array(await new Response(stream).arrayBuffer());
+    const packed = await pack(bytes, 'deflate-raw');
     return packed.length < bytes.length ? packed : null;
+  } catch { /* سکو این قالب را ندارد؛ مسیر دوم */ }
+  try {
+    const raw = stripZlib(await pack(bytes, 'deflate'));
+    return raw && raw.length < bytes.length ? raw : null;
   } catch { return null; }
 }
 
