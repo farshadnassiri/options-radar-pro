@@ -465,6 +465,54 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-tf-matrix td.gain { background: color-mix(in srgb, var(--gain) calc(var(--weight, 0) * 45%), transparent); }
 .backtest-tf-matrix td.loss { background: color-mix(in srgb, var(--loss) calc(var(--weight, 0) * 45%), transparent); }
 .backtest-table-note { margin: 9px 2px 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.8; }
+.backtest-export-size { color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.backtest-export-size:empty { display: none; }
+
+/* ── نوار زیرتب بک‌تست ──
+   نوار افقی و کشویی است، نه چند سطر پیچیده: شانزده تب در چند سطر، هر بار
+   که یکی انتخاب می‌شود ارتفاعش عوض می‌شود و محتوای زیرش بالا و پایین
+   می‌پرد. */
+.subtabs {
+  display: flex; gap: 4px; padding: 5px; margin: 0 0 14px;
+  overflow-x: auto; scrollbar-width: thin;
+  border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--panel-2);
+}
+.subtabs button {
+  flex: 0 0 auto; min-height: 36px; padding: 6px 14px;
+  border: 0; border-radius: var(--radius-pill);
+  color: var(--muted); background: transparent;
+  font: inherit; font-size: var(--fs-sm); font-weight: 800; white-space: nowrap; cursor: pointer;
+}
+.subtabs button:hover { color: var(--ink-2); background: var(--panel); }
+.subtabs button[aria-selected="true"] { color: var(--panel); background: var(--accent); box-shadow: var(--shadow-sm); }
+.subtabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bt-panel:focus { outline: none; }
+.bt-panel[hidden] { display: none; }
+
+/* ریل انتخاب با تعداد دلخواه دکمه — نه پنج ستون ثابتِ ریل مبنای قیمت. */
+.backtest-rail-auto { display: inline-flex; grid-template-columns: none; margin-bottom: 0; }
+.backtest-rail-auto button { padding: 0 14px; }
+.backtest-frame-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  margin-bottom: 13px; color: var(--muted); font-size: var(--fs-sm);
+}
+.backtest-frame-bar .backtest-tf-field { margin: 0; }
+
+/* حکم پنل الگو: چند جملهٔ کوتاه که هرکدام یک عدد را می‌گویند. */
+.backtest-verdict { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-2); }
+.backtest-verdict ul { margin: 0; padding-inline-start: 18px; }
+.backtest-verdict li { margin: 4px 0; line-height: 1.9; font-size: var(--fs-sm); }
+.backtest-verdict b { color: var(--ink-2); }
+
+/* شدت خانهٔ شبکهٔ حساسیت. رنگ از توکن سود و زیان می‌آید، نه از رنگ ثابت. */
+.heat-up-1 { background: color-mix(in srgb, var(--gain) 8%, transparent); }
+.heat-up-2 { background: color-mix(in srgb, var(--gain) 16%, transparent); }
+.heat-up-3 { background: color-mix(in srgb, var(--gain) 26%, transparent); }
+.heat-up-4 { background: color-mix(in srgb, var(--gain) 38%, transparent); }
+.heat-down-1 { background: color-mix(in srgb, var(--loss) 8%, transparent); }
+.heat-down-2 { background: color-mix(in srgb, var(--loss) 16%, transparent); }
+.heat-down-3 { background: color-mix(in srgb, var(--loss) 26%, transparent); }
+.heat-down-4 { background: color-mix(in srgb, var(--loss) 38%, transparent); }
 .backtest-tape { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .backtest-tape .section-head p { margin-top: 4px; color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
 .backtest-tape .history-table-wrap { max-height: 480px; }

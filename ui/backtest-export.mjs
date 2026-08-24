@@ -15,7 +15,7 @@
 import { historyDateLabel, daysBetween } from '../core/history.mjs';
 import { legDaysToExpiry, ivSummary } from '../core/leg-iv.mjs';
 import { stamp } from './export.mjs';
-import { sheet, sheetParts, workbook, downloadWorkbook } from './workbook.mjs';
+import { sheet, sheetParts, downloadXlsx } from './xlsx.mjs';
 
 const date = (value) => (Number(value) > 0 ? historyDateLabel(value) : '');
 const clock = (second) => {
@@ -34,6 +34,18 @@ const legHead = (leg, index) => [
   Number(leg?.ratio) || 1, Number(leg?.size) || NaN,
   Number(leg?.strike) || NaN, date(leg?.expiry),
 ];
+
+/**
+ * ارجاع فشرده به پا، برای برگ‌هایی که صدها هزار ردیف دارند.
+ *
+ * هویت ثابت یک پا — نوع، جهت، نسبت، اندازه، اعمال، سررسید — در هر ردیف
+ * ریزمعامله عوض نمی‌شود. تکرارش در چهارصد هزار ردیف، همان اطلاعات را
+ * چهارصد هزار بار می‌نویسد. اینجا فقط «شماره پا» و نامش می‌آید و بقیه در
+ * برگ «پاهای ورود» با همان شماره پیدا می‌شود؛ هیچ چیزی از فایل بیرون
+ * نرفته، فقط یک بار نوشته شده به‌جای هر بار.
+ */
+const LEG_REF_HEAD = ['شماره پا', 'نام پا'];
+const legRef = (leg, index) => [index + 1, leg?.name || ''];
 
 const GREEK_HEAD = ['دلتا', 'گاما', 'وگا', 'تتا', 'رو'];
 const greekValues = (g) => [g?.delta, g?.gamma, g?.vega, g?.theta, g?.rho]
@@ -94,6 +106,8 @@ function guideSheet() {
     ['سطل تایم‌فریم', 'فقط از ثانیه‌هایی ساخته می‌شود که همهٔ پاها در آن قیمت مشاهده‌شده داشته‌اند. سطل بی‌معامله اصلاً ساخته نشده است.'],
     ['سن مشاهده', 'فاصلهٔ آخرین معاملهٔ آن پا تا لحظهٔ ردیف. سن بالا یعنی قیمت آن پا کهنه است، هرچند ردیف تازه باشد.'],
     ['ماتریس ورود × خروج', 'آفست بین دو لحظه از روز، روی همهٔ روزهای بازه. ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.'],
+    ['شماره پا', 'در برگ‌های پرحجم فقط شمارهٔ پا و نامش می‌آید. نوع، جهت، نسبت، اندازهٔ قرارداد، قیمت اعمال و سررسید همان شماره در برگ «پاهای ورود» است — یک بار، چون در طول عمر موقعیت عوض نمی‌شود.'],
+    ['قالب فایل', 'xlsx فشرده. همان داده در قالب قدیمی چند ده برابر حجم می‌گرفت؛ چیزی از محتوا کم نشده، فقط قالب عوض شده.'],
     ['محدودیت اجرا', 'قیمت تاریخی و آخرین معامله، مظنهٔ قابل اجرای هم‌زمان نیستند. این گزارش ابزار تحلیل است، نه تضمین اجرا و نه توصیهٔ معامله.'],
   ];
   return sheet('راهنما', ['موضوع', 'توضیح'], rows, [190, 700]);
@@ -177,7 +191,7 @@ function bucketLegSheet(buckets, priced) {
   for (const b of buckets || []) {
     (b.perLeg || []).forEach((leg, index) => {
       rows.push([
-        date(b.date), clock(b.startSecond), ...legHead(priced?.[index], index),
+        date(b.date), clock(b.startSecond), ...legRef(priced?.[index], index),
         legDaysToExpiry(priced?.[index], b.date),
         leg.price, leg.priceChange, leg.netPnl, leg.changePnl, leg.ivPct,
         leg.cumulativeVolume, leg.tradeCount, leg.ageSec,
@@ -185,7 +199,7 @@ function bucketLegSheet(buckets, priced) {
     });
   }
   return sheetParts('سطل × پا', [
-    'تاریخ', 'از', ...LEG_HEAD, 'روز تا سررسید',
+    'تاریخ', 'از', ...LEG_REF_HEAD, 'روز تا سررسید',
     'قیمت', 'تغییر قیمت در سطل', 'اثر خالص', 'تغییر اثر در سطل', 'تلاطم ضمنی ٪',
     'حجم تجمعی', 'تعداد معامله', 'سن ثانیه',
   ], rows);
@@ -279,7 +293,7 @@ function intradayLegSheet(points, priced) {
   for (const r of points || []) {
     (r.perLeg || []).forEach((leg, index) => {
       rows.push([
-        clock(r.second), ...legHead(priced?.[index], index),
+        clock(r.second), ...legRef(priced?.[index], index),
         leg.exitPrice, leg.pricePct, leg.netPnl, leg.grossPnl, leg.entryFee, leg.exitFee,
         leg.ivPct, leg.secondVolume, leg.cumulativeVolume, leg.tradeCount,
         clock(leg.lastTradeSecond), leg.ageSec, leg.observedNow ? 'بله' : 'خیر',
@@ -287,7 +301,7 @@ function intradayLegSheet(points, priced) {
     });
   }
   return sheetParts('درون‌روز × پا', [
-    'زمان', ...LEG_HEAD,
+    'زمان', ...LEG_REF_HEAD,
     'قیمت', 'تغییر از اولین معامله ٪', 'اثر خالص', 'اثر ناخالص', 'کارمزد ورود', 'کارمزد خروج',
     'تلاطم ضمنی ٪', 'حجم ثانیه', 'حجم تجمعی', 'تعداد معامله',
     'آخرین معامله', 'سن ثانیه', 'در همین ثانیه معامله شد',
@@ -368,10 +382,11 @@ export function buildBacktestWorkbook(ctx = {}) {
   if (entryExit?.cells?.length) sheets.push(...entryExitSheet(entryExit), entryExitEdgeSheet(entryExit));
   if (intraday.length) sheets.push(...intradaySheet(intraday), ...intradayLegSheet(intraday, replay?.priced));
   sheets.push(ivSummarySheet({ replay, intraday, buckets }));
-  return workbook(sheets);
+  return sheets;
 }
 
+/** فایل را می‌سازد و می‌دهد؛ حجم نهایی را برمی‌گرداند تا فراخوان بتواند نشانش دهد. */
 export function downloadBacktestExcel(ctx = {}) {
   const base = (ctx.ua?.name || 'backtest').replace(/[^\p{L}\p{N}_-]+/gu, '-').slice(0, 24);
-  downloadWorkbook(`backtest-${base}-${stamp()}`, buildBacktestWorkbook(ctx));
+  return downloadXlsx(`backtest-${base}-${stamp()}`, buildBacktestWorkbook(ctx));
 }
