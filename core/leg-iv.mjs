@@ -14,9 +14,10 @@
 // قاعدهٔ ۲-۴ اینجا سفت است: هر ورودیِ نبوده، خروجی را NaN می‌کند. تلاطمی که
 // از قیمت واقعی درنیامده باشد، عدد نیست.
 
-import { impliedVol } from './bs.mjs';
+import { impliedVol, bsGreeks } from './bs.mjs';
 import { daysBetween } from './history.mjs';
 import { num } from './num.mjs';
+import { positionGreeks } from './payoff.mjs';
 
 /**
  * پارامترهای محاسبه که کاربر می‌تواند دست ببرد.
@@ -176,4 +177,51 @@ export function ivSummary(series = []) {
     mean: sum / values.length,
     changePp: values.at(-1) - values[0],
   };
+}
+
+// ═══════════════════ یونانی‌ها در طول زمان ═══════════════════
+//
+// یونانی هر پا از تلاطم ضمنی **خودِ همان پا** می‌آید، نه از یک تلاطم واحد
+// برای کل موقعیت. دو پا با دو اعمال، دو تلاطم دارند؛ اگر هر دو با یک عدد
+// حساب شوند، وگای موقعیت عددی می‌شود که هیچ پایی آن را نمی‌سازد.
+//
+// جمع‌بستن به `positionGreeks` سپرده شده — همان تابعی که بقیهٔ برنامه
+// استفاده می‌کند. علامت و وزن پا یک‌جا اعمال می‌شود، نه دو پیاده‌سازی موازی
+// که با هم از هم دور بیفتند.
+
+/** یونانی یک پا در یک لحظه، با تلاطم ضمنی همان پا. */
+export function legGreeksAt(leg, { spot, price, days }, params = {}) {
+  if (!leg || (leg.kind !== 'call' && leg.kind !== 'put')) return null;
+  const ivPct = legIvPct(leg, { spot, price, days }, params);
+  if (!Number.isFinite(ivPct)) return null;
+  const yearDays = num(params.yearDays, 365);
+  return bsGreeks(leg.kind, num(spot), num(leg.strike), num(days) / yearDays,
+    num(params.rFree, 0), num(params.divYield, 0), ivPct / 100, yearDays);
+}
+
+/**
+ * یونانی کل موقعیت در یک لحظه.
+ *
+ * `incomplete` را دست‌نخورده پس می‌دهد: اگر حتی یک پا تلاطم نداشته باشد،
+ * جمع یونانی‌ها ناقص است و مصرف‌کننده باید همین را نشان دهد، نه عددی که
+ * انگار کامل است.
+ */
+export function positionGreeksAt(legs = [], { spot, prices = [], date }, params = {}) {
+  const byLeg = legs.map((leg, index) => legGreeksAt(leg, {
+    spot, price: prices[index], days: legDaysToExpiry(leg, date),
+  }, params));
+  return { ...positionGreeks(legs, byLeg), byLeg };
+}
+
+/** مسیر روزانه را با یونانی هر پا و یونانی کل مهر می‌زند. */
+export function annotateDailyGreeks(replay, params = {}) {
+  if (!replay?.ok) return replay;
+  const legs = replay.priced || [];
+  for (const row of replay.rows || []) {
+    const prices = (row.perLeg || []).map((leg) => leg.exitPrice);
+    const g = positionGreeksAt(legs, { spot: row.baseClose, prices, date: row.date }, params);
+    g.byLeg.forEach((value, index) => { if (row.perLeg?.[index]) row.perLeg[index].greeks = value; });
+    row.greeks = g;
+  }
+  return replay;
 }

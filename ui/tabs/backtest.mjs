@@ -13,7 +13,9 @@ import {
 } from '/core/backtest.mjs';
 import {
   ivParams, IV_PARAMS, annotateDailyIv, annotateIntradayIv, annotateBucketIv, ivSummary, legDaysToExpiry,
+  annotateDailyGreeks,
 } from '/core/leg-iv.mjs';
+import { downloadBacktestExcel } from '/ui/backtest-export.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
@@ -235,7 +237,7 @@ export async function mount(root, { state }) {
         <section class="backtest-tape"><div class="section-head"><div><h3>نوار مشترک قیمت و حجم</h3><p>نمودارها همه نقاط را دارند؛ جدول برای حفظ سرعت حداکثر ۳۰۰ نقطه را با فاصله یکنواخت نشان می‌دهد.</p></div><span id="bt-tape-count">—</span></div><div id="bt-tape-table" class="history-table-wrap"></div></section>
       </section>
 
-      <section class="card backtest-timeframe"><div class="section-head"><div><p class="eyebrow">گام سوم · کل بازه روی تایم‌فریم دلخواه</p><h2>عملکرد کلی و به تفکیک پاها</h2></div><div class="backtest-head-actions"><label class="backtest-tf-field">تایم‌فریم<select id="bt-tf-size"><option value="60">۱ دقیقه</option><option value="300">۵ دقیقه</option><option value="900" selected>۱۵ دقیقه</option><option value="1800">۳۰ دقیقه</option><option value="3600">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="bt-tf-run">تحلیل کل بازه</button></div></div>
+      <section class="card backtest-timeframe"><div class="section-head"><div><p class="eyebrow">گام سوم · کل بازه روی تایم‌فریم دلخواه</p><h2>عملکرد کلی و به تفکیک پاها</h2></div><div class="backtest-head-actions"><label class="backtest-tf-field">تایم‌فریم<select id="bt-tf-size"><option value="60">۱ دقیقه</option><option value="300">۵ دقیقه</option><option value="900" selected>۱۵ دقیقه</option><option value="1800">۳۰ دقیقه</option><option value="3600">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="bt-tf-run">تحلیل کل بازه</button><button type="button" class="ghost" id="bt-tf-export" hidden>دریافت فایل اکسل</button></div></div>
         <p id="bt-tf-note" class="backtest-table-note">برای هر روز بازه، ریزمعامله همه پاها و نماد پایه جداگانه گرفته می‌شود؛ این یعنی چند ده درخواست. نتیجه فقط از ثانیه‌هایی ساخته می‌شود که هر پا دست‌کم یک معامله داشته باشد.</p>
         <p class="backtest-table-note">این مسیر از <b>آخرین معاملهٔ مشاهده‌شدهٔ هر پا</b> ساخته می‌شود، نه از مظنه تقاضا و عرضهٔ هم‌زمان. یعنی «ارزش موقعیت در آن لحظه»، نه «سودی که در آن لحظه می‌شد گرفت»: آفست واقعی، خرید روی عرضه و فروش روی تقاضاست و اسپرد هر دو پا را می‌پردازد. تابلو دفتر سفارش تاریخی نمی‌دهد، پس عدد اجرایی از این داده ساختنی نیست.</p>
         <div id="bt-tf-body" hidden>
@@ -913,6 +915,9 @@ export async function mount(root, { state }) {
       timeframeDays = loaded.days;
       if (!timeframeDays.length) { setStatus('در هیچ روز این بازه، ریزمعامله کامل همه پاها پیدا نشد.', true); $('bt-tf-body').hidden = true; return; }
       paintTimeframe(loaded);
+      // دکمهٔ خروجی تا وقتی تحلیلی ساخته نشده پنهان است: دکمه‌ای که فایل
+      // خالی می‌دهد، بدتر از دکمهٔ نبوده است.
+      $('bt-tf-export').hidden = false;
       setStatus(`تحلیل ${fmt.int(timeframeDays.length)} روز روی سطل ${fmt.int(timeframeSeconds / 60)} دقیقه‌ای آماده شد.`);
       $('bt-tf-body').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { setStatus(errorText(error, 'تحلیل تایم‌فریم کامل نشد.'), true); }
@@ -992,7 +997,7 @@ export async function mount(root, { state }) {
     });
     if (!replay.ok) { setStatus(replay.error || 'موقعیت تاریخی برای رصد ساخته نشد.', true); return; }
     annotateDailyIv(replay, ivP());
-    tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true;
+    tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true; $('bt-tf-export').hidden = true;
     liveWatching = true; $('bt-live').textContent = 'توقف رصد زنده'; $('bt-live').setAttribute('data-active', 'true');
     setStatus('در حال دریافت معاملات امروز برای موقعیت تاریخی…');
     await refreshLivePosition();
@@ -1010,7 +1015,7 @@ export async function mount(root, { state }) {
       if (!replay.ok) throw new Error(replay.error);
       annotateDailyIv(replay, ivP());
       // ترکیب یا بازه عوض شده؛ ریزمعامله‌های کش‌شده مال بازپخش قبلی‌اند.
-      tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true;
+      tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true; $('bt-tf-export').hidden = true; $('bt-tf-export').hidden = true;
       const day = await fetchDayTrades(endDate);
       paintRunNote(day);
       intradayDate = endDate;
@@ -1153,6 +1158,35 @@ export async function mount(root, { state }) {
     if (row && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDayIntraday(Number(row.dataset.day)); }
   });
   $('bt-tf-run').addEventListener('click', runTimeframe);
+
+  /**
+   * فایل جامع گام سوم.
+   *
+   * یونانی‌ها همین‌جا مهر می‌خورند، نه در جریان رنگ‌آمیزی: محاسبه‌شان برای
+   * هر روز و هر پا یک ریشه‌یابی تلاطم دارد و انجامش در هر رنگ‌آمیزی، تبی را
+   * که فقط جدول را مرتب می‌کند هم کند می‌کرد. برای فایل، یک‌بار بس است.
+   */
+  function exportTimeframeExcel() {
+    if (!replay?.ok || !timeframeDays.length) return;
+    const params = ivP();
+    annotateDailyGreeks(replay, params);
+    const buckets = annotateBucketIv(
+      bucketIntradayPath(timeframeDays, { bucketSeconds: timeframeSeconds }), { legs: replay.priced }, params,
+    );
+    downloadBacktestExcel({
+      ua, strategyName: strategySelect.selectedOptions[0]?.textContent || '',
+      comboName: $('bt-combo').selectedOptions[0]?.textContent || '',
+      replay, intraday, buckets, params,
+      holding: intradayHoldingSummary(timeframeDays),
+      timeOfDay: timeOfDayProfile(timeframeDays, { bucketSeconds: timeframeSeconds }),
+      entryExit: intradayEntryExitProfile(timeframeDays, {
+        legs: replay.priced, bucketSeconds: timeframeSeconds, fees: feesOf(state.settings),
+      }),
+      timeframeSeconds, intradayDate, generatedAt: faClock(new Date()),
+    });
+  }
+
+  $('bt-tf-export').addEventListener('click', exportTimeframeExcel);
 
   // عوض‌شدن پارامتر یعنی هر سه تایم‌فریم باید از نو مهر بخورند. جدول‌هایی
   // که تلاطم را در خانه‌هایشان نشان می‌دهند هم دوباره کشیده می‌شوند، وگرنه
