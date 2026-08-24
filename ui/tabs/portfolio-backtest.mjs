@@ -8,6 +8,7 @@ import {
   normalizeHistoryDate, replayHistory,
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
+import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 
@@ -87,9 +88,10 @@ function strategyBars(host, strategies, onPick) {
 export async function mount(root, { state }) {
   root.innerHTML = `<section class="portfolio-hero"><div><p class="eyebrow">غربال تاریخی همه استراتژی‌ها</p><h1>اگر آن روز همه را می‌ساختیم چه می‌شد؟</h1><p>همه استراتژی‌ها و ترکیب‌های معتبر یک نماد در روز ایجاد ساخته و در یک تاریخ یکسان سنجیده می‌شوند؛ بدون پرکردن قیمت گمشده و بدون انتخاب پس‌نگر یک برنده.</p></div><span>رتبه‌بندی با میانه بازده</span></section>
   <section class="card portfolio-controls"><div class="section-head"><div><p class="eyebrow">مرحله اول</p><h2>نماد، نقدشوندگی و دامنه آزمون</h2></div><b id="pb-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
-    <div class="portfolio-form"><label>نماد پایه<select id="pb-base"><option value="">در حال دریافت…</option></select></label><label>دامنه استراتژی<select id="pb-scope"><option value="feasible">فقط استراتژی‌های قابل اجرا</option><option value="all">همه ساختاری، با برچسب غیرقابل اجرا</option></select></label><label>تعداد واحد<input id="pb-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><label>سقف ترکیب هر استراتژی<input id="pb-cap" type="number" min="10" max="1000" step="10" value="120"></label>
+    <div class="portfolio-form"><label>نماد پایه<select id="pb-base"><option value="">در حال دریافت…</option></select></label><label>دامنه استراتژی<select id="pb-scope"><option value="feasible">فقط استراتژی‌های قابل اجرا</option><option value="all">همه ساختاری، با برچسب غیرقابل اجرا</option></select></label><label>دامنهٔ داده<select id="pb-data-scope">${scopeOptionsMarkup()}</select></label><label>تعداد واحد<input id="pb-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><label>سقف ترکیب هر استراتژی<input id="pb-cap" type="number" min="10" max="1000" step="10" value="120"></label>
       <label>حداقل ارزش پایه (میلیارد ریال)<input id="pb-base-value" type="number" min="0" step="0.1" value="0"></label><label>حداقل ارزش هر قرارداد (میلیون ریال)<input id="pb-leg-value" type="number" min="0" step="0.1" value="0"></label><label>حداقل حجم پایه<input id="pb-base-volume" type="number" min="0" step="1" value="0"></label><label>حداقل حجم هر قرارداد<input id="pb-leg-volume" type="number" min="0" step="1" value="0"></label>
       <button type="button" class="primary" id="pb-load">دریافت تاریخچه نماد</button></div>
+    <p class="live-scope-note" id="pb-scope-note" hidden></p>
     <p class="portfolio-note">سقف ترکیب برای کنترل زمان اجراست و در گزارش شفاف ثبت می‌شود. «همه استراتژی‌ها» یعنی همه الگوها بررسی می‌شوند؛ تعداد ترکیب قراردادهای هر الگو می‌تواند با این سقف محدود شود.</p>
   </section>
   <section id="pb-work" hidden>
@@ -113,6 +115,8 @@ export async function mount(root, { state }) {
   const $ = (id) => root.querySelector(`#${id}`);
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
   let chain = new Map(), ua = null, seriesByIns = {}, baseDates = [], resultRows = [], report = null, generated = [], activeWorker = null, selectedResult = null;
+  // روز جاریِ چسبانده‌شده. صفر یعنی همه‌چیز بسته‌شده است.
+  let liveDate = 0;
   const setStatus = (text, error = false) => { status.textContent = text; status.toggleAttribute('data-error', error); };
   const rowAt = (ins, date) => (seriesByIns[String(ins)] || []).find((row) => normalizeHistoryDate(row.date) === Number(date));
   const liquidity = () => ({
@@ -131,7 +135,9 @@ export async function mount(root, { state }) {
 
   function marketText(date) {
     const market = historyMarketMetrics(rowAt(ua?.ins, date));
-    return `ارزش ${fmt.money(market.value)} · حجم ${fmt.int(market.volume)}`;
+    // روز جاری همان‌جا که خوانده می‌شود برچسب می‌گیرد، نه ده سطر پایین‌تر
+    const live = liveDate && Number(date) === liveDate ? ' · لحظه‌ای، بسته‌نشده' : '';
+    return `ارزش ${fmt.money(market.value)} · حجم ${fmt.int(market.volume)}${live}`;
   }
 
   function refreshDates() {
@@ -145,6 +151,27 @@ export async function mount(root, { state }) {
     mountDateWheel($('pb-entry-date'), entries, entry, () => refreshDates(), { empty: 'روز دارای قیمت پایه پیدا نشد.' });
     mountDateWheel($('pb-exit-date'), exits, exit, (date) => { $('pb-exit-market').textContent = marketText(date); }, { empty: 'روز دارای قیمت پایه پیدا نشد.' });
     $('pb-entry-market').textContent = marketText(entry); $('pb-exit-market').textContent = marketText(exit);
+  }
+
+  /**
+   * دامنهٔ انتخابی کاربر را روی سری‌های تازه‌گرفته اعمال می‌کند.
+   *
+   * در حالت «تا آخرین روز بسته‌شده» هیچ درخواستی نمی‌رود و یادداشت پنهان
+   * می‌ماند — قابلیت تازه نباید به مسیر قدیمی هزینه اضافه کند.
+   */
+  async function applyScope() {
+    const note = $('pb-scope-note');
+    if ($('pb-data-scope').value !== SCOPE_LIVE) {
+      note.hidden = true; note.textContent = ''; note.removeAttribute('data-error');
+      liveDate = 0;
+      return;
+    }
+    const result = await applyLiveScope(seriesByIns);
+    seriesByIns = result.series;
+    liveDate = result.ok ? result.date : 0;
+    note.hidden = false;
+    note.textContent = result.note;
+    note.toggleAttribute('data-error', !result.ok);
   }
 
   async function loadHistory() {
@@ -162,6 +189,9 @@ export async function mount(root, { state }) {
       }));
       seriesByIns = {};
       for (const payload of payloads) for (const [ins, value] of Object.entries(payload)) seriesByIns[ins] = value.rows || [];
+      // روز جاری پس از فهرست بسته‌شده می‌نشیند، نه به‌جای آن. اگر نچسبد،
+      // همان سری‌های بسته‌شده برمی‌گردند و رفتار دقیقاً قبلی می‌ماند.
+      await applyScope();
       baseDates = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
       if (!baseDates.length) throw new Error('برای نماد پایه تاریخچه‌ای دریافت نشد');
       $('pb-work').hidden = false; refreshDates();
@@ -329,6 +359,15 @@ export async function mount(root, { state }) {
   exitRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(exitRail, button.dataset.basis); if (ua) refreshDates(); } });
   $('pb-load').addEventListener('click', loadHistory); $('pb-run').addEventListener('click', runAll);
   baseSelect.addEventListener('change', () => { $('pb-work').hidden = true; $('pb-report').hidden = true; });
+  // عوض‌کردن دامنه یعنی مجموعهٔ روزهای موجود عوض می‌شود. نتیجهٔ قبلی کنار
+  // انتخاب تازه، بدترین حالت است: کاربر فکر می‌کند آنچه می‌بیند مال دامنهٔ
+  // تازه است.
+  $('pb-data-scope').addEventListener('change', () => {
+    const note = $('pb-scope-note');
+    note.hidden = true; note.textContent = ''; note.removeAttribute('data-error');
+    $('pb-report').hidden = true;
+    if (ua && Object.keys(seriesByIns).length) loadHistory();
+  });
 
   try {
     const response = await fetch('/api/history/universe'), payload = await response.json();

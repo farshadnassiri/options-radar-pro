@@ -20,6 +20,7 @@ import { mountSubtabs } from '/ui/subtabs.mjs';
 import {
   ANALYSIS_PANELS, analysisMarkup, paintAnalysis, installAnalysisControls,
 } from '/ui/backtest-panels.mjs';
+import { tehranDateNumber } from '/core/live-day.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
@@ -56,12 +57,6 @@ const clockLabel = (second) => {
 // تلاطم نبوده باید «—» بماند. صفر یعنی «تلاطم صفر» که ادعای دیگری است.
 const ivCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
 const ageLabel = (second) => Number.isFinite(Number(second)) ? `${fmt.int(second)} ثانیه` : '—';
-const tehranDateNumber = (at = Date.now()) => {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(new Date(at)).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
-  return Number(`${parts.year || ''}${parts.month || ''}${parts.day || ''}`) || 0;
-};
 
 /**
  * نقاط ریزمعامله را برای نمودار آماده می‌کند.

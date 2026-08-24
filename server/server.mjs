@@ -201,6 +201,11 @@ async function get(pathname, ttlSec, priority = 5) {
   return p;
 }
 
+/** ساعت واقعی ثبت یک پاسخ در کش. `null` یعنی هنوز چیزی ثبت نشده. */
+function cachedAt(pathname) {
+  return cache.get(`${S.baseUrl}${pathname}`)?.at ?? null;
+}
+
 /**
  * عکس تازه نوار معاملات روز.
  *
@@ -282,14 +287,19 @@ const hhmm = (s) => {
   return (h || 0) * 60 + (m || 0);
 };
 
+// `phase` کنار `why` می‌نشیند چون فراخوان‌ها باید بتوانند بین «بازار هنوز
+// باز نشده» و «بازار بسته شده» فرق بگذارند، و متن فارسی برای این کار
+// شکننده است: یک بازنویسی جمله، منطق مصرف‌کننده را بی‌صدا خراب می‌کند.
+// این تفاوت جای بی‌اهمیتی نیست — پس از بستن بازار، تابلو ارقام نهایی
+// **امروز** را نگه می‌دارد؛ پیش از باز شدنش، ارقام جلسهٔ **دیروز** را.
 function marketOpen() {
-  if (!S.gateMarketHours) return { open: true, why: 'دروازه ساعات بازار خاموش است' };
+  if (!S.gateMarketHours) return { open: true, phase: 'ungated', why: 'دروازه ساعات بازار خاموش است' };
   const { weekday, minutes } = tehranNow();
   const days = String(S.tradeDays).split(',').map((x) => x.trim());
-  if (!days.includes(weekday)) return { open: false, why: `${DAY_FA[weekday] || weekday}، روز معاملاتی نیست` };
-  if (minutes < hhmm(S.openHHMM)) return { open: false, why: 'بازار باز نشده' };
-  if (minutes > hhmm(S.closeHHMM)) return { open: false, why: 'بازار بسته شده' };
-  return { open: true, why: '' };
+  if (!days.includes(weekday)) return { open: false, phase: 'holiday', why: `${DAY_FA[weekday] || weekday}، روز معاملاتی نیست` };
+  if (minutes < hhmm(S.openHHMM)) return { open: false, phase: 'before', why: 'بازار باز نشده' };
+  if (minutes > hhmm(S.closeHHMM)) return { open: false, phase: 'after', why: 'بازار بسته شده' };
+  return { open: true, phase: 'open', why: '' };
 }
 
 // ————————————————————————————————— حلقه دیده‌بان و پخش رویداد —————————————————————————————————
@@ -517,10 +527,19 @@ async function handle(req, res) {
     // حلقه زنده عمداً پشت دروازه ساعت بازار می‌ایستد؛ این نقطه پایانی نباید
     // بایستد چون تاریخچه باید شب و روز قابل بررسی باشد.
     if (p === '/api/history/universe') {
-      const rows = watch.rows.length
-        ? watch.rows
-        : firstList(await get('/Instrument/GetInstrumentOptionMarketWatch/0', Math.max(60, S.ttlMetaSec), 4));
-      return sendJson(res, 200, { at: watch.at, count: rows.length, rows });
+      // ساعت مشاهده باید راست باشد، نه «هرچه دم دست بود». مصرف‌کننده با
+      // همین عدد تصمیم می‌گیرد عکس مال کدام روز است؛ `watch.at` وقتی حلقهٔ
+      // زنده هرگز نچرخیده باشد `null` است و در همان مسیر جایگزین، عکس از
+      // کش می‌آید که ساعت خودش را دارد.
+      const path = '/Instrument/GetInstrumentOptionMarketWatch/0';
+      const fromWatch = watch.rows.length > 0;
+      const rows = fromWatch ? watch.rows : firstList(await get(path, Math.max(60, S.ttlMetaSec), 4));
+      return sendJson(res, 200, {
+        at: fromWatch ? watch.at : cachedAt(path),
+        source: fromWatch ? 'watch' : 'snapshot',
+        market: marketOpen(),
+        count: rows.length, rows,
+      });
     }
 
     if (p === '/api/stream') {

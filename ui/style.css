@@ -1007,6 +1007,15 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .history-actions #h-status { color: var(--muted); font-size: var(--fs-md); }
 .history-actions #h-status[data-error] { color: var(--loss); }
 .history-caveat { margin: 13px 0 0; padding-top: 12px; border-top: 1px dashed var(--line); color: var(--muted); font-size: var(--fs-md); }
+
+/* یادداشت دامنهٔ داده. رنگش از توکن می‌آید نه ثابت، و حالت «نچسبید» با
+   همان توکن هشدار برنامه دیده می‌شود تا با «خطای فاجعه» اشتباه نشود. */
+.live-scope-note { margin: 10px 0 0; padding: 8px 11px; border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in oklab, var(--accent) 35%, var(--line));
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  color: var(--text); font-size: var(--fs-sm); line-height: var(--lh-normal); }
+.live-scope-note[data-error] { border-color: color-mix(in oklab, var(--warn) 45%, var(--line));
+  background: color-mix(in oklab, var(--warn) 8%, transparent); color: var(--muted); }
 .history-range { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 22px; margin-bottom: 14px; }
 .range-head { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 18px; align-items: center; }
 .range-head h2 { margin: 0; }
