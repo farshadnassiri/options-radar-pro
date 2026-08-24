@@ -51,6 +51,10 @@ import {
 import { csvCell, numericCell, toCsv, stamp } from '../ui/export.mjs';
 import { cell as wbCell, sheet as wbSheet, sheetParts as wbParts, workbook as wbWrap } from '../ui/workbook.mjs';
 import { buildBacktestWorkbook } from '../ui/backtest-export.mjs';
+import {
+  buildXlsx, crc32 as xCrc, colName as xCol, sheetName as xSheetName,
+  sheet as xSheet, tidy as xTidy, zip as xZip,
+} from '../ui/xlsx.mjs';
 import { positionGreeksAt, annotateDailyGreeks } from '../core/leg-iv.mjs';
 import { createLog } from '../server/errlog.mjs';
 import * as uiFmt48 from '../ui/fmt.mjs';
@@ -5795,7 +5799,13 @@ group('۷۹. خروجی اکسل جامع بک‌تست');
     timeframeSeconds: 900, intradayDate: 20260101, generatedAt: 'نمونه',
   });
 
-  const sheetNames = [...xml79.matchAll(/ss:Name="([^"]+)"/g)].map((m) => m[1]);
+  // دفترکار حالا فهرست توصیف برگ است نه یک رشتهٔ XML: `buildBacktestWorkbook`
+  // داده را می‌سازد و `ui/xlsx.mjs` آن را به فایل تبدیل می‌کند. آزمون هم
+  // باید همان داده را بسنجد، نه قالبِ روزِ ساختش را.
+  const sheetNames = xml79.map((part) => part.name);
+  const flat = (parts) => parts.map((part) => [part.name, ...part.headers,
+    ...part.rows.map((row) => row.join(' '))].join(' ')).join(' ');
+  const text79 = flat(xml79);
   // هر واحد تحلیلی برگ خودش را دارد؛ خواستهٔ «هیچ اطلاعاتی جا نیفتد»
   for (const want of ['سرشناسه', 'راهنما', 'شاخص کل بازه', 'پاهای ورود', 'مسیر روزانه', 'روز × پا',
     'سطل تایم‌فریم', 'سطل × پا', 'مدت در سود و زیان', 'رفتار بازه‌های روز',
@@ -5804,16 +5814,25 @@ group('۷۹. خروجی اکسل جامع بک‌تست');
   }
   check('برگ تکراری ساخته نمی‌شود', new Set(sheetNames).size === sheetNames.length, sheetNames.join('، '));
   check('یونانی‌ها ستون خودشان را دارند',
-    ['دلتا', 'گاما', 'وگا', 'تتا', 'رو'].every((g2n) => xml79.includes(g2n)));
-  check('تلاطم پاها در طول زمان در فایل هست', xml79.includes('تلاطم ضمنی ٪'));
+    ['دلتا', 'گاما', 'وگا', 'تتا', 'رو'].every((g2n) => text79.includes(g2n)));
+  check('تلاطم پاها در طول زمان در فایل هست', text79.includes('تلاطم ضمنی ٪'));
   check('پارامترهای محاسبه در سرشناسه ثبت می‌شوند',
-    xml79.includes('نرخ بدون ریسک سالانه') && xml79.includes('روز سال — مخرج زمان'));
+    text79.includes('نرخ بدون ریسک سالانه') && text79.includes('روز سال — مخرج زمان'));
   check('ردیف فاقد داده هم در فایل می‌آید، با خانهٔ خالی',
-    (xml79.match(/فاقد داده/g) || []).length >= 1);
+    (text79.match(/فاقد داده/g) || []).length >= 1);
+  // هویت ثابت پا یک بار نوشته می‌شود، ولی از فایل بیرون نمی‌رود
+  const entryLegs79 = xml79.find((part) => part.name === 'پاهای ورود');
+  check('هویت کامل هر پا در برگ پاهای ورود هست',
+    ['نوع', 'جهت', 'نسبت', 'اندازه قرارداد', 'قیمت اعمال', 'سررسید'].every((h) => entryLegs79.headers.includes(h)),
+    entryLegs79.headers.join('، '));
+  const tick79 = xml79.find((part) => part.name === 'درون‌روز × پا');
+  check('برگ پرحجم فقط با شمارهٔ پا به آن ارجاع می‌دهد',
+    tick79.headers.includes('شماره پا') && !tick79.headers.includes('قیمت اعمال'),
+    tick79.headers.join('، '));
 
   // برگی که داده ندارد نباید ساخته شود: برگ خالی از نبودِ برگ بدتر است
   const bare = buildBacktestWorkbook({ ua: { name: 'x' }, replay: replay79, params: gParams });
-  const bareNames = [...bare.matchAll(/ss:Name="([^"]+)"/g)].map((m) => m[1]);
+  const bareNames = bare.map((part) => part.name);
   check('برگ بی‌داده ساخته نمی‌شود',
     !bareNames.includes('سطل تایم‌فریم') && !bareNames.includes('نوار درون‌روز') && bareNames.includes('مسیر روزانه'),
     bareNames.join('، '));
@@ -5900,6 +5919,58 @@ group('۸۰. سورت و جابه‌جایی ستون جدول‌های رشته
     css80.includes('th[aria-sort="ascending"]::after') && css80.includes('th[aria-sort="descending"]::after'));
   check('ستون در حال کشیدن و مقصد، نشانهٔ دیداری دارند',
     css80.includes('th.th-dragging') && css80.includes('th.th-drop'));
+}
+
+// ═════════ ۸۱. نویسندهٔ xlsx و حجم فایل ═════════
+//
+// خواسته کاربر: «خروجی اکسل گام سوم خیلی خوب و جامع است اما حجمش خیلی بالاست
+// و نزدیک ۳۰ مگابایت… طوری اصلاحش کن که حجمش خیلی کمتر بشه.»
+//
+// پس آزمون باید خودِ حجم را بسنجد، نه اینکه «قالب عوض شد» را. عدد مقایسه
+// از همان داده در قالب قبلی می‌آید تا نسبت، ادعای این کامیت را ثابت کند.
+group('۸۱. نویسندهٔ xlsx و حجم فایل');
+{
+  check('دم ممیز شناور چیده می‌شود', xTidy(0.1 + 0.2) === 0.3, String(0.1 + 0.2));
+  check('عددِ نبوده، عددِ نبوده می‌ماند', Number.isNaN(xTidy(NaN)));
+  check('منفی صفر، صفر می‌شود', Object.is(xTidy(-0), 0));
+  check('نام ستون از A تا BA درست است',
+    ['A', 'Z', 'AA', 'AB', 'BA'].every((want, i) => xCol([0, 25, 26, 27, 52][i]) === want));
+
+  const used81 = new Set();
+  check('نام برگ تکراری شماره می‌گیرد',
+    xSheetName('سطل', used81) === 'سطل' && xSheetName('سطل', used81) === 'سطل 2');
+  check('نام برگ از ۳۱ نویسه بلندتر نمی‌شود', xSheetName('ب'.repeat(60), new Set()).length === 31);
+  check('نویسهٔ ممنوع اکسل از نام برگ می‌رود', !xSheetName('a/b:c*d', new Set()).match(/[/:*]/));
+
+  // CRC32 با مقدار شناخته‌شدهٔ «123456789» = 0xCBF43926
+  check('CRC32 با مقدار مرجع می‌خواند',
+    xCrc(new TextEncoder().encode('123456789')) === 0xCBF43926,
+    xCrc(new TextEncoder().encode('123456789')).toString(16));
+
+  const rows81 = Array.from({ length: 3000 }, (_, i) => ['۰۹:۰۰:۰۱', 'اختیار خرید ضهرم۷۰۵۸', i * 1.0000001, NaN, i]);
+  const head81 = ['زمان', 'نام پا', 'اثر', 'تلاطم', 'حجم'];
+  const bytes81 = await buildXlsx([xSheet('برگ', head81, rows81)]);
+  const old81 = new TextEncoder().encode(wbWrap([wbSheet('برگ', head81, rows81)])).length;
+
+  check('فایل یک بستهٔ zip معتبر است',
+    bytes81[0] === 0x50 && bytes81[1] === 0x4B && bytes81[2] === 0x03 && bytes81[3] === 0x04);
+  check('پایان‌نگارهٔ فهرست مرکزی در فایل هست',
+    [...bytes81.slice(-22, -18)].join(',') === '80,75,5,6');
+  // ادعای این کامیت: چند برابر کوچک‌تر، نه چند درصد
+  check('فایل دست‌کم پنج برابر از قالب قبلی کوچک‌تر است',
+    old81 / bytes81.length >= 5, `${(old81 / bytes81.length).toFixed(1)} برابر`);
+
+  // خانهٔ خالی نباید نوشته شود — قاعدهٔ ۲-۴ تا داخل فایل
+  const one81 = await buildXlsx([xSheet('یک', ['الف', 'ب'], [['متن', NaN]])]);
+  const text81 = new TextDecoder().decode(one81);
+  check('خانهٔ عددِ نبوده اصلاً نوشته نمی‌شود', !text81.includes('NaN'));
+
+  // یک برگ بدون فشرده‌سازی هم باید سالم بسته شود
+  const noPack = await xZip([{ name: 'a.txt', data: 'x' }]);
+  check('بسته با یک عضو هم درست بسته می‌شود', noPack.length > 22 && noPack[0] === 0x50);
+
+  const bt81 = readSrc('../ui/tabs/backtest.mjs');
+  check('فراخوان خروجی منتظر ساخت فایل می‌ماند', /await\s+downloadBacktestExcel/.test(bt81));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

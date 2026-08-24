@@ -237,7 +237,7 @@ export async function mount(root, { state }) {
         <section class="backtest-tape"><div class="section-head"><div><h3>نوار مشترک قیمت و حجم</h3><p>نمودارها همه نقاط را دارند؛ جدول برای حفظ سرعت حداکثر ۳۰۰ نقطه را با فاصله یکنواخت نشان می‌دهد.</p></div><span id="bt-tape-count">—</span></div><div id="bt-tape-table" class="history-table-wrap"></div></section>
       </section>
 
-      <section class="card backtest-timeframe"><div class="section-head"><div><p class="eyebrow">گام سوم · کل بازه روی تایم‌فریم دلخواه</p><h2>عملکرد کلی و به تفکیک پاها</h2></div><div class="backtest-head-actions"><label class="backtest-tf-field">تایم‌فریم<select id="bt-tf-size"><option value="60">۱ دقیقه</option><option value="300">۵ دقیقه</option><option value="900" selected>۱۵ دقیقه</option><option value="1800">۳۰ دقیقه</option><option value="3600">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="bt-tf-run">تحلیل کل بازه</button><button type="button" class="ghost" id="bt-tf-export" hidden>دریافت فایل اکسل</button></div></div>
+      <section class="card backtest-timeframe"><div class="section-head"><div><p class="eyebrow">گام سوم · کل بازه روی تایم‌فریم دلخواه</p><h2>عملکرد کلی و به تفکیک پاها</h2></div><div class="backtest-head-actions"><label class="backtest-tf-field">تایم‌فریم<select id="bt-tf-size"><option value="60">۱ دقیقه</option><option value="300">۵ دقیقه</option><option value="900" selected>۱۵ دقیقه</option><option value="1800">۳۰ دقیقه</option><option value="3600">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="bt-tf-run">تحلیل کل بازه</button><button type="button" class="ghost" id="bt-tf-export" hidden>دریافت فایل اکسل</button><span id="bt-tf-export-size" class="backtest-export-size" role="status"></span></div></div>
         <p id="bt-tf-note" class="backtest-table-note">برای هر روز بازه، ریزمعامله همه پاها و نماد پایه جداگانه گرفته می‌شود؛ این یعنی چند ده درخواست. نتیجه فقط از ثانیه‌هایی ساخته می‌شود که هر پا دست‌کم یک معامله داشته باشد.</p>
         <p class="backtest-table-note">این مسیر از <b>آخرین معاملهٔ مشاهده‌شدهٔ هر پا</b> ساخته می‌شود، نه از مظنه تقاضا و عرضهٔ هم‌زمان. یعنی «ارزش موقعیت در آن لحظه»، نه «سودی که در آن لحظه می‌شد گرفت»: آفست واقعی، خرید روی عرضه و فروش روی تقاضاست و اسپرد هر دو پا را می‌پردازد. تابلو دفتر سفارش تاریخی نمی‌دهد، پس عدد اجرایی از این داده ساختنی نیست.</p>
         <div id="bt-tf-body" hidden>
@@ -1166,24 +1166,38 @@ export async function mount(root, { state }) {
    * هر روز و هر پا یک ریشه‌یابی تلاطم دارد و انجامش در هر رنگ‌آمیزی، تبی را
    * که فقط جدول را مرتب می‌کند هم کند می‌کرد. برای فایل، یک‌بار بس است.
    */
-  function exportTimeframeExcel() {
+  async function exportTimeframeExcel() {
     if (!replay?.ok || !timeframeDays.length) return;
+    // ساخت فایل چند صد هزار ردیفی چند ثانیه طول می‌کشد و فشرده‌سازی هم
+    // ناهمگام است. بی این قفل، کاربر دکمه را دو بار می‌زند و دو ساخت هم‌زمان
+    // روی یک نخ می‌نشیند — نتیجه‌اش فقط کندتر شدن هر دو است.
+    const button = $('bt-tf-export'), size = $('bt-tf-export-size');
+    if (button.disabled) return;
+    button.disabled = true;
+    size.textContent = 'در حال ساخت فایل…';
     const params = ivP();
     annotateDailyGreeks(replay, params);
     const buckets = annotateBucketIv(
       bucketIntradayPath(timeframeDays, { bucketSeconds: timeframeSeconds }), { legs: replay.priced }, params,
     );
-    downloadBacktestExcel({
-      ua, strategyName: strategySelect.selectedOptions[0]?.textContent || '',
-      comboName: $('bt-combo').selectedOptions[0]?.textContent || '',
-      replay, intraday, buckets, params,
-      holding: intradayHoldingSummary(timeframeDays),
-      timeOfDay: timeOfDayProfile(timeframeDays, { bucketSeconds: timeframeSeconds }),
-      entryExit: intradayEntryExitProfile(timeframeDays, {
-        legs: replay.priced, bucketSeconds: timeframeSeconds, fees: feesOf(state.settings),
-      }),
-      timeframeSeconds, intradayDate, generatedAt: faClock(new Date()),
-    });
+    try {
+      const bytes = await downloadBacktestExcel({
+        ua, strategyName: strategySelect.selectedOptions[0]?.textContent || '',
+        comboName: $('bt-combo').selectedOptions[0]?.textContent || '',
+        replay, intraday, buckets, params,
+        holding: intradayHoldingSummary(timeframeDays),
+        timeOfDay: timeOfDayProfile(timeframeDays, { bucketSeconds: timeframeSeconds }),
+        entryExit: intradayEntryExitProfile(timeframeDays, {
+          legs: replay.priced, bucketSeconds: timeframeSeconds, fees: feesOf(state.settings),
+        }),
+        timeframeSeconds, intradayDate, generatedAt: faClock(new Date()),
+      });
+      size.textContent = `${fmt.int(Math.max(1, Math.round(bytes / 1024)))} کیلوبایت`;
+    } catch (error) {
+      size.textContent = errorText(error, 'ساخت فایل انجام نشد.');
+    } finally {
+      button.disabled = false;
+    }
   }
 
   $('bt-tf-export').addEventListener('click', exportTimeframeExcel);

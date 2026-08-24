@@ -465,6 +465,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-tf-matrix td.gain { background: color-mix(in srgb, var(--gain) calc(var(--weight, 0) * 45%), transparent); }
 .backtest-tf-matrix td.loss { background: color-mix(in srgb, var(--loss) calc(var(--weight, 0) * 45%), transparent); }
 .backtest-table-note { margin: 9px 2px 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.8; }
+.backtest-export-size { color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.backtest-export-size:empty { display: none; }
 .backtest-tape { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .backtest-tape .section-head p { margin-top: 4px; color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
 .backtest-tape .history-table-wrap { max-height: 480px; }
