@@ -155,8 +155,17 @@ export function openHandoffPage(plan, tab = 'backtest') {
   const token = stashHandoff(plan);
   if (!token) return false;
   const url = `${location.pathname}${location.search}#${tab}!${token}`;
-  const win = window.open(url, '_blank', 'noopener');
-  if (win) return true;
+  // `noopener` اینجا نمی‌آید، و این یک تصمیم است نه فراموشی: طبق استاندارد،
+  // `window.open` با `noopener` **همیشه** `null` برمی‌گرداند — حتی وقتی
+  // پنجره با موفقیت باز شده. با آن، هر باز شدنِ موفق «شکست» خوانده می‌شد و
+  // دو خرابی هم‌زمان می‌ساخت: کلید نقشه پاک می‌شد (صفحهٔ تازه خالی بالا
+  // می‌آمد) و مسیر جایگزین هم اجرا می‌شد (صفحهٔ جاری هم عوض می‌شد). هر دو
+  // را کاربر دید.
+  //
+  // نبودش خطر تازه‌ای نمی‌سازد: صفحهٔ مقصد همین برنامه روی همین مبدأ است،
+  // نه سایت غریبه. `window.opener` هم هیچ‌جا خوانده نمی‌شود.
+  const win = window.open(url, '_blank');
+  if (win && !win.closed) return true;
   takeHandoff(token);                       // پنجره باز نشد؛ کلید را نگه نداریم
   return false;
 }
