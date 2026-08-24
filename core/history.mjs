@@ -240,7 +240,6 @@ function capitalForEntry(priced, netCash, spot, settings, fees) {
     S: spot, closes,
     params: marginParamsOf(settings),
     creditMode: settings.creditSpreadMargin, capitalMode: settings.capitalMode,
-    nakedComboMargin: settings.nakedComboMargin,
   });
   const capital = capitalBase({
     legs: priced, netCash, marginNet: margin.marginNet, maxLoss: payoff.maxLoss,
@@ -424,7 +423,6 @@ export function replayHistory({
       S: base.baseClose, closes: currentCloses,
       params: marginParamsOf(settings),
       creditMode: settings.creditSpreadMargin, capitalMode: settings.capitalMode,
-      nakedComboMargin: settings.nakedComboMargin,
     });
     rows.push({
       date, dateLabel: historyDateLabel(date), dayName: historyDayName(date),

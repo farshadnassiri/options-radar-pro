@@ -162,7 +162,7 @@ export function evaluate({ legs, quotes, ctx }) {
   pos.forEach((l, i) => { closes[i] = num(l.quote?.close, num(l.price)); });
   const margin = strategyMargin(pos, {
     S: Sclose, closes, params, creditMode: s.creditSpreadMargin, capitalMode: s.capitalMode,
-    nakedComboMargin: s.nakedComboMargin, contractSize: basis.contractSize,
+    contractSize: basis.contractSize,
   });
 
   // ——— ۵. سرمایه درگیر و بازده ———
@@ -642,11 +642,13 @@ export const COLUMNS = [
   { key: 'ivList', label: 'تلاطم ضمنی هر پا', fmt: 'list', group: 'ارزش قرارداد' },
   { key: 'leverage', label: 'اهرم', fmt: 'num', group: 'ارزش قرارداد' },
   { key: 'capital', label: 'سرمایه درگیر', fmt: 'money', group: 'سرمایه' },
-  { key: 'marginRequired', label: 'تضمین لازم', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginRequired', label: 'جمع تضمین مستقل پاهای فروش — پیش از راهبرد', fmt: 'money', group: 'سرمایه' },
   { key: 'blockedAsset', label: 'دارایی مسدودی', fmt: 'money', group: 'سرمایه' },
   { key: 'sharesLocked', label: 'سهم قفل‌شده', fmt: 'int', group: 'سرمایه' },
   { key: 'capitalLabel', label: 'مبنای سرمایه', fmt: 'text', group: 'سرمایه' },
   { key: 'margin', label: 'وجه تضمین کل راهبرد', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginNet', label: 'وجه تضمین خالص پس از بستانکار', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginNote', label: 'مبنای وجه تضمین', fmt: 'text', group: 'سرمایه' },
   { key: 'marginParts', label: 'اجزای وجه تضمین', fmt: 'moneyList', group: 'سرمایه' },
   { key: 'marginPart1', label: 'وجه تضمین ۱', fmt: 'money', group: 'سرمایه' },
   { key: 'marginPart2', label: 'وجه تضمین ۲', fmt: 'money', group: 'سرمایه' },
