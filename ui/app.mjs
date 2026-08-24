@@ -276,7 +276,10 @@ const TABS = [
   // خودشان همان‌جا تنبل بار می‌شود؛ همان الگویی که «نگاه باز» دارد.
   { id: 'live-market', title: 'رصد لحظه‌ای بازار', section: 'پایه', mod: '/ui/tabs/live-market.mjs', phase: 3 },
   { id: 'history', title: 'تحلیل تاریخی استراتژی', section: 'پایه', mod: '/ui/tabs/history.mjs', phase: 3 },
-  { id: 'backtest', title: 'بک‌تست سریع', section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },
+  // نام تازه، جست‌وجوی قدیمی را نباید بشکند: کاربر ماه‌ها این تب را
+  // «بک‌تست سریع» صدا کرده و همان را در جعبهٔ جست‌وجو می‌نویسد.
+  { id: 'backtest', title: '🔬 آزمایشگاه آپشن', alias: 'بک‌تست سریع backtest آزمایشگاه اپشن',
+    section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },
   { id: 'portfolio-backtest', title: 'آزمون همه استراتژی‌ها', section: 'پایه', mod: '/ui/tabs/portfolio-backtest.mjs', phase: 3 },
   { id: 'logs', title: 'دفتر خطاها', section: 'پایه', mod: '/ui/tabs/logs.mjs', phase: 1 },
 ];
@@ -444,7 +447,7 @@ function openSubmenu(sec, headEl) {
   const q = normFa(railQuery).toLowerCase();
   const matches = (t) => {
     if (!q) return true;
-    const hay = normFa(`${t.title} ${t.def?.fa || ''} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
+    const hay = normFa(`${t.title} ${t.alias || ''} ${t.def?.fa || ''} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
     return hay.includes(q);
   };
   const tabs = TABS.filter((x) => x.section === sec && matches(x));
@@ -520,7 +523,7 @@ function buildRail() {
 
   const matches = (t) => {
     if (!q) return true;
-    const hay = normFa(`${t.title} ${t.def?.fa || ''} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
+    const hay = normFa(`${t.title} ${t.alias || ''} ${t.def?.fa || ''} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
     return hay.includes(q);
   };
 

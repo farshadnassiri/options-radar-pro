@@ -205,7 +205,7 @@ function chart(host, points, series, { money = false, count = false, timeScale =
 }
 
 export async function mount(root, { state }) {
-  root.innerHTML = `<section class="backtest-hero"><div><p class="eyebrow">بعد از ماتریس‌ها · آزمون یک مسیر مشخص</p><h1>بک‌تست سریع</h1><p>یک استراتژی را با قیمت مشاهده‌شده روز ورود بچین، مسیر روزانه را ببین و روز سنجش را با ریزمعامله‌های واقعی همان روز بازپخش کن.</p></div><span>بدون قیمت ساختگی</span></section>
+  root.innerHTML = `<section class="backtest-hero"><div><p class="eyebrow">بعد از ماتریس‌ها · آزمون یک مسیر مشخص</p><h1>🔬 آزمایشگاه آپشن</h1><p>یک استراتژی را با قیمت مشاهده‌شده روز ورود بچین، مسیر روزانه را ببین و روز سنجش را با ریزمعامله‌های واقعی همان روز بازپخش کن.</p></div><span>بدون قیمت ساختگی</span></section>
   <section class="card backtest-setup"><div class="section-head"><div><p class="eyebrow">گام اول</p><h2>انتخاب سناریو</h2></div><b id="bt-status" role="status">در حال دریافت نمادها…</b></div>
     <div class="backtest-form"><label>نماد پایه<select id="bt-base"><option value="">در حال دریافت…</option></select></label><label>استراتژی<select id="bt-strategy"></select></label><label>تعداد واحد<input id="bt-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><button type="button" class="primary" id="bt-load">دریافت روزهای قابل اجرا</button></div>
   </section>
@@ -290,7 +290,18 @@ export async function mount(root, { state }) {
     { id: 'bt-iv', label: 'تلاطم ضمنی', hint: 'تلاطم هر پا در هر سه تایم‌فریم' },
     ...ANALYSIS_PANELS,
   ];
-  mountSubtabs($('bt-subtabs'), [SETUP_TAB], { root });
+  // `mountSubtabs` نوارِ بی‌تغییر را دست نمی‌زند، پس صدا زدنش پس از هر
+  // دریافت داده بی‌خطر است و تب باز کاربر سر جایش می‌ماند. اما «اجرا» و
+  // «رصد زنده» خواستهٔ صریح کاربرند: اگر همان لحظه روی فرم چیدمان ایستاده
+  // باشد باید نتیجه را ببیند — و این تنها جایی است که انتخاب او جابه‌جا
+  // می‌شود.
+  let subtabs = mountSubtabs($('bt-subtabs'), [SETUP_TAB], { root });
+  const showSetupOnly = () => { subtabs = mountSubtabs($('bt-subtabs'), [SETUP_TAB], { root }); };
+  const showResultTabs = ({ fromSetup = false } = {}) => {
+    subtabs = mountSubtabs($('bt-subtabs'), [SETUP_TAB, ...RESULT_TABS], { root, initial: 'bt-overview' });
+    if (fromSetup && subtabs?.current === SETUP_TAB.id) subtabs.show('bt-overview');
+    return subtabs;
+  };
   const status = $('bt-status'), baseSelect = $('bt-base'), strategySelect = $('bt-strategy');
   const entryRail = $('bt-entry-basis'), exitRail = $('bt-exit-basis');
   let chain = new Map(), ua = null, contracts = [], seriesByIns = {}, entryDates = [], combos = [], legs = null;
@@ -1046,7 +1057,7 @@ export async function mount(root, { state }) {
       $('bt-result').hidden = false;
       paintResult();
       paintPanels();
-      mountSubtabs($('bt-subtabs'), [SETUP_TAB, ...RESULT_TABS], { root, initial: 'bt-overview' });
+      showResultTabs();
       $('bt-intraday-title').textContent = `رصد زنده موقعیت در ${dateLabel(intradayDate)} · ۹:۰۰ تا ۱۲:۳۰`;
       $('bt-run-note').textContent = 'قیمت ورود از تاریخ انتخابی ثابت است؛ نتیجه زنده فقط با آخرین معاملات واقعی امروز محاسبه و در هر دریافت از نو ساخته می‌شود. این ارزش مشاهده‌شده است و تضمین آفست هم‌زمان نیست.';
       const warning = tradeWarningText(lastDayFetch);
@@ -1076,6 +1087,10 @@ export async function mount(root, { state }) {
     liveWatching = true; $('bt-live').textContent = 'توقف رصد زنده'; $('bt-live').setAttribute('data-active', 'true');
     setStatus('در حال دریافت معاملات امروز برای موقعیت تاریخی…');
     await refreshLivePosition();
+    // شروع رصد، خواستهٔ صریح کاربر است: اگر روی فرم چیدمان بود او را روی
+    // نتیجه می‌نشانیم. تیک‌های بعدی این کار را نمی‌کنند — همان‌جا بود که
+    // کاربر را از تب باز خودش بیرون می‌انداخت.
+    if (!$('bt-result').hidden) showResultTabs({ fromSetup: true });
     liveTimer = setInterval(refreshLivePosition, Math.max(3000, Math.min(30000, Number(state.settings.watchIntervalSec || 5) * 1000)));
     $('bt-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -1096,7 +1111,7 @@ export async function mount(root, { state }) {
       intradayDate = endDate;
       intraday = replayDay(day, endDate);
       $('bt-result').hidden = false; paintResult(); paintPanels();
-      mountSubtabs($('bt-subtabs'), [SETUP_TAB, ...RESULT_TABS], { root, initial: 'bt-overview' });
+      showResultTabs({ fromSetup: true });
       const warning = tradeWarningText(day);
       if (intraday.length) setStatus(`${fmt.int(replay.summary.validDays)} روز و ${fmt.int(intraday.length)} نقطه مشترک درون‌روزی محاسبه شد${warning ? `؛ ${warning}` : ''}.`, Boolean(warning));
       else setStatus(`${fmt.int(replay.summary.validDays)} روز آماده شد؛ ${warning || 'در روز سنجش ریزمعامله کامل برای همه پاها پیدا نشد'}.`, Boolean(warning));
@@ -1317,8 +1332,8 @@ export async function mount(root, { state }) {
   });
   $('bt-entry-market').addEventListener('input', onManualInput);
   $('bt-exit-market').addEventListener('input', onManualInput);
-  baseSelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; mountSubtabs($('bt-subtabs'), [SETUP_TAB], { root }); });
-  strategySelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; mountSubtabs($('bt-subtabs'), [SETUP_TAB], { root }); });
+  baseSelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; showSetupOnly(); });
+  strategySelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; showSetupOnly(); });
 
   try {
     const response = await fetch('/api/history/universe'), payload = await response.json();
