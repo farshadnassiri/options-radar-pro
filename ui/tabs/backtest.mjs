@@ -16,6 +16,10 @@ import {
   annotateDailyGreeks,
 } from '/core/leg-iv.mjs';
 import { downloadBacktestExcel } from '/ui/backtest-export.mjs';
+import { mountSubtabs } from '/ui/subtabs.mjs';
+import {
+  ANALYSIS_PANELS, analysisMarkup, paintAnalysis, installAnalysisControls,
+} from '/ui/backtest-panels.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
@@ -206,23 +210,34 @@ export async function mount(root, { state }) {
     <div class="backtest-form"><label>نماد پایه<select id="bt-base"><option value="">در حال دریافت…</option></select></label><label>استراتژی<select id="bt-strategy"></select></label><label>تعداد واحد<input id="bt-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><button type="button" class="primary" id="bt-load">دریافت روزهای قابل اجرا</button></div>
   </section>
   <section id="bt-work" hidden>
+    <nav id="bt-subtabs"></nav>
+    <div class="bt-panel" data-panel="bt-setup">
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود</h2></div><span>فقط روز دارای ترکیب معتبر</span></div><div id="bt-entry-date"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ خروج آزمایشی</h2></div><span>فقط روز دارای قیمت همه پاها</span></div><div id="bt-exit-date"></div></section></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><div id="bt-legs" class="backtest-legs"></div></section>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت پاها در روز ایجاد</h2></div><span>هر کارت یک پای استراتژی</span></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت پاها در روز خروج</h2></div><span>همان قراردادهای ترکیب</span></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
     <section class="card backtest-runbar"><p id="bt-run-note">برای هر ثانیهٔ معامله بین ۹:۰۰ تا ۱۲:۳۰، آخرین قیمت مشاهده‌شده تمام پاها روی یک خط زمانی مشترک قرار می‌گیرد. این ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.</p><div class="backtest-run-actions"><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button><button type="button" class="ghost" id="bt-live">رصد زنده موقعیت از ورود تاریخی</button></div></section>
+    </div>
     <section id="bt-result" hidden>
+      <div class="bt-panel" data-panel="bt-overview" hidden>
       <section class="card backtest-overview"><div class="section-head"><div><p class="eyebrow">گام اول نتیجه</p><h2>عملکرد کلی این بازه</h2></div><span id="bt-overview-range">—</span></div>
         <div class="backtest-kpis" id="bt-kpis"></div>
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>سود و زیان مبلغی</h3><span>ریال</span></div><div id="bt-money-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>بازده و تغییر نماد پایه</h3><span>درصد</span></div><div id="bt-return-chart" class="backtest-chart"></div></section></div>
       </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">اثر هر پایه</p><h2>جزئیات پاهای استراتژی در روز سنجش</h2></div><span id="bt-final-source">—</span></div><div id="bt-leg-table" class="history-table-wrap"></div></section>
+      <section class="card backtest-matrix-link"><div class="section-head"><div><p class="eyebrow">رابطه با ماتریس ورود × خروج</p><h2>اعتبارسنجی افق کوتاه</h2></div></div><div id="bt-matrix-idea"></div></section>
+      </div>
 
+      <div class="bt-panel" data-panel="bt-daily" hidden>
       <section class="card"><div class="section-head"><div><p class="eyebrow">گام دوم · از روز ورود تا روز خروج</p><h2>مسیر روزبه‌روز</h2></div><span id="bt-days-count">—</span></div>
         <p class="backtest-table-note">روی هر ردیف کلیک کن تا ریزمعامله‌های همان روز در کوچک‌ترین تایم‌فریم — ثانیه‌به‌ثانیه — با همان نمودارها و جدول‌ها باز شود.</p>
+        <div class="backtest-chart-grid"><section><div class="section-head"><h3>تغییر روزانهٔ سود</h3><span>ریال · هر نقطه یک روز</span></div><div id="bt-daily-step-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>سود خالص و افت از قله</h3><span>ریال</span></div><div id="bt-daily-dd-chart" class="backtest-chart"></div></section></div>
         <div id="bt-days-table" class="history-table-wrap"></div>
       </section>
+      </div>
 
+      <div class="bt-panel" data-panel="bt-iv" hidden>
       <section class="card backtest-iv"><div class="section-head"><div><p class="eyebrow">تلاطم ضمنی · هر پا جدا</p><h2>تلاطم پاها در هر سه تایم‌فریم</h2></div><span id="bt-iv-source">—</span></div>
         <p class="backtest-table-note">تلاطم هر پا از قیمت مشاهده‌شدهٔ خودش، قیمت پایهٔ همان لحظه و روز مانده تا سررسید <b>همان پا</b> درمی‌آید. پای سهم پایه تلاطم ضمنی ندارد و ستونش خالی می‌ماند. لحظه‌ای که قیمت پایه یا قیمت پا نبوده، تلاطمی هم ساخته نشده — «—» یعنی نداریم، نه صفر.</p>
         <div class="backtest-iv-params" id="bt-iv-params"></div>
@@ -230,13 +245,18 @@ export async function mount(root, { state }) {
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>تلاطم روزبه‌روز</h3><span>درصد · مسیر روزانه</span></div><div id="bt-iv-daily-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>تلاطم درون‌روز</h3><span>درصد · ثانیه‌به‌ثانیه</span></div><div id="bt-iv-intraday-chart" class="backtest-chart"></div></section></div>
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>تلاطم روی تایم‌فریم انتخابی</h3><span>درصد · هر نقطه یک سطل</span></div><div id="bt-iv-tf-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>پراکندگی تلاطم و قیمت پایه</h3><span>حساسیت تلاطم به حرکت پایه</span></div><div id="bt-iv-base-chart" class="backtest-chart"></div></section></div>
       </section>
+      </div>
+
+      <div class="bt-panel" data-panel="bt-intraday" hidden>
       <section class="card backtest-intraday-panel"><div class="section-head"><div><p class="eyebrow">خط زمانی مشترک همه پاها</p><h2 id="bt-intraday-title">تحلیل درون‌روزی ۹:۰۰ تا ۱۲:۳۰</h2></div><div class="backtest-head-actions"><span id="bt-intraday-source">—</span><button type="button" id="bt-export-intraday">خروجی همه نقاط</button></div></div><div id="bt-intraday-kpis" class="backtest-kpis"></div>
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>ارزش مشاهده‌شدهٔ موقعیت</h3><span>ریال · مرجع، نه قابل آفست</span></div><div id="bt-intraday-pnl-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>اثر خالص هر پا</h3><span>تفکیک ریالی</span></div><div id="bt-intraday-leg-chart" class="backtest-chart"></div></section></div>
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>حرکت قیمت هر پا</h3><span>نسبت به اولین معامله همان پا</span></div><div id="bt-intraday-price-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>حجم تجمعی هر پا</h3><span>قرارداد</span></div><div id="bt-intraday-volume-chart" class="backtest-chart"></div></section></div>
         <div class="backtest-analysis-grid"><section><div class="section-head"><h3>پنجره‌های ۱۵ دقیقه‌ای</h3><span>دامنه و جریان آفست</span></div><div id="bt-interval-table" class="history-table-wrap"></div></section><section><div class="section-head"><h3>ماتریس هم‌حرکتی اثر پاها</h3><span>تغییرات نقطه‌به‌نقطه</span></div><div id="bt-correlation-table" class="history-table-wrap"></div><p id="bt-correlation-note" class="backtest-table-note"></p></section></div>
         <section class="backtest-tape"><div class="section-head"><div><h3>نوار مشترک قیمت و حجم</h3><p>نمودارها همه نقاط را دارند؛ جدول برای حفظ سرعت حداکثر ۳۰۰ نقطه را با فاصله یکنواخت نشان می‌دهد.</p></div><span id="bt-tape-count">—</span></div><div id="bt-tape-table" class="history-table-wrap"></div></section>
       </section>
+      </div>
 
+      <div class="bt-panel" data-panel="bt-timeframe" hidden>
       <section class="card backtest-timeframe"><div class="section-head"><div><p class="eyebrow">گام سوم · کل بازه روی تایم‌فریم دلخواه</p><h2>عملکرد کلی و به تفکیک پاها</h2></div><div class="backtest-head-actions"><label class="backtest-tf-field">تایم‌فریم<select id="bt-tf-size"><option value="60">۱ دقیقه</option><option value="300">۵ دقیقه</option><option value="900" selected>۱۵ دقیقه</option><option value="1800">۳۰ دقیقه</option><option value="3600">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="bt-tf-run">تحلیل کل بازه</button><button type="button" class="ghost" id="bt-tf-export" hidden>دریافت فایل اکسل</button><span id="bt-tf-export-size" class="backtest-export-size" role="status"></span></div></div>
         <p id="bt-tf-note" class="backtest-table-note">برای هر روز بازه، ریزمعامله همه پاها و نماد پایه جداگانه گرفته می‌شود؛ این یعنی چند ده درخواست. نتیجه فقط از ثانیه‌هایی ساخته می‌شود که هر پا دست‌کم یک معامله داشته باشد.</p>
         <p class="backtest-table-note">این مسیر از <b>آخرین معاملهٔ مشاهده‌شدهٔ هر پا</b> ساخته می‌شود، نه از مظنه تقاضا و عرضهٔ هم‌زمان. یعنی «ارزش موقعیت در آن لحظه»، نه «سودی که در آن لحظه می‌شد گرفت»: آفست واقعی، خرید روی عرضه و فروش روی تقاضاست و اسپرد هر دو پا را می‌پردازد. تابلو دفتر سفارش تاریخی نمی‌دهد، پس عدد اجرایی از این داده ساختنی نیست.</p>
@@ -244,14 +264,12 @@ export async function mount(root, { state }) {
           <div class="backtest-kpis" id="bt-tf-kpis"></div>
           <div class="backtest-chart-grid"><section><div class="section-head"><h3>آفست موقعیت در کل بازه</h3><span>ریال · هر نقطه یک سطل</span></div><div id="bt-tf-pnl-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>اثر خالص هر پا</h3><span>تفکیک ریالی</span></div><div id="bt-tf-leg-chart" class="backtest-chart"></div></section></div>
           <div class="backtest-chart-grid"><section><div class="section-head"><h3>بازده استراتژی و نماد پایه</h3><span>درصد</span></div><div id="bt-tf-return-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>قیمت نماد پایه</h3><span>ریال</span></div><div id="bt-tf-base-chart" class="backtest-chart"></div></section></div>
-          <div class="backtest-analysis-grid"><section><div class="section-head"><h3>چه مدت در سود، چه مدت در زیان</h3><span>ثانیه مشاهده‌شده</span></div><div id="bt-tf-holding" class="history-table-wrap"></div></section><section><div class="section-head"><h3>رفتار هر بازه از روز</h3><span>تجمیع همه روزها</span></div><div id="bt-tf-timeofday" class="history-table-wrap"></div></section></div>
           <section class="backtest-tape"><div class="section-head"><div><h3>کِی وارد شوی و کِی خارج</h3><p id="bt-tf-matrix-note"></p></div><span id="bt-tf-matrix-best">—</span></div><div id="bt-tf-matrix" class="history-table-wrap"></div></section>
           <section class="backtest-tape"><div class="section-head"><div><h3>جدول سطل‌ها</h3><p>هر ردیف یک سطل زمانی با مشاهده واقعی. سطل بی‌معامله ساخته نشده است.</p></div><span id="bt-tf-count">—</span></div><div id="bt-tf-table" class="history-table-wrap"></div></section>
         </div>
       </section>
-
-      <section class="card"><div class="section-head"><div><p class="eyebrow">اثر هر پایه</p><h2>جزئیات پاهای استراتژی در روز سنجش</h2></div><span id="bt-final-source">—</span></div><div id="bt-leg-table" class="history-table-wrap"></div></section>
-      <section class="card backtest-matrix-link"><div class="section-head"><div><p class="eyebrow">رابطه با ماتریس ورود × خروج</p><h2>اعتبارسنجی افق کوتاه</h2></div></div><div id="bt-matrix-idea"></div></section>
+      </div>
+      ${analysisMarkup()}
     </section>
   </section>`;
 
@@ -260,6 +278,19 @@ export async function mount(root, { state }) {
   // وقتی خالی‌اند، و خواندن لحظهٔ کلیک انجام می‌شود — پس یک بار کافی است.
   attachExportsIn(root, 'backtest');
   const $ = (id) => root.querySelector(`#${id}`);
+
+  // نوار زیرتب. پیش از اولین اجرا فقط «چیدمان» را دارد: تبی که به جدول
+  // خالی می‌رسد، کاربر را سردرگم می‌کند نه راهنمایی.
+  const SETUP_TAB = { id: 'bt-setup', label: 'چیدمان', hint: 'تاریخ، ترکیب قراردادها و قیمت پاها' };
+  const RESULT_TABS = [
+    { id: 'bt-overview', label: 'نمای کلی', hint: 'عملکرد کل بازه در یک نگاه' },
+    { id: 'bt-daily', label: 'مسیر روزانه', hint: 'روزبه‌روز از ورود تا خروج' },
+    { id: 'bt-intraday', label: 'درون‌روز', hint: 'ثانیه‌به‌ثانیهٔ روز سنجش' },
+    { id: 'bt-timeframe', label: 'کل بازه', hint: 'گام سوم — تایم‌فریم دلخواه و خروجی اکسل' },
+    { id: 'bt-iv', label: 'تلاطم ضمنی', hint: 'تلاطم هر پا در هر سه تایم‌فریم' },
+    ...ANALYSIS_PANELS,
+  ];
+  mountSubtabs($('bt-subtabs'), [SETUP_TAB], { root });
   const status = $('bt-status'), baseSelect = $('bt-base'), strategySelect = $('bt-strategy');
   const entryRail = $('bt-entry-basis'), exitRail = $('bt-exit-basis');
   let chain = new Map(), ua = null, contracts = [], seriesByIns = {}, entryDates = [], combos = [], legs = null;
@@ -621,6 +652,15 @@ export async function mount(root, { state }) {
   /** جدول روزبه‌روز مسیر؛ هر ردیف دروازه ورود به ریزمعامله همان روز است. */
   function paintDayTable() {
     const rows = replay.rows;
+    // دو نمودار همین‌جا و نه در «نمای کلی»: آن‌ها سطحِ سود را نشان می‌دهند،
+    // این‌ها تغییرِ روزبه‌روز و ناهمواری راه را — که پرسشِ همین تب است.
+    const valid = rows.filter((row) => row.status === 'ok').map((row) => ({ ...row, granularity: 'day' }));
+    chart($('bt-daily-step-chart'), valid, [{ key: 'pnlDelta', label: 'تغییر روزانهٔ سود', color: 'var(--accent)' }],
+      { money: true, step: true, xLabel: 'روز', yLabel: 'ریال' });
+    chart($('bt-daily-dd-chart'), valid, [
+      { key: 'netPnl', label: 'سود خالص', color: 'var(--accent)' },
+      { key: 'drawdown', label: 'افت از قله', color: 'var(--loss)' },
+    ], { money: true, xLabel: 'روز', yLabel: 'ریال' });
     const legHeads = replay.priced.map((leg, index) => `<th>${faDigits(index + 1)} · ${esc(nameOf(leg, `پای ${index + 1}`))}</th>`).join('');
     $('bt-days-count').textContent = `${fmt.int(rows.filter((row) => row.status === 'ok').length)} روز معتبر از ${fmt.int(rows.length)} روز`;
     $('bt-days-table').innerHTML = `<table class="history-table"><thead><tr><th>روز</th><th>پایانی پایه</th><th>تغییر روز</th><th>تغییر از ورود</th>${legHeads}<th>سود ناخالص</th><th>کارمزد</th><th>سود خالص</th><th>تغییر روز</th><th>بازده</th><th>افت از قله</th><th>وجه تضمین خالص</th><th>وضعیت</th></tr></thead><tbody>${rows.map((row) => {
@@ -780,6 +820,35 @@ export async function mount(root, { state }) {
     $('bt-overview-range').textContent = `${dateLabel(replay.startDate)} تا ${dateLabel(replay.endDate)} · ${fmt.int(replay.summary.validDays)} روز معتبر`;
   }
 
+  /**
+   * پنل‌های تحلیلی، با همان داده‌ای که بقیهٔ تب دارد.
+   *
+   * جدا از `paintResult` نگه داشته شده چون کنترل‌های خودشان — تایم‌فریم
+   * تحلیل، لحظهٔ مرجع حساسیت — باید بتوانند فقط همین‌ها را دوباره بکشند،
+   * نه کل تب را.
+   */
+  function analysisContext() {
+    return {
+      el: $, chart, colors: LEG_COLORS,
+      replay, intraday, intradayDate, params: ivP(),
+      buckets: timeframeDays.length
+        ? annotateBucketIv(bucketIntradayPath(timeframeDays, { bucketSeconds: timeframeSeconds }), { legs: replay.priced }, ivP())
+        : [],
+    };
+  }
+
+  function paintPanels() {
+    if (!replay?.ok) return;
+    try {
+      paintAnalysis(analysisContext());
+    } catch (error) {
+      // یک پنل خراب نباید کل تب را بخواباند: بقیهٔ نتیجه همچنان معتبر است.
+      logError(error, 'پنل‌های تحلیلی بک‌تست');
+    }
+  }
+
+  installAnalysisControls(root, paintPanels);
+
   function paintResult() {
     paintOverview();
     paintDayTable();
@@ -915,6 +984,10 @@ export async function mount(root, { state }) {
       timeframeDays = loaded.days;
       if (!timeframeDays.length) { setStatus('در هیچ روز این بازه، ریزمعامله کامل همه پاها پیدا نشد.', true); $('bt-tf-body').hidden = true; return; }
       paintTimeframe(loaded);
+      // حالا سطل‌های تایم‌فریم ساخته شده‌اند؛ پنل‌های تحلیلی هم باید همان
+      // تایم‌فریم را ببینند وگرنه ریلِ «سطل تایم‌فریم» به مسیر روزانه
+      // برمی‌گشت و کاربر تفاوتش را نمی‌فهمید.
+      paintPanels();
       // دکمهٔ خروجی تا وقتی تحلیلی ساخته نشده پنهان است: دکمه‌ای که فایل
       // خالی می‌دهد، بدتر از دکمهٔ نبوده است.
       $('bt-tf-export').hidden = false;
@@ -972,6 +1045,8 @@ export async function mount(root, { state }) {
       intraday = replayDay({ byIns }, intradayDate);
       $('bt-result').hidden = false;
       paintResult();
+      paintPanels();
+      mountSubtabs($('bt-subtabs'), [SETUP_TAB, ...RESULT_TABS], { root, initial: 'bt-overview' });
       $('bt-intraday-title').textContent = `رصد زنده موقعیت در ${dateLabel(intradayDate)} · ۹:۰۰ تا ۱۲:۳۰`;
       $('bt-run-note').textContent = 'قیمت ورود از تاریخ انتخابی ثابت است؛ نتیجه زنده فقط با آخرین معاملات واقعی امروز محاسبه و در هر دریافت از نو ساخته می‌شود. این ارزش مشاهده‌شده است و تضمین آفست هم‌زمان نیست.';
       const warning = tradeWarningText(lastDayFetch);
@@ -1020,7 +1095,8 @@ export async function mount(root, { state }) {
       paintRunNote(day);
       intradayDate = endDate;
       intraday = replayDay(day, endDate);
-      $('bt-result').hidden = false; paintResult();
+      $('bt-result').hidden = false; paintResult(); paintPanels();
+      mountSubtabs($('bt-subtabs'), [SETUP_TAB, ...RESULT_TABS], { root, initial: 'bt-overview' });
       const warning = tradeWarningText(day);
       if (intraday.length) setStatus(`${fmt.int(replay.summary.validDays)} روز و ${fmt.int(intraday.length)} نقطه مشترک درون‌روزی محاسبه شد${warning ? `؛ ${warning}` : ''}.`, Boolean(warning));
       else setStatus(`${fmt.int(replay.summary.validDays)} روز آماده شد؛ ${warning || 'در روز سنجش ریزمعامله کامل برای همه پاها پیدا نشد'}.`, Boolean(warning));
@@ -1213,6 +1289,7 @@ export async function mount(root, { state }) {
     paintIntradayAnalysis();
     paintIv();
     if (!$('bt-tf-body').hidden) paintTimeframe(true);
+    paintPanels();
   }
 
   paintIvParams();
@@ -1236,12 +1313,12 @@ export async function mount(root, { state }) {
     // تایم‌فریم فقط سطل‌بندی را عوض می‌کند، نه داده را. اگر روزها گرفته شده‌اند
     // دوباره درخواستی نمی‌رود.
     timeframeSeconds = Math.max(60, Number($('bt-tf-size').value) || 900);
-    if (timeframeDays.length) paintTimeframe(null);
+    if (timeframeDays.length) { paintTimeframe(null); paintPanels(); }
   });
   $('bt-entry-market').addEventListener('input', onManualInput);
   $('bt-exit-market').addEventListener('input', onManualInput);
-  baseSelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; });
-  strategySelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; });
+  baseSelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; mountSubtabs($('bt-subtabs'), [SETUP_TAB], { root }); });
+  strategySelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; mountSubtabs($('bt-subtabs'), [SETUP_TAB], { root }); });
 
   try {
     const response = await fetch('/api/history/universe'), payload = await response.json();

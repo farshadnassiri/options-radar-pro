@@ -83,6 +83,24 @@ export const fmt = {
     return d2 === null ? grouped(r) : faNum(stripNegZero(r.toFixed(d2)));
   },
   int: (v) => (Number.isFinite(v) ? grouped(v) : '—'),
+  /**
+   * عدد بسیار کوچک، بی‌آنکه صفر شود.
+   *
+   * `num` زیر یک، چهار رقم اعشار می‌دهد. برای گامای یک قرارداد — که مرتبهٔ
+   * ۱۰ به توان منفی هفت است — یعنی کل ستون «۰٫۰۰۰۰» می‌شود و تفاوت دو پا
+   * که همان ستون برایش ساخته شده، گم می‌شود. اینجا رقم اعشار از خودِ بزرگی
+   * عدد می‌آید تا سه رقم بامعنا سالم بماند.
+   *
+   * نماد نمایی نمی‌نویسیم: «e-7» یک واژهٔ لاتین وسط ستون فارسی است.
+   */
+  small: (v) => {
+    if (!Number.isFinite(v)) return '—';
+    if (v === 0) return faNum('0');
+    const size = Math.abs(v);
+    if (size >= 0.01) return fmt.num(v);
+    const decimals = Math.min(12, Math.ceil(-Math.log10(size)) + 2);
+    return faNum(stripNegZero(v.toFixed(decimals)));
+  },
   // پرچم دو حالته. `text` جوابگو نبود: `String(true)` می‌شد «true» و ستون
   // فارسی، وسطش یک واژه انگلیسی می‌گرفت. نامعلوم هم باید از «خیر» جدا
   // بماند — «نمی‌دانم» با «نه» یکی نیست.

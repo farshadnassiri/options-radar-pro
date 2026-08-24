@@ -55,6 +55,16 @@ import {
   buildXlsx, crc32 as xCrc, colName as xCol, sheetName as xSheetName,
   sheet as xSheet, tidy as xTidy, zip as xZip,
 } from '../ui/xlsx.mjs';
+import {
+  GREEKS as GK, greekSeries, greekSummary, legGreekSummary, trackSummary,
+  annotateIntradayGreeks, annotateBucketGreeks, greekContribution,
+  positionSensitivityGrid, positionSensitivityAxis, ivSnapshot, repriceAt,
+} from '../core/greeks-track.mjs';
+import {
+  DRIVERS, analyzeAttribution, attributeStep, driverTotals, driverPhases,
+  dominantDriver, turningPoints, elapsedDays, dailyTrack,
+} from '../core/attribution.mjs';
+import { ANALYSIS_PANELS, verdictLines } from '../ui/backtest-panels.mjs';
 import { positionGreeksAt, annotateDailyGreeks } from '../core/leg-iv.mjs';
 import { createLog } from '../server/errlog.mjs';
 import * as uiFmt48 from '../ui/fmt.mjs';
@@ -2624,7 +2634,7 @@ group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فری�
   // ——— تحلیل تایم‌فریم ———
   check('کاربر تایم‌فریم را خودش انتخاب می‌کند', source40.includes('id="bt-tf-size"') && source40.includes('id="bt-tf-run"'));
   check('عوض‌کردن تایم‌فریم فقط سطل‌بندی را عوض می‌کند، نه داده را',
-    /\$\('bt-tf-size'\)\.addEventListener\('change'[\s\S]{0,420}?if \(timeframeDays\.length\) paintTimeframe\(null\)/.test(source40));
+    /\$\('bt-tf-size'\)\.addEventListener\('change'[\s\S]{0,420}?if \(timeframeDays\.length\) \{ paintTimeframe\(null\); paintPanels\(\); \}/.test(source40));
   for (const [id, what] of [['bt-tf-pnl-chart', 'آفست کل'], ['bt-tf-leg-chart', 'تفکیک پاها'], ['bt-tf-return-chart', 'بازده و پایه'], ['bt-tf-base-chart', 'قیمت نماد پایه']]) {
     check(`نمودار «${what}» در تحلیل تایم‌فریم رسم می‌شود`, source40.includes(`$('${id}')`));
   }
@@ -5971,6 +5981,242 @@ group('۸۱. نویسندهٔ xlsx و حجم فایل');
 
   const bt81 = readSrc('../ui/tabs/backtest.mjs');
   check('فراخوان خروجی منتظر ساخت فایل می‌ماند', /await\s+downloadBacktestExcel/.test(bt81));
+}
+
+// ═════════ ۸۲. یونانی‌ها در طول زمان و حساسیت ═════════
+//
+// خواسته کاربر: «برای هر پا یونانی‌ها محاسبه بشه در هر بازه زمانی (چه روزانه
+// چه یک دقیقه چه هر تایم‌فریم انتخابی بین این دو)… سپس روند یونانی‌ها در طی
+// عمر استراتژی قابل بررسی در جدول و نمودار باشه… یا شاید تحلیل حساسیت.»
+group('۸۲. مسیر یونانی‌ها و تحلیل حساسیت');
+{
+  const P82 = { rFree: 0.3, divYield: 0, ivLo: 0.01, ivHi: 5, yearDays: 365 };
+  const call82 = { kind: 'call', strike: 11000, expiry: 20260401, side: 'buy', ratio: 1, size: 1000, name: 'کال' };
+  const stock82 = { kind: 'underlying', side: 'buy', ratio: 1, size: 1, name: 'پایه' };
+  const legs82 = [call82, stock82];
+  const price82 = (S, days, sigma) => bsPrice('call', S, 11000, days / 365, 0.3, 0, sigma);
+
+  // ——— مهر خوردن هر سه مسیر ———
+  const tick82 = [
+    { second: 34200, timeLabel: '09:30:00', basePrice: 10000, perLeg: [{ exitPrice: price82(10000, 90, 0.65) }, { exitPrice: 10000 }] },
+    { second: 36000, timeLabel: '10:00:00', basePrice: 10120, perLeg: [{ exitPrice: price82(10120, 90, 0.64) }, { exitPrice: 10120 }] },
+  ];
+  annotateIntradayGreeks(tick82, { legs: legs82, date: 20260101 }, P82);
+  check('یونانی روی نقطهٔ درون‌روز می‌نشیند', Number.isFinite(tick82[0].greeks?.delta), String(tick82[0].greeks?.delta));
+  check('یونانی پا هم روی خودِ پا می‌نشیند', Number.isFinite(tick82[0].perLeg[0].greeks?.vega));
+  check('پای سهم پایه یونانی بلک‌شولز ندارد', tick82[0].perLeg[1].greeks === null);
+  check('دلتای موقعیت، پای پایه را هم می‌شمارد',
+    Math.abs(tick82[0].greeks.delta - (tick82[0].perLeg[0].greeks.delta * 1000 + 1)) < 1e-9,
+    `${tick82[0].greeks.delta}`);
+
+  const bucket82 = [
+    { date: 20260101, startSecond: 34200, basePrice: 10000, perLeg: [{ price: price82(10000, 90, 0.65) }, { price: 10000 }] },
+    { date: 20260105, startSecond: 34200, basePrice: 10300, perLeg: [{ price: price82(10300, 86, 0.6) }, { price: 10300 }] },
+  ];
+  annotateBucketGreeks(bucket82, { legs: legs82 }, P82);
+  // تاریخ هر سطل از خودش می‌آید، پس روز تا سررسید دو سطل فرق دارد و
+  // یونانی‌شان هم باید فرق کند
+  check('هر سطل با روز تا سررسید خودش حساب می‌شود',
+    bucket82[0].greeks.theta !== bucket82[1].greeks.theta);
+
+  // ——— سری و خلاصه ———
+  const series82 = greekSeries(bucket82, { legCount: 2 });
+  check('سری نمودار، ستون کل و ستون هر پا را دارد',
+    Number.isFinite(series82[0].delta) && Number.isFinite(series82[0].delta1) && Number.isNaN(series82[0].delta2),
+    Object.keys(series82[0]).join('،'));
+  check('خلاصهٔ یونانی، ابتدا و انتها و تغییر را می‌دهد',
+    greekSummary(bucket82).every((row) => row.samples === 2 && Number.isFinite(row.change)));
+  check('خلاصهٔ پای بی‌یونانی، جای خالی می‌ماند نه صفر',
+    legGreekSummary(bucket82, 1).every((row) => row.samples === 0 && Number.isNaN(row.mean)));
+  check('خلاصهٔ سری خالی، صفر نمی‌سازد',
+    trackSummary([NaN, NaN]).samples === 0 && Number.isNaN(trackSummary([]).mean));
+
+  // ——— حساسیت ———
+  const snap82 = { spot: 10000, prices: [price82(10000, 90, 0.65), 10000], date: 20260101 };
+  const iv82 = ivSnapshot(legs82, snap82, P82);
+  check('تلاطم ضمنی لحظه، برای پای اختیار درمی‌آید و برای پایه نه',
+    Math.abs(iv82[0] - 65) < 0.5 && Number.isNaN(iv82[1]), `${iv82[0]}`);
+  const grid82 = positionSensitivityGrid(legs82, snap82, P82, { spotSteps: [-10, 0, 10], volSteps: [-5, 0, 5] });
+  const middle = grid82.rows[1].cells[1];
+  // خانهٔ مرکز، هیچ سناریویی نیست: باید دقیقاً صفر باشد وگرنه خطای برازش
+  // مدل داخل «اثر سناریو» نشسته است
+  check('خانهٔ بی‌سناریو دقیقاً صفر است', Math.abs(middle.change) < 1e-6, String(middle.change));
+  check('صعود پایه برای کال خریداری‌شده مثبت است', grid82.rows[2].cells[1].change > 0);
+  check('افت تلاطم برای کال خریداری‌شده منفی است', grid82.rows[1].cells[0].change < 0);
+  const axis82 = positionSensitivityAxis(legs82, snap82, P82, { daySteps: [0, 5] });
+  check('حساسیت تک‌محوره سه محور دارد',
+    axis82.spot.length > 0 && axis82.vol.length > 0 && axis82.time.length === 2);
+  check('گذر زمان برای کال خریداری‌شده ارزش می‌گیرد', axis82.time[1].change < 0);
+
+  // قاعدهٔ ۲-۴: پای بی‌تلاطم بازقیمت‌گذاری نمی‌شود و سناریو ناقص می‌ماند
+  const blind = repriceAt(legs82, { ...snap82, ivPct: [NaN, NaN] }, { spotPct: 5 }, P82);
+  check('سناریوی پای بی‌تلاطم، ناقص علامت می‌خورد', blind.incomplete === true);
+
+  const share82 = greekContribution(legs82, snap82, P82);
+  check('سهم هر پا از یونانی موقعیت، وزن علامت‌دار می‌خورد',
+    Math.abs(share82[0].share.delta - share82[0].greeks.delta * 1000) < 1e-9);
+  check('یونانی‌ها یک نام و یک ترتیب دارند',
+    GK.map((g) => g.key).join(',') === 'delta,gamma,vega,theta,rho');
+}
+
+// ═════════ ۸۳. تجزیه سود و زیان به ریشه‌ها ═════════
+//
+// خواسته کاربر: «هر جا سود و زیانی ایجاد شد اثر ایجاد ان مشخص بشه… مثلا دلتا
+// رفت بالا تلاطم رفت بالا گاما اثر گذاشت یا نه اثر زوال زمانی بود… این ۳۲۰
+// میلیون ریال سود دلیلش چیه و سود و زیان را دقیق و کامل تجزیه کنی به
+// ریشه‌هایش… گام اول به پایه‌هاش، گام دوم رفتار پایه‌ها.»
+group('۸۳. تجزیه سود و زیان');
+{
+  const P83 = { rFree: 0.3, divYield: 0, ivLo: 0.01, ivHi: 5, yearDays: 365 };
+  const leg83 = { kind: 'call', strike: 11000, expiry: 20260401, side: 'buy', ratio: 1, size: 1000, name: 'کال' };
+  const mk = (date, S, sigma, days) => {
+    const price = bsPrice('call', S, 11000, days / 365, 0.3, 0, sigma);
+    return {
+      date, label: String(date), spot: S, prices: [price], pnl: [1000 * price],
+      ivPct: [sigma * 100], greeks: [bsGreeks('call', S, 11000, days / 365, 0.3, 0, sigma, 365)],
+    };
+  };
+
+  // گام کوچک: تقریب مرتبهٔ دوم باید تقریباً کامل توضیح بدهد
+  const small83 = attributeStep([leg83], mk(20260101, 10000, 0.65, 90), mk(20260102, 10020, 0.649, 89));
+  check('گام کوچک، تقریباً کامل تجزیه می‌شود',
+    Math.abs(small83.rest / small83.actual) < 0.05,
+    `باقیمانده ${(Math.abs(small83.rest / small83.actual) * 100).toFixed(2)}٪`);
+  check('جمع چهار عامل و باقیمانده، دقیقاً تغییر واقعی است',
+    Math.abs((small83.delta + small83.gamma + small83.vega + small83.theta + small83.rest) - small83.actual) < 1e-6);
+  check('صعود پایه سهم دلتای مثبت می‌دهد', small83.delta > 0);
+  check('گذر زمان برای کال خریداری‌شده سهم منفی می‌دهد', small83.theta < 0);
+  check('افت تلاطم سهم وگای منفی می‌دهد', small83.vega < 0);
+
+  // پای سهم پایه: کل حرکتش دلتاست و باقیمانده‌اش صفر
+  const stock83 = { kind: 'underlying', side: 'buy', ratio: 1, size: 1, name: 'پایه' };
+  const a83 = { date: 20260101, label: 'الف', spot: 10000, prices: [10000], pnl: [0], ivPct: [NaN], greeks: [null] };
+  const b83 = { date: 20260102, label: 'ب', spot: 10200, prices: [10200], pnl: [200], ivPct: [NaN], greeks: [null] };
+  const stepStock = attributeStep([stock83], a83, b83);
+  check('حرکت پای پایه تمامش دلتاست', Math.abs(stepStock.delta - 200) < 1e-9, String(stepStock.delta));
+  check('پای پایه باقیمانده ندارد', Math.abs(stepStock.rest) < 1e-9);
+
+  // قاعدهٔ ۲-۴: پای بی‌یونانی تجزیه نمی‌شود؛ سودش به «توضیح‌داده‌نشده» می‌رود
+  const blindLeg = { kind: 'call', strike: 11000, expiry: 20260401, side: 'buy', ratio: 1, size: 1000, name: 'کور' };
+  const ba = { date: 20260101, label: 'الف', spot: 10000, prices: [900], pnl: [0], ivPct: [NaN], greeks: [null] };
+  const bb = { date: 20260102, label: 'ب', spot: 10200, prices: [980], pnl: [80000], ivPct: [NaN], greeks: [null] };
+  const blindStep = attributeStep([blindLeg], ba, bb);
+  check('پای بی‌تلاطم تجزیه نمی‌شود و گام ناقص می‌ماند', blindStep.incomplete === true);
+  check('سود پای بی‌تجزیه، صفر فرض نمی‌شود بلکه جدا نگه داشته می‌شود',
+    Math.abs(blindStep.unexplainedPnl - 80000) < 1e-9, String(blindStep.unexplainedPnl));
+  check('سهم عوامل پای بی‌تجزیه، عدد ساختگی نمی‌گیرد',
+    DRIVERS.every((d) => Number.isNaN(blindStep.byLeg[0][d.key])));
+  const blindTotals = driverTotals([blindStep]);
+  check('پوشش تجزیه، سهم توضیح‌داده‌شده را صادقانه می‌گوید',
+    blindTotals.coverage === 0, String(blindTotals.coverage));
+
+  // ——— سه لایهٔ جواب ———
+  const track83 = [mk(20260101, 10000, 0.65, 90), mk(20260102, 10200, 0.62, 89), mk(20260103, 10150, 0.66, 88)];
+  const full83 = analyzeAttribution([leg83], track83);
+  check('لایهٔ اول: هر پا سطر خودش را دارد', full83.byLeg.length === 1 && full83.byLeg[0].samples === 2);
+  check('لایهٔ دوم: جمع عوامل روی کل عمر ساخته می‌شود',
+    Math.abs(full83.totals.actual - (track83[2].pnl[0] - track83[0].pnl[0])) < 1e-6);
+  check('لایهٔ سوم: سود و زیان هر عامل جدا می‌ماند', (() => {
+    const vega = full83.phases.find((p) => p.key === 'vega');
+    return vega.gain > 0 && vega.loss < 0 && Math.abs(vega.net - (vega.gain + vega.loss)) < 1e-9;
+  })());
+  check('مسیر تجمعی، در نقطهٔ آخر با جمع می‌خواند',
+    Math.abs(full83.cumulative.at(-1).actual - full83.totals.actual) < 1e-6);
+  check('پررنگ‌ترین عامل هر گام، بزرگ‌ترین قدر مطلق است', (() => {
+    const step = full83.steps[0];
+    const best = dominantDriver(step);
+    return DRIVERS.every((d) => !Number.isFinite(step[d.key]) || Math.abs(step[d.key]) <= Math.abs(best.value));
+  })());
+  check('نقاط عطف از بزرگ به کوچک مرتب‌اند', (() => {
+    const list = turningPoints(full83.steps, 5);
+    return list.every((item, i) => !i || Math.abs(list[i - 1].step.actual) >= Math.abs(item.step.actual));
+  })());
+  check('رو ستون ندارد، چون نرخ در بازپخش ثابت است',
+    !DRIVERS.some((d) => d.key === 'rho'), DRIVERS.map((d) => d.key).join(','));
+
+  // فاصلهٔ زمانی: ثانیه هم باید بشمارد وگرنه تتای یک روز کامل روی گام
+  // یک‌دقیقه‌ای می‌نشیند
+  check('فاصلهٔ دو نقطهٔ هم‌روز از ثانیه می‌آید',
+    Math.abs(elapsedDays({ date: 20260101, second: 34200 }, { date: 20260101, second: 34260 }) - 60 / 86400) < 1e-12);
+  check('فاصلهٔ دو روز، روز تقویمی است',
+    elapsedDays({ date: 20260101 }, { date: 20260103 }) === 2);
+
+  // مسیر روزانه از بازپخش، بدون ردیف فاقد داده
+  const rows83 = [
+    { date: 20260101, status: 'ok', dateLabel: 'الف', baseClose: 10000, perLeg: [{ exitPrice: 900, netPnl: 0, ivPct: 60 }] },
+    { date: 20260102, status: 'missing', dateLabel: 'ب', perLeg: [] },
+    { date: 20260103, status: 'ok', dateLabel: 'ج', baseClose: 10200, perLeg: [{ exitPrice: 980, netPnl: 80000, ivPct: 61 }] },
+  ];
+  check('ردیف فاقد داده وارد تجزیه نمی‌شود', dailyTrack({ rows: rows83 }).length === 2);
+}
+
+// ═════════ ۸۴. تب‌بندی بک‌تست سریع ═════════
+//
+// خواسته کاربر: «خود تب بک تست سریع را قسمت بندی و تب بندی کن، الان همه چیز
+// توی هم قاطی شده… بر اساس کارکرد هر قسمتش… همچنین ۱۰ تا تب دیگه هم خودت
+// پیشنهاد بده و بساز، داخلشون انواع نمودارها، جداول، تحلیل حساسیت‌ها.»
+group('۸۴. تب‌بندی بک‌تست سریع');
+{
+  const bt84 = readSrc('../ui/tabs/backtest.mjs');
+  const panels84 = readSrc('../ui/backtest-panels.mjs');
+  const tabs84 = readSrc('../ui/subtabs.mjs');
+  const css84 = readSrc('../ui/style.css');
+
+  check('نوار زیرتب در تب نشسته است', bt84.includes('id="bt-subtabs"') && bt84.includes('mountSubtabs('));
+  check('ده پنل تحلیلی تازه ساخته شده', ANALYSIS_PANELS.length === 10, `${ANALYSIS_PANELS.length} پنل`);
+  check('پنل تازه شناسهٔ یگانه دارد',
+    new Set(ANALYSIS_PANELS.map((p) => p.id)).size === 10);
+  check('هر پنل تازه، توضیح خودش را دارد', ANALYSIS_PANELS.every((p) => p.label && p.hint));
+  // بخش‌های فعلی هم پنل خودشان را گرفته‌اند: خواستهٔ «بر اساس کارکرد»
+  for (const id of ['bt-setup', 'bt-overview', 'bt-daily', 'bt-intraday', 'bt-timeframe', 'bt-iv']) {
+    check(`بخش فعلی «${id}» پنل خودش را دارد`, bt84.includes(`data-panel="${id}"`));
+  }
+  for (const panel of ANALYSIS_PANELS) {
+    check(`پنل «${panel.label}» در نشانه‌گذاری هست`, panels84.includes(`data-panel="${panel.id}"`));
+  }
+  check('هر پنل تحلیلی دست‌کم یک نمودار دارد', (() => {
+    const missing = ANALYSIS_PANELS.filter((panel) => {
+      const at = panels84.indexOf(`data-panel="${panel.id}"`);
+      const next = panels84.indexOf('data-panel="', at + 1);
+      const body = panels84.slice(at, next < 0 ? undefined : next);
+      return !/chartBox\(/.test(body) && !/bt-gk-charts/.test(body);
+    }).map((panel) => panel.label);
+    return missing.length === 0 ? true : missing.join('، ');
+  })() === true);
+  check('«چه مدت در سود» و «رفتار بازه‌های روز» به پنل اثر زمان رفتند',
+    panels84.includes('id="bt-tf-holding"') && panels84.includes('id="bt-tf-timeofday"')
+    && !bt84.includes('id="bt-tf-holding"'));
+  check('پنل‌ها پس از هر اجرا و هر تغییر تایم‌فریم دوباره کشیده می‌شوند',
+    (bt84.match(/paintPanels\(\)/g) || []).length >= 4, `${(bt84.match(/paintPanels\(\)/g) || []).length} فراخوان`);
+  check('خرابی یک پنل، کل تب را نمی‌خواباند',
+    /try \{\s*paintAnalysis\(/.test(bt84) && /logError\(error, 'پنل‌های تحلیلی/.test(bt84));
+
+  // نوار زیرتب: فقط یک پنل باز، و شنوندهٔ تکراری نمی‌سازد
+  check('نوار، tablist واقعی است',
+    tabs84.includes("role', 'tablist'") && tabs84.includes('role="tab"') && tabs84.includes("'tabpanel'"));
+  check('فقط تب فعال در ترتیب صفحه‌کلید می‌ماند', tabs84.includes('button.tabIndex = on ? 0 : -1'));
+  check('ساخت دوبارهٔ نوار، شنوندهٔ تکراری نمی‌گذارد',
+    tabs84.includes('host.onclick =') && tabs84.includes('host.onkeydown =')
+    && !/host\.addEventListener/.test(tabs84));
+  check('تب آغازین قابل تعیین است', tabs84.includes('initial') && bt84.includes("initial: 'bt-overview'"));
+  check('نوار زیرتب سبک خودش را دارد', css84.includes('.subtabs {') && css84.includes('.subtabs button[aria-selected="true"]'));
+  check('شدت خانهٔ شبکهٔ حساسیت از توکن می‌آید، نه رنگ ثابت',
+    css84.includes('.heat-up-4') && css84.includes('var(--gain)') && !/\.heat-up-4[^}]*#[0-9a-f]{3}/i.test(css84));
+
+  // حکم پنل الگو نباید بیشتر از عدد ادعا کند
+  const pool84 = [{ label: 'الف', family: 'حرکت پایه', sum: -50, count: 3, samples: 3, winPct: 20 }];
+  const one = verdictLines(pool84, [], 100).join(' ');
+  check('وقتی هیچ دسته‌ای سودده نبوده، «بیشترین سود» گفته نمی‌شود',
+    !one.includes('بیشترین سود') && one.includes('کم‌زیان‌ترین'), one.slice(0, 60));
+  check('بهترین و بدترینِ یکسان، دو جملهٔ هم‌معنی نمی‌سازد',
+    one.includes('تنها یک دسته نمونهٔ کافی داشت'));
+  const two = verdictLines([
+    { label: 'صعود', family: 'حرکت پایه', sum: 900, count: 4, samples: 4, winPct: 75 },
+    { label: 'نزول', family: 'حرکت پایه', sum: -300, count: 3, samples: 3, winPct: 33 },
+  ], [{ label: 'حرکت پایه', net: 600, gain: 900, loss: -300 }], 82.5).join(' ');
+  check('دستهٔ سودده، «بیشترین سود» می‌گیرد', two.includes('بیشترین سود') && two.includes('صعود'));
+  check('پوشش تجزیه همیشه در حکم گفته می‌شود',
+    two.includes('پوشش تجزیه') && one.includes('پوشش تجزیه'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════
