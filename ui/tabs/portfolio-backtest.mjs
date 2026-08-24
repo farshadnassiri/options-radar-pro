@@ -1,4 +1,5 @@
 import { CATALOG, GROUPS } from '/strategies/catalog.mjs';
+import { goHandoff } from '/ui/handoff.mjs';
 import { buildChain } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
@@ -287,7 +288,7 @@ export async function mount(root, { state }) {
    * حرف بزنند و معلوم نبود کدام مال کدام محاسبه است.
    */
   function watchInBacktest(item, live = false) {
-    state.handoff = {
+    goHandoff(state, {
       to: 'backtest', from: 'portfolio-backtest',
       uaIns: String(ua.ins), uaName: nameOf(ua, 'نماد پایه'),
       strategyId: item.strategyId, strategyName: item.strategyName,
@@ -300,8 +301,7 @@ export async function mount(root, { state }) {
       units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
       live: live === true,
       autoRun: live === true,
-    };
-    location.hash = 'backtest';
+    });
   }
 
   async function runAll() {

@@ -3,19 +3,8 @@
 
 import { historyDateLabel } from '../core/history.mjs';
 import { stamp } from './export.mjs';
+import { sheet, sheetParts, workbook, downloadWorkbook, xmlText as xml } from './workbook.mjs';
 
-const BIDI = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
-const clean = (value) => String(value ?? '').replace(BIDI, '').trim();
-const xml = (value) => clean(value).replace(/[&<>"']/g, (char) => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;',
-}[char]));
-const finite = (value) => typeof value === 'number' && Number.isFinite(value);
-const cell = (value, style = '') => {
-  const numeric = finite(value);
-  const shown = typeof value === 'number' && !numeric ? '' : (value ?? '');
-  return `<Cell${style ? ` ss:StyleID="${style}"` : ''}><Data ss:Type="${numeric ? 'Number' : 'String'}">${xml(numeric ? value : shown)}</Data></Cell>`;
-};
-const row = (values, style = '') => `<Row>${values.map((value) => cell(value, style)).join('')}</Row>`;
 const date = (value) => historyDateLabel(value);
 const clock = (second) => {
   if (!Number.isFinite(Number(second))) return '';
@@ -47,18 +36,7 @@ const metricValues = (r) => [
   r.callContracts, r.putContracts, r.baseValue, r.baseVolume,
 ];
 
-function sheet(name, headers, rows, widths = []) {
-  const columns = (widths.length ? widths : headers.map((_, index) => index < 2 ? 92 : 84))
-    .map((width) => `<Column ss:Width="${width}"/>`).join('');
-  return `<Worksheet ss:Name="${xml(name)}"><Table>${columns}${row(headers, 'Header')}${rows.map((values) => row(values)).join('')}</Table>
-    <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel"><FreezePanes/><FrozenNoSplit/><SplitHorizontal>1</SplitHorizontal><TopRowBottomPane>1</TopRowBottomPane><ProtectObjects>False</ProtectObjects><ProtectScenarios>False</ProtectScenarios></WorksheetOptions></Worksheet>`;
-}
 
-function sheetParts(name, headers, rows, widths = []) {
-  const size = 60000;
-  const groups = rows.length ? Array.from({ length: Math.ceil(rows.length / size) }, (_, index) => rows.slice(index * size, (index + 1) * size)) : [[]];
-  return groups.map((group, index) => sheet(groups.length === 1 ? name : `${name.slice(0, 27)} ${index + 1}`, headers, group, widths));
-}
 
 function relationRows(matrix = []) {
   const labels = [...new Set(matrix.map((item) => item.rowLabel))];
@@ -122,18 +100,9 @@ export function buildOpenViewWorkbook({ ua, daily, intraday, dailyRelations = []
     sheet('همبستگی روزانه', dailyRelation.header, dailyRelation.rows),
     sheet('همبستگی بازه', intradayRelation.header, intradayRelation.rows),
   ];
-  return `<?xml version="1.0" encoding="UTF-8"?><?mso-application progid="Excel.Sheet"?>
-  <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
-    <Styles><Style ss:ID="Default" ss:Name="Normal"><Alignment ss:Vertical="Center" ss:ReadingOrder="RightToLeft"/><Font ss:FontName="Tahoma" ss:Size="10"/></Style><Style ss:ID="Header"><Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/><Font ss:FontName="Tahoma" ss:Size="10" ss:Bold="1"/><Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1"/></Borders></Style></Styles>
-    ${sheets.join('')}</Workbook>`;
+  return workbook(sheets);
 }
 
 export function downloadOpenViewExcel(args) {
-  const content = buildOpenViewWorkbook(args);
-  const url = URL.createObjectURL(new Blob([content], { type: 'application/vnd.ms-excel;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `negah-baz-${stamp()}.xls`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  downloadWorkbook(`negah-baz-${stamp()}`, buildOpenViewWorkbook(args));
 }

@@ -35,15 +35,23 @@ import { evictOldest } from '../server/cache.mjs';
 import { watchBackoffSec } from '../server/backoff.mjs';
 import { fmt as uiFmt, axisNum, toEnDigits, faAgo, faClock, humanizeUpstreamError, coverageInfo, kpiTone, signTone, pageTitle, normFa } from '../ui/fmt.mjs';
 import { moveColumn, insertColumn, changedIds, heatRamp } from '../ui/table.mjs';
+import { moveTo as enhanceMoveTo, cellValue as enhanceCellValue } from '../ui/table-enhance.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '../ui/compare.mjs';
 import { strandedKeys } from '../ui/expiries.mjs';
 import { icon, GROUP_ICON, TAB_ICON, sectionIcon } from '../ui/icons.mjs';
-import { canHandoff, handoffPlan, historyHandoffPlan } from '../ui/handoff.mjs';
+import { canHandoff, handoffPlan, historyHandoffPlan, stashHandoff, takeHandoff, openHandoffPage } from '../ui/handoff.mjs';
+import {
+  ivParams, legDaysToExpiry, legIvPct, legIvList, meanIvPct, ivSummary,
+  annotateDailyIv, annotateIntradayIv, annotateBucketIv, IV_PARAMS,
+} from '../core/leg-iv.mjs';
 import {
   scenarioLadder, sensitivityGrid, sensitivityAxis, bookDepthRisk,
   SENS_AXES, SENS_METRICS,
 } from '../core/scenario.mjs';
 import { csvCell, numericCell, toCsv, stamp } from '../ui/export.mjs';
+import { cell as wbCell, sheet as wbSheet, sheetParts as wbParts, workbook as wbWrap } from '../ui/workbook.mjs';
+import { buildBacktestWorkbook } from '../ui/backtest-export.mjs';
+import { positionGreeksAt, annotateDailyGreeks } from '../core/leg-iv.mjs';
 import { createLog } from '../server/errlog.mjs';
 import * as uiFmt48 from '../ui/fmt.mjs';
 import { GROUPS as STRAT_GROUPS48 } from '../strategies/catalog.mjs';
@@ -2355,7 +2363,8 @@ group('۳۷. سپردن موقعیت به بک‌تست سریع');
   // می‌کند و هیچ تبی باز نمی‌شود.
   check('پوسته برنامه تغییر hash از داخل تب را به باز کردن تب ترجمه می‌کند',
     appSource37.includes("window.addEventListener('hashchange'")
-    && appSource37.includes('if (next && next !== current && TABS.some((t) => t.id === next)) open(next);'));
+    && appSource37.includes('goRoute(routeFromHash(location.hash))')
+    && appSource37.includes('if (route.id !== current) open(route.id);'));
   check('جعبه تحویل بین تب‌ها در وضعیت مشترک تعریف شده است', /^\s*handoff: null,$/m.test(appSource37));
   // وارد کردن `open` از app.mjs یک حلقه می‌ساخت، چون app.mjs خودش هر تب را
   // به‌صورت پویا وارد می‌کند.
@@ -2367,12 +2376,14 @@ group('۳۷. سپردن موقعیت به بک‌تست سریع');
   // فقط انتخاب‌ها منتقل می‌شوند، نه نتیجه‌ها؛ وگرنه دو تب می‌توانند دو عدد
   // نشان دهند و معلوم نباشد کدام مال کدام محاسبه است.
   for (const key of ['uaIns', 'strategyId', 'legIns', 'entryDate', 'exitDate', 'entryBasis', 'exitBasis', 'units']) {
-    check(`تحویل «${key}» را همراه می‌برد`, new RegExp(`^\\s*${key}:`, 'm').test(portfolioSource37.slice(portfolioSource37.indexOf('state.handoff = {'))));
+    check(`تحویل «${key}» را همراه می‌برد`, new RegExp(`^\\s*${key}:`, 'm').test(portfolioSource37.slice(portfolioSource37.indexOf('goHandoff(state, {'))));
   }
   check('تحویل هیچ عدد نتیجه‌ای را کپی نمی‌کند',
-    !/state\.handoff = \{[\s\S]*?\};/.exec(portfolioSource37)[0].match(/netPnl|returnPct|capital/));
-  check('آزمون همه استراتژی‌ها کاربر را به تب بک‌تست سریع می‌برد',
-    portfolioSource37.includes("location.hash = 'backtest';"));
+    !/goHandoff\(state, \{[\s\S]*?\}\);/.exec(portfolioSource37)[0].match(/netPnl|returnPct|capital/));
+  // انتقال دیگر تبِ همین صفحه را عوض نمی‌کند؛ `goHandoff` صفحهٔ تازه باز
+  // می‌کند و فقط اگر نشد به مسیر قدیمی برمی‌گردد.
+  check('آزمون همه استراتژی‌ها کاربر را به بک‌تست سریع می‌برد',
+    portfolioSource37.includes('goHandoff(state, {') && !portfolioSource37.includes("location.hash = 'backtest';"));
 
   check('بک‌تست سریع تحویل را برمی‌دارد و می‌چیند',
     backtestSource37.includes("state.handoff?.to === 'backtest'") && backtestSource37.includes('await applyHandoff(plan)'));
@@ -3539,7 +3550,7 @@ group('۵۱. انتقال ترکیب زنده به بک‌تست');
   for (const [file, what] of [['../ui/tabs/strategy.mjs', 'تب استراتژی'], ['../ui/tabs/top.mjs', 'برترین موقعیت‌ها']]) {
     const src = readSrc(file);
     check(`${what} دکمهٔ انتقال دارد و فقط برای ردیف قابل انتقال`,
-      src.includes('canHandoff(r) ? handoffButtonHtml()') && src.includes("location.hash = 'backtest'"));
+      src.includes('canHandoff(r) ? handoffButtonHtml()') && src.includes('goHandoff(state, handoffPlan(r, {'));
   }
 }
 
@@ -4801,8 +4812,7 @@ group('۶۷. انتقال موقعیت تحلیل تاریخی به ریز بک�
   const backtest67 = readSrc('../ui/tabs/backtest.mjs');
   check('مشخصات موقعیت تاریخی دکمه ریز بک‌تست دارد',
     history67.includes('data-history-backtest')
-    && history67.includes('historyHandoffPlan({')
-    && history67.includes("location.hash = 'backtest'"));
+    && history67.includes('goHandoff(state, historyHandoffPlan({'));
   check('استراتژی مطالعه‌ای به بک‌تست اجرایی اشتباه فرستاده نمی‌شود',
     history67.includes('const backtestDisabled = !def?.feasible')
     && history67.includes('این استراتژی به فروش دارایی پایه نیاز دارد'));
@@ -4945,7 +4955,10 @@ group('۶۹. داشبورد تجمعی بازار و رصد زنده موقعی�
   check('نقشه انتقال، درخواست زنده را صریح و بدون کپی نتیجه حمل می‌کند', livePlan69.live === true && livePlan69.autoRun === true && !('netPnl' in livePlan69));
   check('رصد زنده، همان موتور ریزمعامله مشترک و endpoint امروز را به کار می‌گیرد',
     backtest69.includes("fetch(`/api/live-trades?ins=${encodeURIComponent(codes.join(','))}`")
-    && backtest69.includes('intraday = replayIntraday({ replay, tradesByIns: byIns'));
+    // `replayDay` همان `replayIntraday` است به‌علاوهٔ مهر تلاطم؛ هر چهار
+    // مسیر درون‌روز از همین یکی رد می‌شوند تا هیچ‌کدام بی‌تلاطم نماند.
+    && backtest69.includes('intraday = replayDay({ byIns }, intradayDate);')
+    && /function replayDay[\s\S]*replayIntraday\(\{[\s\S]*annotateIntradayIv\(/.test(backtest69));
 }
 
 group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دامنه');
@@ -5464,6 +5477,403 @@ group('۷۶. نماهای سه حالت و سنجه‌های ساختاری');
     ui76.includes('color-mix(in srgb, var(--series-1)') && !/heatRainbow|hsl\(/.test(ui76));
 }
 
+
+// ═════════ ۷۷. انتقال در صفحهٔ تازه، نه روی صفحهٔ جاری ═════════
+//
+// خواسته کاربر: «وقتی با کلیک روی یک دکمه به قسمت بک‌تست سریع یا نمایش
+// زنده می‌رویم یک صفحه جدید باز شود… با کلیک روی آن دکمه صفحه جاری حفظ
+// شود و فعالیت جدید در صفحه جدید ظاهر شود.»
+//
+// نقشه دیگر از `state` این صفحه رد نمی‌شود، چون صفحهٔ تازه سند دیگری است.
+// پس این گروه سه چیز را می‌سنجد: نقشه سالم از حافظه رد می‌شود، کلید
+// یک‌بارمصرف است، و نبودِ حافظه به سکوت ختم نمی‌شود بلکه به مسیر قدیمی
+// برمی‌گردد.
+group('۷۷. انتقال در صفحهٔ تازه');
+{
+  const fakeStore = () => {
+    const map = new Map();
+    return {
+      get length() { return map.size; },
+      key: (i) => [...map.keys()][i] ?? null,
+      getItem: (k) => (map.has(k) ? map.get(k) : null),
+      setItem: (k, v) => { map.set(k, String(v)); },
+      removeItem: (k) => { map.delete(k); },
+      _map: map,
+    };
+  };
+
+  const prevWindow = globalThis.window;
+  const ls = fakeStore();
+  let opened = null;
+  globalThis.window = {
+    localStorage: ls,
+    open: (url) => { opened = url; return { closed: false }; },
+  };
+  globalThis.location = { pathname: '/', search: '' };
+
+  const plan = handoffPlan({ uaIns: '9', underlying: 'خودرو', strategy: 'استرنگل',
+    legsText: 'ض + ط', __legs: [{ kind: 'call', ins: '11' }, { kind: 'put', ins: '12' }] },
+  { from: 'top', units: 3 });
+
+  const token = stashHandoff(plan);
+  check('کلید ساخته می‌شود', !!token, token);
+  check('نقشه در حافظه نشسته است', ls._map.size === 1, `${ls._map.size} کلید`);
+
+  const back = takeHandoff(token);
+  check('نقشه دست‌نخورده برمی‌گردد',
+    back?.uaIns === '9' && back.units === 3 && back.legIns.join(',') === '11,12',
+    JSON.stringify({ ua: back?.uaIns, units: back?.units }));
+  // یک‌بارمصرف: نوسازی صفحه نباید همان انتقال را دوباره اجرا کند
+  check('کلید پس از برداشت پاک می‌شود', ls._map.size === 0 && takeHandoff(token) === null);
+
+  // پنجرهٔ تازه: نشانی باید تب و کلید را با هم داشته باشد
+  check('باز کردن صفحهٔ تازه موفق است', openHandoffPage(plan) === true);
+  check('نشانی صفحهٔ تازه تب و کلید دارد', /#backtest![a-z0-9]+$/.test(String(opened)), String(opened));
+  check('کلید پس از باز شدن هنوز در حافظه است تا صفحهٔ مقصد برش دارد',
+    ls._map.size === 1, `${ls._map.size} کلید`);
+
+  // نقشهٔ منقضی نباید بنشیند
+  const stale = stashHandoff(plan);
+  const staleKey = [...ls._map.keys()].find((k) => k.endsWith(stale));
+  ls.setItem(staleKey, JSON.stringify({ at: Date.now() - (11 * 60 * 1000), plan }));
+  check('نقشهٔ کهنه برداشته نمی‌شود', takeHandoff(stale) === null);
+
+  // پنجره باز نشد → فراخوان باید بفهمد، نه اینکه کلیک بی‌اثر بماند
+  globalThis.window.open = () => null;
+  const before = ls._map.size;
+  check('پنجرهٔ مسدود، شکست را اعلام می‌کند', openHandoffPage(plan) === false);
+  check('کلیدِ پنجرهٔ مسدود جا نمی‌ماند', ls._map.size === before, `${ls._map.size} کلید`);
+
+  // بدون حافظه هم نباید بترکد
+  globalThis.window = { open: () => ({}) };
+  check('نبود حافظه به استثنا ختم نمی‌شود', stashHandoff(plan) === '' && openHandoffPage(plan) === false);
+
+  globalThis.window = prevWindow;
+  delete globalThis.location;
+
+  // مسیر قدیمی باید در کد بماند: اگر پنجره باز نشد، تب همین صفحه عوض شود
+  const src = readSrc('../ui/handoff.mjs');
+  check('برگشت به مسیر قدیمی در goHandoff هست',
+    /export function goHandoff[\s\S]*openHandoffPage\(plan, tab\)[\s\S]*state\.handoff = plan;[\s\S]*location\.hash = tab;/.test(src));
+
+  // هیچ تبی نباید مستقیم hash را برای انتقال دست بزند
+  const direct = ['top', 'strategy', 'history', 'portfolio-backtest']
+    .filter((name) => /location\.hash *= *'backtest'/.test(readSrc(`../ui/tabs/${name}.mjs`)));
+  check('هیچ تبی دیگر مستقیم به بک‌تست پرش نمی‌کند', direct.length === 0, direct.join('، '));
+
+  // مسیریاب باید شکل «تب!کلید» را بشناسد و کلید را از نشانی پاک کند
+  const app = readSrc('../ui/app.mjs');
+  check('مسیریاب کلید را از نشانی جدا می‌کند', /const at = text\.indexOf\('!'\)/.test(app));
+  check('مسیریاب کلید را از نشانی پاک می‌کند', /history\.replaceState\(null, '', `\$\{location\.pathname\}\$\{location\.search\}#\$\{route\.id\}`\)/.test(app));
+}
+
+// ═════════ ۷۸. تلاطم ضمنی هر پا، در هر سه تایم‌فریم ═════════
+//
+// خواسته کاربر: «در جداول ارزش… تلاطم ضمنی هر پایه نیز آورده شود… چه
+// کوچک‌ترین و ریزترین تایم‌فریم چه بزرگ‌ترین تایم‌فریم… همچنین پارامترهای
+// محاسبهٔ آن قابل تنظیم باشند.»
+//
+// دو ادعای غیربدیهی اینجا سنجیده می‌شود: روز مانده تا سررسید **هر پا**
+// جداست (وگرنه استراتژی تقویمی عددِ قابل‌قبولِ غلط می‌سازد و هیچ‌جا NaN
+// نمی‌شود)، و هر ورودیِ نبوده خروجی را NaN می‌کند نه صفر.
+group('۷۸. تلاطم ضمنی هر پا در بک‌تست سریع');
+{
+  const P = ivParams({ rFree: 0.3, divYield: 0, ivLo: 0.01, ivHi: 5, dayCountYear: 365 });
+  check('پارامترها از تنظیمات سراسری می‌آیند',
+    P.rFree === 0.3 && P.yearDays === 365 && P.ivHi === 5, JSON.stringify(P));
+  const over = ivParams({ rFree: 0.3, dayCountYear: 365, ivLo: 0.01, ivHi: 5, divYield: 0 }, { rFree: 0.18 });
+  check('بازنویسی موضعی روی تنظیمات سراسری می‌نشیند',
+    over.rFree === 0.18 && over.yearDays === 365, `${over.rFree}`);
+  check('کاتالوگ پارامتر همان کلیدهایی را دارد که محاسبه می‌خواند',
+    IV_PARAMS.map((x) => x.key).join(',') === 'rFree,divYield,ivLo,ivHi,yearDays');
+
+  // رفت‌وبرگشت: قیمتی که خودِ بلک-شولز با σ ساخته، باید همان σ را پس بدهد
+  const nearCall = { kind: 'call', strike: 11000, expiry: 20260401 };
+  const farCall = { kind: 'call', strike: 11000, expiry: 20260701 };
+  const observed = 20260101;
+  const dNear = legDaysToExpiry(nearCall, observed);
+  const dFar = legDaysToExpiry(farCall, observed);
+  check('روز تا سررسید هر پا از سررسید خودش می‌آید', dNear === 90 && dFar === 181, `${dNear} و ${dFar}`);
+  const priceNear = bsPrice('call', 10000, 11000, dNear / 365, 0.3, 0, 0.65);
+  check('تلاطم برگشتی همان تلاطم ساخت است',
+    near(legIvPct(nearCall, { spot: 10000, price: priceNear, days: dNear }, P), 65, 1e-4));
+
+  // همان قیمت روی پای دورتر، تلاطم دیگری است. اگر روز پا جدا نشود، این دو
+  // یکی می‌شوند و خطا بی‌صدا می‌ماند.
+  const ivFarSamePrice = legIvPct(farCall, { spot: 10000, price: priceNear, days: dFar }, P);
+  check('پای دورتر با همان قیمت، تلاطم کمتری دارد',
+    Number.isFinite(ivFarSamePrice) && ivFarSamePrice < 65, `${ivFarSamePrice.toFixed(2)}٪`);
+
+  // ——— قاعدهٔ ۲-۴: نبود، صفر نیست ———
+  check('پای سهم پایه تلاطم ضمنی ندارد',
+    Number.isNaN(legIvPct({ kind: 'underlying', strike: 0 }, { spot: 1, price: 1, days: 30 }, P)));
+  check('بی‌قیمت، تلاطم ندارد', Number.isNaN(legIvPct(nearCall, { spot: 10000, price: NaN, days: 90 }, P)));
+  check('بی‌قیمتِ پایه، تلاطم ندارد', Number.isNaN(legIvPct(nearCall, { spot: NaN, price: 100, days: 90 }, P)));
+  check('روز سررسید، تلاطم ندارد', Number.isNaN(legIvPct(nearCall, { spot: 10000, price: 100, days: 0 }, P)));
+  check('سررسید نامعلوم یعنی روز نامعلوم', Number.isNaN(legDaysToExpiry({ kind: 'call' }, observed)));
+
+  // ——— فهرست پاها: جای هر پا محفوظ می‌ماند ———
+  const legs = [nearCall, { kind: 'underlying', strike: 0 }, farCall];
+  const list = legIvList(legs, { spot: 10000, prices: [priceNear, 10000, priceNear], date: observed }, P);
+  check('فهرست تلاطم هم‌اندازه و هم‌ترتیب پاهاست', list.length === 3 && Number.isNaN(list[1]),
+    list.map((v) => (Number.isFinite(v) ? v.toFixed(1) : '—')).join('، '));
+  check('میانگین فقط روی پاهای دارای تلاطم است',
+    near(meanIvPct(list), (list[0] + list[2]) / 2, 1e-9));
+
+  // ——— مهر خوردن روی هر سه تایم‌فریم ———
+  const priced = [nearCall, farCall];
+  const replay = { ok: true, priced, rows: [
+    { date: observed, status: 'ok', baseClose: 10000, perLeg: [{ exitPrice: priceNear }, { exitPrice: priceNear }] },
+    { date: observed, status: 'missing', baseClose: NaN, perLeg: [{ exitPrice: NaN }, { exitPrice: NaN }] },
+  ] };
+  annotateDailyIv(replay, P);
+  check('مسیر روزانه مهر تلاطم می‌خورد',
+    near(replay.rows[0].perLeg[0].ivPct, 65, 1e-4) && replay.rows[0].legIvPct.length === 2);
+  check('ردیف بی‌داده، تلاطم جعلی نمی‌گیرد',
+    replay.rows[1].legIvPct.every((v) => Number.isNaN(v)) && Number.isNaN(replay.rows[1].meanIvPct));
+
+  const points = [{ second: 34200, basePrice: 10000, perLeg: [{ exitPrice: priceNear }, { exitPrice: priceNear }] }];
+  annotateIntradayIv(points, { legs: priced, date: observed }, P);
+  check('بازپخش درون‌روز مهر تلاطم می‌خورد', near(points[0].perLeg[0].ivPct, 65, 1e-4));
+
+  // هر سطل تاریخ خودش را دارد؛ سطلی که سه ماه جلوتر است نباید با روزِ سطل
+  // اول حساب شود.
+  const buckets = [
+    { date: observed, basePrice: 10000, perLeg: [{ price: priceNear }, { price: priceNear }] },
+    { date: 20260301, basePrice: 10000, perLeg: [{ price: priceNear }, { price: priceNear }] },
+  ];
+  annotateBucketIv(buckets, { legs: priced }, P);
+  check('هر سطل با تاریخ خودش حساب می‌شود',
+    Number.isFinite(buckets[0].perLeg[0].ivPct) && Number.isFinite(buckets[1].perLeg[0].ivPct)
+    && buckets[0].perLeg[0].ivPct !== buckets[1].perLeg[0].ivPct,
+    `${buckets[0].perLeg[0].ivPct.toFixed(1)}٪ در برابر ${buckets[1].perLeg[0].ivPct.toFixed(1)}٪`);
+
+  // ——— خلاصه ———
+  const sum = ivSummary([60, NaN, 70, 50]);
+  check('خلاصه، نقاط بی‌تلاطم را جدا می‌شمارد و در آمار نمی‌آورد',
+    sum.samples === 3 && sum.gaps === 1 && sum.min === 50 && sum.max === 70 && sum.mean === 60 && sum.changePp === -10);
+  check('خلاصهٔ بی‌مشاهده عدد نمی‌سازد',
+    ivSummary([NaN, NaN]).samples === 0 && Number.isNaN(ivSummary([NaN, NaN]).mean));
+
+  // ——— رابط: هر سه تایم‌فریم و فرم پارامتر ———
+  const bt78 = readSrc('../ui/tabs/backtest.mjs');
+  check('هر سه تایم‌فریم مهر تلاطم می‌خورند',
+    bt78.includes('annotateDailyIv(replay, ivP())')
+    && bt78.includes('annotateIntradayIv(points, { legs: replay.priced, date }, ivP())')
+    && bt78.includes('annotateBucketIv(buckets, { legs: replay.priced }, ivP())'));
+  check('پارامترها در خود تب قابل تنظیم‌اند',
+    bt78.includes("data-iv-param=") && bt78.includes("id=\"bt-iv-reset\"") && bt78.includes('reapplyIv()'));
+  // خانهٔ خالی یعنی «تنظیمات سراسری»، نه صفر
+  check('خانهٔ خالی پارامتر، بازنویسی را برمی‌دارد',
+    /if \(raw === ''\) delete ivOverride\[field\.dataset\.ivParam\];/.test(bt78));
+  // فرم نباید در هر رنگ‌آمیزی از نو ساخته شود، وگرنه فوکوس وسط تایپ می‌پرد
+  check('فرم پارامتر یک‌بار ساخته می‌شود', /if \(host\.children\.length\) return;/.test(bt78));
+  check('جدول‌های هر سه تایم‌فریم ستون تلاطم دارند',
+    (bt78.match(/ivCell\(/g) || []).length >= 5, `${(bt78.match(/ivCell\(/g) || []).length} خانه`);
+  check('نبودِ تلاطم در جدول «—» می‌ماند',
+    /const ivCell = \(value\) => \(Number\.isFinite\(value\) \? `\$\{fmt\.pct\(value\)\}٪` : '—'\);/.test(bt78));
+}
+
+// ═════════ ۷۹. خروجی اکسل جامع گام سوم ═════════
+//
+// خواسته کاربر: «دکمه دریافت فایل اکسل نیز نمایش داده شود و اطلاعات کامل و
+// جامع از تمامی اطلاعات آن استراتژی در فایل اکسل قرار داده شود و هیچ
+// اطلاعاتی جا نیفتد… چه مدت در سود چه مدت در زیان، رفتار هر بازه از روز،
+// یونانی‌های این استراتژی در طول زمان، تلاطم ضمنی پاها در طول زمان.»
+group('۷۹. خروجی اکسل جامع بک‌تست');
+{
+  // ——— قالب مشترک دفترکار ———
+  check('عددِ نبوده خانهٔ خالی می‌شود، نه صفر و نه NaN',
+    wbCell(NaN).includes('ss:Type="String"') && !wbCell(NaN).includes('NaN'), wbCell(NaN));
+  check('عدد، عدد می‌ماند تا اکسل جمعش بزند', wbCell(12.5).includes('ss:Type="Number"'));
+  check('نشانهٔ جهت‌دهی از خانه پاک می‌شود', !wbCell('⁦ضهرم⁩').includes('⁦'));
+  check('نویسهٔ XML فرار داده می‌شود', wbCell('a<b&c').includes('a&lt;b&amp;c'));
+  // بیش از ۶۰ هزار ردیف باید بین چند برگ پخش شود، نه بی‌صدا بیفتد
+  const many = Array.from({ length: 60001 }, (_, i) => [i]);
+  check('داده بلندتر از سقف برگ، بین چند برگ پخش می‌شود', wbParts('نمونه', ['x'], many).length === 2);
+  check('برگ بی‌ردیف هم یک برگ می‌سازد', wbParts('نمونه', ['x'], []).length === 1);
+  check('دفترکار یک Workbook معتبر است',
+    wbWrap([wbSheet('a', ['h'], [[1]])]).startsWith('<?xml') && wbWrap([]).includes('</Workbook>'));
+
+  // ——— یونانی‌ها در طول زمان ———
+  const gLeg = { kind: 'call', strike: 11000, expiry: 20260401, side: 'buy', ratio: 1, size: 1000 };
+  const gPrice = bsPrice('call', 10000, 11000, 90 / 365, 0.3, 0, 0.65);
+  const gParams = { rFree: 0.3, divYield: 0, ivLo: 0.01, ivHi: 5, yearDays: 365 };
+  const g = positionGreeksAt([gLeg], { spot: 10000, prices: [gPrice], date: 20260101 }, gParams);
+  check('یونانی موقعیت از تلاطم ضمنی خود پا می‌آید',
+    Number.isFinite(g.delta) && g.delta > 0 && g.incomplete === false, `دلتا ${g.delta.toFixed(1)}`);
+  // پایی که تلاطم ندارد، جمع را ناقص می‌کند — و باید بگوید
+  const g2 = positionGreeksAt([gLeg, { kind: 'put', strike: 9000, expiry: 20260401, side: 'sell', ratio: 1, size: 1000 }],
+    { spot: 10000, prices: [gPrice, NaN], date: 20260101 }, gParams);
+  check('پای بی‌تلاطم، جمع یونانی را «ناقص» علامت می‌زند', g2.incomplete === true);
+
+  // ——— دفترکار کامل از دادهٔ ساختگی ———
+  const priced = [
+    { ins: '11', name: 'ضنمونه۱', kind: 'call', side: 'buy', ratio: 1, size: 1000, strike: 11000, expiry: 20260401, price: 500, days: 90 },
+    { ins: '12', name: 'طنمونه۱', kind: 'put', side: 'sell', ratio: 1, size: 1000, strike: 9000, expiry: 20260401, price: 300, days: 90 },
+  ];
+  const mkDay = (date, ok = true) => ({
+    date, dateLabel: '', dayName: 'شنبه', holdingDays: 1, daysToExpiry: 89,
+    status: ok ? 'ok' : 'missing', baseClose: ok ? 10000 : NaN,
+    baseDailyPct: 1, baseCumulativePct: 2, baseVolume: 10, baseValue: 20,
+    grossPnl: 100, entryFee: 1, exitFee: 1, totalFees: 2, netPnl: 98, pnlDelta: 3, returnPct: 4, drawdown: -1,
+    margin: 5, marginNet: 6, conditionalMargin: 7,
+    perLeg: [
+      { exitPrice: ok ? gPrice : NaN, entryPrice: 500, grossPnl: 10, netPnl: 9, entryFee: 1, exitFee: 0, pnlDelta: 1, volume: 3, trades: 2, value: 4 },
+      { exitPrice: ok ? 250 : NaN, entryPrice: 300, grossPnl: 5, netPnl: 4, entryFee: 1, exitFee: 0, pnlDelta: 1, volume: 3, trades: 2, value: 4 },
+    ],
+  });
+  const replay79 = {
+    ok: true, startDate: 20260101, endDate: 20260110, expiry: 20260401,
+    entryBasis: 'LAST', exitBasis: 'LAST', priced,
+    entry: { gross: 1, fee: 2, netCash: 3, cashPaid: 4, cashReceived: 5,
+      capital: { value: 1000, label: 'وجه تضمین' }, margin: { marginNet: 9 }, payoff: { maxLoss: -5, maxProfit: 7 } },
+    rows: [mkDay(20260101), mkDay(20260102), mkDay(20260103, false)],
+    summary: { validDays: 2, missingDays: 1, positiveDays: 2, negativeDays: 0, flatDays: 0,
+      best: { date: 20260101, netPnl: 98 }, worst: { date: 20260102, netPnl: 98 },
+      last: { netPnl: 98, returnPct: 4 }, firstProfit: { date: 20260101, holdingDays: 0 } },
+  };
+  annotateDailyIv(replay79, gParams);
+  annotateDailyGreeks(replay79, gParams);
+  check('مسیر روزانه پیش از خروجی، هم تلاطم دارد هم یونانی',
+    Number.isFinite(replay79.rows[0].perLeg[0].ivPct) && Number.isFinite(replay79.rows[0].greeks.delta));
+
+  const buckets79 = [{ date: 20260101, startSecond: 34200, endSecond: 35100, observations: 2, seconds: 900,
+    openPnl: 1, closePnl: 2, highPnl: 3, lowPnl: 0, changePnl: 1, stepPnl: NaN,
+    openReturnPct: 1, returnPct: 2, basePrice: 10000, basePct: 1, volume: 5, trades: 2,
+    baseVolume: 3, freshPct: 100, maxAgeSec: 10,
+    perLeg: [{ price: gPrice, priceChange: 1, netPnl: 2, changePnl: 1, cumulativeVolume: 4, tradeCount: 2, ageSec: 3 },
+      { price: 250, priceChange: 1, netPnl: 2, changePnl: 1, cumulativeVolume: 4, tradeCount: 2, ageSec: 3 }] }];
+  annotateBucketIv(buckets79, { legs: priced }, gParams);
+  const intraday79 = [{ second: 34200, timeLabel: '09:30:00', netPnl: 5, returnPct: 1, basePrice: 10000, basePct: 1,
+    eventVolume: 2, eventTrades: 1, cumulativeVolume: 2, baseSecondVolume: 1, baseCumulativeVolume: 1, baseAgeSec: 0,
+    activeLegs: 2, maxAgeSec: 4, allFresh: true,
+    perLeg: [{ exitPrice: gPrice, pricePct: 1, netPnl: 2, grossPnl: 3, entryFee: 1, exitFee: 0, secondVolume: 1, cumulativeVolume: 2, tradeCount: 1, lastTradeSecond: 34200, ageSec: 0, observedNow: true },
+      { exitPrice: 250, pricePct: 1, netPnl: 2, grossPnl: 3, entryFee: 1, exitFee: 0, secondVolume: 1, cumulativeVolume: 2, tradeCount: 1, lastTradeSecond: 34200, ageSec: 0, observedNow: true }] }];
+  annotateIntradayIv(intraday79, { legs: priced, date: 20260101 }, gParams);
+
+  const xml79 = buildBacktestWorkbook({
+    ua: { ins: '9', name: 'نمونه' }, strategyName: 'استرنگل', comboName: 'ض + ط',
+    replay: replay79, intraday: intraday79, buckets: buckets79, params: gParams,
+    holding: { days: [{ date: 20260101, points: 2, firstSecond: 34200, lastSecond: 35100, observedSeconds: 900,
+      positiveSeconds: 600, negativeSeconds: 300, flatSeconds: 0, positivePct: 66.7,
+      openPnl: 1, closePnl: 2, changePnl: 1, bestPnl: 3, worstPnl: 0, closeReturnPct: 1, basePct: 1, volume: 5 }],
+      observedSeconds: 900, positiveSeconds: 600, negativeSeconds: 300, flatSeconds: 0,
+      positivePct: 66.7, negativePct: 33.3, positiveDays: 1, negativeDays: 0, dayCount: 1 },
+    timeOfDay: [{ startSecond: 34200, endSecond: 36000, days: 2, upDays: 1, downDays: 1, flatDays: 0,
+      meanChange: 1, medianChange: 1, upPct: 50, consistencyPct: 50, meanVolume: 4 }],
+    entryExit: { cells: [{ entrySecond: 34200, exitSecond: 36000, samples: 2, meanPnl: 1, medianPnl: 1, winPct: 50, bestPnl: 2, worstPnl: 0 }],
+      entries: [{ second: 34200, pairs: 1, samples: 2, medianPnl: 1, meanPnl: 1, winPct: 50 }],
+      exits: [{ second: 36000, pairs: 1, samples: 2, medianPnl: 1, meanPnl: 1, winPct: 50 }] },
+    timeframeSeconds: 900, intradayDate: 20260101, generatedAt: 'نمونه',
+  });
+
+  const sheetNames = [...xml79.matchAll(/ss:Name="([^"]+)"/g)].map((m) => m[1]);
+  // هر واحد تحلیلی برگ خودش را دارد؛ خواستهٔ «هیچ اطلاعاتی جا نیفتد»
+  for (const want of ['سرشناسه', 'راهنما', 'شاخص کل بازه', 'پاهای ورود', 'مسیر روزانه', 'روز × پا',
+    'سطل تایم‌فریم', 'سطل × پا', 'مدت در سود و زیان', 'رفتار بازه‌های روز',
+    'ورود × خروج', 'بهترین ساعت', 'نوار درون‌روز', 'درون‌روز × پا', 'خلاصه تلاطم']) {
+    check(`برگ «${want}» در فایل هست`, sheetNames.includes(want), sheetNames.length ? '' : 'هیچ برگی نیست');
+  }
+  check('برگ تکراری ساخته نمی‌شود', new Set(sheetNames).size === sheetNames.length, sheetNames.join('، '));
+  check('یونانی‌ها ستون خودشان را دارند',
+    ['دلتا', 'گاما', 'وگا', 'تتا', 'رو'].every((g2n) => xml79.includes(g2n)));
+  check('تلاطم پاها در طول زمان در فایل هست', xml79.includes('تلاطم ضمنی ٪'));
+  check('پارامترهای محاسبه در سرشناسه ثبت می‌شوند',
+    xml79.includes('نرخ بدون ریسک سالانه') && xml79.includes('روز سال — مخرج زمان'));
+  check('ردیف فاقد داده هم در فایل می‌آید، با خانهٔ خالی',
+    (xml79.match(/فاقد داده/g) || []).length >= 1);
+
+  // برگی که داده ندارد نباید ساخته شود: برگ خالی از نبودِ برگ بدتر است
+  const bare = buildBacktestWorkbook({ ua: { name: 'x' }, replay: replay79, params: gParams });
+  const bareNames = [...bare.matchAll(/ss:Name="([^"]+)"/g)].map((m) => m[1]);
+  check('برگ بی‌داده ساخته نمی‌شود',
+    !bareNames.includes('سطل تایم‌فریم') && !bareNames.includes('نوار درون‌روز') && bareNames.includes('مسیر روزانه'),
+    bareNames.join('، '));
+
+  // ——— رابط: دکمه فقط پس از تحلیل ———
+  const bt79 = readSrc('../ui/tabs/backtest.mjs');
+  check('دکمهٔ اکسل کنار «تحلیل کل بازه» است',
+    bt79.includes('id="bt-tf-export"') && bt79.includes('تحلیل کل بازه'));
+  check('دکمه تا پیش از تحلیل پنهان است',
+    /id="bt-tf-export" hidden/.test(bt79) && bt79.includes("$('bt-tf-export').hidden = false;"));
+  check('باطل‌شدن تحلیل، دکمه را دوباره پنهان می‌کند',
+    (bt79.match(/\$\('bt-tf-export'\)\.hidden = true;/g) || []).length >= 2);
+  check('خروجی، همان موتورهای مشترک را صدا می‌زند',
+    bt79.includes('intradayHoldingSummary(timeframeDays)')
+    && bt79.includes('timeOfDayProfile(timeframeDays')
+    && bt79.includes('intradayEntryExitProfile(timeframeDays'));
+
+  // دو نسخه از قالب دفترکار نداشته باشیم
+  const ovSrc = readSrc('../ui/open-view-export.mjs');
+  check('قالب دفترکار یک پیاده‌سازی دارد',
+    ovSrc.includes("from './workbook.mjs'") && !/^function sheet\(/m.test(ovSrc));
+}
+
+// ═════════ ۸۰. سورت و جابه‌جایی ستون روی همهٔ جدول‌ها ═════════
+//
+// خواسته کاربر: «هر جدولی در برنامه قابلیت sort داشته باشد و drag.»
+//
+// چهل‌وشش جدول با رشتهٔ قالبی ساخته می‌شوند و بازنویسی همه روی `makeTable`
+// یعنی برای هر کدام قرارداد ستون و قالب و کلیک ردیف را از نو سوار کردن —
+// کاری بزرگ با ریسک رگرسیون بالا برای دو رفتار کاملاً عمومی. پس رفتار روی
+// جدولِ رسم‌شده می‌نشیند، همان الگویی که `attachExportsIn` دارد.
+group('۸۰. سورت و جابه‌جایی ستون جدول‌های رشته‌ای');
+{
+  // ——— مقدار خانه ———
+  check('رقم فارسی عدد خوانده می‌شود', enhanceCellValue({ textContent: '۱٬۲۳۴' }).num === 1234);
+  check('اولین عدد ملاک است، نه تکهٔ دوم خانه',
+    enhanceCellValue({ textContent: '۱٬۰۰۰ اثر ۵۰٪' }).num === 1000);
+  check('عدد منفی و اعشاری خوانده می‌شود', enhanceCellValue({ textContent: '-۱۲٫۵' }).num === -12.5);
+  check('خانهٔ «—» بی‌مقدار است، نه صفر',
+    enhanceCellValue({ textContent: '—' }).empty === true && enhanceCellValue({ textContent: '' }).empty === true);
+  check('متن بی‌عدد، متن می‌ماند',
+    enhanceCellValue({ textContent: 'معتبر' }).text === 'معتبر' && Number.isNaN(enhanceCellValue({ textContent: 'معتبر' }).num));
+  check('نشانهٔ جهت‌دهی مقدار را خراب نمی‌کند', enhanceCellValue({ textContent: '⁦۱۲⁩' }).num === 12);
+
+  // ——— جابه‌جایی ستون، هم‌معنی با جدول مجازی‌سازی‌شده ———
+  // اگر این دو یکی نباشند، کشیدن ستون در دو جور جدول دو نتیجه می‌دهد.
+  const keys = ['a', 'b', 'c', 'd'];
+  for (const [from, to] of [[0, 2], [3, 0], [1, 1], [2, 3]]) {
+    const byIndex = enhanceMoveTo([0, 1, 2, 3], from, to).map((at) => keys[at]);
+    const byKey = moveColumn(keys, keys[from], keys[to]);
+    check(`جابه‌جایی ${from}→${to} با جدول مجازی‌سازی‌شده یکی است`,
+      byIndex.join('') === byKey.join(''), `${byIndex.join('')} / ${byKey.join('')}`);
+  }
+
+  // ——— ماژول: قواعدی که نباید بی‌صدا عوض شوند ———
+  const enh = readSrc('../ui/table-enhance.mjs');
+  check('جدول مجازی‌سازی‌شده دوباره ارتقا نمی‌گیرد', enh.includes("table.closest('.tbl-wrap')"));
+  check('سرستون چندسطری و خانهٔ ادغام‌شده کنار گذاشته می‌شود',
+    enh.includes('heads.length !== 1') && enh.includes('c.colSpan > 1 || c.rowSpan > 1'));
+  check('ماتریس متقارن ستون جابه‌جا نمی‌کند ولی سورت می‌شود',
+    /const isMatrix = /.test(enh) && enh.includes('fresh && !isMatrix(table)') && enh.includes('isMatrix(hit.table)'));
+  check('سورت سه حالت دارد تا ترتیب اولیه برگردد',
+    enh.includes("const dir = now === 'descending' ? 1 : now === 'ascending' ? 0 : -1;"));
+  check('مرتب‌سازی پایدار است', enh.includes('(a.at - b.at)'));
+  check('بی‌مقدار همیشه ته می‌نشیند، در هر دو جهت',
+    /if \(a\.empty\) return 1;[\s\S]*if \(b\.empty\) return -1;/.test(enh));
+  check('ترتیب ستون در حافظهٔ مرورگر می‌ماند', enh.includes("const STORE = 'options-radar:cols:'"));
+  check('کلید ترتیب، نام سرستون‌ها را هم در خود دارد',
+    /const heads = \[\.\.\.table\.querySelectorAll\('thead th'\)\]\.map\(\(c\) => c\.textContent\.trim\(\)\)\.join\('\|'\)/.test(enh));
+  check('نبود حافظه به استثنا ختم نمی‌شود',
+    /const store = \(\) => \{ try \{ return window\.localStorage; \} catch \{ return null; \} \};/.test(enh));
+  // شنونده روی ریشه می‌نشیند نه روی جدول: جدول با هر به‌روزرسانی نو می‌شود
+  check('شنونده واگذارشده است، نه روی تک‌تک جدول‌ها',
+    enh.includes("root.addEventListener('click', onClick)") && enh.includes('new MutationObserver'));
+  check('صفحه‌کلید هم مرتب می‌کند', enh.includes("event.key !== 'Enter' && event.key !== ' '"));
+
+  // ——— نصب یک‌باره در پوستهٔ برنامه ———
+  const app80 = readSrc('../ui/app.mjs');
+  check('پوستهٔ برنامه یک‌بار نصبش می‌کند', app80.includes("installTableEnhance(el('stage'))"));
+
+  // ——— نشانگر جهت با ::after می‌آید، نه داخل متن خانه ———
+  const css80 = readSrc('../ui/style.css');
+  check('نشانگر جهت متن سرستون را آلوده نمی‌کند',
+    css80.includes('th[aria-sort="ascending"]::after') && css80.includes('th[aria-sort="descending"]::after'));
+  check('ستون در حال کشیدن و مقصد، نشانهٔ دیداری دارند',
+    css80.includes('th.th-dragging') && css80.includes('th.th-drop'));
+}
 
 // ═══════════════════════════ گزارش ═══════════════════════════
 const W = 62;

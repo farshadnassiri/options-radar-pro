@@ -20,7 +20,7 @@ import { fmt, faNum, faDigits, coverageInfo, signTone, ltr, offsetCell } from '/
 import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
-import { canHandoff, handoffPlan, handoffButtonHtml } from '/ui/handoff.mjs';
+import { canHandoff, handoffPlan, handoffButtonHtml, goHandoff } from '/ui/handoff.mjs';
 import { mountScenarioPanel } from '/ui/scenario-panel.mjs';
 import { runScan, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 
@@ -453,12 +453,11 @@ export async function mount(root, { tab, state, api }) {
 
     // ——— انتقال به بک‌تست ———
     root.querySelector('#to-backtest')?.addEventListener('click', () => {
-      state.handoff = handoffPlan(r, {
+      goHandoff(state, handoffPlan(r, {
         from: 'strategy', strategyId: def.id, strategyName: def.name,
         units: unitsOf(r),
         entryBasis: 'LAST', exitBasis: 'LAST',
-      });
-      location.hash = 'backtest';
+      }));
     });
 
     // نمودار بعد از نشستن قالب سوار می‌شود، چون به اندازه واقعی قاب نیاز دارد
