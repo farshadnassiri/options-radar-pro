@@ -11,6 +11,7 @@ import { icon, sectionIcon, TAB_ICON, GROUP_ICON } from '/ui/icons.mjs';
 import { installGlobalCapture, logError } from '/ui/errlog.mjs';
 import { linkLabelKey } from '/ui/feed-state.mjs';
 import { takeHandoff } from '/ui/handoff.mjs';
+import { installTableEnhance } from '/ui/table-enhance.mjs';
 
 export const state = {
   settings: defaults(),
@@ -778,6 +779,12 @@ await loadSettings();
 applyTheme(getTheme() || state.settings.theme || 'ledger');
 tickHealth();
 setInterval(tickHealth, 3000);
+
+// سورت و جابه‌جایی ستون، یک‌بار برای همهٔ جدول‌های برنامه.
+//
+// روی `stage` می‌نشیند نه روی تک‌تک جدول‌ها: جدول‌ها با هر به‌روزرسانی از نو
+// ساخته می‌شوند و شنونده‌ای که رویشان باشد با خودشان پاک می‌شود.
+installTableEnhance(el('stage'));
 
 mountCapacityPicker(el('capacity'), {
   getSettings: () => state.settings,
