@@ -9,6 +9,7 @@ import {
   holdingPeriodProfile, replayTradeDetail,
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
+import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
@@ -231,6 +232,7 @@ export async function mount(root, { state }) {
         <label for="h-entry">مبنای قیمت ورود<select id="h-entry">${basisOptions(true)}</select></label>
         <label for="h-exit">مبنای قیمت آفست<select id="h-exit">${basisOptions(false)}</select></label>
         <label for="h-filter">ترکیب‌سازی<select id="h-filter"><option value="filtered">فیلترهای تاریخی قابل‌اعمال</option><option value="structural">تمام ترکیب‌های ساختاری</option></select></label>
+        <label for="h-scope">دامنهٔ داده<select id="h-scope">${scopeOptionsMarkup()}</select></label>
       </div>
       <div class="history-liquidity-controls">
         <div><p class="eyebrow">فیلتر نقدشوندگی در زمان اجرا</p><b>حداقل‌های روز ورود و هر روز آفست</b></div>
@@ -246,6 +248,7 @@ export async function mount(root, { state }) {
         <span id="h-status" role="status" aria-live="polite">در حال دریافت فهرست قراردادهای فعال…</span>
       </div>
       <p class="history-caveat">آخرین، پایانی، کمترین و بیشترین قیمت تاریخی‌اند؛ هیچ‌کدام تضمین اجرای واقعی سفارش نیستند. روز ناقص با «فاقد داده» می‌ماند.</p>
+      <p class="live-scope-note" id="h-scope-note" hidden></p>
     </section>
 
     <section class="card history-range" id="h-range" hidden>
@@ -356,6 +359,8 @@ export async function mount(root, { state }) {
   const entrySelect = $('h-entry'), exitSelect = $('h-exit'), status = $('h-status');
   const loadBtn = $('h-load'), runBtn = $('h-run'), exportBtn = $('h-export');
   let chain = new Map(), ua = null, analysisUa = null, contracts = [], seriesByIns = {}, dates = [];
+  // روز جاریِ چسبانده‌شده. صفر یعنی همه‌چیز بسته‌شده است.
+  let liveDate = 0;
   let currentReplay = null, currentArgs = null, autoRows = [], selectedAuto = null;
   let rollingResult = null, rollingArgs = null, rollingCandidates = [], matrixMode = 'cumulative', matrixZoom = 1, payoffChart = null;
   let worker = null, seq = 0, rollingResolve = null;
@@ -416,7 +421,9 @@ export async function mount(root, { state }) {
     const entryMethod = Object.keys(args?.manualEntry || {}).length ? 'دستی هر پا' : basisName(args?.entryBasis);
     const facts = [
       ['تاریخ ورود', `${historyDayName(replay.startDate)} ${historyDateLabel(replay.startDate)}`, ''],
-      ['تاریخ خروج', `${historyDayName(replay.endDate)} ${historyDateLabel(replay.endDate)}`, ''],
+      // اگر روز خروج همان روز جاریِ چسبانده‌شده باشد، کاربر باید بداند این
+      // عدد هنوز نهایی نیست — همان‌جا که تاریخ را می‌خواند، نه ده سطر پایین‌تر.
+      ['تاریخ خروج', `${historyDayName(replay.endDate)} ${historyDateLabel(replay.endDate)}${liveDate && Number(replay.endDate) === liveDate ? ' · لحظه‌ای، بسته‌نشده' : ''}`, ''],
       ['مدت نگهداری', last ? `${fmt.int(last.holdingDays)} روز تقویمی · ${fmt.int(summary.validDays)} روز معتبر` : '—', ''],
       ['تعداد واحد', fmt.int(args?.units || 1), ''],
       ['مبنای ورود / خروج', `${entryMethod} / ${basisName(args?.exitBasis)}`, ''],
@@ -548,7 +555,7 @@ export async function mount(root, { state }) {
   }
 
   function invalidateLoadedHistory() {
-    analysisUa = null; contracts = []; seriesByIns = {}; dates = [];
+    analysisUa = null; contracts = []; seriesByIns = {}; dates = []; liveDate = 0;
     rollingArgs = null; rollingResult = null; setRollingCandidates([]);
     runBtn.disabled = true; exportBtn.disabled = true;
     $('h-range').hidden = true; $('h-legs-card').hidden = true; $('h-results').hidden = true;
@@ -631,6 +638,27 @@ export async function mount(root, { state }) {
 
   const chunks = (list, size) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, (i + 1) * size));
 
+  /**
+   * دامنهٔ انتخابی کاربر را روی سری‌های تازه‌گرفته اعمال می‌کند.
+   *
+   * در حالت «تا آخرین روز بسته‌شده» هیچ درخواستی نمی‌رود و یادداشت پنهان
+   * می‌ماند — قابلیت تازه نباید به مسیر قدیمی هزینه اضافه کند.
+   */
+  async function applyScope() {
+    const note = $('h-scope-note');
+    if ($('h-scope').value !== SCOPE_LIVE) {
+      note.hidden = true; note.textContent = ''; note.removeAttribute('data-error');
+      liveDate = 0;
+      return;
+    }
+    const result = await applyLiveScope(seriesByIns);
+    seriesByIns = result.series;
+    liveDate = result.ok ? result.date : 0;
+    note.hidden = false;
+    note.textContent = result.note;
+    note.toggleAttribute('data-error', !result.ok);
+  }
+
   async function loadHistory() {
     ua = chain.get(baseSelect.value);
     if (!ua) { setStatus('اول نماد پایه را انتخاب کن.', true); return; }
@@ -653,6 +681,10 @@ export async function mount(root, { state }) {
       for (const payload of payloads) {
         for (const [ins, value] of Object.entries(payload)) seriesByIns[ins] = value.rows || [];
       }
+      // روز جاری پس از فهرست بسته‌شده می‌نشیند، نه به‌جای آن. اگر نچسبد،
+      // `applyLiveScope` همان سری‌های ورودی را برمی‌گرداند و تحلیل دقیقاً
+      // همان چیزی می‌شود که پیش از این بود.
+      await applyScope();
       const optionSeries = contracts.map((c) => seriesByIns[String(c.ins)] || []).filter((rows) => rows.length);
       const firstContractDate = Math.min(...optionSeries.map((rows) => Number(rows[0].date)).filter(Boolean));
       const lastContractDate = Math.max(...optionSeries.map((rows) => Number(rows.at(-1).date)).filter(Boolean));
@@ -1335,6 +1367,14 @@ export async function mount(root, { state }) {
   strategySelect.addEventListener('change', () => { paintExpirySummary(); if (dates.length) buildLegControls(); $('h-results').hidden = true; });
   modeSelect.addEventListener('change', () => { $('h-legs-card').hidden = modeSelect.value !== 'manual' || !dates.length; $('h-filter').disabled = modeSelect.value !== 'all'; if (modeSelect.value === 'all' && entrySelect.value === 'MANUAL') entrySelect.value = 'CLOSE'; buildLegControls(); });
   entrySelect.addEventListener('change', buildLegControls);
+  // عوض‌کردن دامنه یعنی مجموعهٔ روزهای موجود عوض می‌شود. نگه‌داشتن نتیجهٔ
+  // قبلی کنار انتخاب تازه، بدترین حالت است: کاربر فکر می‌کند آنچه می‌بیند
+  // مال دامنهٔ تازه است.
+  $('h-scope').addEventListener('change', () => {
+    const note = $('h-scope-note');
+    note.hidden = true; note.textContent = ''; note.removeAttribute('data-error');
+    if (seriesByIns && Object.keys(seriesByIns).length) { invalidateLoadedHistory(); loadHistory(); }
+  });
   loadBtn.addEventListener('click', loadHistory); runBtn.addEventListener('click', runAnalysis);
   exportBtn.addEventListener('click', exportCsv); $('h-rolling').addEventListener('click', renderRolling);
   $('h-matrix-export-csv').addEventListener('click', exportMatrixCsv);
