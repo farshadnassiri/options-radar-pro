@@ -19,6 +19,104 @@ import { analyzeMixed } from './mixed.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
 import { daysSinceJalali } from './jalali.mjs';
 
+const ENTRY_RISK_VERSION = 1;
+
+/** قیمت پایانی پایه در ورود؛ برای کاوردکالِ قدیمی از قیمت خرید سهم درمی‌آید. */
+function entrySpotOf(pos) {
+  const saved = num(pos?.entrySpot);
+  if (saved > 0) return saved;
+  return num(pos?.legs?.find((l) => l.kind === 'underlying')?.price);
+}
+
+/**
+ * عکس فوری سرمایه و وجه تضمین روز ورود، برای یک دست قرارداد.
+ *
+ * قیمت اجرای اختیار لزوماً قیمت پایانی نیست. موقعیت‌های تازه `entryClose`
+ * را جدا ذخیره می‌کنند؛ برای رکورد قدیمی، قیمت اجرا فقط یک برآورد است و
+ * پرچم `approxMargin` این تفاوت را تا رابط حفظ می‌کند.
+ */
+export function captureEntryRisk(pos, opt = {}) {
+  const fees = opt.fees || { buyStock: 0, sellStock: 0, option: 0, exercise: 0 };
+  const legs = Array.isArray(pos?.legs) ? pos.legs : [];
+  const entryGross = grossCash(legs);
+  const entryFee = entryFees(legs, fees);
+  const entryNet = entryGross - entryFee;
+  const analysis = analyzePayoff(legs, entryNet, { fees });
+  const entrySpot = entrySpotOf(pos);
+  const shorts = legs.filter((l) => l.side === 'sell' && l.kind !== 'underlying');
+
+  // بدون قیمت پایانی پایه، وجه تضمین فروش لخت قابل بازسازی نیست. استفاده از
+  // قیمت امروز برای یک تاریخ قدیمی مخرج بازده را با حرکت بازار جابه‌جا می‌کند.
+  if (shorts.length && !(entrySpot > 0)) {
+    return {
+      version: ENTRY_RISK_VERSION, available: false, entrySpot: NaN,
+      reason: 'قیمت پایانی پایه در روز ورود ثبت نشده است',
+    };
+  }
+
+  const closes = {};
+  let approxMargin = false;
+  legs.forEach((leg, i) => {
+    if (leg.kind === 'underlying') return;
+    const savedClose = num(leg.entryClose);
+    if (savedClose > 0) closes[i] = savedClose;
+    else {
+      closes[i] = num(leg.price);
+      if (leg.side === 'sell') approxMargin = true;
+    }
+  });
+  const margin = strategyMargin(legs, {
+    S: entrySpot, closes, params: opt.params,
+    creditMode: opt.creditMode || 'FULL', capitalMode: opt.capitalMode || 'NET',
+  });
+  const cap = capitalBase({ legs, netCash: entryNet, marginNet: margin.marginNet, maxLoss: analysis.maxLoss });
+  const available = Number.isFinite(cap.value);
+  return {
+    version: ENTRY_RISK_VERSION, available, entrySpot,
+    capital: cap.value, capitalKind: cap.kind, capitalLabel: cap.label,
+    margin: margin.margin, marginNet: margin.marginNet,
+    conditionalMargin: margin.conditionalMargin,
+    approxMargin,
+    reason: available ? '' : 'سرمایه روز ورود قابل محاسبه نیست',
+  };
+}
+
+function savedEntryRisk(pos) {
+  const r = pos?.entryRisk;
+  if (!r || r.version !== ENTRY_RISK_VERSION || !Number.isFinite(r.capital)) return null;
+  return { ...r, available: true };
+}
+
+/** وجه تضمین لازم امروز، فقط وقتی قیمت پایانی امروزِ همه فروش‌ها موجود است. */
+function currentMarginRisk(legs, quotes, opt) {
+  const spot = num(opt.spotClose, opt.spot);
+  const shorts = legs
+    .map((leg, index) => ({ leg, index }))
+    .filter(({ leg }) => leg.side === 'sell' && leg.kind !== 'underlying');
+  if (!shorts.length) {
+    return { available: true, margin: 0, marginNet: 0, conditionalMargin: 0 };
+  }
+  if (!(spot > 0) || shorts.some(({ index }) => !(num(quotes[index]?.close) > 0))) {
+    return {
+      available: false, margin: NaN, marginNet: NaN, conditionalMargin: NaN,
+      reason: !(spot > 0)
+        ? 'قیمت پایانی پایه امروز موجود نیست'
+        : 'قیمت پایانی امروز یکی از قراردادهای فروش موجود نیست',
+    };
+  }
+  const closes = {};
+  shorts.forEach(({ index }) => { closes[index] = num(quotes[index].close); });
+  const margin = strategyMargin(legs, {
+    S: spot, closes, params: opt.params,
+    creditMode: opt.creditMode || 'FULL', capitalMode: opt.capitalMode || 'NET',
+  });
+  return {
+    available: true,
+    margin: margin.margin, marginNet: margin.marginNet,
+    conditionalMargin: margin.conditionalMargin,
+  };
+}
+
 /** قیمت بستن هر پا در بازار: موقعیت خرید روی تقاضا بسته می‌شود، فروش روی عرضه. */
 export function closePrice(leg, quote, basis = 'BOOK') {
   const q = quote || {};
@@ -135,11 +233,11 @@ export function markToMarket(pos, quotes, opt = {}) {
   const pnl = entryNet + closeNet;
 
   const an = analyzePayoff(legs, entryNet, { fees });
-  const margin = strategyMargin(legs, {
-    S: num(opt.spotClose, opt.spot), closes: {}, params: opt.params,
-    creditMode: opt.creditMode || 'FULL', capitalMode: opt.capitalMode || 'NET',
-  });
-  const cap = capitalBase({ legs, netCash: entryNet, marginNet: margin.marginNet, maxLoss: an.maxLoss });
+  // بازده از یک مخرج تاریخی ثابت می‌آید؛ وجه تضمین امروز عدد دیگری است و
+  // با قیمت پایانی امروزِ پایه و اختیار محاسبه می‌شود.
+  const entryRisk = savedEntryRisk(pos) || captureEntryRisk(pos, opt);
+  const currentRisk = currentMarginRisk(legs, quotes, opt);
+  const capital = entryRisk.available ? entryRisk.capital : NaN;
 
   const held = daysSinceJalali(pos.entryDate);
   const qty = Math.max(1, num(pos.qty, 1));
@@ -150,11 +248,25 @@ export function markToMarket(pos, quotes, opt = {}) {
     closeGross, closeFee, closeNet,
     pnl, pnlTotal: pnl * qty,
     perLeg,
-    capital: cap.value, capitalLabel: cap.label,
-    retPct: cap.value > 0 ? (pnl / cap.value) * 100 : NaN,
-    retMonthPct: cap.value > 0 && held ? ((pnl / cap.value) * 100 * 30) / held : NaN,
+    capital, capitalLabel: entryRisk.capitalLabel || entryRisk.reason,
+    retPct: capital > 0 ? (pnl / capital) * 100 : NaN,
+    retMonthPct: capital > 0 && held ? ((pnl / capital) * 100 * 30) / held : NaN,
     daysHeld: held,
-    margin: margin.margin, conditionalMargin: margin.conditionalMargin,
+    entrySpot: entryRisk.entrySpot,
+    entryMargin: entryRisk.available ? entryRisk.margin : NaN,
+    entryMarginNet: entryRisk.available ? entryRisk.marginNet : NaN,
+    entryConditionalMargin: entryRisk.available ? entryRisk.conditionalMargin : NaN,
+    entryMarginApprox: entryRisk.approxMargin === true,
+    entryRiskAvailable: entryRisk.available === true,
+    entryRiskStored: savedEntryRisk(pos) != null,
+    entryRiskReason: entryRisk.reason || '',
+    currentMarginAvailable: currentRisk.available,
+    currentMarginReason: currentRisk.reason || '',
+    currentMargin: currentRisk.margin,
+    currentMarginNet: currentRisk.marginNet,
+    currentConditionalMargin: currentRisk.conditionalMargin,
+    // نام‌های قدیمی برای مصرف‌کننده‌های موجود؛ از این پس صریحاً «امروز»اند.
+    margin: currentRisk.margin, conditionalMargin: currentRisk.conditionalMargin,
     ifHeld: {
       atSpot: pnlAtExpiry(legs, num(opt.spot), entryNet, { fees }),
       maxProfit: an.maxProfit, maxLoss: an.maxLoss, breakevens: an.breakevens,
@@ -295,7 +407,7 @@ export function rollAnalysis({ pos, quotes, closeIdx, newLeg, newQuote, opt = {}
 export function blankPosition() {
   return {
     id: `p${Date.now().toString(36)}`,
-    title: '', uaIns: '', entryDate: '', qty: 1, note: '',
+    title: '', uaIns: '', entryDate: '', entrySpot: null, entryRisk: null, qty: 1, note: '',
     legs: [],
   };
 }
