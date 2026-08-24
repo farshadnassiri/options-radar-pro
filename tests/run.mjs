@@ -39,7 +39,7 @@ import { moveTo as enhanceMoveTo, cellValue as enhanceCellValue } from '../ui/ta
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '../ui/compare.mjs';
 import { strandedKeys } from '../ui/expiries.mjs';
 import { icon, GROUP_ICON, TAB_ICON, sectionIcon } from '../ui/icons.mjs';
-import { canHandoff, handoffPlan, historyHandoffPlan, stashHandoff, takeHandoff, openHandoffPage } from '../ui/handoff.mjs';
+import { canHandoff, handoffPlan, historyHandoffPlan, stashHandoff, takeHandoff, openHandoffPage, goHandoff } from '../ui/handoff.mjs';
 import {
   ivParams, legDaysToExpiry, legIvPct, legIvList, meanIvPct, ivSummary,
   annotateDailyIv, annotateIntradayIv, annotateBucketIv, IV_PARAMS,
@@ -5504,10 +5504,17 @@ group('۷۷. انتقال در صفحهٔ تازه');
 
   const prevWindow = globalThis.window;
   const ls = fakeStore();
-  let opened = null;
+  let opened = null, openedFeatures = null;
+  // مرورگر واقعی: `window.open` با `noopener` **همیشه** `null` برمی‌گرداند،
+  // حتی وقتی پنجره باز شده. اولین پیاده‌سازی این را نمی‌دانست و آزمونِ
+  // اولیه هم چون همیشه یک شیء برمی‌گرداند، باگ را پنهان کرد. حالا بدل هم
+  // همان قاعده را دارد، پس اگر `noopener` برگردد این گروه قرمز می‌شود.
   globalThis.window = {
     localStorage: ls,
-    open: (url) => { opened = url; return { closed: false }; },
+    open: (url, target, features) => {
+      opened = url; openedFeatures = features || '';
+      return /noopener|noreferrer/.test(openedFeatures) ? null : { closed: false };
+    },
   };
   globalThis.location = { pathname: '/', search: '' };
 
@@ -5528,9 +5535,29 @@ group('۷۷. انتقال در صفحهٔ تازه');
 
   // پنجرهٔ تازه: نشانی باید تب و کلید را با هم داشته باشد
   check('باز کردن صفحهٔ تازه موفق است', openHandoffPage(plan) === true);
+  // ریشهٔ باگی که کاربر دید: با `noopener` هر باز شدنِ موفق «شکست» خوانده
+  // می‌شد، پس هم کلید نقشه پاک می‌شد (صفحهٔ تازه خالی بالا می‌آمد) و هم
+  // مسیر جایگزین اجرا می‌شد (صفحهٔ جاری هم عوض می‌شد).
+  check('پنجره با noopener باز نمی‌شود، چون آن‌وقت باز شدنش قابل تشخیص نیست',
+    !/noopener|noreferrer/.test(String(openedFeatures)), String(openedFeatures));
   check('نشانی صفحهٔ تازه تب و کلید دارد', /#backtest![a-z0-9]+$/.test(String(opened)), String(opened));
   check('کلید پس از باز شدن هنوز در حافظه است تا صفحهٔ مقصد برش دارد',
     ls._map.size === 1, `${ls._map.size} کلید`);
+  // شبیه‌سازی صفحهٔ مقصد: کلید را از نشانی درمی‌آورد و نقشه را برمی‌دارد
+  const arrivedToken = String(opened).split('!')[1];
+  const arrived = takeHandoff(arrivedToken);
+  check('نقشه سالم به صفحهٔ مقصد می‌رسد',
+    arrived?.strategyId === plan.strategyId && arrived.units === plan.units
+    && arrived.legIns.join(',') === plan.legIns.join(','),
+    JSON.stringify({ id: arrived?.strategyId, units: arrived?.units }));
+
+  // صفحهٔ مبدأ نباید دست بخورد وقتی پنجرهٔ تازه باز شده
+  const source = { handoff: null };
+  let hashSet = 0;
+  globalThis.location = { pathname: '/', search: '', set hash(v) { hashSet += 1; } };
+  check('باز شدن صفحهٔ تازه، صفحهٔ مبدأ را عوض نمی‌کند',
+    goHandoff(source, plan) === true && source.handoff === null && hashSet === 0,
+    `hash ${hashSet} بار ست شد`);
 
   // نقشهٔ منقضی نباید بنشیند
   const stale = stashHandoff(plan);
