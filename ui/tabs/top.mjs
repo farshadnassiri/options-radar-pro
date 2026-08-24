@@ -23,7 +23,7 @@ import { runScanAll, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 // می‌مانند: ردیف‌ها از استراتژی‌های مختلف با تعداد پای متفاوت می‌آیند، پس
 // هیچ عدد واحدی برای «تعداد پا» وجود ندارد که ستون را با آن برید.
 const DEFAULT_COLS = ['strategy', 'underlying', 'legsText', 'days', 'netCash', 'capital',
-  'margin', 'marginPart1', 'marginPart2', 'marginPart3', 'marginPart4',
+  'margin', 'marginNet', 'marginPart1', 'marginPart2', 'marginPart3', 'marginPart4',
   'beDistPct', 'beRoomPct', 'retMaxPct', 'retMonthPct', 'popPct',
   'maxProfit', 'maxLoss', 'maxLossPct', 'rewardRisk',
   'legValue1', 'legValue2', 'legValue3', 'legValue4', 'warn'];
