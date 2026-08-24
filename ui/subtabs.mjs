@@ -34,6 +34,20 @@ export function mountSubtabs(host, tabs = [], { root = document, onChange, initi
     .filter((tab) => tab.panel);
   if (!items.length) return null;
 
+  // ساختنِ دوبارهٔ نوارِ بی‌تغییر، کارِ کاربر را خراب می‌کند.
+  //
+  // رصد زنده هر چند ثانیه داده می‌گیرد و پس از هر دریافت همین تابع را با
+  // همان فهرست صدا می‌زند. تا پیش از این، هر بار نوار از نو ساخته می‌شد و
+  // انتخاب به تب آغازین برمی‌گشت: کاربر روی «تجزیه سود و زیان» می‌نشست و
+  // چند ثانیه بعد، بی‌آنکه چیزی کلیک کند، سر از «نمای کلی» درمی‌آورد. اگر
+  // با صفحه‌کلید کار می‌کرد، نشانگر هم با `innerHTML` تازه پاک می‌شد.
+  //
+  // پس فهرست یکسان یعنی «کاری لازم نیست»: نوار دست‌نخورده می‌ماند و همان
+  // دستهٔ قبلی برمی‌گردد. تغییر واقعی — افزوده یا کم‌شدن تب، یا عوض‌شدن
+  // برچسبی — کلید را عوض می‌کند و نوار از نو ساخته می‌شود.
+  const key = JSON.stringify(items.map((tab) => [tab.id, tab.label]));
+  if (host.subtabsKey === key && host.subtabsApi) return host.subtabsApi;
+
   host.className = 'subtabs';
   host.setAttribute('role', 'tablist');
   host.innerHTML = items.map((tab, index) => `<button type="button" role="tab" id="tab-${esc(tab.id)}"
@@ -92,5 +106,8 @@ export function mountSubtabs(host, tabs = [], { root = document, onChange, initi
   });
 
   show(current);
-  return { show, get current() { return current; }, ids: items.map((tab) => tab.id) };
+  const api = { show, get current() { return current; }, ids: items.map((tab) => tab.id) };
+  host.subtabsKey = key;
+  host.subtabsApi = api;
+  return api;
 }
