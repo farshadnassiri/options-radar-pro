@@ -26,7 +26,7 @@
 import { num, ok, ceilTo, nearly, EPS } from './num.mjs';
 import { grossCash, signedQty } from './payoff.mjs';
 
-export const DEFAULT_PARAMS = { A: 0.20, B: 0.10, C: 10000, maint: 0.70, bBasis: 'SPOT' };
+export const DEFAULT_PARAMS = { A: 0.20, B: 0.10, C: 10000, maint: 0.70, bBasis: 'STRIKE' };
 
 export function otmAmount(S, K, kind) {
   return kind === 'call' ? Math.max(0, K - S) : Math.max(0, S - K);
@@ -37,17 +37,13 @@ export function otmAmount(S, K, kind) {
  *
  * ——— مبنای جزء B ———
  *
- * شش مشاهدهٔ تابلو که این فایل رویشان تثبیت شد، جزء B را بر قیمت پایانی
- * دارایی پایه نشان دادند. متن آینه‌ای ضوابط منتشرشده، همان جزء را بر قیمت
- * اعمال می‌نویسد. حسابرسی مستقل روی ۷٬۹۲۵ پای فروش، بیشینه اختلاف ۷٫۳۴
- * میلیون ریال برای یک محاسبه شمرد.
+ * متن ضوابط منتشرشده، جزء B را بر قیمت اعمال می‌نویسد. شش مشاهدهٔ تابلوی
+ * کارگزاری با مبنای قیمت پایه بازتولید شده‌اند، اما آن نمونه‌ها زمان و منبع
+ * برداشت ندارند و برای کنارگذاشتن متن ضوابط کافی نیستند. حسابرسی مستقل روی
+ * ۷٬۹۲۵ پای فروش، بیشینه اختلاف ۷٫۳۴ میلیون ریال برای یک محاسبه شمرد.
  *
- * هیچ‌کدام از این دو را نمی‌شود از روی داده حل کرد: تابلو گفت B×S، متن
- * گفت B×K، و فایل رسمیِ قابل دانلود از دامنهٔ سازمان بورس در دسترس نبود.
- * پس عددی اختراع نمی‌شود و انتخاب، صریح و در دست کاربر است. پیش‌فرض همان
- * چیزی می‌ماند که با تابلوی واقعی تطبیق داده شده — `SPOT` — و `STRIKE`
- * برای کسی است که می‌خواهد انطباق با متن ضوابط را بسنجد یا با صورتحساب
- * کارگزارش مقایسه کند.
+ * انتخاب برای تطبیق با صورتحساب کارگزار صریح می‌ماند، ولی پیش‌فرض مقرراتی
+ * `STRIKE` است. `SPOT` فقط حالت سازگاری با نمونه‌های قدیمی تابلوست.
  */
 export function marginBase(S, K, size, kind, p = DEFAULT_PARAMS) {
   const legA = (p.A * S - otmAmount(S, K, kind)) * size;
@@ -276,48 +272,65 @@ export function strategyMargin(legs, ctx = {}) {
 
     total += due;
     perLeg.push({
-      index: i, strike: num(l.strike), kind, size,
+      index: i, strike: num(l.strike), kind, size, ratio: num(l.ratio, 1),
       initial: initialMargin(S, num(l.strike), size, kind, p),
       required: rmOne,
+      premium: close * size,
       minimum: minMargin(rmOne, p),
       covered: rec.covered, naked: rec.naked, due,
-      // اجزای بخش لخت، برای قاعدهٔ ترکیبی پایین
       days: num(l.days, NaN),
-      nakedIm: initialMargin(S, num(l.strike), size, kind, p) * rec.naked,
-      nakedPrem: close * size * rec.naked,
       nakedDue: rmOne * rec.naked,
     });
   });
 
   // ——— قاعدهٔ ترکیبی فروش کال و پوت ———
   //
-  // برنامه از ابتدا دو پای لخت را جمع می‌بست. متن ضوابط منتشرشده برای
-  // فروش هم‌زمان کال و پوت، قاعدهٔ دیگری می‌دهد: بزرگ‌ترِ وجه تضمین دو پا،
-  // به‌علاوهٔ پریمیوم پای دیگر. منطقش این است که کال و پوت هم‌زمان در زیان
-  // عمیق نمی‌روند، پس جمع‌بستن دو پا سرمایه را بیش‌برآورد می‌کند.
-  //
-  // با تجزیهٔ خودِ همین فایل (RM = IM + پریمیوم × اندازه) آن قاعده می‌شود
-  // max(IM کال ، IM پوت) + پریمیوم هر دو پا — همان «بزرگ‌تر + پریمیوم دیگری».
-  //
-  // پیش‌فرض عوض نمی‌شود. هیچ‌کدام از این دو با تابلوی واقعی تأیید نشده و
-  // جمع‌بستن محافظه‌کارانه‌تر است؛ کم‌برآوردِ وجه تضمین یعنی کال‌مارجین
-  // غیرمنتظره، و آن بدتر از بیش‌برآورد است. انتخاب، صریح و در دست کاربر.
-  const comboMode = ctx.nakedComboMargin || 'SUM';
+  // بندهای ۶ و ۷ ضوابط، استرادل و استرانگل فروش هم‌ماه را یک راهبرد
+  // می‌شناسند: بزرگ‌ترِ وجه تضمین لازم دو سمت، به‌علاوهٔ قیمت پایانی
+  // قراردادی که وجه تضمین اولیه کمتری دارد. بنابراین جمع دو وجه تضمین،
+  // مبنای راهبردی نیست. فقط تعداد برابر کال و پوت با هم جفت می‌شود؛ مازاد
+  // هر سمت همچنان فروش لخت مستقل است.
+  // استرانگل هم فقط وقتی شناخته می‌شود که اعمال کال بالاتر از اعمال پوت
+  // باشد. ترکیب وارونه در جدول ضوابط نیامده و اینجا عدد مقرراتی نمی‌سازد.
+  const comboMode = ctx.nakedComboMargin || 'MAX_PLUS_PREMIUM';
   let comboRule = 'SUM';
+  let components = perLeg
+    .filter((l) => l.due > EPS)
+    .map((l) => ({ type: 'leg', amount: l.due, legIndexes: [l.index], sortIndex: l.index }));
   if (comboMode === 'MAX_PLUS_PREMIUM') {
     const nakedCalls = perLeg.filter((l) => l.kind === 'call' && l.naked > EPS);
     const nakedPuts = perLeg.filter((l) => l.kind === 'put' && l.naked > EPS);
-    // فقط ترکیب تمیزِ یک کال و یک پوتِ هم‌سررسید. هر چیز دیگری — نسبت‌اسپرد،
-    // چند سررسید، پای نیمه‌پوشیده — از این قاعده بیرون است و جمع می‌ماند،
-    // چون متن ضوابط دربارهٔ آن حالت‌ها چیزی نمی‌گوید و حدس زدن، اختراع عدد است.
+    // فقط ترکیب تمیزِ یک کال و یک پوتِ کاملاً لخت و هم‌سررسید. پای
+    // نیمه‌پوشیده و چندسررسید بیرون می‌مانند، چون ضوابط آن‌ها را راهبرد ۶
+    // یا ۷ نمی‌شناسد.
     if (nakedCalls.length === 1 && nakedPuts.length === 1
-      && nakedCalls[0].days === nakedPuts[0].days) {
+      && nakedCalls[0].covered <= EPS && nakedPuts[0].covered <= EPS
+      && nakedCalls[0].days === nakedPuts[0].days
+      && nakedCalls[0].strike >= nakedPuts[0].strike) {
       const c = nakedCalls[0], u = nakedPuts[0];
-      const after = Math.max(c.nakedIm, u.nakedIm) + c.nakedPrem + u.nakedPrem;
+      const paired = Math.min(c.naked, u.naked);
+      // ضوابط صریحاً «قرارداد با وجه تضمین اولیه کمتر» را نام می‌برد؛ نه
+      // لزوماً پای با RM کمتر. در تساوی IM (استرادل)، پای با RM کمتر همان
+      // «پای دیگر» است و پریمیوم آن افزوده می‌شود.
+      const lowerInitial = c.initial < u.initial - EPS ? c
+        : u.initial < c.initial - EPS ? u
+          : c.required <= u.required ? c : u;
+      const pairedDue = (Math.max(c.required, u.required) + lowerInitial.premium) * paired;
+      const cExtra = c.required * Math.max(0, c.naked - paired);
+      const uExtra = u.required * Math.max(0, u.naked - paired);
+      const after = pairedDue + cExtra + uExtra;
       total += after - (c.nakedDue + u.nakedDue);
       comboRule = 'MAX_PLUS_PREMIUM';
+      components = components.filter((part) => !part.legIndexes.includes(c.index) && !part.legIndexes.includes(u.index));
+      if (pairedDue > EPS) components.push({
+        type: 'combo', amount: pairedDue, legIndexes: [c.index, u.index],
+        sortIndex: Math.min(c.index, u.index),
+      });
+      if (cExtra > EPS) components.push({ type: 'leg', amount: cExtra, legIndexes: [c.index], sortIndex: c.index + 0.1 });
+      if (uExtra > EPS) components.push({ type: 'leg', amount: uExtra, legIndexes: [u.index], sortIndex: u.index + 0.1 });
     }
   }
+  components.sort((a, b) => a.sortIndex - b.sortIndex);
 
   // سهمی که به‌عنوان پوشش قفل شده — «دارایی مسدودی» تابلو. از همان
   // تفکیک پوشش می‌آید که بالا حساب شد، پس محاسبه دوباره لازم نیست.
@@ -325,7 +338,7 @@ export function strategyMargin(legs, ctx = {}) {
     + r.by.filter((b) => b.what === 'underlying').reduce((x, b) => x + b.ratio, 0)
       * num(r.leg.size, contractSize), 0);
   // وجه تضمین لازم کل: مجموع پاها، پیش از تخفیف پوشش و پیش از کسر بستانکار.
-  const requiredTotal = perLeg.reduce((a, l) => a + l.required, 0);
+  const requiredTotal = perLeg.reduce((a, l) => a + l.required * l.ratio, 0);
 
   const credit = Math.max(0, cash);
   return {
@@ -340,6 +353,7 @@ export function strategyMargin(legs, ctx = {}) {
     conditionalMargin: conditional,          // اگر پوشش از بین برود
     creditMode: mode,
     comboRule,
+    components,
     perLeg,
     note: (!isCredit
       ? (total > 0

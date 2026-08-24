@@ -403,6 +403,8 @@ export function evaluate({ legs, quotes, ctx }) {
     blockedAsset: num(margin.sharesLocked) * Sclose,
     sharesLocked: num(margin.sharesLocked),
     marginRequired: num(margin.requiredTotal),
+    marginParts: margin.components.map((part) => part.amount),
+    ...marginPartSlots(margin.components),
 
     // سرمایه
     capital: cap, capitalKind: capital.kind, capitalLabel: capital.label,
@@ -526,6 +528,7 @@ export function breakevenMetrics(bes, S) {
 
 /** چند پا ستون ارزش معاملات جدا می‌گیرد. کاتالوگ حداکثر چهار پا دارد. */
 export const LEG_VALUE_SLOTS = 4;
+export const MARGIN_PART_SLOTS = 4;
 
 /**
  * ارزش معاملات امروزِ هر پا، هر کدام در ستون خودش.
@@ -548,6 +551,23 @@ export function legValueSlots(values) {
   for (let i = 1; i <= LEG_VALUE_SLOTS; i++) slots[`legValue${i}`] = NaN;
   for (let i = 0; i < Math.min(LEG_VALUE_SLOTS, list.length); i++) {
     slots[`legValue${i + 1}`] = ok(list[i]) ? list[i] : NaN;
+  }
+  return slots;
+}
+
+/**
+ * اجزای واقعی وجه تضمین راهبرد، نه الزام مستقل هر پای فروش.
+ *
+ * استرادل/استرانگل فروشِ هم‌ماه یک جزء ترکیبی دارد؛ اگر یک سمت نسبت
+ * بیشتری داشته باشد، مازاد آن جزء مستقل بعدی است. خانهٔ نبودن `NaN` است،
+ * چون «جزء دوم وجود ندارد» با «جزء دوم صفر است» فرق دارد.
+ */
+export function marginPartSlots(parts) {
+  const list = Array.isArray(parts) ? parts : [];
+  const slots = {};
+  for (let i = 1; i <= MARGIN_PART_SLOTS; i++) slots[`marginPart${i}`] = NaN;
+  for (let i = 0; i < Math.min(MARGIN_PART_SLOTS, list.length); i++) {
+    slots[`marginPart${i + 1}`] = ok(list[i]?.amount) ? list[i].amount : NaN;
   }
   return slots;
 }
@@ -626,7 +646,12 @@ export const COLUMNS = [
   { key: 'blockedAsset', label: 'دارایی مسدودی', fmt: 'money', group: 'سرمایه' },
   { key: 'sharesLocked', label: 'سهم قفل‌شده', fmt: 'int', group: 'سرمایه' },
   { key: 'capitalLabel', label: 'مبنای سرمایه', fmt: 'text', group: 'سرمایه' },
-  { key: 'margin', label: 'وجه تضمین', fmt: 'money', group: 'سرمایه' },
+  { key: 'margin', label: 'وجه تضمین کل راهبرد', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginParts', label: 'اجزای وجه تضمین', fmt: 'moneyList', group: 'سرمایه' },
+  { key: 'marginPart1', label: 'وجه تضمین ۱', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginPart2', label: 'وجه تضمین ۲', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginPart3', label: 'وجه تضمین ۳', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginPart4', label: 'وجه تضمین ۴', fmt: 'money', group: 'سرمایه' },
   { key: 'marginToMaxLoss', label: 'تضمین به زیان', fmt: 'num', group: 'سرمایه' },
   { key: 'conditionalMargin', label: 'تضمین شرطی', fmt: 'money', group: 'سرمایه' },
   { key: 'retMaxPct', label: 'بازده دوره ٪', fmt: 'pct', group: 'بازده', heat: 'gain' },
@@ -660,6 +685,33 @@ const LEG_KIND_FA = { call: 'کال', put: 'پوت', underlying: 'سهم' };
 // نمی‌شود؛ ورودی اینجا یک عدد صحیح کوچک است (نسبت پا)، نه عدد پولی.
 const faInt = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
 
+/** اجزای بالقوهٔ وجه تضمین یک الگوی استراتژی، برای ساخت ستون‌های همان تب. */
+export function marginPartDescriptors(def) {
+  const legs = def?.legs || [];
+  if (!legs.length) return [];
+  const credit = def.expect === 'credit';
+  const debit = def.expect === 'debit';
+  const sample = legs.map((leg) => ({
+    ...leg,
+    strike: 100 + (num(leg.slot, 1) - 1) * 10,
+    days: 30 + num(leg.exp) * 30,
+    size: 1000,
+    price: leg.kind === 'underlying' ? 100
+      : leg.side === 'sell' ? (debit ? 2 : 10)
+        : (credit ? 2 : 10),
+  }));
+  const sampleMargin = strategyMargin(sample, {
+    S: 100, creditMode: 'FULL', nakedComboMargin: 'MAX_PLUS_PREMIUM',
+  });
+  return sampleMargin.components.slice(0, MARGIN_PART_SLOTS).map((part) => {
+    if (part.type === 'combo') return { ...part, label: 'وجه تضمین ترکیبی — فروش کال و پوت' };
+    const legIndex = part.legIndexes[0];
+    const leg = legs[legIndex];
+    const ratio = num(leg?.ratio, 1) > 1 ? ` ×${faInt(leg.ratio)}` : '';
+    return { ...part, label: `وجه تضمین — فروش ${LEG_KIND_FA[leg?.kind] || ''}${ratio}` };
+  });
+}
+
 /**
  * قرارداد ستونی، با سرستون پاهای یک استراتژی مشخص.
  *
@@ -681,7 +733,13 @@ const faInt = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d])
 export function columnsForStrategy(def) {
   const legs = def?.legs || [];
   if (!legs.length) return COLUMNS;
-  return COLUMNS.map((c) => {
+  const marginParts = marginPartDescriptors(def);
+  return COLUMNS.filter((c) => {
+    const m = /^marginPart(\d+)$/.exec(c.key);
+    return !m || Number(m[1]) <= marginParts.length;
+  }).map((c) => {
+    const marginPart = /^marginPart(\d+)$/.exec(c.key);
+    if (marginPart) return { ...c, label: marginParts[Number(marginPart[1]) - 1].label };
     const m = /^legValue(\d+)$/.exec(c.key);
     const leg = m ? legs[Number(m[1]) - 1] : null;
     if (!leg) return c;

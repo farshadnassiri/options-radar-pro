@@ -15,7 +15,11 @@ import {
   coverage, strategyMargin, capitalBase, marginBase, DEFAULT_PARAMS,
 } from '../core/margin.mjs';
 import { walkBook, resolvePrice, maxSize, bookCapacity } from '../core/exec.mjs';
-import { evaluate, profitRegions, probOfProfit, breakevenMetrics, legValueSlots, LEG_VALUE_SLOTS, columnsForStrategy, COLUMNS } from '../core/evaluate.mjs';
+import {
+  evaluate, profitRegions, probOfProfit, breakevenMetrics,
+  legValueSlots, LEG_VALUE_SLOTS, marginPartSlots, MARGIN_PART_SLOTS,
+  marginPartDescriptors, columnsForStrategy, COLUMNS,
+} from '../core/evaluate.mjs';
 import { CATALOG, buildLegs, byId } from '../strategies/catalog.mjs';
 import { flattenActiveContracts, generateHistoricalCombos as histCombos } from '../core/history.mjs';
 import { defaults, SCHEMA, feesOf, assetClassMap, assetClassOf } from '../core/settings.mjs';
@@ -288,6 +292,9 @@ group('۳. بازده در سررسید — با کارمزد تسویه');
 // ═══════════════════════════ ۴. وجه تضمین در برابر تابلو ═══════════════════════════
 group('۴. وجه تضمین — شش مشاهده تابلو');
 {
+  // این fixture قدیمی بر مبنای رفتار تابلوی کارگزاری (B×S) ثبت شده است؛
+  // پیش‌فرض موتور اکنون متن ضوابط (B×K) است، پس حالت سازگاری باید صریح باشد.
+  const boardParams = { ...DEFAULT_PARAMS, bBasis: 'SPOT' };
   // شش مشاهدهٔ دستیِ تابلو، در دو برداشت (A و B). این‌ها داده‌اند نه محاسبه:
   // هرچه اینجاست از تابلو خوانده شده و هیچ عددش بازسازی نشده.
   //
@@ -325,7 +332,7 @@ group('۴. وجه تضمین — شش مشاهده تابلو');
     else results.push(['!', `اتحاد RM در ${b.name} برقرار نیست`,
       `محاسبه ${identity.toLocaleString()} در برابر تابلو ${b.rm.toLocaleString()}`]);
 
-    const inv = impliedUnderlying({ K: b.K, size: b.size, kind: b.kind, imRef: b.im });
+    const inv = impliedUnderlying({ K: b.K, size: b.size, kind: b.kind, imRef: b.im, params: boardParams });
     check(`بازتولید IM تابلو — ${b.name} ${b.snap}`, inv.ok,
       inv.ok ? `S سازگار ${Math.round(inv.lo).toLocaleString()} تا ${Math.round(inv.hi).toLocaleString()} | جزء ${inv.binding}` : 'هیچ S سازگاری نیست');
     if (inv.ok) {
@@ -346,13 +353,14 @@ group('۴. وجه تضمین — شش مشاهده تابلو');
   }
 
   // تطبیق مستقیم با قیمت پایه معلوم
-  const v = verifyMargin({ S: 156950, K: 140000, size: 1000, kind: 'call', optClose: 22049, imRef: 31390000, rmRef: 53439000 });
+  const v = verifyMargin({ S: 156950, K: 140000, size: 1000, kind: 'call', optClose: 22049,
+    imRef: 31390000, rmRef: 53439000, params: boardParams });
   check('تطبیق کامل ضفزر با S معلوم', v.imOk && v.rmOk && v.identityOk,
     `IM ${Math.round(v.im).toLocaleString()} | RM ${Math.round(v.rm).toLocaleString()} | جزء ${v.binding}`);
 
   check('گردکردن فقط روی وجه تضمین اولیه است',
-    initialMargin(156950, 140000, 1000, 'call') % DEFAULT_PARAMS.C === 0
-    && requiredMargin(156950, 140000, 1000, 'call', 22049) % DEFAULT_PARAMS.C !== 0);
+    initialMargin(156950, 140000, 1000, 'call', boardParams) % DEFAULT_PARAMS.C === 0
+    && requiredMargin(156950, 140000, 1000, 'call', 22049, boardParams) % DEFAULT_PARAMS.C !== 0);
   check('حداقل وجه تضمین ۷۰ درصد لازم است', near(minMargin(1000000), 700000));
   check('وجه تضمین در قیمت پایه یکنواست',
     initialMargin(100000, 50000, 1000, 'call') <= initialMargin(120000, 50000, 1000, 'call'));
@@ -416,21 +424,48 @@ group('۵. پوشش موقعیت و قاعده بستانکار در برابر 
     `الف ${Math.round(full).toLocaleString()} | ب ${Math.round(less).toLocaleString()} | ج ${Math.round(width).toLocaleString()}`);
   // ——— قاعدهٔ ترکیبی فروش هم‌زمان کال و پوت ———
   //
-  // حسابرسی: برنامه دو پای لخت را جمع می‌بندد، متن ضوابط منتشرشده «بزرگ‌تر
-  // + پریمیوم پای دیگر» می‌دهد. هیچ‌کدام با تابلو تأیید نشده، پس هر دو
-  // در دسترس‌اند و پیش‌فرض همان محافظه‌کارانه می‌ماند.
+  // ضوابط، استرادل و استرانگل هم‌ماه را یک راهبرد می‌شناسد: بزرگ‌ترِ وجه
+  // تضمین لازم دو پا + پریمیوم قراردادی که IM کمتری دارد. جمع دو پا فقط
+  // سناریوی دستی است.
   const strangle = [mk('call', 'sell', 110, 5), mk('put', 'sell', 90, 4)];
-  const cSum = strategyMargin(strangle, { S, closes: { 0: 5, 1: 4 } });
-  const cMax = strategyMargin(strangle, { S, closes: { 0: 5, 1: 4 }, nakedComboMargin: 'MAX_PLUS_PREMIUM' });
-  check('پیش‌فرضِ فروش هم‌زمان کال و پوت، همان جمع دو پا می‌ماند',
-    cSum.comboRule === 'SUM' && cSum.margin === strategyMargin(strangle, { S, closes: { 0: 5, 1: 4 }, nakedComboMargin: 'SUM' }).margin);
+  const cMax = strategyMargin(strangle, { S, closes: { 0: 5, 1: 4 } });
+  const cSum = strategyMargin(strangle, { S, closes: { 0: 5, 1: 4 }, nakedComboMargin: 'SUM' });
+  check('پیش‌فرض فروش هم‌زمان کال و پوت، قاعدهٔ راهبردی ضوابط است',
+    cMax.comboRule === 'MAX_PLUS_PREMIUM');
   check('قاعدهٔ متن ضوابط، وجه تضمین کمتری می‌دهد', cMax.margin < cSum.margin,
     `جمع ${Math.round(cSum.margin).toLocaleString()} | ضوابط ${Math.round(cMax.margin).toLocaleString()}`);
-  check('و دقیقاً برابر «بزرگ‌ترِ IM دو پا + پریمیوم هر دو» است',
+  check('و دقیقاً برابر «بزرگ‌ترِ RM + پریمیوم قرارداد با IM کمتر» است',
     Math.abs(cMax.margin - (Math.max(
-      initialMargin(S, 110, size, 'call'), initialMargin(S, 90, size, 'put'),
-    ) + 5 * size + 4 * size)) < 1e-6, `${Math.round(cMax.margin).toLocaleString()}`);
+      requiredMargin(S, 110, size, 'call', 5), requiredMargin(S, 90, size, 'put', 4),
+    ) + 4 * size)) < 1e-6, `${Math.round(cMax.margin).toLocaleString()}`);
   check('برچسب قاعدهٔ به‌کاررفته گزارش می‌شود', cMax.comboRule === 'MAX_PLUS_PREMIUM');
+  check('استرادل/استرانگل هم‌اندازه فقط یک جزء وجه تضمین دارد',
+    cMax.components.length === 1 && cMax.components[0].type === 'combo'
+    && near(cMax.components[0].amount, cMax.margin));
+
+  // بازنویسی قدیمی max(IM)+هر دو پریمیوم همیشه هم‌ارز فرمول ضوابط نیست.
+  // این نمونه عمداً پریمیوم پای با IM کمتر را بزرگ می‌گیرد تا دو فرمول از
+  // هم جدا شوند: متن همان پریمیوم پوت را صریحاً اضافه می‌کند.
+  const premiumCross = [mk('call', 'sell', 110, 1), mk('put', 'sell', 90, 30)];
+  const cross = strategyMargin(premiumCross, { S, closes: { 0: 1, 1: 30 } });
+  const literal = Math.max(
+    requiredMargin(S, 110, size, 'call', 1), requiredMargin(S, 90, size, 'put', 30),
+  ) + 30 * size;
+  const oldRewrite = Math.max(
+    initialMargin(S, 110, size, 'call'), initialMargin(S, 90, size, 'put'),
+  ) + 31 * size;
+  check('فرمول مستقیم ضوابط جای بازنویسی نامعتبر قبلی را گرفته است',
+    cross.margin === literal && cross.margin !== oldRewrite,
+    `${cross.margin.toLocaleString()} در برابر بازنویسی ${oldRewrite.toLocaleString()}`);
+
+  const uneven = [mk('call', 'sell', 110, 5, 2), mk('put', 'sell', 90, 4)];
+  const unevenMargin = strategyMargin(uneven, { S, closes: { 0: 5, 1: 4 } });
+  check('در نسبت نابرابر، یک جفت ترکیبی و مازاد کال دو جزء جدا هستند',
+    unevenMargin.comboRule === 'MAX_PLUS_PREMIUM' && unevenMargin.components.length === 2
+    && near(unevenMargin.components.reduce((a, x) => a + x.amount, 0), unevenMargin.margin));
+  check('تضمین لازم کل، نسبت هر پای فروش را حساب می‌کند',
+    unevenMargin.requiredTotal === 2 * requiredMargin(S, 110, size, 'call', 5)
+      + requiredMargin(S, 90, size, 'put', 4));
   // ترکیبی که متن ضوابط دربارهٔ آن حرفی نزده، از قاعده بیرون می‌ماند
   const twoCalls = [mk('call', 'sell', 110, 5), mk('call', 'sell', 120, 3)];
   check('دو کالِ لخت مشمول قاعدهٔ ترکیبی نیست — حدس زدن، اختراع عدد است',
@@ -438,15 +473,18 @@ group('۵. پوشش موقعیت و قاعده بستانکار در برابر 
   const crossExpiry = [mk('call', 'sell', 110, 5, 1, 30), mk('put', 'sell', 90, 4, 1, 90)];
   check('کال و پوت با دو سررسید هم بیرون می‌ماند',
     strategyMargin(crossExpiry, { S, closes: { 0: 5, 1: 4 }, nakedComboMargin: 'MAX_PLUS_PREMIUM' }).comboRule === 'SUM');
+  const inverted = [mk('call', 'sell', 90, 5), mk('put', 'sell', 110, 4)];
+  check('ترکیب اعمال‌وارونه، استرانگل مقرراتی فرض نمی‌شود',
+    strategyMargin(inverted, { S, closes: { 0: 5, 1: 4 } }).comboRule === 'SUM');
 
   // ——— مبنای جزء B ———
   //
-  // تابلو B×S نشان داد، متن ضوابط B×K می‌نویسد. عددی اختراع نمی‌شود؛
-  // انتخاب صریح است و پیش‌فرض همان تطبیق‌شده با تابلو.
+  // متن ضوابط B×K می‌نویسد. حالت B×S برای سازگاری با نمونه‌های قدیمی
+  // تابلو باقی است، ولی پیش‌فرض مقرراتی قیمت اعمال است.
   const pSpot = { A: 0.20, B: 0.10, C: 10000, maint: 0.70, bBasis: 'SPOT' };
   const pStrike = { ...pSpot, bBasis: 'STRIKE' };
-  check('پیش‌فرض جزء B، قیمت پایانی پایه است',
-    marginBase(100, 300, size, 'call').legB === marginBase(100, 300, size, 'call', pSpot).legB);
+  check('پیش‌فرض جزء B، قیمت اعمال است',
+    marginBase(100, 300, size, 'call').legB === marginBase(100, 300, size, 'call', pStrike).legB);
   check('با مبنای قیمت اعمال، جزء B عدد دیگری می‌شود',
     marginBase(100, 300, size, 'call', pStrike).legB === 0.10 * 300 * size);
   check('و آن اختلاف به وجه تضمین اولیه می‌رسد',
@@ -3135,6 +3173,22 @@ group('۴۵. ستون‌های مشخصات قرارداد');
   check('اسپرد بدون پای سهم، دارایی مسدودی ندارد',
     spread.sharesLocked === 0 && spread.blockedAsset === 0);
 
+  const shortStrangleDef = byId('short-strangle');
+  const shortStrangle = evaluate({
+    legs: buildLegs(shortStrangleDef, { strikes: [90000, 110000], size, days: [30] }),
+    quotes: [mk(3800, 4000), mk(4800, 5000)],
+    ctx: { S: 100000, Sclose: 100000, days: 30, size, qty: 1, settings: s45,
+      def: shortStrangleDef, underlying: 'نمونه', sigmaHist: 0.6 },
+  });
+  check('ردیف استرانگل فروش، یک جزء ترکیبی دارد نه دو وجه تضمین مستقل',
+    shortStrangle.marginParts.length === 1
+    && shortStrangle.marginPart1 === shortStrangle.margin
+    && Number.isNaN(shortStrangle.marginPart2));
+  check('شکاف اجزای وجه تضمین با خانهٔ خالی حفظ می‌شود',
+    MARGIN_PART_SLOTS === 4
+    && marginPartSlots([{ amount: 7 }, { amount: NaN }, { amount: 9 }]).marginPart1 === 7
+    && Number.isNaN(marginPartSlots([{ amount: 7 }, { amount: NaN }, { amount: 9 }]).marginPart2));
+
   // ——— بازار ———
   check('حجم و ارزش و تعداد معامله فقط از پاهای اختیار جمع می‌شوند',
     spread.volTotal === 2400 && spread.tradeCount === 60 && spread.valueTotal === 1e7,
@@ -3167,7 +3221,8 @@ group('۴۵. ستون‌های مشخصات قرارداد');
   const NEED = ['headlineList', 'bidList', 'askList', 'lastList', 'closeList', 'spreadWorstPct',
     'bidQtyMin', 'askQtyMin', 'volTotal', 'valueTotal', 'tradeCount', 'oiTotal', 'oiChange',
     'notional', 'marketValue', 'intrinsic', 'timeValue', 'bsValue', 'bsDiffPct', 'ivList',
-    'leverage', 'marginRequired', 'blockedAsset', 'sharesLocked', 'rho', 'deltaShares'];
+    'leverage', 'marginRequired', 'marginParts', 'marginPart1', 'marginPart2',
+    'marginPart3', 'marginPart4', 'blockedAsset', 'sharesLocked', 'rho', 'deltaShares'];
   const absent = NEED.filter((k) => !keys.has(k));
   check('هر ستون تازه در قرارداد ستونی ثبت شده', absent.length === 0, absent.join('، '));
 
@@ -4724,6 +4779,9 @@ group('۶۶. ارزش معاملات هر پا');
     /'legValue1', 'legValue2', 'legValue3', 'legValue4'/.test(stratSrc66));
   check('برترین موقعیت‌ها هم همان ستون‌ها را دارد',
     topSrc66.includes("'legValue1', 'legValue2', 'legValue3', 'legValue4'"));
+  check('وجه تضمین کل و اجزای پویای آن در نمای پیش‌فرض هر دو جدول دیده می‌شود',
+    stratSrc66.includes("'margin', 'marginPart1', 'marginPart2', 'marginPart3', 'marginPart4'")
+    && topSrc66.includes("'margin', 'marginPart1', 'marginPart2', 'marginPart3', 'marginPart4'"));
   // ستون «پای ۴» یک اسپرد دوپا همیشه «—» است و فقط پهنا می‌گیرد.
   check('ستون‌های پا به تعداد پاهای همان استراتژی بریده می‌شوند',
     /legValue\(\\d\+\)/.test(stratSrc66) && stratSrc66.includes('Number(m[1]) <= legCount'));
@@ -4746,6 +4804,19 @@ group('۶۶. ارزش معاملات هر پا');
     labelOf(strangleCols, 'legValue1') === 'ارزش معاملات پای ۱ — فروش پوت'
     && labelOf(strangleCols, 'legValue2') === 'ارزش معاملات پای ۲ — فروش کال',
     labelOf(strangleCols, 'legValue1'));
+  check('استرانگل فروش یک ستون وجه تضمین ترکیبی دارد، نه دو ستون مستقل',
+    marginPartDescriptors(byId('short-strangle')).length === 1
+    && labelOf(strangleCols, 'marginPart1') === 'وجه تضمین ترکیبی — فروش کال و پوت'
+    && !strangleCols.some((c) => c.key === 'marginPart2'));
+  const condorCols = columnsForStrategy(byId('iron-condor'));
+  check('راهبردی با دو جزء واقعی، دو ستون وجه تضمین می‌گیرد',
+    marginPartDescriptors(byId('iron-condor')).length === 2
+    && condorCols.some((c) => c.key === 'marginPart1')
+    && condorCols.some((c) => c.key === 'marginPart2')
+    && !condorCols.some((c) => c.key === 'marginPart3'));
+  check('راهبرد بی‌وجه تضمین، ستون جزء ساختگی نمی‌گیرد',
+    marginPartDescriptors(byId('covered-call')).length === 0
+    && !columnsForStrategy(byId('covered-call')).some((c) => /^marginPart\d+$/.test(c.key)));
   // شماره پا حذف نمی‌شود: باترفلای سه پای کال دارد و بدون شماره، سه سرستون
   // هم‌نام می‌شوند و ستون سوم از ستون اول جدا نمی‌ماند.
   const flyCols = columnsForStrategy(byId('long-call-butterfly'));
