@@ -14,6 +14,12 @@ import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { historyHandoffPlan, goHandoff } from '/ui/handoff.mjs';
+import { ivParams } from '/core/leg-iv.mjs';
+import { resolveHistVol, histVolSeries } from '/core/hist-vol.mjs';
+import {
+  GREEKS, annotateReplay, monitorSeries, monitorGreekSummary, monitorVolSummary, monitorCoverage,
+} from '/core/monitor.mjs';
+import { chart as trackChart, LEG_COLORS } from '/ui/track-chart.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -31,6 +37,11 @@ const displayName = (entity, fallback = 'بدون نام') => {
 const contractLabel = (c) => `${displayName(c, 'قرارداد اختیار')} — ${c.kind === 'call' ? 'اختیار خرید' : 'اختیار فروش'} — اعمال ${fmt.int(c.strike)} — سررسید ${historyDateLabel(c.expiry)}`;
 const legLabel = (leg, index) => `${faDigits(index + 1)}. ${leg.side === 'buy' ? 'خرید' : 'فروش'} ${leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'دارایی پایه'} × ${faDigits(leg.ratio)}`;
 const valueLabel = (value, estimated = false) => `${estimated ? '≈ ' : ''}${fmt.money(value)}`;
+// تلاطم نبوده «—» می‌ماند؛ صفر یعنی «تلاطم صفر» که ادعای دیگری است.
+const ivCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
+// یونانی‌ها دو مرتبهٔ بزرگی فاصله دارند — گامای یک قرارداد مرتبهٔ ۱۰ به توان
+// منفی هفت است و وگا ریالی؛ `fmt.small` رقم اعشار را از خود عدد می‌گیرد.
+const greekCell = (value) => (Number.isFinite(value) ? fmt.small(value) : '—');
 
 function filterNumber(text) {
   const normalized = toEnDigits(text).replaceAll(',', '').replaceAll('٬', '');
@@ -315,6 +326,17 @@ export async function mount(root, { state }) {
         <div class="history-table-wrap"><table class="history-table"><thead id="h-days-head"></thead><tbody id="h-days"></tbody></table></div>
       </section>
 
+      <section class="card">
+        <div class="section-head"><div><p class="eyebrow">حساسیت، در کنار سود</p><h2>یونانی‌ها و تلاطم در طول مسیر</h2></div><button type="button" class="ghost" id="h-to-greeks">رصد کامل در تب یونانی</button></div>
+        <p class="note" id="h-greeks-note"></p>
+        <div class="backtest-kpis" id="h-greeks-kpis"></div>
+        <div class="backtest-chart-grid" id="h-greeks-charts"></div>
+        <div class="history-analysis-grid">
+          <div><div class="section-head"><h3>خلاصهٔ یونانی موقعیت</h3></div><div id="h-greeks-summary" class="history-table-wrap"></div></div>
+          <div><div class="section-head"><h3>خلاصهٔ تلاطم</h3></div><div id="h-vol-summary" class="history-table-wrap"></div></div>
+        </div>
+      </section>
+
       <div class="history-analysis-grid">
         <section class="card"><div class="section-head"><h2>مقایسه ۲۵ مبنای ورود و خروج</h2></div><div id="h-basis-matrix" class="history-table-wrap"></div></section>
         <section class="card"><div class="section-head"><h2>حساسیت قیمت ورود هر پا</h2></div><div id="h-sensitivity" class="history-table-wrap"></div></section>
@@ -491,6 +513,26 @@ export async function mount(root, { state }) {
     }
     if (event.target.closest('[data-frozen-fold]')) toggleFrozenFold();
   }
+
+  /**
+   * همان موقعیت را در تب رصد یونانی باز می‌کند.
+   *
+   * `to` عوض می‌شود و بقیهٔ نقشه دست‌نخورده می‌ماند: هر دو مقصد یک ورودی
+   * می‌خواهند — نماد، استراتژی، قراردادها، روز ورود — و ساختن یک قرارداد
+   * دوم برای همین داده، یعنی دو جا که باید هم‌زمان به‌روز بمانند.
+   */
+  $('h-to-greeks').addEventListener('click', () => {
+    const def = byId(strategySelect.value);
+    if (!currentReplay || !currentArgs) { setStatus('ابتدا یک موقعیت را تحلیل کن.', true); return; }
+    goHandoff(state, {
+      ...historyHandoffPlan({
+        ua: analysisUa || ua, strategyId: def?.id || '', strategyName: def?.name || '',
+        replay: currentReplay, args: currentArgs, comboName: $('h-selected-label').textContent,
+        live: $('h-scope').value === SCOPE_LIVE,
+      }),
+      to: 'greeks-watch',
+    }, 'greeks-watch');
+  });
 
   function changeMatrixZoom(delta) {
     matrixZoom = Math.min(2.5, Math.max(0.75, Math.round((matrixZoom + delta) * 100) / 100));
@@ -885,9 +927,15 @@ export async function mount(root, { state }) {
     const legHeads = replay.priced.map((l, i) => `<th>${esc(legLabel(l, i))}</th>`).join('');
     const table = $('h-days-head').closest('table');
     delete table.dataset.sorts;
-    $('h-days-head').innerHTML = `<tr><th>روز</th><th>نماد پایه</th><th>پایانی پایه</th><th>حجم پایه</th><th>ارزش پایه</th><th>تعداد معامله پایه</th><th>تغییر روزانه</th><th>تغییر از ورود</th>${legHeads}<th>سود ناخالص</th><th>کارمزد کل</th><th>سود خالص</th><th>تغییر سود روز</th><th>بازده</th><th>افت از قله</th><th>وجه تضمین خالص</th><th>وضعیت</th></tr>`;
+    // ستون یونانی و تلاطم دقیقاً کنار ستون سود می‌نشیند، نه در جدولی جدا:
+    // خواستهٔ صریح این بود که «در هر تایم‌فریمی که سود و زیان محاسبه می‌شود
+    // این یونانی‌ها هم به تفکیک نمایش داده شوند». دو جدول یعنی کاربر باید
+    // تاریخ را در ذهنش تطبیق بدهد.
+    const greekHeads = GREEKS.map(({ label }) => `<th>${esc(label)}</th>`).join('');
+    $('h-days-head').innerHTML = `<tr><th>روز</th><th>نماد پایه</th><th>پایانی پایه</th><th>حجم پایه</th><th>ارزش پایه</th><th>تعداد معامله پایه</th><th>تغییر روزانه</th><th>تغییر از ورود</th>${legHeads}<th>سود ناخالص</th><th>کارمزد کل</th><th>سود خالص</th><th>تغییر سود روز</th><th>بازده</th><th>افت از قله</th><th>وجه تضمین خالص</th>${greekHeads}<th>ضمنی موقعیت</th><th>تاریخی پایه</th><th>ضمنی−تاریخی</th><th>وضعیت</th></tr>`;
     $('h-days').innerHTML = replay.rows.map((r) => {
-      const legCells = r.perLeg.map((l) => `<td title="ورود ${fmt.money(l.entryPrice)}"><b>${Number.isFinite(l.exitPrice) ? fmt.money(l.exitPrice) : '—'}</b><small class="${signTone(l.netPnl)}">اثر ${Number.isFinite(l.netPnl) ? fmt.money(l.netPnl) : '—'}</small><small class="${signTone(l.pnlDelta)}">Δ ${Number.isFinite(l.pnlDelta) ? fmt.money(l.pnlDelta) : '—'} · حجم ${fmt.int(l.volume)} · ارزش ${valueLabel(l.value, l.valueEstimated)}</small></td>`).join('');
+      const legCells = r.perLeg.map((l) => `<td title="ورود ${fmt.money(l.entryPrice)}"><b>${Number.isFinite(l.exitPrice) ? fmt.money(l.exitPrice) : '—'}</b><small class="${signTone(l.netPnl)}">اثر ${Number.isFinite(l.netPnl) ? fmt.money(l.netPnl) : '—'}</small><small class="${signTone(l.pnlDelta)}">Δ ${Number.isFinite(l.pnlDelta) ? fmt.money(l.pnlDelta) : '—'} · حجم ${fmt.int(l.volume)} · ارزش ${valueLabel(l.value, l.valueEstimated)}</small><small>تلاطم ${ivCell(l.ivPct)} · دلتا ${greekCell(l.greeks?.delta)} · وگا ${greekCell(l.greeks?.vega)}</small></td>`).join('');
+      const greekCells = GREEKS.map(({ key }) => `<td class="${signTone(r.greeks?.[key])}">${greekCell(r.greeks?.[key])}</td>`).join('');
       const statusText = r.status === 'ok' ? 'معتبر'
         : r.status === 'liquidity' ? `حذف نقدشوندگی${r.baseLiquid ? '' : ' · پایه'}${r.illiquidLegs?.length ? ` · پای ${faDigits(r.illiquidLegs.map((i) => i + 1).join('،'))}` : ''}`
           : `فاقد داده · پای ${faDigits((r.missingLegs || []).map((i) => i + 1).join('،'))}`;
@@ -896,10 +944,89 @@ export async function mount(root, { state }) {
         <td><b>${esc(displayName(ua, 'دارایی پایه'))}</b></td><td>${fmt.money(r.baseClose)}</td><td>${fmt.int(r.baseVolume)}</td><td>${valueLabel(r.baseValue, r.baseValueEstimated)}</td><td>${fmt.int(r.baseTrades)}</td><td class="${signTone(r.baseDailyPct)}">${fmt.pct(r.baseDailyPct)}</td><td class="${signTone(r.baseCumulativePct)}">${fmt.pct(r.baseCumulativePct)}</td>
         ${legCells}<td>${Number.isFinite(r.grossPnl) ? fmt.money(r.grossPnl) : '—'}</td><td>${Number.isFinite(r.totalFees) ? fmt.money(r.totalFees) : '—'}</td>
         <td class="${signTone(r.netPnl)}">${Number.isFinite(r.netPnl) ? fmt.money(r.netPnl) : '—'}</td><td class="${signTone(r.pnlDelta)}">${Number.isFinite(r.pnlDelta) ? fmt.money(r.pnlDelta) : '—'}</td><td class="${signTone(r.returnPct)}">${Number.isFinite(r.returnPct) ? fmt.pct(r.returnPct) : '—'}</td>
-        <td class="${signTone(r.drawdown)}">${Number.isFinite(r.drawdown) ? fmt.money(r.drawdown) : '—'}</td><td>${Number.isFinite(r.marginNet) && r.marginNet > 0 ? fmt.money(r.marginNet) : 'بدون وجه تضمین'}</td><td>${esc(statusText)}</td>
+        <td class="${signTone(r.drawdown)}">${Number.isFinite(r.drawdown) ? fmt.money(r.drawdown) : '—'}</td><td>${Number.isFinite(r.marginNet) && r.marginNet > 0 ? fmt.money(r.marginNet) : 'بدون وجه تضمین'}</td>
+        ${greekCells}<td>${ivCell(r.meanIvPct)}</td><td>${ivCell(r.hvPct)}</td><td class="${signTone(r.ivHvSpreadPp)}">${greekCell(r.ivHvSpreadPp)}</td><td>${esc(statusText)}</td>
       </tr>`;
     }).join('');
     enableColumnSort(table);
+  }
+
+  /**
+   * مهرِ یونانی و تلاطم روی همان مسیر روزانه‌ای که سود و زیان از آن آمده.
+   *
+   * روی همان `replay.rows` می‌نشیند، نه روی یک بازپخش دوم: اگر دو بازپخش
+   * می‌بود، یک روزِ حذف‌شده به‌خاطر نقدشوندگی می‌توانست در یکی باشد و در
+   * دیگری نه، و آن‌وقت «دلتای این روز» و «سود این روز» دو ردیف متفاوت
+   * را می‌گفتند.
+   *
+   * پنجرهٔ تلاطم تاریخی روی کل سری پایه بسته می‌شود نه روی روزهای همین
+   * موقعیت — همان استدلال تب رصد: موقعیت کوتاه، پنجرهٔ بلند را پر نمی‌کند.
+   */
+  function annotateGreeks(replay) {
+    const params = ivParams(state.settings, {});
+    const baseSeries = seriesByIns[String(ua?.ins)] || [];
+    const closes = baseSeries.map((row) => Number(row.close)).filter((value) => value > 0);
+    const hv = resolveHistVol(closes, {
+      tradingDaysYear: params.tradingDaysYear, window: params.hvWindow, manualPct: params.hvManualPct,
+    });
+    const rolling = histVolSeries(baseSeries.map((row) => Number(row.close)), {
+      tradingDaysYear: params.tradingDaysYear, window: params.hvWindow, manualPct: params.hvManualPct,
+    });
+    const byDate = new Map(baseSeries.map((row, at) => [normalizeHistoryDate(row.date), rolling[at]]));
+    annotateReplay(replay, {
+      hvSeries: (replay.rows || []).map((row) => byDate.get(Number(row.date))),
+      hvSource: hv.source,
+    }, params);
+    return hv;
+  }
+
+  function paintGreeks(replay, hv) {
+    const rows = replay.rows.filter((row) => row.status !== 'missing');
+    const legs = replay.priced;
+    const points = monitorSeries(rows, { legCount: legs.length });
+    const last = rows.at(-1);
+    const cov = monitorCoverage(rows);
+    const small = (value) => (Number.isFinite(value) ? fmt.small(value) : '—');
+    const pctCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
+
+    $('h-greeks-note').textContent = hv.source === 'manual'
+      ? `تلاطم تاریخی از سری قیمت درنیامد؛ ${hv.why} پارامترهای این محاسبه در تنظیمات، بخش «یونانی‌ها، تلاطم و احتمال» قابل تغییرند.`
+      : hv.enough
+        ? `یونانی هر پا از تلاطم ضمنی همان پا می‌آید و جمعِ موقعیت وزن‌دار است. تلاطم تاریخی از سری قیمت پایه ساخته شده. همهٔ پارامترها در تنظیمات، بخش «یونانی‌ها، تلاطم و احتمال» قابل تغییرند.`
+        : `تلاطم تاریخی ساخته نشد؛ ${hv.why}`;
+
+    $('h-greeks-kpis').innerHTML = [
+      ...GREEKS.map(({ key, label }) => [label, small(last?.greeks?.[key]), signTone(last?.greeks?.[key])]),
+      ['تلاطم ضمنی موقعیت', pctCell(last?.meanIvPct), ''],
+      ['تلاطم تاریخی پایه', pctCell(last?.hvPct), ''],
+      ['پوشش یونانی', pctCell(cov.coveragePct), cov.coveragePct >= 99 ? 'gain' : 'loss'],
+    ].map(([label, value, tone]) => `<div class="kpi"><span>${esc(label)}</span><strong class="${tone}">${value}</strong></div>`).join('');
+
+    $('h-greeks-charts').innerHTML = [
+      ...GREEKS.map(({ key, label, unit }) => `<section><div class="section-head"><h3>${esc(label)}</h3><span>${esc(unit)}</span></div><div id="h-gk-${key}" class="backtest-chart"></div></section>`),
+      '<section><div class="section-head"><h3>تلاطم ضمنی و تاریخی</h3><span>درصد سالانه</span></div><div id="h-gk-vol" class="backtest-chart"></div></section>',
+    ].join('');
+    for (const { key, label } of GREEKS) {
+      trackChart($(`h-gk-${key}`), points, [
+        { key, label: `کل موقعیت · ${label}`, color: 'var(--accent)' },
+        ...legs.map((leg, index) => ({ key: `${key}${index + 1}`, label: legLabel(leg, index), color: LEG_COLORS[index % LEG_COLORS.length] })),
+      ], { xLabel: 'روز مسیر', yLabel: label });
+    }
+    trackChart($('h-gk-vol'), points, [
+      ...legs.map((leg, index) => ({ key: `iv${index + 1}`, label: `ضمنی ${legLabel(leg, index)}`, color: LEG_COLORS[index % LEG_COLORS.length] })),
+      { key: 'ivMean', label: 'میانگین ضمنی موقعیت', color: 'var(--accent)' },
+      { key: 'hv', label: 'تاریخی پایه', color: 'var(--muted)' },
+    ], { xLabel: 'روز مسیر', yLabel: 'تلاطم سالانه (٪)' });
+
+    const cells = (list) => `<tr>${list.map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
+    $('h-greeks-summary').innerHTML = `<table class="history-table"><thead><tr><th>یونانی</th><th>واحد</th><th>مشاهده</th><th>ابتدا</th><th>انتها</th><th>تغییر</th><th>کمینه</th><th>بیشینه</th></tr></thead><tbody>${
+      monitorGreekSummary(rows).map((row) => cells([esc(row.label), esc(row.unit), fmt.int(row.samples),
+        small(row.first), small(row.last), small(row.change), small(row.min), small(row.max)])).join('')}</tbody></table>`;
+    $('h-vol-summary').innerHTML = `<table class="history-table"><thead><tr><th>سری</th><th>مشاهده</th><th>ابتدا</th><th>انتها</th><th>تغییر</th><th>کمینه</th><th>بیشینه</th></tr></thead><tbody>${
+      monitorVolSummary(rows, { legs }).map((row) => cells([
+        row.kind === 'leg' ? esc(legLabel(legs[row.index], row.index)) : esc(row.label),
+        fmt.int(row.samples), pctCell(row.first), pctCell(row.last),
+        small(row.changePp), pctCell(row.min), pctCell(row.max)])).join('')}</tbody></table>`;
   }
 
   function paintContrib(replay) {
@@ -1093,7 +1220,11 @@ export async function mount(root, { state }) {
     } else {
       setRollingCandidates(rollingCandidates, legs);
     }
+    // مهر یونانی پیش از جدول روزبه‌روز می‌نشیند، چون همان جدول ستون‌های
+    // یونانی و تلاطم را از روی ردیف مهرخورده می‌سازد.
+    const hv = annotateGreeks(replay);
     paintKpis(replay); paintStatistics(replay); paintDayTable(replay); paintContrib(replay);
+    paintGreeks(replay, hv);
     paintLegEvolution(replay); histogram($('h-distribution'), replay.rows);
     paintBasis(args); paintSensitivity(args, replay); paintMargin(replay); paintOptimal(args, replay);
     mountPayoffWheel(); renderDailyPayoff();

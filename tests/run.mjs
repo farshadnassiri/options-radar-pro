@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { bsPrice, bsGreeks, impliedVol, probBelow, probAbove, histVol, npdf, d1d2, ncdf, ninv, priceQuantile } from '../core/bs.mjs';
-import { grossCash, entryFees, analyzePayoff, signedQty, pnlAtExpiry } from '../core/payoff.mjs';
+import { grossCash, entryFees, analyzePayoff, signedQty, pnlAtExpiry, positionGreeks } from '../core/payoff.mjs';
 import { analyzeMixed } from '../core/mixed.mjs';
 import {
   initialMargin, requiredMargin, minMargin, verifyMargin, impliedUnderlying,
@@ -75,6 +75,11 @@ import { mountSubtabs } from '../ui/subtabs.mjs';
 import { tehranDateNumber, liveDayOf, liveDayRows, mergeLiveDay, LIVE_DAY_PHASES } from '../core/live-day.mjs';
 import { scopeNote, applyLiveScope, SCOPE_OPTIONS, scopeOptionsMarkup } from '../ui/live-scope.mjs';
 import { positionGreeksAt, annotateDailyGreeks } from '../core/leg-iv.mjs';
+import {
+  annotateTrack, monitorSnapshot, monitorSeries, monitorCoverage, monitorExtremes, monitorStance,
+} from '../core/monitor.mjs';
+import { histVolPct, histVolSeries, resolveHistVol } from '../core/hist-vol.mjs';
+import { markAt, marksAt, applyIntradayMark, markNote, MARK_MOMENTS } from '../core/intraday-mark.mjs';
 import { createLog } from '../server/errlog.mjs';
 import * as uiFmt48 from '../ui/fmt.mjs';
 import { GROUPS as STRAT_GROUPS48 } from '../strategies/catalog.mjs';
@@ -2154,7 +2159,8 @@ group('۳۲. بازپخش تاریخی استراتژی');
     backtestSource32.includes('summarizeIntraday(intraday)') && backtestSource32.includes('bt-intraday-leg-chart')
     && backtestSource32.includes('bt-intraday-volume-chart') && backtestSource32.includes('bt-correlation-table'));
   check('نمودارهای درون‌روزی روی ساعت واقعی و به‌شکل پله‌ای رسم می‌شوند',
-    backtestSource32.includes('timeScale: true, step: true') && backtestSource32.includes("`M ${values[0].x} ${values[0].y}`"));
+    backtestSource32.includes('timeScale: true, step: true')
+    && readSrc('../ui/track-chart.mjs').includes("`M ${values[0].x} ${values[0].y}`"));
 
   const manual32 = replayHistory({ ...args32, manualEntry: { 0: 5, 1: 20 } });
   check('قیمت دستی هر پا مستقل و بیرون دامنه پذیرفته می‌شود', manual32.priced[0].price === 5 && manual32.priced[1].price === 20);
@@ -2313,13 +2319,15 @@ group('۳۲. بازپخش تاریخی استراتژی');
     sharedIns32.map((row) => row.cumulativeVolume).join('/'));
   check('حجم تجمعی سطر همان جمع رویدادهای همان مسیر است',
     sharedIns32.at(-1).cumulativeVolume === sharedIns32.reduce((sum, row) => sum + row.eventVolume, 0));
-  const chartSource32 = readSrc('../ui/tabs/backtest.mjs');
+  const chartSource32 = readSrc('../ui/track-chart.mjs');
   check('برچسب سری نمودار نام قرارداد بالادست را فرار می‌دهد',
     chartSource32.includes('const seriesLabel = (item) => esc(item.label);')
     && !/\$\{item\.label\}/.test(chartSource32));
+  // این ادعا دربارهٔ نشانه‌گذاری خودِ تب است، نه نمودار مشترک.
+  const btMarkup32 = readSrc('../ui/tabs/backtest.mjs');
   check('توضیح ماتریس هم‌حرکتی بیرون از جعبه پیمایش جدول می‌نشیند',
-    chartSource32.includes('id="bt-correlation-note"')
-    && !/backtest-correlation[\s\S]{0,2000}?<p class="backtest-table-note"/.test(chartSource32));
+    btMarkup32.includes('id="bt-correlation-note"')
+    && !/backtest-correlation[\s\S]{0,2000}?<p class="backtest-table-note"/.test(btMarkup32));
   const styleSource32 = readSrc('../ui/style.css');
   check('ماتریس هم‌حرکتی کف پهنای جدول تاریخچه را نمی‌گیرد',
     styleSource32.includes('.history-table.backtest-correlation { min-width: 0; }'));
@@ -4050,7 +4058,7 @@ group('۵۴. خروجی اکسل و عنوان محور');
   // ——— عنوان محور ———
   //
   // بدون عنوان، «۱۲٬۵۰۰» می‌تواند ریال باشد یا قرارداد یا درصد.
-  for (const [file, what] of [['../ui/chart.mjs', 'نمودار بازده'], ['../ui/tabs/backtest.mjs', 'نمودارهای بک‌تست'],
+  for (const [file, what] of [['../ui/chart.mjs', 'نمودار بازده'], ['../ui/track-chart.mjs', 'نمودارهای بک‌تست'],
     ['../ui/tabs/history.mjs', 'نمودارهای تاریخچه'], ['../ui/tabs/portfolio-backtest.mjs', 'نمودار سبد']]) {
     const src = readSrc(file);
     check(`${what} عنوان محور دارد`, /axis-title/.test(src));
@@ -4058,7 +4066,7 @@ group('۵۴. خروجی اکسل و عنوان محور');
   const chartSrc54 = readSrc('../ui/chart.mjs');
   check('واحد در عنوان محور نوشته می‌شود',
     chartSrc54.includes('قیمت سهم پایه (ریال)') && chartSrc54.includes('سود و زیان (ریال)'));
-  const btSrc54 = readSrc('../ui/tabs/backtest.mjs');
+  const btSrc54 = readSrc('../ui/track-chart.mjs');
   check('عنوان محور بک‌تست از واحد خودِ نمودار می‌آید',
     btSrc54.includes("money ? 'ریال' : count ? 'تعداد' : 'درصد'")
     && btSrc54.includes("timeScale ? 'ساعت جلسه"));
@@ -4593,10 +4601,10 @@ group('۶۲. تاریخ تولتیپ نمودار ریزمعامله');
     btSrc.includes('intradayChartRows(intraday, intradayDate)')
     && !btSrc.includes('intradayChartRows(intraday, replay.endDate)'));
   check('تاریخ تولتیپ از خودِ نقطه می‌آید و نقطهٔ بی‌تاریخ «—» می‌گیرد',
-    btSrc.includes("Number.isFinite(Number(row.date)) ? dateLabel(row.date) : '—'"));
+    readSrc('../ui/track-chart.mjs').includes("Number.isFinite(Number(row.date)) ? dateLabel(row.date) : '—'"));
   // درصد در تولتیپ باید واحد داشته باشد: عنوان محور کنارش نیست و «۱۲٫۳۵»
   // تنها، نه ریال است نه درصد.
-  check('عدد درصدی در تولتیپ واحد می‌گیرد', btSrc.includes('const tipLabel ='));
+  check('عدد درصدی در تولتیپ واحد می‌گیرد', readSrc('../ui/track-chart.mjs').includes('const tipLabel ='));
 
   // ریشهٔ «NaN/NaN/NaN»: تاریخ نامعتبر از `dateParts` رد می‌شد و `{0,0,0}`
   // می‌ساخت. بدتر از برچسب خراب، `dateUtc` بود که از همان صفر یک تاریخ
@@ -5818,8 +5826,12 @@ group('۷۸. تلاطم ضمنی هر پا در بک‌تست سریع');
   const over = ivParams({ rFree: 0.3, dayCountYear: 365, ivLo: 0.01, ivHi: 5, divYield: 0 }, { rFree: 0.18 });
   check('بازنویسی موضعی روی تنظیمات سراسری می‌نشیند',
     over.rFree === 0.18 && over.yearDays === 365, `${over.rFree}`);
+  // قید ساختاری، نه فهرست دستی: کاتالوگ فرمِ بازنویسی موضعی را می‌سازد، پس
+  // اگر کلیدی به محاسبه اضافه شود و به کاتالوگ نه، آن کلید در هیچ تبی قابل
+  // تنظیم نمی‌ماند و کاربر هیچ‌وقت نمی‌فهمد چرا.
   check('کاتالوگ پارامتر همان کلیدهایی را دارد که محاسبه می‌خواند',
-    IV_PARAMS.map((x) => x.key).join(',') === 'rFree,divYield,ivLo,ivHi,yearDays');
+    IV_PARAMS.map((x) => x.key).join(',') === Object.keys(ivParams({})).join(','),
+    IV_PARAMS.map((x) => x.key).join(','));
 
   // رفت‌وبرگشت: قیمتی که خودِ بلک-شولز با σ ساخته، باید همان σ را پس بدهد
   const nearCall = { kind: 'call', strike: 11000, expiry: 20260401 };
@@ -6862,6 +6874,522 @@ group('۹۰. ستون‌های بیشتر، متناسب با داده هر جد
     table90.includes('class="col-search"') && table90.includes("querySelectorAll('.col-opt')")
     && !/col-search[\s\S]{0,500}setKeys\(/.test(table90) && css90.includes('.col-search')
     && css90.includes('.col-opt[hidden], .col-group[hidden] { display: none; }'));
+}
+
+// ═══════════════════ ۹۱. ممیزی عددی یونانی‌ها ═══════════════════
+//
+// خواستهٔ کاربر این بود که صحت محاسبهٔ یونانی‌ها با منابع فارسی تطبیق داده
+// شود. آنچه از منابع فارسی به‌دست آمد، **قرارداد واحد** است نه فرمول تازه:
+// دلتا حساسیت به قیمت پایه، گاما نرخ تغییر دلتا، وگا اثر یک **واحد درصد**
+// تلاطم، تتا افت ارزش در یک **روز**. همان چیزی که `core/bs.mjs` بالای فایل
+// اعلام کرده.
+//
+// ولی «منبع گفته» ادعای ضعیفی است و شش ماه بعد قابل بازسنجی نیست. آنچه
+// اینجا نوشته می‌شود قوی‌تر است: هر یونانی، تعریفش را روی خودِ تابع قیمت
+// می‌دهد. اگر دلتا واقعاً مشتق قیمت نسبت به پایه باشد، باید با تفاضل
+// مرکزیِ `bsPrice` بخواند — و اگر کسی فردا علامت یا مخرجی را عوض کند،
+// همین‌جا رد می‌شود، بی‌آنکه لازم باشد کسی سایتی را دوباره بخواند.
+//
+// مرجع بیرونی هم هست: مثال استاندارد هال (S=49، K=50، r=۵٪، σ=۲۰٪،
+// T=۰٫۳۸۴۶ سال) که در متن‌های فارسیِ مشتقات هم همان اعداد نقل می‌شود.
+group('۹۱. ممیزی عددی یونانی‌ها — تعریف مشتق و مرجع بیرونی');
+{
+  const Y91 = 365;
+  const cases91 = [
+    { kind: 'call', S: 10000, K: 10500, T: 90 / Y91, r: 0.30, q: 0.00, sig: 0.55 },
+    { kind: 'put', S: 10000, K: 9500, T: 45 / Y91, r: 0.30, q: 0.02, sig: 0.75 },
+    { kind: 'call', S: 24000, K: 24000, T: 200 / Y91, r: 0.22, q: 0.05, sig: 0.35 },
+    { kind: 'put', S: 5000, K: 6200, T: 15 / Y91, r: 0.30, q: 0.00, sig: 1.20 },
+  ];
+
+  const relOk = (got, want, tol) => Math.abs(got - want) <= tol * Math.max(1, Math.abs(want));
+
+  let deltaOk = true, gammaOk = true, vegaOk = true, thetaOk = true, rhoOk = true;
+  const detail91 = [];
+  for (const c of cases91) {
+    const g = bsGreeks(c.kind, c.S, c.K, c.T, c.r, c.q, c.sig, Y91);
+    // دلتا: ∂V/∂S با تفاضل مرکزی
+    const hS = c.S * 1e-4;
+    const dNum = (bsPrice(c.kind, c.S + hS, c.K, c.T, c.r, c.q, c.sig)
+      - bsPrice(c.kind, c.S - hS, c.K, c.T, c.r, c.q, c.sig)) / (2 * hS);
+    if (!relOk(g.delta, dNum, 1e-5)) { deltaOk = false; detail91.push(`دلتا ${g.delta.toFixed(6)}≠${dNum.toFixed(6)}`); }
+
+    // گاما: ∂²V/∂S² با تفاضل مرکزی دوم
+    const gNum = (bsPrice(c.kind, c.S + hS, c.K, c.T, c.r, c.q, c.sig)
+      - 2 * bsPrice(c.kind, c.S, c.K, c.T, c.r, c.q, c.sig)
+      + bsPrice(c.kind, c.S - hS, c.K, c.T, c.r, c.q, c.sig)) / (hS * hS);
+    if (!relOk(g.gamma, gNum, 1e-3)) { gammaOk = false; detail91.push(`گاما ${g.gamma}≠${gNum}`); }
+
+    // وگا: اثر یک واحد درصد تلاطم، یعنی ∂V/∂σ ÷ ۱۰۰
+    const hV = 1e-5;
+    const vNum = (bsPrice(c.kind, c.S, c.K, c.T, c.r, c.q, c.sig + hV)
+      - bsPrice(c.kind, c.S, c.K, c.T, c.r, c.q, c.sig - hV)) / (2 * hV) / 100;
+    if (!relOk(g.vega, vNum, 1e-5)) { vegaOk = false; detail91.push(`وگا ${g.vega}≠${vNum}`); }
+
+    // تتا: افت ارزش در گذشت یک روز تقویمی، یعنی −∂V/∂T ÷ روزِ سال
+    const hT = 1e-7;
+    const tNum = -(bsPrice(c.kind, c.S, c.K, c.T + hT, c.r, c.q, c.sig)
+      - bsPrice(c.kind, c.S, c.K, c.T - hT, c.r, c.q, c.sig)) / (2 * hT) / Y91;
+    if (!relOk(g.theta, tNum, 1e-4)) { thetaOk = false; detail91.push(`تتا ${g.theta}≠${tNum}`); }
+
+    // رو: اثر یک واحد درصد نرخ بهره
+    const hR = 1e-6;
+    const rNum = (bsPrice(c.kind, c.S, c.K, c.T, c.r + hR, c.q, c.sig)
+      - bsPrice(c.kind, c.S, c.K, c.T, c.r - hR, c.q, c.sig)) / (2 * hR) / 100;
+    if (!relOk(g.rho, rNum, 1e-4)) { rhoOk = false; detail91.push(`رو ${g.rho}≠${rNum}`); }
+  }
+  check('دلتا همان ∂قیمت/∂پایه است — تفاضل مرکزی روی ۴ قرارداد', deltaOk, detail91.filter((x) => x.startsWith('دلتا')).join(' '));
+  check('گاما همان ∂دلتا/∂پایه است', gammaOk, detail91.filter((x) => x.startsWith('گاما')).join(' '));
+  check('وگا به‌ازای یک واحد درصد تلاطم است، نه یک واحد', vegaOk, detail91.filter((x) => x.startsWith('وگا')).join(' '));
+  check('تتا به‌ازای یک روز تقویمی است و علامتش افت را می‌گوید', thetaOk, detail91.filter((x) => x.startsWith('تتا')).join(' '));
+  check('رو به‌ازای یک واحد درصد نرخ است', rhoOk, detail91.filter((x) => x.startsWith('رو')).join(' '));
+
+  // تساوی‌های تحلیلی که هر پیاده‌سازی درست باید بدهد
+  const S91 = 10000, K91 = 10200, T91 = 120 / Y91, r91 = 0.28, q91 = 0.03, s91 = 0.62;
+  const gc = bsGreeks('call', S91, K91, T91, r91, q91, s91, Y91);
+  const gp = bsGreeks('put', S91, K91, T91, r91, q91, s91, Y91);
+  check('برابری خرید و فروش: دلتای کال منهای دلتای پوت برابر e^(−qT) است',
+    near(gc.delta - gp.delta, Math.exp(-q91 * T91), 1e-9), `${(gc.delta - gp.delta).toFixed(9)}`);
+  check('گاما و وگای کال و پوت هم‌اعمال یکی است',
+    near(gc.gamma, gp.gamma, 1e-12) && near(gc.vega, gp.vega, 1e-12));
+  check('برابری خرید و فروش: رو‌ی کال منهای رو‌ی پوت برابر K·T·e^(−rT)÷۱۰۰ است',
+    near(gc.rho - gp.rho, (K91 * T91 * Math.exp(-r91 * T91)) / 100, 1e-9));
+  check('برابری قیمت خرید و فروش برقرار است',
+    near(bsPrice('call', S91, K91, T91, r91, q91, s91) - bsPrice('put', S91, K91, T91, r91, q91, s91),
+      S91 * Math.exp(-q91 * T91) - K91 * Math.exp(-r91 * T91), 1e-7));
+
+  // مرجع بیرونی: مثال کلاسیک هال. اعداد منتشرشده — دلتا ۰٫۵۲۲، گاما ۰٫۰۶۶،
+  // وگا ۱۲٫۱ (به‌ازای ۱۰۰٪ تلاطم، یعنی ۰٫۱۲۱ به‌ازای یک واحد درصد)،
+  // تتا سالانه ۴٫۳۱− و رو ۸٫۹۱.
+  const hull = bsGreeks('call', 49, 50, 0.3846, 0.05, 0, 0.20, 365);
+  check('مثال مرجع: دلتا ۰٫۵۲۲', Math.abs(hull.delta - 0.522) < 0.001, hull.delta.toFixed(4));
+  check('مثال مرجع: گاما ۰٫۰۶۶', Math.abs(hull.gamma - 0.066) < 0.001, hull.gamma.toFixed(4));
+  check('مثال مرجع: وگا ۱۲٫۱ به‌ازای صد واحد درصد', Math.abs(hull.vega * 100 - 12.1) < 0.1, (hull.vega * 100).toFixed(3));
+  check('مثال مرجع: تتا سالانه ۴٫۳۱−', Math.abs(hull.theta * 365 + 4.31) < 0.02, (hull.theta * 365).toFixed(3));
+  check('مثال مرجع: رو ۸٫۹۱ به‌ازای صد واحد درصد', Math.abs(hull.rho * 100 - 8.91) < 0.02, (hull.rho * 100).toFixed(3));
+
+  // تلاطم تاریخی: سالانه‌سازی با ریشهٔ روز معاملاتی — همان قراردادی که
+  // منابع فارسی هم می‌گویند (آن‌ها ۲۵۰ یا ۲۵۲ می‌گیرند؛ عدد از تنظیمات
+  // می‌آید، پس قرارداد سنجیده می‌شود نه یک عدد ثابت).
+  const daily91 = 0.02;
+  const closes91 = [];
+  let px91 = 1000;
+  for (let i = 0; i < 400; i += 1) { closes91.push(px91); px91 *= Math.exp(((i % 2) ? 1 : -1) * daily91); }
+  const hv240 = histVol(closes91, 240);
+  const hv252 = histVol(closes91, 252);
+  check('تلاطم تاریخی با ریشهٔ روز معاملاتی سالانه می‌شود',
+    near(hv252 / hv240, Math.sqrt(252 / 240), 1e-9), `${hv240.toFixed(4)} و ${hv252.toFixed(4)}`);
+  check('تلاطم تاریخی انحراف معیار بازده لگاریتمی است',
+    Math.abs(hv240 - daily91 * Math.sqrt(240)) < 1e-3, hv240.toFixed(5));
+}
+
+// ═══════════════════ ۹۲. یونانی و تلاطم هر پا، در جدول هر استراتژی ═══════════════════
+//
+// خواستهٔ صریح: «در هر قسمتی که استراتژی هست، هم یونانی پاها به تفکیک باشد
+// هم یونانی کل». همهٔ آن قسمت‌ها — سی‌ویک تب استراتژی، برترین موقعیت‌ها،
+// داشبورد و رول — از یک قرارداد ستونی مشترک می‌سازند، پس این ادعا روی
+// خروجی `evaluate` سنجیده می‌شود نه روی تک‌تک تب‌ها.
+group('۹۲. یونانی و تلاطم هر پا در قرارداد ستونی');
+{
+  const s92 = defaults();
+  const size92 = 1000;
+  const q92 = (bid, ask) => ({
+    bid, bidQty: 50, ask, askQty: 50, last: (bid + ask) / 2, close: (bid + ask) / 2,
+    low: bid * 0.9, high: ask * 1.1, state: 'A', staleSec: 10,
+    book: [{ level: 1, bid, bidQty: 50, ask, askQty: 50 }],
+  });
+  const def92 = byId('bull-call-spread');
+  const legs92 = buildLegs(def92, { strikes: [100000, 110000], size: size92, days: [60] });
+  const row92 = evaluate({
+    legs: legs92, quotes: [q92(9000, 9400), q92(4000, 4400)],
+    ctx: { S: 100000, Sclose: 100000, days: 60, size: size92, qty: 1, settings: s92,
+      def: def92, underlying: 'نمونه', sigmaHist: 0.45 },
+  });
+
+  check('هر پا تلاطم ضمنی خودش را دارد و دو پا دو عدد جدا می‌گیرند',
+    Number.isFinite(row92.legIv1) && Number.isFinite(row92.legIv2)
+    && Math.abs(row92.legIv1 - row92.legIv2) > 1e-6,
+    `${row92.legIv1.toFixed(2)}٪ و ${row92.legIv2.toFixed(2)}٪`);
+  check('هر پنج یونانی برای هر دو پا ستون دارد',
+    ['delta', 'gamma', 'vega', 'theta', 'rho']
+      .every((k) => Number.isFinite(row92[`leg${k}1`]) && Number.isFinite(row92[`leg${k}2`])));
+  // ستون پا وزن‌نخورده است: دلتای پای خریدِ داخل‌پول بین صفر و یک می‌ماند
+  // حتی وقتی موقعیت هزار سهم است. اگر روزی وزن‌دار شود، این رد می‌شود.
+  check('ستون یونانی پا وزن‌نخورده است، پس دلتایش بین صفر و یک می‌ماند',
+    row92.legdelta1 > 0 && row92.legdelta1 < 1 && row92.legdelta2 > 0 && row92.legdelta2 < 1,
+    `${row92.legdelta1.toFixed(3)} و ${row92.legdelta2.toFixed(3)}`);
+  // و جمع موقعیت وزن‌دار است: خرید منهای فروش، ضربدر اندازهٔ قرارداد
+  check('جمع موقعیت، همان وزن‌دارِ ستون‌های پاست',
+    near(row92.delta, size92 * (row92.legdelta1 - row92.legdelta2), 1e-6),
+    `${row92.delta.toFixed(2)}`);
+  check('تلاطم ضمنی موقعیت میانگین سادهٔ پاهای اختیار است',
+    near(row92.ivMeanPct, (row92.legIv1 + row92.legIv2) / 2, 1e-9), `${row92.ivMeanPct.toFixed(3)}`);
+  check('تلاطم تاریخی پایه به درصد می‌آید و منبعش سری است',
+    near(row92.hvPct, 45, 1e-9) && row92.hvSource === 'series', `${row92.hvPct} — ${row92.hvSource}`);
+  check('فاصلهٔ ضمنی از تاریخی، تفریق است نه نسبت',
+    near(row92.ivHvSpreadPp, row92.ivMeanPct - row92.hvPct, 1e-9));
+
+  // بدون سری کافی، تلاطم تاریخی ساخته نمی‌شود — مگر کاربر خودش اعلام کند
+  const noHv = evaluate({
+    legs: legs92, quotes: [q92(9000, 9400), q92(4000, 4400)],
+    ctx: { S: 100000, Sclose: 100000, days: 60, size: size92, qty: 1, settings: s92,
+      def: def92, underlying: 'نمونه', sigmaHist: NaN },
+  });
+  check('بی‌داده و بی‌اعلام، تلاطم تاریخی خالی می‌ماند نه صفر',
+    Number.isNaN(noHv.hvPct) && noHv.hvSource === 'none' && Number.isNaN(noHv.ivHvSpreadPp));
+  const manualHv = evaluate({
+    legs: legs92, quotes: [q92(9000, 9400), q92(4000, 4400)],
+    ctx: { S: 100000, Sclose: 100000, days: 60, size: size92, qty: 1,
+      settings: { ...s92, hvManualPct: 38 },
+      def: def92, underlying: 'نمونه', sigmaHist: NaN },
+  });
+  check('اعلام دستی کاربر جای داده نبوده می‌نشیند و برچسبش می‌ماند',
+    near(manualHv.hvPct, 38, 1e-9) && manualHv.hvSource === 'manual');
+  check('اعلام دستی روی دادهٔ واقعی نمی‌نشیند',
+    near(row92.hvPct, 45, 1e-9) && row92.hvSource === 'series');
+
+  // پای دارایی پایه: دلتای یک، بقیه صفر، و بی‌تلاطم ضمنی
+  const cc92 = byId('covered-call');
+  const ccRow = evaluate({
+    legs: buildLegs(cc92, { strikes: [110000], size: size92, days: [30] }),
+    quotes: [q92(99000, 100000), q92(4800, 5200)],
+    ctx: { S: 100000, Sclose: 100000, days: 30, size: size92, qty: 1, settings: s92,
+      def: cc92, underlying: 'نمونه', sigmaHist: 0.6 },
+  });
+  check('پای سهم دلتای یک دارد و از تلاطم و زمان اثر نمی‌گیرد',
+    ccRow.legdelta1 === 1 && ccRow.legvega1 === 0 && ccRow.legtheta1 === 0);
+  check('پای سهم تلاطم ضمنی ندارد، چون قرارداد اختیار نیست',
+    Number.isNaN(ccRow.legIv1) && Number.isFinite(ccRow.legIv2));
+
+  // ستون‌های پای نداشته اصلاً ساخته نمی‌شوند
+  const cols92 = columnsForStrategy(def92);
+  check('اسپرد دوپا، ستون یونانیِ پای سوم و چهارم نمی‌گیرد',
+    !cols92.some((c) => /^(legIv|legdelta|leggamma|legvega|legtheta|legrho)[34]$/.test(c.key))
+    && cols92.some((c) => c.key === 'legdelta2'));
+  check('سرستون یونانی پا، خودِ پا را می‌گوید نه فقط شماره‌اش',
+    cols92.find((c) => c.key === 'legdelta2').label === 'دلتا پا ۲ — فروش کال',
+    cols92.find((c) => c.key === 'legdelta2').label);
+  check('تب استراتژی نمای «یونانی پاها» دارد',
+    readSrc('../ui/tabs/strategy.mjs').includes("'یونانی پاها':"));
+}
+
+// ═══════════════════ ۹۳. لایهٔ مشترک رصد یونانی و تلاطم ═══════════════════
+group('۹۳. لایهٔ مشترک رصد — یک ورودی برای هر سه تایم‌فریم');
+{
+  const P93 = ivParams({ rFree: 0.3, divYield: 0, ivLo: 0.01, ivHi: 5, dayCountYear: 365,
+    tradingDaysYr: 240, hvWindowDays: 30, hvManualPct: 0 });
+  const legs93 = [
+    { kind: 'call', strike: 10000, expiry: 20260401, side: 'buy', ratio: 1, size: 1000, name: 'کال ۱۰' },
+    { kind: 'call', strike: 11000, expiry: 20260401, side: 'sell', ratio: 1, size: 1000, name: 'کال ۱۱' },
+  ];
+  // قیمتی که خودِ بلک‌شولز با تلاطم معلوم ساخته؛ پس تلاطم برگشتی باید همان باشد
+  const spot93 = 10500, days93 = 90, T93 = days93 / 365;
+  const px = (leg, sigma) => bsPrice(leg.kind, spot93, leg.strike, T93, 0.3, 0, sigma);
+  const prices93 = [px(legs93[0], 0.55), px(legs93[1], 0.65)];
+
+  const snap = monitorSnapshot(legs93, { spot: spot93, prices: prices93, date: 20260101 }, P93, { hvPct: 42 });
+  check('عکس لحظه، تلاطم ضمنی هر پا را جدا درمی‌آورد',
+    near(snap.ivPct[0], 55, 1e-3) && near(snap.ivPct[1], 65, 1e-3),
+    `${snap.ivPct[0].toFixed(2)} و ${snap.ivPct[1].toFixed(2)}`);
+  check('میانگین ضمنی موقعیت، میانگین سادهٔ همان دوتاست',
+    near(snap.meanIvPct, 60, 1e-3), `${snap.meanIvPct.toFixed(3)}`);
+  check('فاصلهٔ ضمنی از تاریخی تفریق است',
+    near(snap.ivHvSpreadPp, snap.meanIvPct - 42, 1e-9));
+  // سهم هر پا، جمعش دقیقاً یونانی موقعیت است — همان ادعایی که جدول تفکیک می‌کند
+  check('جمع سهم پاها دقیقاً یونانی موقعیت است',
+    ['delta', 'gamma', 'vega', 'theta', 'rho'].every((key) =>
+      near(snap.share.reduce((sum, part) => sum + part[key], 0), snap.greeks[key], 1e-9)),
+    `دلتا ${snap.greeks.delta.toFixed(3)}`);
+
+  // ——— جمعِ ناقص، جمع نیست ———
+  //
+  // پیش از این `positionGreeks` از صفر شروع می‌کرد و موقعیتی که هیچ پایش
+  // تلاطم نداده بود «دلتا ۰» می‌گرفت — عددی که «خنثای جهت» خوانده می‌شود
+  // در حالی که حرفش «نمی‌دانیم» است. قاعده در خودِ `positionGreeks` نشسته
+  // نه در لایهٔ رصد، وگرنه آزمایشگاه که از این لایه رد نمی‌شود همان موقعیت
+  // را با عدد دیگری نشان می‌داد.
+  const blind = monitorSnapshot(legs93, { spot: spot93, prices: [NaN, NaN], date: 20260101 }, P93, {});
+  check('موقعیت بی‌تلاطم، یونانی صفر نمی‌گیرد — خالی می‌ماند',
+    blind.incomplete && ['delta', 'gamma', 'vega', 'theta', 'rho'].every((key) => Number.isNaN(blind.greeks[key])),
+    `دلتا ${blind.greeks.delta}`);
+  // همین قاعده مستقیم روی `positionGreeks` هم سنجیده می‌شود، چون مسیرهایی
+  // (آزمایشگاه، قرارداد ستونی) از لایهٔ رصد رد نمی‌شوند.
+  const rawSum = positionGreeks(
+    [{ kind: 'call', side: 'buy', ratio: 1, size: 1000, strike: 10000 },
+      { kind: 'call', side: 'sell', ratio: 1, size: 1000, strike: 11000 }],
+    [{ delta: 0.6, gamma: 1e-6, vega: 12, theta: -3, rho: 4 }, null],
+  );
+  check('خودِ positionGreeks هم جمعِ ناقص را عدد نمی‌کند',
+    rawSum.incomplete && ['delta', 'gamma', 'vega', 'theta', 'rho', 'deltaShares']
+      .every((key) => Number.isNaN(rawSum[key])), `دلتا ${rawSum.delta}`);
+  const half = monitorSnapshot(legs93, { spot: spot93, prices: [prices93[0], NaN], date: 20260101 }, P93, {});
+  check('پای درآمده سر جایش می‌ماند، ولی جمعِ ناقص عدد نمی‌دهد',
+    half.incomplete && Number.isNaN(half.greeks.delta) && Number.isFinite(half.byLeg[0].delta)
+    && Number.isFinite(half.ivPct[0]) && Number.isNaN(half.ivPct[1]));
+
+  // ——— یک ورودی، سه شکل داده ———
+  const rowsDaily = [{ date: 20260101, dateLabel: '۱۴۰۴/۱۰/۱۱', baseClose: spot93, netPnl: 1000,
+    perLeg: [{ exitPrice: prices93[0] }, { exitPrice: prices93[1] }] }];
+  const rowsIntraday = [{ second: 34200, timeLabel: '09:30:00', basePrice: spot93, netPnl: 900,
+    perLeg: [{ exitPrice: prices93[0] }, { exitPrice: prices93[1] }] }];
+  const rowsBucket = [{ date: 20260101, startSecond: 34200, timeLabel: '09:30:00', basePrice: spot93, closePnl: 800,
+    perLeg: [{ price: prices93[0] }, { price: prices93[1] }] }];
+  annotateTrack(rowsDaily, { legs: legs93, shape: 'daily', hvPct: 42 }, P93);
+  annotateTrack(rowsIntraday, { legs: legs93, shape: 'intraday', date: 20260101, hvPct: 42 }, P93);
+  annotateTrack(rowsBucket, { legs: legs93, shape: 'bucket', hvPct: 42 }, P93);
+  check('هر سه شکل داده به یک عدد می‌رسند — چون یک بدنه دارند',
+    near(rowsDaily[0].greeks.delta, rowsIntraday[0].greeks.delta, 1e-9)
+    && near(rowsDaily[0].greeks.delta, rowsBucket[0].greeks.delta, 1e-9)
+    && near(rowsDaily[0].meanIvPct, rowsBucket[0].meanIvPct, 1e-9),
+    `${rowsDaily[0].greeks.delta.toFixed(4)}`);
+  check('مهر روی خود ردیف و روی هر پا می‌نشیند',
+    Number.isFinite(rowsDaily[0].perLeg[0].ivPct) && !!rowsDaily[0].perLeg[0].greeks
+    && rowsDaily[0].hvPct === 42);
+  check('سطل تایم‌فریم هم ستون سود می‌گیرد، از closePnl',
+    monitorSeries(rowsBucket)[0].netPnl === 800);
+
+  // ——— سری نمودار ———
+  const series93 = monitorSeries(rowsDaily, { legCount: 2 });
+  check('سری نمودار، هم ستون کل دارد هم ستون هر پا و هم تلاطم‌ها',
+    Number.isFinite(series93[0].delta) && Number.isFinite(series93[0].delta1)
+    && Number.isFinite(series93[0].iv2) && series93[0].hv === 42
+    && Number.isFinite(series93[0].ivHv));
+  check('ستون یونانی پا وزن‌نخورده است، مثل قرارداد ستونی',
+    near(series93[0].delta1, rowsDaily[0].perLeg[0].greeks.delta, 1e-12));
+
+  // ——— پوشش و نقاط عطف ———
+  const mixed93 = [
+    { date: 20260101, dateLabel: 'الف', baseClose: spot93, perLeg: [{ exitPrice: prices93[0] }, { exitPrice: prices93[1] }] },
+    { date: 20260102, dateLabel: 'ب', baseClose: spot93, perLeg: [{ exitPrice: prices93[0] }, { exitPrice: NaN }] },
+  ];
+  annotateTrack(mixed93, { legs: legs93, shape: 'daily', hvPct: 42 }, P93);
+  const cov93 = monitorCoverage(mixed93);
+  check('پوشش می‌گوید از چند نقطه یونانیِ کامل درآمد',
+    cov93.total === 2 && cov93.complete === 1 && cov93.partial === 1 && near(cov93.coveragePct, 50, 1e-9),
+    `${cov93.coveragePct}٪`);
+  const ex93 = monitorExtremes(mixed93);
+  check('نقاط عطف می‌گوید هر حساسیت کجا به انتهای دامنه‌اش رسید',
+    ex93.length === 6 && ex93[0].key === 'delta' && typeof ex93[0].maxAt === 'string' && ex93[0].maxAt !== '');
+
+  // ——— جهت‌گیری، ترجمهٔ همان عددها ———
+  const stance93 = monitorStance({ delta: 1200, gamma: -3, vega: -900, theta: 400 });
+  check('جهت‌گیری، عدد را به جمله ترجمه می‌کند و چیز تازه‌ای نمی‌سازد',
+    stance93.delta === 'صعودی' && stance93.gamma === 'دشمن حرکت بزرگ'
+    && stance93.vega === 'فروشندهٔ تلاطم' && stance93.theta === 'زمان به سودت کار می‌کند');
+  check('دلتای نزدیک صفر، خنثای جهت خوانده می‌شود نه صعودی',
+    monitorStance({ delta: 0.01 }).delta === 'خنثای جهت');
+
+  // ——— تلاطم تاریخی ———
+  const closes93 = Array.from({ length: 120 }, (_, i) => 1000 * Math.exp(((i % 2) ? 1 : -1) * 0.015));
+  const hvOk = histVolPct(closes93, { tradingDaysYear: 240 });
+  check('تلاطم تاریخی با داده کافی، عدد و منبعش را می‌گوید',
+    hvOk.enough && hvOk.source === 'series' && hvOk.pct > 0, `${hvOk.pct.toFixed(2)}٪`);
+  const hvShort = histVolPct(closes93.slice(0, 10), { tradingDaysYear: 240 });
+  check('داده کم، عدد نمی‌سازد و می‌گوید چند تا لازم بود',
+    !hvShort.enough && Number.isNaN(hvShort.pct) && hvShort.needed === 22 && hvShort.why.includes('۲۲'),
+    hvShort.why);
+  const hvManual = resolveHistVol(closes93.slice(0, 10), { tradingDaysYear: 240, manualPct: 37 });
+  check('اعلام دستی جای دادهٔ نبوده می‌نشیند و برچسبش می‌ماند',
+    hvManual.pct === 37 && hvManual.source === 'manual');
+  const hvIgnored = resolveHistVol(closes93, { tradingDaysYear: 240, manualPct: 37 });
+  check('اعلام دستی روی دادهٔ واقعی نمی‌نشیند و همین گفته می‌شود',
+    hvIgnored.source === 'series' && hvIgnored.manualIgnored === true);
+  const rolling93 = histVolSeries(closes93, { tradingDaysYear: 240, window: 30 });
+  check('سری غلتان، تا پنجره پر نشود عدد نمی‌سازد',
+    Number.isNaN(rolling93[10]) && Number.isFinite(rolling93.at(-1)), `${rolling93.at(-1).toFixed(2)}`);
+  check('پنجرهٔ کوتاه‌تر از کف، به کف کشیده می‌شود نه اینکه بشکند',
+    histVolSeries(closes93, { tradingDaysYear: 240, window: 5 }).filter(Number.isFinite).length > 0);
+
+  // ——— تب رصد، فقط از همین لایه می‌خواند ———
+  const gwSrc = readSrc('../ui/tabs/greeks-watch.mjs');
+  check('تب رصد یونانی، محاسبه‌ای از خودش ندارد و از لایهٔ مشترک می‌خواند',
+    gwSrc.includes("from '/core/monitor.mjs'") && gwSrc.includes('annotateTrack(')
+    && !gwSrc.includes('bsGreeks(') && !gwSrc.includes('impliedVol('));
+  check('تب رصد هر سه تایم‌فریم را دارد',
+    ['daily', 'bucket', 'intraday'].every((key) => gwSrc.includes(`['${key}',`)));
+  check('تب رصد در فهرست تب‌ها ثبت شده است',
+    readSrc('../ui/app.mjs').includes("id: 'greeks-watch'"));
+  // پنجرهٔ غلتان باید روی کل سری پایه بسته شود، نه روی روزهای همین موقعیت:
+  // یک موقعیت ده‌روزه هیچ‌وقت پنجرهٔ شصت‌روزه را پر نمی‌کند.
+  check('پنجرهٔ تلاطم تاریخی روی کل سری پایه بسته می‌شود، نه روی روزهای موقعیت',
+    gwSrc.includes('const baseSeries = seriesByIns[String(ua.ins)] || [];')
+    && gwSrc.includes('histVolSeries(baseSeries.map('));
+}
+
+// ═══════════════════ ۹۴. یونانی و تلاطم در تحلیل تاریخی ═══════════════════
+//
+// خواسته: «در هر تایم‌فریمی که سود و زیان محاسبه می‌شود، این یونانی‌ها نیز
+// به تفکیک گفته‌شده نمایش داده شوند». جدول روزبه‌روزِ تحلیل تاریخی همان
+// جایی است که سود و زیان روزانه دیده می‌شود، پس ستون یونانی باید همان‌جا
+// باشد نه در جدولی جدا — دو جدول یعنی کاربر باید تاریخ را در ذهنش تطبیق
+// بدهد.
+group('۹۴. یونانی و تلاطم در تب تحلیل تاریخی');
+{
+  const src94 = readSrc('../ui/tabs/history.mjs');
+  check('تحلیل تاریخی از همان لایهٔ مشترک می‌خواند، نه محاسبهٔ خودش',
+    src94.includes("from '/core/monitor.mjs'") && src94.includes('annotateReplay(replay,')
+    && !src94.includes('bsGreeks(') && !src94.includes('impliedVol('));
+  check('ستون یونانی و تلاطم کنار ستون سود در همان جدول روزبه‌روز است',
+    src94.includes('const greekHeads = GREEKS.map(') && src94.includes('${greekCells}<td>${ivCell(r.meanIvPct)}</td>')
+    && src94.includes('<th>ضمنی موقعیت</th><th>تاریخی پایه</th><th>ضمنی−تاریخی</th>'));
+  check('سلول هر پا، تلاطم ضمنی و یونانی خودش را هم می‌گوید',
+    src94.includes('تلاطم ${ivCell(l.ivPct)} · دلتا ${greekCell(l.greeks?.delta)}'));
+  check('مهر یونانی پیش از ساخت جدول می‌نشیند، وگرنه ستون‌ها خالی می‌مانند',
+    /const hv = annotateGreeks\(replay\);[\s\S]{0,200}paintDayTable\(replay\)/.test(src94));
+  check('پنجرهٔ تلاطم تاریخی روی کل سری پایه بسته می‌شود',
+    src94.includes('histVolSeries(baseSeries.map('));
+  check('از تحلیل تاریخی می‌شود همان موقعیت را در تب رصد باز کرد',
+    src94.includes("to: 'greeks-watch',") && src94.includes("}, 'greeks-watch');"));
+  // شمارهٔ پا در برچسب خلاصهٔ تلاطم از رابط می‌آید نه از هسته، چون باید رقم
+  // فارسی بگیرد.
+  check('برچسب پا در خلاصهٔ تلاطم از رابط می‌آید',
+    src94.includes("row.kind === 'leg' ? esc(legLabel(legs[row.index], row.index))"));
+}
+
+// ═══════════════════ ۹۵. یونانی و تلاطم در «موقعیت‌های من» ═══════════════════
+group('۹۵. یونانی و تلاطم موقعیت باز');
+{
+  const src95 = readSrc('../ui/tabs/positions.mjs');
+  check('موقعیت‌های من از همان لایهٔ مشترک می‌خواند',
+    src95.includes("from '/core/monitor.mjs'") && src95.includes('monitorSnapshot(p.legs,')
+    && !src95.includes('bsGreeks(') && !src95.includes('impliedVol('));
+  check('یونانی و تلاطم موقعیت، ستون جدول فهرست هم هست',
+    src95.includes('${GREEKS.map(({ key }) => `<td class="n">${gk(greeks.greeks?.[key])}</td>`).join(\'\')}')
+    && src95.includes('<th>تلاطم ضمنی</th>'));
+  check('پنل جزئیات، یونانی هر پا و سطر جمع وزن‌دار را جدا نشان می‌دهد',
+    src95.includes('const greekTotals =') && src95.includes('greeks.byLeg[i]?.[key]'));
+  check('تلاطم ضمنی از همان قیمت بستن می‌آید که سود از آن آمده',
+    src95.includes('prices: m.perLeg.map((leg) => leg.markPrice),'));
+
+  // موقعیت تازه سررسید ذخیره می‌کند؛ موقعیت قدیمی که ندارد، روز مانده را از
+  // «روز ورود منهای روز نگهداری» می‌گیرد. حدس‌زدن سررسید از روی آن عدد،
+  // تاریخ می‌ساخت.
+  check('موقعیت تازه سررسید قرارداد را روی پا ذخیره می‌کند',
+    src95.includes("expiry: Number(o.dataset.expiry) || 0,") && src95.includes('data-expiry="${normalizeHistoryDate(ex.endDate)}"'));
+  check('موقعیت قدیمیِ بی‌سررسید، روز مانده را از تفریق می‌گیرد نه از تاریخ ساختگی',
+    src95.includes('const daysLeftOf = (p, daysHeld)') && src95.includes('Math.max(0, atEntry - Number(daysHeld || 0))'));
+
+  // خودِ قاعدهٔ روز مانده، مستقیم سنجیده می‌شود
+  const legs95 = [{ kind: 'call', strike: 10000, side: 'buy', ratio: 1, size: 1000 }];
+  const priced95 = bsPrice('call', 11000, 10000, 60 / 365, 0.3, 0, 0.5);
+  const P95 = ivParams({ rFree: 0.3, divYield: 0, ivLo: 0.01, ivHi: 5, dayCountYear: 365 });
+  const given = monitorSnapshot(legs95, { spot: 11000, prices: [priced95], date: 0, days: [60] }, P95);
+  check('روز مانده داده‌شده، جای سررسیدِ نبوده می‌نشیند',
+    near(given.ivPct[0], 50, 1e-3), `${given.ivPct[0].toFixed(2)}٪`);
+  const noDays = monitorSnapshot(legs95, { spot: 11000, prices: [priced95], date: 0 }, P95);
+  check('بی‌سررسید و بی‌روزِ داده‌شده، تلاطمی ساخته نمی‌شود',
+    Number.isNaN(noDays.ivPct[0]) && noDays.incomplete);
+  // سررسیدِ روی پا همچنان مقدم است وقتی روزِ بیرونی داده نشده
+  const byExpiry = monitorSnapshot([{ ...legs95[0], expiry: 20260401 }],
+    { spot: 11000, prices: [priced95], date: 20260131 }, P95);
+  check('وقتی سررسید هست، روز مانده از تاریخ درمی‌آید',
+    Number.isFinite(byExpiry.ivPct[0]), `${byExpiry.ivPct[0]}`);
+}
+
+// ═══════════════════ ۹۶. سنجش در یک لحظهٔ درون‌روز ═══════════════════
+//
+// خواسته: «قسمت آزمون همه استراتژی‌ها قابلیت بررسی از مبدأ تا قیمت‌های
+// میان‌روزی در تایم بازار را داشته باشد». حالت «تا همین لحظه» از قبل بود
+// ولی یک ردیفِ روزانه از عکس تابلو می‌ساخت. آنچه نبود این بود: «اگر ساعت
+// ده و نیمِ همان روز می‌بستم چه می‌شد؟»
+group('۹۶. سنجش در یک لحظهٔ درون‌روز');
+{
+  const tape96 = {
+    // سه معامله: ۹:۳۰، ۱۰:۱۵، ۱۱:۴۵
+    A: [
+      { time: 93000, price: 100, quantity: 10, canceled: false },
+      { time: 101500, price: 130, quantity: 20, canceled: false },
+      { time: 114500, price: 190, quantity: 5, canceled: false },
+    ],
+    // فقط بعدازظهر معامله شده
+    B: [{ time: 120000, price: 55, quantity: 7, canceled: false }],
+    // معاملهٔ باطل‌شده و معاملهٔ پیش‌گشایش، هیچ‌کدام نباید بنشینند
+    C: [
+      { time: 84000, price: 900, quantity: 1, canceled: false },
+      { time: 100000, price: 800, quantity: 3, canceled: true },
+    ],
+  };
+  const at1030 = markAt(tape96.A, 10 * 3600 + 1800);
+  check('قیمت لحظه، آخرین معاملهٔ پیش از همان ثانیه است',
+    at1030.price === 130 && at1030.timeLabel === '10:15:00', `${at1030.price} در ${at1030.timeLabel}`);
+  check('حجم و ارزش تا همان لحظه شمرده می‌شوند، نه تا پایان روز',
+    at1030.volume === 30 && at1030.trades === 2 && at1030.value === 100 * 10 + 130 * 20,
+    `${at1030.volume} سهم در ${at1030.trades} معامله`);
+  check('معاملهٔ بعد از آن لحظه وارد نمی‌شود',
+    markAt(tape96.A, 12 * 3600 + 1800).price === 190);
+  check('ابزار بی‌معامله تا آن لحظه، اصلاً قیمت نمی‌گیرد',
+    markAt(tape96.B, 10 * 3600) === null);
+  check('پیش‌گشایش و معاملهٔ باطل‌شده هیچ‌کدام قیمت نمی‌سازند',
+    markAt(tape96.C, 12 * 3600 + 1800) === null);
+
+  const marks96 = marksAt(tape96, 10 * 3600 + 1800);
+  check('نگاشت لحظه فقط ابزارهای دارای معامله را دارد',
+    Object.keys(marks96).join(',') === 'A', Object.keys(marks96).join(','));
+
+  // تاریخ‌ها به همان شکلی‌اند که خوراک روزانه می‌دهد: میلادی فشرده.
+  const series96 = {
+    A: [{ date: 20260521, close: 111, last: 111, first: 90, low: 88, high: 120, vol: 900, trades: 40, value: 99900 },
+      { date: 20260522, close: 222, last: 222, first: 200, low: 190, high: 230, vol: 800, trades: 30, value: 177600 }],
+    B: [{ date: 20260521, close: 50, last: 50, vol: 5, trades: 1, value: 250 },
+      { date: 20260522, close: 60, last: 60, vol: 6, trades: 1, value: 360 }],
+  };
+  const applied = applyIntradayMark(series96, marks96, { date: 20260522, second: 10 * 3600 + 1800 });
+  const rowA = applied.series.A.find((row) => row.date === 20260522);
+  check('ردیف روز سنجش قیمت لحظه‌ای می‌گیرد و برچسبش می‌ماند',
+    rowA.close === 130 && rowA.last === 130 && rowA.intradayMark === true && rowA.markTimeLabel === '10:15:00');
+  // «کمترین/بیشترین/اولین» روز در ساعت ده و نیم هنوز کامل نشده‌اند؛ ماندنشان
+  // یعنی مبنای «کمترین قیمت روز» عددی می‌داد که هنوز وجود نداشت.
+  check('دامنهٔ روز صفر می‌شود، چون در آن لحظه هنوز کامل نشده',
+    rowA.first === 0 && rowA.low === 0 && rowA.high === 0);
+  check('روز قبلی دست‌نخورده می‌ماند',
+    applied.series.A.find((row) => row.date === 20260521).close === 111);
+  // قاعدهٔ ۲-۴ در سفت‌ترین شکلش: قیمت پایانی روز یا قیمت دیروز جایش نمی‌نشیند
+  check('ابزار بی‌قیمت در آن لحظه، ردیف آن روز را از دست می‌دهد نه اینکه قیمت کهنه بگیرد',
+    !applied.series.B.some((row) => row.date === 20260522) && applied.dropped === 1,
+    `افتاده: ${applied.dropped}`);
+  check('شمارش مهر و افت گزارش می‌شود',
+    applied.marked === 1 && applied.date === 20260522);
+  check('بی‌روزِ معتبر، ورودی دست‌نخورده برمی‌گردد',
+    applyIntradayMark(series96, marks96, { date: 0 }).series === series96);
+
+  const note96 = markNote(applied, { label: '۱۰:۳۰', total: 2 });
+  check('جمله می‌گوید چند ابزار قیمت گرفتند و چند تا افتادند، با رقم فارسی',
+    note96.includes('۱ ابزار قیمت ساعت ۱۰:۳۰') && note96.includes('۱ ابزار ردیف آن روز را از دست دادند')
+    && !/[0-9]/.test(note96), note96);
+  check('بی‌هیچ معامله، جمله ادعای آماده‌شدن نمی‌کند',
+    markNote({ marked: 0 }, { label: '۰۹:۳۰', total: 5 }).includes('ممکن نیست'));
+
+  const pbSrc = readSrc('../ui/tabs/portfolio-backtest.mjs');
+  check('آزمون همه استراتژی‌ها انتخابگر لحظهٔ سنجش دارد',
+    pbSrc.includes("id=\"pb-mark\"") && pbSrc.includes('MARK_MOMENTS.map(') && pbSrc.includes('applyIntradayMark('));
+  check('سنجش پایان روز هیچ درخواست تازه‌ای نمی‌خورد',
+    /if \(!Number\.isFinite\(second\) \|\| !second\) \{[\s\S]{0,160}return seriesByIns;/.test(pbSrc));
+  // رتبه‌بندی و جزئیات باید از یک سری بخوانند، وگرنه یکی ساعت ده و نیم را
+  // می‌گوید و دیگری پایان روز، و هیچ‌کدام غلط به نظر نمی‌رسد.
+  check('جزئیات و حساسیت از همان سری‌ای می‌خوانند که رتبه‌بندی با آن ساخته شد',
+    pbSrc.includes('runSeriesByIns = runSeries;')
+    && pbSrc.includes('seriesByIns: Object.keys(runSeriesByIns).length ? runSeriesByIns : seriesByIns'));
+  check('آزمون همه استراتژی‌ها یونانی و تلاطم همان بازپخش را نشان می‌دهد',
+    pbSrc.includes('annotateReplay(replay,') && pbSrc.includes("id=\"pb-greeks-kpis\""));
+  check('از آزمون همه استراتژی‌ها می‌شود به تب رصد یونانی رفت',
+    pbSrc.includes("to: 'greeks-watch' }, 'greeks-watch')"));
+}
+
+// ═══════════════════ ۹۷. یونانی پیش و پس از رول ═══════════════════
+group('۹۷. یونانی پیش و پس از رول');
+{
+  const src97 = readSrc('../ui/tabs/roll.mjs');
+  check('تحلیل رول یونانی دو طرف را از همان لایهٔ مشترک می‌گیرد',
+    src97.includes("from '/core/monitor.mjs'") && src97.includes('monitorSnapshot(legs,')
+    && src97.includes('r.nextLegs'));
+  check('جدول «پیش و پس از رول» ستون تغییر دارد',
+    src97.includes("id=\"roll-greeks\"") && src97.includes('const change = Number.isFinite(before) && Number.isFinite(after) ? after - before : NaN;'));
+  // نامزد رول هنوز موقعیت نیست و تاریخی روی آن ننشسته، پس روز مانده از خودِ
+  // پا می‌آید نه از سررسیدِ ذخیره‌شده.
+  check('روز مانده نامزد رول از خودِ پا می‌آید، نه از تاریخِ نداشته',
+    src97.includes("days: legs.map((l) => (l.kind === 'underlying' ? undefined : Number(l.days)))"));
+  check('ناقص بودن یک طرف، صریح گفته می‌شود نه با عدد پر می‌شود',
+    src97.includes('curGreeks.incomplete || nextGreeks.incomplete'));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

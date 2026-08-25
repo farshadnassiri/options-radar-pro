@@ -33,6 +33,9 @@ export const IV_PARAMS = [
   { key: 'ivLo', label: 'کف جست‌وجوی تلاطم', min: 0.001, max: 1, step: 0.01 },
   { key: 'ivHi', label: 'سقف جست‌وجوی تلاطم', min: 0.5, max: 20, step: 0.5 },
   { key: 'yearDays', label: 'روز سال — مخرج زمان', min: 1, max: 400, step: 1 },
+  { key: 'tradingDaysYear', label: 'روز معاملاتی سال — مخرج تلاطم تاریخی', min: 200, max: 260, step: 1 },
+  { key: 'hvWindow', label: 'پنجره تلاطم تاریخی غلتان', min: 22, max: 500, step: 1 },
+  { key: 'hvManualPct', label: 'تلاطم تاریخی دستی ٪', min: 0, max: 500, step: 1 },
 ];
 
 /** پارامترهای مؤثر: پیش‌فرض تنظیمات، با بازنویسی موضعی همین تب. */
@@ -47,6 +50,12 @@ export function ivParams(settings = {}, override = {}) {
     ivLo: pick('ivLo', settings.ivLo),
     ivHi: pick('ivHi', settings.ivHi),
     yearDays: pick('yearDays', settings.dayCountYear),
+    // سه کلید تلاطم تاریخی هم از همین‌جا می‌آیند تا مصرف‌کننده یک شیء
+    // پارامتر داشته باشد نه دو تا. مخرجشان با مخرج T عمداً یکی نیست:
+    // زمان تا سررسید تقویمی می‌گذرد و تلاطم از روز معاملاتی درمی‌آید.
+    tradingDaysYear: pick('tradingDaysYear', settings.tradingDaysYr),
+    hvWindow: pick('hvWindow', settings.hvWindowDays),
+    hvManualPct: pick('hvManualPct', settings.hvManualPct),
   };
 }
 
@@ -189,14 +198,25 @@ export function ivSummary(series = []) {
 // استفاده می‌کند. علامت و وزن پا یک‌جا اعمال می‌شود، نه دو پیاده‌سازی موازی
 // که با هم از هم دور بیفتند.
 
-/** یونانی یک پا در یک لحظه، با تلاطم ضمنی همان پا. */
-export function legGreeksAt(leg, { spot, price, days }, params = {}) {
+/**
+ * یونانی یک پا از تلاطمی که **قبلاً** درآمده.
+ *
+ * جدا از `legGreeksAt` است چون مصرف‌کننده‌ای که هم ستون تلاطم می‌خواهد هم
+ * ستون یونانی — یعنی هر جدول رصدی — وگرنه مجبور می‌شد دو بار ریشه‌یابی
+ * نیوتن را برای همان نقطه بدهد. یک مسیر محاسبه است، دو در ورودی.
+ */
+export function greeksFromIvPct(leg, { spot, days }, ivPct, params = {}) {
   if (!leg || (leg.kind !== 'call' && leg.kind !== 'put')) return null;
-  const ivPct = legIvPct(leg, { spot, price, days }, params);
   if (!Number.isFinite(ivPct)) return null;
   const yearDays = num(params.yearDays, 365);
   return bsGreeks(leg.kind, num(spot), num(leg.strike), num(days) / yearDays,
     num(params.rFree, 0), num(params.divYield, 0), ivPct / 100, yearDays);
+}
+
+/** یونانی یک پا در یک لحظه، با تلاطم ضمنی همان پا. */
+export function legGreeksAt(leg, { spot, price, days }, params = {}) {
+  if (!leg || (leg.kind !== 'call' && leg.kind !== 'put')) return null;
+  return greeksFromIvPct(leg, { spot, days }, legIvPct(leg, { spot, price, days }, params), params);
 }
 
 /**

@@ -69,6 +69,11 @@ export function onChain(fn) {
 export const chainDetail = (uaIns) => ask({ type: 'chain-detail', uaIns });
 
 // ————————————————————————— تلاطم تاریخی —————————————————————————
+//
+// کش، **نتیجهٔ خام سری** را نگه می‌دارد نه عدد نهایی: عدد نهایی به
+// `hvManualPct` تنظیمات هم بستگی دارد و آن هر لحظه می‌تواند عوض شود. اگر
+// عدد نهایی کش می‌شد، کاربر تلاطم دستی را در تنظیمات وارد می‌کرد و تا
+// بارگذاری دوبارهٔ صفحه هیچ اتفاقی نمی‌افتاد.
 const sigmaCache = new Map();
 
 export async function sigmas(uaKeys, settings) {
@@ -76,14 +81,23 @@ export async function sigmas(uaKeys, settings) {
   await Promise.all(todo.map(async (ins) => {
     try {
       const r = await (await fetch(`/api/daily?ins=${ins}&n=${settings.volDays}`)).json();
-      const closes = (r.rows || []).map((x) => x.close).filter((x) => x > 0);
-      const { histVol } = await import('/core/bs.mjs');
-      sigmaCache.set(ins, histVol(closes, settings.tradingDaysYr));
-    } catch { sigmaCache.set(ins, NaN); }
+      sigmaCache.set(ins, (r.rows || []).map((x) => x.close).filter((x) => x > 0));
+    } catch { sigmaCache.set(ins, []); }
   }));
-  const out = {};
-  for (const k of uaKeys) out[k] = sigmaCache.get(k);
-  return out;
+  const { resolveHistVol } = await import('/core/hist-vol.mjs');
+  const out = {}, source = {}, note = {};
+  for (const k of uaKeys) {
+    const hv = resolveHistVol(sigmaCache.get(k) || [], {
+      tradingDaysYear: settings.tradingDaysYr,
+      manualPct: settings.hvManualPct,
+    });
+    out[k] = Number.isFinite(hv.pct) ? hv.pct / 100 : NaN;
+    source[k] = hv.source;
+    note[k] = hv.why;
+  }
+  // سه نگاشت جدا، نه یک شیء با میدان پنهان: این خروجی با `postMessage` به
+  // ریسه می‌رود و کلون ساختاری هر چیزی جز میدان‌های شمارشی را می‌اندازد.
+  return { sigma: out, source, note };
 }
 
 // ————————————————————————— اسکن دومرحله‌ای —————————————————————————
@@ -99,10 +113,10 @@ export async function runScan({ defId, uaKeys, settings, qty, onStage }) {
     return { rows: [] };
   }
 
-  const sigmaByUa = await sigmas(uaKeys, settings);
+  const { sigma: sigmaByUa, source: sigmaSourceByUa } = await sigmas(uaKeys, settings);
 
   // ——— مرحله یک ———
-  const one = await ask({ type: 'scan', defId, uaKeys, settings, sigmaByUa, qty });
+  const one = await ask({ type: 'scan', defId, uaKeys, settings, sigmaByUa, sigmaSourceByUa, qty });
   if (one.error) { onStage?.('one', { rows: [], error: one.error }); return { rows: [] }; }
   onStage?.('one', one);
 
@@ -132,7 +146,7 @@ export async function runScan({ defId, uaKeys, settings, qty, onStage }) {
 
     const two = await ask({
       type: 'scan', defId, uaKeys: [...new Set(top.map((r) => r.uaIns))],
-      settings, sigmaByUa, qty, onlyIds: top.map((r) => r.id),
+      settings, sigmaByUa, sigmaSourceByUa, qty, onlyIds: top.map((r) => r.id),
     });
     // خطای ریسه (نه فقط خطای شبکه که catch زیر می‌گیرد) هم از همین راه
     // برمی‌گردد؛ بدون این بررسی، two.rows نبود و onStage مصرف‌کننده‌اش
@@ -154,7 +168,7 @@ export const clearOverlay = () => ask({ type: 'clear-overlay' });
  */
 export async function runScanAll({ uaKeys, settings, qty, limit = 50 }) {
   if (!uaKeys.length) return { rows: [], total: 0, funnel: null };
-  const sigmaByUa = await sigmas(uaKeys, settings);
+  const { sigma: sigmaByUa, source: sigmaSourceByUa } = await sigmas(uaKeys, settings);
   const defIds = CATALOG.filter((d) => d.feasible).map((d) => d.id);
-  return ask({ type: 'scan-all', defIds, uaKeys, settings, sigmaByUa, qty, limit });
+  return ask({ type: 'scan-all', defIds, uaKeys, settings, sigmaByUa, sigmaSourceByUa, qty, limit });
 }

@@ -281,6 +281,11 @@ const TABS = [
   { id: 'backtest', title: '🔬 آزمایشگاه آپشن', alias: 'بک‌تست سریع backtest آزمایشگاه اپشن',
     section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },
   { id: 'portfolio-backtest', title: 'آزمون همه استراتژی‌ها', section: 'پایه', mod: '/ui/tabs/portfolio-backtest.mjs', phase: 3 },
+  // رصد یونانی، تب مستقل است نه پنلی در آزمایشگاه: آزمایشگاه دربارهٔ یک
+  // آزمون است و این دربارهٔ یک موقعیت در طول عمرش. کاربری که فقط می‌خواهد
+  // حساسیت‌ها را دنبال کند، نباید از میان پانزده پنلِ دیگر رد شود.
+  { id: 'greeks-watch', title: '📐 رصد یونانی و تلاطم', alias: 'یونانی گریک دلتا گاما وگا تتا رو تلاطم ضمنی تاریخی greeks',
+    section: 'پایه', mod: '/ui/tabs/greeks-watch.mjs', phase: 3 },
   { id: 'logs', title: 'دفتر خطاها', section: 'پایه', mod: '/ui/tabs/logs.mjs', phase: 1 },
 ];
 
