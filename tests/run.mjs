@@ -9197,6 +9197,16 @@ group('۱۱۰. گزارش پایان جلسه و داشبورد تجمیعی');
         || (row.at.date * 100000 + row.at.second) >= (line[at - 1].at.date * 100000 + line[at - 1].at.second)));
     check('متن دلیل کاربر در خط زمانی می‌ماند',
       line.some((row) => row.reason === 'حمایت'));
+    check('برچسب رویداد در خط زمانی فارسی است، نه کلید انگلیسی', (() => {
+      const withEvent = recordEvent(session, { kind: 'marginCall', detail: 'کسری' }).session;
+      const rows = sessionTimeline(withEvent);
+      const hit = rows.find((row) => row.kind === 'marginCall');
+      return hit?.label === 'کال مارجین' && !/[A-Za-z]/.test(hit.label);
+    })());
+    check('برچسب «موقعیت باز شد» هم ترجمه دارد', (() => {
+      const opened = recordEvent(session, { kind: 'open', detail: 'x' }).session;
+      return sessionTimeline(opened).some((row) => row.label === 'موقعیت باز شد');
+    })());
   }
 
   // ——— داشبورد تجمیعی ———

@@ -54,7 +54,11 @@ import {
   EXIT_RULES, EXIT_RULE_BY_KEY, NO_OPTION_STOP_NOTE,
   walkMoments, attemptClose, makeEvent, eventSummary,
 } from '/core/bereket-events.mjs';
-import { aliasMap, indexSeries, moneynessLabel, sizeLabel, dayLabel, leakCheck, reveal } from '/core/bereket-anon.mjs';
+import { aliasMap, indexSeries, moneynessLabel, moneynessPct, sizeLabel, dayLabel, leakCheck, reveal } from '/core/bereket-anon.mjs';
+import { sessionReport } from '/core/bereket-report.mjs';
+import {
+  SLICES, sliceSessions, calibration, sampleNote, headlineMetrics,
+} from '/core/bereket-stats.mjs';
 import { bookAt } from '/core/book-history.mjs';
 import { markAt } from '/core/intraday-mark.mjs';
 import * as feed from '/ui/bereket-data.mjs';
@@ -229,6 +233,15 @@ export async function mount(root, { state }) {
       <p class="backtest-table-note" id="bk-events-note"></p>
     </section>
 
+    <section class="card" id="bk-report-card" hidden>${headBlock('گزارش', 'چه شد — و نسبت به چه؟', 'مازاد، نه بازده مطلق')}
+      <p class="backtest-table-note" id="bk-report-headline"></p>
+      <div class="backtest-kpis" id="bk-report-kpis"></div>
+      <div id="bk-report-bench"></div>
+      <div id="bk-report-accuracy"></div>
+      <div id="bk-report-timeline"></div>
+      <p class="backtest-table-note" id="bk-report-warning" hidden></p>
+    </section>
+
     <section class="card">${headBlock('پایان', 'بستن جلسه', 'نام و تاریخ فقط اینجا فاش می‌شوند')}
       <div class="backtest-form">
         <button type="button" class="ghost" id="bk-end">پایان جلسه</button>
@@ -237,6 +250,17 @@ export async function mount(root, { state }) {
       <div id="bk-reveal"></div>
       <p class="backtest-table-note">جلسهٔ رهاشده هم در آمار شمرده می‌شود و در گزارش جدا نمایش داده می‌شود — رها کردن جلسه‌ای که دارد بد پیش می‌رود، خودش یک الگوی رفتاری است.</p>
     </section>
+  </section>
+
+  <section class="card" id="bk-dash-card">${headBlock('روی همهٔ جلسه‌ها', 'داشبورد تجمیعی', 'تا آستانه نگذری، هر عدد برچسب دارد')}
+    <div class="backtest-form">
+      <label>برش<select id="bk-slice">${SLICES.map((slice) => `<option value="${esc(slice.key)}">${esc(slice.label)}</option>`).join('')}</select></label>
+      <button type="button" class="ghost" id="bk-dash-load">دریافت جلسه‌ها</button>
+    </div>
+    <div class="backtest-kpis" id="bk-dash-kpis"></div>
+    <div id="bk-dash-table"></div>
+    <div id="bk-dash-calib"></div>
+    <p class="backtest-table-note" id="bk-dash-note"></p>
   </section>`;
 
   const setStatus = (text, isError = false) => {
@@ -727,7 +751,9 @@ export async function mount(root, { state }) {
     $('bk-build-card').hidden = true;
     $('bk-dist-card').hidden = true;
     session = recordEvent(session, {
-      kind: 'open', detail: `${priced.def.name} — ${filled} قرارداد · رتبهٔ موتور ${priced.rank}`, at: position.openedAt,
+      // رقم فارسی: این متن مستقیم در خط زمانی گزارش می‌نشیند و رقم لاتین
+      // در خروجی نمایشی ایراد است. ممیزی مرورگری گرفتش.
+      kind: 'open', detail: `${priced.def.name} — ${faDigits(String(filled))} قرارداد · رتبهٔ موتور ${faDigits(String(priced.rank))}`, at: position.openedAt,
     }).session;
     await save();
     await paintTrack();
@@ -1058,10 +1084,73 @@ export async function mount(root, { state }) {
   $('bk-end').addEventListener('click', () => finish(false));
   $('bk-abandon').addEventListener('click', () => finish(true));
 
+  /**
+   * همان ساختار روی چند نماد دیگر، در همان بازه.
+   *
+   * معیار دوم سند، و گران‌ترین بخش گزارش: برای هر نماد باید قرارداد
+   * هم‌شکل پیدا شود و در دو سر بازه قیمت بخورد. سقفش سه نماد است — نه
+   * چون سه عدد کافی است، بلکه چون هر نماد چند درخواست است و بندِ «تب
+   * نباید فریز کند» هم بند است.
+   *
+   * نمادی که قرارداد هم‌شکل ندارد **حذف می‌شود**، نه اینکه با صفر
+   * بنشیند. صفر یعنی «ساختار آنجا هیچ نداد» که ادعای دیگری است.
+   */
+  async function peerReturns(limit = 3) {
+    if (!position?.legs?.length) return [];
+    const from = session.start.date, to = gate.now().date;
+    const others = [...chain.values()].filter((item) => String(item.ins) !== String(ua.ins)).slice(0, limit);
+    const out = [];
+    for (const other of others) {
+      try {
+        const pool = flattenActiveContracts(other, state.settings.blockedExpiries || '');
+        const legs = [];
+        for (const leg of position.legs) {
+          if (leg.kind === 'underlying') { legs.push({ ...leg, ins: String(other.ins) }); continue; }
+          // هم‌شکل یعنی همان نوع و همان فاصله از پایه، نه همان قیمت اعمال.
+          const wantPct = moneynessPct(leg.strike, position.spotAtEntry);
+          const rows = await feed.loadDailies(String(other.ins)).catch(() => []);
+          const spotThen = Number(rows.find((row) => normalizeHistoryDate(row.date) === from)?.close);
+          if (!(spotThen > 0)) throw new Error('بی‌قیمت');
+          const want = spotThen * (1 + wantPct / 100);
+          const match = pool.filter((row) => row.kind === leg.kind)
+            .sort((a, b) => Math.abs(a.strike - want) - Math.abs(b.strike - want))[0];
+          if (!match) throw new Error('بی‌قرارداد');
+          legs.push({ ...leg, ins: String(match.ins), strike: Number(match.strike), size: Number(match.size) || leg.size });
+        }
+        const priceOn = async (date) => {
+          const values = [];
+          for (const leg of legs) {
+            const rows = await feed.loadDailies(String(leg.ins)).catch(() => []);
+            const row = rows.find((item) => normalizeHistoryDate(item.date) === date);
+            const close = Number(row?.close);
+            if (!(close > 0)) return null;
+            values.push(close);
+          }
+          return values;
+        };
+        const open = await priceOn(from);
+        const close = await priceOn(to);
+        if (!open || !close) throw new Error('بی‌قیمت');
+        const pnl = legs.reduce((sum, leg, at) => {
+          const sign = leg.side === 'sell' ? -1 : 1;
+          return sum + sign * (Number(leg.ratio) || 1) * (Number(leg.size) || 1) * (close[at] - open[at]);
+        }, 0);
+        const spent = legs.reduce((sum, leg, at) => {
+          const sign = leg.side === 'sell' ? -1 : 1;
+          return sum + Math.abs(sign * (Number(leg.ratio) || 1) * (Number(leg.size) || 1) * open[at]);
+        }, 0);
+        if (!(spent > 0)) throw new Error('بی‌مخرج');
+        out.push({ ins: String(other.ins), name: nameOf(other, ''), returnPct: (pnl / spent) * 100 });
+      } catch { /* نماد بی‌قرارداد یا بی‌قیمت حذف می‌شود، نه اینکه صفر بگیرد */ }
+    }
+    return out;
+  }
+
   async function finish(abandoned) {
     const result = closeSession(session, { abandoned, closedAt: Date.now() });
     if (!result.ok) return;
     session = result.session;
+    await buildReport();
     await save();
     const revealed = reveal({ session, aliases, names: Object.fromEntries([[String(ua.ins), nameOf(ua, '')], ...contracts.map((c) => [String(c.ins), c.name || ''])]) });
     const summary = sessionSummary(session);
@@ -1080,6 +1169,147 @@ export async function mount(root, { state }) {
     $('bk-hero-state').textContent = summary.stateLabel;
     // جلسه بسته شد، پس نام دیگر رازی نیست و کارت شروع می‌تواند برگردد.
     $('bk-start-card').hidden = false;
+  }
+
+  /**
+   * ساخت گزارش پایان جلسه و نشاندن خلاصه‌اش روی خود جلسه.
+   *
+   * خلاصه ذخیره می‌شود چون داشبورد تجمیعی از همان می‌خواند: بازساختن
+   * گزارش هر جلسه هنگام باز کردن داشبورد، یعنی ده‌ها بار همان محاسبه و
+   * ده‌ها درخواست شبکه برای عددی که تغییر نمی‌کند.
+   */
+  async function buildReport() {
+    if (!position) { $('bk-report-card').hidden = true; return; }
+    const history = await gate.history(String(ua.ins));
+    const rows = history.rows || [];
+    const spotNow = Number(rows[rows.length - 1]?.close);
+    const actualMovePct = position.spotAtEntry > 0 && spotNow > 0
+      ? ((spotNow - position.spotAtEntry) / position.spotAtEntry) * 100 : NaN;
+
+    const decomposed = decomposePnl({
+      legs: position.legs, track,
+      entryCost: position.entryCost, exitCost: null,
+      marginNet: position.marginState?.blocked || 0,
+      rFree: ivP().rFree, days: Math.max(0, track.length - 1),
+      residualWarnPct: Number(state.settings.bkResidualWarnPct) || 20,
+    });
+    const netPnl = decomposed.net * position.size;
+    const capital = Number(position.marginState?.capital?.value) * position.size;
+
+    $('bk-report-headline').textContent = 'در حال ساختن معیارهای مقایسه…';
+    const peers = await peerReturns(3);
+    const report = sessionReport({
+      session, netPnl, capital, baseRows: rows, fees: fees(), peers, actualMovePct,
+    });
+    paintReport(report, peers);
+
+    // خلاصهٔ ماندگار برای داشبورد.
+    const firstLeg = position.legs.find((leg) => leg.kind !== 'underlying');
+    session = {
+      ...session,
+      summary: {
+        defName: position.def?.name || '',
+        regime: session.regime,
+        daysToExpiry: firstLeg?.expiry ? daysTo(firstLeg.expiry, session.start.date) : NaN,
+        moneynessPct: firstLeg ? moneynessPct(firstLeg.strike, position.spotAtEntry) : NaN,
+        ivPercentile: NaN,
+        confidence: lastDecision(session)?.view?.confidence,
+        holdDays: Math.max(0, track.length - 1),
+        excessBuyHoldPct: report.excessBuyHold,
+        returnPct: report.returnPct,
+        forecastHit: report.accuracy.ok ? report.accuracy.hit : null,
+        myRank: priced?.rank ?? NaN,
+        candidateCount: candidates.length,
+        state: session.state,
+        manualStart: session.manualStart,
+        practice: session.practice,
+      },
+    };
+  }
+
+  function paintReport(report, peers) {
+    $('bk-report-card').hidden = false;
+    $('bk-report-headline').textContent = report.ok ? report.headline : `${report.headline} ${report.why}`;
+    $('bk-report-headline').toggleAttribute('data-error', !report.ok);
+    $('bk-report-kpis').innerHTML = kpis([
+      ['مازاد بر نگهداری ساده', pctCell(report.excessBuyHold)],
+      ['مازاد بر همان ساختار جای دیگر', pctCell(report.excessPeer)],
+      ['بازده موقعیت', pctCell(report.returnPct)],
+      ['نگهداری ساده', pctCell(report.buyHold.ok ? report.buyHold.netPct : NaN)],
+      ['رژیم شروع', esc(regimeLabel(report.regime))],
+      ['وضعیت', esc(report.stateLabel)],
+    ]);
+    $('bk-report-bench').innerHTML = table(['نماد', 'بازده همان ساختار'],
+      (peers || []).map((row) => [td(esc(row.name || row.ins)), td(pctCell(row.returnPct))]),
+      'همان ساختار روی هیچ نماد دیگری ارزیابی نشد — بدون این، گزارش معیار دومش را ندارد.');
+    $('bk-report-accuracy').innerHTML = report.accuracy.ok
+      ? table(['جهت اعلامی', 'حرکت واقعی', 'خطای بزرگی', 'اطمینان اعلامی'], [[
+        td(esc(report.accuracy.directionLabel) + (report.accuracy.hit ? ' ✓' : ' ✗')),
+        td(pctCell(report.accuracy.actualPct)),
+        td(pctCell(report.accuracy.magnitudeError)),
+        td(pctCell(num100(report.accuracy.confidence))),
+      ]])
+      : `<p class="empty-note">${esc(report.accuracy.why)}</p>`;
+    $('bk-report-timeline').innerHTML = table(['لحظه', 'چه شد', 'شرح', 'دلیل تو'],
+      report.timeline.map((row) => [
+        td(esc(anonOn() ? dayLabel(row.at?.date, session.start.date, calendar) : faDigits(historyDateLabel(row.at?.date)))),
+        td(esc(row.label)), td(esc(row.detail || '—')), td(esc(row.reason || '')),
+      ]));
+    const warn = $('bk-report-warning');
+    warn.hidden = !report.warning;
+    warn.textContent = report.warning;
+    warn.toggleAttribute('data-error', !!report.warning);
+  }
+
+  const num100 = (value) => (Number.isFinite(Number(value)) ? Number(value) * 100 : NaN);
+
+  // ——————————————————————— داشبورد تجمیعی ———————————————————————
+
+  $('bk-dash-load').addEventListener('click', paintDashboard);
+  $('bk-slice').addEventListener('change', paintDashboard);
+
+  async function paintDashboard() {
+    $('bk-dash-note').textContent = 'در حال خواندن جلسه‌ها…';
+    try {
+      const saved = await feed.listSessions();
+      const rows = saved.map((row) => ({ ...(row.summary || {}), practice: row.practice, state: row.state }))
+        .filter((row) => Object.keys(row).length > 2);
+      if (!rows.length) {
+        $('bk-dash-kpis').innerHTML = '';
+        $('bk-dash-table').innerHTML = '';
+        $('bk-dash-calib').innerHTML = '';
+        $('bk-dash-note').textContent = 'هنوز جلسهٔ بسته‌شده‌ای نیست. داشبورد پس از اولین جلسهٔ کامل پر می‌شود.';
+        return;
+      }
+      const head = headlineMetrics(rows);
+      $('bk-dash-kpis').innerHTML = kpis([
+        ['جلسه', int(head.count)],
+        ['دقت پیش‌بینی', pctCell(head.forecastAccuracyPct)],
+        ['مازاد میانگین', pctCell(head.excessMeanPct)],
+        ['بازده میانگین', pctCell(head.returnMeanPct)],
+        ['رتبهٔ میانگین انتخاب', small(head.meanRank)],
+        ['رهاشده', int(head.abandoned)],
+      ]);
+      const sliced = sliceSessions(rows, $('bk-slice').value);
+      $('bk-dash-table').innerHTML = table(
+        ['گروه', 'جلسه', 'مازاد میانگین', 'بازده میانگین', 'نرخ برد', 'دقت پیش‌بینی', 'کفایت نمونه'],
+        sliced.groups.map((group) => [
+          td(esc(group.key)), td(int(group.count)),
+          td(pctCell(group.excessMeanPct)), td(pctCell(group.returnMeanPct)),
+          td(pctCell(group.winRatePct)), td(pctCell(group.forecastAccuracyPct)),
+          td(esc(sampleNote(group)), group.enough ? '' : 'neg'),
+        ]));
+      const calib = calibration(rows);
+      $('bk-dash-calib').innerHTML = table(['سطل اطمینان', 'اطمینان اعلامی', 'دقت واقعی', 'جلسه', 'کفایت'],
+        calib.points.map((point) => [
+          td(esc(point.bucket)), td(pctCell(point.statedPct)), td(pctCell(point.actualPct)),
+          td(int(point.count)), td(point.enough ? 'کافی' : 'ناکافی', point.enough ? '' : 'neg'),
+        ]));
+      $('bk-dash-note').textContent = `${head.selectionNote} ${calib.note} ${sampleNote(head)}`;
+    } catch (error) {
+      $('bk-dash-note').textContent = errorText(error, 'جلسه‌ها خوانده نشدند.');
+      logError(error, 'bereket:dash');
+    }
   }
 
   async function save() {

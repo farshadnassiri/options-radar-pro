@@ -38,6 +38,7 @@ import { tradeTimeLabel } from './backtest.mjs';
 import { secondToHms } from './book-history.mjs';
 
 export const EVENT_KINDS = {
+  open: 'موقعیت باز شد',
   marginCall: 'کال مارجین',
   expiry: 'سررسید',
   halt: 'توقف نماد',

@@ -27,6 +27,7 @@
 import { num } from './num.mjs';
 import { normalizeHistoryDate, daysBetween } from './history.mjs';
 import { VIEW_DIRECTIONS, SESSION_STATES } from './bereket-session.mjs';
+import { EVENT_KINDS } from './bereket-events.mjs';
 
 const faInt = (n) => String(Math.round(num(n, 0))).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
 const faNum1 = (n) => (Number.isFinite(num(n, NaN)) ? num(n).toFixed(1) : '—')
@@ -161,7 +162,13 @@ export function sessionTimeline(session) {
     }
   }
   for (const event of session.events || []) {
-    out.push({ at: event.at, kind: event.kind, label: event.kind, detail: event.detail || '', reason: '' });
+    // برچسب فارسیِ رویداد. نسخهٔ اول کلید انگلیسی را مستقیم چاپ می‌کرد و
+    // در خط زمانی «open» می‌نشست کنار «نظر ثبت شد».
+    out.push({
+      at: event.at, kind: event.kind,
+      label: EVENT_KINDS[event.kind] || event.kind,
+      detail: event.detail || '', reason: '',
+    });
   }
   return out.sort((a, b) => {
     const ka = num(a.at?.date, 0) * 100000 + num(a.at?.second, 0);
