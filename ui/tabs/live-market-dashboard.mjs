@@ -11,6 +11,7 @@ import {
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { createOpenViewBaseSyncGate } from '/ui/open-view-selection.mjs';
 
 // شش اسلات، و بدون چرخش. اسلات هفتم یعنی رنگی که با یکی از شش تای قبلی
 // اشتباه گرفته می‌شود؛ سریِ هفتم باید در «بقیه» جمع شود، نه رنگ تازه بگیرد.
@@ -601,6 +602,7 @@ export async function mount(root, { state, api }) {
   let activeMode = DASHBOARD_MODES[0].id;
   const activeViews = Object.fromEntries(DASHBOARD_MODES.filter((mode) => mode.views.length).map((mode) => [mode.id, mode.views[0][0]]));
   let loading = false, paused = false, timer = null, nextAt = 0, tape = [], openViewMounted = false;
+  const openViewBaseSync = createOpenViewBaseSyncGate();
   let intervalSec = Math.max(5, Math.min(60, Number(localStorage.getItem('options-radar:dashboard-interval')) || Number(state.settings.watchIntervalSec) || 15));
   $('dd-interval').value = String(intervalSec);
 
@@ -644,6 +646,10 @@ export async function mount(root, { state, api }) {
       host.innerHTML = '<p class="empty-note">در حال آماده‌سازی تحلیل چندروزه…</p>';
       const mod = await import('/ui/tabs/open-view.mjs'); await mod.mount(host, { state }); openViewMounted = true;
     }
+    // تیک خودکار دوباره به `paintView` می‌رسد، اما حق ندارد انتخاب مستقلی را
+    // که کاربر داخل «نگاه باز» انجام داده با نماد بالای داشبورد جایگزین کند.
+    // این مجوز فقط در ورود نخست یا رویداد صریح `dd-underlying` مصرف می‌شود.
+    if (!openViewBaseSync.consume()) return;
     const base = host.querySelector('#ov-base'), value = $('dd-underlying').value;
     if (base && value && base.value !== value && [...base.options].some((option) => option.value === value)) {
       base.value = value; base.dispatchEvent(new Event('change'));
@@ -956,7 +962,10 @@ export async function mount(root, { state, api }) {
     await paintView();
   }));
   $('dd-scope').addEventListener('change', async () => { fillSelectors(true); await fetchTape(); await paintView(); });
-  $('dd-underlying').addEventListener('change', async () => { fillSelectors(true); await fetchTape(); await paintView(); });
+  $('dd-underlying').addEventListener('change', async () => {
+    openViewBaseSync.request();
+    fillSelectors(true); await fetchTape(); await paintView();
+  });
   $('dd-expiry').addEventListener('change', async () => { fillSelectors(true); await fetchTape(); await paintView(); });
   $('dd-contract').addEventListener('change', async () => { await fetchTape(); await paintView(); });
   root.querySelectorAll('#dd-board-metric').forEach((select) => {
