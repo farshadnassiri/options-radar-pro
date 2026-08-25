@@ -11,6 +11,10 @@ import { mountDateWheel } from '/ui/datewheel.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
+import { MARK_MOMENTS, marksAt, applyIntradayMark, markNote } from '/core/intraday-mark.mjs';
+import { ivParams } from '/core/leg-iv.mjs';
+import { resolveHistVol } from '/core/hist-vol.mjs';
+import { GREEKS, annotateReplay, monitorGreekSummary, monitorVolSummary } from '/core/monitor.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -97,6 +101,15 @@ export async function mount(root, { state }) {
   <section id="pb-work" hidden>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود همه استراتژی‌ها</h2></div><span id="pb-entry-market">—</span></div><div id="pb-entry-date"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ مقایسه نهایی</h2></div><span id="pb-exit-market">—</span></div><div id="pb-exit-date"></div></section></div>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><h2>مبنای قیمت ورود</h2><span>مشاهده‌شده برای اجرای دسته‌ای</span></div>${basisRail('pb-entry-basis', 'LAST')}<p class="portfolio-note">پس از انتخاب هر ترکیب، قیمت دستی هر پا جداگانه قابل ویرایش است.</p></section><section class="card"><div class="section-head"><h2>مبنای قیمت خروج</h2><span>یکسان برای مقایسه منصفانه</span></div>${basisRail('pb-exit-basis', 'LAST')}</section></div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">لحظهٔ سنجش</p><h2>پایان روز، یا یک ساعت مشخص از همان روز</h2></div><span id="pb-mark-state">پایان روز سنجش</span></div>
+      <div class="portfolio-form">
+        <label>لحظهٔ خروج<select id="pb-mark">
+          <option value="">پایان روز سنجش — قیمت پایانی همان روز</option>
+          ${MARK_MOMENTS.map(([second, label]) => `<option value="${second}">ساعت ${label} همان روز</option>`).join('')}
+        </select></label>
+      </div>
+      <p class="portfolio-note" id="pb-mark-note">با انتخاب یک ساعت، قیمت خروج هر قرارداد آخرین معاملهٔ پیش از همان لحظه می‌شود و ریزمعاملهٔ روز سنجش گرفته می‌شود. قراردادی که تا آن لحظه معامله نشده قیمت نمی‌گیرد و ترکیب‌های وابسته‌اش از رتبه‌بندی بیرون می‌مانند — قیمت پایانی روز یا قیمت دیروز جایش نمی‌نشیند. حجم و ارزش هم تا همان لحظه شمرده می‌شوند، پس غربال نقدشوندگی روی عدد واقعیِ آن ساعت می‌نشیند نه عدد پایان روز.</p>
+    </section>
     <section class="card portfolio-run"><div><p class="eyebrow">مرحله دوم</p><h2>ساخت و بازپخش دسته‌ای</h2><p>فقط ترکیبی وارد رتبه‌بندی می‌شود که دقیقاً در روز سنجش برای همه پاها قیمت و نقدشوندگی معتبر داشته باشد.</p></div><button type="button" class="primary" id="pb-run">اجرای همه استراتژی‌ها</button></section>
   </section>
   <section id="pb-report" hidden>
@@ -115,6 +128,12 @@ export async function mount(root, { state }) {
   const $ = (id) => root.querySelector(`#${id}`);
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
   let chain = new Map(), ua = null, seriesByIns = {}, baseDates = [], resultRows = [], report = null, generated = [], activeWorker = null, selectedResult = null;
+  // سری‌هایی که **آخرین اجرا** با آن‌ها انجام شد. با پایان روز، همان
+  // `seriesByIns` است؛ با لحظهٔ درون‌روز، نسخهٔ مهرخورده. پنل جزئیات و
+  // تحلیل حساسیت باید از همین بخوانند، وگرنه رتبه‌بندی ساعت ده و نیم را
+  // می‌گوید و جزئیاتِ همان ردیف، پایان روز را — و هیچ‌کدام غلط به نظر
+  // نمی‌رسد.
+  let runSeriesByIns = {};
   // روز جاریِ چسبانده‌شده. صفر یعنی همه‌چیز بسته‌شده است.
   let liveDate = 0;
   const setStatus = (text, error = false) => { status.textContent = text; status.toggleAttribute('data-error', error); };
@@ -126,7 +145,7 @@ export async function mount(root, { state }) {
     minLegVolume: Math.max(0, safeNum($('pb-leg-volume').value)),
   });
   const replayArgs = (item, manualEntry = {}) => ({
-    legs: item.legs, seriesByIns, baseIns: String(ua.ins),
+    legs: item.legs, seriesByIns: Object.keys(runSeriesByIns).length ? runSeriesByIns : seriesByIns, baseIns: String(ua.ins),
     startDate: Number($('pb-entry-date').dataset.value), endDate: Number($('pb-exit-date').dataset.value),
     entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST',
     manualEntry, units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
@@ -188,6 +207,7 @@ export async function mount(root, { state }) {
         return payload;
       }));
       seriesByIns = {};
+      runSeriesByIns = {};
       for (const payload of payloads) for (const [ins, value] of Object.entries(payload)) seriesByIns[ins] = value.rows || [];
       // روز جاری پس از فهرست بسته‌شده می‌نشیند، نه به‌جای آن. اگر نچسبد،
       // همان سری‌های بسته‌شده برمی‌گردند و رفتار دقیقاً قبلی می‌ماند.
@@ -284,16 +304,61 @@ export async function mount(root, { state }) {
     };
   }
 
+  /**
+   * یونانی و تلاطم همان بازپخشی که جدول سود را ساخت.
+   *
+   * مهر روی همان `replay` می‌نشیند، نه یک بازپخش دوم — همان قاعده‌ای که در
+   * تحلیل تاریخی هم هست: دو بازپخش یعنی «دلتای این روز» و «سود این روز»
+   * می‌توانند از دو ردیف متفاوت بیایند.
+   */
+  function renderGreeks(replay) {
+    const params = ivParams(state.settings, {});
+    const closes = (seriesByIns[String(ua?.ins)] || []).map((row) => Number(row.close)).filter((value) => value > 0);
+    const hv = resolveHistVol(closes, {
+      tradingDaysYear: params.tradingDaysYear, window: params.hvWindow, manualPct: params.hvManualPct,
+    });
+    annotateReplay(replay, { hvPct: hv.pct, hvSource: hv.source }, params);
+    const rows = replay.rows.filter((row) => row.status !== 'missing');
+    const legs = replay.priced;
+    const last = rows.at(-1);
+    const gk = (value) => (Number.isFinite(value) ? fmt.small(value) : '—');
+    const ivCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
+
+    $('pb-greeks-state').textContent = `${fmt.int(rows.length)} روز مهرخورده`;
+    $('pb-greeks-note').textContent = hv.source === 'manual'
+      ? `تلاطم تاریخی از سری قیمت درنیامد؛ ${hv.why}`
+      : hv.enough
+        ? 'یونانی هر پا از تلاطم ضمنی همان پا می‌آید و جمعِ موقعیت وزن‌دار است. پارامترها در تنظیمات، بخش «یونانی‌ها، تلاطم و احتمال» قابل تغییرند.'
+        : `تلاطم تاریخی ساخته نشد؛ ${hv.why}`;
+    $('pb-greeks-kpis').innerHTML = [
+      ...GREEKS.map(({ key, label }) => [label, gk(last?.greeks?.[key]), signTone(last?.greeks?.[key])]),
+      ['تلاطم ضمنی موقعیت', ivCell(last?.meanIvPct), ''],
+      ['تلاطم تاریخی پایه', ivCell(last?.hvPct), ''],
+    ].map(([label, value, tone]) => `<article class="${tone}"><span>${esc(label)}</span><b>${value}</b></article>`).join('');
+
+    const cells = (list) => `<tr>${list.map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
+    $('pb-greeks-summary').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>یونانی</th><th>واحد</th><th>مشاهده</th><th>ابتدا</th><th>انتها</th><th>تغییر</th><th>کمینه</th><th>بیشینه</th></tr></thead><tbody>${
+      monitorGreekSummary(rows).map((row) => cells([esc(row.label), esc(row.unit), fmt.int(row.samples),
+        gk(row.first), gk(row.last), gk(row.change), gk(row.min), gk(row.max)])).join('')}</tbody></table>`;
+    $('pb-vol-summary').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>سری</th><th>مشاهده</th><th>ابتدا</th><th>انتها</th><th>تغییر</th><th>کمینه</th><th>بیشینه</th></tr></thead><tbody>${
+      monitorVolSummary(rows, { legs }).map((row) => cells([
+        row.kind === 'leg' ? `${faDigits(row.index + 1)} · ${esc(nameOf(legs[row.index], 'پا'))}` : esc(row.label),
+        fmt.int(row.samples), ivCell(row.first), ivCell(row.last),
+        gk(row.changePp), ivCell(row.min), ivCell(row.max)])).join('')}</tbody></table>`;
+  }
+
   function showDetail(item) {
     selectedResult = item;
     root.querySelectorAll('[data-result]').forEach((row) => row.classList.toggle('selected', row.dataset.result === item.id));
     const detail = $('pb-detail'); detail.hidden = false;
     const replay = replayHistory(replayArgs(item));
     if (!replay.ok) { detail.innerHTML = `<section class="card"><p class="empty-note">${esc(replay.error)}</p></section>`; return; }
-    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">ادامه در آزمایشگاه آپشن</button><button type="button" class="ghost" id="pb-live-watch">رصد زنده با معاملات امروز</button></div></div><div id="pb-detail-result"></div></section>
+    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">ادامه در آزمایشگاه آپشن</button><button type="button" class="ghost" id="pb-live-watch">رصد زنده با معاملات امروز</button><button type="button" class="ghost" id="pb-greeks-watch">رصد یونانی و تلاطم</button></div></div><div id="pb-detail-result"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">قیمت دستی واقعی برای هر قرارداد</p><h2>بازمحاسبه بدون دست‌کاری قیمت سایر پاها</h2></div><button type="button" class="primary" id="pb-manual-run">بازمحاسبه دستی</button></div><div class="portfolio-manual">${replay.priced.map((leg, index) => `<label>${fmt.int(index + 1)} · ${esc(nameOf(leg, 'پایه'))}<input type="number" min="0" step="1" data-manual="${index}" value="${leg.price}"></label>`).join('')}</div></section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">حساسیت، در کنار سود</p><h2>یونانی‌ها و تلاطم این ترکیب</h2></div><span id="pb-greeks-state">—</span></div><p class="portfolio-note" id="pb-greeks-note"></p><div class="backtest-kpis" id="pb-greeks-kpis"></div><div class="history-analysis-grid"><div><div class="section-head"><h3>خلاصهٔ یونانی موقعیت</h3></div><div id="pb-greeks-summary" class="history-table-wrap"></div></div><div><div class="section-head"><h3>خلاصهٔ تلاطم</h3></div><div id="pb-vol-summary" class="history-table-wrap"></div></div></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">تحلیل حساسیت پویا</p><h2>اگر قیمت ورود یا مبنای خروج فرق می‌کرد</h2></div><div class="portfolio-shock-controls"><label>دامنه شوک<input id="pb-shock-range" type="number" min="1" max="50" step="1" value="10"></label><label>گام<input id="pb-shock-step" type="number" min="1" max="25" step="1" value="5"></label></div></div><div id="pb-sensitivity"></div></section>`;
     renderReplay(item, replay);
+    renderGreeks(replay);
     renderSensitivity(item, replayArgs(item));
     detail.querySelector('#pb-manual-run').onclick = () => {
       const manualEntry = Object.fromEntries([...detail.querySelectorAll('[data-manual]')].map((input) => [input.dataset.manual, safeNum(input.value, NaN)]));
@@ -303,6 +368,12 @@ export async function mount(root, { state }) {
     };
     detail.querySelector('#pb-watch').onclick = () => watchInBacktest(item, false);
     detail.querySelector('#pb-live-watch').onclick = () => watchInBacktest(item, true);
+    // همان نقشهٔ انتقال، فقط با مقصد دیگر. هر دو تب یک ورودی می‌خواهند و
+    // قرارداد دوم یعنی دو جا که باید هم‌زمان به‌روز بمانند.
+    detail.querySelector('#pb-greeks-watch').onclick = () => {
+      const plan = handoffPlanFor(item, false);
+      goHandoff(state, { ...plan, to: 'greeks-watch' }, 'greeks-watch');
+    };
     const updateSensitivity = () => renderSensitivity(item, replayArgs(item));
     detail.querySelector('#pb-shock-range').oninput = updateSensitivity;
     detail.querySelector('#pb-shock-step').oninput = updateSensitivity;
@@ -317,21 +388,81 @@ export async function mount(root, { state }) {
    * از نو محاسبه می‌کند — اگر عددی از اینجا کپی می‌شد، دو تب می‌توانستند دو
    * حرف بزنند و معلوم نبود کدام مال کدام محاسبه است.
    */
+  /** نقشهٔ انتقال یک ردیف — یک قرارداد، چند مقصد. */
+  const handoffPlanFor = (item, live = false) => ({
+    to: 'backtest', from: 'portfolio-backtest',
+    uaIns: String(ua.ins), uaName: nameOf(ua, 'نماد پایه'),
+    strategyId: item.strategyId, strategyName: item.strategyName,
+    legIns: item.legs.map((leg) => String(leg.ins)),
+    comboName: comboName(item),
+    entryDate: Number($('pb-entry-date').dataset.value),
+    exitDate: Number($('pb-exit-date').dataset.value),
+    entryBasis: entryRail.dataset.value || 'LAST',
+    exitBasis: exitRail.dataset.value || 'LAST',
+    units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
+    live: live === true,
+    autoRun: live === true,
+  });
+
   function watchInBacktest(item, live = false) {
-    goHandoff(state, {
-      to: 'backtest', from: 'portfolio-backtest',
-      uaIns: String(ua.ins), uaName: nameOf(ua, 'نماد پایه'),
-      strategyId: item.strategyId, strategyName: item.strategyName,
-      legIns: item.legs.map((leg) => String(leg.ins)),
-      comboName: comboName(item),
-      entryDate: Number($('pb-entry-date').dataset.value),
-      exitDate: Number($('pb-exit-date').dataset.value),
-      entryBasis: entryRail.dataset.value || 'LAST',
-      exitBasis: exitRail.dataset.value || 'LAST',
-      units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
-      live: live === true,
-      autoRun: live === true,
-    });
+    goHandoff(state, handoffPlanFor(item, live));
+  }
+
+  /**
+   * ریزمعاملهٔ روز سنجش برای همهٔ قراردادهای این پایه.
+   *
+   * یک درخواست به‌ازای هر قرارداد، ولی فقط برای **یک روز** — و فقط وقتی
+   * کاربر صریحاً لحظه‌ای را انتخاب کرده. سنجش پایان روز، مثل قبل، هیچ
+   * درخواست تازه‌ای نمی‌خورد.
+   *
+   * پاسخِ نیامده «معامله نشده» فرض نمی‌شود: کلیدش اصلاً ساخته نمی‌شود و
+   * `applyIntradayMark` همان‌طور با آن رفتار می‌کند که با قراردادِ واقعاً
+   * بی‌معامله — ردیف آن روز را نمی‌سازد. تفاوت این دو در عدد اثری ندارد،
+   * چون هر دو یعنی «قیمتی برای آن لحظه نداریم».
+   */
+  async function fetchTape(date) {
+    const codes = Object.keys(seriesByIns);
+    const tape = {};
+    let failed = 0;
+    for (const part of chunks(codes, 12)) {
+      const settled = await Promise.allSettled(part.map(async (ins) => {
+        const response = await fetch(`/api/trades?ins=${encodeURIComponent(ins)}&date=${date}`);
+        const payload = await response.json();
+        if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
+        return [ins, payload.rows || []];
+      }));
+      for (const item of settled) {
+        if (item.status === 'fulfilled') tape[item.value[0]] = item.value[1];
+        else failed += 1;
+      }
+      setStatus(`دریافت ریزمعاملهٔ روز سنجش: ${fmt.int(Object.keys(tape).length)} از ${fmt.int(codes.length)} ابزار`);
+    }
+    return { tape, failed, total: codes.length };
+  }
+
+  /**
+   * سری‌هایی که بازپخش با آن‌ها اجرا می‌شود.
+   *
+   * پایان روز: همان `seriesByIns`. لحظهٔ درون‌روز: همان سری‌ها با ردیفِ روز
+   * سنجش جایگزین‌شده. موتور بازپخش، تولید ترکیب و رتبه‌بندی هیچ‌کدام
+   * نمی‌فهمند کدام حالت است — یک موتور، دو ورودی.
+   */
+  async function seriesForRun(endDate) {
+    const second = Number($('pb-mark').value);
+    if (!Number.isFinite(second) || !second) {
+      $('pb-mark-state').textContent = 'پایان روز سنجش';
+      return seriesByIns;
+    }
+    const label = MARK_MOMENTS.find(([value]) => value === second)?.[1] || '';
+    const { tape, failed, total } = await fetchTape(endDate);
+    const result = applyIntradayMark(seriesByIns, marksAt(tape, second), { date: endDate, second });
+    const note = markNote(result, { label, total });
+    $('pb-mark-note').textContent = failed
+      ? `${note} ریزمعاملهٔ ${fmt.int(failed)} ابزار دریافت نشد و آن‌ها هم قیمت نگرفتند.`
+      : note;
+    $('pb-mark-state').textContent = result.marked ? `ساعت ${label} روز سنجش` : 'پایان روز سنجش';
+    if (!result.marked) throw new Error(`تا ساعت ${label} هیچ ابزاری معامله نشده بود`);
+    return result.series;
   }
 
   async function runAll() {
@@ -340,8 +471,10 @@ export async function mount(root, { state }) {
     $('pb-run').disabled = true; $('pb-report').hidden = true;
     setStatus('آماده‌سازی اجرای همه استراتژی‌ها…');
     try {
+      const runSeries = await seriesForRun(endDate);
+      runSeriesByIns = runSeries;
       const payload = await runWorker({
-        id: `portfolio-${Date.now()}`, type: 'portfolio', ua, seriesByIns, startDate, endDate,
+        id: `portfolio-${Date.now()}`, type: 'portfolio', ua, seriesByIns: runSeries, startDate, endDate,
         entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST',
         units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))), fees: feesOf(state.settings), settings: state.settings,
         filtered: true, liquidity: liquidity(), maxPerStrategy: Math.max(10, Math.min(1000, Math.trunc(safeNum($('pb-cap').value, 120)))),
