@@ -17,6 +17,13 @@ import { num } from './num.mjs';
 /** کمینهٔ مشاهدهٔ لازم. همان کفی که `histVol` روی آن ایستاده. */
 export const HV_MIN_CLOSES = 22;
 
+// رقم فارسی، همان‌جا. جمله‌های `why` مستقیم به کاربر نشان داده می‌شوند و
+// رقم لاتین در خروجی نمایشی ایراد است (قاعده ۲-۳)؛ ولی هسته به رابط
+// وابسته نمی‌شود. ورودی اینجا یک عدد صحیح کوچک است — شمار مشاهده — نه عدد
+// پولی که به گروه‌بندی هزارگان نیاز داشته باشد. همان الگویی که
+// `core/evaluate.mjs` برای نسبت پا دارد.
+const faInt = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+
 export const HV_SOURCES = {
   series: 'از سری قیمت پایه',
   manual: 'اعلام دستی کاربر',
@@ -50,7 +57,7 @@ export function histVolPct(closes = [], { tradingDaysYear = 240, window = 0 } = 
   if (used.length < HV_MIN_CLOSES) {
     return {
       ...base, pct: NaN, enough: false, source: 'none',
-      why: `برای تلاطم تاریخی دست‌کم ${HV_MIN_CLOSES} قیمت پایانی لازم است و ${used.length} تا در دسترس بود.`,
+      why: `برای تلاطم تاریخی دست‌کم ${faInt(HV_MIN_CLOSES)} قیمت پایانی لازم است و ${faInt(used.length)} تا در دسترس بود.`,
     };
   }
   const sigma = histVol(used, num(tradingDaysYear, 240));

@@ -81,6 +81,21 @@ export function monitorSnapshot(legs = [], { spot, prices = [], date } = {}, par
       : greeksFromIvPct(leg, { spot, days: days[index] }, ivPct[index], params)
   ));
   const totals = positionGreeks(legs, byLeg);
+  // جمعِ ناقص، جمع نیست.
+  //
+  // `positionGreeks` از صفر شروع می‌کند و پایی که یونانی ندارد را رد
+  // می‌کند. یعنی موقعیتی که هیچ پایش تلاطم نداده، «دلتا ۰» می‌گیرد — عددی
+  // که دقیقاً شبیه «این موقعیت خنثای جهت است» خوانده می‌شود، در حالی که
+  // حرفش «نمی‌دانیم» است. پرچم `incomplete` کنارش هست ولی چشم اول به عدد
+  // می‌افتد نه به پرچم.
+  //
+  // پس جمعِ ناقص عدد نمی‌دهد. یونانی پاهایی که درآمده‌اند سر جایشان
+  // می‌مانند و در جدول تفکیک دیده می‌شوند؛ چیزی که ساخته نمی‌شود فقط
+  // ادعای «یونانی کل موقعیت این است» است.
+  if (totals.incomplete) {
+    for (const { key } of GREEKS) totals[key] = NaN;
+    totals.deltaShares = NaN;
+  }
   const hvPct = num(extra.hvPct, NaN);
   const meanIv = meanIvPct(ivPct);
   return {
@@ -158,7 +173,10 @@ export function monitorSeries(rows = [], { legCount = 0 } = {}) {
       timeLabel: row.timeLabel,
       granularity: row.granularity,
       incomplete: row.greeks?.incomplete === true,
-      netPnl: finite(row.netPnl) ? Number(row.netPnl) : NaN,
+      // سطل تایم‌فریم `netPnl` ندارد؛ ارزش پایانِ سطل را `closePnl` می‌گوید.
+      // هر دو یک چیزند — «موقعیت در آن لحظه چقدر می‌ارزید» — و ستون یکی
+      // است، پس نامشان اینجا یکی می‌شود نه در سه مصرف‌کننده.
+      netPnl: finite(row.netPnl) ? Number(row.netPnl) : (finite(row.closePnl) ? Number(row.closePnl) : NaN),
       returnPct: finite(row.returnPct) ? Number(row.returnPct) : NaN,
       spot: finite(row.baseClose) ? Number(row.baseClose) : (finite(row.basePrice) ? Number(row.basePrice) : NaN),
       ivMean: finite(row.meanIvPct) ? Number(row.meanIvPct) : NaN,
@@ -201,9 +219,12 @@ export function monitorLegGreekSummary(rows = [], index = 0) {
  * وامی‌دارد جای دیگری دنبالش بگردد، و ثابت‌بودن خودش یک خبر است.
  */
 export function monitorVolSummary(rows = [], { legs = [] } = {}) {
+  // برچسب پا اینجا ساخته نمی‌شود. شمارهٔ پا عددی است که کاربر می‌بیند و
+  // باید رقم فارسی بگیرد؛ فارسی‌سازی کارِ `ui/fmt.mjs` است و هسته به رابط
+  // وابسته نمی‌شود. پس `index` برمی‌گردد و رابط با همان نامی که در نمودار
+  // و جدول‌های دیگرش به کار می‌برد برچسب می‌زند — یک نام، نه دو.
   const out = legs.map((leg, index) => ({
-    kind: 'leg', index, leg,
-    label: `${index + 1} · ${leg?.name || (leg?.kind === 'underlying' ? 'دارایی پایه' : `پای ${index + 1}`)}`,
+    kind: 'leg', index, leg, label: '',
     ...ivSummary(rows.map((row) => row.legIvPct?.[index])),
   }));
   out.push({
@@ -232,8 +253,13 @@ export function monitorCoverage(rows = []) {
   let complete = 0, partial = 0, none = 0;
   for (const row of rows) {
     const g = row.greeks;
-    if (!g || !Number.isFinite(g.delta)) { none += 1; continue; }
-    if (g.incomplete) partial += 1; else complete += 1;
+    // ترتیب مهم است: از وقتی جمعِ ناقص عدد نمی‌دهد، «دلتا متناهی نیست»
+    // دیگر «هیچ‌چیز درنیامد» را نمی‌گوید — پرچم `incomplete` می‌گوید.
+    // سنجیدن دلتا پیش از پرچم، هر نقطهٔ نیمه‌کامل را «بی‌یونانی» می‌شمرد.
+    if (!g) { none += 1; continue; }
+    if (g.incomplete) { partial += 1; continue; }
+    if (!Number.isFinite(g.delta)) { none += 1; continue; }
+    complete += 1;
   }
   return {
     total, complete, partial, none,
