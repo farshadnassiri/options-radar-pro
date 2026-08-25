@@ -12,6 +12,10 @@ import { fmt } from '/ui/table.mjs';
 import { faDigits, kpiTone } from '/ui/fmt.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
+import { ivParams } from '/core/leg-iv.mjs';
+import { tehranDateNumber } from '/core/live-day.mjs';
+import { normalizeHistoryDate } from '/core/history.mjs';
+import { GREEKS, monitorSnapshot, monitorStance } from '/core/monitor.mjs';
 import { emptyReason } from '/ui/feed-state.mjs';
 
 const KINDS = [
@@ -168,7 +172,7 @@ export async function mount(root, { state, api }) {
     const put = wantPut();
     F.opt.innerHTML = ex.strikes.map((st) => {
       const q = put ? st.put : st.call;
-      return `<option value="${q.ins}" data-strike="${st.strike}" data-size="${st.size}" data-days="${ex.days}" data-bid="${q.bid}" data-ask="${q.ask}" data-close="${q.close}">
+      return `<option value="${q.ins}" data-strike="${st.strike}" data-size="${st.size}" data-days="${ex.days}" data-expiry="${normalizeHistoryDate(ex.endDate)}" data-bid="${q.bid}" data-ask="${q.ask}" data-close="${q.close}">
         ${displayName(q.name, q.ins, 'قرارداد اختیار بدون نام')} — اعمال ${fmt.money(st.strike)} — تقاضا ${fmt.money(q.bid)}</option>`;
     }).join('');
     const first = F.opt.selectedOptions[0];
@@ -233,6 +237,10 @@ export async function mount(root, { state, api }) {
         kind: put ? 'put' : 'call',
         side: kind.startsWith('long') ? 'buy' : 'sell',
         ratio: 1, size, strike, days,
+        // سررسید روی خودِ پا می‌نشیند تا روز مانده در هر روزِ آینده از
+        // تاریخ درآید نه از تفریق. موقعیت‌های ذخیره‌شدهٔ قدیمی این را
+        // ندارند و مسیر جایگزینِ «روز ورود منهای روز نگهداری» را می‌گیرند.
+        expiry: Number(o.dataset.expiry) || 0,
         price: optionPrice, entryClose: optionClose,
         ins: o.value, name: o.textContent.split('—')[0].trim(),
       });
@@ -272,6 +280,41 @@ export async function mount(root, { state, api }) {
     return { bid: 0, ask: 0, last: 0, close: 0 };
   }
 
+  /**
+   * روز مانده تا سررسیدِ **امروز** برای هر پا.
+   *
+   * موقعیت‌های ذخیره‌شدهٔ قدیمی سررسید ندارند و فقط «روز مانده در لحظهٔ
+   * ورود» را نگه داشته‌اند. روز مانده امروز = همان عدد منهای روز نگهداری —
+   * و چون هر دو تقویمی‌اند، این تفریق دقیق است نه تقریب. سررسید از روی آن
+   * ساخته نمی‌شود؛ تاریخِ ساختگی بدتر از عددِ داده‌شده است.
+   *
+   * موقعیت تازه سررسید واقعی دارد و `undefined` می‌گیرد تا از همان استفاده
+   * شود.
+   */
+  const daysLeftOf = (p, daysHeld) => p.legs.map((leg) => {
+    if (leg.kind === 'underlying') return undefined;
+    if (Number.isFinite(Number(leg.expiry)) && Number(leg.expiry) > 0) return undefined;
+    const atEntry = Number(leg.days);
+    if (!Number.isFinite(atEntry)) return undefined;
+    return Math.max(0, atEntry - Number(daysHeld || 0));
+  });
+
+  /**
+   * یونانی و تلاطم ضمنی موقعیتِ باز، در همین لحظه.
+   *
+   * قیمتِ مبنا همان `markPrice` است که سود و زیان از آن آمده — نه یک مبنای
+   * دوم. اگر دو مبنا بود، «تلاطم ضمنی این پا» و «سود این پا» دو قیمت
+   * متفاوت را می‌گفتند و هیچ‌کدام غلط به نظر نمی‌رسید.
+   */
+  function greeksOf(p, m, spot) {
+    return monitorSnapshot(p.legs, {
+      spot,
+      prices: m.perLeg.map((leg) => leg.markPrice),
+      date: tehranDateNumber(),
+      days: daysLeftOf(p, m.daysHeld),
+    }, ivParams(s(), {}));
+  }
+
   function evalPos(p) {
     const fees = feesNow();
     const uaQ = quotesByIns.get(p.uaIns) || {};
@@ -281,13 +324,17 @@ export async function mount(root, { state, api }) {
       ...riskOptions(), fees, spot, spotClose: uaQ.close || spot,
       basis: s().priceBasis === 'BOOK' ? 'BOOK' : s().priceBasis,
     });
-    return { m, spot, quotes, fees };
+    return { m, spot, quotes, fees, greeks: greeksOf(p, m, spot) };
   }
 
   function render() {
     const evals = positions.map((p) => ({ p, ...evalPos(p) }));
 
-    const rows = evals.map(({ p, m }, i) => `
+    // سلول یونانی: مرتبهٔ بزرگی این پنج عدد یکی نیست — گاما ۱۰ به توان منفی
+    // هفت و وگا ریالی — پس `fmt.small` رقم اعشار را از خود عدد می‌گیرد.
+    const gk = (value) => (Number.isFinite(value) ? fmt.small(value) : '—');
+    const ivPctCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
+    const rows = evals.map(({ p, m, greeks }, i) => `
       <tr data-i="${i}" style="cursor:pointer" tabindex="0" role="button" aria-label="جزئیات موقعیت ${p.title || '—'}">
         <td>${p.title || '—'}</td>
         <td>${displayName(p.uaName, p.uaIns, 'دارایی پایه بدون نام')}</td>
@@ -301,13 +348,15 @@ export async function mount(root, { state, api }) {
         <td class="n">${fmt.pct(m.retPct)}</td>
         <td class="n">${fmt.pct(m.retMonthPct)}</td>
         <td class="n">${fmt.money(m.ifHeld.atSpot * p.qty)}</td>
+        ${GREEKS.map(({ key }) => `<td class="n">${gk(greeks.greeks?.[key])}</td>`).join('')}
+        <td class="n">${ivPctCell(greeks.meanIvPct)}</td>
         <td><button class="ghost" data-del="${i}">حذف</button></td>
       </tr>`).join('');
 
     root.querySelector('#list').innerHTML = positions.length ? `
       <thead><tr>
         <th>عنوان</th><th>پایه</th><th>پاها</th><th>تعداد</th><th>تاریخ ورود</th><th>روز</th>
-        <th>سرمایه روز ورود</th><th>وجه تضمین امروز</th><th>سود و زیان الان</th><th>بازده از ورود ٪</th><th>ماهانه ٪</th><th>اگر تا سررسید بماند</th><th></th>
+        <th>سرمایه روز ورود</th><th>وجه تضمین امروز</th><th>سود و زیان الان</th><th>بازده از ورود ٪</th><th>ماهانه ٪</th><th>اگر تا سررسید بماند</th>${GREEKS.map(({ label }) => `<th>${label}</th>`).join('')}<th>تلاطم ضمنی</th><th></th>
       </tr></thead><tbody>${rows}</tbody>`
       : '<tbody><tr><td style="padding:16px;color:var(--muted)">موقعیتی ثبت نشده. از فرم بالا اضافه کن.</td></tr></tbody>';
 
@@ -375,7 +424,7 @@ export async function mount(root, { state, api }) {
       chart?.destroy(); chart = null; chartFor = null;
       return;
     }
-    const { m, spot, fees } = evalPos(p);
+    const { m, spot, fees, greeks } = evalPos(p);
     // قیمت‌گیری هر پانزده ثانیه دوباره صدا می‌زند؛ اگر همان موقعیت باز است
     // نه یک موقعیت دیگر، زوم/پن چارت باید بماند نه هر بار به نمای اول برگردد
     const sameRow = chartFor === expanded;
@@ -383,7 +432,12 @@ export async function mount(root, { state, api }) {
     root.querySelector('#det-card').style.display = '';
     root.querySelector('#det-title').textContent = `${p.title} — ${displayName(p.uaName, p.uaIns, 'دارایی پایه بدون نام')}`;
 
-    const legRows = m.perLeg.map((l) => `
+    const gk = (value) => (Number.isFinite(value) ? fmt.small(value) : '—');
+    const ivPctCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
+    // جمله‌های جهت‌گیری از `monitorStance` می‌آیند و متن ثابتِ خودِ برنامه‌اند،
+    // نه دادهٔ بالادست؛ یک بار ساخته می‌شوند نه چهار بار.
+    const stance = monitorStance(greeks.greeks || {});
+    const legRows = m.perLeg.map((l, i) => `
       <tr>
         <td>${l.side === 'sell' ? 'فروش' : 'خرید'} ${l.kind === 'underlying' ? 'سهم' : (l.kind === 'call' ? 'کال' : 'پوت') + ' ' + fmt.money(l.strike)}</td>
         <td class="n">${fmt.money(l.entryPrice)}</td>
@@ -391,17 +445,26 @@ export async function mount(root, { state, api }) {
         <td class="n">${fmt.int(l.units)}</td>
         <td class="n">${fmt.money(l.feeIn + l.feeOut)}</td>
         <td class="n" style="color:${l.pnl >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(l.pnl)}</td>
+        <td class="n">${ivPctCell(greeks.ivPct[i])}</td>
+        ${GREEKS.map(({ key }) => `<td class="n">${gk(greeks.byLeg[i]?.[key])}</td>`).join('')}
       </tr>`).join('');
+
+    // سطر جمع، همان سهم‌های وزن‌دار است — نه محاسبه‌ای دوم. ستون هر پا
+    // وزن‌نخورده است، پس جمعِ چشمی ستون‌ها با این سطر یکی نمی‌شود و همین در
+    // یادداشت زیر جدول گفته می‌شود.
+    const greekTotals = `<tr class="mini-total"><td>جمع موقعیت — وزن‌دار</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td><td class="n">—</td>
+      <td class="n">${ivPctCell(greeks.meanIvPct)}</td>${GREEKS.map(({ key }) => `<td class="n">${gk(greeks.greeks?.[key])}</td>`).join('')}</tr>`;
 
     root.querySelector('#det').innerHTML = `
       <div>
         <div id="det-chart"></div>
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">تفکیک هر پا — برای یک دست قرارداد</h4>
         <table class="mini">
-          <thead><tr><th>پا</th><th>قیمت ورود</th><th>قیمت بستن</th><th>سهم درگیر</th><th>کارمزد رفت و برگشت</th><th>سود و زیان</th></tr></thead>
-          <tbody>${legRows}</tbody>
+          <thead><tr><th>پا</th><th>قیمت ورود</th><th>قیمت بستن</th><th>سهم درگیر</th><th>کارمزد رفت و برگشت</th><th>سود و زیان</th><th>تلاطم ضمنی</th>${GREEKS.map(({ label }) => `<th>${label}</th>`).join('')}</tr></thead>
+          <tbody>${legRows}${greekTotals}</tbody>
         </table>
         <p class="note" style="margin-top:10px">قیمت بستن، مظنه مخالف است: موقعیت خرید روی تقاضا بسته می‌شود و موقعیت فروش روی عرضه بازخرید می‌شود.</p>
+        <p class="note">${greeks.incomplete ? 'یونانی جمعِ موقعیت ساخته نشد چون دست‌کم یک پا تلاطم ضمنی ندارد؛ عددِ ناقص با فرض صفر برای آن پا ساخته نمی‌شود.' : `همین حالا این موقعیت <b>${stance.delta}</b> است، نسبت به حرکت بزرگ <b>${stance.gamma}</b>، نسبت به تلاطم <b>${stance.vega}</b>، و <b>${stance.theta}</b>.`} یونانی ستونِ هر پا وزن‌نخورده است — همان چیزی که بلک‌شولز برای یک سهم داده؛ وزن و علامت فقط در سطر جمع اعمال می‌شود. تلاطم ضمنی از همان قیمت بستن درمی‌آید که سود و زیان از آن آمده، و پارامترهایش در تنظیمات، بخش «یونانی‌ها، تلاطم و احتمال» قابل تغییرند.</p>
       </div>
       <div>
         <dl class="kv">

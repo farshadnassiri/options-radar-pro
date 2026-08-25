@@ -70,8 +70,15 @@ export const TRACK_SHAPES = {
  * موقعیت‌های من، و هر نقطه از یک مسیر تاریخی، همگی همین را صدا می‌زنند —
  * پس عددِ «دلتای این موقعیت» در تب زنده و در بک‌تست، از یک بدنه می‌آید.
  */
-export function monitorSnapshot(legs = [], { spot, prices = [], date } = {}, params = {}, extra = {}) {
-  const days = legs.map((leg) => legDaysToExpiry(leg, date));
+export function monitorSnapshot(legs = [], { spot, prices = [], date, days: daysOverride } = {}, params = {}, extra = {}) {
+  // روز مانده معمولاً از سررسیدِ روی خودِ پا درمی‌آید. ولی موقعیت‌های
+  // ذخیره‌شدهٔ قدیمی سررسید ندارند و فقط «روز مانده در لحظهٔ ورود» را نگه
+  // داشته‌اند؛ آن‌ها روز مانده را از بیرون می‌دهند. حدس‌زدن سررسید از روی
+  // آن عدد، تاریخ می‌ساخت — و تاریخِ ساختگی بدتر از عددِ داده‌شده است.
+  const days = legs.map((leg, index) => {
+    const given = Number(daysOverride?.[index]);
+    return Number.isFinite(given) ? Math.max(0, given) : legDaysToExpiry(leg, date);
+  });
   const ivPct = legs.map((leg, index) => legIvPct(leg, {
     spot, price: prices[index], days: days[index],
   }, params));
