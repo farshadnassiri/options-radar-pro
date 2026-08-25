@@ -4,17 +4,33 @@
    ———————————————————————————————————————————————— */
 
 :root {
-  --ground: #f8fafc;
+  /* ————— خنثی‌های آبی‌ته —————
+     خاکستری خالص نیست: هر سطح و هر خط یک ته‌رنگ آبی دارد. روی صفحه‌ای که
+     تمامش عدد و جدول است، این ته‌رنگ کاغذ را «سرد و مالی» می‌کند به‌جای
+     «خاکستری اداری». مقادیر از تحلیل استرایپ در awesome-design-md آمده. */
+  --ground: #f6f9fc;
   --panel: #ffffff;
-  --panel-2: #f1f5f9;
-  --line: #cbd5e1;
-  --line-soft: #e2e8f0;
-  --ink: #0f172a;
-  --ink-2: #1e293b;
-  --muted: #64748b;
-  --accent: #4f46e5;
-  --accent-soft: #eef2ff;
-  --accent-2: #6366f1;
+  --panel-2: #eef3f9;
+  /* دو وزن خط: `--line` مویی است و فقط کارت و جدول را از هم جدا می‌کند؛
+     `--line-input` پررنگ‌تر و آبی‌تر است چون کادر ورودی باید *پیدا* باشد.
+     پیش از این هر دو یک رنگ بودند و ورودی از یک باکس ساده جدا نمی‌شد. */
+  --line: #e3e8ee;
+  --line-soft: #eef1f6;
+  --line-input: #a8c3de;
+  --ink: #0d253d;
+  --ink-2: #273951;
+  --muted: #5f6e86;
+  /* چهار پله بنفش، نه یکی: پایه برای پرکردن، `hover` و `active` برای دو
+     حالت فشار، و `ink` برای وقتی که خودِ بنفش *متن* است. پیش از این حالت‌ها
+     با `filter: brightness()` ساخته می‌شدند — که رنگ را از توکن جدا می‌کرد
+     و در پوسته تیره برعکس عمل می‌کرد (روشن‌تر باید می‌شد، تیره‌تر می‌شد). */
+  --accent: #533afd;
+  --accent-hover: #4434d4;
+  --accent-active: #2e2b8c;
+  --accent-ink: #4434d4;
+  --accent-soft: #f0eefe;
+  --accent-2: #665efd;
+  --on-accent: #ffffff;
   --gain: #059669;
   --gain-soft: #ecfdf5;
   --loss: #e11d48;
@@ -59,7 +75,7 @@
   /* فلش انتخابگر. data URI هیچ var() نمی‌خواند، پس رنگش نمی‌تواند از داخل
      SVG به توکن وصل شود؛ به‌جایش خود تصویر برای هر پوسته یک‌بار نوشته شده
      تا رنگ باز هم از `--muted` همان پوسته بیاید، نه از یک خاکستری ثابت. */
-  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235f6e86' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
 
   /* ——— مقیاس فاصله‌گذاری سیستماتیک ——— */
   --space-1: 4px;
@@ -75,18 +91,27 @@
   --control-h: 40px;
   --control-h-lg: 44px;
 
-  --shadow: 0 1px 3px rgba(15, 23, 42, .06), 0 10px 25px -5px rgba(15, 23, 42, .08);
-  --shadow-2xs: 0 1px 2px rgba(15, 23, 42, .04);
-  --shadow-xs: 0 1px 3px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .04);
-  --shadow-sm: 0 2px 5px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .04);
-  --shadow-md: 0 4px 14px -2px rgba(15, 23, 42, .08), 0 2px 6px -1px rgba(15, 23, 42, .04);
-  --shadow-lg: 0 12px 28px -4px rgba(15, 23, 42, .1), 0 6px 12px -2px rgba(15, 23, 42, .05);
+  /* سایه از سرمه‌ای #003770 ساخته می‌شود نه از خاکستری. سایه خاکستری روی
+     زمینه آبی‌ته کثیف دیده می‌شود؛ هم‌فام که باشد، فقط «عمق» می‌دهد و رنگ
+     اضافه نمی‌کند. دامنه‌ها هم نرم‌تر شد: بلندی زیاد با محو کم، لبه‌ای
+     می‌سازد که در کارت‌های کنار هم مثل خط دوم دیده می‌شود. */
+  --shadow: 0 1px 3px rgba(0, 55, 112, .08), 0 8px 24px rgba(0, 55, 112, .08);
+  --shadow-2xs: 0 1px 2px rgba(0, 55, 112, .06);
+  --shadow-xs: 0 1px 3px rgba(0, 55, 112, .08);
+  --shadow-sm: 0 1px 3px rgba(0, 55, 112, .08), 0 1px 2px rgba(0, 55, 112, .04);
+  --shadow-md: 0 8px 24px rgba(0, 55, 112, .08), 0 2px 6px rgba(0, 55, 112, .04);
+  --shadow-lg: 0 16px 40px rgba(0, 55, 112, .1), 0 4px 12px rgba(0, 55, 112, .05);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  /* پله گردی سفت‌تر شد. گردی زیاد روی کنترل ریز، فضای داخلی را می‌خورد و
+     کادر را «بادکرده» نشان می‌دهد؛ روی صفحه‌ای با ده‌ها کنترل، همان چند
+     پیکسل جمع می‌شود. ورودی ۶، جعبه فشرده ۸، کارت ۱۲، پوسته ۱۶. دکمه در
+     هیچ‌کدام نیست — دکمه قرص است. */
   --radius: 12px;
+  --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-pill: 9999px;
   --transition-fast: .15s cubic-bezier(.4, 0, .2, 1);
   --transition-med: .25s cubic-bezier(.4, 0, .2, 1);
@@ -124,17 +149,27 @@
 }
 
 body[data-theme="board"] {
-  --ground: #0b0f19;
-  --panel: #111827;
-  --panel-2: #1e293b;
-  --line: #334155;
-  --line-soft: #1e293b;
-  --ink: #f8fafc;
-  --ink-2: #cbd5e1;
-  --muted: #94a3b8;
-  --accent: #6366f1;
-  --accent-soft: #1e1b4b;
-  --accent-2: #818cf8;
+  --ground: #0a0f1c;
+  --panel: #121a2e;
+  --panel-2: #1b2440;
+  --line: #2c3855;
+  --line-soft: #1c2640;
+  --line-input: #3d5578;
+  --ink: #f6f9fc;
+  --ink-2: #c3ceda;
+  --muted: #8c9bb1;
+  /* در پوسته تیره، فشار دکمه باید *روشن‌تر* کند نه تیره‌تر — روی زمینه
+     سیاه، تیره‌ترشدن یعنی ناپدیدشدن. پس `hover` اینجا روشن‌تر از پایه است،
+     خلاف پوسته روشن. همین دلیلِ توکن‌شدن این دو حالت است.
+     `--accent-ink` از پایه روشن‌تر است چون متن به کنتراست بیشتری از سطحِ
+     پرشده نیاز دارد؛ با خود `--accent` زیر کف ۴٫۵ می‌ماند. */
+  --accent: #665efd;
+  --accent-hover: #7b74ff;
+  --accent-active: #5348e8;
+  --accent-ink: #8781ff;
+  --accent-soft: #1c1e54;
+  --accent-2: #8781ff;
+  --on-accent: #ffffff;
   --gain: #10b981;
   --gain-soft: #064e3b;
   --loss: #f43f5e;
@@ -164,7 +199,7 @@ body[data-theme="board"] {
   --shadow-md: 0 4px 14px -2px rgba(0, 0, 0, .5), 0 2px 6px -1px rgba(0, 0, 0, .35);
   --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, .6), 0 6px 12px -2px rgba(0, 0, 0, .4);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
-  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238c9bb1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
 }
 
 * { box-sizing: border-box; }
@@ -352,7 +387,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .backtest-leg-market-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .backtest-leg-market-head > span { flex: none; padding: 4px 8px; border-radius: var(--radius-pill); background: var(--panel); color: var(--muted); font-size: var(--fs-2xs); }
 .backtest-manual-price { display: grid; gap: 5px; margin-top: 10px; color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
-.backtest-manual-price input { width: 100%; min-height: 36px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); font: inherit; font-family: var(--mono); }
+.backtest-manual-price input { width: 100%; min-height: 36px; padding: 7px 10px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); font: inherit; font-family: var(--mono); }
 .backtest-manual-price input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* بیرون بودن از بازه روز، خطا نیست — هشدار است. رنگش هم باید همین را بگوید:
    نه قرمزِ «نشد»، نه سکوتِ خاکستری. */
@@ -457,7 +492,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .history-table tbody tr[data-day][aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .backtest-timeframe { margin: 14px 0; border-top: 4px solid var(--cmp1); }
 .backtest-tf-field { display: grid; gap: 5px; color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
-.backtest-tf-field select { min-height: 34px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background-color: var(--panel); color: var(--ink); font: inherit; }
+.backtest-tf-field select { min-height: 34px; padding: 5px 9px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background-color: var(--panel); color: var(--ink); font: inherit; }
 .backtest-timeframe > #bt-tf-body > .backtest-chart-grid { margin-top: 14px; }
 .backtest-timeframe > #bt-tf-body > .backtest-chart-grid > section { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel-2) 70%, var(--panel)); }
 /* شدت رنگ خانه ماتریس ورود×خروج با قدر مطلق میانه، تا چشم بزرگی را ببیند
@@ -484,7 +519,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   font: inherit; font-size: var(--fs-sm); font-weight: 800; white-space: nowrap; cursor: pointer;
 }
 .subtabs button:hover { color: var(--ink-2); background: var(--panel); }
-.subtabs button[aria-selected="true"] { color: var(--panel); background: var(--accent); box-shadow: var(--shadow-sm); }
+.subtabs button[aria-selected="true"] { color: var(--on-accent); background: var(--accent); box-shadow: none; }
 .subtabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .bt-panel:focus { outline: none; }
 .bt-panel[hidden] { display: none; }
@@ -533,7 +568,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .portfolio-controls { margin-bottom: var(--space-4, 16px); }
 .portfolio-form { display: grid; grid-template-columns: repeat(5, minmax(145px, 1fr)); gap: var(--space-3, 12px); align-items: end; }
 .portfolio-form label, .portfolio-manual label, .portfolio-shock-controls label { display: grid; gap: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
-.portfolio-form input, .portfolio-form select, .portfolio-manual input, .portfolio-shock-controls input { width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background-color: var(--panel); color: var(--ink); font: inherit; }
+.portfolio-form input, .portfolio-form select, .portfolio-manual input, .portfolio-shock-controls input { width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background-color: var(--panel); color: var(--ink); font: inherit; }
 .portfolio-form button { min-height: var(--control-h, 40px); }
 .portfolio-note { margin: 10px 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-normal); }
 .portfolio-run { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin: 14px 0; border-inline-start: 4px solid var(--accent); }
@@ -1052,7 +1087,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .history-frozen[data-empty="true"] { border-style: dashed; box-shadow: none; }
 .frozen-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .frozen-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 7px; }
-.frozen-actions .primary { min-height: 34px; padding: 6px 14px; border-radius: var(--radius-md); white-space: nowrap; }
+.frozen-actions .primary { min-height: 34px; padding: 6px 14px; border-radius: var(--radius-pill); white-space: nowrap; }
 .frozen-actions .primary:disabled { cursor: not-allowed; opacity: .55; }
 .frozen-head .ghost {
   background: var(--panel); border: 1px solid var(--line-soft); color: var(--ink-2);
@@ -1087,9 +1122,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   border-inline-start: 4px solid var(--accent);
   border-radius: var(--radius-lg); padding: 14px 16px;
   box-shadow: var(--shadow-2xs);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
-.history-kpi:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.history-kpi:hover { box-shadow: var(--shadow-md); }
 .history-kpi span { display: block; margin-bottom: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; }
 .history-kpi b { font-family: var(--mono); font-size: var(--fs-2xl); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.4; }
 .history-kpi.gain { border-top-color: var(--gain); }
@@ -1213,7 +1248,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .return-matrix td button:hover, .return-matrix td button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; background: color-mix(in srgb, var(--panel) 25%, transparent); }
 .return-matrix .matrix-empty { background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--line) 38%, transparent) 5px 6px); }
 .matrix-mode { display: flex; flex-wrap: wrap; gap: 6px; }
-.matrix-mode button[aria-pressed="true"] { color: #fff; background: var(--accent); border-color: var(--accent); }
+.matrix-mode button[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 .matrix-toolbar {
   display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; margin: 0 0 10px;
   padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2);
@@ -1297,13 +1332,17 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .page-head h2 { margin: 0; font-size: var(--fs-4xl); font-weight: 800; line-height: var(--lh-tight); }
 .page-head p { margin: 4px 0 0; color: var(--muted); max-width: 74ch; }
 
+/* کارت روی کاغذِ آبی‌ته می‌نشیند: سفیدِ سطح، خطِ مویی، و یک سایه کم‌رمق.
+   کادر دیگر نیمه‌شفاف نیست — با `--line` تازه که خودش روشن است،
+   `color-mix` تا ۷۵٪ آن را چنان محو می‌کرد که کارت لبه‌اش را از دست می‌داد
+   و فقط سایه نگهش می‌داشت. */
 .card {
-  background: var(--panel); border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-xs);
   padding: 20px 22px; margin-bottom: var(--space-4, 16px);
-  transition: box-shadow var(--transition-med), transform var(--transition-med), border-color var(--transition-med);
+  transition: box-shadow var(--transition-med), border-color var(--transition-med);
 }
-.card:hover { box-shadow: var(--shadow-md); border-color: color-mix(in srgb, var(--line) 95%, transparent); }
+.card:hover { box-shadow: var(--shadow-md); }
 .card > h3 {
   margin: 0 0 6px; font-size: var(--fs-xl); font-weight: 800;
   display: flex; align-items: center; gap: 8px;
@@ -1335,14 +1374,20 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .field { display: flex; flex-direction: column; gap: var(--space-1, 4px); }
 .field label { font-size: var(--fs-md); color: var(--ink-2); font-weight: 700; }
 .field .hint { font-size: var(--fs-xs); color: var(--muted); line-height: var(--lh-normal); margin-top: 2px; }
+/* ورودی سفید است و کادر آبی دارد، نه خاکستریِ پرشده.
+   پیش از این ورودی با زمینهٔ `--panel-2` ساخته می‌شد — یعنی همان رنگی که
+   جعبه‌های اطلاعاتیِ غیرقابل‌ویرایش دارند. نتیجه این بود که در یک کارت،
+   ورودی و برچسبِ فقط‌خواندنی یک‌شکل دیده می‌شدند. حالا برعکس است: ورودی
+   روشن‌ترین سطح صفحه است و کادرش تنها کادر آبیِ صفحه — «اینجا می‌شود
+   نوشت» را خودِ شکل می‌گوید، بی‌آنکه لازم باشد کاربر امتحان کند. */
 .field input, .field select,
 select, input[type="text"], input[type="search"], input[type="number"], input[type="date"] {
-  background-color: var(--panel-2); color: var(--ink);
-  border: 1px solid var(--line); border-radius: var(--radius-md);
+  background-color: var(--panel); color: var(--ink);
+  border: 1px solid var(--line-input); border-radius: var(--radius-sm);
   min-height: var(--control-h, 40px);
   padding: 8px 12px; font: inherit; font-size: var(--fs-md); width: 100%;
-  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 3%, transparent);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+  box-shadow: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background-color var(--transition-fast);
 }
 select {
   appearance: none;
@@ -1360,12 +1405,15 @@ select {
 select:focus, input[type="text"]:focus, input[type="search"]:focus, input[type="number"]:focus, input[type="date"]:focus {
   border-color: var(--accent); outline: none;
   background-color: var(--panel);
-  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--ink) 3%, transparent), var(--focus-ring);
+  box-shadow: var(--focus-ring);
 }
+/* غیرفعال حالا با *پرشدن* گفته می‌شود نه فقط با کم‌رنگی: چون ورودی فعال
+   سفید است، خاکستری‌شدنِ زمینه خودش پیام «این را نمی‌شود عوض کرد» را
+   می‌دهد و دیگر لازم نیست فقط به شفافیت تکیه کرد. */
 .field input:disabled, .field select:disabled,
 select:disabled, input:disabled {
-  opacity: 0.5; cursor: not-allowed;
-  background-color: color-mix(in srgb, var(--panel-2) 65%, var(--ground));
+  opacity: 0.6; cursor: not-allowed;
+  background-color: var(--panel-2); border-color: var(--line);
 }
 
 /* فیلد بولی: تیک و برچسب کنار هم، توضیح زیر هر دو. با `flex` ساده، توضیح
@@ -1390,12 +1438,12 @@ select:disabled, input:disabled {
   display: grid; place-items: center;
   background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 50%;
   font: inherit; font-size: var(--fs-xl); line-height: 1; cursor: pointer;
-  box-shadow: var(--shadow-2xs);
-  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast);
+  box-shadow: none;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast);
 }
-.step-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow-xs); }
-.step-btn:active { filter: brightness(.94); transform: translateY(0) scale(0.96); box-shadow: none; }
-.step-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+.step-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.step-btn:active { background: var(--accent-soft); border-color: var(--accent-active); color: var(--accent-active); }
+.step-btn:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
 .num-range { width: 100%; margin-top: 4px; accent-color: var(--accent); cursor: pointer; }
 
 .scan-progress {
@@ -1408,57 +1456,66 @@ select:disabled, input:disabled {
   transition: width var(--transition-med), opacity var(--transition-med);
 }
 
-/* ——— سلسله‌مراتب دکمه‌ها ——— */
+/* ——— سلسله‌مراتب دکمه‌ها ———
+   هر دکمه قرص است، در هر اندازه. این تنها شکلی است که با هیچ باکس دیگری
+   اشتباه نمی‌شود: در این صفحه ده‌ها مستطیل گردِ ۸ و ۱۲ پیکسلی هست — کارت،
+   ورودی، سلول، پنل — و دکمهٔ گردگوشه یکی از همان‌ها به نظر می‌رسید. قرص،
+   با یک نگاه، «این را می‌شود زد» را می‌گوید.
+
+   بازخورد از **رنگ** می‌آید نه از حرکت. پیش از این هر دکمه در `hover` یک
+   پیکسل بالا می‌پرید و `filter: brightness()` می‌خورد. دو ایراد داشت: در
+   نوار ابزارِ پرِ دکمه، بالاپریدن‌های پیاپی صفحه را می‌لرزاند؛ و
+   `brightness` رنگ را از توکن جدا می‌کرد، پس در پوسته تیره «روشن‌تر» را
+   با ضرب در عددی می‌ساخت که برای پوسته روشن تنظیم شده بود. حالا هر حالت
+   توکن خودش را دارد و در هر دو پوسته درست است. */
 .btn, .primary {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: var(--control-h, 40px);
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
-  color: #fff; border: 1px solid transparent; border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent); border: 1px solid transparent; border-radius: var(--radius-pill);
   padding: 8px 20px; font: inherit; font-weight: 800; font-size: var(--fs-md); cursor: pointer;
-  box-shadow: 0 2px 8px -1px color-mix(in srgb, var(--accent) 35%, transparent), var(--shadow-2xs);
-  transition: transform var(--transition-fast), filter var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+  box-shadow: none;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.btn:hover, .primary:hover {
-  filter: brightness(1.06); transform: translateY(-1px);
-  box-shadow: 0 4px 14px -1px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow-xs);
-}
-.btn:active, .primary:active { filter: brightness(.95); transform: translateY(0) scale(.98); box-shadow: none; }
-.btn:disabled, .primary:disabled { opacity: .45; cursor: not-allowed; filter: none; transform: none; box-shadow: none; pointer-events: none; }
+.btn:hover, .primary:hover { background: var(--accent-hover); }
+.btn:active, .primary:active { background: var(--accent-active); }
+.btn:disabled, .primary:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; pointer-events: none; }
 
+/* دکمه دوم: کادرِ هم‌رنگِ دکمه اول، نه خاکستری. کادر خاکستری دکمه دوم را
+   به «باکس غیرفعال» نزدیک می‌کرد؛ با کادر بنفش پیداست که هم‌خانوادهٔ دکمه
+   اصلی است، فقط یک پله پایین‌تر در تأکید. */
 .btn.sec, .btn-sec {
-  background: var(--panel); color: var(--ink-2); border: 1px solid var(--line);
-  box-shadow: var(--shadow-2xs);
+  background: var(--panel); color: var(--accent-ink); border: 1px solid var(--accent);
+  box-shadow: none;
 }
-.btn.sec:hover, .btn-sec:hover {
-  background: var(--panel-2); border-color: var(--accent); color: var(--accent);
-  transform: translateY(-1px); box-shadow: var(--shadow-xs);
-}
-.btn.sec:active, .btn-sec:active { background: var(--accent-soft); transform: translateY(0) scale(.98); }
+.btn.sec:hover, .btn-sec:hover { background: var(--accent-soft); border-color: var(--accent-hover); }
+.btn.sec:active, .btn-sec:active { background: var(--accent-soft); border-color: var(--accent-active); color: var(--accent-active); }
 .btn.sec:disabled, .btn-sec:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
 
 .btn.danger, .btn.destructive, .btn-danger {
   background: var(--loss-soft); color: var(--loss); border: 1px solid color-mix(in srgb, var(--loss) 40%, transparent);
-  box-shadow: var(--shadow-2xs);
+  box-shadow: none;
 }
+/* «خطرناک» تا پیش از فشار، پرنشده است: پرکردنِ قرمز پیش از قصدِ کاربر،
+   یک دکمهٔ عادی را شبیه هشدارِ در حال وقوع نشان می‌داد. */
 .btn.danger:hover, .btn.destructive:hover, .btn-danger:hover {
-  background: var(--loss); color: #fff; border-color: var(--loss);
-  transform: translateY(-1px); box-shadow: 0 4px 12px -2px color-mix(in srgb, var(--loss) 40%, transparent);
+  background: var(--loss); color: var(--on-accent); border-color: var(--loss);
 }
-.btn.danger:active, .btn.destructive:active, .btn-danger:active { filter: brightness(.92); transform: translateY(0) scale(.98); }
+.btn.danger:active, .btn.destructive:active, .btn-danger:active { background: var(--loss); color: var(--on-accent); border-color: color-mix(in srgb, var(--loss) 60%, var(--ink)); }
 
 .ghost {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: var(--control-h-sm, 34px);
   background: var(--panel); border: 1px solid var(--line); color: var(--ink-2);
-  box-shadow: var(--shadow-2xs);
-  border-radius: var(--radius-md); padding: 6px 14px; font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
-  transition: transform var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+  box-shadow: none;
+  border-radius: var(--radius-pill); padding: 6px 14px; font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.ghost:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); box-shadow: var(--shadow-xs); }
-.ghost:active { transform: translateY(0) scale(.98); }
-.ghost[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); box-shadow: inset 0 1px 3px color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 800; }
-.ghost:disabled { opacity: .45; cursor: not-allowed; transform: none; box-shadow: none; pointer-events: none; }
-.ghost:disabled:hover { border-color: var(--line); color: var(--ink-2); }
+.ghost:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+.ghost:active { background: var(--accent-soft); border-color: var(--accent-active); color: var(--accent-active); }
+.ghost[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); box-shadow: none; font-weight: 800; }
+.ghost:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; pointer-events: none; }
+.ghost:disabled:hover { border-color: var(--line); color: var(--ink-2); background: var(--panel); }
 .bar { display: flex; align-items: center; gap: var(--space-3, 12px); flex-wrap: wrap; }
 .bar .sp { flex: 1; }
 .saved { color: var(--gain); font-size: var(--fs-md); font-weight: 700; }
@@ -1558,9 +1615,9 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
   border-inline-start: 4px solid var(--accent);
   border-radius: var(--radius-lg); padding: 14px 16px;
   box-shadow: var(--shadow-2xs);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.kpi:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.kpi:hover { box-shadow: var(--shadow-md); }
 /* مرز رنگی سمت شروع، همان جهت سود/زیان کارت را از فاصله چشم می‌رساند،
    بی‌آنکه رنگ‌آمیزی کل کارت ادعای اجرا یا داده کیفی دیگر را رنگ کند. */
 .kpi:has(.v.gain) { border-inline-start-color: var(--gain); }
@@ -1657,9 +1714,9 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
   padding: 5px 13px; font-size: var(--fs-sm); cursor: pointer; color: var(--ink-2); font: inherit; font-weight: 700;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
 }
-.chip:hover:not([aria-pressed="true"]) { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); box-shadow: var(--shadow-2xs); }
-.chip:active:not([aria-pressed="true"]) { transform: translateY(0); }
-.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 800; box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--accent) 40%, transparent); }
+.chip:hover:not([aria-pressed="true"]) { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+.chip:active:not([aria-pressed="true"]) { border-color: var(--accent-active); color: var(--accent-active); }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 800; box-shadow: none; }
 
 dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px; margin: 0; font-size: var(--fs-lg); }
 dl.kv dt { color: var(--muted); }
@@ -2043,14 +2100,14 @@ td.gain, dd.gain { color: var(--gain); }
 .open-view-controls { margin-bottom: var(--space-4, 16px); }
 .open-view-form { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); gap: var(--space-3, 12px); align-items: end; }
 .open-view-form label { display: grid; gap: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
-.open-view-form select { width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background-color: var(--panel); color: var(--ink); font: inherit; }
+.open-view-form select { width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background-color: var(--panel); color: var(--ink); font: inherit; }
 .open-view-form button { min-height: var(--control-h, 40px); }
 .open-view-model-settings { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(520px, 2fr) auto; gap: 14px; align-items: end; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
 .open-view-model-settings h3 { margin: 2px 0 4px; }
 .open-view-model-settings small { color: var(--muted); }
 .open-view-model-grid { display: grid; grid-template-columns: repeat(5, minmax(105px, 1fr)); gap: 9px; }
 .open-view-model-grid label { display: grid; gap: 5px; color: var(--ink-2); font-size: var(--fs-xs); font-weight: 700; }
-.open-view-model-grid input, .open-view-model-grid select { width: 100%; min-height: 40px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 9px; background-color: var(--panel); color: var(--ink); font: inherit; }
+.open-view-model-grid input, .open-view-model-grid select { width: 100%; min-height: 40px; padding: 6px 9px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background-color: var(--panel); color: var(--ink); font: inherit; }
 .open-view-model-grid input { direction: ltr; text-align: start; font-family: var(--mono); }
 .open-view-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
 .open-view-chart { min-height: 245px; min-width: 0; }
@@ -2099,7 +2156,7 @@ td.gain, dd.gain { color: var(--gain); }
 .open-view-intraday-controls { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(150px, .35fr) auto minmax(190px, .5fr); gap: 12px; align-items: end; margin: 20px 0 12px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
 .open-view-intraday-controls h3 { margin: 2px 0 0; }
 .open-view-intraday-controls label { display: grid; gap: 5px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
-.open-view-intraday-controls select { min-height: 40px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 9px; background-color: var(--panel); color: var(--ink); font: inherit; }
+.open-view-intraday-controls select { min-height: 40px; padding: 6px 10px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background-color: var(--panel); color: var(--ink); font: inherit; }
 .open-view-day-detail .open-view-chart-grid > section { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
 
 @media (max-width: 900px) {
@@ -2124,7 +2181,7 @@ td.gain, dd.gain { color: var(--gain); }
 .live-market-control-head, .live-market-pick-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 9px; }
 .live-market-control-head { justify-content: space-between; }
 .live-market-control-head > label { display: grid; gap: 5px; min-width: min(420px, 100%); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 800; }
-.live-market-control-head select, .live-market-pick-tools input { min-height: 42px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background-color: var(--panel-2); color: var(--ink); font: inherit; }
+.live-market-control-head select, .live-market-pick-tools input { min-height: 42px; padding: 7px 10px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background-color: var(--panel); color: var(--ink); font: inherit; }
 .live-market-pick-tools input { min-width: 220px; }
 .live-market-pick-tools > span { margin-inline-start: auto; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
 .live-market-model { padding: 10px 12px; border-inline-start: 3px solid var(--cmp1); border-radius: 9px; background: var(--panel-2); color: var(--ink-2); font-size: var(--fs-sm); }
@@ -2202,7 +2259,7 @@ td.gain, dd.gain { color: var(--gain); }
 .live-market-picker { display: grid; gap: 14px; margin-top: 14px; }
 .live-market-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .live-base-search { display: grid; gap: 5px; max-width: 340px; color: var(--ink-2); font-size: var(--fs-sm); font-weight: 800; }
-.live-base-search input { min-height: 42px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); color: var(--ink); font: inherit; }
+.live-base-search input { min-height: 42px; padding: 7px 10px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); font: inherit; }
 .live-base-rail, .live-expiry-rail { display: flex; gap: 8px; overflow: auto; padding: 3px 2px 8px; scrollbar-width: thin; }
 .live-base-rail button, .live-expiry-rail button { display: grid; flex: 0 0 auto; gap: 3px; min-width: 150px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); color: var(--ink); text-align: start; cursor: pointer; }
 .live-base-rail button[aria-pressed="true"], .live-expiry-rail button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 -3px var(--accent); }
@@ -2222,28 +2279,32 @@ td.gain, dd.gain { color: var(--gain); }
 .decision-refresh-control output { color: var(--accent); font-weight: 900; text-align: end; }
 .decision-scope-controls { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
 .decision-scope-controls label { display: grid; gap: 5px; color: var(--muted); font-size: var(--fs-sm); font-weight: 800; }
-.decision-scope-controls select { width: 100%; min-height: 42px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 10px; background-color: var(--panel-2); color: var(--ink); font: inherit; }
+.decision-scope-controls select { width: 100%; min-height: 42px; padding: 7px 9px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background-color: var(--panel); color: var(--ink); font: inherit; }
 .decision-shell { display: grid; grid-template-columns: 230px minmax(0, 1fr); align-items: start; gap: 14px; direction: ltr; }
 .decision-mode-rail, .decision-main { direction: rtl; }
 .decision-mode-rail { position: sticky; top: 12px; display: grid; gap: 9px; }
 .decision-mode-rail button {
   display: grid; gap: 5px; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-lg);
   background: var(--panel); color: var(--ink); text-align: start; box-shadow: var(--shadow-2xs); cursor: pointer;
-  transition: transform var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+  transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
 }
-.decision-mode-rail button:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: var(--shadow-xs); }
+.decision-mode-rail button:hover { border-color: var(--accent); background: var(--accent-soft); box-shadow: var(--shadow-xs); }
 .decision-mode-rail button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 4px 0 var(--accent); font-weight: 800; }
 .decision-mode-rail small { color: var(--muted); line-height: 1.6; }
 .decision-mode-rail span { color: var(--accent); font-size: var(--fs-xs); font-weight: 900; }
 .decision-mode > .section-head { margin-bottom: 12px; }
 .decision-view-buttons { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
+/* بیست کلید انتخاب نما. تا پیش از این جعبه خاکستری بودند و در شبکه‌ای که
+   خودش پر از جعبه است گم می‌شدند؛ حالا قرص‌اند مثل هر کلید دیگر و کلید
+   فعال پر می‌شود، نه اینکه فقط زیرش خط بیفتد — خطِ ۳ پیکسلیِ داخلی روی
+   لبهٔ گرد بریده می‌شد و در ردیف پایین اصلاً دیده نمی‌شد. */
 .decision-view-buttons button {
-  min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-md);
-  background: var(--panel-2); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); font-weight: 700; text-align: start; cursor: pointer;
-  transition: transform var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  min-height: var(--control-h, 40px); padding: 8px 14px; border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: var(--panel); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); font-weight: 700; text-align: start; cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
 }
-.decision-view-buttons button:hover { border-color: var(--accent); color: var(--accent); background: var(--panel); }
-.decision-view-buttons button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 -3px var(--accent); font-weight: 800; }
+.decision-view-buttons button:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+.decision-view-buttons button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 800; }
 .decision-view-card { min-width: 0; min-height: 360px; }
 .decision-table { min-width: 1500px; }
 .decision-table td:nth-child(2) small { display: block; color: var(--muted); font-size: var(--fs-xs); }
@@ -2263,7 +2324,7 @@ td.gain, dd.gain { color: var(--gain); }
 .decision-side-switch button { border: 0; background: var(--panel); color: var(--ink-2);
   padding: 6px 14px; font: inherit; font-size: var(--fs-sm); cursor: pointer; }
 .decision-side-switch button + button { border-inline-start: 1px solid var(--line); }
-.decision-side-switch button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.decision-side-switch button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 
 /* میله انباشته: کال و پوت روی یک میله، با فاصله ۲ پیکسلی زمینه بینشان تا
    دو بخش هم‌مرز به هم نچسبند و مرزشان دیده شود. */
