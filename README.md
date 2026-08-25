@@ -205,6 +205,23 @@ core/evaluate.mjs      ارزیاب ردیف و قرارداد ستونی مشت
 core/positions.mjs     ارزش‌گذاری موقعیت واقعی و تحلیل رول
 core/portfolio.mjs     تجمیع و رتبه‌بندی گزارش همه استراتژی‌ها
 core/jalali.mjs        تاریخ شمسی
+
+سفره پر برکت بازار — شبیه‌ساز سفر در زمان:
+core/time-gate.mjs        دروازه زمان — تنها راه رسیدن داده به موتور جلسه
+core/book-history.mjs     بازسازی دفتر سفارش یک لحظه گذشته از دفتر رویداد
+core/trading-calendar.mjs تقویم معاملاتی از خود داده، و نردبان پرش
+core/bereket-session.mjs  مدل جلسه — قفل انتظار، زمان یک‌طرفه، بازتولیدپذیری
+core/bereket-exec.mjs     اجراپذیری در لحظه گذشته، با تشخیص صف
+core/bereket-value.mjs    ارزش‌گذاری موقعیت و وجه تضمین همان لحظه
+core/bereket-pnl.mjs      تجزیه کامل سود و زیان با باقیمانده اجباری
+core/bereket-events.mjs   رویدادهای میانه پرش و قواعد خروجِ اجراشدنی
+core/bereket-anon.mjs     حالت ناشناس — نام مستعار، محور شاخص‌شده، نگهبان نشت
+core/bereket-suggest.mjs  توزیع نظر، امتیاز با آزمون مقاومت، تفکیک بدشانسی
+core/bereket-candidates.mjs تولید ترکیب و پرتفوی سایه
+core/bereket-report.mjs   گزارش پایان جلسه با معیار مقایسه اجباری
+core/bereket-stats.mjs    داشبورد تجمیعی با برچسب نمونه ناکافی
+core/regime.mjs           رژیم بازار و انتخاب تاریخ لایه‌بندی‌شده
+core/rng.mjs              مولد شبه‌تصادفی با بذر، برای بازتولیدپذیری
 strategies/catalog.mjs   ۳۶ استراتژی، اعلانی
 server/server.mjs      سرور محلی
 worker/scan-worker.mjs   ریسه اسکن
