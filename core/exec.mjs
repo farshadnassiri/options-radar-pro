@@ -180,7 +180,11 @@ export function priceLegs(legs, quotes, opt = {}) {
 export function maxSize(pricedLegs, opt = {}) {
   const contractSize = num(opt.contractSize, 1000);
   const limits = [];
-  for (const l of pricedLegs) {
+  // `index` شمارهٔ همان پاست. برچسبِ اینجا قیمت اعمال دارد و برای جدول
+  // معمولی درست است؛ ولی هر مصرف‌کننده‌ای که نامِ نماد و اعمال را پنهان
+  // می‌کند — مثل شبیه‌ساز سفر در زمان — باید بتواند برچسب خودش را بسازد.
+  // بدون شماره، تنها راهش تجزیهٔ رشتهٔ فارسی بود.
+  pricedLegs.forEach((l, index) => {
     const per = l.kind === 'underlying'
       ? num(l.ratio, 1) * num(l.size, contractSize)
       : num(l.ratio, 1);
@@ -188,12 +192,12 @@ export function maxSize(pricedLegs, opt = {}) {
       ? 'عمق سهم پایه'
       : `عمق ${l.side === 'sell' ? 'تقاضای' : 'عرضه'} ${l.kind === 'call' ? 'کال' : 'پوت'} ${num(l.strike)}`;
     // پایی که عمقش نامعلوم است، قید نمی‌شود ولی در فهرست دیده می‌شود
-    if (l.exec?.assumedDepth) { limits.push({ what: label, max: null, note: 'نامعلوم' }); continue; }
+    if (l.exec?.assumedDepth) { limits.push({ index, what: label, max: null, note: 'نامعلوم' }); return; }
     // ظرفیت دفتر، نه حجم پرشده. حجم پرشده سقف درخواستی تو را نمی‌شکند.
     const capUnits = num(l.exec?.capacity, num(l.exec?.filled));
     const cap = per > 0 ? Math.floor(capUnits / per) : 0;
-    limits.push({ what: label, max: cap });
-  }
+    limits.push({ index, what: label, max: cap });
+  });
 
   const capitalPer = num(opt.capitalPerContract);
   if (capitalPer > 0 && num(opt.capitalAvailable) > 0) {
@@ -204,9 +208,13 @@ export function maxSize(pricedLegs, opt = {}) {
   }
 
   const valid = limits.filter((x) => x.max != null && Number.isFinite(x.max));
-  if (!valid.length) return { max: 0, binding: 'بی‌مظنه', limits };
+  if (!valid.length) return { max: 0, binding: 'بی‌مظنه', bindingIndex: -1, limits };
   const min = valid.reduce((a, b) => (b.max < a.max ? b : a), valid[0]);
-  return { max: Math.max(0, min.max), binding: min.what, limits };
+  return {
+    max: Math.max(0, min.max), binding: min.what,
+    bindingIndex: Number.isFinite(min.index) ? min.index : -1,
+    limits,
+  };
 }
 
 /**

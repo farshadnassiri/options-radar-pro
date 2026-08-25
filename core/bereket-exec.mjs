@@ -133,19 +133,23 @@ export function executableAt({
   const quotes = quotesForLegs(legs, books, meta);
   const share = Math.min(1, Math.max(0, num(takePct, DEFAULT_TAKE_PCT) / 100));
 
+  // `index` عمدی است. برچسبِ ساختهٔ هسته قیمت اعمال دارد، و رابط در
+  // حالت ناشناس حق ندارد چنین متنی را چاپ کند. پس هسته **شمارهٔ پا** را
+  // هم می‌دهد تا مصرف‌کننده بتواند برچسب خودش را بسازد؛ `why` برای دفتر
+  // خطا و حالت غیرناشناس سر جایش می‌ماند.
   const missing = [];
   const blocked = [];
   legs.forEach((leg, at) => {
     const quote = quotes[at];
     const label = legLabel(leg);
-    if (!quote) { missing.push(label); return; }
-    if (!quote.queue.tradable) blocked.push({ leg: label, ...quote.queue });
+    if (!quote) { missing.push({ index: at, leg: label }); return; }
+    if (!quote.queue.tradable) blocked.push({ index: at, leg: label, ...quote.queue });
   });
 
   if (missing.length) {
     return {
       max: 0, binding: 'بی‌مظنه', limits: [], quotes, blocked, missing,
-      ok: false, why: `در آن لحظه برای ${missing.join('، ')} دفتری نبود؛ این ساختار ساختنی نیست.`,
+      ok: false, why: `در آن لحظه برای ${missing.map((row) => row.leg).join('، ')} دفتری نبود؛ این ساختار ساختنی نیست.`,
     };
   }
   if (blocked.length) {
@@ -171,7 +175,7 @@ export function executableAt({
 
   return {
     ok: sized.max > 0,
-    max: sized.max, binding: sized.binding, limits: sized.limits,
+    max: sized.max, binding: sized.binding, bindingIndex: sized.bindingIndex, limits: sized.limits,
     priced, quotes, cost, quality, slipPct, takePct: num(takePct, DEFAULT_TAKE_PCT),
     blocked, missing,
     why: sized.max > 0 ? '' : `عمق کافی نبود — قید: ${sized.binding}`,

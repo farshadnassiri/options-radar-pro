@@ -286,6 +286,8 @@ const TABS = [
   // حساسیت‌ها را دنبال کند، نباید از میان پانزده پنلِ دیگر رد شود.
   { id: 'greeks-watch', title: '📐 رصد یونانی و تلاطم', alias: 'یونانی گریک دلتا گاما وگا تتا رو تلاطم ضمنی تاریخی greeks',
     section: 'پایه', mod: '/ui/tabs/greeks-watch.mjs', phase: 3 },
+  { id: 'bereket', title: '🍲 سفره پر برکت بازار', alias: 'سفر در زمان شبیه‌ساز جلسه تمرین یادگیری بازی گذشته bereket time machine',
+    section: 'پایه', mod: '/ui/tabs/bereket.mjs', phase: 3 },
   { id: 'logs', title: 'دفتر خطاها', section: 'پایه', mod: '/ui/tabs/logs.mjs', phase: 1 },
 ];
 
