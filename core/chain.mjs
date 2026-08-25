@@ -248,7 +248,7 @@ export function buildChain(rows) {
  */
 function rollupQuotes(u) {
   let contracts = 0, quoted = 0, callVol = 0, putVol = 0, callOi = 0, putOi = 0;
-  let value = 0, trades = 0;
+  let callValue = 0, putValue = 0, callTrades = 0, putTrades = 0;
   // موقعیت باز دیروز کنار امروز جمع می‌شود تا «تغییر موقعیت باز» هر نماد
   // ساخته شود. تا امروز فقط `oi` جمع می‌شد و ستون تغییر، هیچ منبعی نداشت.
   //
@@ -264,11 +264,14 @@ function rollupQuotes(u) {
       for (const [q, isCall] of [[st.call, true], [st.put, false]]) {
         contracts += 1;
         if (q.bid > 0 || q.ask > 0) quoted += 1;
-        if (isCall) { callVol += q.vol; callOi += q.oi; } else { putVol += q.vol; putOi += q.oi; }
+        if (isCall) {
+          callVol += q.vol; callOi += q.oi; callValue += q.value; callTrades += q.trades || 0;
+        } else {
+          putVol += q.vol; putOi += q.oi; putValue += q.value; putTrades += q.trades || 0;
+        }
         if (Number.isFinite(q.oiYday)) {
           if (isCall) callOiYday += q.oiYday; else putOiYday += q.oiYday;
         } else oiYdayKnown = false;
-        value += q.value; trades += q.trades || 0;
         if (q.bid > 0 && q.ask > 0) {
           const mid = (q.bid + q.ask) / 2;
           if (mid > 0) spreads.push(((q.ask - q.bid) / mid) * 100);
@@ -282,11 +285,21 @@ function rollupQuotes(u) {
     : (spreads[spreads.length / 2 - 1] + spreads[spreads.length / 2]) / 2) : NaN;
   const days = u.expiryList.map((ex) => ex.days).filter(Number.isFinite);
   const oi = callOi + putOi;
+  const volume = callVol + putVol;
+  const value = callValue + putValue;
+  const trades = callTrades + putTrades;
   const oiYday = oiYdayKnown ? callOiYday + putOiYday : NaN;
+  const pct = (part, total) => total > 0 ? (part / total) * 100 : NaN;
   return {
     contracts, quoted, strikes: strikes.size,
-    volume: callVol + putVol, oi,
+    quotedPct: pct(quoted, contracts), twoSided: spreads.length,
+    twoSidedPct: pct(spreads.length, contracts),
+    volume, oi,
     callVol, putVol, callOi, putOi,
+    callVolumePct: pct(callVol, volume), putVolumePct: pct(putVol, volume),
+    callValue, putValue, callValuePct: pct(callValue, value), putValuePct: pct(putValue, value),
+    callTrades, putTrades,
+    callOiPct: pct(callOi, oi), putOiPct: pct(putOi, oi),
     oiYday, callOiYday: oiYdayKnown ? callOiYday : NaN, putOiYday: oiYdayKnown ? putOiYday : NaN,
     oiChange: oiYdayKnown ? oi - oiYday : NaN,
     oiChangePct: oiYdayKnown && oiYday > 0 ? ((oi / oiYday) - 1) * 100 : NaN,
@@ -295,7 +308,6 @@ function rollupQuotes(u) {
     pcVolRatio: callVol > 0 ? putVol / callVol : NaN,
     value, trades,
     spreadMedPct: spreads.length ? mid : NaN,
-    twoSided: spreads.length,
     farDays: days.length ? Math.max(...days) : null,
   };
 }
@@ -305,19 +317,23 @@ export function underlyingList(chain, opt = {}) {
   const divYield = Number.isFinite(opt.divYield) ? opt.divYield : 0;
   const yearDays = Number.isFinite(opt.yearDays) ? opt.yearDays : 365;
   return [...chain.values()]
-    .map((u) => ({
-      ins: u.ins, name: u.name, last: u.last || u.close, close: u.close, yday: u.yday,
-      changePct: (u.last || u.close) > 0 && u.yday > 0 ? (((u.last || u.close) / u.yday) - 1) * 100 : NaN,
-      expiries: u.expiryList.length,
-      nearestDays: u.expiryList[0]?.days ?? null,
-      // گردش خودِ نماد پایه، جدا از گردش زنجیره اختیارش. تا امروز خوانده
-      // می‌شد ولی به هیچ ستونی نمی‌رسید، و ستون «ارزش معاملات» جدول در
-      // واقع مجموع زنجیره بود — دو عدد کاملاً متفاوت با یک نام.
-      uaValue: u.value, uaVolume: u.vol, uaTrades: u.trades,
-      ...rollupQuotes(u),
-      pcRatio: pcOpenInterestRatio(u),
-      atmIv: atmIv(u, rFree, divYield, yearDays),
-    }))
+    .map((u) => {
+      const iv = atmIv(u, rFree, divYield, yearDays);
+      return {
+        ins: u.ins, name: u.name, last: u.last || u.close, close: u.close, yday: u.yday,
+        changePct: (u.last || u.close) > 0 && u.yday > 0 ? (((u.last || u.close) / u.yday) - 1) * 100 : NaN,
+        expiries: u.expiryList.length,
+        nearestDays: u.expiryList[0]?.days ?? null,
+        // گردش خودِ نماد پایه، جدا از گردش زنجیره اختیارش. تا امروز خوانده
+        // می‌شد ولی به هیچ ستونی نمی‌رسید، و ستون «ارزش معاملات» جدول در
+        // واقع مجموع زنجیره بود — دو عدد کاملاً متفاوت با یک نام.
+        uaValue: u.value, uaVolume: u.vol, uaTrades: u.trades,
+        ...rollupQuotes(u),
+        pcRatio: pcOpenInterestRatio(u),
+        atmIv: iv,
+        atmIvPct: Number.isFinite(iv) ? iv * 100 : NaN,
+      };
+    })
     .sort((a, b) => b.volume - a.volume || b.contracts - a.contracts);
 }
 
