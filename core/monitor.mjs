@@ -87,22 +87,10 @@ export function monitorSnapshot(legs = [], { spot, prices = [], date, days: days
       ? { delta: 1, gamma: 0, vega: 0, theta: 0, rho: 0 }
       : greeksFromIvPct(leg, { spot, days: days[index] }, ivPct[index], params)
   ));
+  // «جمعِ ناقص، جمع نیست» در خودِ `positionGreeks` نشسته، نه اینجا: مسیر
+  // آزمایشگاه از این فایل رد نمی‌شود و اگر قاعده اینجا بود، همان موقعیت
+  // در دو تب دو عدد می‌گرفت.
   const totals = positionGreeks(legs, byLeg);
-  // جمعِ ناقص، جمع نیست.
-  //
-  // `positionGreeks` از صفر شروع می‌کند و پایی که یونانی ندارد را رد
-  // می‌کند. یعنی موقعیتی که هیچ پایش تلاطم نداده، «دلتا ۰» می‌گیرد — عددی
-  // که دقیقاً شبیه «این موقعیت خنثای جهت است» خوانده می‌شود، در حالی که
-  // حرفش «نمی‌دانیم» است. پرچم `incomplete` کنارش هست ولی چشم اول به عدد
-  // می‌افتد نه به پرچم.
-  //
-  // پس جمعِ ناقص عدد نمی‌دهد. یونانی پاهایی که درآمده‌اند سر جایشان
-  // می‌مانند و در جدول تفکیک دیده می‌شوند؛ چیزی که ساخته نمی‌شود فقط
-  // ادعای «یونانی کل موقعیت این است» است.
-  if (totals.incomplete) {
-    for (const { key } of GREEKS) totals[key] = NaN;
-    totals.deltaShares = NaN;
-  }
   const hvPct = num(extra.hvPct, NaN);
   const meanIv = meanIvPct(ivPct);
   return {

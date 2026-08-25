@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { bsPrice, bsGreeks, impliedVol, probBelow, probAbove, histVol, npdf, d1d2, ncdf, ninv, priceQuantile } from '../core/bs.mjs';
-import { grossCash, entryFees, analyzePayoff, signedQty, pnlAtExpiry } from '../core/payoff.mjs';
+import { grossCash, entryFees, analyzePayoff, signedQty, pnlAtExpiry, positionGreeks } from '../core/payoff.mjs';
 import { analyzeMixed } from '../core/mixed.mjs';
 import {
   initialMargin, requiredMargin, minMargin, verifyMargin, impliedUnderlying,
@@ -7105,11 +7105,23 @@ group('۹۳. لایهٔ مشترک رصد — یک ورودی برای هر سه
   //
   // پیش از این `positionGreeks` از صفر شروع می‌کرد و موقعیتی که هیچ پایش
   // تلاطم نداده بود «دلتا ۰» می‌گرفت — عددی که «خنثای جهت» خوانده می‌شود
-  // در حالی که حرفش «نمی‌دانیم» است.
+  // در حالی که حرفش «نمی‌دانیم» است. قاعده در خودِ `positionGreeks` نشسته
+  // نه در لایهٔ رصد، وگرنه آزمایشگاه که از این لایه رد نمی‌شود همان موقعیت
+  // را با عدد دیگری نشان می‌داد.
   const blind = monitorSnapshot(legs93, { spot: spot93, prices: [NaN, NaN], date: 20260101 }, P93, {});
   check('موقعیت بی‌تلاطم، یونانی صفر نمی‌گیرد — خالی می‌ماند',
     blind.incomplete && ['delta', 'gamma', 'vega', 'theta', 'rho'].every((key) => Number.isNaN(blind.greeks[key])),
     `دلتا ${blind.greeks.delta}`);
+  // همین قاعده مستقیم روی `positionGreeks` هم سنجیده می‌شود، چون مسیرهایی
+  // (آزمایشگاه، قرارداد ستونی) از لایهٔ رصد رد نمی‌شوند.
+  const rawSum = positionGreeks(
+    [{ kind: 'call', side: 'buy', ratio: 1, size: 1000, strike: 10000 },
+      { kind: 'call', side: 'sell', ratio: 1, size: 1000, strike: 11000 }],
+    [{ delta: 0.6, gamma: 1e-6, vega: 12, theta: -3, rho: 4 }, null],
+  );
+  check('خودِ positionGreeks هم جمعِ ناقص را عدد نمی‌کند',
+    rawSum.incomplete && ['delta', 'gamma', 'vega', 'theta', 'rho', 'deltaShares']
+      .every((key) => Number.isNaN(rawSum[key])), `دلتا ${rawSum.delta}`);
   const half = monitorSnapshot(legs93, { spot: spot93, prices: [prices93[0], NaN], date: 20260101 }, P93, {});
   check('پای درآمده سر جایش می‌ماند، ولی جمعِ ناقص عدد نمی‌دهد',
     half.incomplete && Number.isNaN(half.greeks.delta) && Number.isFinite(half.byLeg[0].delta)
