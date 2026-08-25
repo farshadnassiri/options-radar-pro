@@ -21,15 +21,20 @@ import { signedQty } from './payoff.mjs';
  * skipLevels برای حالت محافظه‌کار است: فرض می‌کنیم سطح اول تا زمان رسیدن
  * سفارش تو برداشته شده.
  */
-export function walkBook(book, qty, side, skipLevels = 0) {
+export function walkBook(book, qty, side, skipLevels = 0, takePct = 1) {
   const empty = { vwap: 0, top: 0, filled: 0, short: num(qty), levels: 0, slipPct: NaN, full: false };
   if (!Array.isArray(book) || !book.length || !(qty > 0)) return empty;
 
+  // سقف مصرف هر سطح. یک یعنی همه‌اش — رفتار قبلی، و پیش‌فرض همین است تا
+  // مسیرهای موجود عوض نشوند. عدد کمتر یعنی «فرض می‌کنیم کل صف پشت یک
+  // سطح مال ما نیست»؛ در بازاری که سفارش‌ها لحظه‌ای برداشته می‌شوند،
+  // برداشتن صد درصد هر سطح، اجراپذیری را بیش‌برآورد می‌کند.
+  const share = Math.min(1, Math.max(0, num(takePct, 1)));
   const rows = book.slice(skipLevels);
   let rem = num(qty), cost = 0, used = 0, top = 0;
   for (const r of rows) {
     const p = side === 'buy' ? num(r.ask) : num(r.bid);
-    const q = side === 'buy' ? num(r.askQty) : num(r.bidQty);
+    const q = (side === 'buy' ? num(r.askQty) : num(r.bidQty)) * share;
     if (!(p > 0) || !(q > 0)) continue;
     if (top === 0) top = p;
     const take = Math.min(rem, q);
@@ -54,13 +59,14 @@ export function walkBook(book, qty, side, skipLevels = 0) {
  * دور نشده‌اند. این با «حجم پرشده» یکی نیست — حجم پرشده هرگز از حجم درخواستی
  * تو بیشتر نمی‌شود، پس نمی‌تواند مبنای «سقف قرارداد» باشد.
  */
-export function bookCapacity(book, side, skipLevels = 0, maxSlipPct = Infinity) {
+export function bookCapacity(book, side, skipLevels = 0, maxSlipPct = Infinity, takePct = 1) {
   if (!Array.isArray(book) || !book.length) return 0;
+  const share = Math.min(1, Math.max(0, num(takePct, 1)));
   const rows = book.slice(skipLevels);
   let top = 0, total = 0;
   for (const r of rows) {
     const p = side === 'buy' ? num(r.ask) : num(r.bid);
-    const q = side === 'buy' ? num(r.askQty) : num(r.bidQty);
+    const q = (side === 'buy' ? num(r.askQty) : num(r.bidQty)) * share;
     if (!(p > 0) || !(q > 0)) continue;
     if (top === 0) top = p;
     const slip = Math.abs((p - top) / top) * 100;
@@ -116,8 +122,9 @@ export function resolvePrice(quote, side, opt = {}) {
     ? q.book
     : [{ bid: num(q.bid), bidQty: num(q.bidQty), ask: num(q.ask), askQty: num(q.askQty) }];
   const hasDepth = Array.isArray(q.book) && q.book.length > 1;
-  const w = walkBook(book, qty, side, skip);
-  const capacity = bookCapacity(book, side, skip, num(opt.maxSlipPct, Infinity));
+  const take = num(opt.takePct, 1);
+  const w = walkBook(book, qty, side, skip, take);
+  const capacity = bookCapacity(book, side, skip, num(opt.maxSlipPct, Infinity), take);
 
   if (!(w.vwap > 0)) {
     // در حالت مطالعه، به قیمت پایانی برمی‌گردیم تا ردیف عدد معنی‌دار داشته
