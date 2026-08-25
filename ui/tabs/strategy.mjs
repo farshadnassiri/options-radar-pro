@@ -64,8 +64,18 @@ const VIEWS = {
   سرمایه: ['underlying', 'legsText', 'days', 'capital', 'capitalLabel', 'margin', 'marginNet',
     'marginPart1', 'marginPart2', 'marginPart3', 'marginPart4', 'marginToMaxLoss',
     'marginRequired', 'marginNote', 'conditionalMargin', 'netCash', 'maxLoss', 'retMaxPct', 'retAnnPct', 'warn'],
-  یونانی: ['underlying', 'legsText', 'days', 'delta', 'gamma', 'vega', 'theta',
-    'thetaToCapitalPct', 'sigmaUse', 'popPct', 'capital', 'warn'],
+  یونانی: ['underlying', 'legsText', 'days', 'delta', 'gamma', 'vega', 'theta', 'rho',
+    'thetaToCapitalPct', 'sigmaUse', 'ivMeanPct', 'hvPct', 'ivHvSpreadPp', 'popPct', 'capital', 'warn'],
+  // تفکیک پا، نمای جدا دارد نه ستون‌های اضافه روی نمای «یونانی»: با چهار پا
+  // بیست‌وچهار ستون می‌شود و جدولی که باید در یک نگاه خوانده شود، افقی
+  // اسکرول می‌خورد.
+  'یونانی پاها': ['underlying', 'legNames', 'days',
+    'legIv1', 'legIv2', 'legIv3', 'legIv4',
+    'legdelta1', 'legdelta2', 'legdelta3', 'legdelta4',
+    'leggamma1', 'leggamma2', 'leggamma3', 'leggamma4',
+    'legvega1', 'legvega2', 'legvega3', 'legvega4',
+    'legtheta1', 'legtheta2', 'legtheta3', 'legtheta4',
+    'delta', 'gamma', 'vega', 'theta', 'warn'],
   اجرا: ['underlying', 'legsText', 'days', 'execCost', 'costCommission', 'costCrossing',
     'costSlippage', 'costFunding', 'maxQty', 'binding', 'qualityLabel', 'warn'],
   همه: COLUMNS.map((c) => c.key),

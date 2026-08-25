@@ -231,7 +231,7 @@ export function passesFilters(row, s) {
  * اسکن یک استراتژی روی چند نماد پایه.
  * تابع خالص است و در ریسه جدا هم اجرا می‌شود.
  */
-export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, qty }) {
+export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, sigmaSourceByUa = {}, qty }) {
   const s = settings;
   const funnel = emptyFunnel();
   const rows = [];
@@ -252,7 +252,7 @@ export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, qty }) {
             S: c.spot, Sclose: c.spotClose, days: c.days, size: c.size,
             sizeMixed: c.sizeMixed,
             qty: qty ?? s.qtyDefault, settings: s, def,
-            underlying: c.underlying, sigmaHist: sigmaByUa[key],
+            underlying: c.underlying, sigmaHist: sigmaByUa[key], sigmaHistSource: sigmaSourceByUa[key],
             // نوع پایه، از نگاشت اعلامی کاربر. نرخ کارمزد پای سهم از همین
             // می‌آید و ردیف هم می‌گوید کدام نرخ خورده است.
             assetClass: assetClassOf(classes, ua),
@@ -300,7 +300,7 @@ export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, qty }) {
  * تنها روی خودش اعمال می‌کند؛ اینجا همان معیار روی همه ردیف‌های همه
  * استراتژی‌ها با هم اعمال می‌شود.
  */
-export function scanAll({ defs, chain, uaKeys, settings, sigmaByUa = {}, qty, limit = 50 }) {
+export function scanAll({ defs, chain, uaKeys, settings, sigmaByUa = {}, sigmaSourceByUa = {}, qty, limit = 50 }) {
   const t0 = Date.now();
   const funnel = emptyFunnel();
   const rows = [];
@@ -310,7 +310,7 @@ export function scanAll({ defs, chain, uaKeys, settings, sigmaByUa = {}, qty, li
   // topN=۵۰ و ۳۱ استراتژی، ۴۵۹۳ ترکیب «۳۲۸۸» گزارش می‌شد.
   let total = 0;
   for (const def of defs) {
-    const res = scan({ def, chain, uaKeys, settings, sigmaByUa, qty });
+    const res = scan({ def, chain, uaKeys, settings, sigmaByUa, sigmaSourceByUa, qty });
     for (const k of FUNNEL_KEYS) funnel[k] += res.funnel[k] || 0;
     // «به سقف خورد» بولی است: اگر حتی یک استراتژی به سقف بخورد، نمای کلی
     // هم به سقف خورده و هشدارش نباید پنهان بماند.

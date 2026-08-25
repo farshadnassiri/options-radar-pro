@@ -97,7 +97,7 @@ function handleMessage(m) {
     const settings = m.onlyIds ? { ...m.settings, greeksInScan: true } : m.settings;
     const res = scan({
       def, chain: ch, uaKeys: m.uaKeys, settings,
-      sigmaByUa: m.sigmaByUa || {}, qty: m.qty,
+      sigmaByUa: m.sigmaByUa || {}, sigmaSourceByUa: m.sigmaSourceByUa || {}, qty: m.qty,
     });
     const rows = m.onlyIds
       ? res.rows.filter((r) => m.onlyIds.includes(r.id))
@@ -119,7 +119,7 @@ function handleMessage(m) {
     const defs = m.defIds.map((id) => byId(id)).filter(Boolean);
     const res = scanAll({
       defs, chain: ch, uaKeys: m.uaKeys, settings: m.settings,
-      sigmaByUa: m.sigmaByUa || {}, qty: m.qty, limit: m.limit,
+      sigmaByUa: m.sigmaByUa || {}, sigmaSourceByUa: m.sigmaSourceByUa || {}, qty: m.qty, limit: m.limit,
     });
     // شیء payoff تابع دارد و کلون نمی‌شود؛ فقط داده رسم را می‌فرستیم
     for (const r of res.rows) {

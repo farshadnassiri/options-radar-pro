@@ -15,6 +15,7 @@
 // دست‌نخورده می‌مانند، چون صورت و مخرجشان با هم مقیاس می‌خورند.
 
 import { num, ok, EPS } from './num.mjs';
+import { ivHvSpread } from './hist-vol.mjs';
 import {
   grossCash, entryFees, analyzePayoff, positionGreeks, signedQty,
 } from './payoff.mjs';
@@ -218,6 +219,27 @@ export function evaluate({ legs, quotes, ctx }) {
   const sigmaUse = s.volSource === 'MANUAL' ? s.volManual
     : ok(ctx.sigmaHist) ? ctx.sigmaHist
     : priced.map((l) => l.sigma).find(ok);
+
+  // ——— ۶-۲. تلاطم ضمنی موقعیت در برابر تلاطم تاریخی پایه ———
+  //
+  // میانگین ساده است، نه وزنی. وزنِ ارزش معامله «تلاطم بازار» را می‌سازد
+  // نه «تلاطم این موقعیت»، و پای پرگردش را هم‌اندازهٔ کل بازار نشان
+  // می‌دهد. همان استدلالی که `meanIvPct` در `core/leg-iv.mjs` دارد.
+  const ivOfLegs = priced
+    .filter((l) => l.kind !== 'underlying')
+    .map((l) => num(l.sigma, NaN))
+    .filter((v) => ok(v) && v > 0);
+  const ivMeanPct = ivOfLegs.length
+    ? (ivOfLegs.reduce((a, b) => a + b, 0) / ivOfLegs.length) * 100 : NaN;
+  // تلاطم تاریخی از بیرون می‌آید — سری قیمت پایه اینجا نیست و ساختنش از
+  // قیمت‌های همین ترکیب یعنی اختراع داده. اگر نیامده باشد، `hvManualPct`
+  // تنظیمات جایش می‌نشیند و منبعش «دستی» علامت می‌خورد.
+  const hvManual = num(s.hvManualPct, 0);
+  const hvPct = ok(ctx.sigmaHist) && ctx.sigmaHist > 0 ? ctx.sigmaHist * 100
+    : hvManual > 0 ? hvManual : NaN;
+  const hvSource = ok(ctx.sigmaHist) && ctx.sigmaHist > 0
+    ? (ctx.sigmaHistSource === 'manual' ? 'manual' : 'series')
+    : hvManual > 0 ? 'manual' : 'none';
 
   // ——— ۷. احتمال ———
   const pop = probOfProfit(payoff, S, T, sigmaUse);
@@ -437,6 +459,10 @@ export function evaluate({ legs, quotes, ctx }) {
     theta: greeks.theta, rho: greeks.rho, deltaShares: greeks.deltaShares,
     greeksIncomplete: greeks.incomplete,
     thetaToCapitalPct: cap > 0 && ok(greeks.theta) ? (greeks.theta / cap) * 100 : NaN,
+    // یونانی و تلاطم هر پا، جدا از جمع موقعیت. خواستهٔ صریح: در هر جایی که
+    // استراتژی هست، هم پاها دیده شوند هم کل.
+    ...legGreekSlots(priced, greeksByLeg),
+    ivMeanPct, hvPct, hvSource, ivHvSpreadPp: ivHvSpread(ivMeanPct, hvPct),
 
     // اجرا
     execCost: cost.total, execCostPctCapital: pctCapital(cost.total),
@@ -505,6 +531,9 @@ export function evaluate({ legs, quotes, ctx }) {
 /** چند سربه‌سری ستون جدا می‌گیرد. چهار پا، حداکثر چهار نقطهٔ واقعی می‌سازد. */
 export const BE_SLOTS = 4;
 
+/** ترتیب یونانی‌ها در ستون‌ها. همان ترتیب `GREEKS` در `core/greeks-track.mjs`. */
+const GREEK_KEYS = ['delta', 'gamma', 'vega', 'theta', 'rho'];
+
 export function breakevenMetrics(bes, S) {
   const list = (Array.isArray(bes) ? bes : []).filter((b) => ok(b) && b > 0).sort((a, b) => a - b);
   const slots = {};
@@ -541,6 +570,15 @@ export function breakevenMetrics(bes, S) {
 /** چند پا ستون ارزش معاملات جدا می‌گیرد. کاتالوگ حداکثر چهار پا دارد. */
 export const LEG_VALUE_SLOTS = 4;
 export const MARGIN_PART_SLOTS = 4;
+/**
+ * ستون‌های یونانی و تلاطمِ **هر پا**.
+ *
+ * چهارتاست چون هیچ الگوی کاتالوگ بیش از چهار پا ندارد، همان کفی که
+ * `LEG_VALUE_SLOTS` روی آن ایستاده. پای پنجم اگر روزی بیاید، ستون
+ * نمی‌گیرد ولی در جمع موقعیت هست — و همین‌جا نوشته می‌شود تا کسی گمان
+ * نکند جمع، فقط جمعِ ستون‌هاست.
+ */
+export const LEG_GREEK_SLOTS = 4;
 
 /**
  * ارزش معاملات امروزِ هر پا، هر کدام در ستون خودش.
@@ -563,6 +601,39 @@ export function legValueSlots(values) {
   for (let i = 1; i <= LEG_VALUE_SLOTS; i++) slots[`legValue${i}`] = NaN;
   for (let i = 0; i < Math.min(LEG_VALUE_SLOTS, list.length); i++) {
     slots[`legValue${i + 1}`] = ok(list[i]) ? list[i] : NaN;
+  }
+  return slots;
+}
+
+/**
+ * یونانی و تلاطم ضمنی هر پا، هر کدام در ستون خودش.
+ *
+ * عددِ ستون، یونانی **وزن‌نخوردهٔ** خودِ قرارداد است — همان چیزی که
+ * بلک‌شولز برای یک سهم داده. وزن و علامت پا فقط در سطر جمع (`delta`،
+ * `gamma`…) اعمال می‌شود. اگر اینجا هم اعمال می‌شد، یک نام دو تعریف
+ * داشت: «دلتای پا ۲» در جدول با «دلتای پا ۲» در پنل رصد یکی نمی‌ماند.
+ *
+ * پای دارایی پایه دلتای ۱ دارد و بقیهٔ یونانی‌هایش صفر است — این ادعای
+ * ساختگی نیست، تعریف است: سهم نسبت به خودش دلتای یک دارد و از تلاطم و
+ * زمان اثر نمی‌گیرد. ولی تلاطم ضمنی ندارد، چون قرارداد اختیار نیست.
+ */
+export function legGreekSlots(legs = [], greeksByLeg = []) {
+  const slots = {};
+  for (let i = 1; i <= LEG_GREEK_SLOTS; i++) {
+    slots[`legIv${i}`] = NaN;
+    for (const key of GREEK_KEYS) slots[`leg${key}${i}`] = NaN;
+  }
+  for (let i = 0; i < Math.min(LEG_GREEK_SLOTS, legs.length); i++) {
+    const leg = legs[i];
+    const g = greeksByLeg[i];
+    if (leg?.kind === 'underlying') {
+      slots[`legdelta${i + 1}`] = 1;
+      for (const key of GREEK_KEYS) if (key !== 'delta') slots[`leg${key}${i + 1}`] = 0;
+      continue;
+    }
+    slots[`legIv${i + 1}`] = ok(leg?.sigma) ? leg.sigma * 100 : NaN;
+    if (!g) continue;
+    for (const key of GREEK_KEYS) slots[`leg${key}${i + 1}`] = ok(g[key]) ? g[key] : NaN;
   }
   return slots;
 }
@@ -693,6 +764,33 @@ export const COLUMNS = [
   { key: 'deltaShares', label: 'دلتا بر حسب سهم', fmt: 'num', group: 'یونانی' },
   { key: 'thetaToCapitalPct', label: 'تتا به سرمایه ٪', fmt: 'pct', group: 'یونانی', heat: 'gain' },
   { key: 'sigmaUse', label: 'تلاطم مبنا', fmt: 'num', group: 'یونانی' },
+  { key: 'ivMeanPct', label: 'تلاطم ضمنی موقعیت ٪', fmt: 'num', group: 'یونانی' },
+  { key: 'hvPct', label: 'تلاطم تاریخی پایه ٪', fmt: 'num', group: 'یونانی' },
+  { key: 'ivHvSpreadPp', label: 'ضمنی منهای تاریخی', fmt: 'num', group: 'یونانی' },
+  { key: 'legIv1', label: 'تلاطم ضمنی پا ۱', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'legIv2', label: 'تلاطم ضمنی پا ۲', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'legIv3', label: 'تلاطم ضمنی پا ۳', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'legIv4', label: 'تلاطم ضمنی پا ۴', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'legdelta1', label: 'دلتا پا ۱', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'legdelta2', label: 'دلتا پا ۲', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'legdelta3', label: 'دلتا پا ۳', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'legdelta4', label: 'دلتا پا ۴', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'leggamma1', label: 'گاما پا ۱', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'leggamma2', label: 'گاما پا ۲', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'leggamma3', label: 'گاما پا ۳', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'leggamma4', label: 'گاما پا ۴', fmt: 'num', group: 'یونانی پاها' },
+  { key: 'legvega1', label: 'وگا پا ۱', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legvega2', label: 'وگا پا ۲', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legvega3', label: 'وگا پا ۳', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legvega4', label: 'وگا پا ۴', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legtheta1', label: 'تتا روزانه پا ۱', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legtheta2', label: 'تتا روزانه پا ۲', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legtheta3', label: 'تتا روزانه پا ۳', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legtheta4', label: 'تتا روزانه پا ۴', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legrho1', label: 'رو پا ۱', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legrho2', label: 'رو پا ۲', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legrho3', label: 'رو پا ۳', fmt: 'money', group: 'یونانی پاها' },
+  { key: 'legrho4', label: 'رو پا ۴', fmt: 'money', group: 'یونانی پاها' },
   { key: 'execCost', label: 'هزینه اجرا', fmt: 'money', group: 'اجرا', heat: 'loss' },
   { key: 'execCostPctCapital', label: 'هزینه اجرا ٪ سرمایه', fmt: 'pct', group: 'اجرا', heat: 'loss' },
   { key: 'costCommission', label: 'کارمزد', fmt: 'money', group: 'اجرا' },
@@ -760,14 +858,23 @@ export function columnsForStrategy(def) {
   const legs = def?.legs || [];
   if (!legs.length) return COLUMNS;
   const marginParts = marginPartDescriptors(def);
+  // ستون یونانیِ پایی که این الگو ندارد ساخته نمی‌شود. شش ستون در هر خانهٔ
+  // پا (تلاطم و پنج یونانی) یعنی برای یک اسپرد دوپا، دوازده ستون همیشه‌خالی
+  // در منو — که کاربر انتخابشان می‌کند و بعد دنبال دلیل خالی‌بودنشان
+  // می‌گردد. `legValue` عمداً از این قاعده بیرون است: یک ستون است نه شش،
+  // و رفتار فعلی‌اش را آزمون ۶۶ قفل کرده؛ عوض‌کردنش کار این تغییر نیست.
+  const legSlot = (key) => /^(?:legIv|legdelta|leggamma|legvega|legtheta|legrho)(\d+)$/.exec(key);
+  const labelSlot = (key) => /^(?:legValue|legIv|legdelta|leggamma|legvega|legtheta|legrho)(\d+)$/.exec(key);
   return COLUMNS.filter((c) => {
     const m = /^marginPart(\d+)$/.exec(c.key);
-    return !m || Number(m[1]) <= marginParts.length;
+    if (m) return Number(m[1]) <= marginParts.length;
+    const slot = legSlot(c.key);
+    return !slot || Number(slot[1]) <= legs.length;
   }).map((c) => {
     const marginPart = /^marginPart(\d+)$/.exec(c.key);
     if (marginPart) return { ...c, label: marginParts[Number(marginPart[1]) - 1].label };
-    const m = /^legValue(\d+)$/.exec(c.key);
-    const leg = m ? legs[Number(m[1]) - 1] : null;
+    const slot = labelSlot(c.key);
+    const leg = slot ? legs[Number(slot[1]) - 1] : null;
     if (!leg) return c;
     const side = leg.side === 'sell' ? 'فروش' : 'خرید';
     const ratio = num(leg.ratio, 1) > 1 ? ` ×${faInt(leg.ratio)}` : '';
