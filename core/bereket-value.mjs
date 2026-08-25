@@ -111,15 +111,21 @@ export function markMoment({
  * همین است که کال مارجین را می‌سازد. اگر قیمت ورود می‌رفت، موقعیتی که
  * دارد به کال مارجین نزدیک می‌شود، تا آخر جلسه هم آرام به‌نظر می‌رسید.
  */
-export function marginAt({ legs = [], prices = [], spot, params = {}, contractSize = 1000, creditPolicy = 'maxOfLossAndShortLeg' } = {}) {
+export function marginAt({ legs = [], prices = [], spot, params = {}, contractSize = 1000, creditPolicy = 'maxOfLossAndShortLeg', fees = null } = {}) {
   const marked = legs.map((leg, at) => {
     const now = Number(prices[at]);
     return Number.isFinite(now) ? { ...leg, price: now } : { ...leg };
   });
   const closes = Object.fromEntries(marked.map((leg, at) => [at, num(leg.price, 0)]));
   const margin = strategyMargin(marked, { S: spot, params, closes, contractSize });
-  const payoff = analyzePayoff(marked, { contractSize });
+  // پارامتر دومِ `analyzePayoff` **نقد خالص** است، نه شیء تنظیمات. نسخهٔ
+  // اول شیء می‌داد و حساب داخلی به `NaN` می‌رفت؛ نتیجه‌اش «بیشترین زیانِ
+  // صفر» بود برای هر ساختاری — عددی که هیچ جدولی به آن مشکوک نمی‌شود و
+  // درست همان‌جا در مخرج سرمایه و در آزمون مقاومت می‌نشیند. راستی‌آزمایی
+  // مرورگری گرفتش، نه آزمون واحد: ستون «بیشترین زیان» برای هر سه کاندید
+  // صفر بود.
   const netCash = grossCash(marked);
+  const payoff = analyzePayoff(marked, netCash, { fees });
   const maxLoss = Number.isFinite(payoff?.maxLoss) ? Math.abs(payoff.maxLoss) : NaN;
   // میدان خالصِ وجه تضمین در `strategyMargin` نامش `marginNet` است، نه
   // `net`. نسخهٔ اول اینجا `margin.net` می‌خواند و `undefined` می‌گرفت،

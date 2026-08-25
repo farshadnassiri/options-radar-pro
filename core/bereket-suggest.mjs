@@ -303,6 +303,9 @@ export function pickQuality(ranked = [], chosenIds = []) {
  * دربیاوردش.
  */
 export function luckVsSkill({ shadowPnls = [], chosenPnl = NaN, meanRank = NaN, total = 0 } = {}) {
+  // رقم فارسی: این جمله مستقیم به کاربر نشان داده می‌شود و رقم لاتین در
+  // خروجی نمایشی ایراد است (قاعدهٔ ۲-۳). راستی‌آزمایی مرورگری گرفتش.
+  const fa = (n) => String(Math.round(num(n, 0))).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
   const list = (shadowPnls || []).map((value) => num(value, NaN)).filter(Number.isFinite);
   if (!list.length || !Number.isFinite(num(chosenPnl, NaN))) {
     return { ok: false, why: 'برای این تفکیک، سود و زیان همهٔ کاندیدها لازم است.' };
@@ -315,16 +318,16 @@ export function luckVsSkill({ shadowPnls = [], chosenPnl = NaN, meanRank = NaN, 
   let verdict, note;
   if (winRate < 25) {
     verdict = 'forecast';
-    note = `از ${list.length} کاندید، تنها ${winners} تا سود دادند. یعنی مسئله ساختار نبود — پیش‌بینی جهت غلط بود.`;
+    note = `از ${fa(list.length)} کاندید، تنها ${fa(winners)} تا سود دادند. یعنی مسئله ساختار نبود — پیش‌بینی جهت غلط بود.`;
   } else if (winRate > 60 && beatPct < 40) {
     verdict = 'selection';
-    note = `بیشتر کاندیدها سود دادند ولی انتخاب تو از ${Math.round(100 - beatPct)} درصدشان بدتر بود. پیش‌بینی درست بود؛ ساختار غلط انتخاب شد.`;
+    note = `بیشتر کاندیدها سود دادند ولی انتخاب تو از ${fa(100 - beatPct)} درصدشان بدتر بود. پیش‌بینی درست بود؛ ساختار غلط انتخاب شد.`;
   } else if (beatPct > 70) {
     verdict = 'edge';
-    note = `انتخاب تو از ${Math.round(beatPct)} درصد کاندیدها بهتر درآمد. اگر این الگو تکرار شود، تو چیزی می‌بینی که موتور نمی‌بیند و منطق موتور باید بهبود یابد.`;
+    note = `انتخاب تو از ${fa(beatPct)} درصد کاندیدها بهتر درآمد. اگر این الگو تکرار شود، تو چیزی می‌بینی که موتور نمی‌بیند و منطق موتور باید بهبود یابد.`;
   } else {
     verdict = 'mixed';
-    note = `نرخ برد کاندیدها ${Math.round(winRate)} درصد و انتخاب تو از ${Math.round(beatPct)} درصدشان بهتر بود. یک جلسه برای حکم‌دادن کافی نیست.`;
+    note = `نرخ برد کاندیدها ${fa(winRate)} درصد و انتخاب تو از ${fa(beatPct)} درصدشان بهتر بود. یک جلسه برای حکم‌دادن کافی نیست.`;
   }
   return { ok: true, verdict, note, winRate, beatPct, count: list.length, meanRank, total };
 }

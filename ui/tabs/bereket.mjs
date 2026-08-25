@@ -40,6 +40,14 @@ import {
   RIAL_PER_TOMAN,
 } from '/core/bereket-session.mjs';
 import { executableAt } from '/core/bereket-exec.mjs';
+import { resolveHistVol } from '/core/hist-vol.mjs';
+import {
+  viewDistribution, editDistribution, scoreCandidate, SCORE_PARTS,
+  rankCandidates, pickQuality, luckVsSkill,
+} from '/core/bereket-suggest.mjs';
+import {
+  generateCandidates, openShadow, markShadow, shadowTable,
+} from '/core/bereket-candidates.mjs';
 import { markMoment, marginAt } from '/core/bereket-value.mjs';
 import { decomposePnl } from '/core/bereket-pnl.mjs';
 import {
@@ -98,6 +106,10 @@ export async function mount(root, { state }) {
   let track = [];
   let events = [];
   let lastStep = null;
+  let dist = null;              // توزیع نظر کاربر
+  let candidates = [];          // کاندیدهای امتیازخورده و رتبه‌بندی‌شده
+  let shadows = [];             // همهٔ کاندیدها، به‌عنوان پوزیشن سایه
+  let liveContracts = [];       // قراردادهایی که در تاریخ جلسه واقعاً بودند
 
   const $ = (id) => root.querySelector(`#${id}`);
   const ivP = () => ivParams(state.settings, {});
@@ -147,15 +159,34 @@ export async function mount(root, { state }) {
       <p class="backtest-table-note" id="bk-view-note"></p>
     </section>
 
-    <section class="card" id="bk-build-card" hidden>${headBlock('گام سوم', 'ساختن موقعیت', 'قیمت از دفتر همان لحظه')}
+    <section class="card" id="bk-dist-card" hidden>${headBlock('گام سوم', 'توزیع نظرت', 'ببینش، و اگر با شهودت نمی‌خواند عوضش کن')}
+      <div class="backtest-kpis" id="bk-dist-kpis"></div>
+      <div id="bk-dist-chart" class="backtest-chart"></div>
       <div class="backtest-form">
-        <label>ساختار<select id="bk-structure"></select></label>
-        <label>تعداد قرارداد<input id="bk-size" type="number" min="1" step="1" value="1"></label>
-        <button type="button" class="ghost" id="bk-price">سنجش اجراپذیری</button>
+        <label>مرکز توزیع<input id="bk-dist-centre" type="number" step="1"><span class="unit">ریال</span></label>
+        <label>پراکندگی افق<input id="bk-dist-sigma" type="number" step="0.001"><span class="unit">کسری</span></label>
+        <button type="button" class="ghost" id="bk-dist-apply">اعمال ویرایش</button>
       </div>
+      <p class="backtest-table-note" id="bk-dist-note"></p>
+    </section>
+
+    <section class="card" id="bk-build-card" hidden>${headBlock('گام چهارم', 'پیشنهادها', 'همه با قیمت دفترِ همان لحظه')}
+      <div class="backtest-form">
+        <label>ساختارهای پیشنهادی<select id="bk-structures" multiple size="7"></select></label>
+        <label>تعداد قرارداد<input id="bk-size" type="number" min="1" step="1" value="1"></label>
+        <button type="button" class="ghost" id="bk-suggest">پیشنهاد بده</button>
+      </div>
+      <p class="backtest-table-note" id="bk-suggest-note">موتور برای هر ساختار همهٔ ترکیبات معقول قیمت اعمال و سررسید را می‌سازد، اجراپذیری‌شان را در دفتر همان لحظه می‌سنجد، و آنچه می‌ماند را امتیاز می‌دهد. اجزای امتیاز همه دیده می‌شوند، نه فقط عدد نهایی.</p>
+      <div id="bk-candidates"></div>
       <div id="bk-exec"></div>
-      <button type="button" class="primary" id="bk-open" disabled>باز کردن موقعیت</button>
-      <p class="backtest-table-note">موتور پیشنهاد و پرتفوی سایه در فاز بعدی می‌آیند. تا آن موقع ساختار را خودت برمی‌داری و همین تب اجراپذیری‌اش را در دفتر همان لحظه می‌سنجد.</p>
+      <button type="button" class="primary" id="bk-open" disabled>باز کردن موقعیت انتخاب‌شده</button>
+      <div id="bk-rejected"></div>
+    </section>
+
+    <section class="card" id="bk-shadow-card" hidden>${headBlock('پرتفوی سایه', 'انتخاب تو در برابر بقیه', 'سایه‌ها در سرمایه دخالت نمی‌کنند')}
+      <div class="backtest-kpis" id="bk-shadow-kpis"></div>
+      <div id="bk-shadow"></div>
+      <p class="backtest-table-note" id="bk-shadow-note"></p>
     </section>
 
     <section class="card" id="bk-expect-card" hidden>${headBlock('گام چهارم', 'انتظارت را قفل کن', 'پس از قفل، ویرایش نمی‌شود')}
@@ -229,7 +260,11 @@ export async function mount(root, { state }) {
     setStatus(errorText(error, 'فهرست قراردادهای فعال دریافت نشد.'), true);
   }
 
-  $('bk-structure').innerHTML = CATALOG.map((def) => `<option value="${esc(def.id)}">${esc(def.name)} — ${esc(def.fa)}</option>`).join('');
+  // پیش‌فرض، ساختارهای پرکاربرد و کم‌پا. کاربر می‌تواند هر کدام را
+  // اضافه یا کم کند؛ سند خواسته بود انتخاب اینکه موتور کدام‌ها را
+  // پیشنهاد بدهد دست خودش باشد.
+  const DEFAULT_DEFS = ['long-call', 'long-put', 'bull-call-spread', 'bear-put-spread', 'bull-put-spread', 'long-straddle'];
+  $('bk-structures').innerHTML = CATALOG.map((def) => `<option value="${esc(def.id)}"${DEFAULT_DEFS.includes(def.id) ? ' selected' : ''}>${esc(def.name)} — ${esc(def.fa)}</option>`).join('');
   $('bk-regime-note').textContent = `قاعدهٔ رژیم بازار: ${regimeRuleText({ windowDays: state.settings.bkRegimeWindow, thresholdPct: state.settings.bkRegimeThresholdPct })} همین قاعده در تنظیمات قابل تغییر است و در گزارش پایان جلسه هم نوشته می‌شود.`;
 
   // ——————————————————————— انتخاب نماد و تاریخ ———————————————————————
@@ -375,104 +410,219 @@ export async function mount(root, { state }) {
     $('bk-view-note').toggleAttribute('data-error', !result.ok);
     if (!result.ok) return;
     session = result.session;
-    $('bk-build-card').hidden = false;
     $('bk-rules-card').hidden = false;
+    await buildDistribution();
     await save();
+  });
+
+  // ——————————————————————— توزیع نظر ———————————————————————
+
+  /**
+   * توزیع از نظر کاربر و تلاطم تحقق‌یافتهٔ **تا همین لحظه**.
+   *
+   * تلاطم از سری گذشته می‌آید و از دروازه رد می‌شود، پس هیچ روزی از
+   * آینده در کف پراکندگی نمی‌نشیند. اگر داده کم باشد، عدد ساخته نمی‌شود
+   * و همان گفته می‌شود — عدد دستی تنظیمات هم همان‌جا جایگزین می‌شود.
+   */
+  async function buildDistribution() {
+    const history = await gate.history(String(ua.ins));
+    const closes = (history.rows || []).map((row) => Number(row.close)).filter((value) => value > 0);
+    const params = ivP();
+    const hv = resolveHistVol(closes, {
+      tradingDaysYear: params.tradingDaysYear, window: params.hvWindow, manualPct: params.hvManualPct,
+    });
+    const snapshot = await gate.snapshot(String(ua.ins)).catch(() => null);
+    const spot = Number(snapshot?.trade?.price) || Number(closes[closes.length - 1]) || NaN;
+    const view = lastDecision(session)?.view || {};
+    dist = viewDistribution({
+      spot, direction: view.direction, movePct: view.movePct,
+      confidence: view.confidence, horizonDays: view.horizonDays,
+      realizedVolPct: hv.pct, yearDays: params.yearDays, ivView: view.ivView,
+    });
+    $('bk-dist-card').hidden = false;
+    $('bk-build-card').hidden = !dist.ok;
+    paintDistribution(hv);
+  }
+
+  function paintDistribution(hv) {
+    if (!dist?.ok) {
+      $('bk-dist-kpis').innerHTML = '';
+      $('bk-dist-chart').innerHTML = '';
+      $('bk-dist-note').textContent = `${dist?.why || 'توزیعی ساخته نشد.'} ${hv?.why || ''}`.trim();
+      $('bk-dist-note').setAttribute('data-error', '');
+      return;
+    }
+    $('bk-dist-note').removeAttribute('data-error');
+    $('bk-dist-kpis').innerHTML = kpis([
+      ['مرکز — حرکت مورد انتظار', anonOn() ? `${fmt.pct(dist.driftPct)}٪` : money(dist.centre)],
+      ['میانه', anonOn() ? '—' : money(dist.medianPrice)],
+      ['پراکندگی افق', small(dist.sigma)],
+      ['تلاطم تحقق‌یافته', pctCell(dist.realizedVolPct)],
+      ['افق', `${faDigits(String(dist.horizonDays))} روز`],
+      ['ویرایش‌شده', dist.edited ? 'بله' : 'خیر'],
+    ]);
+    // نمودار توزیع: نسبت به قیمت جاری، تا در حالت ناشناس هم معنی بدهد.
+    const nodes = [];
+    for (let p = 0.02; p <= 0.98; p += 0.02) {
+      const value = priceQuantileAt(dist, p);
+      if (Number.isFinite(value)) nodes.push({ date: Math.round(p * 100), pct: ((value - dist.spot) / dist.spot) * 100 });
+    }
+    chart($('bk-dist-chart'), nodes, [{ key: 'pct', label: 'تغییر پایه', color: 'var(--series-2)' }],
+      { xLabel: 'صدک', yLabel: 'درصد تغییر' });
+    $('bk-dist-centre').value = Math.round(dist.centre);
+    $('bk-dist-sigma').value = dist.sigma.toFixed(4);
+    $('bk-dist-note').textContent = `${hv?.source === 'manual' ? 'تلاطم تحقق‌یافته از عدد دستی تنظیمات آمد، چون سری کافی نبود. ' : ''}پراکندگی از عکس درجهٔ اطمینان می‌آید و کفش تلاطم تحقق‌یافته است — اطمینان کامل هم پراکندگی را از آنچه بازار واقعاً داشته کمتر نمی‌کند.`;
+  }
+
+  /** صدک توزیع، بی‌آنکه هسته را برای یک نمودار وارد کنیم. */
+  const priceQuantileAt = (d, p) => {
+    if (!d?.ok || !(p > 0 && p < 1)) return NaN;
+    // همان فرمول `priceQuantile`: مرکز روی میانگین، σ پراکندگی افق.
+    const z = Math.sqrt(2) * inverseErf(2 * p - 1);
+    return d.centre * Math.exp(z * d.sigma - 0.5 * d.sigma * d.sigma);
+  };
+  // تقریب معکوس تابع خطا — فقط برای رسم، نه برای هیچ عدد مالی.
+  function inverseErf(x) {
+    const a = 0.147;
+    const ln = Math.log(1 - x * x);
+    const first = 2 / (Math.PI * a) + ln / 2;
+    return Math.sign(x) * Math.sqrt(Math.sqrt(first * first - ln / a) - first);
+  }
+
+  $('bk-dist-apply').addEventListener('click', () => {
+    dist = editDistribution(dist, {
+      centre: Number($('bk-dist-centre').value),
+      sigma: Number($('bk-dist-sigma').value),
+    });
+    paintDistribution(null);
   });
 
   // ——————————————————————— ساختن موقعیت ———————————————————————
 
   let priced = null;
 
-  $('bk-price').addEventListener('click', async () => {
+  $('bk-suggest').addEventListener('click', async () => {
     priced = null;
+    candidates = [];
     $('bk-open').disabled = true;
-    const def = byId($('bk-structure').value);
-    if (!def || !gate) return;
-    $('bk-exec').innerHTML = '<p class="empty-note">در حال سنجش دفتر همان لحظه…</p>';
+    $('bk-candidates').innerHTML = '<p class="empty-note">در حال ساختن و سنجیدن کاندیدها…</p>';
+    $('bk-exec').innerHTML = '';
     try {
-      const built = await buildPosition(def, Number($('bk-size').value) || 1);
-      priced = built;
-      $('bk-exec').innerHTML = execMarkup(built);
-      $('bk-open').disabled = !built.exec.ok;
+      await suggest();
     } catch (error) {
-      $('bk-exec').innerHTML = `<p class="empty-note" data-error>${esc(errorText(error, 'سنجش اجراپذیری ممکن نشد.'))}</p>`;
-      logError(error, 'bereket:price');
+      $('bk-candidates').innerHTML = `<p class="empty-note" data-error>${esc(errorText(error, 'پیشنهاد ساخته نشد.'))}</p>`;
+      logError(error, 'bereket:suggest');
     }
   });
 
   /**
-   * ساخت پاهای یک ساختار از زنجیره، با قیمت و دفترِ همان لحظه.
+   * قراردادهایی که در تاریخ جلسه واقعاً وجود داشتند.
    *
-   * قیمت اعمال‌ها ساده انتخاب می‌شوند: نزدیک‌ترین به پایه، و بعدی‌ها به
-   * ترتیب بالاتر. فاز بعد این را به موتور پیشنهاد می‌سپارد که همهٔ
-   * ترکیبات معقول را بسازد؛ اینجا فقط یک ترکیب معقول لازم است تا ماشین
-   * جلسه قابل آزمودن باشد.
+   * ردیف روزانه داشتن، تنها نشانهٔ در دسترسِ ماست. یک بار حساب می‌شود و
+   * برای کل جلسه می‌ماند، چون هر بار محاسبه‌اش یک درخواست به‌ازای هر
+   * قرارداد است.
    */
-  async function buildPosition(def, size) {
+  async function contractsAliveAt(date) {
+    if (liveContracts.length) return liveContracts;
+    const alive = [];
+    for (const contract of contracts) {
+      const rows = await feed.loadDailies(String(contract.ins)).catch(() => []);
+      if (rows.some((row) => normalizeHistoryDate(row.date) === date)) alive.push(contract);
+    }
+    liveContracts = alive;
+    return alive;
+  }
+
+  /**
+   * ساخت، سنجش و رتبه‌بندی کاندیدها.
+   *
+   * ترتیب عمدی است: اول اجراپذیری، بعد امتیاز. ساختاری که ساختنی نیست
+   * اصلاً لازم نیست امتیاز بگیرد، و امتیازدادن به آن هزینهٔ محاسبه‌ای
+   * دارد که به کار کسی نمی‌آید.
+   */
+  async function suggest() {
     const now = gate.now();
     const snapshot = await gate.snapshot(String(ua.ins));
     const history = await gate.history(String(ua.ins), { lookback: 1 });
     const spot = Number(snapshot?.trade?.price) || Number(history.rows?.[0]?.close) || NaN;
     if (!(spot > 0)) throw new Error('در این لحظه قیمتی برای پایه نبود.');
 
-    // قراردادهایی که در همان روز واقعاً وجود داشتند: ردیف روزانه دارند.
-    const alive = [];
-    for (const contract of contracts) {
-      const rows = await feed.loadDailies(String(contract.ins)).catch(() => []);
-      if (rows.some((row) => normalizeHistoryDate(row.date) === now.date)) alive.push(contract);
-    }
-    if (!alive.length) throw new Error('هیچ قراردادی در این تاریخ ردیف روزانه نداشت؛ یا نماد اشتباه است یا تاریخ بیرون از عمر قراردادهاست.');
+    const alive = await contractsAliveAt(now.date);
+    if (!alive.length) throw new Error('هیچ قراردادی در این تاریخ ردیف روزانه نداشت.');
 
-    const expiries = [...new Set(alive.map((c) => c.expiry))].sort((a, b) => a - b);
-    const wantExp = expiries.slice(0, Math.max(1, def.expiries));
-    const pool = alive.filter((c) => wantExp.includes(c.expiry));
-    const strikeList = [...new Set(pool.map((c) => Number(c.strike)))].sort((a, b) => a - b);
-    if (strikeList.length < def.strikes) throw new Error(`این ساختار ${def.strikes} قیمت اعمال می‌خواهد و در این تاریخ ${strikeList.length} تا موجود بود.`);
-    const centre = strikeList.reduce((best, k) => (Math.abs(k - spot) < Math.abs(best - spot) ? k : best), strikeList[0]);
-    const from = Math.max(0, Math.min(strikeList.indexOf(centre), strikeList.length - def.strikes));
-    const strikes = strikeList.slice(from, from + def.strikes);
+    const wanted = [...$('bk-structures').selectedOptions].map((option) => byId(option.value)).filter(Boolean);
+    if (!wanted.length) throw new Error('دست‌کم یک ساختار انتخاب کن.');
 
-    const pick = (kind, slot, exp) => pool.find((c) => c.kind === kind
-      && Number(c.strike) === strikes[slot - 1] && c.expiry === wantExp[Math.min(exp, wantExp.length - 1)]);
-
-    const legs = [];
-    const books = {};
-    const meta = {};
-    for (const template of def.legs) {
-      if (template.kind === 'underlying') {
-        legs.push({ kind: 'underlying', side: template.side, ratio: template.ratio, size: 1, ins: String(ua.ins), strike: undefined });
-        continue;
+    const generated = generateCandidates(wanted, alive, spot, { contractSize: state.settings.contractSize });
+    const size = Math.max(1, Number($('bk-size').value) || 1);
+    const scored = [];
+    for (const combo of generated.candidates) {
+      const books = {};
+      const meta = {};
+      for (const leg of combo.legs) {
+        if (!leg.ins) continue;
+        books[leg.ins] = bookAt(await feed.loadBookEvents(leg.ins, now.date).catch(() => []), now.second);
+        meta[leg.ins] = await feed.loadDayMeta(leg.ins, now.date, now.second).catch(() => ({}));
       }
-      const contract = pick(template.kind, template.slot, template.exp);
-      if (!contract) throw new Error('یکی از پاهای این ساختار در این تاریخ قرارداد نداشت.');
-      legs.push({
-        kind: template.kind, side: template.side, ratio: template.ratio,
-        size: Number(contract.size) || state.settings.contractSize,
-        strike: Number(contract.strike), ins: String(contract.ins),
-        expiry: contract.expiry, name: contract.name,
+      const exec = executableAt({
+        legs: combo.legs, books, meta, fees: fees(), contractSize: state.settings.contractSize,
+        takePct: Number(state.settings.bkTakePct) || 30, qty: size,
+        capitalAvailable: session.capitalRial,
       });
+      const prices = (exec.priced || []).map((leg) => Number(leg.price));
+      const pricedLegs = combo.legs.map((leg, at) => ({ ...leg, price: prices[at] }));
+      const marginState = marginAt({
+        legs: pricedLegs, prices, spot, params: marginP(),
+        contractSize: state.settings.contractSize, creditPolicy: state.settings.bkCreditSpreadMargin,
+        fees: fees(),
+      });
+      const capital = Number(marginState.capital?.value);
+      const score = exec.ok
+        ? scoreCandidate({ legs: pricedLegs, dist, capital, maxLoss: marginState.maxLoss })
+        : { ok: false, why: exec.why };
+      scored.push({ ...combo, legs: pricedLegs, books, meta, exec, prices, marginState, score, spot, size });
     }
-    for (const leg of legs) {
-      // رویدادها را سرور نرمال کرده و `ui/bereket-data.mjs` همان را
-      // برمی‌گرداند. نسخهٔ اول دوباره `normalizeBookEvents` می‌زد و چون
-      // ورودی دیگر میدان‌های خام را نداشت، همه‌چیز دور ریخته می‌شد و دفتر
-      // همیشه خالی درمی‌آمد — بدون هیچ خطایی، فقط «دفتری نبود».
-      books[leg.ins] = bookAt(await feed.loadBookEvents(leg.ins, now.date).catch(() => []), now.second);
-      meta[leg.ins] = await feed.loadDayMeta(leg.ins, now.date, now.second).catch(() => ({}));
-    }
-    const exec = executableAt({
-      legs, books, meta, fees: fees(), contractSize: state.settings.contractSize,
-      takePct: Number(state.settings.bkTakePct) || 30, qty: Math.max(1, size),
-      capitalAvailable: session.capitalRial,
-    });
-    const prices = (exec.priced || []).map((leg) => Number(leg.price));
-    const marginState = marginAt({
-      legs, prices, spot, params: marginP(), contractSize: state.settings.contractSize,
-      creditPolicy: state.settings.bkCreditSpreadMargin,
-    });
-    return { def, legs, size: Math.max(1, size), spot, books, meta, exec, prices, marginState, at: now };
+
+    const ranked = rankCandidates(scored);
+    candidates = ranked.ranked;
+    paintCandidates(ranked, generated.truncated, spot);
   }
+
+  function paintCandidates(ranked, truncated, spot) {
+    const rows = ranked.ranked.map((item) => [
+      td(faDigits(String(item.rank))),
+      td(esc(item.defName)),
+      td(esc(anonOn() ? item.strikes.map((k) => moneynessLabel(k, spot)).join(' · ') : item.strikes.map((k) => fmt.int(k)).join(' · '))),
+      td(pctCell(item.score.parts.returnPct)),
+      td(pctCell(item.score.parts.stressReturnPct)),
+      td(pctCell(item.score.parts.fragility)),
+      td(pctCell(item.score.parts.probProfitPct)),
+      td(money(item.score.parts.maxLoss)),
+      td(int(item.exec.max)),
+      td(`<button type="button" class="ghost" data-pick="${esc(item.id)}">انتخاب</button>`),
+    ]);
+    $('bk-candidates').innerHTML = table(
+      ['رتبه', 'ساختار', 'قیمت اعمال', 'بازده', 'زیر فشار', 'شکنندگی', 'احتمال سود', 'بیشترین زیان', 'سقف قرارداد', ''],
+      rows, 'هیچ کاندیدی در این لحظه اجراپذیر نبود.');
+    $('bk-suggest-note').textContent = `${faDigits(String(ranked.count))} کاندید اجراپذیر، ${faDigits(String(ranked.rejected.length))} کنارگذاشته.`
+      + (truncated ? ' سقف تولید ترکیب خورد، پس فهرست کامل نیست.' : '')
+      + ` ${SCORE_PARTS.map((part) => `${part.label}: ${part.hint}`).join(' · ')}`;
+    $('bk-rejected').innerHTML = ranked.rejected.length
+      ? table(['ساختار', 'چرا وارد رتبه‌بندی نشد'], ranked.rejected.slice(0, 12).map((item) => [
+        td(esc(item.defName || item.defId)), td(esc(item.why || '—')),
+      ]))
+      : '';
+  }
+
+  root.addEventListener('click', async (event) => {
+    const id = event.target?.dataset?.pick;
+    if (!id) return;
+    const item = candidates.find((row) => String(row.id) === String(id));
+    if (!item) return;
+    priced = { ...item, def: byId(item.defId), at: gate.now() };
+    $('bk-exec').innerHTML = execMarkup(priced);
+    $('bk-open').disabled = !item.exec.ok;
+  });
 
   /**
    * برچسب یک پا، با احترام به حالت ناشناس.
@@ -558,14 +708,79 @@ export async function mount(root, { state }) {
       legs: position.legs, prices: position.entryPrices, entryPrices: position.entryPrices,
       spot: priced.spot, date: position.openedAt.date, second: position.openedAt.second, params: ivP(),
     })];
+    // ═══ همهٔ کاندیدها سایه می‌شوند، نه فقط انتخاب کاربر ═══
+    //
+    // هزینه‌اش تقریباً صفر است چون همه از قبل ساخته و قیمت‌خورده‌اند، و
+    // بازدهش این است که جلسه به‌جای یک مشاهده، به تعداد کاندیدها مشاهده
+    // تولید می‌کند. بدون این، «ضرر دادم» و «بد انتخاب کردم» تا ابد یکی
+    // می‌مانند.
+    shadows = candidates.map((item) => openShadow({
+      id: item.id, defId: item.defId, defName: item.defName,
+      legs: item.legs, prices: item.prices, size: Math.min(filled, item.exec.max),
+      at: position.openedAt, capital: Number(item.marginState?.capital?.value),
+      score: { rank: item.rank, score: item.score.score },
+    }));
+    // انتخاب کاربر هم در همان فهرست است؛ فقط برچسبش فرق می‌کند.
+    session = { ...session, positions: [...session.positions, { ...position, isShadow: false, id: priced.id }] };
+
     $('bk-expect-card').hidden = false;
     $('bk-build-card').hidden = true;
+    $('bk-dist-card').hidden = true;
     session = recordEvent(session, {
-      kind: 'open', detail: `${priced.def.name} — ${filled} قرارداد`, at: position.openedAt,
+      kind: 'open', detail: `${priced.def.name} — ${filled} قرارداد · رتبهٔ موتور ${priced.rank}`, at: position.openedAt,
     }).session;
     await save();
     await paintTrack();
+    await paintShadows();
   });
+
+  /**
+   * جدول مقایسه‌ای سایه‌ها در لحظهٔ جاری.
+   *
+   * رتبه از سود می‌آید نه از امتیاز موتور، و هر دو ستون کنار هم می‌نشینند
+   * — فاصلهٔ همین دو ستون است که می‌گوید منطق موتور کجا کم آورده.
+   */
+  async function paintShadows() {
+    if (!shadows.length) { $('bk-shadow-card').hidden = true; return; }
+    $('bk-shadow-card').hidden = false;
+    const now = gate.now();
+    const pricesById = {};
+    for (const shadow of shadows) {
+      const prices = [];
+      for (const leg of shadow.legs) {
+        const trades = await feed.loadTrades(leg.ins, now.date).catch(() => []);
+        const mark = markAt(trades, now.second);
+        prices.push(mark ? mark.price : NaN);
+      }
+      pricesById[shadow.id] = prices;
+    }
+    const chosenId = priced?.id ? [String(priced.id)] : [];
+    const board = shadowTable(shadows, pricesById, chosenId);
+    $('bk-shadow-kpis').innerHTML = kpis([
+      ['کاندیدها', int(shadows.length)],
+      ['رتبه‌خورده', int(board.ranked)],
+      ['بی‌قیمت', int(board.unpriced)],
+      ['برنده', int(board.winners)],
+      ['بهترین رتبهٔ تو', Number.isFinite(board.myBest) ? faDigits(String(board.myBest)) : '—'],
+    ]);
+    $('bk-shadow').innerHTML = table(
+      ['رتبهٔ سود', 'ساختار', 'سود و زیان', 'رتبهٔ موتور', 'انتخاب تو'],
+      board.rows.map((row) => [
+        td(Number.isFinite(row.rank) ? faDigits(String(row.rank)) : '—'),
+        td(esc(row.defName || '—')),
+        td(money(row.pnl), row.pnl < 0 ? 'neg' : row.pnl > 0 ? 'pos' : ''),
+        td(Number.isFinite(row.engineRank) ? faDigits(String(row.engineRank)) : '—'),
+        td(row.isChosen ? '✓' : ''),
+      ]));
+    const verdict = luckVsSkill({
+      shadowPnls: board.rows.map((row) => row.pnl),
+      chosenPnl: board.rows.find((row) => row.isChosen)?.pnl,
+      meanRank: board.myBest, total: board.ranked,
+    });
+    $('bk-shadow-note').textContent = verdict.ok
+      ? verdict.note
+      : 'سایه‌ها در سرمایه و وجه تضمین دخالت نمی‌کنند؛ اگر می‌کردند، وجود خودشان نتیجهٔ جلسه را عوض می‌کرد و دیگر مقایسه نبود.';
+  }
 
   // ——————————————————————— قفل انتظار ———————————————————————
 
@@ -696,6 +911,7 @@ export async function mount(root, { state }) {
     // لحظهٔ قبلی را نشان می‌داد.
     await save();
     await paintNow();
+    await paintShadows();
     paintEvents();
     $('bk-jump-note').textContent = jumpNote(lastStep);
   }

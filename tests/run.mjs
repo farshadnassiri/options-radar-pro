@@ -8374,6 +8374,15 @@ group('۱۰۴. ارزش‌گذاری موقعیت و آزمون پذیرش فا�
     const marginParams = { A: 0.20, B: 0.10, C: 10000, maint: 0.70, bBasis: 'SPOT' };
     const debit = marginAt({ legs, prices: world[3].prices, spot: world[3].spot, params: marginParams });
     check('اسپرد بدهکار وجه تضمین بلوکه نمی‌کند', debit.isCredit === false && debit.blocked === 0);
+    check('بیشترین زیان عدد واقعی است، نه صفرِ خاموش', (() => {
+      // `analyzePayoff` پارامتر دومش نقد خالص است نه شیء تنظیمات. اگر شیء
+      // بدهی، حساب داخلی به NaN می‌رود و بیشترین زیان صفر درمی‌آید — عددی
+      // که هیچ جدولی به آن مشکوک نمی‌شود و همان‌جا در مخرج سرمایه و آزمون
+      // مقاومت می‌نشیند.
+      const spent = Math.abs(debit.netCash);
+      return Number.isFinite(debit.maxLoss) && debit.maxLoss > 0
+        && Math.abs(debit.maxLoss - spent) / spent < 0.05;
+    })(), `${Number(debit.maxLoss).toFixed(0)} در برابر ${Math.abs(debit.netCash).toFixed(0)}`);
     check('سرمایهٔ درگیر اسپرد بدهکار، بدهکار خالص است', debit.capital.value > 0);
 
     const creditLegs = [
@@ -8954,6 +8963,12 @@ group('۱۰۸. موتور پیشنهاد');
   })());
   check('بدون سود و زیان سایه‌ها، تفکیکی ادعا نمی‌شود',
     luckVsSkill({ shadowPnls: [], chosenPnl: 5 }).ok === false);
+  check('هیچ حکمی رقم لاتین ندارد', [
+    luckVsSkill({ shadowPnls: [-10, -20, -5, -30], chosenPnl: -12 }),
+    luckVsSkill({ shadowPnls: [100, 80, 60, 40, -5], chosenPnl: 10 }),
+    luckVsSkill({ shadowPnls: [10, 20, 5, -30, -5], chosenPnl: 90 }),
+    luckVsSkill({ shadowPnls: [10, -10, 20, -20], chosenPnl: 5 }),
+  ].every((row) => /^[^0-9]*$/.test(row.note)));
 }
 
 // ═══════════════════ ۱۰۹. تولید کاندید و پرتفوی سایه ═══════════════════
