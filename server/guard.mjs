@@ -51,6 +51,18 @@ export function historicalPath(kind, ins, date) {
   return build(ins, date);
 }
 
+/**
+ * شناسهٔ جلسهٔ شبیه‌سازی.
+ *
+ * شناسه مستقیم نام فایل می‌شود، پس همان چیزی که `safeStaticPath` را لازم
+ * کرد اینجا هم لازم است — با این تفاوت که اینجا اصلاً اجازهٔ جداکننده
+ * نمی‌دهیم: نقطه و اسلش و بک‌اسلش هیچ‌کدام در مجموعهٔ مجاز نیستند، پس
+ * «..» ساخته هم نمی‌شود.
+ */
+export function validSessionId(x) {
+  return typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x);
+}
+
 /** مسیر تاریخچه تک‌معامله؛ فقط پس از اعتبارسنجی اجزای مسیر ساخته می‌شود. */
 export function historicalTradesPath(ins, date) {
   return historicalPath('trades', ins, date);

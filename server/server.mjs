@@ -26,7 +26,7 @@ import {
 import { decisionDashboardSnapshot } from '../core/decision-dashboard.mjs';
 import {
   validIns, validCompactDate, historicalTradesPath, historicalPath, HISTORICAL_KINDS,
-  parseInsList, safeStaticPath, readBody, BodyTooLarge,
+  validSessionId, parseInsList, safeStaticPath, readBody, BodyTooLarge,
 } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { createLog } from './errlog.mjs';
@@ -780,6 +780,52 @@ async function handle(req, res) {
         await fs.writeFile(file, JSON.stringify(list, null, 2), 'utf8');
         log(`موقعیت‌ها ذخیره شد — ${list.length} ردیف`);
         return sendJson(res, 200, list);
+      }
+      return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
+    }
+
+    // ——— جلسه‌های «سفره پر برکت بازار» ———
+    //
+    // هر جلسه یک فایل. پایگاه داده‌ای در کار نیست و قاعدهٔ صفر وابستگی هم
+    // اجازهٔ درایور نمی‌دهد؛ ولی مسئله فقط قاعده نیست: یک جلسه با ده‌ها
+    // ارزش‌گذاری از هشت تا دوازده پوزیشن سایه، در یک فایل مشترک با بقیه،
+    // هر ذخیره را به بازنویسی کل تاریخچه تبدیل می‌کرد.
+    //
+    // **حذفی در کار نیست.** سند می‌گوید هر جلسه از لحظهٔ شروع ثبت و قفل
+    // می‌شود، حتی جلسه‌ای که کاربر رهایش کند، و جلسات رهاشده در آمار
+    // شمرده می‌شوند. اگر حذف ممکن بود، همین بند از بین می‌رفت: هر کس
+    // می‌توانست جلسه‌های بدش را پاک کند و آمارِ باقی‌مانده، آمار یک
+    // معامله‌گر دیگر می‌شد.
+    if (p === '/api/bereket/sessions') {
+      const dir = path.join(ROOT, 'data', 'bereket');
+      let names = [];
+      try { names = (await fs.readdir(dir)).filter((name) => name.endsWith('.json')); } catch { names = []; }
+      const rows = [];
+      for (const name of names) {
+        try { rows.push(JSON.parse(await fs.readFile(path.join(dir, name), 'utf8'))); }
+        catch { rows.push({ id: name.replace(/\.json$/, ''), broken: true }); }
+      }
+      return sendJson(res, 200, { count: rows.length, sessions: rows });
+    }
+
+    if (p === '/api/bereket/session') {
+      const id = u.searchParams.get('id');
+      if (!validSessionId(id)) return sendJson(res, 400, { error: 'شناسهٔ جلسه فقط حرف و رقم و خط تیره است' });
+      const file = path.join(ROOT, 'data', 'bereket', `${id}.json`);
+      if (req.method === 'GET') {
+        try { return send(res, 200, await fs.readFile(file, 'utf8')); }
+        catch { return sendJson(res, 404, { error: 'جلسه پیدا نشد' }); }
+      }
+      if (req.method === 'PUT') {
+        const body = JSON.parse(await readBody(req, MAX_BODY) || 'null');
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          return sendJson(res, 400, { error: 'بدنهٔ جلسه لازم است' });
+        }
+        if (body.id !== id) return sendJson(res, 400, { error: 'شناسهٔ بدنه با شناسهٔ درخواست یکی نیست' });
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, JSON.stringify(body, null, 2), 'utf8');
+        log(`جلسهٔ برکت ذخیره شد — ${id}`);
+        return sendJson(res, 200, { ok: true, id });
       }
       return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
     }
