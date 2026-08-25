@@ -20,10 +20,40 @@ export function validCompactDate(x) {
   return typeof x === 'string' && /^(?:19|20)\d{6}$/.test(x);
 }
 
+/**
+ * مسیرهای تاریخ‌دار بالادست.
+ *
+ * مرز معماری در یک جدول: هر مسیری که `{date}` دارد، فقط برای روزِ
+ * **تکمیل‌شده** است. این‌ها منبع لایو نیستند و نباید در طول همان روز
+ * معاملاتی خوانده شوند — داده‌شان یا هنوز ساخته نشده یا هنوز نهایی نشده.
+ *
+ * جدول بودنش عمدی است. هفت تابع تقریباً یکسان، هفت جای فراموش‌کردنِ
+ * اعتبارسنجی است؛ اینجا فقط یک دروازه هست و همه از آن رد می‌شوند.
+ */
+export const HISTORICAL_PATHS = {
+  book:       (ins, date) => `/BestLimits/${ins}/${date}`,
+  closing:    (ins, date) => `/ClosingPrice/GetClosingPriceHistory/${ins}/${date}`,
+  daily:      (ins, date) => `/ClosingPrice/GetClosingPriceDaily/${ins}/${date}`,
+  trades:     (ins, date) => `/Trade/GetTradeHistory/${ins}/${date}/true`,
+  state:      (ins, date) => `/MarketData/GetInstrumentState/${ins}/${date}`,
+  threshold:  (ins, date) => `/MarketData/GetStaticThreshold/${ins}/${date}`,
+  instrument: (ins, date) => `/Instrument/GetInstrumentHistory/${ins}/${date}`,
+  clientType: (ins, date) => `/ClientType/GetClientTypeHistory/${ins}/${date}`,
+};
+
+export const HISTORICAL_KINDS = Object.keys(HISTORICAL_PATHS);
+
+/** مسیر تاریخ‌دار، یا null اگر نوع یا کد یا تاریخ معتبر نباشد. */
+export function historicalPath(kind, ins, date) {
+  const build = Object.prototype.hasOwnProperty.call(HISTORICAL_PATHS, kind)
+    ? HISTORICAL_PATHS[kind] : null;
+  if (!build || !validIns(ins) || !validCompactDate(date)) return null;
+  return build(ins, date);
+}
+
 /** مسیر تاریخچه تک‌معامله؛ فقط پس از اعتبارسنجی اجزای مسیر ساخته می‌شود. */
 export function historicalTradesPath(ins, date) {
-  if (!validIns(ins) || !validCompactDate(date)) return null;
-  return `/Trade/GetTradeHistory/${ins}/${date}/true`;
+  return historicalPath('trades', ins, date);
 }
 
 /**

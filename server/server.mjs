@@ -19,11 +19,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
+import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
 import { decisionDashboardSnapshot } from '../core/decision-dashboard.mjs';
-import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
+import {
+  validIns, validCompactDate, historicalTradesPath, historicalPath, HISTORICAL_KINDS,
+  parseInsList, safeStaticPath, readBody, BodyTooLarge,
+} from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { createLog } from './errlog.mjs';
 import { watchBackoffSec } from './backoff.mjs';
@@ -261,6 +265,33 @@ function firstDict(obj) {
   if (!obj || typeof obj !== 'object') return {};
   for (const v of Object.values(obj)) if (v && typeof v === 'object' && !Array.isArray(v)) return v;
   return obj;
+}
+
+/**
+ * پاسخ تاریخ‌دار بالادست را به شکل ثابت درمی‌آورد.
+ *
+ * فقط `book` و `trades` اینجا نرمال می‌شوند، چون هر دو نرمال‌سازی‌شان در
+ * `core/` است و آزمون دارد. بقیه خام رد می‌شوند: تا وقتی پاسخ واقعی
+ * بالادست دیده نشده، حدس‌زدن نام میدان‌ها یعنی ساختن نگاشتی که ممکن است
+ * غلط باشد و بی‌صدا هم بماند. مصرف‌کننده ردیف خام را می‌بیند و خودش
+ * تصمیم می‌گیرد.
+ *
+ * `count` همیشه هست تا «آمد ولی خالی بود» از «نیامد» جدا بماند.
+ */
+function shapeHistorical(kind, raw) {
+  if (kind === 'book') {
+    const rows = firstList(raw);
+    return { events: normalizeBookEvents(rows), count: rows.length };
+  }
+  if (kind === 'trades') {
+    const rows = firstList(raw);
+    return { rows: normalizeTrades(rows), count: rows.length };
+  }
+  if (kind === 'daily' || kind === 'instrument' || kind === 'clientType') {
+    return { row: firstDict(raw) };
+  }
+  const rows = firstList(raw);
+  return { rows, count: rows.length };
 }
 
 // ————————————————————————————————— ساعات بازار —————————————————————————————————
@@ -556,6 +587,46 @@ async function handle(req, res) {
       const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 15000);
       req.on('close', () => { clearInterval(ping); clients.delete(res); stat.clients = clients.size; });
       return undefined;
+    }
+
+    // ——— داده تاریخ‌دار: فقط روزهای تکمیل‌شده ———
+    //
+    // یک دروازه برای هشت نوع، نه هشت نقطه پایانی. نوع در `kind` می‌آید و از
+    // جدول `HISTORICAL_PATHS` رد می‌شود؛ هر چیزی که در آن جدول نباشد اصلاً
+    // مسیری نمی‌سازد، پس یک اشتباه تایپی به درخواستِ ناخواسته تبدیل نمی‌شود.
+    //
+    // TTL بلند است چون این داده دیگر عوض نمی‌شود: روزِ تمام‌شده تمام است.
+    // همین یک تفاوت، بار بالادست را در یک جلسهٔ شبیه‌سازی چند ده برابر کم
+    // می‌کند، چون هر لحظه‌ای که کاربر عقب و جلو می‌رود روی همان یک پاسخ
+    // می‌نشیند.
+    if (p === '/api/hist' || p === '/api/hist/batch') {
+      const kind = String(u.searchParams.get('kind') || '');
+      const date = u.searchParams.get('date');
+      if (!HISTORICAL_KINDS.includes(kind)) {
+        return sendJson(res, 400, { error: `نوع تاریخی ناشناخته — یکی از ${HISTORICAL_KINDS.join('، ')}` });
+      }
+      if (!validCompactDate(date)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
+
+      const one = async (code) => {
+        const upstream = historicalPath(kind, code, date);
+        if (!upstream) return [code, { ins: code, error: 'کد ابزار نامعتبر' }];
+        try {
+          const raw = await get(upstream, S.ttlDailySec, 6);
+          return [code, { ins: code, ...shapeHistorical(kind, raw) }];
+        } catch (e) {
+          return [code, { ins: code, error: `${e.name}: ${e.message}` }];
+        }
+      };
+
+      if (p === '/api/hist') {
+        if (!validIns(ins)) return sendJson(res, 400, { error: 'کد ابزار باید فقط رقم باشد' });
+        const [, body] = await one(ins);
+        return sendJson(res, 200, { kind, date: Number(date), ...body });
+      }
+      const codes = parseInsList(u.searchParams.get('ins'), 60);
+      if (!codes.length) return sendJson(res, 400, { error: 'دست‌کم یک کد ابزار لازم است' });
+      const pairs = await Promise.all(codes.map(one));
+      return sendJson(res, 200, { kind, date: Number(date), byIns: Object.fromEntries(pairs) });
     }
 
     // ——— غنی‌سازی، فقط بر اساس تقاضا ———
