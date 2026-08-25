@@ -2154,7 +2154,8 @@ group('۳۲. بازپخش تاریخی استراتژی');
     backtestSource32.includes('summarizeIntraday(intraday)') && backtestSource32.includes('bt-intraday-leg-chart')
     && backtestSource32.includes('bt-intraday-volume-chart') && backtestSource32.includes('bt-correlation-table'));
   check('نمودارهای درون‌روزی روی ساعت واقعی و به‌شکل پله‌ای رسم می‌شوند',
-    backtestSource32.includes('timeScale: true, step: true') && backtestSource32.includes("`M ${values[0].x} ${values[0].y}`"));
+    backtestSource32.includes('timeScale: true, step: true')
+    && readSrc('../ui/track-chart.mjs').includes("`M ${values[0].x} ${values[0].y}`"));
 
   const manual32 = replayHistory({ ...args32, manualEntry: { 0: 5, 1: 20 } });
   check('قیمت دستی هر پا مستقل و بیرون دامنه پذیرفته می‌شود', manual32.priced[0].price === 5 && manual32.priced[1].price === 20);
@@ -2313,13 +2314,15 @@ group('۳۲. بازپخش تاریخی استراتژی');
     sharedIns32.map((row) => row.cumulativeVolume).join('/'));
   check('حجم تجمعی سطر همان جمع رویدادهای همان مسیر است',
     sharedIns32.at(-1).cumulativeVolume === sharedIns32.reduce((sum, row) => sum + row.eventVolume, 0));
-  const chartSource32 = readSrc('../ui/tabs/backtest.mjs');
+  const chartSource32 = readSrc('../ui/track-chart.mjs');
   check('برچسب سری نمودار نام قرارداد بالادست را فرار می‌دهد',
     chartSource32.includes('const seriesLabel = (item) => esc(item.label);')
     && !/\$\{item\.label\}/.test(chartSource32));
+  // این ادعا دربارهٔ نشانه‌گذاری خودِ تب است، نه نمودار مشترک.
+  const btMarkup32 = readSrc('../ui/tabs/backtest.mjs');
   check('توضیح ماتریس هم‌حرکتی بیرون از جعبه پیمایش جدول می‌نشیند',
-    chartSource32.includes('id="bt-correlation-note"')
-    && !/backtest-correlation[\s\S]{0,2000}?<p class="backtest-table-note"/.test(chartSource32));
+    btMarkup32.includes('id="bt-correlation-note"')
+    && !/backtest-correlation[\s\S]{0,2000}?<p class="backtest-table-note"/.test(btMarkup32));
   const styleSource32 = readSrc('../ui/style.css');
   check('ماتریس هم‌حرکتی کف پهنای جدول تاریخچه را نمی‌گیرد',
     styleSource32.includes('.history-table.backtest-correlation { min-width: 0; }'));
@@ -4050,7 +4053,7 @@ group('۵۴. خروجی اکسل و عنوان محور');
   // ——— عنوان محور ———
   //
   // بدون عنوان، «۱۲٬۵۰۰» می‌تواند ریال باشد یا قرارداد یا درصد.
-  for (const [file, what] of [['../ui/chart.mjs', 'نمودار بازده'], ['../ui/tabs/backtest.mjs', 'نمودارهای بک‌تست'],
+  for (const [file, what] of [['../ui/chart.mjs', 'نمودار بازده'], ['../ui/track-chart.mjs', 'نمودارهای بک‌تست'],
     ['../ui/tabs/history.mjs', 'نمودارهای تاریخچه'], ['../ui/tabs/portfolio-backtest.mjs', 'نمودار سبد']]) {
     const src = readSrc(file);
     check(`${what} عنوان محور دارد`, /axis-title/.test(src));
@@ -4058,7 +4061,7 @@ group('۵۴. خروجی اکسل و عنوان محور');
   const chartSrc54 = readSrc('../ui/chart.mjs');
   check('واحد در عنوان محور نوشته می‌شود',
     chartSrc54.includes('قیمت سهم پایه (ریال)') && chartSrc54.includes('سود و زیان (ریال)'));
-  const btSrc54 = readSrc('../ui/tabs/backtest.mjs');
+  const btSrc54 = readSrc('../ui/track-chart.mjs');
   check('عنوان محور بک‌تست از واحد خودِ نمودار می‌آید',
     btSrc54.includes("money ? 'ریال' : count ? 'تعداد' : 'درصد'")
     && btSrc54.includes("timeScale ? 'ساعت جلسه"));
@@ -4593,10 +4596,10 @@ group('۶۲. تاریخ تولتیپ نمودار ریزمعامله');
     btSrc.includes('intradayChartRows(intraday, intradayDate)')
     && !btSrc.includes('intradayChartRows(intraday, replay.endDate)'));
   check('تاریخ تولتیپ از خودِ نقطه می‌آید و نقطهٔ بی‌تاریخ «—» می‌گیرد',
-    btSrc.includes("Number.isFinite(Number(row.date)) ? dateLabel(row.date) : '—'"));
+    readSrc('../ui/track-chart.mjs').includes("Number.isFinite(Number(row.date)) ? dateLabel(row.date) : '—'"));
   // درصد در تولتیپ باید واحد داشته باشد: عنوان محور کنارش نیست و «۱۲٫۳۵»
   // تنها، نه ریال است نه درصد.
-  check('عدد درصدی در تولتیپ واحد می‌گیرد', btSrc.includes('const tipLabel ='));
+  check('عدد درصدی در تولتیپ واحد می‌گیرد', readSrc('../ui/track-chart.mjs').includes('const tipLabel ='));
 
   // ریشهٔ «NaN/NaN/NaN»: تاریخ نامعتبر از `dateParts` رد می‌شد و `{0,0,0}`
   // می‌ساخت. بدتر از برچسب خراب، `dateUtc` بود که از همان صفر یک تاریخ
