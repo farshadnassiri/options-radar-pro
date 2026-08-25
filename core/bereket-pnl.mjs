@@ -135,7 +135,10 @@ export function decomposePnl({
  * خوب است»، و روزی که بزرگ شد و ظاهر شد، دیگر نمی‌داند با آن چه کند.
  */
 export function residualNote({ residualPct, warn, coverage, threshold = RESIDUAL_WARN_PCT }) {
-  const fa = (n) => (Number.isFinite(n) ? n.toFixed(1) : '—').replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+  // اعشار «٫» است نه نقطه — همان قرارداد `ui/fmt.mjs`. عدد نیمه‌فارسی از
+  // عدد لاتین بدتر است، چون درست به‌نظر می‌رسد.
+  const fa = (n) => (Number.isFinite(n) ? n.toFixed(1) : '—')
+    .replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]).replace(/\./g, '٫');
   if (!Number.isFinite(residualPct)) {
     return 'حرکتی ثبت نشد، پس باقی‌مانده‌ای هم معنی ندارد.';
   }
