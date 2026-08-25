@@ -305,6 +305,10 @@ export function evaluate({ legs, quotes, ctx }) {
   const cost = executionCost(pos, {
     fees, marginNet: margin.marginNet, rFree: r, days, yearDays: Y,
   });
+  // درصدهای پولیِ انتخابگر ستون، همگی یک مخرج صریح دارند: همان «سرمایه
+  // درگیر» که بازده راهبرد با آن سنجیده می‌شود. اگر مخرج معتبر نباشد خانه
+  // خالی می‌ماند؛ صفر یا درصد ساختگی جای دادهٔ نامعلوم نمی‌نشیند.
+  const pctCapital = (value) => cap > 0 && ok(value) ? (value / cap) * 100 : NaN;
 
   // ——— ۹. سقف حجم ———
   // سقف حجم به‌ازای «یک واحد» سنجیده می‌شود — جوابش خودش تعداد قرارداد
@@ -373,9 +377,12 @@ export function evaluate({ legs, quotes, ctx }) {
     })),
 
     // جریان نقد
-    grossCash: gross, entryFee, netCash, isCredit,
+    grossCash: gross, grossCashPctCapital: pctCapital(gross),
+    entryFee, entryFeePctCapital: pctCapital(entryFee),
+    netCash, netCashPctCapital: pctCapital(netCash), isCredit,
     cashLabel: isCredit ? 'بستانکار' : 'بدهکار',
-    instantClosePnl, settleLastPnl, settleClosePnl,
+    instantClosePnl, instantClosePnlPctCapital: pctCapital(instantClosePnl),
+    settleLastPnl, settleClosePnl,
     offsettable, noExitLegs,
 
     // سود و زیان
@@ -392,8 +399,11 @@ export function evaluate({ legs, quotes, ctx }) {
     staticPnl,
 
     // مشخصات قرارداد و بازار
-    notional, intrinsic, timeValue,
-    bsValue: bsKnown ? bsValue : NaN, bsDiffPct, marketValue, leverage,
+    notional, notionalPctCapital: pctCapital(notional),
+    intrinsic, intrinsicPctCapital: pctCapital(intrinsic),
+    timeValue, timeValuePctCapital: pctCapital(timeValue),
+    bsValue: bsKnown ? bsValue : NaN, bsDiffPct,
+    marketValue, marketValuePctCapital: pctCapital(marketValue), leverage,
     oiTotal, oiChange: oiChangeKnown ? oiChange : NaN, volTotal, tradeCount, valueTotal,
     spreadWorstPct: ok(spreadWorst) ? spreadWorst : NaN,
     bidQtyMin: Number.isFinite(bidQtyMin) ? bidQtyMin : NaN,
@@ -408,7 +418,8 @@ export function evaluate({ legs, quotes, ctx }) {
 
     // سرمایه
     capital: cap, capitalKind: capital.kind, capitalLabel: capital.label,
-    margin: margin.margin, marginNet: margin.marginNet,
+    margin: margin.margin, marginPctCapital: pctCapital(margin.margin),
+    marginNet: margin.marginNet, marginNetPctCapital: pctCapital(margin.marginNet),
     conditionalMargin: margin.conditionalMargin,
     marginToMaxLoss: Number.isFinite(payoff.maxLoss) && payoff.maxLoss > 0
       ? margin.margin / payoff.maxLoss : NaN,
@@ -428,7 +439,8 @@ export function evaluate({ legs, quotes, ctx }) {
     thetaToCapitalPct: cap > 0 && ok(greeks.theta) ? (greeks.theta / cap) * 100 : NaN,
 
     // اجرا
-    execCost: cost.total, costCommission: cost.commission, costCrossing: cost.crossing,
+    execCost: cost.total, execCostPctCapital: pctCapital(cost.total),
+    costCommission: cost.commission, costCrossing: cost.crossing,
     costSlippage: cost.slippage, costFunding: cost.funding, costRows: cost.rows,
     maxQty: size.max, binding: size.binding, sizeLimits: size.limits,
     leggingRisk: legging.exists, leggingUnlimited: legging.unlimitedIfNaked,
@@ -585,14 +597,19 @@ export const COLUMNS = [
   { key: 'legNames', label: 'نام قرارداد پاها', fmt: 'sym', group: 'هویت' },
   { key: 'cashLabel', label: 'جهت نقدی', fmt: 'text', group: 'جریان نقد' },
   { key: 'grossCash', label: 'نقد ناخالص', fmt: 'money', group: 'جریان نقد' },
+  { key: 'grossCashPctCapital', label: 'نقد ناخالص ٪ سرمایه', fmt: 'pct', group: 'جریان نقد' },
   { key: 'entryFee', label: 'کارمزد ورود', fmt: 'money', group: 'جریان نقد' },
+  { key: 'entryFeePctCapital', label: 'کارمزد ورود ٪ سرمایه', fmt: 'pct', group: 'جریان نقد', heat: 'loss' },
   { key: 'netCash', label: 'نقد خالص', fmt: 'money', group: 'جریان نقد' },
+  { key: 'netCashPctCapital', label: 'نقد خالص ٪ سرمایه', fmt: 'pct', group: 'جریان نقد' },
   { key: 'instantClosePnl', label: 'آفست — سود/زیان بستن فوری با دفتر سفارش', fmt: 'money', group: 'جریان نقد', heat: 'gain' },
+  { key: 'instantClosePnlPctCapital', label: 'آفست فوری ٪ سرمایه', fmt: 'pct', group: 'جریان نقد', heat: 'gain' },
   { key: 'offsettable', label: 'آفست ممکن است', fmt: 'bool', group: 'جریان نقد' },
   { key: 'noExitLegs', label: 'پای بدون سمت خروج', fmt: 'sym', group: 'جریان نقد' },
   { key: 'settleLastPnl', label: 'سود/زیان اگر تسویه با آخرین معامله', fmt: 'money', group: 'جریان نقد' },
   { key: 'settleClosePnl', label: 'سود/زیان اگر تسویه با قیمت پایانی', fmt: 'money', group: 'جریان نقد' },
   { key: 'S', label: 'قیمت پایه', fmt: 'money', group: 'سود و زیان' },
+  { key: 'Sclose', label: 'قیمت پایانی پایه', fmt: 'money', group: 'سود و زیان' },
   { key: 'breakevens', label: 'سربه‌سری', fmt: 'list', group: 'سود و زیان' },
   { key: 'beDistList', label: 'فاصله تا هر سربه‌سری ٪', fmt: 'pctList', group: 'سود و زیان' },
   { key: 'be1', label: 'سربه‌سری ۱', fmt: 'money', group: 'سود و زیان' },
@@ -634,9 +651,13 @@ export const COLUMNS = [
   { key: 'oiTotal', label: 'موقعیت باز', fmt: 'int', group: 'بازار' },
   { key: 'oiChange', label: 'تغییر موقعیت باز', fmt: 'int', group: 'بازار' },
   { key: 'notional', label: 'نوشنال ولیو', fmt: 'money', group: 'ارزش قرارداد' },
+  { key: 'notionalPctCapital', label: 'نوشنال ٪ سرمایه', fmt: 'pct', group: 'ارزش قرارداد' },
   { key: 'marketValue', label: 'ارزش بازاری موقعیت', fmt: 'money', group: 'ارزش قرارداد' },
+  { key: 'marketValuePctCapital', label: 'ارزش بازاری ٪ سرمایه', fmt: 'pct', group: 'ارزش قرارداد' },
   { key: 'intrinsic', label: 'ارزش ذاتی', fmt: 'money', group: 'ارزش قرارداد' },
+  { key: 'intrinsicPctCapital', label: 'ارزش ذاتی ٪ سرمایه', fmt: 'pct', group: 'ارزش قرارداد' },
   { key: 'timeValue', label: 'ارزش زمانی', fmt: 'money', group: 'ارزش قرارداد' },
+  { key: 'timeValuePctCapital', label: 'ارزش زمانی ٪ سرمایه', fmt: 'pct', group: 'ارزش قرارداد' },
   { key: 'bsValue', label: 'بلک‌شولز', fmt: 'money', group: 'ارزش قرارداد' },
   { key: 'bsDiffPct', label: 'درصد اختلاف با بلک‌شولز', fmt: 'pct', group: 'ارزش قرارداد' },
   { key: 'ivList', label: 'تلاطم ضمنی هر پا', fmt: 'list', group: 'ارزش قرارداد' },
@@ -647,7 +668,9 @@ export const COLUMNS = [
   { key: 'sharesLocked', label: 'سهم قفل‌شده', fmt: 'int', group: 'سرمایه' },
   { key: 'capitalLabel', label: 'مبنای سرمایه', fmt: 'text', group: 'سرمایه' },
   { key: 'margin', label: 'وجه تضمین کل راهبرد', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginPctCapital', label: 'وجه تضمین کل ٪ سرمایه', fmt: 'pct', group: 'سرمایه' },
   { key: 'marginNet', label: 'وجه تضمین خالص پس از بستانکار', fmt: 'money', group: 'سرمایه' },
+  { key: 'marginNetPctCapital', label: 'وجه تضمین خالص ٪ سرمایه', fmt: 'pct', group: 'سرمایه' },
   { key: 'marginNote', label: 'مبنای وجه تضمین', fmt: 'text', group: 'سرمایه' },
   { key: 'marginParts', label: 'اجزای وجه تضمین', fmt: 'moneyList', group: 'سرمایه' },
   { key: 'marginPart1', label: 'وجه تضمین ۱', fmt: 'money', group: 'سرمایه' },
@@ -671,6 +694,7 @@ export const COLUMNS = [
   { key: 'thetaToCapitalPct', label: 'تتا به سرمایه ٪', fmt: 'pct', group: 'یونانی', heat: 'gain' },
   { key: 'sigmaUse', label: 'تلاطم مبنا', fmt: 'num', group: 'یونانی' },
   { key: 'execCost', label: 'هزینه اجرا', fmt: 'money', group: 'اجرا', heat: 'loss' },
+  { key: 'execCostPctCapital', label: 'هزینه اجرا ٪ سرمایه', fmt: 'pct', group: 'اجرا', heat: 'loss' },
   { key: 'costCommission', label: 'کارمزد', fmt: 'money', group: 'اجرا' },
   { key: 'costCrossing', label: 'عبور از اسپرد', fmt: 'money', group: 'اجرا' },
   { key: 'costSlippage', label: 'افت مظنه', fmt: 'money', group: 'اجرا' },

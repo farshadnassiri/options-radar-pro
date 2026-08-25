@@ -318,6 +318,7 @@ export function makeTable(host, cols, opts = {}) {
       <div class="col-panel-head">
         <span>هر ستونی را می‌شود اضافه یا کم کرد، و سرستون‌ها را با کشیدن جابه‌جا کرد. انتخاب و چیدمان همین جدول ذخیره می‌ماند.</span>
         <span class="sp"></span>
+        <input type="search" class="col-search" aria-label="جست‌وجوی ستون" placeholder="جست‌وجوی قیمت، درصد، حجم…">
         <button type="button" class="ghost" data-act="base">نمای آماده</button>
         <button type="button" class="ghost" data-act="all">همه</button>
         <button type="button" class="ghost" data-act="close">بستن</button>
@@ -347,6 +348,22 @@ export function makeTable(host, cols, opts = {}) {
         savePick(opts.storeKey, keys);
         buildHead();
         apply();
+      });
+    });
+
+    // کاتالوگ هر جدول حالا ده‌ها ستون متناسب با همان داده دارد. جست‌وجو
+    // فقط گزینه‌ها را فیلتر می‌کند و هیچ انتخابی را عوض نمی‌کند؛ گروهی که
+    // نتیجه ندارد هم موقتاً پنهان می‌شود تا کاربر میان عنوان‌های خالی نگردد.
+    panel.querySelector('.col-search').addEventListener('input', (event) => {
+      const query = event.target.value.trim().toLocaleLowerCase('fa');
+      panel.querySelectorAll('.col-group').forEach((group) => {
+        let visible = 0;
+        group.querySelectorAll('.col-opt').forEach((option) => {
+          const match = !query || option.textContent.toLocaleLowerCase('fa').includes(query);
+          option.hidden = !match;
+          if (match) visible += 1;
+        });
+        group.hidden = visible === 0;
       });
     });
 
@@ -384,6 +401,7 @@ export function makeTable(host, cols, opts = {}) {
     if (open) {
       document.addEventListener('mousedown', closeOnOutside);
       document.addEventListener('keydown', closeOnEscape);
+      panel.querySelector('.col-search')?.focus();
     } else {
       document.removeEventListener('mousedown', closeOnOutside);
       document.removeEventListener('keydown', closeOnEscape);

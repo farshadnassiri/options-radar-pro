@@ -18,6 +18,8 @@ const ALL_COLS = [
   { key: 'name', label: 'نماد پایه', fmt: 'text', group: 'شناسه' },
   { key: 'last', label: 'آخرین', fmt: 'money', group: 'قیمت پایه' },
   { key: 'close', label: 'پایانی', fmt: 'money', group: 'قیمت پایه' },
+  { key: 'yday', label: 'پایانی دیروز', fmt: 'money', group: 'قیمت پایه' },
+  { key: 'changePct', label: 'تغییر پایه نسبت به دیروز ٪', fmt: 'pct', group: 'قیمت پایه', heat: 'gain' },
 
   { key: 'contracts', label: 'قرارداد', fmt: 'int', group: 'اندازه تابلو' },
   { key: 'strikes', label: 'قیمت اعمال', fmt: 'int', group: 'اندازه تابلو' },
@@ -28,18 +30,29 @@ const ALL_COLS = [
   { key: 'quoted', label: 'دارای مظنه', fmt: 'int', group: 'نقدشوندگی', heat: 'prob' },
   { key: 'quotedPct', label: 'نسبت مظنه ٪', fmt: 'pct', group: 'نقدشوندگی', heat: 'prob' },
   { key: 'twoSided', label: 'مظنه دوطرفه', fmt: 'int', group: 'نقدشوندگی', heat: 'prob' },
+  { key: 'twoSidedPct', label: 'مظنه دوطرفه ٪', fmt: 'pct', group: 'نقدشوندگی', heat: 'prob' },
   { key: 'spreadMedPct', label: 'میانه فاصله مظنه ٪', fmt: 'pct', group: 'نقدشوندگی', heat: 'loss' },
 
   { key: 'volume', label: 'حجم اختیار', fmt: 'int', group: 'گردش امروز', heat: 'gain' },
   { key: 'callVol', label: 'حجم کال', fmt: 'int', group: 'گردش امروز' },
+  { key: 'callVolumePct', label: 'سهم کال از حجم ٪', fmt: 'pct', group: 'گردش امروز' },
   { key: 'putVol', label: 'حجم پوت', fmt: 'int', group: 'گردش امروز' },
+  { key: 'putVolumePct', label: 'سهم پوت از حجم ٪', fmt: 'pct', group: 'گردش امروز' },
   // «ارزش معاملات اختیار» و «ارزش معاملات نماد پایه» دو عدد جدا هستند و
   // نامشان هم باید جدا باشد: اولی مجموع گردش کل زنجیره است، دومی گردش خودِ
   // سهم. برچسب قبلی فقط «ارزش معاملات» بود و کنار «حجم اختیار» این را
   // می‌رساند که هر دو یک چیز را می‌شمارند.
   { key: 'value', label: 'ارزش معاملات اختیار', fmt: 'money', group: 'گردش امروز', heat: 'gain' },
+  { key: 'callValue', label: 'ارزش معاملات کال', fmt: 'money', group: 'گردش امروز' },
+  { key: 'callValuePct', label: 'سهم کال از ارزش ٪', fmt: 'pct', group: 'گردش امروز' },
+  { key: 'putValue', label: 'ارزش معاملات پوت', fmt: 'money', group: 'گردش امروز' },
+  { key: 'putValuePct', label: 'سهم پوت از ارزش ٪', fmt: 'pct', group: 'گردش امروز' },
   { key: 'uaValue', label: 'ارزش معاملات نماد پایه', fmt: 'money', group: 'گردش امروز', heat: 'gain' },
+  { key: 'uaVolume', label: 'حجم نماد پایه', fmt: 'int', group: 'گردش امروز' },
+  { key: 'uaTrades', label: 'تعداد معامله نماد پایه', fmt: 'int', group: 'گردش امروز' },
   { key: 'trades', label: 'تعداد معامله', fmt: 'int', group: 'گردش امروز' },
+  { key: 'callTrades', label: 'تعداد معامله کال', fmt: 'int', group: 'گردش امروز' },
+  { key: 'putTrades', label: 'تعداد معامله پوت', fmt: 'int', group: 'گردش امروز' },
 
   { key: 'oi', label: 'موقعیت باز', fmt: 'int', group: 'تعهد انباشته', heat: 'gain' },
   // تعهد انباشته بدون تغییرش، عکس است نه فیلم: نمادی که موقعیت بازش امروز
@@ -49,8 +62,12 @@ const ALL_COLS = [
   { key: 'oiChange', label: 'تغییر موقعیت باز', fmt: 'int', group: 'تعهد انباشته', heat: 'gain' },
   { key: 'oiChangePct', label: 'تغییر موقعیت باز ٪', fmt: 'pct', group: 'تعهد انباشته', heat: 'gain' },
   { key: 'callOi', label: 'موقعیت باز کال', fmt: 'int', group: 'تعهد انباشته' },
+  { key: 'callOiPct', label: 'سهم کال از موقعیت باز ٪', fmt: 'pct', group: 'تعهد انباشته' },
+  { key: 'callOiYday', label: 'موقعیت باز کال دیروز', fmt: 'int', group: 'تعهد انباشته' },
   { key: 'callOiChange', label: 'تغییر موقعیت باز کال', fmt: 'int', group: 'تعهد انباشته' },
   { key: 'putOi', label: 'موقعیت باز پوت', fmt: 'int', group: 'تعهد انباشته' },
+  { key: 'putOiPct', label: 'سهم پوت از موقعیت باز ٪', fmt: 'pct', group: 'تعهد انباشته' },
+  { key: 'putOiYday', label: 'موقعیت باز پوت دیروز', fmt: 'int', group: 'تعهد انباشته' },
   { key: 'putOiChange', label: 'تغییر موقعیت باز پوت', fmt: 'int', group: 'تعهد انباشته' },
   { key: 'pcRatio', label: 'نسبت پوت به کال — موقعیت باز', fmt: 'num', group: 'تعهد انباشته' },
   { key: 'pcVolRatio', label: 'نسبت پوت به کال — حجم', fmt: 'num', group: 'تعهد انباشته' },
@@ -278,16 +295,8 @@ export async function mount(root, { state, api }) {
       <tbody>${body}</tbody>`;
   }
 
-  // atmIv و pcRatio از موتور خالص فراکشن/نسبت خام برمی‌گردند؛ درصد و برچسب
-  // نمایش، کار همین تب است، نه موتور
-  const withDerived = (u) => ({
-    ...u,
-    quotedPct: (u.quoted / (u.contracts || 1)) * 100,
-    atmIvPct: Number.isFinite(u.atmIv) ? u.atmIv * 100 : NaN,
-  });
-
   const offChain = onChain((cs) => {
-    list = cs.list.map(withDerived);
+    list = cs.list;
     table.set(list);
     table.setEmptyMessage(NO_CHAIN_MSG);
     picker.setList(cs.list);
@@ -295,7 +304,7 @@ export async function mount(root, { state, api }) {
     drawBars();
   });
   if (chainState.list.length) {
-    list = chainState.list.map(withDerived);
+    list = chainState.list;
     table.set(list);
     table.setEmptyMessage(NO_CHAIN_MSG);
     picker.setList(chainState.list);

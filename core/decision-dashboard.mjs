@@ -16,6 +16,7 @@ const emptyAggregate = (seed = {}) => ({
   ...seed, contracts: 0, tradedContracts: 0, positive: 0, negative: 0, unchanged: 0,
   volume: 0, value: 0, trades: 0, oi: 0, oiYday: 0, _oiYdayGap: false,
   callVolume: 0, putVolume: 0, callValue: 0, putValue: 0,
+  callTrades: 0, putTrades: 0,
   callOi: 0, putOi: 0, twoSided: 0, changePct: NaN, ivPct: NaN,
   _changeWeighted: 0, _changeWeight: 0, _ivWeighted: 0, _ivWeight: 0, _spreads: [],
 });
@@ -30,9 +31,11 @@ function addContract(target, row) {
   // تغییرِ کلِ گروه نامعلوم می‌شود نه ناقص.
   if (Number.isFinite(row.oiYday)) target.oiYday += row.oiYday; else target._oiYdayGap = true;
   if (row.kind === 'call') {
-    target.callVolume += row.volume; target.callValue += row.value; target.callOi += row.oi;
+    target.callVolume += row.volume; target.callValue += row.value;
+    target.callTrades += row.trades; target.callOi += row.oi;
   } else {
-    target.putVolume += row.volume; target.putValue += row.value; target.putOi += row.oi;
+    target.putVolume += row.volume; target.putValue += row.value;
+    target.putTrades += row.trades; target.putOi += row.oi;
   }
   if (Number.isFinite(row.changePct)) {
     if (row.changePct > 0) target.positive += 1;
@@ -55,6 +58,8 @@ function finishAggregate(row) {
     ? (spreads.length % 2 ? spreads[middle] : (spreads[middle - 1] + spreads[middle]) / 2)
     : NaN;
   const oiYday = row._oiYdayGap ? NaN : row.oiYday;
+  const directionKnown = row.positive + row.negative + row.unchanged;
+  const pct = (part, total) => total > 0 ? (part / total) * 100 : NaN;
   const out = { ...row,
     oiYday,
     // تا امروز `oi` و `oiYday` جمع می‌شدند ولی تفاضلشان هیچ‌جا ساخته نمی‌شد،
@@ -66,6 +71,14 @@ function finishAggregate(row) {
     spreadPct,
     putCallVolume: row.callVolume > 0 ? row.putVolume / row.callVolume : NaN,
     putCallOi: row.callOi > 0 ? row.putOi / row.callOi : NaN,
+    tradedPct: pct(row.tradedContracts, row.contracts),
+    positivePct: pct(row.positive, directionKnown),
+    negativePct: pct(row.negative, directionKnown),
+    unchangedPct: pct(row.unchanged, directionKnown),
+    twoSidedPct: pct(row.twoSided, row.contracts),
+    callVolumePct: pct(row.callVolume, row.volume), putVolumePct: pct(row.putVolume, row.volume),
+    callValuePct: pct(row.callValue, row.value), putValuePct: pct(row.putValue, row.value),
+    callOiPct: pct(row.callOi, row.oi), putOiPct: pct(row.putOi, row.oi),
   };
   delete out._changeWeighted; delete out._changeWeight; delete out._ivWeighted;
   delete out._ivWeight; delete out._spreads; delete out._oiYdayGap;
@@ -99,16 +112,28 @@ export function decisionDashboardSnapshot(rows, settings = {}) {
           if (!quote.ins) continue;
           const last = Number(quote.last || quote.close);
           const mid = quote.bid > 0 && quote.ask > 0 ? (quote.bid + quote.ask) / 2 : NaN;
+          const intrinsic = quote.kind === 'put'
+            ? Math.max(0, Number(strike.strike) - spot)
+            : Math.max(0, spot - Number(strike.strike));
+          const timeValue = Number.isFinite(last) ? last - intrinsic : NaN;
+          const pctSpot = (value) => spot > 0 && Number.isFinite(value) ? (value / spot) * 100 : NaN;
+          const oiYday = Number(quote.oiYday);
           const contract = {
             ins: String(quote.ins), name: quote.name, kind: quote.kind,
             uaIns: String(ua.ins), uaName: ua.name, endDate: expiry.endDate, days: expiry.days,
-            strike: strike.strike, size: strike.size, last, yday: quote.yday,
+            strike: strike.strike, size: strike.size, spot,
+            last, close: Number(quote.close), yday: quote.yday,
             changePct: pctVsYesterday(last, quote.yday), bid: quote.bid, ask: quote.ask,
+            bidQty: quote.bidQty, askQty: quote.askQty, mid,
             spreadPct: mid > 0 ? ((quote.ask - quote.bid) / mid) * 100 : NaN,
+            premiumPctSpot: pctSpot(last), intrinsic, timeValue,
+            intrinsicPctSpot: pctSpot(intrinsic), timeValuePctSpot: pctSpot(timeValue),
+            moneynessPct: spot > 0 ? ((Number(strike.strike) / spot) - 1) * 100 : NaN,
             volume: quote.vol, trades: quote.trades, value: quote.value,
-            spot,
             oi: quote.oi, oiYday: quote.oiYday,
-            oiChange: Number(quote.oi) - Number(quote.oiYday),
+            oiChange: Number.isFinite(oiYday) ? Number(quote.oi) - oiYday : NaN,
+            oiChangePct: Number.isFinite(oiYday) && oiYday > 0
+              ? ((Number(quote.oi) / oiYday) - 1) * 100 : NaN,
             ivPct: liveQuoteIv({ ...quote, strike: strike.strike, days: expiry.days }, spot, settings),
           };
           contracts.push(contract); addContract(expiryAgg, contract); addContract(marketAgg, contract);
@@ -218,7 +243,8 @@ export function activeOptionsBoard(contracts = [], { metric = 'value', side = 'b
     if (!group) {
       group = { key: id, uaIns: row.uaIns, uaName: row.uaName, endDate: row.endDate, days: row.days,
         spot: Number(row.spot), contracts: 0, weight: 0,
-        call: { weight: 0, be: 0, gap: 0, count: 0 }, put: { weight: 0, be: 0, gap: 0, count: 0 } };
+        call: { weight: 0, be: 0, gap: 0, strike: 0, premium: 0, count: 0 },
+        put: { weight: 0, be: 0, gap: 0, strike: 0, premium: 0, count: 0 } };
       groups.set(id, group);
     }
     group.contracts += 1;
@@ -227,13 +253,18 @@ export function activeOptionsBoard(contracts = [], { metric = 'value', side = 'b
     const bucket = row.kind === 'put' ? group.put : group.call;
     if (weight > 0 && Number.isFinite(row.breakeven)) {
       bucket.weight += weight; bucket.be += row.breakeven * weight;
-      bucket.gap += row.breakevenGapPct * weight; bucket.count += 1;
+      bucket.gap += row.breakevenGapPct * weight;
+      bucket.strike += Number(row.strike) * weight;
+      bucket.premium += premiumOf(row) * weight;
+      bucket.count += 1;
     }
   }
   const expiries = [...groups.values()].map((group) => {
     const mean = (bucket) => ({
       breakeven: bucket.weight > 0 ? bucket.be / bucket.weight : NaN,
       gapPct: bucket.weight > 0 ? bucket.gap / bucket.weight : NaN,
+      strike: bucket.weight > 0 ? bucket.strike / bucket.weight : NaN,
+      premium: bucket.weight > 0 ? bucket.premium / bucket.weight : NaN,
       count: bucket.count, weight: bucket.weight,
     });
     const call = mean(group.call), put = mean(group.put);
@@ -242,6 +273,16 @@ export function activeOptionsBoard(contracts = [], { metric = 'value', side = 'b
       days: group.days, spot: group.spot, contracts: group.contracts, weight: group.weight,
       callBreakeven: call.breakeven, callGapPct: call.gapPct, callCount: call.count, callWeight: call.weight,
       putBreakeven: put.breakeven, putGapPct: put.gapPct, putCount: put.count, putWeight: put.weight,
+      callStrike: call.strike,
+      callStrikeGapPct: Number.isFinite(call.strike) && group.spot > 0 ? ((call.strike / group.spot) - 1) * 100 : NaN,
+      putStrike: put.strike,
+      putStrikeGapPct: Number.isFinite(put.strike) && group.spot > 0 ? ((put.strike / group.spot) - 1) * 100 : NaN,
+      callPremium: call.premium,
+      callPremiumPct: Number.isFinite(call.premium) && group.spot > 0 ? (call.premium / group.spot) * 100 : NaN,
+      putPremium: put.premium,
+      putPremiumPct: Number.isFinite(put.premium) && group.spot > 0 ? (put.premium / group.spot) * 100 : NaN,
+      callSharePct: group.weight > 0 ? (call.weight / group.weight) * 100 : NaN,
+      putSharePct: group.weight > 0 ? (put.weight / group.weight) * 100 : NaN,
       // پهنای باند: از سربه‌سر پوت تا سربه‌سر کال. بازار انتظار دارد قیمت
       // تا پایان این سررسید بیرون از این بازه نرود — وگرنه یک سمت در سود
       // می‌رود.
