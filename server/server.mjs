@@ -21,6 +21,10 @@ import { defaults, sanitize } from '../core/settings.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
 import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
+  makeArchive, chainRowsFrom, archiveNote, archiveName, validArchiveDate,
+} from '../core/watch-archive.mjs';
+import { tehranDateNumber } from '../core/live-day.mjs';
+import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
 import { decisionDashboardSnapshot } from '../core/decision-dashboard.mjs';
@@ -380,12 +384,53 @@ async function watchTick() {
     stat.lastWatchMs = Date.now() - t0;
     // بار اول کل عکس، بعد فقط ردیف‌های تغییرکرده
     broadcast('watch', { at: watch.at, full: first, count: rows.length, rows: first ? rows : changed });
+    archiveToday(rows).catch((e) => logErr('بایگانی دیده‌بان', e));
     return true;
   } catch (e) {
     logErr('دور دیده‌بان', e);
     broadcast('trouble', { at: Date.now(), message: `${e.name}: ${e.message}` });
     return false;
   }
+}
+
+// ——————————————————————— بایگانی دیده‌بان ———————————————————————
+//
+// بالادست نسخهٔ تاریخ‌دار فهرست قراردادها را نمی‌دهد، پس تنها راه داشتنش
+// این است که از امروز هر روز یک بار خودمان ذخیره‌اش کنیم. یک بار در روز
+// کافی است: فهرست قراردادهای یک روز در طول همان روز عوض نمی‌شود.
+//
+// پرچم درون‌حافظه‌ای جلوی نوشتن مکرر را می‌گیرد، ولی وجود فایل هم بررسی
+// می‌شود — سرور می‌تواند وسط روز ری‌استارت شود و پرچم پاک شود.
+const ARCHIVE_DIR = path.join(ROOT, 'data', 'watch-history');
+let archivedDay = 0;
+
+async function archiveToday(rows) {
+  const day = tehranDateNumber();
+  if (!day || archivedDay === day || !rows?.length) return;
+  const file = path.join(ARCHIVE_DIR, `${day}.json`);
+  try { await fs.access(file); archivedDay = day; return; } catch { /* هنوز نیست */ }
+  const body = makeArchive(day, rows, { at: Date.now() });
+  if (!body.count) return;
+  await fs.mkdir(ARCHIVE_DIR, { recursive: true });
+  await fs.writeFile(file, JSON.stringify(body), 'utf8');
+  archivedDay = day;
+  log(`بایگانی دیده‌بان ${day} نوشته شد — ${body.count} ردیف`);
+}
+
+/** قدیمی‌ترین روزی که بایگانی دارد. صفر یعنی هنوز هیچ. */
+async function archiveFirstDate() {
+  try {
+    const names = (await fs.readdir(ARCHIVE_DIR)).filter((name) => /^\d{8}\.json$/.test(name));
+    if (!names.length) return 0;
+    return Math.min(...names.map((name) => Number(name.slice(0, 8))));
+  } catch { return 0; }
+}
+
+async function readArchive(date) {
+  const name = archiveName(String(date));
+  if (!name) return null;
+  try { return JSON.parse(await fs.readFile(path.join(ARCHIVE_DIR, name), 'utf8')); }
+  catch { return null; }
 }
 
 async function watchLoop() {
@@ -558,16 +603,42 @@ async function handle(req, res) {
     // حلقه زنده عمداً پشت دروازه ساعت بازار می‌ایستد؛ این نقطه پایانی نباید
     // بایستد چون تاریخچه باید شب و روز قابل بررسی باشد.
     if (p === '/api/history/universe') {
+      // ——— نسخهٔ آن تاریخ، اگر ضبط شده باشد ———
+      //
+      // بدون این، شبیه‌ساز سفر در زمان فهرست **امروز** را می‌دید و
+      // قراردادی که داخل بازه سررسید شده اصلاً وجود نداشت. آن سوگیری بقا،
+      // خودش خبری از آینده است.
+      //
+      // حالت میانی — بایگانی هست ولی برای آن تاریخ نه — عمداً `false`
+      // برمی‌گرداند و فهرست امروز را با برچسب می‌دهد. اگر بی‌صدا جایگزین
+      // می‌شد، همان سوگیری با ظاهرِ حل‌شده برمی‌گشت.
+      const wanted = u.searchParams.get('date');
+      if (wanted != null && wanted !== '') {
+        if (!validArchiveDate(wanted)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
+        const archive = await readArchive(wanted);
+        if (archive) {
+          const rows = chainRowsFrom(archive);
+          return sendJson(res, 200, {
+            at: archive.at, source: 'archive', asOf: archive.date, archived: true,
+            note: archiveNote({ wanted: Number(wanted), found: true, count: rows.length }),
+            market: marketOpen(), count: rows.length, rows,
+          });
+        }
+      }
+
       // ساعت مشاهده باید راست باشد، نه «هرچه دم دست بود». مصرف‌کننده با
       // همین عدد تصمیم می‌گیرد عکس مال کدام روز است؛ `watch.at` وقتی حلقهٔ
       // زنده هرگز نچرخیده باشد `null` است و در همان مسیر جایگزین، عکس از
       // کش می‌آید که ساعت خودش را دارد.
-      const path = '/Instrument/GetInstrumentOptionMarketWatch/0';
+      const upstream = '/Instrument/GetInstrumentOptionMarketWatch/0';
       const fromWatch = watch.rows.length > 0;
-      const rows = fromWatch ? watch.rows : firstList(await get(path, Math.max(60, S.ttlMetaSec), 4));
+      const rows = fromWatch ? watch.rows : firstList(await get(upstream, Math.max(60, S.ttlMetaSec), 4));
+      const firstDate = await archiveFirstDate();
       return sendJson(res, 200, {
-        at: fromWatch ? watch.at : cachedAt(path),
+        at: fromWatch ? watch.at : cachedAt(upstream),
         source: fromWatch ? 'watch' : 'snapshot',
+        archived: false, asOf: 0, archiveFirstDate: firstDate,
+        note: wanted ? archiveNote({ wanted: Number(wanted), found: false, firstDate }) : '',
         market: marketOpen(),
         count: rows.length, rows,
       });

@@ -139,7 +139,7 @@ export async function mount(root, { state }) {
       <button type="button" class="primary" id="bk-start" disabled>شروع جلسه</button>
     </div>
     <p class="backtest-table-note" id="bk-regime-note"></p>
-    <p class="backtest-table-note" id="bk-survivor-note">فهرست قراردادها از دیده‌بان <b>امروز</b> ساخته می‌شود، پس قراردادی که داخل همین بازه سررسید شده در جلسه دیده نمی‌شود. این سوگیری بقاست و تا وقتی دیده‌بان روزانه ضبط نشود، برطرف نمی‌شود — عدد جلسه با آن خوش‌بین‌تر از واقعیت است.</p>
+    <p class="backtest-table-note" id="bk-survivor-note">سرور از امروز هر روز یک بار فهرست قراردادها را بایگانی می‌کند. اگر برای تاریخ جلسه بایگانی باشد، همان به کار می‌رود و سوگیری بقا وجود ندارد؛ اگر نباشد، فهرست امروز جایش می‌نشیند و همین‌جا گفته می‌شود.</p>
   </section>
 
   <section id="bk-live" hidden>
@@ -327,6 +327,26 @@ export async function mount(root, { state }) {
 
   // ——————————————————————— شروع جلسه ———————————————————————
 
+  /**
+   * فهرست قراردادهای همان تاریخ، از بایگانی اگر باشد.
+   *
+   * حالتی که بایگانی برای آن تاریخ نیست، **بی‌صدا رد نمی‌شود**: زنجیرهٔ
+   * امروز جایش می‌نشیند و جمله‌اش روی صفحه می‌آید. اگر ساکت جایگزین
+   * می‌شد، همان سوگیری بقا با ظاهرِ حل‌شده برمی‌گشت — و آن بدتر از
+   * نداشتنش است، چون کاربر دیگر به آن مشکوک نمی‌شود.
+   */
+  async function universeAt(date) {
+    try {
+      const response = await fetch(`/api/history/universe?date=${encodeURIComponent(String(date))}`);
+      const payload = await response.json();
+      if (!response.ok || payload.error) throw new Error(payload.error || 'فهرست دریافت نشد');
+      return payload;
+    } catch (error) {
+      logError(error, 'bereket:universe');
+      return null;
+    }
+  }
+
   $('bk-start').addEventListener('click', async () => {
     if (!ua) return;
     const months = Math.max(1, Number(state.settings.bkLookbackMonths) || 3);
@@ -356,7 +376,19 @@ export async function mount(root, { state }) {
       regime: regimeAt(regimeRows, startDate),
       createdAt: Date.now(),
     });
-    contracts = flattenActiveContracts(ua, state.settings.blockedExpiries || '');
+    // زنجیرهٔ همان تاریخ. بایگانی قیمت ندارد و نباید هم داشته باشد —
+    // فقط می‌گوید کدام قرارداد آن روز وجود داشت. قیمت از مسیرهای
+    // تاریخ‌دار می‌آید و آنجا واقعی است.
+    const asOf = await universeAt(startDate);
+    let uaAt = ua;
+    if (asOf?.archived) {
+      const archivedChain = buildChain(asOf.rows || []);
+      uaAt = archivedChain.get(String(ua.ins)) || ua;
+    }
+    contracts = flattenActiveContracts(uaAt, state.settings.blockedExpiries || '');
+    $('bk-survivor-note').textContent = asOf?.note
+      || 'وضعیت بایگانی دیده‌بان معلوم نشد؛ فهرست از دیده‌بان امروز آمد.';
+    $('bk-survivor-note').toggleAttribute('data-error', !asOf?.archived);
     aliases = aliasMap(session.seed, [String(ua.ins), ...contracts.map((c) => String(c.ins))]);
     gate = createTimeGate({ sessionId: id, now: session.start, load: feed.gateLoaders(), days: calendar });
     position = null; rules = []; track = []; events = []; lastStep = null;

@@ -222,6 +222,7 @@ core/bereket-report.mjs   گزارش پایان جلسه با معیار مقا�
 core/bereket-stats.mjs    داشبورد تجمیعی با برچسب نمونه ناکافی
 core/regime.mjs           رژیم بازار و انتخاب تاریخ لایه‌بندی‌شده
 core/rng.mjs              مولد شبه‌تصادفی با بذر، برای بازتولیدپذیری
+core/watch-archive.mjs    بایگانی روزانه دیده‌بان — درمان تدریجی سوگیری بقا
 strategies/catalog.mjs   ۳۶ استراتژی، اعلانی
 server/server.mjs      سرور محلی
 worker/scan-worker.mjs   ریسه اسکن
