@@ -14,6 +14,8 @@ import { fmt } from '/ui/table.mjs';
 import { faDigits, signTone } from '/ui/fmt.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
+import { ivParams } from '/core/leg-iv.mjs';
+import { GREEKS, monitorSnapshot } from '/core/monitor.mjs';
 
 const baseName = (position) => {
   const name = String(position?.uaName || '').trim();
@@ -57,6 +59,13 @@ export async function mount(root, { state, api }) {
     </div>
 
     <div class="kpis" id="kpis"></div>
+
+    <section class="card">
+      <h3>یونانی و تلاطم — پیش و پس از رول</h3>
+      <p class="note">«تفاضل در قیمت فعلی» فقط یک نقطه را می‌گوید. این جدول شیب را می‌گوید: رول ریسک جهت،
+        گرفتاری تلاطم و زوال زمانی را کم می‌کند یا زیاد.</p>
+      <div id="roll-greeks"></div>
+    </section>
 
     <section class="card">
       <h3>مقایسه نامزدهای رول — همه قیمت‌های اعمال موجود در همان سررسید</h3>
@@ -221,6 +230,31 @@ export async function mount(root, { state, api }) {
 
     const r = rollAnalysis({ pos: p, quotes, closeIdx, newLeg, newQuote, opt: { fees, spot, basis: 'BOOK', sigma, rFree: s().rFree, divYield: s().divYield } });
     const m = markToMarket(p, quotes, { fees, spot, spotClose: uaQ.close || spot });
+
+    // ——— یونانی پیش و پس از رول ———
+    //
+    // پرسشی که هیچ ستون دیگری جوابش را نمی‌دهد: این رول ریسک جهت و
+    // گرفتاری تلاطم را کم می‌کند یا زیاد؟ «تفاضل در قیمت فعلی» فقط یک نقطه
+    // را می‌گوید؛ دلتا و وگا کل شیب را.
+    //
+    // روز مانده از خودِ پا می‌آید (`leg.days` که برای نامزد تازه، روز
+    // سررسید همان نامزد است) نه از سررسیدِ ذخیره‌شده: نامزد رول هنوز
+    // موقعیت نیست و تاریخی روی آن ننشسته.
+    const greeksOfLegs = (legs, quoteOf) => monitorSnapshot(legs, {
+      spot, prices: legs.map(quoteOf), days: legs.map((l) => (l.kind === 'underlying' ? undefined : Number(l.days))),
+    }, ivParams(s(), {}));
+    const priceOfQuote = (q) => (Number(q?.close) > 0 ? Number(q.close) : Number(q?.last) || NaN);
+    const curGreeks = greeksOfLegs(p.legs, (l, i) => (l.kind === 'underlying' ? spot : priceOfQuote(quotes[i])));
+    const nextGreeks = greeksOfLegs(r.nextLegs, (l, i) => (l.kind === 'underlying' ? spot
+      : priceOfQuote(i === closeIdx ? newQuote : quotes[i])));
+    const gk = (value) => (Number.isFinite(value) ? fmt.small(value) : '—');
+    el('#roll-greeks').innerHTML = `<table class="mini"><thead><tr><th>حساسیت</th><th>واحد</th><th>الان</th><th>پس از رول</th><th>تغییر</th></tr></thead><tbody>${
+      GREEKS.map(({ key, label, unit }) => {
+        const before = curGreeks.greeks?.[key], after = nextGreeks.greeks?.[key];
+        const change = Number.isFinite(before) && Number.isFinite(after) ? after - before : NaN;
+        return `<tr><td>${label}</td><td>${unit}</td><td class="n">${gk(before)}</td><td class="n">${gk(after)}</td><td class="n ${signTone(change)}">${gk(change)}</td></tr>`;
+      }).join('')}<tr><td>تلاطم ضمنی موقعیت</td><td>درصد سالانه</td><td class="n">${Number.isFinite(curGreeks.meanIvPct) ? `${fmt.pct(curGreeks.meanIvPct)}٪` : '—'}</td><td class="n">${Number.isFinite(nextGreeks.meanIvPct) ? `${fmt.pct(nextGreeks.meanIvPct)}٪` : '—'}</td><td class="n">—</td></tr></tbody></table>
+      <p class="note">${curGreeks.incomplete || nextGreeks.incomplete ? 'یکی از دو طرف پایی دارد که تلاطم ضمنی‌اش درنیامده، پس جمعِ آن طرف ساخته نشده — عددِ ناقص با فرض صفر برای آن پا نوشته نمی‌شود.' : 'مثبت شدن «تغییر» یعنی رول آن حساسیت را بالا می‌برد. پارامترهای این محاسبه در تنظیمات، بخش «یونانی‌ها، تلاطم و احتمال» قابل تغییرند.'}</p>`;
 
     el('#cur').innerHTML = `
       <dt>پایه</dt><dd>${baseName(p)}</dd>
