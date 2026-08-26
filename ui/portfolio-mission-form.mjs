@@ -2,18 +2,27 @@
 // رابط تومان و رشتهٔ فارسی می‌گیرد؛ هسته فقط ریال و لحظه معتبر می‌بیند.
 
 import { createPortfolioSession, portfolioCapitalPlan } from '../core/portfolio-session.mjs';
-import { MISSION_REPLAY_GRAINS } from '../core/portfolio-mission.mjs';
+import { MISSION_REPLAY_GRAINS, validateMissionOutlook } from '../core/portfolio-mission.mjs';
 
 const DIGITS = { '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
   '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9' };
 
+const latinDigits = (value) => String(value ?? '').replace(/[۰-۹٠-٩]/g, (digit) => DIGITS[digit]);
+
 /** متن تومان با رقم فارسی/عربی و جداکننده → عدد صحیح تومان. */
 export function parseTomanInput(value) {
-  const normalized = String(value ?? '').replace(/[۰-۹٠-٩]/g, (digit) => DIGITS[digit])
-    .replace(/[٬,،\s_]/g, '');
+  const normalized = latinDigits(value).replace(/[٬,،\s_]/g, '');
   if (!/^\d+$/.test(normalized)) return NaN;
   const amount = Number(normalized);
   return Number.isSafeInteger(amount) ? amount : NaN;
+}
+
+/** درصد با رقم فارسی/عربی و ممیز فارسی یا لاتین. */
+export function parsePercentInput(value) {
+  const normalized = latinDigits(value).trim().replace(/٫/g, '.');
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return NaN;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : NaN;
 }
 
 export function tomanToRial(value) {
@@ -72,6 +81,58 @@ export function createPortfolioStepOneDraft({
         grain,
         grainSeconds: MISSION_REPLAY_GRAINS[grain].seconds,
       },
+    },
+  };
+}
+
+function formFail(why) {
+  return { ok: false, why, draft: null };
+}
+
+function optionalToman(value, label) {
+  if (String(value ?? '').trim() === '') return { ok: true, value: null };
+  const rial = tomanToRial(value);
+  return Number.isFinite(rial)
+    ? { ok: true, value: rial }
+    : { ok: false, why: `${label} باید عدد صحیح و معتبر تومان باشد` };
+}
+
+/** مرحله دوم را بدون ساخت هدف، ریسک یا نقدشوندگی پنهان به draft وصل می‌کند. */
+export function createPortfolioOutlookDraft(stepOneDraft, {
+  direction = '', targetPriceToman = '', rangeLowToman = '', rangeHighToman = '',
+  volatilityView = '', expectedVolatilityPct = '', confidencePct = '', thesis = '',
+} = {}) {
+  if (!stepOneDraft?.session || stepOneDraft.step !== 'setup') {
+    return formFail('پیش‌نویس معتبر مرحله نخست لازم است');
+  }
+  const target = optionalToman(targetPriceToman, 'قیمت هدف');
+  if (!target.ok) return formFail(target.why);
+  const low = optionalToman(rangeLowToman, 'کران پایین قیمت');
+  if (!low.ok) return formFail(low.why);
+  const high = optionalToman(rangeHighToman, 'کران بالای قیمت');
+  if (!high.ok) return formFail(high.why);
+  const confidence = parsePercentInput(confidencePct);
+  if (!Number.isFinite(confidence)) return formFail('اطمینان باید عددی بین صفر و صد باشد');
+  let expectedVolatility = null;
+  if (String(expectedVolatilityPct ?? '').trim() !== '') {
+    expectedVolatility = parsePercentInput(expectedVolatilityPct);
+    if (!Number.isFinite(expectedVolatility)) return formFail('تلاطم مورد انتظار باید درصدی معتبر باشد');
+  }
+
+  const input = { direction, volatilityView, confidencePct: confidence, thesis };
+  if (target.value !== null) input.targetPriceRial = target.value;
+  if (low.value !== null) input.rangeLowRial = low.value;
+  if (high.value !== null) input.rangeHighRial = high.value;
+  if (expectedVolatility !== null) input.expectedVolatilityPct = expectedVolatility;
+  const checked = validateMissionOutlook(input);
+  if (!checked.ok) return formFail(checked.why);
+  return {
+    ok: true,
+    why: '',
+    draft: {
+      ...stepOneDraft,
+      step: 'outlook',
+      outlook: checked.outlook,
     },
   };
 }

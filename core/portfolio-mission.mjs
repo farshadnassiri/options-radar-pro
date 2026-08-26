@@ -70,6 +70,65 @@ function boolField(row, key) {
   return own(row, key) && typeof row[key] === 'boolean' ? row[key] : null;
 }
 
+function outlookFail(why) {
+  return { ok: false, why, outlook: null };
+}
+
+/**
+ * اعتبارسنجی مستقل مرحله «انتظار بازار».
+ * فرم مرحله‌ای لازم نیست برای رسیدن به این قواعد، هدف یا ریسک ساختگی بسازد.
+ */
+export function validateMissionOutlook(input = {}) {
+  const outlook = input || {};
+  const direction = String(outlook.direction || '');
+  const volatilityView = String(outlook.volatilityView || '');
+  const confidencePct = finiteField(outlook, 'confidencePct');
+  const targetPriceRial = optionalPositive(outlook, 'targetPriceRial');
+  const rangeLowRial = optionalPositive(outlook, 'rangeLowRial');
+  const rangeHighRial = optionalPositive(outlook, 'rangeHighRial');
+  const expectedVolatilityPct = optionalPositive(outlook, 'expectedVolatilityPct');
+  const thesis = String(outlook.thesis || '').trim();
+
+  if (!inCatalog(MISSION_DIRECTIONS, direction)) return outlookFail('دید جهت بازار معتبر نیست');
+  if (!inCatalog(MISSION_VOLATILITY_VIEWS, volatilityView)) return outlookFail('دید تلاطم معتبر نیست');
+  if (!Number.isFinite(confidencePct) || confidencePct < 0 || confidencePct > 100) {
+    return outlookFail('اطمینان باید بین صفر و صد باشد');
+  }
+  if (!thesis) return outlookFail('دلیل و انتظار کاربر از موقعیت باید ثبت شود');
+  if (thesis.length > 2000) return outlookFail('متن انتظار از دو هزار نویسه بیشتر است');
+
+  const hasTarget = Number.isFinite(targetPriceRial);
+  const hasLow = Number.isFinite(rangeLowRial);
+  const hasHigh = Number.isFinite(rangeHighRial);
+  const hasVol = Number.isFinite(expectedVolatilityPct);
+  if ((hasLow && !hasHigh) || (!hasLow && hasHigh)) return outlookFail('کران پایین و بالای قیمت باید با هم ثبت شوند');
+  if (hasTarget && !(targetPriceRial > 0)) return outlookFail('قیمت هدف باید مثبت باشد');
+  if (hasLow && (!(rangeLowRial > 0) || !(rangeHighRial >= rangeLowRial))) {
+    return outlookFail('بازه قیمت باید مثبت و صعودی باشد');
+  }
+  if (hasTarget && hasLow && (targetPriceRial < rangeLowRial || targetPriceRial > rangeHighRial)) {
+    return outlookFail('قیمت هدف باید داخل بازه مورد انتظار باشد');
+  }
+  if (hasVol && !(expectedVolatilityPct > 0)) return outlookFail('تلاطم مورد انتظار باید مثبت باشد');
+  if ((direction === 'bullish' || direction === 'bearish') && !hasTarget) {
+    return outlookFail('دید جهت‌دار به قیمت هدف نیاز دارد');
+  }
+  if (direction === 'neutral' && !hasLow) return outlookFail('دید خنثی به بازه قیمت نیاز دارد');
+  if (direction === 'volatile' && !hasVol) return outlookFail('دید پرنوسان به تلاطم مورد انتظار نیاز دارد');
+
+  return {
+    ok: true,
+    why: '',
+    outlook: {
+      direction, confidencePct, volatilityView, thesis,
+      targetPriceRial: hasTarget ? targetPriceRial : null,
+      rangeLowRial: hasLow ? rangeLowRial : null,
+      rangeHighRial: hasHigh ? rangeHighRial : null,
+      expectedVolatilityPct: hasVol ? expectedVolatilityPct : null,
+    },
+  };
+}
+
 /**
  * ساخت مأموریت از session و ورودی صریح کاربر.
  *
@@ -103,41 +162,8 @@ export function createPortfolioMission(session, input = {}) {
   const grain = String(replay.grain || '');
   if (!inCatalog(MISSION_REPLAY_GRAINS, grain)) return fail('تایم‌فریم بازپخش معتبر نیست');
 
-  const direction = String(outlook.direction || '');
-  const volatilityView = String(outlook.volatilityView || '');
-  const confidencePct = finiteField(outlook, 'confidencePct');
-  const targetPriceRial = optionalPositive(outlook, 'targetPriceRial');
-  const rangeLowRial = optionalPositive(outlook, 'rangeLowRial');
-  const rangeHighRial = optionalPositive(outlook, 'rangeHighRial');
-  const expectedVolatilityPct = optionalPositive(outlook, 'expectedVolatilityPct');
-  const thesis = String(outlook.thesis || '').trim();
-
-  if (!inCatalog(MISSION_DIRECTIONS, direction)) return fail('دید جهت بازار معتبر نیست');
-  if (!inCatalog(MISSION_VOLATILITY_VIEWS, volatilityView)) return fail('دید تلاطم معتبر نیست');
-  if (!Number.isFinite(confidencePct) || confidencePct < 0 || confidencePct > 100) {
-    return fail('اطمینان باید بین صفر و صد باشد');
-  }
-  if (!thesis) return fail('دلیل و انتظار کاربر از موقعیت باید ثبت شود');
-  if (thesis.length > 2000) return fail('متن انتظار از دو هزار نویسه بیشتر است');
-
-  const hasTarget = Number.isFinite(targetPriceRial);
-  const hasLow = Number.isFinite(rangeLowRial);
-  const hasHigh = Number.isFinite(rangeHighRial);
-  const hasVol = Number.isFinite(expectedVolatilityPct);
-  if ((hasLow && !hasHigh) || (!hasLow && hasHigh)) return fail('کران پایین و بالای قیمت باید با هم ثبت شوند');
-  if (hasTarget && !(targetPriceRial > 0)) return fail('قیمت هدف باید مثبت باشد');
-  if (hasLow && (!(rangeLowRial > 0) || !(rangeHighRial >= rangeLowRial))) {
-    return fail('بازه قیمت باید مثبت و صعودی باشد');
-  }
-  if (hasTarget && hasLow && (targetPriceRial < rangeLowRial || targetPriceRial > rangeHighRial)) {
-    return fail('قیمت هدف باید داخل بازه مورد انتظار باشد');
-  }
-  if (hasVol && !(expectedVolatilityPct > 0)) return fail('تلاطم مورد انتظار باید مثبت باشد');
-  if ((direction === 'bullish' || direction === 'bearish') && !hasTarget) {
-    return fail('دید جهت‌دار به قیمت هدف نیاز دارد');
-  }
-  if (direction === 'neutral' && !hasLow) return fail('دید خنثی به بازه قیمت نیاز دارد');
-  if (direction === 'volatile' && !hasVol) return fail('دید پرنوسان به تلاطم مورد انتظار نیاز دارد');
+  const checkedOutlook = validateMissionOutlook(outlook);
+  if (!checkedOutlook.ok) return fail(checkedOutlook.why);
 
   const maxLossPct = finiteField(risk, 'maxLossPct');
   const maxDrawdownPct = finiteField(risk, 'maxDrawdownPct');
@@ -211,13 +237,7 @@ export function createPortfolioMission(session, input = {}) {
       replay: {
         grain, grainSeconds: MISSION_REPLAY_GRAINS[grain].seconds,
       },
-      outlook: {
-        direction, confidencePct, volatilityView, thesis,
-        targetPriceRial: hasTarget ? targetPriceRial : null,
-        rangeLowRial: hasLow ? rangeLowRial : null,
-        rangeHighRial: hasHigh ? rangeHighRial : null,
-        expectedVolatilityPct: hasVol ? expectedVolatilityPct : null,
-      },
+      outlook: checkedOutlook.outlook,
       risk: {
         maxLossPct, maxDrawdownPct, minFreeCapitalPct, maxMarginUsePct,
         allowUnlimitedRisk,
