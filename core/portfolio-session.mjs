@@ -13,6 +13,7 @@ import { EPS, num } from './num.mjs';
 import { moment, momentKey, sameMoment } from './trading-calendar.mjs';
 import { DEFAULT_CAPITAL_RIAL } from './bereket-session.mjs';
 import { combineDataQuality } from './data-quality.mjs';
+import { createPortfolioMission } from './portfolio-mission.mjs';
 
 export const PORTFOLIO_SCHEMA_VERSION = 1;
 
@@ -132,11 +133,28 @@ export function createPortfolioSession({
       capital,
       allocations: [],
       lockedAllocations: [],
+      mission: null,
+      lockedMission: null,
       startSnapshot: null,
       dataWarnings: [],
       events: [],
       counters: { event: 0, transaction: 0, position: 0, execution: 0, lot: 0 },
     },
+  };
+}
+
+/** ثبت یا جایگزینی مأموریت فقط تا پیش از فعال‌شدن جلسه. */
+export function setPortfolioMission(session, input = {}) {
+  if (!session || session.state !== 'draft') {
+    return { ok: false, why: 'مأموریت فقط در پیش‌نویس جلسه قابل تغییر است', session };
+  }
+  const made = createPortfolioMission(session, input);
+  if (!made.ok) return { ok: false, why: made.why, session };
+  return {
+    ok: true,
+    why: '',
+    mission: copy(made.mission),
+    session: { ...session, mission: copy(made.mission) },
   };
 }
 
@@ -203,6 +221,9 @@ export function activatePortfolioSession(session, { at = null, snapshot = null }
   if (!session.allocations?.length) {
     return { ok: false, why: 'پیش از فعال‌کردن باید تخصیص خانواده‌ها ثبت شود', session };
   }
+  if (!session.mission) {
+    return { ok: false, why: 'پیش از فعال‌کردن باید مأموریت سبد ثبت شود', session };
+  }
   const point = at ? moment(at.date, at.second) : moment(session.start.date, session.start.second);
   if (!sameMoment(point, session.start)) {
     return { ok: false, why: 'عکس شروع باید دقیقاً در لحظه شروع جلسه قفل شود', session };
@@ -227,6 +248,7 @@ export function activatePortfolioSession(session, { at = null, snapshot = null }
       state: 'active',
       now: { ...point },
       lockedAllocations: copy(session.allocations),
+      lockedMission: copy(session.mission),
       startSnapshot,
       dataWarnings: quality.reasons.slice(),
     },
