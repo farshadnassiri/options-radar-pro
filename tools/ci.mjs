@@ -74,8 +74,13 @@ for (;;) {
     process.exit(3);
   }
   const pending = runs.filter((run) => run.status !== 'completed');
-  if (!WAIT || pending.length === 0 || Date.now() - started > MAX_WAIT_MS) break;
-  console.log(`… ${pending.length} اجرا هنوز تمام نشده — دوباره در ${POLL_MS / 1000} ثانیه`);
+  // فهرست خالی هم انتظار است، نه پایان: گیت‌هاب چند ثانیه پس از پوش هنوز
+  // اجرایی ثبت نکرده. اگر اینجا برگردیم، `--wait` دقیقاً در همان لحظه‌ای
+  // که بیشترین کاربرد را دارد بی‌فایده می‌شود.
+  const settled = runs.length > 0 && pending.length === 0;
+  if (!WAIT || settled || Date.now() - started > MAX_WAIT_MS) break;
+  const note = runs.length === 0 ? 'هنوز اجرایی ثبت نشده' : `${pending.length} اجرا هنوز تمام نشده`;
+  console.log(`… ${note} — دوباره در ${POLL_MS / 1000} ثانیه`);
   await new Promise((resolve) => { setTimeout(resolve, POLL_MS); });
 }
 
