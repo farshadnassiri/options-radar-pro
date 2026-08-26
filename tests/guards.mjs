@@ -206,9 +206,32 @@ group('۷. آزمون به پایان‌خط سیستم‌عامل بند نیس
 
   // ادعای «کد این را دارد» باید از خواننده نرمال‌کننده رد شود. یک
   // `readFileSync` خام، همان کلاس خطا را برمی‌گرداند بی‌آنکه کسی بفهمد.
+  //
+  // خواننده حالا در `tests/harness.mjs` است و مجموعه به ۱۲۱ دسته شکسته
+  // شده. پس به‌جای یک فایل، همهٔ دسته‌ها سنجیده می‌شوند: دستهٔ تازه‌ای که
+  // فردا نوشته شود هم زیر همین قفل است.
+  const harnessSrc = fs.readFileSync(path.join(ROOT, 'tests/harness.mjs'), 'utf8');
+  check('خوانندهٔ نرمال‌کننده در harness.mjs تعریف شده',
+    /\.replace\(\/\\r\\n\/g, '\\n'\)/.test(harnessSrc));
+
+  const suiteDir = path.join(ROOT, 'tests/suites');
+  const suites = fs.existsSync(suiteDir) ? fs.readdirSync(suiteDir).filter((f) => f.endsWith('.mjs')) : [];
+  check('دسته‌های آزمون پیدا شدند', suites.length > 0, `${suites.length} دسته`);
+  const rawReaders = ['run.mjs', ...suites.map((f) => `suites/${f}`)]
+    .filter((rel) => /fs\.readFileSync/.test(fs.readFileSync(path.join(ROOT, 'tests', rel), 'utf8')));
+  check('هیچ دسته‌ای منبع را خام نمی‌خواند — فقط readSrc',
+    rawReaders.length === 0, rawReaders.join(' ،') || 'همه از harness');
+
+  // بارگذار باید همهٔ دسته‌ها را بردارد، نه فهرستی دستی که جا می‌ماند.
   const runSrc = fs.readFileSync(path.join(ROOT, 'tests/run.mjs'), 'utf8');
-  check('آزمون اصلی منبع را فقط با خوانندهٔ نرمال‌کننده می‌خواند',
-    !/fs\.readFileSync/.test(runSrc) && /\.replace\(\/\\r\\n\/g, '\\n'\)/.test(runSrc));
+  check('بارگذار دسته‌ها را از روی پوشه برمی‌دارد',
+    /readdirSync/.test(runSrc) && /suites/.test(runSrc));
+
+  // روی ویندوز مسیر مطلق `D:\...` است و `import()` پویا آن را رد می‌کند:
+  // «absolute paths must be valid file:// URLs». job ویندوزِ CI این را یک
+  // بار گرفت؛ این نگهبان نمی‌گذارد دوباره بی‌صدا برگردد.
+  check('بارگذار مسیر را به file:// تبدیل می‌کند — وگرنه ویندوز می‌شکند',
+    /pathToFileURL\(/.test(runSrc) && !/await import\(path\.join/.test(runSrc));
 }
 
 // ═════════════════════ ۸. شمار تب، یک عدد باشد نه سه ═════════════════════
@@ -426,8 +449,75 @@ group('۱۰. رنگ سری‌ها جداپذیر است');
     offenders.length === 0, offenders.join('، '));
 }
 
+// ═════════════════════ ۹. بودجهٔ خواندن (قاعده ۰) ═════════════════════
+//
+// اندازه‌گیری ۱۴۰۵/۰۶/۰۴: خواندنِ اجباری پیش از هر کار به ۵۷۴ هزار نویسهٔ
+// فارسی رسیده بود — بزرگ‌تر از پنجرهٔ بافتار هر عاملی. نتیجه‌اش این بود که
+// هر جلسه بیشتر وقتش را صرف جهت‌یابی می‌کرد تا ساختن، و کار مفیدِ هر
+// جلسه کوچک و کوچک‌تر می‌شد.
+//
+// این نگهبان سقف را نگه می‌دارد. رشد طبیعی است — دفتر کار هر روز یک قلم
+// اضافه می‌کند — پس قاعده «رشد نکن» نیست، «بایگانی کن» است: وقتی اینجا
+// قرمز شد، اقلام کهنه به `docs/worklog/` یا `docs/status/` بروند.
+//
+// سقف‌ها با `node tools/next.mjs` یکی هستند تا عامل پیش از آنکه CI قرمز
+// شود خودش ببیند.
+group('۹. بودجهٔ خواندنِ اجباری از سقف نگذشته');
+{
+  const CAPS = [
+    ['NEXT.md', 8],
+    ['PROTOCOL.md', 8],
+    ['AGENTS.md', 16],
+    ['WORKLOG.md', 48],
+    ['TASK_STATUS.md', 24],
+  ];
+  let total = 0;
+  for (const [file, capKb] of CAPS) {
+    const full = path.join(ROOT, file);
+    const size = fs.existsSync(full) ? fs.statSync(full).size : 0;
+    total += size;
+    check(`${file} زیر ${capKb} کیلوبایت است`, size > 0 && size <= capKb * 1024,
+      `${(size / 1024).toFixed(1)}k از ${capKb}k`);
+  }
+  check('جمع خواندن اجباری زیر ۹۶ کیلوبایت است', total <= 96 * 1024,
+    `${(total / 1024).toFixed(1)}k`);
+
+  // بارگذار باید نازک بماند. هر ادعایی که اینجا نوشته شود، دوباره همان
+  // فایل داغِ مشترکی می‌شود که دو کار موازی را به هم می‌زد.
+  const runSize = fs.statSync(path.join(ROOT, 'tests/run.mjs')).size;
+  check('tests/run.mjs بارگذار مانده، نه انبار ادعا', runSize <= 4 * 1024,
+    `${(runSize / 1024).toFixed(1)}k`);
+
+  // هیچ دسته‌ای نباید دوباره به هیولا تبدیل شود.
+  const suiteDir = path.join(ROOT, 'tests/suites');
+  const big = fs.readdirSync(suiteDir).filter((f) => f.endsWith('.mjs'))
+    .filter((f) => fs.statSync(path.join(suiteDir, f)).size > 40 * 1024);
+  check('هیچ دستهٔ آزمونی از ۴۰ کیلوبایت نگذشته', big.length === 0, big.join(' ،') || 'همه کوچک');
+
+  // ابزارهایی که پروتکل به آن‌ها ارجاع می‌دهد باید واقعاً باشند.
+  for (const f of ['NEXT.md', 'PROTOCOL.md', 'BACKLOG.md', 'tools/next.mjs', 'tools/check.mjs', 'tools/progress.mjs', 'tests/harness.mjs']) {
+    check(`${f} موجود است`, fs.existsSync(path.join(ROOT, f)));
+  }
+}
+
 // ═══════════════════════════ گزارش ═══════════════════════════
+// حالت خلاصه: فقط ردها و یک خط جمع‌بندی.
+//
+// چرا هست: گزارش کامل چند هزار خط «✔» است. برای آدمی که ترمینال را
+// می‌بیند مفید است، ولی عاملی که این خروجی را در بافتار خودش می‌ریزد،
+// هر بار ده‌ها هزار توکن بابت سطرهایی می‌دهد که همه سبزند. قاعده:
+// عامل با `--quiet` اجرا کند، آدم بدون آن.
+const QUIET = process.argv.includes('--quiet') || process.argv.includes('-q');
 const W = 62;
+if (QUIET) {
+  let head = '';
+  for (const [mark, name, detail] of results) {
+    if (mark === '—') { head = name; continue; }
+    if (mark === '✘') console.log(` ✘ ${head} › ${name} ${detail}`);
+  }
+  console.log(`نگهبان قواعد مخزن — قبول ${pass}   رد ${fail}`);
+  process.exit(fail ? 1 : 0);
+}
 console.log('\n' + '═'.repeat(W));
 console.log('  نگهبان قواعد مخزن');
 console.log('═'.repeat(W));
