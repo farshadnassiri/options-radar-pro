@@ -713,6 +713,31 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-outlook-detail-grid input[aria-invalid="true"], .pt-thesis textarea[aria-invalid="true"] { border-color: var(--loss); box-shadow: 0 0 0 3px color-mix(in srgb, var(--loss) 14%, transparent); }
 .pt-stage-actions { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
 .pt-stage-actions .pt-save-state { margin: 0; }
+.pt-risk-input-grid, .pt-liquidity-grid { display: grid; grid-template-columns: repeat(2, minmax(170px, 1fr)); gap: var(--space-3); }
+.pt-liquidity-grid { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+.pt-risk-input-grid input, .pt-liquidity-grid input { width: 100%; min-height: var(--control-h-lg); padding: 9px 12px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); font: inherit; }
+.pt-risk-input-grid input[aria-invalid="true"], .pt-liquidity-grid input[aria-invalid="true"] { border-color: var(--loss); box-shadow: 0 0 0 3px color-mix(in srgb, var(--loss) 14%, transparent); }
+.pt-binary-field { margin-top: var(--space-4); }
+.pt-binary { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: var(--space-2); }
+.pt-binary label { position: relative; cursor: pointer; }
+.pt-binary input { position: absolute; opacity: 0; pointer-events: none; }
+.pt-binary span { display: grid; place-items: center; min-height: 52px; padding: 10px 13px; border: 1px solid var(--line-input); border-radius: var(--radius-lg); background: var(--panel-2); color: var(--ink-2); font-weight: 800; text-align: center; transition: border-color var(--transition-fast), background var(--transition-fast); }
+.pt-binary input:checked + span { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.pt-binary input:focus-visible + span { outline: 3px solid color-mix(in srgb, var(--accent) 25%, transparent); outline-offset: 2px; }
+.pt-binary[aria-invalid="true"] span { border-color: var(--loss); }
+.pt-budget { display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: linear-gradient(135deg, var(--panel-2), color-mix(in srgb, var(--gain) 5%, var(--panel))); }
+.pt-budget h3, .pt-subhead h3 { margin: 0; }
+.pt-budget-track { display: flex; overflow: hidden; min-height: 18px; border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--panel); }
+.pt-budget-track i { flex: 0 0 0; min-width: 0; transition: flex-basis var(--transition-fast); }
+.pt-budget-track .free { background: var(--gain); }
+.pt-budget-track .margin { background: var(--warn); }
+.pt-budget-track .flex { background: var(--accent); opacity: .45; }
+.pt-budget-values { display: grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap: var(--space-2); }
+.pt-budget-values article { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: color-mix(in srgb, var(--panel) 85%, transparent); }
+.pt-budget-values span, .pt-budget-values small, .pt-budget > p { color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-normal); }
+.pt-budget-values b { color: var(--ink-2); font-family: var(--mono); font-size: var(--fs-lg); }
+.pt-budget > p { margin: 0; }
+.pt-subhead { margin-top: var(--space-6); }
 
 .pt-review { position: sticky; top: var(--space-3); margin: 0; border-top: 4px solid var(--accent); }
 .pt-review h2 { margin: 0 0 var(--space-4); }
@@ -758,7 +783,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .pt-progress { grid-template-columns: 1fr; }
   .pt-progress > div:not(.active) { display: none; }
   .pt-money-grid, .pt-capital-board, .pt-date-grid { grid-template-columns: 1fr; }
-  .pt-choice-grid, .pt-volatility-grid, .pt-outlook-price-grid, .pt-outlook-detail-grid { grid-template-columns: 1fr; }
+  .pt-choice-grid, .pt-volatility-grid, .pt-outlook-price-grid, .pt-outlook-detail-grid,
+  .pt-risk-input-grid, .pt-liquidity-grid, .pt-binary, .pt-budget-values { grid-template-columns: 1fr; }
   .pt-stage-actions { grid-template-columns: 1fr; }
   .pt-symbol-row { grid-template-columns: 1fr; }
   .pt-date-title { align-items: stretch; flex-direction: column; }
