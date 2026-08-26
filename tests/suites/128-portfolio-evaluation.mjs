@@ -1,128 +1,28 @@
 // ۱۲۸. ارزیابی بازده و ریسک طرح سرمایه‌دار سبد
 
 import { check, group, near, readSrc } from '../harness.mjs';
+import { BULLISH_OUTLOOK, portfolioFixture } from '../fixtures/portfolio.mjs';
 import { makeDataQuality } from '../../core/data-quality.mjs';
-import { bookCapacity, walkBook } from '../../core/exec.mjs';
 import { analyzePayoff, pnlAtExpiry } from '../../core/payoff.mjs';
-import { createPortfolioMission } from '../../core/portfolio-mission.mjs';
-import { portfolioCandidates } from '../../core/portfolio-candidates.mjs';
 import { portfolioEntryPlan } from '../../core/portfolio-entry.mjs';
 import { portfolioCapitalRequirement } from '../../core/portfolio-capital.mjs';
 import {
   PORTFOLIO_EVALUATION_VERSION, portfolioPlanEvaluation,
 } from '../../core/portfolio-evaluation.mjs';
-import { byId } from '../../strategies/catalog.mjs';
 
 group('۱۲۸. ارزیابی بازده و ریسک طرح سرمایه‌دار سبد');
 {
-  const at128 = { date: 20260521, second: 10 * 3600 };
-  const observed128 = makeDataQuality({
-    kind: 'observed', source: 'locked-broker-settings', asOf: at128, sufficient: true,
-  });
-  const executable128 = makeDataQuality({
-    kind: 'executable', source: 'best-limits-history', asOf: at128, sufficient: true,
-    details: { levelsKnown: 2, levelsTotal: 2 },
-  });
-  const book128 = ({ bid, ask, qty = 40 }) => [
-    { level: 1, bid, bidQty: qty, ask, askQty: qty, second: at128.second },
-    { level: 2, bid: bid - 2, bidQty: qty, ask: ask + 2, askQty: qty, second: at128.second },
-  ];
-  const contracts128 = [];
-  for (const strike of [9000, 9500, 10_000, 10_500, 11_000, 11_500, 12_000]) {
-    contracts128.push({
-      ins: `call-${strike}`, kind: 'call', strike, expiry: 20260620, size: 1000,
-      quote: { book: book128({ bid: 68, ask: 72 }), close: 70, quality: executable128 },
-    });
-    contracts128.push({
-      ins: `put-${strike}`, kind: 'put', strike, expiry: 20260620, size: 1000,
-      quote: { book: book128({ bid: 78, ask: 82 }), close: 80, quality: executable128 },
-    });
-  }
-  const capitalInputs128 = {
-    fees: { option: 0.001, buyStock: 0.003, sellStock: 0.009, exercise: 0.0005, quality: observed128 },
-    margin: {
-      spotCloseRial: 10_200,
-      params: { A: 0.20, B: 0.10, C: 10_000, maint: 0.70, bBasis: 'SPOT' },
-      creditMode: 'FULL', nakedComboMargin: 'MAX_PLUS_PREMIUM', quality: observed128,
-    },
-  };
-  const capital128 = {
-    initialRial: 10_000_000, reserveRial: 0, reservePct: 0,
-    allocatableRial: 10_000_000, assignedRial: 0, unassignedRial: 10_000_000,
-  };
-  const baseSession128 = {
-    id: 'pt-eval-128', portfolioId: 'pf-128', baseIns: '900001', state: 'active',
-    start: at128, end: { date: 20260620, second: 12 * 3600 },
-    capital: capital128,
-    lockedAllocations: [
-      { familyId: 'single', pct: 20, targetRial: 2_000_000 },
-      { familyId: 'vol', pct: 80, targetRial: 8_000_000 },
-    ],
-    startSnapshot: {
-      at: at128, spot: 10_200, contracts: contracts128, capitalInputs: capitalInputs128,
-    },
-  };
+  const fx128 = portfolioFixture('eval-128');
+  const at128 = fx128.at;
+  const capitalInputs128 = fx128.capitalInputs;
+  const session128 = fx128.session;
+  const evidence128 = fx128.evidence;
+  const candidateSet128 = fx128.candidateSet;
+  const sessionWith128 = fx128.sessionWith;
+  const bullishOutlook128 = BULLISH_OUTLOOK;
+  const longCall128 = fx128.longCall;
+  const strangle128 = fx128.strangle;
 
-  const missionInput128 = (outlook) => ({
-    objective: { mode: 'growth', returnBase: 'initial', targetReturnPct: 25, maxHoldingDays: 30 },
-    outlook,
-    risk: {
-      maxLossPct: 5, maxDrawdownPct: 20, minFreeCapitalPct: 10,
-      maxMarginUsePct: 40, allowUnlimitedRisk: false,
-    },
-    liquidity: {
-      minUnderlyingDailyValueRial: 100_000_000,
-      minOptionDailyValueRial: 10_000_000,
-      minOpenInterest: 100,
-      maxSpreadPct: 8,
-      maxBookTakePct: 50,
-      requireFullBook: false,
-    },
-    replay: { grain: 'daily' },
-  });
-
-  /** جلسه‌ای با همان همه‌چیز، فقط دید بازارش فرق دارد. */
-  const sessionWith128 = (outlook) => {
-    const made = createPortfolioMission(baseSession128, missionInput128(outlook));
-    if (!made.ok) throw new Error(`مأموریت آزمون ساخته نشد: ${made.why}`);
-    return { ...baseSession128, lockedMission: made.mission };
-  };
-
-  const bullishOutlook128 = {
-    direction: 'bullish', volatilityView: 'higher', confidencePct: 70,
-    targetPriceRial: 11_400, thesis: 'انتظار رشد پس از گزارش فصلی',
-  };
-  const session128 = sessionWith128(bullishOutlook128);
-
-  const evidence128 = {
-    ok: true,
-    now: { ...at128 },
-    rows: contracts128.flatMap((contract) => ['buy', 'sell'].map((side) => {
-      const executableQty = Math.floor(bookCapacity(contract.quote.book, side, 0, Infinity, 0.5));
-      const execution = walkBook(contract.quote.book, executableQty, side, 0, 0.5);
-      return {
-        candidateId: `${contract.ins}:${side}`, ins: contract.ins, side,
-        verdict: 'accepted', accepted: true, executableQty,
-        execution: {
-          vwap: execution.vwap, top: execution.top, filled: execution.filled,
-          levels: execution.levels, maxBookTakePct: 50,
-        },
-        quality: { candidate: executable128, book: executable128 },
-      };
-    })),
-  };
-  const candidateSet128 = portfolioCandidates(
-    session128, [byId('long-call'), byId('short-strangle')], evidence128,
-  );
-  const planFor128 = (defId, session = session128) => {
-    const candidate = candidateSet128.candidates.find((row) => row.defId === defId);
-    const entry = portfolioEntryPlan(session, candidateSet128, evidence128, candidate.id);
-    const capital = portfolioCapitalRequirement(session, candidateSet128, evidence128, entry);
-    return { entry, capital };
-  };
-
-  const longCall128 = planFor128('long-call');
-  const strangle128 = planFor128('short-strangle');
   check('پیش‌شرط آزمون: طرح بدهکار و طرح بستانکار هر دو مبنای سرمایه گرفتند',
     longCall128.capital.ok && strangle128.capital.ok,
     `${longCall128.capital.why} | ${strangle128.capital.why}`);

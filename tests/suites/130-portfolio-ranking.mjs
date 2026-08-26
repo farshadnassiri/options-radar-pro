@@ -1,170 +1,48 @@
 // ۱۳۰. رتبه‌بندی و کوتاه‌فهرست طرح‌های سبد
 
-import { check, group, near, readSrc } from '../harness.mjs';
-import { makeDataQuality } from '../../core/data-quality.mjs';
-import { bookCapacity, walkBook } from '../../core/exec.mjs';
-import { createPortfolioMission } from '../../core/portfolio-mission.mjs';
-import { portfolioCandidates } from '../../core/portfolio-candidates.mjs';
-import { portfolioEntryPlan } from '../../core/portfolio-entry.mjs';
-import { portfolioCapitalRequirement } from '../../core/portfolio-capital.mjs';
+import { check, group, readSrc } from '../harness.mjs';
+import { BULLISH_OUTLOOK, WIDE_RISK, portfolioFixture } from '../fixtures/portfolio.mjs';
 import { portfolioPlanEvaluation } from '../../core/portfolio-evaluation.mjs';
 import { portfolioPlanScore } from '../../core/portfolio-score.mjs';
 import { rankPlanScores } from '../../core/portfolio-ranking.mjs';
-import { byId } from '../../strategies/catalog.mjs';
 
 group('۱۳۰. رتبه‌بندی و کوتاه‌فهرست طرح‌های سبد');
 {
-  const at130 = { date: 20260521, second: 10 * 3600 };
-  const observed130 = makeDataQuality({
-    kind: 'observed', source: 'locked-broker-settings', asOf: at130, sufficient: true,
-  });
-  const executable130 = makeDataQuality({
-    kind: 'executable', source: 'best-limits-history', asOf: at130, sufficient: true,
-    details: { levelsKnown: 2, levelsTotal: 2 },
-  });
-  const book130 = ({ bid, ask, qty = 40 }) => [
-    { level: 1, bid, bidQty: qty, ask, askQty: qty, second: at130.second },
-    { level: 2, bid: bid - 2, bidQty: qty, ask: ask + 2, askQty: qty, second: at130.second },
-  ];
-  const contracts130 = [];
-  for (const strike of [9000, 9500, 10_000, 10_500, 11_000, 11_500, 12_000]) {
-    contracts130.push({
-      ins: `call-${strike}`, kind: 'call', strike, expiry: 20260620, size: 1000,
-      quote: { book: book130({ bid: 68, ask: 72 }), close: 70, quality: executable130 },
-    });
-    contracts130.push({
-      ins: `put-${strike}`, kind: 'put', strike, expiry: 20260620, size: 1000,
-      quote: { book: book130({ bid: 78, ask: 82 }), close: 80, quality: executable130 },
-    });
-  }
-  const capitalInputs130 = {
-    fees: { option: 0.001, buyStock: 0.003, sellStock: 0.009, exercise: 0.0005, quality: observed130 },
-    margin: {
-      spotCloseRial: 10_200,
-      params: { A: 0.20, B: 0.10, C: 10_000, maint: 0.70, bBasis: 'SPOT' },
-      creditMode: 'FULL', nakedComboMargin: 'MAX_PLUS_PREMIUM', quality: observed130,
-    },
-  };
-  const capital130 = {
-    initialRial: 10_000_000, reserveRial: 0, reservePct: 0,
-    allocatableRial: 10_000_000, assignedRial: 0, unassignedRial: 10_000_000,
-  };
-  const baseSession130 = {
-    id: 'pt-eval-130', portfolioId: 'pf-130', baseIns: '900001', state: 'active',
-    start: at130, end: { date: 20260620, second: 12 * 3600 },
-    capital: capital130,
-    lockedAllocations: [
-      { familyId: 'single', pct: 20, targetRial: 2_000_000 },
-      { familyId: 'vol', pct: 80, targetRial: 8_000_000 },
-    ],
-    startSnapshot: {
-      at: at130, spot: 10_200, contracts: contracts130, capitalInputs: capitalInputs130,
-    },
-  };
-
-  const missionInput130 = (outlook) => ({
-    objective: { mode: 'growth', returnBase: 'initial', targetReturnPct: 25, maxHoldingDays: 30 },
-    outlook,
-    risk: {
-      maxLossPct: 5, maxDrawdownPct: 20, minFreeCapitalPct: 10,
-      maxMarginUsePct: 40, allowUnlimitedRisk: false,
-    },
-    liquidity: {
-      minUnderlyingDailyValueRial: 100_000_000,
-      minOptionDailyValueRial: 10_000_000,
-      minOpenInterest: 100,
-      maxSpreadPct: 8,
-      maxBookTakePct: 50,
-      requireFullBook: false,
-    },
-    replay: { grain: 'daily' },
-  });
-
-  /** جلسه‌ای با همان همه‌چیز، فقط دید بازارش فرق دارد. */
-  const sessionWith130 = (outlook) => {
-    const made = createPortfolioMission(baseSession130, missionInput130(outlook));
-    if (!made.ok) throw new Error(`مأموریت آزمون ساخته نشد: ${made.why}`);
-    return { ...baseSession130, lockedMission: made.mission };
-  };
-
-  const bullishOutlook130 = {
-    direction: 'bullish', volatilityView: 'higher', confidencePct: 70,
-    targetPriceRial: 11_400, thesis: 'انتظار رشد پس از گزارش فصلی',
-  };
-  const session130 = sessionWith130(bullishOutlook130);
-
-  const evidence130 = {
-    ok: true,
-    now: { ...at130 },
-    rows: contracts130.flatMap((contract) => ['buy', 'sell'].map((side) => {
-      const executableQty = Math.floor(bookCapacity(contract.quote.book, side, 0, Infinity, 0.5));
-      const execution = walkBook(contract.quote.book, executableQty, side, 0, 0.5);
-      return {
-        candidateId: `${contract.ins}:${side}`, ins: contract.ins, side,
-        verdict: 'accepted', accepted: true, executableQty,
-        execution: {
-          vwap: execution.vwap, top: execution.top, filled: execution.filled,
-          levels: execution.levels, maxBookTakePct: 50,
-        },
-        quality: { candidate: executable130, book: executable130 },
-      };
-    })),
-  };
-  const candidateSet130 = portfolioCandidates(
-    session130, [byId('long-call'), byId('short-strangle')], evidence130,
-  );
-  const planFor130 = (defId, session = session130) => {
-    const candidate = candidateSet130.candidates.find((row) => row.defId === defId);
-    const entry = portfolioEntryPlan(session, candidateSet130, evidence130, candidate.id);
-    const capital = portfolioCapitalRequirement(session, candidateSet130, evidence130, entry);
-    return { entry, capital };
-  };
-
-  const longCall130 = planFor130('long-call');
-  const strangle130 = planFor130('short-strangle');
-
-  // سقف زیان ۵٪ برای این طرح‌ها تنگ است و همه را نامعتبر می‌کند؛ برای
-  // سنجیدن خودِ امتیاز به مأموریتی با سقف بازتر لازم داریم. سقف تنگ
-  // پایین‌تر، جداگانه سنجیده می‌شود.
-  const wideRisk130 = {
-    maxLossPct: 50, maxDrawdownPct: 60, minFreeCapitalPct: 10,
-    maxMarginUsePct: 40, allowUnlimitedRisk: false,
-  };
-  const sessionRisk130 = (outlook, risk) => {
-    const made = createPortfolioMission(baseSession130, { ...missionInput130(outlook), risk });
-    if (!made.ok) throw new Error(`مأموریت آزمون ساخته نشد: ${made.why}`);
-    return { ...baseSession130, lockedMission: made.mission };
-  };
+  const fx130 = portfolioFixture('rank-130');
+  const at130 = fx130.at;
+  const session130 = fx130.session;
+  const evidence130 = fx130.evidence;
+  const candidateSet130 = fx130.candidateSet;
+  const bullishOutlook130 = BULLISH_OUTLOOK;
+  const longCall130 = fx130.longCall;
+  const strangle130 = fx130.strangle;
+  const wideRisk130 = WIDE_RISK;
+  const sessionRisk130 = fx130.sessionWith;
 
   const wide130 = sessionRisk130(bullishOutlook130, wideRisk130);
-  const evalWide130 = portfolioPlanEvaluation(
-    wide130, candidateSet130, evidence130, longCall130.entry, longCall130.capital,
-  );
   const scoreOf130 = (session, evaluation, plan = longCall130) => portfolioPlanScore(
     session, candidateSet130, evidence130, plan.entry, plan.capital, evaluation,
   );
-  const wideScore130 = scoreOf130(wide130, evalWide130);
+  const evalOf130 = (session, plan = longCall130) => portfolioPlanEvaluation(
+    session, candidateSet130, evidence130, plan.entry, plan.capital,
+  );
+  const wideScore130 = scoreOf130(wide130, evalOf130(wide130));
 
   // امتیازهای واقعی این چیدمان: یکی واجد، یکی ردشده به‌علت سقف زیان،
   // یکی ردشده به‌علت ریسک نامحدود، و یکی بی‌امتیاز به‌علت نبود نقطه.
-  const tightScore130 = scoreOf130(session130, portfolioPlanEvaluation(
-    session130, candidateSet130, evidence130, longCall130.entry, longCall130.capital,
-  ));
-  const strangleScore130 = scoreOf130(wide130, portfolioPlanEvaluation(
-    wide130, candidateSet130, evidence130, strangle130.entry, strangle130.capital,
-  ), strangle130);
+  const tightScore130 = scoreOf130(session130, evalOf130(session130));
+  const strangleScore130 = scoreOf130(wide130, evalOf130(wide130, strangle130), strangle130);
   const volSession130 = sessionRisk130({
     direction: 'volatile', volatilityView: 'higher', confidencePct: 60,
     expectedVolatilityPct: 45, thesis: 'انتظار جهش، بدون قیمت صریح',
   }, wideRisk130);
-  const volScore130 = scoreOf130(volSession130, portfolioPlanEvaluation(
-    volSession130, candidateSet130, evidence130, longCall130.entry, longCall130.capital,
-  ));
+  const volScore130 = scoreOf130(volSession130, evalOf130(volSession130));
+
   // امتیاز نامعلوم از همان طرحِ کال می‌آید (فقط دید بازار فرق دارد)، پس
-  // شناسهٔ نامزدش با ردیف واجد یکی است. برای چیدن در یک جدول، شناسه‌اش
-  // جدا می‌شود — همان چیزی که در عمل رخ می‌دهد وقتی نامزد دیگری همین
-  // وضع را داشته باشد. تکراری‌بودن جداگانه سنجیده می‌شود.
+  // شناسهٔ نامزدش با ردیف واجد یکی است. برای چیدن در یک جدول شناسه‌اش جدا
+  // می‌شود؛ تکراری‌بودن جداگانه سنجیده می‌شود.
   const volRow130 = { ...volScore130, candidateId: 'c-vol' };
+
   check('پیش‌شرط آزمون: یک امتیاز واجد، یک ردشده، یک نامعلوم',
     wideScore130.ok && Number.isFinite(wideScore130.score)
     && strangleScore130.ineligible === true && volScore130.score === null,
@@ -178,7 +56,7 @@ group('۱۳۰. رتبه‌بندی و کوتاه‌فهرست طرح‌های س
   // ── بند ۱: همه از یک جلسه و یک لحظه و یک مأموریت ────────────────────
   const ok130 = rankPlanScores([wideScore130, strangleScore130, volRow130]);
   check('فهرست هم‌جلسه و هم‌لحظه چیده می‌شود',
-    ok130.ok && ok130.sessionId === 'pt-eval-130'
+    ok130.ok && ok130.sessionId === fx130.baseSession.id
     && ok130.now.date === at130.date && ok130.now.second === at130.second, ok130.why);
 
   const otherSession130 = { ...variant130('c-other', 1), sessionId: 'pt-eval-999' };

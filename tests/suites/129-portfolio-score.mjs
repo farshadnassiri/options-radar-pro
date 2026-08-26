@@ -1,142 +1,27 @@
 // ۱۲۹. امتیاز طرح سرمایه‌دار سبد
 
 import { check, group, near, readSrc } from '../harness.mjs';
-import { makeDataQuality } from '../../core/data-quality.mjs';
-import { bookCapacity, walkBook } from '../../core/exec.mjs';
-import { createPortfolioMission } from '../../core/portfolio-mission.mjs';
-import { portfolioCandidates } from '../../core/portfolio-candidates.mjs';
-import { portfolioEntryPlan } from '../../core/portfolio-entry.mjs';
-import { portfolioCapitalRequirement } from '../../core/portfolio-capital.mjs';
+import { BULLISH_OUTLOOK, WIDE_RISK, portfolioFixture } from '../fixtures/portfolio.mjs';
 import { portfolioPlanEvaluation } from '../../core/portfolio-evaluation.mjs';
 import {
   PORTFOLIO_SCORE_VERSION, PORTFOLIO_SCORE_WEIGHTS, portfolioPlanScore,
 } from '../../core/portfolio-score.mjs';
-import { byId } from '../../strategies/catalog.mjs';
 
 group('۱۲۹. امتیاز طرح سرمایه‌دار سبد');
 {
-  const at129 = { date: 20260521, second: 10 * 3600 };
-  const observed129 = makeDataQuality({
-    kind: 'observed', source: 'locked-broker-settings', asOf: at129, sufficient: true,
-  });
-  const executable129 = makeDataQuality({
-    kind: 'executable', source: 'best-limits-history', asOf: at129, sufficient: true,
-    details: { levelsKnown: 2, levelsTotal: 2 },
-  });
-  const book129 = ({ bid, ask, qty = 40 }) => [
-    { level: 1, bid, bidQty: qty, ask, askQty: qty, second: at129.second },
-    { level: 2, bid: bid - 2, bidQty: qty, ask: ask + 2, askQty: qty, second: at129.second },
-  ];
-  const contracts129 = [];
-  for (const strike of [9000, 9500, 10_000, 10_500, 11_000, 11_500, 12_000]) {
-    contracts129.push({
-      ins: `call-${strike}`, kind: 'call', strike, expiry: 20260620, size: 1000,
-      quote: { book: book129({ bid: 68, ask: 72 }), close: 70, quality: executable129 },
-    });
-    contracts129.push({
-      ins: `put-${strike}`, kind: 'put', strike, expiry: 20260620, size: 1000,
-      quote: { book: book129({ bid: 78, ask: 82 }), close: 80, quality: executable129 },
-    });
-  }
-  const capitalInputs129 = {
-    fees: { option: 0.001, buyStock: 0.003, sellStock: 0.009, exercise: 0.0005, quality: observed129 },
-    margin: {
-      spotCloseRial: 10_200,
-      params: { A: 0.20, B: 0.10, C: 10_000, maint: 0.70, bBasis: 'SPOT' },
-      creditMode: 'FULL', nakedComboMargin: 'MAX_PLUS_PREMIUM', quality: observed129,
-    },
-  };
-  const capital129 = {
-    initialRial: 10_000_000, reserveRial: 0, reservePct: 0,
-    allocatableRial: 10_000_000, assignedRial: 0, unassignedRial: 10_000_000,
-  };
-  const baseSession129 = {
-    id: 'pt-eval-129', portfolioId: 'pf-129', baseIns: '900001', state: 'active',
-    start: at129, end: { date: 20260620, second: 12 * 3600 },
-    capital: capital129,
-    lockedAllocations: [
-      { familyId: 'single', pct: 20, targetRial: 2_000_000 },
-      { familyId: 'vol', pct: 80, targetRial: 8_000_000 },
-    ],
-    startSnapshot: {
-      at: at129, spot: 10_200, contracts: contracts129, capitalInputs: capitalInputs129,
-    },
-  };
+  const fx129 = portfolioFixture('score-129');
+  const session129 = fx129.session;
+  const evidence129 = fx129.evidence;
+  const candidateSet129 = fx129.candidateSet;
+  const bullishOutlook129 = BULLISH_OUTLOOK;
+  const longCall129 = fx129.longCall;
+  const strangle129 = fx129.strangle;
+  const wideRisk129 = WIDE_RISK;
+  const sessionRisk129 = fx129.sessionWith;
 
-  const missionInput129 = (outlook) => ({
-    objective: { mode: 'growth', returnBase: 'initial', targetReturnPct: 25, maxHoldingDays: 30 },
-    outlook,
-    risk: {
-      maxLossPct: 5, maxDrawdownPct: 20, minFreeCapitalPct: 10,
-      maxMarginUsePct: 40, allowUnlimitedRisk: false,
-    },
-    liquidity: {
-      minUnderlyingDailyValueRial: 100_000_000,
-      minOptionDailyValueRial: 10_000_000,
-      minOpenInterest: 100,
-      maxSpreadPct: 8,
-      maxBookTakePct: 50,
-      requireFullBook: false,
-    },
-    replay: { grain: 'daily' },
-  });
-
-  /** جلسه‌ای با همان همه‌چیز، فقط دید بازارش فرق دارد. */
-  const sessionWith129 = (outlook) => {
-    const made = createPortfolioMission(baseSession129, missionInput129(outlook));
-    if (!made.ok) throw new Error(`مأموریت آزمون ساخته نشد: ${made.why}`);
-    return { ...baseSession129, lockedMission: made.mission };
-  };
-
-  const bullishOutlook129 = {
-    direction: 'bullish', volatilityView: 'higher', confidencePct: 70,
-    targetPriceRial: 11_400, thesis: 'انتظار رشد پس از گزارش فصلی',
-  };
-  const session129 = sessionWith129(bullishOutlook129);
-
-  const evidence129 = {
-    ok: true,
-    now: { ...at129 },
-    rows: contracts129.flatMap((contract) => ['buy', 'sell'].map((side) => {
-      const executableQty = Math.floor(bookCapacity(contract.quote.book, side, 0, Infinity, 0.5));
-      const execution = walkBook(contract.quote.book, executableQty, side, 0, 0.5);
-      return {
-        candidateId: `${contract.ins}:${side}`, ins: contract.ins, side,
-        verdict: 'accepted', accepted: true, executableQty,
-        execution: {
-          vwap: execution.vwap, top: execution.top, filled: execution.filled,
-          levels: execution.levels, maxBookTakePct: 50,
-        },
-        quality: { candidate: executable129, book: executable129 },
-      };
-    })),
-  };
-  const candidateSet129 = portfolioCandidates(
-    session129, [byId('long-call'), byId('short-strangle')], evidence129,
-  );
-  const planFor129 = (defId, session = session129) => {
-    const candidate = candidateSet129.candidates.find((row) => row.defId === defId);
-    const entry = portfolioEntryPlan(session, candidateSet129, evidence129, candidate.id);
-    const capital = portfolioCapitalRequirement(session, candidateSet129, evidence129, entry);
-    return { entry, capital };
-  };
-
-  const longCall129 = planFor129('long-call');
-  const strangle129 = planFor129('short-strangle');
-
-  // سقف زیان ۵٪ برای این طرح‌ها تنگ است و همه را نامعتبر می‌کند؛ برای
+  // سقف زیان تنگِ پیش‌فرض چیدمان، این طرح‌ها را نامعتبر می‌کند؛ برای
   // سنجیدن خودِ امتیاز به مأموریتی با سقف بازتر لازم داریم. سقف تنگ
-  // پایین‌تر، جداگانه سنجیده می‌شود.
-  const wideRisk129 = {
-    maxLossPct: 50, maxDrawdownPct: 60, minFreeCapitalPct: 10,
-    maxMarginUsePct: 40, allowUnlimitedRisk: false,
-  };
-  const sessionRisk129 = (outlook, risk) => {
-    const made = createPortfolioMission(baseSession129, { ...missionInput129(outlook), risk });
-    if (!made.ok) throw new Error(`مأموریت آزمون ساخته نشد: ${made.why}`);
-    return { ...baseSession129, lockedMission: made.mission };
-  };
-
+  // جداگانه سنجیده می‌شود.
   const wide129 = sessionRisk129(bullishOutlook129, wideRisk129);
   const evalWide129 = portfolioPlanEvaluation(
     wide129, candidateSet129, evidence129, longCall129.entry, longCall129.capital,
