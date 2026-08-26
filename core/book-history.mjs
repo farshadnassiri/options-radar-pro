@@ -29,6 +29,7 @@
 
 import { num } from './num.mjs';
 import { tradeSecond, tradeTimeLabel } from './backtest.mjs';
+import { bookDataQuality } from './data-quality.mjs';
 
 /** تابلوی تهران پنج سطح می‌دهد. عدد اینجاست تا در کد پخش نشود. */
 export const BOOK_LEVELS = 5;
@@ -120,7 +121,7 @@ export function bookAt(events = [], second) {
     }));
   const newest = book.reduce((best, row) => (row.second > best ? row.second : best), -Infinity);
   const oldest = book.reduce((best, row) => (row.second < best ? row.second : best), Infinity);
-  return {
+  const snapshot = {
     book, at: newest, atLabel: tradeTimeLabel(secondToHms(newest)),
     second: cut,
     levelsKnown: book.length, levelsTotal: BOOK_LEVELS,
@@ -130,6 +131,7 @@ export function bookAt(events = [], second) {
     refIdKnown: list.every((event) => event.refIdKnown),
     ...bookSanity(book),
   };
+  return { ...snapshot, quality: bookDataQuality(snapshot) };
 }
 
 /** ثانیه از ابتدای روز → HHMMSS، معکوسِ `tradeSecond`. */
@@ -198,5 +200,6 @@ export function quoteFromBook(snapshot) {
     asOf: snapshot.at, asOfLabel: snapshot.atLabel || tradeTimeLabel(secondToHms(snapshot.at)),
     stale: num(snapshot.ageSec, 0),
     complete: !!snapshot.complete, sane: !!snapshot.sane, crossed: !!snapshot.crossed,
+    quality: snapshot.quality || bookDataQuality(snapshot),
   };
 }

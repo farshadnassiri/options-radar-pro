@@ -43,6 +43,9 @@ import {
 } from './trading-calendar.mjs';
 import { normalizeBookEvents, bookAt, quoteFromBook } from './book-history.mjs';
 import { markAt } from './intraday-mark.mjs';
+import {
+  dailyDataQuality, intradayDataQuality, bookDataQuality, combineDataQuality,
+} from './data-quality.mjs';
 
 /**
  * نشت داده از آینده.
@@ -206,7 +209,12 @@ export function createTimeGate({ sessionId = '', now, load = {}, days = [], refe
      * `lookback` شمار روز معاملاتی است، نه روز تقویمی. صفر یعنی همه.
      */
     async history(ins, { lookback = 0 } = {}) {
-      if (typeof load.dailies !== 'function') return { rows: [], ins, partialDay: false };
+      if (typeof load.dailies !== 'function') {
+        return {
+          rows: [], ins, partialDay: false,
+          quality: dailyDataQuality({ rows: [], now: at }),
+        };
+      }
       const raw = await load.dailies(ins, { until: at.date });
       const kept = referee
         ? (raw || []).slice().sort((a, b) => normalizeHistoryDate(a.date) - normalizeHistoryDate(b.date))
@@ -222,7 +230,11 @@ export function createTimeGate({ sessionId = '', now, load = {}, days = [], refe
       // خروجیِ دو جلسه فرق کند. آزمون پذیرش نشت همین را گرفت. شمار ردیفِ
       // بریده‌شده هم به همین دلیل اصلاً بیرون نمی‌رود: عددی که می‌گوید
       // «سه ردیف دیگر هم بود»، خودش خبری از آینده است.
-      return { rows, ins, partialDay: at.second < INTRADAY_END_SECOND };
+      const partialDay = at.second < INTRADAY_END_SECOND;
+      return {
+        rows, ins, partialDay,
+        quality: dailyDataQuality({ rows, now: at, partialDay }),
+      };
     },
 
     /**
@@ -233,7 +245,10 @@ export function createTimeGate({ sessionId = '', now, load = {}, days = [], refe
      * ردیف روزانه نمی‌آیند، چون ردیف روزانه کل روز را می‌گوید.
      */
     async snapshot(ins) {
-      const out = { ins, date: at.date, second: at.second, trade: null, quote: null, why: '' };
+      const out = {
+        ins, date: at.date, second: at.second, trade: null, quote: null, why: '',
+        tradeQuality: null, bookQuality: null, quality: null,
+      };
       // عکسِ لحظه، ذاتاً به همان ثانیه بریده می‌شود: `markAt` و `bookAt`
       // خودشان تا آن ثانیه می‌خوانند. پس اینجا حتی دروازهٔ داوری هم چیز
       // بیشتری نمی‌بیند — داوری قدرتش روی **روزهای بعد** است، و آن را با
@@ -244,15 +259,23 @@ export function createTimeGate({ sessionId = '', now, load = {}, days = [], refe
         const admitted = admitIntraday(raw, at, at.date);
         guard(admitted.rows, { kind: `ریزمعاملهٔ ${ins}`, where: 'snapshot' });
         out.trade = markAt(admitted.rows, at.second);
+        out.tradeQuality = intradayDataQuality({ rows: admitted.rows, date: at.date, now: at });
       }
       if (typeof load.book === 'function') {
         const raw = await load.book(ins, at.date);
         const events = normalizeBookEvents(raw);
         const admitted = admitBookEvents(events, at, at.date);
         guard(admitted.events, { kind: `دفتر سفارش ${ins}`, where: 'snapshot' });
-        out.quote = quoteFromBook(bookAt(admitted.events, at.second));
+        const book = bookAt(admitted.events, at.second);
+        out.quote = quoteFromBook(book);
+        out.bookQuality = bookDataQuality(book, { date: at.date });
       }
       if (!out.trade && !out.quote) out.why = 'تا این لحظه نه معامله‌ای بود نه سفارشی';
+      out.tradeQuality ||= intradayDataQuality({ rows: [], date: at.date, now: at });
+      out.bookQuality ||= bookDataQuality(null, { date: at.date });
+      out.quality = combineDataQuality([out.tradeQuality, out.bookQuality], {
+        source: 'time-gate-snapshot', asOf: at,
+      });
       return out;
     },
 

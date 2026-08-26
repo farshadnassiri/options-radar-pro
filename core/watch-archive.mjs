@@ -21,6 +21,7 @@
 // (`/api/hist`) و آنجا واقعی است.
 
 import { num } from './num.mjs';
+import { universeDataQuality } from './data-quality.mjs';
 
 /** نسخهٔ ساختار فایل. اگر شکل عوض شد، خواننده باید بفهمد. */
 export const ARCHIVE_VERSION = 1;
@@ -138,4 +139,12 @@ export function archiveNote({ wanted, found, firstDate = 0, count = 0 } = {}) {
     return `برای ${fa(wanted)} بایگانی نداریم؛ ضبط روزانه از ${fa(firstDate)} شروع شده. فهرست از دیده‌بان امروز ساخته شد، پس قراردادی که داخل این بازه سررسید شده دیده نمی‌شود — عدد جلسه با آن خوش‌بین‌تر از واقعیت است.`;
   }
   return 'هنوز هیچ بایگانی دیده‌بانی ضبط نشده. فهرست از دیده‌بان امروز می‌آید و سوگیری بقا دارد؛ از امروز که سرور روشن بماند، هر روز یک روز به بایگانی اضافه می‌شود.';
+}
+
+/** همان سه حالت بایگانی، این بار در قرارداد ساختاری قابل حمل تا گزارش. */
+export function archiveQuality({
+  wanted = 0, found = false, rows = [], firstDate = 0,
+  source = '', asOf = null, note = '',
+} = {}) {
+  return universeDataQuality({ wanted, found, rows, firstDate, source, asOf, note });
 }

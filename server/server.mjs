@@ -21,7 +21,7 @@ import { defaults, sanitize } from '../core/settings.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
 import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
-  makeArchive, chainRowsFrom, archiveNote, archiveName, validArchiveDate,
+  makeArchive, chainRowsFrom, archiveNote, archiveQuality, archiveName, validArchiveDate,
 } from '../core/watch-archive.mjs';
 import { tehranDateNumber } from '../core/live-day.mjs';
 import {
@@ -618,9 +618,14 @@ async function handle(req, res) {
         const archive = await readArchive(wanted);
         if (archive) {
           const rows = chainRowsFrom(archive);
+          const note = archiveNote({ wanted: Number(wanted), found: true, count: rows.length });
           return sendJson(res, 200, {
             at: archive.at, source: 'archive', asOf: archive.date, archived: true,
-            note: archiveNote({ wanted: Number(wanted), found: true, count: rows.length }),
+            note,
+            quality: archiveQuality({
+              wanted: Number(wanted), found: true, rows, source: 'watch-archive',
+              asOf: { date: archive.date, second: archive.at }, note,
+            }),
             market: marketOpen(), count: rows.length, rows,
           });
         }
@@ -634,11 +639,18 @@ async function handle(req, res) {
       const fromWatch = watch.rows.length > 0;
       const rows = fromWatch ? watch.rows : firstList(await get(upstream, Math.max(60, S.ttlMetaSec), 4));
       const firstDate = await archiveFirstDate();
+      const note = wanted ? archiveNote({ wanted: Number(wanted), found: false, firstDate }) : '';
+      const source = fromWatch ? 'watch' : 'snapshot';
+      const at = fromWatch ? watch.at : cachedAt(upstream);
       return sendJson(res, 200, {
-        at: fromWatch ? watch.at : cachedAt(upstream),
-        source: fromWatch ? 'watch' : 'snapshot',
+        at,
+        source,
         archived: false, asOf: 0, archiveFirstDate: firstDate,
-        note: wanted ? archiveNote({ wanted: Number(wanted), found: false, firstDate }) : '',
+        note: wanted ? archiveNote({ wanted: Number(wanted), found: false, firstDate }) : note,
+        quality: archiveQuality({
+          wanted: Number(wanted) || 0, found: false, rows, firstDate,
+          source, asOf: at, note,
+        }),
         market: marketOpen(),
         count: rows.length, rows,
       });
