@@ -17,6 +17,7 @@
 // نبودنشان است.
 
 export const GROUPS = {
+  single:   'تک‌پایه',
   income:   'کسب درآمد',
   vertical: 'اسپرد عمودی',
   calendar: 'اسپرد تقویمی',
@@ -30,6 +31,22 @@ export const GROUPS = {
 const L = (kind, side, slot = 1, ratio = 1, exp = 0) => ({ kind, side, slot, ratio, exp });
 
 export const CATALOG = [
+  // ——— تک‌پایه ———
+  //
+  // ساده‌ترین دو ساختار بازار، و تا امروز در این فهرست نبودند. دلیلش هم
+  // روشن بود: اسکنر دنبال ترکیب می‌گشت و «یک پا» ترکیب نیست. ولی جای
+  // اشتباهی خالی می‌ماند — معیارِ مقایسهٔ هر ساختار پیچیده‌ای همین دوتاست.
+  // ساختاری که از خرید سادهٔ یک کال بهتر نباشد، پیچیدگی‌اش را توجیه نکرده.
+  { id: 'long-call', name: 'Long Call', fa: 'خرید کال اختیار خرید', group: 'single', dir: 'صعودی',
+    legs: [L('call', 'buy', 1)],
+    strikes: 1, expiries: 1, feasible: true, phase: 4, expect: 'debit',
+    note: 'زیان محدود به قیمت پرداختی. وجه تضمین ندارد؛ سرمایه درگیر، همان بهای خرید است.' },
+
+  { id: 'long-put', name: 'Long Put', fa: 'خرید پوت اختیار فروش', group: 'single', dir: 'نزولی',
+    legs: [L('put', 'buy', 1)],
+    strikes: 1, expiries: 1, feasible: true, phase: 4, expect: 'debit',
+    note: 'تنها راه سادهٔ سود از افت، وقتی فروش سهم پایه ممکن نیست.' },
+
   // ——— کسب درآمد ———
   { id: 'covered-call', name: 'Covered Call', fa: 'کاوردکال', group: 'income', dir: 'صعودی ملایم',
     legs: [L('underlying', 'buy'), L('call', 'sell', 1)],
@@ -84,6 +101,11 @@ export const CATALOG = [
     legs: [L('call', 'sell', 2, 1, 0), L('call', 'buy', 1, 1, 1)],
     strikes: 2, expiries: 2, feasible: true, phase: 6, expect: 'debit' },
 
+  { id: 'diagonal-put', name: 'Diagonal Put Spread', fa: 'مورب پوت', group: 'calendar', dir: 'نزولی ملایم',
+    legs: [L('put', 'sell', 1, 1, 0), L('put', 'buy', 2, 1, 1)],
+    strikes: 2, expiries: 2, feasible: true, phase: 6, expect: 'debit',
+    note: 'قرینهٔ مورب کال: پای نزدیک با اعمال پایین‌تر فروخته می‌شود و پای دور با اعمال بالاتر خریده.' },
+
   // ——— تلاطم ———
   { id: 'long-straddle', name: 'Long Straddle', fa: 'استرادل خرید', group: 'vol', dir: 'تلاطم بالا',
     legs: [L('call', 'buy', 1), L('put', 'buy', 1)],
@@ -128,6 +150,11 @@ export const CATALOG = [
     legs: [L('call', 'buy', 1), L('call', 'sell', 2), L('call', 'sell', 3), L('call', 'buy', 4)],
     strikes: 4, expiries: 1, feasible: true, phase: 6, expect: 'debit' },
 
+  { id: 'long-put-condor', name: 'Long Put Condor', fa: 'کندور پوت خرید', group: 'wing', dir: 'خنثی',
+    legs: [L('put', 'buy', 1), L('put', 'sell', 2), L('put', 'sell', 3), L('put', 'buy', 4)],
+    strikes: 4, expiries: 1, feasible: true, phase: 6, expect: 'debit',
+    note: 'همان نیم‌رخ کندور کال با پاهای پوت؛ کدامشان ارزان‌تر درمی‌آید به اسپرد همان لحظه بستگی دارد.' },
+
   // ——— نسبت ———
   { id: 'call-ratio-spread', name: 'Call Ratio Spread', fa: 'نسبت‌اسپرد کال', group: 'ratio', dir: 'صعودی ملایم',
     legs: [L('call', 'buy', 1), L('call', 'sell', 2, 2)],
@@ -141,6 +168,11 @@ export const CATALOG = [
   { id: 'call-backspread', name: 'Call Backspread', fa: 'بک‌اسپرد کال', group: 'ratio', dir: 'صعودی تند',
     legs: [L('call', 'sell', 1), L('call', 'buy', 2, 2)],
     strikes: 2, expiries: 1, feasible: true, phase: 6 },
+
+  { id: 'put-backspread', name: 'Put Backspread', fa: 'بک‌اسپرد پوت', group: 'ratio', dir: 'نزولی تند',
+    legs: [L('put', 'sell', 2), L('put', 'buy', 1, 2)],
+    strikes: 2, expiries: 1, feasible: true, phase: 6,
+    note: 'فروش یک پوت با اعمال بالاتر و خرید دو پوت با اعمال پایین‌تر؛ از افت تند سود می‌برد و از رکود زیان.' },
 
   // ——— پوشش ریسک ———
   { id: 'protective-put', name: 'Protective Put', fa: 'پوت محافظ', group: 'hedge', dir: 'صعودی با بیمه',

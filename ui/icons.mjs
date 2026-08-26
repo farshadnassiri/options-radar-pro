@@ -30,6 +30,9 @@ const PATHS = {
   rotate: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>',
   alert: '<path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4M12 17.5v.01"/>',
   dot: '<circle cx="12" cy="12" r="3.5"/>',
+  // تک‌پایه: یک فلش جهت‌دار. ساده‌ترین شکل ممکن، چون خودِ ساختار هم
+  // ساده‌ترین ساختار ممکن است — یک پا، یک جهت.
+  arrow: '<path d="M5 19L19 5"/><path d="M11 5h8v8"/>',
   // مثلث CSS قبلی نه ضخامتش با بقیهٔ خانواده می‌خواند نه چرخشش نرم بود.
   chevron: '<path d="M15 6l-6 6 6 6"/>',
 };
@@ -44,13 +47,14 @@ export function icon(name, cls = 'ic') {
 
 /** آیکون هر گروه استراتژی. کلید همان کلید GROUPS در فهرست استراتژی‌هاست. */
 export const GROUP_ICON = {
+  single: 'arrow',
   income: 'coins', vertical: 'vertical', calendar: 'calendar', vol: 'wave',
   wing: 'peak', ratio: 'ratio', hedge: 'shield', arb: 'swap',
 };
 
 /** آیکون تب‌هایی که استراتژی نیستند. */
 export const TAB_ICON = {
-  settings: 'sliders', chain: 'grid', 'live-market': 'wave', 'open-view': 'wave', history: 'clock', backtest: 'play',
+  bereket: 'clock', settings: 'sliders', chain: 'grid', 'live-market': 'wave', 'open-view': 'wave', history: 'clock', backtest: 'play',
   'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert',
   positions: 'briefcase', roll: 'rotate',
 };

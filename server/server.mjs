@@ -19,11 +19,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
+import { normalizeBookEvents } from '../core/book-history.mjs';
+import {
+  makeArchive, chainRowsFrom, archiveNote, archiveName, validArchiveDate,
+} from '../core/watch-archive.mjs';
+import { tehranDateNumber } from '../core/live-day.mjs';
 import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
 import { decisionDashboardSnapshot } from '../core/decision-dashboard.mjs';
-import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from './guard.mjs';
+import {
+  validIns, validCompactDate, historicalTradesPath, historicalPath, HISTORICAL_KINDS,
+  validSessionId, parseInsList, safeStaticPath, readBody, BodyTooLarge,
+} from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { createLog } from './errlog.mjs';
 import { watchBackoffSec } from './backoff.mjs';
@@ -263,6 +271,33 @@ function firstDict(obj) {
   return obj;
 }
 
+/**
+ * پاسخ تاریخ‌دار بالادست را به شکل ثابت درمی‌آورد.
+ *
+ * فقط `book` و `trades` اینجا نرمال می‌شوند، چون هر دو نرمال‌سازی‌شان در
+ * `core/` است و آزمون دارد. بقیه خام رد می‌شوند: تا وقتی پاسخ واقعی
+ * بالادست دیده نشده، حدس‌زدن نام میدان‌ها یعنی ساختن نگاشتی که ممکن است
+ * غلط باشد و بی‌صدا هم بماند. مصرف‌کننده ردیف خام را می‌بیند و خودش
+ * تصمیم می‌گیرد.
+ *
+ * `count` همیشه هست تا «آمد ولی خالی بود» از «نیامد» جدا بماند.
+ */
+function shapeHistorical(kind, raw) {
+  if (kind === 'book') {
+    const rows = firstList(raw);
+    return { events: normalizeBookEvents(rows), count: rows.length };
+  }
+  if (kind === 'trades') {
+    const rows = firstList(raw);
+    return { rows: normalizeTrades(rows), count: rows.length };
+  }
+  if (kind === 'daily' || kind === 'instrument' || kind === 'clientType') {
+    return { row: firstDict(raw) };
+  }
+  const rows = firstList(raw);
+  return { rows, count: rows.length };
+}
+
 // ————————————————————————————————— ساعات بازار —————————————————————————————————
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -349,12 +384,53 @@ async function watchTick() {
     stat.lastWatchMs = Date.now() - t0;
     // بار اول کل عکس، بعد فقط ردیف‌های تغییرکرده
     broadcast('watch', { at: watch.at, full: first, count: rows.length, rows: first ? rows : changed });
+    archiveToday(rows).catch((e) => logErr('بایگانی دیده‌بان', e));
     return true;
   } catch (e) {
     logErr('دور دیده‌بان', e);
     broadcast('trouble', { at: Date.now(), message: `${e.name}: ${e.message}` });
     return false;
   }
+}
+
+// ——————————————————————— بایگانی دیده‌بان ———————————————————————
+//
+// بالادست نسخهٔ تاریخ‌دار فهرست قراردادها را نمی‌دهد، پس تنها راه داشتنش
+// این است که از امروز هر روز یک بار خودمان ذخیره‌اش کنیم. یک بار در روز
+// کافی است: فهرست قراردادهای یک روز در طول همان روز عوض نمی‌شود.
+//
+// پرچم درون‌حافظه‌ای جلوی نوشتن مکرر را می‌گیرد، ولی وجود فایل هم بررسی
+// می‌شود — سرور می‌تواند وسط روز ری‌استارت شود و پرچم پاک شود.
+const ARCHIVE_DIR = path.join(ROOT, 'data', 'watch-history');
+let archivedDay = 0;
+
+async function archiveToday(rows) {
+  const day = tehranDateNumber();
+  if (!day || archivedDay === day || !rows?.length) return;
+  const file = path.join(ARCHIVE_DIR, `${day}.json`);
+  try { await fs.access(file); archivedDay = day; return; } catch { /* هنوز نیست */ }
+  const body = makeArchive(day, rows, { at: Date.now() });
+  if (!body.count) return;
+  await fs.mkdir(ARCHIVE_DIR, { recursive: true });
+  await fs.writeFile(file, JSON.stringify(body), 'utf8');
+  archivedDay = day;
+  log(`بایگانی دیده‌بان ${day} نوشته شد — ${body.count} ردیف`);
+}
+
+/** قدیمی‌ترین روزی که بایگانی دارد. صفر یعنی هنوز هیچ. */
+async function archiveFirstDate() {
+  try {
+    const names = (await fs.readdir(ARCHIVE_DIR)).filter((name) => /^\d{8}\.json$/.test(name));
+    if (!names.length) return 0;
+    return Math.min(...names.map((name) => Number(name.slice(0, 8))));
+  } catch { return 0; }
+}
+
+async function readArchive(date) {
+  const name = archiveName(String(date));
+  if (!name) return null;
+  try { return JSON.parse(await fs.readFile(path.join(ARCHIVE_DIR, name), 'utf8')); }
+  catch { return null; }
 }
 
 async function watchLoop() {
@@ -527,16 +603,42 @@ async function handle(req, res) {
     // حلقه زنده عمداً پشت دروازه ساعت بازار می‌ایستد؛ این نقطه پایانی نباید
     // بایستد چون تاریخچه باید شب و روز قابل بررسی باشد.
     if (p === '/api/history/universe') {
+      // ——— نسخهٔ آن تاریخ، اگر ضبط شده باشد ———
+      //
+      // بدون این، شبیه‌ساز سفر در زمان فهرست **امروز** را می‌دید و
+      // قراردادی که داخل بازه سررسید شده اصلاً وجود نداشت. آن سوگیری بقا،
+      // خودش خبری از آینده است.
+      //
+      // حالت میانی — بایگانی هست ولی برای آن تاریخ نه — عمداً `false`
+      // برمی‌گرداند و فهرست امروز را با برچسب می‌دهد. اگر بی‌صدا جایگزین
+      // می‌شد، همان سوگیری با ظاهرِ حل‌شده برمی‌گشت.
+      const wanted = u.searchParams.get('date');
+      if (wanted != null && wanted !== '') {
+        if (!validArchiveDate(wanted)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
+        const archive = await readArchive(wanted);
+        if (archive) {
+          const rows = chainRowsFrom(archive);
+          return sendJson(res, 200, {
+            at: archive.at, source: 'archive', asOf: archive.date, archived: true,
+            note: archiveNote({ wanted: Number(wanted), found: true, count: rows.length }),
+            market: marketOpen(), count: rows.length, rows,
+          });
+        }
+      }
+
       // ساعت مشاهده باید راست باشد، نه «هرچه دم دست بود». مصرف‌کننده با
       // همین عدد تصمیم می‌گیرد عکس مال کدام روز است؛ `watch.at` وقتی حلقهٔ
       // زنده هرگز نچرخیده باشد `null` است و در همان مسیر جایگزین، عکس از
       // کش می‌آید که ساعت خودش را دارد.
-      const path = '/Instrument/GetInstrumentOptionMarketWatch/0';
+      const upstream = '/Instrument/GetInstrumentOptionMarketWatch/0';
       const fromWatch = watch.rows.length > 0;
-      const rows = fromWatch ? watch.rows : firstList(await get(path, Math.max(60, S.ttlMetaSec), 4));
+      const rows = fromWatch ? watch.rows : firstList(await get(upstream, Math.max(60, S.ttlMetaSec), 4));
+      const firstDate = await archiveFirstDate();
       return sendJson(res, 200, {
-        at: fromWatch ? watch.at : cachedAt(path),
+        at: fromWatch ? watch.at : cachedAt(upstream),
         source: fromWatch ? 'watch' : 'snapshot',
+        archived: false, asOf: 0, archiveFirstDate: firstDate,
+        note: wanted ? archiveNote({ wanted: Number(wanted), found: false, firstDate }) : '',
         market: marketOpen(),
         count: rows.length, rows,
       });
@@ -556,6 +658,46 @@ async function handle(req, res) {
       const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 15000);
       req.on('close', () => { clearInterval(ping); clients.delete(res); stat.clients = clients.size; });
       return undefined;
+    }
+
+    // ——— داده تاریخ‌دار: فقط روزهای تکمیل‌شده ———
+    //
+    // یک دروازه برای هشت نوع، نه هشت نقطه پایانی. نوع در `kind` می‌آید و از
+    // جدول `HISTORICAL_PATHS` رد می‌شود؛ هر چیزی که در آن جدول نباشد اصلاً
+    // مسیری نمی‌سازد، پس یک اشتباه تایپی به درخواستِ ناخواسته تبدیل نمی‌شود.
+    //
+    // TTL بلند است چون این داده دیگر عوض نمی‌شود: روزِ تمام‌شده تمام است.
+    // همین یک تفاوت، بار بالادست را در یک جلسهٔ شبیه‌سازی چند ده برابر کم
+    // می‌کند، چون هر لحظه‌ای که کاربر عقب و جلو می‌رود روی همان یک پاسخ
+    // می‌نشیند.
+    if (p === '/api/hist' || p === '/api/hist/batch') {
+      const kind = String(u.searchParams.get('kind') || '');
+      const date = u.searchParams.get('date');
+      if (!HISTORICAL_KINDS.includes(kind)) {
+        return sendJson(res, 400, { error: `نوع تاریخی ناشناخته — یکی از ${HISTORICAL_KINDS.join('، ')}` });
+      }
+      if (!validCompactDate(date)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
+
+      const one = async (code) => {
+        const upstream = historicalPath(kind, code, date);
+        if (!upstream) return [code, { ins: code, error: 'کد ابزار نامعتبر' }];
+        try {
+          const raw = await get(upstream, S.ttlDailySec, 6);
+          return [code, { ins: code, ...shapeHistorical(kind, raw) }];
+        } catch (e) {
+          return [code, { ins: code, error: `${e.name}: ${e.message}` }];
+        }
+      };
+
+      if (p === '/api/hist') {
+        if (!validIns(ins)) return sendJson(res, 400, { error: 'کد ابزار باید فقط رقم باشد' });
+        const [, body] = await one(ins);
+        return sendJson(res, 200, { kind, date: Number(date), ...body });
+      }
+      const codes = parseInsList(u.searchParams.get('ins'), 60);
+      if (!codes.length) return sendJson(res, 400, { error: 'دست‌کم یک کد ابزار لازم است' });
+      const pairs = await Promise.all(codes.map(one));
+      return sendJson(res, 200, { kind, date: Number(date), byIns: Object.fromEntries(pairs) });
     }
 
     // ——— غنی‌سازی، فقط بر اساس تقاضا ———
@@ -709,6 +851,52 @@ async function handle(req, res) {
         await fs.writeFile(file, JSON.stringify(list, null, 2), 'utf8');
         log(`موقعیت‌ها ذخیره شد — ${list.length} ردیف`);
         return sendJson(res, 200, list);
+      }
+      return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
+    }
+
+    // ——— جلسه‌های «سفره پر برکت بازار» ———
+    //
+    // هر جلسه یک فایل. پایگاه داده‌ای در کار نیست و قاعدهٔ صفر وابستگی هم
+    // اجازهٔ درایور نمی‌دهد؛ ولی مسئله فقط قاعده نیست: یک جلسه با ده‌ها
+    // ارزش‌گذاری از هشت تا دوازده پوزیشن سایه، در یک فایل مشترک با بقیه،
+    // هر ذخیره را به بازنویسی کل تاریخچه تبدیل می‌کرد.
+    //
+    // **حذفی در کار نیست.** سند می‌گوید هر جلسه از لحظهٔ شروع ثبت و قفل
+    // می‌شود، حتی جلسه‌ای که کاربر رهایش کند، و جلسات رهاشده در آمار
+    // شمرده می‌شوند. اگر حذف ممکن بود، همین بند از بین می‌رفت: هر کس
+    // می‌توانست جلسه‌های بدش را پاک کند و آمارِ باقی‌مانده، آمار یک
+    // معامله‌گر دیگر می‌شد.
+    if (p === '/api/bereket/sessions') {
+      const dir = path.join(ROOT, 'data', 'bereket');
+      let names = [];
+      try { names = (await fs.readdir(dir)).filter((name) => name.endsWith('.json')); } catch { names = []; }
+      const rows = [];
+      for (const name of names) {
+        try { rows.push(JSON.parse(await fs.readFile(path.join(dir, name), 'utf8'))); }
+        catch { rows.push({ id: name.replace(/\.json$/, ''), broken: true }); }
+      }
+      return sendJson(res, 200, { count: rows.length, sessions: rows });
+    }
+
+    if (p === '/api/bereket/session') {
+      const id = u.searchParams.get('id');
+      if (!validSessionId(id)) return sendJson(res, 400, { error: 'شناسهٔ جلسه فقط حرف و رقم و خط تیره است' });
+      const file = path.join(ROOT, 'data', 'bereket', `${id}.json`);
+      if (req.method === 'GET') {
+        try { return send(res, 200, await fs.readFile(file, 'utf8')); }
+        catch { return sendJson(res, 404, { error: 'جلسه پیدا نشد' }); }
+      }
+      if (req.method === 'PUT') {
+        const body = JSON.parse(await readBody(req, MAX_BODY) || 'null');
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          return sendJson(res, 400, { error: 'بدنهٔ جلسه لازم است' });
+        }
+        if (body.id !== id) return sendJson(res, 400, { error: 'شناسهٔ بدنه با شناسهٔ درخواست یکی نیست' });
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await fs.writeFile(file, JSON.stringify(body, null, 2), 'utf8');
+        log(`جلسهٔ برکت ذخیره شد — ${id}`);
+        return sendJson(res, 200, { ok: true, id });
       }
       return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
     }

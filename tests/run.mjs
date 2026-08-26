@@ -33,8 +33,73 @@ import {
 import { scan as scanFn, scanAll, generateCombos, unexecutableReason, blockedExpirySet, expiryBlocked, emptyFunnel, passesFilters } from '../core/scan.mjs';
 import { markToMarket, captureEntryRisk, rollAnalysis, closeValuation } from '../core/positions.mjs';
 import { timeMachine } from '../core/timemachine.mjs';
+import {
+  normalizeBookEvents, bookAt, bookPath, bookSanity, quoteFromBook, secondToHms, BOOK_LEVELS,
+} from '../core/book-history.mjs';
+import {
+  tradingDays, indexOfDay, snapToTradingDay, shiftTradingDays, tradingDaysBetween,
+  gapsIn, moment, momentKey, laterThan, sameMoment, stepMoment, momentsBetween,
+  STEPS, STEP_BY_KEY,
+} from '../core/trading-calendar.mjs';
+import {
+  FutureDataLeakError, admitDaily, admitIntraday, admitBookEvents,
+  assertNoFuture, createTimeGate, createRefereeGate,
+} from '../core/time-gate.mjs';
+import { makeRng, seedFrom, pick, shuffle } from '../core/rng.mjs';
+import {
+  REGIMES, REGIME_KEYS, REGIME_RULE, regimeRuleText, regimeSeries,
+  regimeBuckets, stratifiedPick, regimeAt, regimeLabel,
+} from '../core/regime.mjs';
+import {
+  blankSession, countsInStats, recordView, lastDecision, recordCandidates,
+  lockExpectation, canAdvance, chooseCandidates, advanceTo, recordEvent,
+  recordValuation, closeSession, replayAllowed, sessionSummary,
+  SESSION_STATES, VIEW_DIRECTIONS, IV_VIEWS, DEFAULT_CAPITAL_RIAL,
+} from '../core/bereket-session.mjs';
+import {
+  queueState, quotesForLegs, executableAt, QUEUE_STATES, DEFAULT_TAKE_PCT,
+} from '../core/bereket-exec.mjs';
+import {
+  decomposePnl, fundingCost, residualNote, PNL_PARTS, COST_KEYS, MARKET_KEYS, RESIDUAL_WARN_PCT,
+} from '../core/bereket-pnl.mjs';
+import {
+  markMoment, marginAt, valuationTrack, creditSpreadMargin, CREDIT_MARGIN_POLICIES,
+} from '../core/bereket-value.mjs';
+import {
+  EVENT_KINDS, EXIT_RULES, EXIT_RULE_BY_KEY, NO_OPTION_STOP_NOTE, closingLegs,
+  ruleFires, firstFiring, marginCallAt, attemptClose, makeEvent, walkMoments, eventSummary,
+} from '../core/bereket-events.mjs';
+import {
+  makeAlias, aliasMap, indexSeries, moneynessPct, moneynessLabel,
+  sizeLabel, dayLabel, leakCheck, anonContract, reveal,
+} from '../core/bereket-anon.mjs';
+import {
+  viewDistribution, editDistribution, quantileNodes, expectedUnder, probabilityUnder,
+  pnlAt, stressDistribution, scoreCandidate, SCORE_PARTS, rankCandidates,
+  pickQuality, luckVsSkill, NODES,
+} from '../core/bereket-suggest.mjs';
+import {
+  candidateId, combosFor, generateCandidates, openShadow, markShadow, shadowTable,
+  MAX_PER_DEF, MAX_TOTAL, STRIKE_STEPS,
+} from '../core/bereket-candidates.mjs';
+import {
+  buyHoldBenchmark, positionReturnPct, excessOver, peerBenchmark,
+  forecastAccuracy, sessionTimeline, sessionReport,
+} from '../core/bereket-report.mjs';
+import {
+  MIN_SAMPLE, SLICES, SLICE_BY_KEY, dteBucket, moneynessBucket, percentileBucket,
+  confidenceBucket, horizonBucket, groupStats, sliceSessions, calibration,
+  sampleNote, headlineMetrics,
+} from '../core/bereket-stats.mjs';
+import {
+  ARCHIVE_VERSION, validArchiveDate, archiveName, compactWatchRow, compactWatch,
+  makeArchive, chainRowsFrom, archiveNote,
+} from '../core/watch-archive.mjs';
 import { jalaliToGregorian, gregorianToJalali, parseJalali, todayJalali } from '../core/jalali.mjs';
-import { validIns, validCompactDate, historicalTradesPath, parseInsList, safeStaticPath, readBody, BodyTooLarge } from '../server/guard.mjs';
+import {
+  validIns, validCompactDate, historicalTradesPath, historicalPath, HISTORICAL_KINDS,
+  validSessionId, parseInsList, safeStaticPath, readBody, BodyTooLarge,
+} from '../server/guard.mjs';
 import { evictOldest } from '../server/cache.mjs';
 import { watchBackoffSec } from '../server/backoff.mjs';
 import { fmt as uiFmt, axisNum, toEnDigits, faAgo, faClock, humanizeUpstreamError, coverageInfo, kpiTone, signTone, pageTitle, normFa } from '../ui/fmt.mjs';
@@ -93,7 +158,7 @@ import {
   replayIntraday, summarizeIntraday, tradeSecond, tradeTimeLabel,
   normalizeTrades, canceledFlag, inIntradaySession,
   bucketIntradayPath, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
-  ENTRY_EXIT_MIN_BUCKET, INTRADAY_START_SECOND,
+  ENTRY_EXIT_MIN_BUCKET, INTRADAY_START_SECOND, INTRADAY_END_SECOND,
 } from '../core/backtest.mjs';
 import { summarizePortfolio } from '../core/portfolio.mjs';
 import { linkLabelKey, emptyReason } from '../ui/feed-state.mjs';
@@ -3470,8 +3535,15 @@ group('۴۷. نوار سقف سررسید، وقتی زنجیره نیست');
   const serverSrc47 = readSrc('../server/server.mjs');
   check('چرا `watch` مناسب نبود: حلقه دیده‌بان پشت ساعت بازار می‌ایستد',
     /if \(!gate\.open\) return true;/.test(serverSrc47));
+  // پنجره از ۷۰۰ به ۳۰۰۰ رفت چون شاخهٔ «نسخهٔ آن تاریخ» بالای همین بلوک
+  // نشست. ادعا عوض نشده: وقتی عکس لحظه‌ای خالی است، همین نقطه خودش از
+  // بالادست می‌گیرد.
   check('`history/universe` وقتی عکس لحظه‌ای خالی است خودش از بالادست می‌گیرد',
-    /history\/universe[\s\S]{0,700}fromWatch = watch\.rows\.length > 0[\s\S]{0,200}fromWatch \? watch\.rows : firstList/.test(serverSrc47));
+    /history\/universe[\s\S]{0,3000}fromWatch = watch\.rows\.length > 0[\s\S]{0,200}fromWatch \? watch\.rows : firstList/.test(serverSrc47));
+  check('نسخهٔ تاریخ‌دار فهرست، پیش از بازگشت به عکس امروز امتحان می‌شود',
+    /history\/universe[\s\S]{0,1200}readArchive\(wanted\)[\s\S]{0,600}source: 'archive'/.test(serverSrc47));
+  check('نبودن بایگانی برای آن تاریخ، بی‌صدا به عکس امروز برنمی‌گردد',
+    /archived: false[\s\S]{0,200}archiveNote\(/.test(serverSrc47));
   // زنجیره خالی نباید کش شود، وگرنه یک بارِ ناموفق تا بارگذاری دوباره صفحه
   // ادامه پیدا می‌کند و باز کردن دوباره هیچ تلاشی نمی‌کند.
   check('زنجیره خالی کش نمی‌شود', src47.includes('if (chain?.size && !force) return;'));
@@ -6756,8 +6828,11 @@ group('۸۸. اتصال دامنهٔ داده به دو تب');
   // سرور باید فاز بازار و ساعت راست بدهد، وگرنه روزِ عکس قابل تشخیص نیست
   check('سرور فاز بازار را جدا از متن فارسی می‌دهد',
     ["'ungated'", "'holiday'", "'before'", "'after'", "'open'"].every((phase) => srv88.includes(`phase: ${phase}`)));
+  // متغیر محلی از `path` به `upstream` تغییر نام داد، چون همان بلوک حالا
+  // به ماژول `node:path` هم نیاز دارد و سایه‌انداختن روی آن، خطای بی‌صدا
+  // می‌سازد. ادعا همان است: عکس، ساعت راستِ خودش را حمل می‌کند.
   check('عکس تابلو ساعت راست خودش را می‌دهد',
-    srv88.includes('cachedAt(path)') && srv88.includes('market: marketOpen()'));
+    srv88.includes('cachedAt(upstream)') && srv88.includes('market: marketOpen()'));
   check('ساعت کش از خودِ کش خوانده می‌شود', /function cachedAt\(pathname\)/.test(srv88));
 
   check('یادداشت دامنه رنگش از توکن می‌آید',
@@ -7390,6 +7465,1946 @@ group('۹۷. یونانی پیش و پس از رول');
     src97.includes("days: legs.map((l) => (l.kind === 'underlying' ? undefined : Number(l.days)))"));
   check('ناقص بودن یک طرف، صریح گفته می‌شود نه با عدد پر می‌شود',
     src97.includes('curGreeks.incomplete || nextGreeks.incomplete'));
+}
+
+// ═══════════════════ ۹۸. دفتر سفارش تاریخی ═══════════════════
+//
+// این گروه تنها جایی است که ادعای «در آن لحظهٔ گذشته می‌شد اجرا کرد» از آن
+// بیرون می‌آید، پس بیش از درستیِ عدد، درستیِ **نگفتن** را می‌سنجد: سطحی که
+// رکورد نداشته نباید ساخته شود، و بازسازیِ پشت‌ورو باید دیده شود.
+group('۹۸. دفتر سفارش تاریخی');
+{
+  // دفتر رویدادِ یک قرارداد در یک روز. سطح ۱ تا ۵ در بازگشایی، بعد دو
+  // تغییر: سطح یک در ۹:۳۵:۱۰ و سطح دو در ۱۰:۰۰:۰۰.
+  const raw = [
+    { hEven: 90000, refID: 5, number: 5, pMeDem: 960, qTitMeDem: 500, zOrdMeDem: 5, pMeOf: 1040, qTitMeOf: 500, zOrdMeOf: 5 },
+    { hEven: 90000, refID: 1, number: 1, pMeDem: 1000, qTitMeDem: 100, zOrdMeDem: 1, pMeOf: 1010, qTitMeOf: 100, zOrdMeOf: 1 },
+    { hEven: 90000, refID: 2, number: 2, pMeDem: 990, qTitMeDem: 200, zOrdMeDem: 2, pMeOf: 1020, qTitMeOf: 200, zOrdMeOf: 2 },
+    { hEven: 90000, refID: 3, number: 3, pMeDem: 980, qTitMeDem: 300, zOrdMeDem: 3, pMeOf: 1030, qTitMeOf: 300, zOrdMeOf: 3 },
+    { hEven: 90000, refID: 4, number: 4, pMeDem: 970, qTitMeDem: 400, zOrdMeDem: 4, pMeOf: 1035, qTitMeOf: 400, zOrdMeOf: 4 },
+    { hEven: 93510, refID: 20, number: 1, pMeDem: 1005, qTitMeDem: 150, zOrdMeDem: 2, pMeOf: 1008, qTitMeOf: 90, zOrdMeOf: 1 },
+    { hEven: 100000, refID: 30, number: 2, pMeDem: 995, qTitMeDem: 250, zOrdMeDem: 3, pMeOf: 1015, qTitMeOf: 180, zOrdMeOf: 2 },
+  ];
+  const events = normalizeBookEvents(raw);
+
+  check('رویدادها به ثانیه و بعد refID مرتب می‌شوند',
+    events.map((e) => e.refId).join(',') === '1,2,3,4,5,20,30');
+  check('ثانیه از HHMMSS درست درمی‌آید', events[0].second === 9 * 3600 && events[5].second === 9 * 3600 + 35 * 60 + 10);
+
+  // ——— بازسازی در سه لحظه ———
+  const open = bookAt(events, 9 * 3600 + 60);          // ۹:۰۱
+  check('دفتر بازگشایی هر پنج سطح را دارد', open.levelsKnown === 5 && open.complete === true);
+  check('بهترین تقاضا و عرضهٔ بازگشایی درست است', open.book[0].bid === 1000 && open.book[0].ask === 1010);
+  check('دفتر بازگشایی یکنواخت است', open.sane === true && open.crossed === false);
+
+  const mid = bookAt(events, 9 * 3600 + 40 * 60);      // ۹:۴۰ — بعد از تغییر سطح یک
+  check('سطح تغییرکرده تازه‌ترین رکوردش را می‌گیرد', mid.book[0].bid === 1005 && mid.book[0].ask === 1008);
+  check('سطح تغییرنکرده از بازگشایی حمل می‌شود', mid.book[1].bid === 990 && mid.book[4].bid === 960);
+  check('سن دفتر از تازه‌ترین سطح حساب می‌شود', mid.ageSec === (9 * 3600 + 40 * 60) - (9 * 3600 + 35 * 60 + 10));
+  check('سن کهنه‌ترین سطح جدا گزارش می‌شود', mid.oldestAgeSec === (9 * 3600 + 40 * 60) - 9 * 3600);
+
+  const late = bookAt(events, 11 * 3600);
+  check('هر دو تغییر تا ساعت یازده نشسته‌اند', late.book[0].bid === 1005 && late.book[1].bid === 995);
+
+  // ——— آنچه ساخته نمی‌شود ———
+  check('پیش از اولین رویداد، دفتری گزارش نمی‌شود', bookAt(events, 8 * 3600) === null);
+  check('ثانیهٔ نامعتبر دفتر نمی‌سازد', bookAt(events, NaN) === null);
+  {
+    // سطح سه رکوردش دیر می‌آید: در ۹:۱۰ باید **نباشد**، نه اینکه صفر شود.
+    const late3 = normalizeBookEvents([
+      { hEven: 90000, refID: 1, number: 1, pMeDem: 1000, qTitMeDem: 100, pMeOf: 1010, qTitMeOf: 100 },
+      { hEven: 90000, refID: 2, number: 2, pMeDem: 990, qTitMeDem: 200, pMeOf: 1020, qTitMeOf: 200 },
+      { hEven: 95000, refID: 9, number: 3, pMeDem: 980, qTitMeDem: 300, pMeOf: 1030, qTitMeOf: 300 },
+    ]);
+    const early = bookAt(late3, 9 * 3600 + 600);
+    check('سطحی که هنوز رکورد نداشته اصلاً در دفتر نیست',
+      early.levelsKnown === 2 && early.complete === false && !early.book.some((r) => r.level === 3));
+    check('ناقص بودن دفتر با شمار سطح اعلام می‌شود', early.levelsTotal === 5);
+  }
+
+  // ——— نگهبانِ بازسازی غلط ———
+  check('تقاضای غیریکنواخت دیده می‌شود',
+    bookSanity([{ level: 1, bid: 990, ask: 1010 }, { level: 2, bid: 1000, ask: 1020 }]).sane === false);
+  check('عرضهٔ غیریکنواخت دیده می‌شود',
+    bookSanity([{ level: 1, bid: 1000, ask: 1020 }, { level: 2, bid: 990, ask: 1010 }]).asksOk === false);
+  check('سطح خالی یکنواختی را نمی‌شکند',
+    bookSanity([{ level: 1, bid: 1000, ask: 1010 }, { level: 2, bid: 0, ask: 0 }]).sane === true);
+  check('دفتر متقاطع جدا از ناسالم علامت می‌خورد', (() => {
+    const s = bookSanity([{ level: 1, bid: 1020, ask: 1010 }]);
+    return s.crossed === true && s.sane === true;
+  })());
+
+  // ——— مسیر سریع باید با مسیر ساده یکی دربیاید ———
+  {
+    const moments = [9 * 3600 + 60, 9 * 3600 + 40 * 60, 10 * 3600 + 30 * 60, 8 * 3600];
+    const fast = bookPath(events, moments);
+    const slow = moments.slice().sort((a, b) => a - b).map((s) => ({ second: s, snap: bookAt(events, s) }));
+    const same = fast.every((row, at) => {
+      const ref = slow[at].snap;
+      if (!ref) return row.book === null;
+      return JSON.stringify(row.book) === JSON.stringify(ref.book) && row.ageSec === ref.ageSec;
+    });
+    check('bookPath با bookAt در هر لحظه یکی است', same);
+    check('bookPath لحظهٔ پیش از اولین رویداد را خالی می‌دهد', fast[0].book === null);
+  }
+
+  // ——— پل به موتور اجرا ———
+  {
+    const quote = quoteFromBook(bookAt(events, 9 * 3600 + 40 * 60));
+    check('quoteFromBook بهترین سطح را بالا می‌آورد', quote.bid === 1005 && quote.ask === 1008);
+    check('quoteFromBook ساعت و کهنگی را حمل می‌کند', quote.asOf === 9 * 3600 + 35 * 60 + 10 && quote.stale === 290);
+    const walk = walkBook(quote.book, 200, 'buy');
+    // ۹۰ تا در ۱۰۰۸، بقیه از سطح دو در ۱۰۲۰
+    check('walkBook روی دفتر بازسازی‌شده عمق را می‌پیماید',
+      walk.filled === 200 && Math.abs(walk.vwap - ((90 * 1008 + 110 * 1020) / 200)) < 1e-9);
+    check('دفتر خالی مظنه نمی‌سازد', quoteFromBook(null) === null);
+  }
+
+  // ——— refID نبود، ولی ترتیب حفظ شد ———
+  {
+    const noRef = normalizeBookEvents([
+      { hEven: 90000, number: 1, pMeDem: 1000, pMeOf: 1010 },
+      { hEven: 90000, number: 2, pMeDem: 990, pMeOf: 1020 },
+    ]);
+    check('نبودن refID در خروجی علامت می‌خورد', noRef.every((e) => e.refIdKnown === false));
+    check('بدون refID هم ترتیب ورود آرایه جای آن می‌نشیند', bookAt(noRef, 9 * 3600 + 10).levelsKnown === 2);
+  }
+
+  // ——— رفت و برگشت ثانیه ———
+  check('secondToHms معکوس tradeSecond است',
+    [0, 9 * 3600, 9 * 3600 + 35 * 60 + 10, 12 * 3600 + 30 * 60].every((s) => tradeSecond(secondToHms(s)) === s));
+  check('رکورد با سطح بیرون از یک تا پنج کنار گذاشته می‌شود',
+    normalizeBookEvents([{ hEven: 90000, number: 9, pMeDem: 1 }, { hEven: 90000, number: 0, pMeDem: 1 }]).length === 0);
+
+  // ——— دروازهٔ مسیرهای تاریخ‌دار ———
+  check('هشت نوع تاریخی در جدول هست',
+    HISTORICAL_KINDS.length === 8 && HISTORICAL_KINDS.includes('book') && HISTORICAL_KINDS.includes('threshold'));
+  check('مسیر دفتر تاریخی درست ساخته می‌شود',
+    historicalPath('book', '17765240', '20260521') === '/BestLimits/17765240/20260521');
+  check('مسیر تک‌معامله همان مسیر قبلی می‌ماند',
+    historicalPath('trades', '17765240', '20260521') === historicalTradesPath('17765240', '20260521'));
+  check('نوع ناشناخته مسیر نمی‌سازد', historicalPath('anything', '17765240', '20260521') === null);
+  check('نوعِ ارث‌بری‌شده از Object مسیر نمی‌سازد',
+    historicalPath('toString', '17765240', '20260521') === null
+    && historicalPath('constructor', '17765240', '20260521') === null);
+  check('کد یا تاریخ نامعتبر مسیر نمی‌سازد',
+    historicalPath('book', '17a65240', '20260521') === null
+    && historicalPath('book', '17765240', '2026052') === null
+    && historicalPath('book', '17765240', '../../x') === null);
+}
+
+// ═══════════════════ ۹۹. تقویم معاملاتی و پرش زمانی ═══════════════════
+//
+// تقویم از داده ساخته می‌شود نه از جدول تعطیلات، پس آنچه باید سنجیده شود
+// این است: روزی که در سری نیست هرگز روز معاملاتی نشود، و پرشی که به
+// انتهای تقویم می‌خورد بی‌صدا کوتاه نشود.
+group('۹۹. تقویم معاملاتی و پرش زمانی');
+{
+  const series = [
+    { date: 20260517, close: 100 }, { date: 20260518, close: 101 },
+    { date: 20260519, close: 102 }, { date: 20260520, close: 103 },
+    { date: 20260521, close: 104 },
+    // پنج‌شنبه و جمعه نیست
+    { date: 20260524, close: 105 }, { date: 20260525, close: 106 },
+  ];
+  const days = tradingDays(series);
+  check('تقویم فقط روزهای دارای قیمت را می‌گیرد', days.length === 7 && days[0] === 20260517);
+  check('روز بی‌قیمت روز معاملاتی نیست',
+    tradingDays([{ date: 20260517, close: 100 }, { date: 20260518, close: 0 }]).length === 1);
+  check('تقویم مرتب و بدون تکرار است',
+    tradingDays([{ date: 20260519, close: 1 }, { date: 20260517, close: 1 }, { date: 20260519, close: 1 }])
+      .join(',') === '20260517,20260519');
+
+  check('ایندکس روز با جست‌وجوی دودویی درست است',
+    indexOfDay(days, 20260521) === 4 && indexOfDay(days, 20260524) === 5);
+  check('روز بیرون از تقویم ایندکس ندارد', indexOfDay(days, 20260522) === -1);
+
+  check('چسبیدن به جلو، تعطیلی را رد می‌کند', snapToTradingDay(days, 20260522, 1) === 20260524);
+  check('چسبیدن به عقب، تعطیلی را برمی‌گرداند', snapToTradingDay(days, 20260522, -1) === 20260521);
+  check('روز معاملاتی به خودش می‌چسبد', snapToTradingDay(days, 20260521, 1) === 20260521);
+
+  check('یک روز جلو، از تعطیلی می‌پرد', shiftTradingDays(days, 20260521, 1) === 20260524);
+  check('یک هفته یعنی پنج روز معاملاتی', shiftTradingDays(days, 20260517, 5) === 20260524);
+  check('پرش بیرون از تقویم صفر می‌دهد نه آخرین روز',
+    shiftTradingDays(days, 20260525, 3) === 0 && shiftTradingDays(days, 20260517, -1) === 0);
+  check('فاصلهٔ دو روز به روز معاملاتی شمرده می‌شود',
+    tradingDaysBetween(days, 20260521, 20260525) === 2);
+  check('فاصله با روز بیرون از تقویم عدد نمی‌سازد',
+    Number.isNaN(tradingDaysBetween(days, 20260522, 20260525)));
+
+  // ——— پرش ———
+  const at = (d, s) => ({ date: d, second: s });
+  check('پرش پانزده‌دقیقه‌ای درون همان روز می‌ماند', (() => {
+    const r = stepMoment(days, at(20260521, 9 * 3600), 'm15');
+    return r.ok && r.date === 20260521 && r.second === 9 * 3600 + 900 && r.rolled === false;
+  })());
+  check('پلهٔ ساعتی که از ۱۲:۳۰ رد شود به ۹:۰۰ جلسهٔ بعد می‌رود', (() => {
+    const r = stepMoment(days, at(20260521, 12 * 3600), 'h1');
+    return r.ok && r.date === 20260524 && r.second === INTRADAY_START_SECOND && r.rolled === true;
+  })());
+  check('باقی‌ماندهٔ پله حمل نمی‌شود', (() => {
+    // ۱۲:۲۹ به‌علاوهٔ یک ساعت، ۹:۵۹ روز بعد نمی‌شود؛ ۹:۰۰ می‌شود.
+    const r = stepMoment(days, at(20260521, 12 * 3600 + 29 * 60), 'h1');
+    return r.second === INTRADAY_START_SECOND;
+  })());
+  check('پایان روز از میانهٔ روز به ۱۲:۳۰ همان روز می‌رود', (() => {
+    const r = stepMoment(days, at(20260521, 10 * 3600), 'eod');
+    return r.date === 20260521 && r.second === INTRADAY_END_SECOND && r.rolled === false;
+  })());
+  check('پایان روز از خودِ ۱۲:۳۰ به روز بعد می‌رود', (() => {
+    const r = stepMoment(days, at(20260521, INTRADAY_END_SECOND), 'eod');
+    return r.date === 20260524 && r.rolled === true;
+  })());
+  check('پرش روزانه ساعت را نگه می‌دارد', (() => {
+    const r = stepMoment(days, at(20260517, 10 * 3600 + 1800), 'd3');
+    return r.date === 20260520 && r.second === 10 * 3600 + 1800;
+  })());
+  check('پرش تا سررسید به آخرین روز معاملاتیِ تا سررسید می‌رود', (() => {
+    const r = stepMoment(days, at(20260517, 9 * 3600), 'expiry', { expiryDate: 20260522 });
+    return r.date === 20260521 && r.second === INTRADAY_END_SECOND;
+  })());
+  check('پرش از انتهای تقویم دلیل می‌دهد نه لحظهٔ ساختگی', (() => {
+    const r = stepMoment(days, at(20260525, 12 * 3600), 'h1');
+    return r.ok === false && r.end === true && r.why.length > 0;
+  })());
+  check('پلهٔ ناشناخته لحظه نمی‌سازد', stepMoment(days, at(20260521, 9 * 3600), 'nope').ok === false);
+
+  // ——— لحظه‌ها ———
+  check('ثانیهٔ پیش از جلسه به بازگشایی می‌چسبد', moment(20260521, 8 * 3600).second === INTRADAY_START_SECOND);
+  check('ثانیهٔ پس از جلسه به پایان می‌چسبد', moment(20260521, 15 * 3600).second === INTRADAY_END_SECOND);
+  check('کلید لحظه مرتب‌شدنی است',
+    momentKey(at(20260521, 9 * 3600)) < momentKey(at(20260521, 10 * 3600))
+    && momentKey(at(20260521, INTRADAY_END_SECOND)) < momentKey(at(20260524, 0)));
+  check('لحظهٔ بی‌تاریخ کلید ندارد', Number.isNaN(momentKey({ date: 0, second: 100 })));
+  check('laterThan با لحظهٔ نامعتبر هرگز درست نیست',
+    laterThan({ date: 0 }, at(20260521, 9 * 3600)) === false
+    && laterThan(at(20260521, 9 * 3600), { date: 0 }) === false);
+
+  // ——— قدم‌های میانی ———
+  {
+    const r = momentsBetween(days, at(20260521, 9 * 3600), at(20260521, 10 * 3600), { seconds: 900 });
+    check('قدم‌های میانی یک ساعت با دانهٔ ربع‌ساعت چهارتاست', r.ok && r.moments.length === 4);
+    check('آخرین قدم دقیقاً روی مقصد می‌ایستد',
+      sameMoment(r.moments[r.moments.length - 1], at(20260521, 10 * 3600)));
+  }
+  {
+    const r = momentsBetween(days, at(20260521, 9 * 3600), at(20260525, 12 * 3600), { seconds: 900, limit: 5 });
+    check('رسیدن به سقف قدم، صریح اعلام می‌شود', r.truncated === true && r.moments.length === 5);
+  }
+  check('مقصدِ پیش از مبدأ قدمی نمی‌سازد',
+    momentsBetween(days, at(20260524, 9 * 3600), at(20260521, 9 * 3600)).moments.length === 0);
+
+  // ——— شکاف مشکوک ———
+  check('شکاف بلندتر از آخر هفته دیده می‌شود', (() => {
+    const stopped = tradingDays([
+      { date: 20260517, close: 1 }, { date: 20260518, close: 1 }, { date: 20260601, close: 1 },
+    ]);
+    const gaps = gapsIn(stopped);
+    return gaps.length === 1 && gaps[0].from === 20260518 && gaps[0].to === 20260601;
+  })());
+  check('آخر هفتهٔ عادی شکاف نیست', gapsIn(days).length === 0);
+}
+
+// ═══════════════════ ۱۰۰. دروازهٔ زمان و آزمون نشت ═══════════════════
+//
+// آخرین آزمون این گروه، آزمون پذیرش سند است: همان جلسه یک بار روی دادهٔ
+// کامل و یک بار روی دادهٔ بریده‌شده اجرا می‌شود و خروجی باید **ذره‌ای**
+// فرق نکند. اگر فرق کرد، جایی از آینده خوانده شده.
+group('۱۰۰. دروازهٔ زمان و آزمون نشت');
+{
+  const NOW = { date: 20260521, second: 10 * 3600 + 1800 };   // ۲۱ مه، ۱۰:۳۰
+  const at = (d, s) => ({ date: d, second: s });
+
+  // ——— مرزِ ورود: سری روزانه ———
+  {
+    const rows = [
+      { date: 20260519, close: 100 }, { date: 20260520, close: 101 },
+      { date: 20260521, close: 104 }, { date: 20260524, close: 110 },
+    ];
+    const mid = admitDaily(rows, NOW);
+    check('ردیف روزهای آینده حذف می‌شود', !mid.rows.some((r) => r.date === 20260524));
+    check('ردیف روز جاری در میانهٔ جلسه حذف می‌شود', !mid.rows.some((r) => r.date === 20260521));
+    check('حذف ردیف روز جاری صریح اعلام می‌شود', mid.partialDay === true && mid.dropped === 2);
+    const done = admitDaily(rows, at(20260521, INTRADAY_END_SECOND));
+    check('پس از پایان جلسه، ردیف روز جاری کامل است',
+      done.rows.some((r) => r.date === 20260521) && done.partialDay === false);
+    check('ردیف بی‌تاریخ اصلاً وارد نمی‌شود', admitDaily([{ close: 5 }], NOW).rows.length === 0);
+  }
+
+  // ——— مرزِ ورود: ریزمعامله و دفتر ———
+  {
+    const tape = [
+      { time: 93000, second: 9 * 3600 + 1800, price: 1000, quantity: 10 },
+      { time: 102900, second: 10 * 3600 + 29 * 60, price: 1010, quantity: 20 },
+      { time: 103100, second: 10 * 3600 + 31 * 60, price: 1200, quantity: 30 },
+      { time: 120000, second: 12 * 3600, price: 1300, quantity: 40 },
+    ];
+    const a = admitIntraday(tape, NOW, 20260521);
+    check('معاملهٔ پس از لحظهٔ جاری وارد نمی‌شود', a.rows.length === 2 && a.dropped === 2);
+    check('روز گذشته تا پایان جلسه‌اش کامل است',
+      admitIntraday(tape, NOW, 20260520).rows.length === 4);
+    check('روز آینده هیچ معامله‌ای نمی‌دهد', (() => {
+      const f = admitIntraday(tape, NOW, 20260524);
+      return f.rows.length === 0 && f.wrongDay === true;
+    })());
+
+    const events = normalizeBookEvents([
+      { hEven: 90000, refID: 1, number: 1, pMeDem: 1000, qTitMeDem: 100, pMeOf: 1010, qTitMeOf: 100 },
+      { hEven: 103100, refID: 9, number: 1, pMeDem: 1190, qTitMeDem: 50, pMeOf: 1210, qTitMeOf: 50 },
+    ]);
+    const b = admitBookEvents(events, NOW, 20260521);
+    check('رویداد دفتر پس از لحظهٔ جاری وارد نمی‌شود', b.events.length === 1 && b.dropped === 1);
+    check('دفتر بازسازی‌شده هم همان مرز را دارد',
+      bookAt(b.events, NOW.second).book[0].bid === 1000);
+  }
+
+  // ——— نگهبان ———
+  {
+    const future = [{ date: 20260524, close: 110 }];
+    let thrown = null;
+    try { assertNoFuture(future, NOW, { kind: 'سری پایه', where: 'آزمون' }); }
+    catch (e) { thrown = e; }
+    check('نگهبان روی دادهٔ آینده پرتاب می‌کند', thrown instanceof FutureDataLeakError);
+    check('خطا می‌گوید کجا و چقدر و کِی',
+      thrown.kind === 'سری پایه' && thrown.count === 1
+      && thrown.found.date === 20260524 && thrown.now.date === 20260521 && thrown.where === 'آزمون');
+    check('نگهبان روی دادهٔ گذشته ساکت است',
+      assertNoFuture([{ date: 20260519, close: 1 }], NOW).length === 1);
+    check('ردیف روزانه با پایان جلسه سنجیده می‌شود نه با ابتدای آن', (() => {
+      // ردیفِ کل روزِ جاری، حتی بدون ثانیه، باید آینده حساب شود.
+      try { assertNoFuture([{ date: 20260521, close: 1 }], NOW); return false; } catch { return true; }
+    })());
+    check('ردیف درون‌روزیِ پیش از لحظهٔ جاری رد می‌شود',
+      assertNoFuture([{ date: 20260521, second: 9 * 3600 }], NOW).length === 1);
+    check('لحظهٔ جاری نامعتبر یعنی هیچ داده‌ای پذیرفته نمی‌شود', (() => {
+      try { assertNoFuture([], { date: 0 }); return false; } catch (e) { return e instanceof FutureDataLeakError; }
+    })());
+  }
+
+  // ——— دروازه ———
+  const days = [20260519, 20260520, 20260521, 20260524, 20260525];
+  const fullData = {
+    dailies: {
+      '1': [
+        { date: 20260519, close: 100 }, { date: 20260520, close: 101 },
+        { date: 20260521, close: 104 }, { date: 20260524, close: 110 }, { date: 20260525, close: 115 },
+      ],
+    },
+    trades: {
+      '1|20260521': [
+        { time: 93000, second: 9 * 3600 + 1800, price: 1000, quantity: 10 },
+        { time: 102900, second: 10 * 3600 + 29 * 60, price: 1010, quantity: 20 },
+        { time: 103100, second: 10 * 3600 + 31 * 60, price: 1200, quantity: 30 },
+        // پس از دورترین جایی که این جلسه می‌رسد؛ باید هرگز خوانده نشود.
+        { time: 110000, second: 11 * 3600, price: 1400, quantity: 40 },
+      ],
+      '1|20260524': [{ time: 93000, second: 9 * 3600 + 1800, price: 1300, quantity: 99 }],
+    },
+    book: {
+      '1|20260521': [
+        { hEven: 90000, refID: 1, number: 1, pMeDem: 1000, qTitMeDem: 100, pMeOf: 1010, qTitMeOf: 100 },
+        { hEven: 90000, refID: 2, number: 2, pMeDem: 990, qTitMeDem: 200, pMeOf: 1020, qTitMeOf: 200 },
+        { hEven: 103100, refID: 9, number: 1, pMeDem: 1190, qTitMeDem: 50, pMeOf: 1210, qTitMeOf: 50 },
+        { hEven: 110000, refID: 12, number: 1, pMeDem: 1390, qTitMeDem: 20, pMeOf: 1410, qTitMeOf: 20 },
+      ],
+    },
+  };
+  const loaderFor = (data) => ({
+    dailies: async (ins) => (data.dailies[ins] || []).map((r) => ({ ...r })),
+    trades: async (ins, date) => (data.trades[`${ins}|${date}`] || []).map((r) => ({ ...r })),
+    book: async (ins, date) => (data.book[`${ins}|${date}`] || []).map((r) => ({ ...r })),
+  });
+
+  const gate = createTimeGate({ sessionId: 's1', now: NOW, load: loaderFor(fullData), days });
+  check('دروازه بدون لحظهٔ جاری ساخته نمی‌شود', (() => {
+    try { createTimeGate({ now: { date: 0 }, load: {}, days }); return false; } catch { return true; }
+  })());
+  check('لحظهٔ دروازه کپی است نه ارجاع', (() => {
+    const one = gate.now(); one.second = 0;
+    return gate.now().second === NOW.second;
+  })());
+
+  await (async () => {
+    const hist = await gate.history('1');
+    check('تاریخچه فقط تا دیروز می‌آید',
+      hist.rows.length === 2 && hist.rows[hist.rows.length - 1].date === 20260520);
+    check('تاریخچه می‌گوید ردیف امروز کنار گذاشته شد', hist.partialDay === true);
+    const short = await gate.history('1', { lookback: 1 });
+    check('lookback به روز معاملاتی برش می‌زند', short.rows.length === 1 && short.rows[0].date === 20260520);
+
+    const snap = await gate.snapshot('1');
+    check('آخرین معاملهٔ عکس، معاملهٔ ۱۰:۲۹ است', snap.trade.price === 1010);
+    check('حجم تجمعی عکس تا همان لحظه است', snap.trade.volume === 30);
+    check('دفتر عکس، سطح یکِ پیش از ۱۰:۳۱ را دارد', snap.quote.bid === 1000 && snap.quote.ask === 1010);
+    check('کهنگی دفتر گزارش می‌شود', snap.quote.stale === NOW.second - 9 * 3600);
+  })();
+
+  // ——— زمان یک‌طرفه ———
+  {
+    const back = gate.advance({ days: -1 });
+    check('پله به عقب پذیرفته نمی‌شود', back.ok === false && back.gate === null);
+    const fwd = gate.advance('h1');
+    check('پله جلو دروازهٔ تازه می‌سازد', fwd.ok === true && fwd.gate.now().second === 11 * 3600 + 1800);
+    check('دروازهٔ قبلی سر جای خودش می‌ماند', gate.now().second === NOW.second);
+    check('قدم‌های میانی برگردانده می‌شوند', fwd.moments.length === 4);
+    const roll = gate.advance('eod').gate.advance('h1');
+    check('پله‌ای که از پایان جلسه رد شود به جلسهٔ بعد می‌رود',
+      roll.ok && roll.gate.now().date === 20260524 && roll.rolled === true);
+  }
+
+  // ——— دروازهٔ داوری، تنها استثنا ———
+  await (async () => {
+    const referee = createRefereeGate({ now: NOW, load: loaderFor(fullData), days });
+    const hist = await referee.history('1');
+    check('دروازهٔ داوری به آینده دسترسی دارد', hist.rows.length === 5);
+    check('دروازهٔ داوری خودش را اعلام می‌کند', referee.referee === true && gate.referee === false);
+  })();
+
+  // ═══ آزمون پذیرش: جلسهٔ یکسان روی دادهٔ کامل و دادهٔ بریده ═══
+  //
+  // سند می‌گوید داده را «در تاریخ T» ببر. ولی جلسه‌ای که پرش می‌کند،
+  // بعد از T به داده نیاز **دارد** و آن نیاز نشت نیست. آنچه باید ثابت
+  // شود این است که هیچ‌چیز فراتر از **دورترین جایی که جلسه رسید** خوانده
+  // نمی‌شود. پس مرزِ بریدن، آخرین لحظهٔ جلسه است نه لحظهٔ شروعش.
+  await (async () => {
+    const LAST = { date: 20260521, second: NOW.second + 15 * 60 };   // ۱۰:۴۵
+    const cutData = {
+      dailies: { '1': fullData.dailies['1'].filter((r) => r.date < LAST.date) },
+      trades: {
+        '1|20260521': fullData.trades['1|20260521'].filter((r) => r.second <= LAST.second),
+      },
+      book: {
+        '1|20260521': fullData.book['1|20260521'].filter((r) => tradeSecond(r.hEven) <= LAST.second),
+      },
+    };
+
+    // یک «جلسه»: چند بار خواندن، یک پرش، و باز چند بار خواندن.
+    const runSession = async (data) => {
+      let g = createTimeGate({ sessionId: 's', now: NOW, load: loaderFor(data), days });
+      const log = [];
+      log.push(await g.history('1'));
+      log.push(await g.snapshot('1'));
+      const step = g.advance('m15');
+      log.push({ ok: step.ok, moments: step.moments, rolled: step.rolled });
+      g = step.gate;
+      log.push(await g.history('1'));
+      log.push(await g.snapshot('1'));
+      return JSON.stringify(log);
+    };
+
+    const withFuture = await runSession(fullData);
+    const withoutFuture = await runSession(cutData);
+    check('جلسه روی دادهٔ کامل و دادهٔ بریده دقیقاً یکی درمی‌آید', withFuture === withoutFuture,
+      withFuture === withoutFuture ? '' : 'نشت');
+
+    // و برای اینکه آزمون خودش توخالی نباشد: باید ثابت شود دادهٔ آینده
+    // اصلاً وجود داشته و صرفاً نادیده گرفته شده.
+    check('آزمون نشت توخالی نیست — دادهٔ آینده واقعاً موجود بود',
+      fullData.dailies['1'].length > cutData.dailies['1'].length
+      && fullData.trades['1|20260521'].length > cutData.trades['1|20260521'].length
+      && fullData.book['1|20260521'].length > cutData.book['1|20260521'].length);
+
+    // و اگر دروازه را دور بزنیم، همان جلسه باید فرق کند.
+    const leaky = JSON.stringify(fullData.dailies['1']);
+    const honest = JSON.stringify(cutData.dailies['1']);
+    check('دور زدن دروازه واقعاً خروجی را عوض می‌کند', leaky !== honest);
+  })();
+}
+
+// ═══════════════════ ۱۰۱. بذر، رژیم بازار و مدل جلسه ═══════════════════
+//
+// سه چیز که همه به یک قید تکیه می‌کنند: با شناسهٔ جلسه باید بشود دقیقاً
+// همان جلسه را با همان اعداد بازسازی کرد.
+group('۱۰۱. بذر، رژیم بازار و مدل جلسه');
+{
+  // ——— بذر ———
+  check('یک بذر همیشه یک دنباله می‌دهد', (() => {
+    const a = makeRng('س-۱'), b = makeRng('س-۱');
+    return [0, 1, 2, 3, 4].every(() => a() === b());
+  })());
+  check('دو بذر متفاوت دو دنباله می‌دهند', makeRng('a')() !== makeRng('b')());
+  check('خروجی در بازهٔ صفر تا یک است', (() => {
+    const r = makeRng(7);
+    for (let at = 0; at < 500; at += 1) { const v = r(); if (!(v >= 0 && v < 1)) return false; }
+    return true;
+  })());
+  check('جابه‌جایی ورودی را دست نمی‌زند', (() => {
+    const src = [1, 2, 3, 4, 5];
+    const out = shuffle(makeRng('x'), src);
+    return src.join(',') === '1,2,3,4,5' && out.length === 5 && out.slice().sort().join(',') === '1,2,3,4,5';
+  })());
+  check('جابه‌جایی با یک بذر بازتولیدپذیر است',
+    shuffle(makeRng('k'), [1, 2, 3, 4, 5]).join(',') === shuffle(makeRng('k'), [1, 2, 3, 4, 5]).join(','));
+  check('برداشتن از فهرست خالی خطا نمی‌دهد', pick(makeRng('x'), []) === undefined);
+
+  // ——— رژیم ———
+  {
+    // شصت روز معاملاتی متوالی و معتبر، سه بخش: صعود، نزول، رکود.
+    const rows = [];
+    let close = 1000;
+    const days = [];
+    for (let m = 5; m <= 7; m += 1) for (let d = 1; d <= 28; d += 1) days.push(2026 * 10000 + m * 100 + d);
+    days.slice(0, 84).forEach((date, at) => {
+      close = at < 28 ? close * 1.008 : at < 56 ? close * 0.992 : close * 1.0002;
+      rows.push({ date, close });
+    });
+    const series = regimeSeries(rows, { windowDays: 20, thresholdPct: 5 });
+    const buckets = regimeBuckets(series);
+    check('هر سه رژیم در سری ساختگی پیدا می‌شوند',
+      buckets.up.length > 0 && buckets.down.length > 0 && buckets.flat.length > 0);
+    check('روزهای پیش از پر شدن پنجره برچسب نمی‌گیرند',
+      buckets.unlabeled.length === 20 && series.slice(0, 20).every((r) => r.regime === null));
+    check('برچسب فقط از پنجرهٔ عقب‌رو می‌آید', (() => {
+      // اگر پنجره مرکزی بود، برچسب روز n به روزهای بعد وابسته می‌شد.
+      // بریدن سری از روز n به بعد نباید برچسب روز n را عوض کند.
+      const at = 40;
+      const full = regimeSeries(rows, { windowDays: 20, thresholdPct: 5 });
+      const cut = regimeSeries(rows.slice(0, at + 1), { windowDays: 20, thresholdPct: 5 });
+      return full[at].regime === cut[at].regime && Math.abs(full[at].changePct - cut[at].changePct) < 1e-9;
+    })());
+    check('آستانه واقعاً اثر دارد', (() => {
+      const wide = regimeBuckets(regimeSeries(rows, { windowDays: 20, thresholdPct: 50 }));
+      return wide.flat.length > buckets.flat.length;
+    })());
+    check('جملهٔ قاعده با رقم فارسی نوشته می‌شود',
+      /^[^0-9]*$/.test(regimeRuleText({ windowDays: 20, thresholdPct: 5 })));
+
+    // ——— انتخاب لایه‌بندی‌شده ———
+    const one = stratifiedPick(series, { seed: 'ب-۱', count: 9 });
+    const two = stratifiedPick(series, { seed: 'ب-۱', count: 9 });
+    check('انتخاب با یک بذر بازتولیدپذیر است', JSON.stringify(one.picks) === JSON.stringify(two.picks));
+    check('انتخاب از هر سه رژیم به نسبت مساوی برمی‌دارد', (() => {
+      const by = { up: 0, down: 0, flat: 0 };
+      for (const p of one.picks) by[p.regime] += 1;
+      return by.up === 3 && by.down === 3 && by.flat === 3;
+    })());
+    check('رژیمِ نبوده در بازه، صریح گزارش می‌شود', (() => {
+      const onlyUp = series.filter((r) => r.regime === 'up');
+      const r = stratifiedPick(onlyUp, { seed: 'x', count: 3 });
+      return r.missing.includes('down') && r.missing.includes('flat') && r.picks.length === 3;
+    })());
+    check('تاریخ بازی‌شده دوباره انتخاب نمی‌شود', (() => {
+      const first = stratifiedPick(series, { seed: 'z', count: 3 });
+      const again = stratifiedPick(series, { seed: 'z', count: 3, exclude: first.picks.map((p) => p.date) });
+      const seen = new Set(first.picks.map((p) => p.date));
+      return again.picks.every((p) => !seen.has(p.date));
+    })());
+    check('رژیم یک تاریخ مشخص خوانده می‌شود',
+      regimeAt(series, series[30].date) === series[30].regime && regimeAt(series, 19000101) === null);
+    check('برچسب فارسی رژیم درست است',
+      regimeLabel('up') === 'صعودی' && regimeLabel('down') === 'نزولی' && regimeLabel('zzz') === 'بی‌برچسب');
+  }
+
+  // ——— مدل جلسه ———
+  {
+    const start = { date: 20260521, second: 9 * 3600 };
+    let s = blankSession({ id: 'س-۱', start });
+    check('سرمایه پیش‌فرض یک میلیارد تومان به ریال است', s.capitalRial === 10_000_000_000);
+    check('بذر از شناسه می‌آید نه از ساعت',
+      blankSession({ id: 'س-۱', start }).seed === blankSession({ id: 'س-۱', start }).seed
+      && blankSession({ id: 'س-۲', start }).seed !== s.seed);
+    check('حالت ناشناس پیش‌فرض روشن است', s.anonymous === true);
+    check('جلسهٔ تازه در آمار شمرده می‌شود', countsInStats(s) === true);
+    check('جلسهٔ تمرینی در آمار شمرده نمی‌شود',
+      countsInStats(blankSession({ id: 'x', start, practice: true })) === false);
+
+    check('نظر بدون متن دلیل ثبت نمی‌شود',
+      recordView(s, { direction: 'up', reason: '   ' }).ok === false);
+    check('جهت نامعتبر نظر ثبت نمی‌کند',
+      recordView(s, { direction: 'sideways-ish', reason: 'چیزی' }).ok === false);
+    s = recordView(s, {
+      direction: 'up', movePct: 8, confidence: 0.6, horizonDays: 10,
+      ivView: 'down', reason: 'برگشت از حمایت روزانه', macro: 'دلار آرام',
+    }).session;
+    check('نظر ثبت شد و نقطهٔ تصمیم ساخته شد', s.decisions.length === 1 && lastDecision(s).view.movePct === 8);
+    check('درجهٔ اطمینان به بازهٔ صفر تا یک بریده می‌شود',
+      recordView(s, { direction: 'up', confidence: 9, reason: 'x' }).session.decisions[1].view.confidence === 1);
+
+    s = recordCandidates(s, [{ id: 'a', score: 9 }, { id: 'b', score: 7 }, { id: 'c', score: 5 }]).session;
+    check('همهٔ کاندیدها ثبت می‌شوند نه فقط انتخاب‌شده', lastDecision(s).candidates.length === 3);
+    check('رتبه از ترتیب ورود ساخته می‌شود', lastDecision(s).candidates[1].rank === 2);
+
+    check('انتخاب کاندیدی که در تصمیم نیست رد می‌شود',
+      chooseCandidates(s, [{ id: 'zzz', size: 1 }]).ok === false);
+    check('اندازهٔ نامثبت رد می‌شود', chooseCandidates(s, [{ id: 'a', size: 0 }]).ok === false);
+    s = chooseCandidates(s, [{ id: 'b', size: 5 }]).session;
+    check('رتبهٔ انتخاب کاربر همراه انتخاب ذخیره می‌شود', lastDecision(s).chosen[0].rank === 2);
+
+    // ——— قفل انتظار: مهم‌ترین قید جلسه ———
+    check('پیش از قفل انتظار، پرش ممکن نیست', canAdvance(s).ok === false);
+    check('پرش بدون قفل، لحظه را عوض نمی‌کند', (() => {
+      const r = advanceTo(s, { date: 20260521, second: 10 * 3600 });
+      return r.ok === false && r.session.now.second === 9 * 3600;
+    })());
+    check('انتظار بدون متن قفل نمی‌شود', lockExpectation(s, { text: ' ' }).ok === false);
+    s = lockExpectation(s, { text: 'تا سه روز به ۱۰ درصد بالاتر', targetPricePct: 10 }).session;
+    check('پس از قفل، پرش ممکن است', canAdvance(s).ok === true);
+    check('انتظار قفل‌شده ویرایش نمی‌شود', lockExpectation(s, { text: 'حرف تازه' }).ok === false);
+    check('پس از قفل انتظار، انتخاب هم عوض نمی‌شود',
+      chooseCandidates(s, [{ id: 'a', size: 1 }]).ok === false);
+
+    // ——— زمان یک‌طرفه ———
+    check('پرش به عقب رد می‌شود', advanceTo(s, { date: 20260520, second: 9 * 3600 }).ok === false);
+    check('پرش در جا رد می‌شود', advanceTo(s, start).ok === false);
+    s = advanceTo(s, { date: 20260521, second: 10 * 3600 }).session;
+    check('پرش جلو لحظه را می‌برد', s.now.second === 10 * 3600);
+
+    // ——— رویداد و ارزش‌گذاری ———
+    check('رویداد بدون نوع ثبت نمی‌شود', recordEvent(s, { detail: 'چیزی' }).ok === false);
+    s = recordEvent(s, { kind: 'margin-call', detail: 'وجه تضمین کم آورد', positionId: 'p1' }).session;
+    check('رویداد با مهر زمانی لحظهٔ جاری ثبت می‌شود',
+      s.events.length === 1 && s.events[0].at.second === 10 * 3600 && s.events[0].kind === 'margin-call');
+    check('ارزش‌گذاری بدون شناسهٔ موقعیت ثبت نمی‌شود', recordValuation(s, {}).ok === false);
+    s = recordValuation(s, { positionId: 'p1', pnlRial: 1234 }).session;
+    check('ارزش‌گذاری با لحظه ذخیره می‌شود', s.valuations[0].at.date === 20260521);
+
+    // ——— بستن ———
+    const abandoned = closeSession(s, { abandoned: true }).session;
+    check('جلسهٔ رهاشده حالت خودش را می‌گیرد', abandoned.state === 'abandoned');
+    check('جلسهٔ رهاشده هم در آمار شمرده می‌شود', countsInStats(abandoned) === true);
+    check('جلسهٔ بسته دوباره بسته نمی‌شود', closeSession(abandoned).ok === false);
+    check('جلسهٔ بسته پرش نمی‌کند', canAdvance(abandoned).ok === false);
+
+    // ——— ضد تقلب ———
+    const history = [{ start: { date: 20260521 }, ins: '17765240' }];
+    check('بازی مجدد همان تاریخ و نماد رد می‌شود',
+      replayAllowed(history, { date: 20260521, ins: '17765240' }).ok === false);
+    check('تاریخ دیگر مجاز است', replayAllowed(history, { date: 20260520, ins: '17765240' }).ok === true);
+    check('نماد دیگر در همان تاریخ مجاز است',
+      replayAllowed(history, { date: 20260521, ins: '99' }).ok === true);
+    check('پرچم تمرینی بازی مجدد را باز می‌کند', (() => {
+      const r = replayAllowed(history, { date: 20260521, ins: '17765240', practice: true });
+      return r.ok === true && r.practice === true;
+    })());
+
+    // ——— خلاصه ———
+    const sum = sessionSummary(s);
+    check('خلاصهٔ جلسه شمار تصمیم و رویداد را می‌دهد',
+      sum.decisions === 1 && sum.events === 1 && sum.inStats === true && sum.stateLabel === 'باز');
+  }
+
+  // ——— بازتولیدپذیری کامل ———
+  check('اجرای دوبارهٔ همان زنجیره، همان جلسه را می‌سازد', (() => {
+    const run = () => {
+      let s = blankSession({ id: 'تکرار', start: { date: 20260521, second: 9 * 3600 } });
+      s = recordView(s, { direction: 'down', confidence: 0.3, reason: 'اُفت حجم' }).session;
+      s = recordCandidates(s, [{ id: 'a' }, { id: 'b' }]).session;
+      s = chooseCandidates(s, [{ id: 'a', size: 2 }]).session;
+      s = lockExpectation(s, { text: 'کاهش' }).session;
+      s = advanceTo(s, { date: 20260521, second: 11 * 3600 }).session;
+      return JSON.stringify(s);
+    };
+    return run() === run();
+  })());
+  // ——— شناسهٔ جلسه، که مستقیم نام فایل می‌شود ———
+  check('شناسهٔ سالم پذیرفته می‌شود',
+    validSessionId('b-2026-05-21_x9') && validSessionId('A1'));
+  check('شناسه با جداکنندهٔ مسیر رد می‌شود',
+    !validSessionId('../x') && !validSessionId('a/b') && !validSessionId('a\\b') && !validSessionId('a.b'));
+  check('شناسهٔ خالی یا خیلی بلند رد می‌شود',
+    !validSessionId('') && !validSessionId('a'.repeat(65)) && !validSessionId(null));
+
+  check('توابع جلسه، جلسهٔ ورودی را عوض نمی‌کنند', (() => {
+    const s = blankSession({ id: 'x', start: { date: 20260521, second: 9 * 3600 } });
+    const before = JSON.stringify(s);
+    recordView(s, { direction: 'up', reason: 'چیزی' });
+    recordEvent(s, { kind: 'k' });
+    return JSON.stringify(s) === before;
+  })());
+}
+
+// ═══════════════════ ۱۰۲. اجراپذیری در لحظهٔ گذشته ═══════════════════
+//
+// سند این را «قید اصلی» می‌نامد نه فیلتر جانبی. پس آنچه سنجیده می‌شود
+// فقط عددِ سقف نیست؛ این است که وقتی سقف صفر می‌شود، **دلیلش** درست
+// گفته شود — «صف بود» و «مظنه نبود» دو چیز متفاوت‌اند و درمانشان هم.
+group('۱۰۲. اجراپذیری در لحظهٔ گذشته');
+{
+  const evt = (time, ref, level, bid, bidQty, ask, askQty) => ({
+    hEven: time, refID: ref, number: level,
+    pMeDem: bid, qTitMeDem: bidQty, zOrdMeDem: 1,
+    pMeOf: ask, qTitMeOf: askQty, zOrdMeOf: 1,
+  });
+  const snapshot = (rows, second = 10 * 3600) => bookAt(normalizeBookEvents(rows), second);
+
+  // ——— سقف مصرف عمق ———
+  {
+    const book = [
+      { level: 1, bid: 1000, bidQty: 100, ask: 1010, askQty: 100 },
+      { level: 2, bid: 990, bidQty: 100, ask: 1020, askQty: 100 },
+    ];
+    const full = walkBook(book, 150, 'buy');
+    const capped = walkBook(book, 150, 'buy', 0, 0.3);
+    check('بدون سقف، همان رفتار قبلی می‌ماند', full.filled === 150 && full.full === true);
+    check('سقف سی درصد، حجم پرشده را کم می‌کند', capped.filled === 60 && capped.full === false);
+    check('سقف روی ظرفیت هم می‌نشیند',
+      bookCapacity(book, 'buy') === 200 && Math.abs(bookCapacity(book, 'buy', 0, Infinity, 0.3) - 60) < 1e-9);
+    check('سقف بالای یک به یک بریده می‌شود', walkBook(book, 150, 'buy', 0, 5).filled === 150);
+    check('سقف صفر یعنی هیچ', walkBook(book, 150, 'buy', 0, 0).filled === 0);
+    check('قیمت میانگین با سقف هم از عمق واقعی می‌آید',
+      Math.abs(capped.vwap - ((30 * 1010 + 30 * 1020) / 60)) < 1e-9);
+  }
+
+  // ——— صف ———
+  {
+    const healthy = [{ level: 1, bid: 1000, bidQty: 500, ask: 1010, askQty: 400 }];
+    check('دفتر دوطرفه عادی است', queueState(healthy, { limitLow: 900, limitHigh: 1100 }).key === 'normal');
+    check('عرضهٔ خالی روی سقف دامنه، صف خرید است',
+      queueState([{ level: 1, bid: 1100, bidQty: 9999, ask: 0, askQty: 0 }], { limitLow: 900, limitHigh: 1100 }).key === 'buyQueue');
+    check('تقاضای خالی روی کف دامنه، صف فروش است',
+      queueState([{ level: 1, bid: 0, bidQty: 0, ask: 900, askQty: 9999 }], { limitLow: 900, limitHigh: 1100 }).key === 'sellQueue');
+    check('یک سمت خالی ولی دور از دامنه، صف نیست بلکه بی‌مظنه است',
+      queueState([{ level: 1, bid: 1000, bidQty: 10, ask: 0, askQty: 0 }], { limitLow: 900, limitHigh: 1100 }).key === 'noBook');
+    check('بدون دامنهٔ آن روز، صف «تأییدنشده» علامت می‌خورد', (() => {
+      const q = queueState([{ level: 1, bid: 1000, bidQty: 10, ask: 0, askQty: 0 }], {});
+      return q.key === 'buyQueue' && q.known === false && q.tradable === false;
+    })());
+    check('نماد نامجاز پیش از هر چیز دیگری دیده می‌شود',
+      queueState(healthy, { limitLow: 900, limitHigh: 1100, state: 'I' }).key === 'halted');
+    check('دفتر خالی، صف نیست', queueState([], {}).key === 'noBook');
+    check('هیچ حالت صفی قابل معامله نیست',
+      ['buyQueue', 'sellQueue', 'noBook', 'halted'].every((key) => {
+        const map = {
+          buyQueue: queueState([{ level: 1, bid: 1100, bidQty: 9, ask: 0, askQty: 0 }], { limitLow: 900, limitHigh: 1100 }),
+          sellQueue: queueState([{ level: 1, bid: 0, bidQty: 0, ask: 900, askQty: 9 }], { limitLow: 900, limitHigh: 1100 }),
+          noBook: queueState([], {}),
+          halted: queueState([{ level: 1, bid: 1, bidQty: 1, ask: 2, askQty: 1 }], { state: 'I' }),
+        };
+        return map[key].tradable === false;
+      }));
+  }
+
+  // ——— کل ساختار ———
+  {
+    const legs = [
+      { kind: 'call', side: 'buy', strike: 1000, ratio: 1, size: 1000, ins: 'A' },
+      { kind: 'call', side: 'sell', strike: 1100, ratio: 1, size: 1000, ins: 'B' },
+    ];
+    const deep = [
+      evt(90000, 1, 1, 480, 200, 500, 200), evt(90000, 2, 2, 470, 300, 510, 300),
+      evt(90000, 3, 3, 460, 400, 520, 400),
+    ];
+    const thin = [evt(90000, 4, 1, 190, 30, 210, 30)];
+    const books = { A: snapshot(deep), B: snapshot(thin) };
+    const meta = { A: { limitLow: 1, limitHigh: 9999 }, B: { limitLow: 1, limitHigh: 9999 } };
+    const fees = { buyStock: 0.003712, sellStock: 0.0088, option: 0.00103, exercise: 0.0005 };
+
+    const r = executableAt({ legs, books, meta, fees, takePct: 100 });
+    check('ساختار با دفتر دوطرفه اجراپذیر است', r.ok === true && r.max > 0);
+    check('قید مقیدکننده نام دارد', typeof r.binding === 'string' && r.binding.length > 0);
+    check('پای نازک قید می‌شود نه پای عمیق', r.binding.includes('۱۱۰۰') || r.binding.includes('1100'));
+    check('هزینهٔ اجرا تفکیک‌شده می‌آید',
+      r.cost.rows.length === 2 && r.cost.commission > 0 && Number.isFinite(r.cost.total));
+
+    const capped = executableAt({ legs, books, meta, fees, takePct: 30 });
+    check('سقف مصرف عمق، سقف قرارداد را کم می‌کند', capped.max < r.max && capped.max > 0);
+    check('سقف مصرف در خروجی گزارش می‌شود', capped.takePct === 30);
+
+    // ——— صفر شدن، با دلیل ———
+    const noBookFor = executableAt({ legs, books: { A: books.A }, meta, fees });
+    check('پای بی‌دفتر، کل ساختار را صفر می‌کند', noBookFor.max === 0 && noBookFor.ok === false);
+    check('دلیل بی‌دفتری نام پا را می‌گوید',
+      noBookFor.missing.length === 1 && noBookFor.why.includes('دفتری نبود'));
+
+    const queued = executableAt({
+      legs,
+      books: { A: books.A, B: snapshot([evt(90000, 9, 1, 300, 5000, 0, 0)]) },
+      meta: { A: meta.A, B: { limitLow: 100, limitHigh: 300 } },
+      fees,
+    });
+    check('پای در صف، کل ساختار را صفر می‌کند', queued.max === 0 && queued.ok === false);
+    check('دلیل صف از دلیل بی‌مظنه جدا گفته می‌شود',
+      queued.why.includes('صف خرید') && !queued.why.includes('دفتری نبود'));
+    check('صف تأییدنشده جدا علامت می‌خورد', (() => {
+      const unverified = executableAt({
+        legs,
+        books: { A: books.A, B: snapshot([evt(90000, 9, 1, 300, 5000, 0, 0)]) },
+        meta: { A: meta.A, B: {} },
+        fees,
+      });
+      return unverified.unverifiedQueue === true;
+    })());
+
+    check('اسپرد و میانهٔ هر پا در خروجی هست',
+      r.spreadPctByLeg.every(Number.isFinite) && r.midByLeg.every((v) => v > 0));
+    check('کیفیت ردیف اعلام می‌شود', ['exact', 'approx', 'unexecutable'].includes(r.quality.level));
+  }
+}
+
+// ═══════════════════ ۱۰۳. تجزیهٔ کامل سود و زیان ═══════════════════
+//
+// بند اجباری سند: «باقی‌مانده توضیح‌داده‌نشده همیشه نمایش داده شود». پس
+// آنچه سنجیده می‌شود این است که اتحاد جمع دقیقاً برقرار بماند و هیچ قلمی
+// در دیگری قایم نشود.
+group('۱۰۳. تجزیهٔ کامل سود و زیان');
+{
+  const legs = [
+    { kind: 'call', side: 'buy', strike: 10000, ratio: 1, size: 1000 },
+    { kind: 'call', side: 'sell', strike: 11000, ratio: 1, size: 1000 },
+  ];
+  const g = (delta, gamma, vega, theta) => ({ delta, gamma, vega, theta });
+  const track = [
+    {
+      label: 'روز یک', date: 20260519, spot: 10000,
+      pnl: [0, 0], ivPct: [40, 38],
+      greeks: [g(0.55, 0.0004, 12, -30), g(0.30, 0.0003, 10, -22)],
+    },
+    {
+      label: 'روز دو', date: 20260520, spot: 10200,
+      pnl: [120_000_000, -60_000_000], ivPct: [42, 39],
+      greeks: [g(0.60, 0.0004, 12, -32), g(0.34, 0.0003, 10, -24)],
+    },
+    {
+      label: 'روز سه', date: 20260521, spot: 10150,
+      pnl: [95_000_000, -48_000_000], ivPct: [41, 39],
+      greeks: [g(0.58, 0.0004, 12, -31), g(0.32, 0.0003, 10, -23)],
+    },
+  ];
+  const entryCost = { commission: 3_000_000, crossing: 1_200_000, slippage: 400_000 };
+  const exitCost = { commission: 2_800_000, crossing: 900_000, slippage: 300_000 };
+
+  const r = decomposePnl({
+    legs, track, entryCost, exitCost,
+    marginNet: 500_000_000, rFree: 0.30, days: 2, yearDays: 365,
+  });
+
+  check('اتحاد جمع دقیقاً برقرار است', r.identityOk === true, `فاصله ${r.identityGap}`);
+  check('ناخالص، جمع حرکت پاهاست', Math.abs(r.gross - (95_000_000 - 48_000_000)) < 1e-6);
+  check('خالص، ناخالص منهای هزینه‌هاست', Math.abs(r.net - (r.gross + r.costs)) < 1e-6);
+  check('هر چهار هزینه علامت منفی دارند',
+    COST_KEYS.every((key) => r.parts[key] <= 0));
+  check('هزینهٔ ورود و خروج هر دو شمرده می‌شوند',
+    Math.abs(r.parts.commission + (3_000_000 + 2_800_000)) < 1e-6);
+  check('هزینه فرصت وجه تضمین از نرخ همان تاریخ می‌آید',
+    Math.abs(r.parts.funding + (500_000_000 * 0.30 * (2 / 365))) < 1e-6);
+  check('نبودن نرخ، هزینه فرصت نمی‌سازد و اعلام می‌کند', (() => {
+    const noRate = decomposePnl({ legs, track, entryCost, exitCost, marginNet: 5e8, days: 2 });
+    return noRate.parts.funding === 0 && noRate.fundingKnown === false;
+  })());
+  check('وجه تضمین صفر، هزینه فرصت ندارد',
+    fundingCost({ marginNet: 0, rFree: 0.3, days: 10 }).rial === 0);
+
+  check('باقی‌مانده در ردیف‌های نمایش هست',
+    r.rows.some((row) => row.key === 'rest' && row.kind === 'residual'));
+  check('ردیف‌های نمایش با اقلام یکی‌اند',
+    r.rows.length === PNL_PARTS.length && r.rows.every((row) => row.rial === r.parts[row.key]));
+  check('جملهٔ باقی‌مانده همیشه نوشته می‌شود، حتی وقتی کوچک است',
+    typeof r.residualNote === 'string' && r.residualNote.length > 0);
+  check('جملهٔ باقی‌مانده رقم لاتین ندارد', /^[^0-9]*$/.test(r.residualNote));
+
+  // ——— هشدار باقی‌مانده ———
+  check('باقی‌ماندهٔ بزرگ هشدار می‌دهد', (() => {
+    // یونانی‌های کوچک یعنی مدل تقریباً هیچ‌چیز را توضیح نمی‌دهد.
+    const blind = track.map((row) => ({ ...row, greeks: row.greeks.map(() => g(0.001, 0, 0, 0)) }));
+    const out = decomposePnl({ legs, track: blind, entryCost, exitCost, rFree: 0.3 });
+    return out.residualWarn === true && out.residualNote.includes('مدل قیمت‌گذاری');
+  })());
+  check('باقی‌ماندهٔ کوچک هشدار نمی‌دهد', (() => {
+    const out = decomposePnl({ legs, track, entryCost, exitCost, rFree: 0.3, residualWarnPct: 100000 });
+    return out.residualWarn === false && out.residualNote.includes('زیر آستانه');
+  })());
+  check('آستانهٔ هشدار قابل تنظیم است', (() => {
+    const strict = decomposePnl({ legs, track, entryCost, exitCost, rFree: 0.3, residualWarnPct: 0 });
+    return strict.residualWarn === true;
+  })());
+
+  // ——— پوشش ———
+  check('پایی بدون تلاطم، پوشش را کم می‌کند و صفر جا نمی‌گذارد', (() => {
+    const gap = track.map((row) => ({ ...row, ivPct: [row.ivPct[0], NaN] }));
+    const out = decomposePnl({ legs, track: gap, entryCost, exitCost, rFree: 0.3 });
+    return Number.isFinite(out.coverage) && out.coverage < 100 && out.incompleteSteps > 0
+      && out.residualNote.includes('تجزیه نشده');
+  })());
+  check('مسیر بدون گام، عدد نمی‌سازد', (() => {
+    const out = decomposePnl({ legs, track: [track[0]], entryCost: null, exitCost: null });
+    return out.gross === 0 && !Number.isFinite(out.residualPct) && out.residualNote.includes('معنی ندارد');
+  })());
+}
+
+// ═══════════════════ ۱۰۴. ارزش‌گذاری موقعیت و آزمون پذیرش فاز دو ═══════════════════
+//
+// آزمون پذیرشی که سند برای این فاز خواسته: یک پوزیشن دستی، ارزش‌گذاری روز
+// به روز، و باقی‌ماندهٔ کوچک. دنیای آزمون را خودِ بلک-شولز می‌سازد — پس
+// اگر تجزیه درست باشد، باید تقریباً کاملش کند. باقی‌ماندهٔ بزرگ در چنین
+// دنیایی یعنی ایراد از تجزیه است، نه از بازار.
+group('۱۰۴. ارزش‌گذاری موقعیت و آزمون پذیرش فاز دو');
+{
+  // کف و سقف جست‌وجوی تلاطم **کسری‌اند** نه درصدی — همان واحدی که
+  // `impliedVol` می‌فهمد. عدد درصدی اینجا یعنی کفِ صد درصد، و تلاطم
+  // چهل درصدی زیر آن کف می‌افتد و ریشه پیدا نمی‌شود.
+  const params = { rFree: 0.30, divYield: 0, yearDays: 365, ivLo: 0.01, ivHi: 5 };
+  const SIGMA = 0.40;
+  const legs = [
+    { kind: 'call', side: 'buy', strike: 10_000, ratio: 1, size: 1000 },
+    { kind: 'call', side: 'sell', strike: 11_000, ratio: 1, size: 1000 },
+  ];
+  const priceAt = (spot, daysLeft) => legs.map((leg) => bsPrice(
+    leg.kind, spot, leg.strike, Math.max(daysLeft, 0.5) / 365, params.rFree, params.divYield, SIGMA,
+  ));
+
+  // ——— دنیای ساختگی: مسیر آرام قیمت، تلاطم ثابت ———
+  const world = [];
+  const spots = [10_000, 10_120, 10_050, 10_260, 10_400, 10_330, 10_510];
+  spots.forEach((spot, at) => {
+    world.push({ date: 20260501 + at, spot, daysLeft: 60 - at, prices: priceAt(spot, 60 - at) });
+  });
+  const entryPrices = world[0].prices;
+
+  const track = valuationTrack({
+    legs, entryPrices, params,
+    moments: world.map((row) => ({ date: row.date })),
+    feed: (at) => ({
+      spot: world[at].spot, prices: world[at].prices,
+      date: world[at].date, days: [world[at].daysLeft, world[at].daysLeft],
+    }),
+  });
+
+  check('مسیر ارزش‌گذاری برای هر لحظه یک نقطه دارد', track.length === world.length);
+  check('نقطهٔ ورود سود صفر دارد', Math.abs(track[0].grossPnl) < 1e-6);
+  check('تلاطم استخراج‌شده همان تلاطمی است که قیمت با آن ساخته شد',
+    track[3].ivPct.every((value) => Math.abs(value - SIGMA * 100) < 0.5),
+    track[3].ivPct.map((v) => v.toFixed(2)).join('، '));
+  check('هر پا سود و زیان جدا دارد و جمعشان ناخالص است', (() => {
+    const row = track[4];
+    return Math.abs(row.pnl[0] + row.pnl[1] - row.grossPnl) < 1e-6;
+  })());
+  check('شکل نقطه همان چیزی است که تجزیه می‌خواهد',
+    ['label', 'date', 'spot', 'pnl', 'greeks', 'ivPct'].every((key) => key in track[0]));
+
+  // ——— آزمون پذیرش: باقی‌مانده باید کوچک باشد ———
+  const decomposed = decomposePnl({
+    legs, track,
+    entryCost: { commission: 1_500_000, crossing: 300_000, slippage: 0 },
+    exitCost: { commission: 1_400_000, crossing: 280_000, slippage: 0 },
+    marginNet: 0, rFree: params.rFree, days: 6, yearDays: 365,
+  });
+  check('اتحاد جمع در مسیر واقعی هم برقرار است', decomposed.identityOk === true);
+  check('همهٔ گام‌ها تجزیه شدند', decomposed.incompleteSteps === 0 && Math.abs(decomposed.coverage - 100) < 1e-6);
+  check('باقی‌ماندهٔ توضیح‌داده‌نشده کوچک است',
+    decomposed.residualPct < 5, `${decomposed.residualPct.toFixed(2)}٪`);
+  check('در دنیای بلک-شولز، هشدار باقی‌مانده روشن نمی‌شود', decomposed.residualWarn === false);
+  check('چهار عامل با هم تقریباً کل حرکت را می‌سازند', (() => {
+    const four = ['delta', 'gamma', 'vega', 'theta'].reduce((sum, key) => sum + decomposed.parts[key], 0);
+    return Math.abs(four - decomposed.gross) / Math.abs(decomposed.gross) < 0.05;
+  })());
+  check('تلاطم ثابت یعنی سهم وگا ناچیز است',
+    Math.abs(decomposed.parts.vega) < Math.abs(decomposed.gross) * 0.02);
+  check('گذر زمان روی این اسپرد منفی نیست بلکه علامت خودش را دارد',
+    Number.isFinite(decomposed.parts.theta));
+
+  // ——— وجه تضمین ———
+  {
+    const marginParams = { A: 0.20, B: 0.10, C: 10000, maint: 0.70, bBasis: 'SPOT' };
+    const debit = marginAt({ legs, prices: world[3].prices, spot: world[3].spot, params: marginParams });
+    check('اسپرد بدهکار وجه تضمین بلوکه نمی‌کند', debit.isCredit === false && debit.blocked === 0);
+    check('بیشترین زیان عدد واقعی است، نه صفرِ خاموش', (() => {
+      // `analyzePayoff` پارامتر دومش نقد خالص است نه شیء تنظیمات. اگر شیء
+      // بدهی، حساب داخلی به NaN می‌رود و بیشترین زیان صفر درمی‌آید — عددی
+      // که هیچ جدولی به آن مشکوک نمی‌شود و همان‌جا در مخرج سرمایه و آزمون
+      // مقاومت می‌نشیند.
+      const spent = Math.abs(debit.netCash);
+      return Number.isFinite(debit.maxLoss) && debit.maxLoss > 0
+        && Math.abs(debit.maxLoss - spent) / spent < 0.05;
+    })(), `${Number(debit.maxLoss).toFixed(0)} در برابر ${Math.abs(debit.netCash).toFixed(0)}`);
+    check('سرمایهٔ درگیر اسپرد بدهکار، بدهکار خالص است', debit.capital.value > 0);
+
+    const creditLegs = [
+      { kind: 'put', side: 'sell', strike: 10_000, ratio: 1, size: 1000, price: 500 },
+      { kind: 'put', side: 'buy', strike: 9_000, ratio: 1, size: 1000, price: 200 },
+    ];
+    const credit = marginAt({
+      legs: creditLegs, prices: [500, 200], spot: 10_200, params: marginParams,
+      creditPolicy: 'maxOfLossAndShortLeg',
+    });
+    check('اسپرد بستانکار وجه تضمین می‌گیرد', credit.isCredit === true && credit.blocked > 0);
+    check('عدد بلوکه‌شده واقعاً از موتور وجه تضمین می‌آید، نه صفرِ نام‌غلط',
+      credit.marginNet > 0 && Number.isFinite(credit.marginNet));
+    check('عدد اسپرد بستانکار تخمینی برچسب می‌خورد', credit.estimated === true && !!credit.creditEstimate.label);
+    check('سیاست بیشینه، از هر دو جزء بزرگ‌تر است', (() => {
+      const onlyShort = marginAt({ legs: creditLegs, prices: [500, 200], spot: 10_200, params: marginParams, creditPolicy: 'shortLeg' });
+      const onlyLoss = marginAt({ legs: creditLegs, prices: [500, 200], spot: 10_200, params: marginParams, creditPolicy: 'maxLoss' });
+      return credit.blocked >= onlyShort.blocked - 1e-6 && credit.blocked >= onlyLoss.blocked - 1e-6;
+    })());
+    check('هر سه سیاست، تخمینی بودن را حمل می‌کنند',
+      Object.keys(CREDIT_MARGIN_POLICIES).every((policy) =>
+        creditSpreadMargin({ marginNet: 1e6, maxLoss: 2e6, policy }).estimated === true));
+    check('زیان حداکثرِ نامعلوم، عدد ساختگی نمی‌سازد', (() => {
+      const out = creditSpreadMargin({ marginNet: 1e6, maxLoss: NaN, policy: 'maxLoss' });
+      return out.value === 1e6 && out.label.includes('نامعلوم');
+    })());
+    check('وجه تضمین با قیمت همان لحظه حساب می‌شود نه با قیمت ورود', (() => {
+      // روی اسپرد پوشش‌یافته، پای فروش با پای خرید پوشش می‌شود و عدد به
+      // فاصلهٔ دو قیمت اعمال می‌چسبد نه به قیمت قرارداد. پس ادعا را روی
+      // پای لخت می‌سنجیم، جایی که وجه تضمین نگهداری واقعاً با قیمت روز
+      // بالا و پایین می‌رود — و همین است که کال مارجین را می‌سازد.
+      //
+      // و عددی که باید سنجیده شود «وجه تضمین لازم» است نه «خالص». خالص،
+      // پریمیوم دریافتی را کم می‌کند و چون هر دو با قیمت قرارداد بالا
+      // می‌روند، تفاضلشان تقریباً ثابت می‌ماند. آنچه کال مارجین را
+      // می‌سازد، همان عدد ناخالص است.
+      const naked = [{ kind: 'put', side: 'sell', strike: 10_000, ratio: 1, size: 1000, price: 500 }];
+      const cheap = marginAt({ legs: naked, prices: [500], spot: 10_200, params: marginParams });
+      const dear = marginAt({ legs: naked, prices: [1500], spot: 10_200, params: marginParams });
+      return dear.margin.requiredTotal > cheap.margin.requiredTotal && cheap.marginNet > 0;
+    })());
+  }
+
+  // ——— پای بی‌قیمت ———
+  check('پای بی‌قیمت سود صفر نمی‌گیرد بلکه نامعلوم می‌ماند', (() => {
+    const row = markMoment({
+      legs, prices: [world[2].prices[0], NaN], entryPrices, spot: world[2].spot,
+      date: world[2].date, days: [58, 58], params,
+    });
+    return Number.isNaN(row.pnl[1]) && row.marked === 1;
+  })());
+  check('گام ناقص، پوشش تجزیه را کم می‌کند', (() => {
+    const holed = track.map((row, at) => (at === 3 ? { ...row, ivPct: [row.ivPct[0], NaN] } : row));
+    const out = decomposePnl({ legs, track: holed });
+    return out.coverage < 100 && out.incompleteSteps > 0;
+  })());
+}
+
+// ═══════════════════ ۱۰۵. رویدادهای میانی و قواعد خروج ═══════════════════
+//
+// مهم‌ترین ادعای این گروه یکی است: قاعده‌ای که شلیک کند ولی در مظنهٔ همان
+// لحظه اجراشدنی نباشد، **خروج ثبت نمی‌کند**. سیستمی که این را رعایت نکند،
+// همیشه به نفع استراتژی دروغ می‌گوید.
+group('۱۰۵. رویدادهای میانی و قواعد خروج');
+{
+  const evt = (time, ref, level, bid, bidQty, ask, askQty) => ({
+    hEven: time, refID: ref, number: level,
+    pMeDem: bid, qTitMeDem: bidQty, zOrdMeDem: 1,
+    pMeOf: ask, qTitMeOf: askQty, zOrdMeOf: 1,
+  });
+  const snap = (rows, second = 10 * 3600) => bookAt(normalizeBookEvents(rows), second);
+  const fees = { buyStock: 0.003712, sellStock: 0.0088, option: 0.00103, exercise: 0.0005 };
+  const marginParams = { A: 0.20, B: 0.10, C: 10000, maint: 0.70, bBasis: 'SPOT' };
+
+  const legs = [
+    { kind: 'call', side: 'buy', strike: 10_000, ratio: 1, size: 1000, ins: 'A', price: 500 },
+    { kind: 'call', side: 'sell', strike: 11_000, ratio: 1, size: 1000, ins: 'B', price: 200 },
+  ];
+  const deepBooks = {
+    A: snap([evt(90000, 1, 1, 480, 500, 500, 500), evt(90000, 2, 2, 470, 500, 510, 500)]),
+    B: snap([evt(90000, 3, 1, 190, 500, 210, 500), evt(90000, 4, 2, 180, 500, 220, 500)]),
+  };
+  const openMeta = { A: { limitLow: 1, limitHigh: 9999 }, B: { limitLow: 1, limitHigh: 9999 } };
+  // پای دوم در صف خرید قفل است: عرضه خالی و تقاضا روی سقف دامنه.
+  const queuedBooks = { A: deepBooks.A, B: snap([evt(90000, 9, 1, 300, 9000, 0, 0)]) };
+  const queuedMeta = { A: openMeta.A, B: { limitLow: 100, limitHigh: 300 } };
+
+  // ——— قواعد ———
+  check('فهرست قواعد خروج، حد ضرر روی قیمت قرارداد ندارد',
+    !EXIT_RULES.some((rule) => /قرارداد|اختیار|پریمیوم/.test(rule.basis)));
+  check('هر قاعده به قیمت پایه یا زمان یا سود موقعیت بسته است',
+    EXIT_RULES.every((rule) => ['قیمت پایه', 'زمان', 'سود موقعیت', 'زیان موقعیت'].includes(rule.basis)));
+  check('دلیل نبودن حد ضرر قراردادی صادر می‌شود تا رابط نشانش دهد',
+    typeof NO_OPTION_STOP_NOTE === 'string' && NO_OPTION_STOP_NOTE.includes('اجرا نمی‌شود'));
+
+  check('قاعدهٔ عبور از سطح بالا درست شلیک می‌کند',
+    ruleFires({ key: 'spotAbove', value: 10_000 }, { spot: 10_500 })
+    && !ruleFires({ key: 'spotAbove', value: 10_000 }, { spot: 9_500 }));
+  check('قاعدهٔ عبور از سطح پایین درست شلیک می‌کند',
+    ruleFires({ key: 'spotBelow', value: 10_000 }, { spot: 9_500 })
+    && !ruleFires({ key: 'spotBelow', value: 10_000 }, { spot: 10_500 }));
+  check('قاعدهٔ روز مانده در آستانه شلیک می‌کند',
+    ruleFires({ key: 'daysLeft', value: 7 }, { daysLeft: 7 })
+    && !ruleFires({ key: 'daysLeft', value: 7 }, { daysLeft: 8 }));
+  check('درصد سود نسبت به بیشترین سود سنجیده می‌شود',
+    ruleFires({ key: 'profitPct', value: 80 }, { pnl: 80, maxProfit: 100 })
+    && !ruleFires({ key: 'profitPct', value: 80 }, { pnl: 70, maxProfit: 100 }));
+  check('بدون بیشترین سود، قاعدهٔ درصد سود شلیک نمی‌کند',
+    !ruleFires({ key: 'profitPct', value: 50 }, { pnl: 90, maxProfit: NaN }));
+  check('قاعدهٔ درصد زیان روی سود شلیک نمی‌کند',
+    !ruleFires({ key: 'lossPct', value: 50 }, { pnl: 90, maxLoss: -100 })
+    && ruleFires({ key: 'lossPct', value: 50 }, { pnl: -60, maxLoss: -100 }));
+  check('قاعدهٔ ناشناخته و آستانهٔ نامعتبر شلیک نمی‌کنند',
+    !ruleFires({ key: 'whatever', value: 1 }, { spot: 5 })
+    && !ruleFires({ key: 'spotAbove', value: NaN }, { spot: 5 }));
+  check('اولین قاعدهٔ شلیک‌کننده به ترتیب فهرست کاربر برداشته می‌شود', (() => {
+    const rules = [{ key: 'daysLeft', value: 1 }, { key: 'spotAbove', value: 10_000 }];
+    return firstFiring(rules, { spot: 10_500, daysLeft: 30 })?.key === 'spotAbove';
+  })());
+
+  // ——— بستن ———
+  check('بستن با دفتر عمیق انجام می‌شود',
+    attemptClose({ legs, size: 1, books: deepBooks, meta: openMeta, fees, takePct: 100 }).closed === true);
+  check('پای در صف، بستن را ناممکن می‌کند', (() => {
+    const out = attemptClose({ legs, size: 1, books: queuedBooks, meta: queuedMeta, fees });
+    return out.closed === false && out.kind === 'queueBlocked';
+  })());
+  check('عمق ناکافی یعنی بستن ناقص، نه بستن کامل', (() => {
+    const thin = {
+      A: snap([evt(90000, 1, 1, 480, 2, 500, 2)]),
+      B: snap([evt(90000, 3, 1, 190, 2, 210, 2)]),
+    };
+    const out = attemptClose({ legs, size: 10, books: thin, meta: openMeta, fees, takePct: 100 });
+    return out.closed === false && out.partial === true && out.filled > 0 && out.filled < 10;
+  })());
+
+  // ——— کال مارجین ———
+  {
+    const naked = [{ kind: 'put', side: 'sell', strike: 10_000, ratio: 1, size: 1000, ins: 'A', price: 500 }];
+    const rich = marginCallAt({ legs: naked, prices: [500], spot: 10_200, equity: 1e9, params: marginParams });
+    const poor = marginCallAt({ legs: naked, prices: [500], spot: 10_200, equity: 1000, params: marginParams });
+    check('سرمایهٔ کافی کال مارجین نمی‌سازد', rich.called === false);
+    check('سرمایهٔ کم کال مارجین می‌سازد و کسری را می‌گوید',
+      poor.called === true && poor.shortfall > 0 && poor.why.length > 0);
+    check('کال مارجین از وجه تضمین لازم می‌آید نه از خالص',
+      poor.required > 0 && Math.abs(poor.floor - poor.required * 0.70) < 1e-6);
+    check('بدون وجه تضمین، کال مارجینی هم نیست',
+      marginCallAt({ legs: [{ kind: 'call', side: 'buy', strike: 1, ratio: 1, size: 1000, price: 1 }], prices: [1], spot: 10, equity: 0, params: marginParams }).called === false);
+  }
+
+  // ═══ ادعای اصلی: قاعده شلیک کرد، بازار اجازه نداد ═══
+  {
+    const moments = [
+      { date: 20260519, second: 10 * 3600 },
+      { date: 20260520, second: 10 * 3600 },
+      { date: 20260521, second: 10 * 3600 },
+    ];
+    // روز دوم قیمت پایه از سطح رد می‌شود، ولی همان روز پای دوم در صف است.
+    const feedBlocked = (at) => ({
+      spot: at === 0 ? 9_500 : 10_500,
+      prices: [500, 200],
+      books: at === 0 ? deepBooks : queuedBooks,
+      meta: at === 0 ? openMeta : queuedMeta,
+      daysLeft: 60 - at, pnl: 0, equity: 1e12,
+    });
+    const blocked = walkMoments({
+      moments, feed: feedBlocked, legs, size: 1, fees, params: marginParams,
+      rules: [{ key: 'spotAbove', value: 10_000 }],
+    });
+    check('قاعده شلیک می‌کند و ثبت می‌شود',
+      blocked.events.some((e) => e.kind === 'exitRule'));
+    check('خروجِ ناممکن، «خروج انجام شد» ثبت نمی‌کند',
+      !blocked.events.some((e) => e.kind === 'exitDone'));
+    check('به‌جایش رویداد ناکامی ثبت می‌شود',
+      blocked.events.some((e) => e.kind === 'queueBlocked' || e.kind === 'exitFailed'));
+    check('موقعیت باز می‌ماند', blocked.open === true && blocked.closedAt === null);
+    check('حلقه ادامه می‌دهد و هر روز دوباره امتحان می‌کند', blocked.attempts >= 2);
+    check('هر رویداد مهر زمانی دقیق خودش را دارد',
+      blocked.events.every((e) => /^\d{8} \d{2}:\d{2}:\d{2}$/.test(e.stamp)));
+
+    // همان مسیر، ولی دفتر باز.
+    const feedOpen = (at) => ({ ...feedBlocked(at), books: deepBooks, meta: openMeta });
+    const done = walkMoments({
+      moments, feed: feedOpen, legs, size: 1, fees, params: marginParams, takePct: 100,
+      rules: [{ key: 'spotAbove', value: 10_000 }],
+    });
+    check('با دفتر باز، همان قاعده خروج را انجام می‌دهد',
+      done.events.some((e) => e.kind === 'exitDone') && done.open === false);
+    check('پس از بستن، حلقه می‌ایستد', done.closedAt.date === 20260520);
+  }
+
+  // ——— سررسید و توقف ———
+  {
+    const moments = [{ date: 20260519, second: 10 * 3600 }, { date: 20260520, second: 10 * 3600 }];
+    const feed = () => ({ spot: 10_000, prices: [500, 200], books: deepBooks, meta: openMeta, daysLeft: 1, pnl: 0, equity: 1e12 });
+    const expired = walkMoments({ moments, feed, legs, size: 1, fees, params: marginParams, expiryDate: 20260520 });
+    check('سررسید موقعیت را می‌بندد',
+      expired.events.some((e) => e.kind === 'expiry') && expired.open === false);
+
+    const haltedFeed = (at) => ({ ...feed(at), halted: true, haltWhy: 'نماد متوقف بود' });
+    const halted = walkMoments({
+      moments, feed: haltedFeed, legs, size: 1, fees, params: marginParams,
+      rules: [{ key: 'spotAbove', value: 1 }],
+    });
+    check('در توقف نماد، هیچ خروجی حتی امتحان نمی‌شود',
+      halted.events.every((e) => e.kind === 'halt') && halted.attempts === 0 && halted.open === true);
+  }
+
+  // ——— خلاصهٔ آموزشی ———
+  check('خلاصه، نرخ اجرای قواعد را می‌گوید', (() => {
+    const s = eventSummary([
+      makeEvent('exitRule', { date: 20260519, second: 36000 }),
+      makeEvent('exitFailed', { date: 20260519, second: 36000 }),
+      makeEvent('exitRule', { date: 20260520, second: 36000 }),
+      makeEvent('exitDone', { date: 20260520, second: 36000 }),
+    ]);
+    return s.fired === 2 && s.failed === 1 && Math.abs(s.executedRate - 50) < 1e-9
+      && s.note.includes('درسِ این جلسه');
+  })());
+  check('بی‌رویداد، خلاصه ادعای اضافه نمی‌کند',
+    eventSummary([]).note.includes('هیچ قاعدهٔ خروجی') && Number.isNaN(eventSummary([]).executedRate));
+  check('بدون بارگذار، حلقه چیزی نمی‌سازد',
+    walkMoments({ moments: [{ date: 20260519, second: 36000 }], legs }).events.length === 0);
+}
+
+// ═══════════════════ ۱۰۶. حالت ناشناس ═══════════════════
+//
+// ادعای این گروه: پنهان‌کردن نام کافی نیست. معامله‌گر فعالِ این بازار از
+// سطح قیمت، شبکهٔ قیمت اعمال و اندازهٔ غیراستاندارد قرارداد هم نماد را
+// می‌شناسد. اگر آن‌ها بمانند، حالت ناشناس تزئینی است.
+group('۱۰۶. حالت ناشناس');
+{
+  // ——— نام مستعار ———
+  check('نام مستعار در یک جلسه ثابت است',
+    makeAlias('جلسه-۱', '17765240') === makeAlias('جلسه-۱', '17765240'));
+  check('نام مستعار بین دو جلسه فرق می‌کند',
+    makeAlias('جلسه-۱', '17765240') !== makeAlias('جلسه-۲', '17765240'));
+  check('دو ابزار در یک جلسه دو نام می‌گیرند',
+    makeAlias('ج', '111') !== makeAlias('ج', '222'));
+  check('نام مستعار رقم لاتین ندارد', /^[^0-9]*$/.test(makeAlias('ج', '111')));
+  check('نگاشت نام مستعار، تکراری نمی‌سازد', (() => {
+    const map = aliasMap('ج', ['111', '222', '111']);
+    return Object.keys(map).length === 2 && map['111'] === makeAlias('ج', '111');
+  })());
+
+  // ——— محور قیمت ———
+  {
+    const rows = [{ date: 1, close: 5200 }, { date: 2, close: 5460 }, { date: 3, close: 5044 }];
+    const indexed = indexSeries(rows);
+    check('سری از صد شاخص می‌شود', Math.abs(indexed.rows[0].close - 100) < 1e-9);
+    check('شکل نمودار دست‌نخورده می‌ماند', (() => {
+      const rawPct = (rows[1].close - rows[0].close) / rows[0].close;
+      const idxPct = (indexed.rows[1].close - indexed.rows[0].close) / indexed.rows[0].close;
+      return Math.abs(rawPct - idxPct) < 1e-12;
+    })());
+    check('قیمت واقعی برای گزارش پایانی نگه داشته می‌شود',
+      indexed.rows[0].closeRaw === 5200 && indexed.base === 5200);
+    check('سری خالی، پایه نمی‌سازد', Number.isNaN(indexSeries([]).base));
+  }
+
+  // ——— قیمت اعمال ———
+  check('فاصله از پایه به‌جای قیمت اعمال می‌نشیند',
+    Math.abs(moneynessPct(11_000, 10_000) - 10) < 1e-9
+    && Math.abs(moneynessPct(9_000, 10_000) + 10) < 1e-9);
+  check('برچسب فاصله، باارزش و بی‌ارزش را هم می‌گوید',
+    moneynessLabel(11_000, 10_000, 'call').includes('بی‌ارزش')
+    && moneynessLabel(9_000, 10_000, 'call').includes('باارزش')
+    && moneynessLabel(11_000, 10_000, 'put').includes('باارزش'));
+  check('برچسب فاصله رقم لاتین و نقطهٔ لاتین ندارد',
+    /^[^0-9.]*$/.test(moneynessLabel(11_000, 10_000, 'call')));
+  check('بدون قیمت، فاصله ساخته نمی‌شود',
+    moneynessLabel(0, 10_000) === '—' && Number.isNaN(moneynessPct(11_000, 0)));
+
+  // ——— اندازهٔ قرارداد ———
+  check('اندازهٔ استاندارد و تعدیل‌شده فقط برچسب می‌گیرند، نه عدد',
+    sizeLabel(1000) === 'استاندارد' && sizeLabel(1187) === 'تعدیل‌شده'
+    && !/\d/.test(sizeLabel(1187)));
+  check('اندازهٔ نامعتبر «نامعلوم» است', sizeLabel(0) === 'نامعلوم' && sizeLabel(NaN) === 'نامعلوم');
+
+  // ——— تاریخ ———
+  check('تاریخ به «روز n جلسه» تبدیل می‌شود',
+    dayLabel(20260521, 20260519, [20260519, 20260520, 20260521]) === 'روز ۳ جلسه');
+  check('روز شروع، روز یک است',
+    dayLabel(20260519, 20260519, [20260519, 20260520]) === 'روز ۱ جلسه');
+  check('برچسب روز، تاریخ واقعی را جایی نمی‌آورد',
+    !dayLabel(20260521, 20260519, [20260519, 20260520, 20260521]).includes('۲۰۲۶'));
+
+  // ——— نگهبان نشت ———
+  {
+    const secrets = { names: ['خودرو', 'شستا'], dates: [20260521] };
+    check('نشت نام گرفته می‌شود', leakCheck('روند نماد خودرو صعودی بود', secrets).clean === false);
+    check('نشت تاریخ فشرده گرفته می‌شود', leakCheck('در 20260521 بسته شد', secrets).clean === false);
+    check('نشت تاریخ با جداکننده هم گرفته می‌شود',
+      leakCheck('در 2026/05/21 بسته شد', secrets).clean === false
+      && leakCheck('در 2026-05-21 بسته شد', secrets).clean === false);
+    check('متن پاک، پاک اعلام می‌شود',
+      leakCheck('نماد الف-۷ در روز ۳ جلسه صعودی بود', secrets).clean === true);
+    check('نشت، نوع و مقدارش را می‌گوید', (() => {
+      const out = leakCheck('خودرو در 20260521', secrets);
+      return out.found.some((f) => f.kind === 'name') && out.found.some((f) => f.kind === 'date');
+    })());
+    check('نام تک‌حرفی نگهبان را بی‌جهت شلیک نمی‌کند',
+      leakCheck('نماد الف-۷', { names: ['خ'], dates: [] }).clean === true);
+  }
+
+  // ——— دید قرارداد ———
+  {
+    const contract = {
+      ins: '17765240', kind: 'call', strike: 11_000, size: 1187, daysToExpiry: 42,
+      ivPct: 44.2, ivPercentile: 78, openInterest: 12_000, volume: 3_400, value: 9.9e9, spreadPct: 3.1,
+    };
+    const aliases = aliasMap('ج', ['17765240']);
+    const view = anonContract(contract, { spot: 10_000, aliases, on: true });
+    check('قیمت اعمال در دید ناشناس نیست', !('strike' in view));
+    check('اندازهٔ عددی قرارداد در دید ناشناس نیست',
+      !('size' in view) && view.sizeLabel === 'تعدیل‌شده');
+    check('تصمیم‌سازها می‌مانند',
+      view.ivPct === 44.2 && view.ivPercentile === 78 && view.openInterest === 12_000
+      && view.volume === 3_400 && view.spreadPct === 3.1 && view.daysToExpiry === 42);
+    check('فهرست آنچه پنهان شده به کاربر گفته می‌شود',
+      view.hidden.includes('قیمت اعمال') && view.hidden.includes('نام نماد'));
+    check('خاموش‌بودن حالت ناشناس، قرارداد را دست‌نخورده می‌گذارد', (() => {
+      const raw = anonContract(contract, { spot: 10_000, aliases, on: false });
+      return raw.strike === 11_000 && raw.size === 1187 && raw.anonymous === false;
+    })());
+    check('دید ناشناس هیچ نشتی ندارد',
+      leakCheck(JSON.stringify(view), { names: [], dates: [] }).clean === true
+      && !JSON.stringify(view).includes('11000'));
+  }
+
+  // ——— افشا ———
+  {
+    const start = { date: 20260519, second: 9 * 3600 };
+    let s = blankSession({ id: 'ج', start });
+    const aliases = aliasMap('ج', ['17765240']);
+    check('تا جلسه باز است، افشایی در کار نیست',
+      reveal({ session: s, aliases, names: { '17765240': 'خودرو' } }).ok === false);
+    s = closeSession(s).session;
+    const out = reveal({ session: s, aliases, names: { '17765240': 'خودرو' } });
+    check('پس از بستن جلسه، نام و تاریخ فاش می‌شوند',
+      out.ok === true && out.startDate === 20260519 && out.symbols[0].name === 'خودرو');
+    check('افشا، نام مستعار را هم کنار نام واقعی می‌گذارد',
+      out.symbols[0].alias === aliases['17765240']);
+    check('جلسهٔ رهاشده هم قابل افشاست',
+      reveal({ session: closeSession(blankSession({ id: 'x', start }), { abandoned: true }).session, aliases: {} }).ok === true);
+  }
+}
+
+// ═══════════════════ ۱۰۷. شمارهٔ پا در دلیلِ اجراناپذیری ═══════════════════
+//
+// موتور اجرا برچسبِ خودش را می‌سازد و قیمت اعمال تویش هست. برای جدول
+// معمولی درست است و برای شبیه‌سازی ناشناس غلط. راه‌حل، تجزیهٔ رشتهٔ فارسی
+// نیست — موتور **شمارهٔ پا** را هم می‌دهد و مصرف‌کننده برچسب خودش را
+// می‌سازد. این گروه همان قرارداد را قفل می‌کند.
+group('۱۰۷. شمارهٔ پا در دلیلِ اجراناپذیری');
+{
+  const evt = (time, ref, level, bid, bidQty, ask, askQty) => ({
+    hEven: time, refID: ref, number: level,
+    pMeDem: bid, qTitMeDem: bidQty, zOrdMeDem: 1,
+    pMeOf: ask, qTitMeOf: askQty, zOrdMeOf: 1,
+  });
+  const snap = (rows) => bookAt(normalizeBookEvents(rows), 10 * 3600);
+  const fees = { buyStock: 0.003712, sellStock: 0.0088, option: 0.00103, exercise: 0.0005 };
+  const legs = [
+    { kind: 'call', side: 'buy', strike: 10_000, ratio: 1, size: 1000, ins: 'A' },
+    { kind: 'call', side: 'sell', strike: 11_000, ratio: 1, size: 1000, ins: 'B' },
+  ];
+  const openMeta = { A: { limitLow: 1, limitHigh: 9999 }, B: { limitLow: 1, limitHigh: 9999 } };
+  const deep = snap([evt(90000, 1, 1, 480, 900, 500, 900), evt(90000, 2, 2, 470, 900, 510, 900)]);
+  const thin = snap([evt(90000, 3, 1, 190, 4, 210, 4)]);
+
+  check('هر قید، شمارهٔ پای خودش را دارد', (() => {
+    const out = executableAt({ legs, books: { A: deep, B: thin }, meta: openMeta, fees, takePct: 100 });
+    return out.limits.every((row) => Number.isInteger(row.index));
+  })());
+  check('قید مقیدکننده شمارهٔ پا را هم می‌دهد', (() => {
+    const out = executableAt({ legs, books: { A: deep, B: thin }, meta: openMeta, fees, takePct: 100 });
+    return out.bindingIndex === 1;   // پای نازک، پای دوم است
+  })());
+  check('از شمارهٔ پا می‌شود برچسب تازه ساخت بی‌آنکه رشته تجزیه شود', (() => {
+    const out = executableAt({ legs, books: { A: deep, B: thin }, meta: openMeta, fees, takePct: 100 });
+    const leg = legs[out.bindingIndex];
+    return leg?.strike === 11_000 && leg.side === 'sell';
+  })());
+  check('پای بی‌دفتر، شمارهٔ خودش را در فهرست کم‌بودها دارد', (() => {
+    const out = executableAt({ legs, books: { A: deep }, meta: openMeta, fees });
+    return out.missing.length === 1 && out.missing[0].index === 1 && typeof out.missing[0].leg === 'string';
+  })());
+  check('پای در صف، شمارهٔ خودش را در فهرست مسدودها دارد', (() => {
+    const queued = snap([evt(90000, 9, 1, 300, 5000, 0, 0)]);
+    const out = executableAt({
+      legs, books: { A: deep, B: queued },
+      meta: { A: openMeta.A, B: { limitLow: 100, limitHigh: 300 } }, fees,
+    });
+    return out.blocked.length === 1 && out.blocked[0].index === 1 && out.blocked[0].key === 'buyQueue';
+  })());
+  check('قیدِ نیامده از پا — سرمایه — شماره ندارد و همان می‌ماند', (() => {
+    const out = executableAt({
+      legs, books: { A: deep, B: deep }, meta: openMeta, fees, takePct: 100,
+      capitalAvailable: 1000, capitalPerContract: 1000,
+    });
+    const capital = out.limits.find((row) => row.what === 'سرمایه در دسترس');
+    return !!capital && capital.index === undefined;
+  })());
+  check('بدون هیچ مظنه‌ای، شمارهٔ قید منفی یک است', (() => {
+    const out = maxSize([{ kind: 'call', side: 'buy', ratio: 1, size: 1000, exec: { assumedDepth: true } }], {});
+    return out.bindingIndex === -1 && out.max === 0;
+  })());
+}
+
+// ═══════════════════ ۱۰۸. موتور پیشنهاد ═══════════════════
+//
+// سند دو خواستهٔ صریح دارد که این گروه هر دو را قفل می‌کند: ساختاری که
+// فقط زیر سناریوی دقیق کاربر برنده است باید جریمه بگیرد، و اجزای امتیاز
+// باید دیده شوند نه فقط عدد نهایی.
+group('۱۰۸. موتور پیشنهاد');
+{
+  const view = {
+    spot: 10_000, direction: 'up', movePct: 8, confidence: 0.6,
+    horizonDays: 20, realizedVolPct: 40,
+  };
+  const dist = viewDistribution(view);
+
+  // ——— توزیع ———
+  check('مرکز توزیع از پیش‌بینی کاربر می‌آید', Math.abs(dist.centre - 10_800) < 1e-6);
+  check('مرکز، میانگین است نه میانه — و هر دو جدا برمی‌گردند',
+    dist.medianPrice < dist.centre
+    && Math.abs(dist.medianPrice - dist.centre * Math.exp(-0.5 * dist.sigma ** 2)) < 1e-9);
+  check('نظر نزولی مرکز را پایین می‌برد',
+    viewDistribution({ ...view, direction: 'down' }).centre < view.spot);
+  check('نظر خنثی مرکز را جابه‌جا نمی‌کند',
+    Math.abs(viewDistribution({ ...view, direction: 'flat' }).centre - view.spot) < 1e-6);
+  check('اطمینان کامل، پراکندگی را از تلاطم تحقق‌یافته کمتر نمی‌کند', (() => {
+    const sure = viewDistribution({ ...view, confidence: 1 });
+    const base = 0.40 * Math.sqrt(20 / 365);
+    return Math.abs(sure.sigma - base) < 1e-9;
+  })());
+  check('اطمینان صفر، پراکندگی را سه برابر می‌کند', (() => {
+    const unsure = viewDistribution({ ...view, confidence: 0 });
+    const sure = viewDistribution({ ...view, confidence: 1 });
+    return Math.abs(unsure.sigma - sure.sigma * 3) < 1e-9;
+  })());
+  check('نظر پرنوسان، پراکندگی بیشتری می‌خواهد',
+    viewDistribution({ ...view, direction: 'volatile' }).sigma > dist.sigma);
+  check('بدون تلاطم تحقق‌یافته، توزیعی ساخته نمی‌شود', (() => {
+    const none = viewDistribution({ ...view, realizedVolPct: NaN });
+    return none.ok === false && none.why.length > 0;
+  })());
+  check('نظر دربارهٔ تلاطم ضمنی جدا از توزیع پایه نگه داشته می‌شود',
+    viewDistribution({ ...view, ivView: 'up' }).ivShiftPp > 0
+    && viewDistribution({ ...view, ivView: 'down' }).ivShiftPp < 0
+    && viewDistribution({ ...view, ivView: 'same' }).ivShiftPp === 0);
+
+  // ——— ویرایش ———
+  check('ویرایش دستی توزیع علامت می‌خورد', (() => {
+    const edited = editDistribution(dist, { centre: 11_000 });
+    return edited.edited === true && Math.abs(edited.centre - 11_000) < 1e-6
+      && Math.abs(edited.driftPct - 10) < 1e-9 && dist.edited === false;
+  })());
+  check('ویرایش با عدد نامعتبر چیزی را خراب نمی‌کند', (() => {
+    const same = editDistribution(dist, { centre: -5, sigma: 0 });
+    return same.centre === dist.centre && same.sigma === dist.sigma;
+  })());
+
+  // ——— گره‌ها ———
+  {
+    const nodes = quantileNodes(dist, 9);
+    check('گره‌ها به تعداد خواسته‌شده‌اند', nodes.length === 9);
+    check('گره‌ها صعودی‌اند', nodes.every((value, at) => at === 0 || value > nodes[at - 1]));
+    check('میانگین گره‌ها روی مرکز می‌نشیند، و گرهِ میانی روی میانه', (() => {
+      const many = quantileNodes(dist, 401);
+      const mean = many.reduce((a, b) => a + b, 0) / many.length;
+      const middle = many[200];
+      return Math.abs(mean - dist.centre) / dist.centre < 0.01
+        && Math.abs(middle - dist.medianPrice) / dist.medianPrice < 0.01;
+    })());
+    check('توزیع نامعتبر گره نمی‌سازد', quantileNodes({ ok: false }, 9).length === 0);
+  }
+  check('امید ریاضی، میانگین سادهٔ گره‌هاست', (() => {
+    const nodes = quantileNodes(dist, 11);
+    const manual = nodes.reduce((sum, S) => sum + S, 0) / nodes.length;
+    return Math.abs(expectedUnder(dist, (S) => S, 11) - manual) < 1e-9;
+  })());
+  check('احتمال، نسبت گره‌های برنده است', (() => {
+    // تابعی که دقیقاً بالای میانه مثبت است → نزدیک پنجاه درصد
+    const p = probabilityUnder(dist, (S) => S - dist.medianPrice, 101);
+    return Math.abs(p - 50) < 2;
+  })());
+
+  // ——— آزمون مقاومت ———
+  check('فشار، توزیع را خلاف جهت نظر جابه‌جا می‌کند',
+    stressDistribution(dist).centre < dist.centre
+    && stressDistribution(viewDistribution({ ...view, direction: 'down' })).centre
+      > viewDistribution({ ...view, direction: 'down' }).centre);
+  check('برای نظر بی‌جهت، فشار به اندازهٔ نصف پراکندگی است', (() => {
+    const flat = viewDistribution({ ...view, direction: 'flat' });
+    const under = stressDistribution(flat);
+    return Math.abs(under.centre - flat.spot * (1 - flat.sigma / 2)) < 1e-6;
+  })());
+  check('توزیع تحت فشار علامت خودش را دارد', stressDistribution(dist).stressed === true);
+
+  // ——— امتیاز ———
+  const spread = [
+    { kind: 'call', side: 'buy', strike: 10_000, ratio: 1, size: 1000, price: 500 },
+    { kind: 'call', side: 'sell', strike: 11_000, ratio: 1, size: 1000, price: 200 },
+  ];
+  const scored = scoreCandidate({ legs: spread, dist, capital: 300_000, maxLoss: 300_000 });
+  check('امتیاز ساخته می‌شود', scored.ok === true && Number.isFinite(scored.score));
+  check('همهٔ اجزای امتیاز برمی‌گردند، نه فقط عدد نهایی',
+    SCORE_PARTS.every((part) => part.key in scored.parts));
+  check('هر جزء امتیاز برچسب و توضیح دارد',
+    SCORE_PARTS.every((part) => part.label && part.hint && part.unit));
+  check('بازده بر مخرج سرمایه حساب می‌شود',
+    Math.abs(scored.parts.returnPct - (scored.parts.expectedPnl / 300_000) * 100) < 1e-9);
+  check('بدون مخرج سرمایه، امتیاز ساخته نمی‌شود',
+    scoreCandidate({ legs: spread, dist, capital: 0 }).ok === false);
+  check('بدون توزیع، امتیاز ساخته نمی‌شود',
+    scoreCandidate({ legs: spread, dist: { ok: false } }).ok === false);
+
+  // ═══ ادعای اصلی: ساختار شکننده جریمه می‌گیرد ═══
+  {
+    // کالِ خیلی بی‌ارزش فقط وقتی می‌برد که حرکت دقیقاً همان‌قدر که کاربر
+    // گفته یا بیشتر باشد؛ کالِ باارزش زیر فشار هم چیزی نگه می‌دارد.
+    const fragile = [{ kind: 'call', side: 'buy', strike: 12_000, ratio: 1, size: 1000, price: 60 }];
+    const sturdy = [{ kind: 'call', side: 'buy', strike: 9_500, ratio: 1, size: 1000, price: 900 }];
+    const a = scoreCandidate({ legs: fragile, dist, capital: 60_000, maxLoss: 60_000 });
+    const b = scoreCandidate({ legs: sturdy, dist, capital: 900_000, maxLoss: 900_000 });
+    check('شکنندگی برای ساختار دور از پول بیشتر است',
+      a.parts.fragility > b.parts.fragility,
+      `${a.parts.fragility.toFixed(1)} در برابر ${b.parts.fragility.toFixed(1)}`);
+    check('بازده زیر فشار همیشه از بازده عادی کمتر است',
+      a.parts.stressReturnPct < a.parts.returnPct && b.parts.stressReturnPct < b.parts.returnPct);
+    check('امتیاز میان دو بازده می‌نشیند، نه روی خوش‌بینانه‌ترینشان',
+      a.score < a.parts.returnPct && a.score > a.parts.stressReturnPct);
+  }
+
+  // ——— رتبه‌بندی ———
+  {
+    const make = (id, score, ok = true, max = 5) => ({
+      id, exec: { ok, max, why: ok ? '' : 'صف خرید' },
+      score: { ok: true, score, parts: {} },
+    });
+    const out = rankCandidates([make('a', 10), make('b', 30), make('c', 20), make('x', 99, false, 0)]);
+    check('رتبه‌بندی به ترتیب امتیاز است', out.ranked.map((r) => r.id).join(',') === 'b,c,a');
+    check('رتبه از یک شروع می‌شود', out.ranked[0].rank === 1 && out.ranked[2].rank === 3);
+    check('کاندید اجراناپذیر رتبه نمی‌گیرد', !out.ranked.some((r) => r.id === 'x'));
+    check('ولی ناپدید هم نمی‌شود و دلیلش می‌ماند',
+      out.rejected.length === 1 && out.rejected[0].id === 'x' && out.rejected[0].why === 'صف خرید');
+    check('کاندید بی‌امتیاز هم کنار می‌رود با دلیل', (() => {
+      const r = rankCandidates([{ id: 'z', exec: { ok: true, max: 3 }, score: { ok: false, why: 'مخرج نبود' } }]);
+      return r.ranked.length === 0 && r.rejected[0].why === 'مخرج نبود';
+    })());
+
+    // ——— کیفیت انتخاب ———
+    const quality = pickQuality(out.ranked, ['c']);
+    check('رتبهٔ انتخاب کاربر گزارش می‌شود', quality.ok && quality.meanRank === 2 && quality.total === 3);
+    check('صدک انتخاب حساب می‌شود', Math.abs(quality.percentile - 50) < 1e-9);
+    check('انتخابی که در کاندیدها نیست، کیفیت نمی‌سازد',
+      pickQuality(out.ranked, ['ناموجود']).ok === false);
+  }
+
+  // ——— بدشانسی در برابر بدانتخابی ———
+  check('وقتی همه ضرر دادند، حکم روی پیش‌بینی است', (() => {
+    const r = luckVsSkill({ shadowPnls: [-10, -20, -5, -30], chosenPnl: -12 });
+    return r.verdict === 'forecast' && r.note.includes('پیش‌بینی جهت غلط');
+  })());
+  check('وقتی بیشترشان سود دادند و انتخاب پایین بود، حکم روی ساختار است', (() => {
+    const r = luckVsSkill({ shadowPnls: [100, 80, 60, 40, -5], chosenPnl: 10 });
+    return r.verdict === 'selection' && r.note.includes('ساختار غلط');
+  })());
+  check('وقتی انتخاب از بیشترشان بهتر بود، حکم روی برتری کاربر است', (() => {
+    const r = luckVsSkill({ shadowPnls: [10, 20, 5, -30, -5], chosenPnl: 90 });
+    return r.verdict === 'edge' && r.note.includes('موتور نمی‌بیند');
+  })());
+  check('حالت مبهم، حکم قطعی نمی‌دهد', (() => {
+    const r = luckVsSkill({ shadowPnls: [10, -10, 20, -20], chosenPnl: 5 });
+    return r.verdict === 'mixed' && r.note.includes('یک جلسه برای حکم‌دادن کافی نیست');
+  })());
+  check('بدون سود و زیان سایه‌ها، تفکیکی ادعا نمی‌شود',
+    luckVsSkill({ shadowPnls: [], chosenPnl: 5 }).ok === false);
+  check('هیچ حکمی رقم لاتین ندارد', [
+    luckVsSkill({ shadowPnls: [-10, -20, -5, -30], chosenPnl: -12 }),
+    luckVsSkill({ shadowPnls: [100, 80, 60, 40, -5], chosenPnl: 10 }),
+    luckVsSkill({ shadowPnls: [10, 20, 5, -30, -5], chosenPnl: 90 }),
+    luckVsSkill({ shadowPnls: [10, -10, 20, -20], chosenPnl: 5 }),
+  ].every((row) => /^[^0-9]*$/.test(row.note)));
+}
+
+// ═══════════════════ ۱۰۹. تولید کاندید و پرتفوی سایه ═══════════════════
+group('۱۰۹. تولید کاندید و پرتفوی سایه');
+{
+  const contracts = [];
+  for (const strike of [9000, 9500, 10_000, 10_500, 11_000, 11_500, 12_000]) {
+    for (const kind of ['call', 'put']) {
+      for (const expiry of [20260620, 20260720, 20260820]) {
+        contracts.push({ ins: `${kind}-${strike}-${expiry}`, kind, strike, expiry, size: 1000, name: `x${strike}` });
+      }
+    }
+  }
+  const spot = 10_200;
+
+  // ——— تولید ———
+  {
+    const vertical = combosFor(byId('bull-call-spread'), contracts, spot);
+    check('اسپرد عمودی ترکیب می‌سازد', vertical.length > 0);
+    check('هر ترکیب دو پا با دو قیمت اعمال دارد',
+      vertical.every((row) => row.legs.length === 2 && row.strikes.length === 2 && row.strikes[0] < row.strikes[1]));
+    check('پنجره حول قیمت جاری بریده می‌شود، نه از ابتدای فهرست',
+      vertical.every((row) => row.strikes.some((k) => Math.abs(k - spot) <= 1500)));
+    check('فاصله‌های مختلف قیمت اعمال امتحان می‌شوند',
+      new Set(vertical.map((row) => row.step)).size > 1);
+    check('شناسه از خود پاها ساخته می‌شود و پایدار است', (() => {
+      const again = combosFor(byId('bull-call-spread'), contracts, spot);
+      return again.map((r) => r.id).join(',') === vertical.map((r) => r.id).join(',');
+    })());
+    check('شناسهٔ تکراری ساخته نمی‌شود',
+      new Set(vertical.map((row) => row.id)).size === vertical.length);
+
+    const butterfly = combosFor(byId('long-call-butterfly'), contracts, spot);
+    check('باترفلای سه قیمت اعمال با فاصلهٔ برابر می‌سازد',
+      butterfly.every((row) => row.strikes[1] - row.strikes[0] === row.strikes[2] - row.strikes[1]));
+    check('نسبت پاها از الگو می‌آید',
+      butterfly.every((row) => row.legs[1].ratio === 2));
+
+    const calendar = combosFor(byId('calendar-call'), contracts, spot);
+    check('تقویمی دو سررسید متفاوت می‌گیرد',
+      calendar.length > 0 && calendar.every((row) => row.expiries.length === 2 && row.expiries[0] < row.expiries[1]));
+    check('پاهای تقویمی سررسیدهای متفاوت دارند',
+      calendar.every((row) => row.legs[0].expiry !== row.legs[1].expiry));
+
+    check('سقف هر ساختار رعایت می‌شود',
+      combosFor(byId('long-call-butterfly'), contracts, spot, { maxPerDef: 2 }).length === 2);
+    check('قیمت اعمال کم، ترکیب نمی‌سازد',
+      combosFor(byId('iron-condor'), contracts.filter((c) => c.strike === 10_000), spot).length === 0);
+    check('بدون قیمت پایه، ترکیبی ساخته نمی‌شود',
+      combosFor(byId('bull-call-spread'), contracts, NaN).length === 0);
+    check('پایی که قرارداد ندارد، کل ترکیب را می‌اندازد', (() => {
+      const noPuts = contracts.filter((row) => row.kind === 'call');
+      return combosFor(byId('iron-butterfly'), noPuts, spot).length === 0;
+    })());
+  }
+
+  // ——— سقف کل ———
+  {
+    const defs = [byId('bull-call-spread'), byId('long-call-butterfly'), byId('long-straddle')];
+    const all = generateCandidates(defs, contracts, spot);
+    check('ترکیبات همهٔ ساختارها با هم می‌آیند',
+      all.candidates.length > 0 && new Set(all.candidates.map((row) => row.defId)).size === 3);
+    const capped = generateCandidates(defs, contracts, spot, { maxTotal: 4 });
+    check('رسیدن به سقف کل، صریح اعلام می‌شود',
+      capped.candidates.length === 4 && capped.truncated === true);
+    check('نرسیدن به سقف هم صریح است', all.truncated === false);
+  }
+
+  // ——— سایه ———
+  {
+    const legs = [
+      { kind: 'call', side: 'buy', strike: 10_000, ratio: 1, size: 1000 },
+      { kind: 'call', side: 'sell', strike: 11_000, ratio: 1, size: 1000 },
+    ];
+    const shadow = openShadow({ id: 'a', defId: 'bull-call-spread', defName: 'Bull Call Spread', legs, prices: [500, 200], size: 2, at: { date: 20260519, second: 36000 }, capital: 600_000 });
+    check('سایه همیشه سایه است', shadow.isShadow === true);
+    check('اندازه و قیمت ورود کپی می‌شوند، نه ارجاع', (() => {
+      const prices = [500, 200];
+      const s = openShadow({ id: 'b', legs, prices });
+      prices[0] = 999;
+      return s.entryPrices[0] === 500;
+    })());
+    check('سود سایه از تفاضل قیمت و اندازه می‌آید',
+      Math.abs(markShadow(shadow, [600, 250]) - ((100 * 1000) + (-50 * 1000)) * 2) < 1e-9);
+    check('پای بی‌قیمت، کل سایه را نامعلوم می‌کند',
+      Number.isNaN(markShadow(shadow, [600, NaN])));
+    check('سایهٔ بی‌پا عددی نمی‌سازد', Number.isNaN(markShadow({ legs: [] }, [])));
+
+    // ——— جدول مقایسه ———
+    const shadows = [
+      openShadow({ id: 'a', defName: 'الف', legs, prices: [500, 200], capital: 3e5 }),
+      openShadow({ id: 'b', defName: 'ب', legs, prices: [500, 200], capital: 3e5 }),
+      openShadow({ id: 'c', defName: 'پ', legs, prices: [500, 200], capital: 3e5 }),
+      openShadow({ id: 'd', defName: 'ت', legs, prices: [500, 200], capital: 3e5 }),
+    ];
+    const table = shadowTable(shadows, {
+      a: [700, 250], b: [600, 250], c: [520, 210], d: [600, NaN],
+    }, ['b']);
+    check('رتبه از سود می‌آید نه از امتیاز موتور',
+      table.rows[0].id === 'a' && table.rows[0].rank === 1);
+    check('انتخاب کاربر علامت می‌خورد و رتبه‌اش گزارش می‌شود',
+      table.rows.find((row) => row.id === 'b').isChosen === true && table.myBest === 2);
+    check('سایهٔ بی‌قیمت رتبه نمی‌گیرد ولی حذف هم نمی‌شود',
+      table.unpriced === 1 && table.rows.some((row) => row.id === 'd' && Number.isNaN(row.rank)));
+    check('شمار برنده‌ها گزارش می‌شود', table.winners === 3);
+    check('بدون انتخاب، رتبهٔ کاربر ساخته نمی‌شود',
+      Number.isNaN(shadowTable(shadows, { a: [700, 250] }, []).myBest));
+  }
+}
+
+// ═══════════════════ ۱۱۰. گزارش پایان جلسه و داشبورد تجمیعی ═══════════════════
+//
+// مهم‌ترین جملهٔ کل مشخصات اینجاست: بدون معیار مقایسه، در بازاری با روند
+// اسمی بزرگ همه‌چیز سودده به‌نظر می‌رسد و سیستم یاد می‌گیرد «همیشه کال
+// بخر». پس این گروه بیش از هر چیز، **اجباری بودن** معیار را می‌سنجد.
+group('۱۱۰. گزارش پایان جلسه و داشبورد تجمیعی');
+{
+  const fees = { buyStock: 0.003712, sellStock: 0.0088, option: 0.00103, exercise: 0.0005 };
+  const baseRows = [
+    { date: 20260501, close: 10_000 }, { date: 20260505, close: 10_200 },
+    { date: 20260510, close: 10_600 }, { date: 20260515, close: 10_900 },
+  ];
+
+  // ——— نگهداری ساده ———
+  {
+    const hold = buyHoldBenchmark({ rows: baseRows, from: 20260501, to: 20260510, fees });
+    check('نگهداری ساده از دو سر بازه حساب می‌شود',
+      hold.ok && hold.openPrice === 10_000 && hold.closePrice === 10_600);
+    check('بازده ناخالص نگهداری درست است', Math.abs(hold.grossPct - 6) < 1e-9);
+    check('کارمزد خرید و فروش شمرده می‌شود، پس خالص کمتر از ناخالص است',
+      hold.netPct < hold.grossPct);
+    check('تاریخِ بیرون از سری، معیار نمی‌سازد',
+      buyHoldBenchmark({ rows: baseRows, from: 20260520, to: 20260530, fees }).ok === false);
+    check('یک قیمت به‌تنهایی معیار نیست',
+      buyHoldBenchmark({ rows: [baseRows[0]], from: 20260501, to: 20260510, fees }).ok === false);
+  }
+
+  // ——— مازاد ———
+  check('مازاد تفریق است نه نسبت', Math.abs(excessOver(12, 4.68) - 7.32) < 1e-9);
+  check('مازاد با عدد ناموجود ساخته نمی‌شود',
+    Number.isNaN(excessOver(12, NaN)) && Number.isNaN(excessOver(NaN, 4)));
+  check('بازده موقعیت بر مخرج سرمایه است',
+    Math.abs(positionReturnPct({ netPnl: 120_000, capital: 1_000_000 }) - 12) < 1e-9);
+  check('مخرج صفر، بازده نمی‌سازد',
+    Number.isNaN(positionReturnPct({ netPnl: 120_000, capital: 0 })));
+
+  // ——— همان ساختار روی نمادهای دیگر ———
+  {
+    const peer = peerBenchmark([
+      { ins: 'a', returnPct: 4 }, { ins: 'b', returnPct: -6 }, { ins: 'c', returnPct: 14 },
+    ]);
+    check('معیار همتا میانگین و نرخ برد می‌دهد',
+      peer.ok && Math.abs(peer.meanPct - 4) < 1e-9 && peer.count === 3 && peer.winners === 2);
+    check('بهترین و بدترین همتا گزارش می‌شود', peer.best === 14 && peer.worst === -6);
+    check('بدون همتا، ادعایی نمی‌شود', peerBenchmark([]).ok === false);
+  }
+
+  // ——— دقت پیش‌بینی ———
+  check('جهت درست، درست علامت می‌خورد',
+    forecastAccuracy({ view: { direction: 'up', movePct: 8 }, actualMovePct: 6 }).hit === true);
+  check('جهت غلط، غلط علامت می‌خورد',
+    forecastAccuracy({ view: { direction: 'up', movePct: 8 }, actualMovePct: -3 }).hit === false);
+  check('نظر خنثی وقتی درست است که حرکتی نباشد',
+    forecastAccuracy({ view: { direction: 'flat' }, actualMovePct: 0.01 }).hit === true
+    && forecastAccuracy({ view: { direction: 'flat' }, actualMovePct: 5 }).hit === false);
+  check('نظر پرنوسان با بزرگی حرکت سنجیده می‌شود نه جهتش',
+    forecastAccuracy({ view: { direction: 'volatile', movePct: 5 }, actualMovePct: -9 }).hit === true
+    && forecastAccuracy({ view: { direction: 'volatile', movePct: 5 }, actualMovePct: -2 }).hit === false);
+  check('خطای بزرگی جدا از جهت گزارش می‌شود',
+    Math.abs(forecastAccuracy({ view: { direction: 'up', movePct: 8 }, actualMovePct: 6 }).magnitudeError + 2) < 1e-9);
+  check('بدون حرکت واقعی، دقتی ادعا نمی‌شود',
+    forecastAccuracy({ view: { direction: 'up' }, actualMovePct: NaN }).ok === false);
+  check('جملهٔ دقت رقم لاتین ندارد',
+    /^[^0-9]*$/.test(forecastAccuracy({ view: { direction: 'up', movePct: 8 }, actualMovePct: 6.5 }).note));
+
+  // ═══ ادعای اصلی: گزارش بدون هر دو معیار کامل نیست ═══
+  {
+    let session = blankSession({ id: 'گ', start: { date: 20260501, second: 9 * 3600 } });
+    session = recordView(session, { direction: 'up', movePct: 8, confidence: 0.6, horizonDays: 10, reason: 'حمایت' }).session;
+    session = advanceTo({ ...session, decisions: session.decisions.map((d) => ({ ...d, chosen: [] })) },
+      { date: 20260510, second: 12 * 3600 }).session;
+
+    const full = sessionReport({
+      session, netPnl: 120_000, capital: 1_000_000,
+      baseRows, fees, peers: [{ ins: 'a', returnPct: 4 }, { ins: 'b', returnPct: -6 }],
+      actualMovePct: 6,
+    });
+    check('گزارش با هر دو معیار کامل است', full.ok === true);
+    check('جملهٔ سرخط از مازاد شروع می‌شود، نه از بازده مطلق',
+      full.headline.startsWith('مازاد'));
+    check('هر دو مازاد حساب می‌شوند',
+      Number.isFinite(full.excessBuyHold) && Number.isFinite(full.excessPeer));
+
+    const halfOnly = sessionReport({
+      session, netPnl: 120_000, capital: 1_000_000, baseRows, fees, peers: [], actualMovePct: 6,
+    });
+    check('نیم‌معیار هم معیار نیست — گزارش ناقص اعلام می‌شود',
+      halfOnly.ok === false && halfOnly.headline.includes('کامل نیست') && halfOnly.why.length > 0);
+    const noBase = sessionReport({
+      session, netPnl: 120_000, capital: 1_000_000, baseRows: [], fees,
+      peers: [{ ins: 'a', returnPct: 4 }], actualMovePct: 6,
+    });
+    check('نبودن نگهداری ساده هم گزارش را ناقص می‌کند', noBase.ok === false);
+
+    check('سود همراه با عقب‌ماندن از نگهداری، هشدار می‌گیرد', (() => {
+      const behind = sessionReport({
+        session, netPnl: 10_000, capital: 1_000_000, baseRows, fees,
+        peers: [{ ins: 'a', returnPct: 1 }], actualMovePct: 6,
+      });
+      return behind.returnPct > 0 && behind.excessBuyHold < 0 && behind.warning.includes('خودفریبی');
+    })());
+
+    // ——— خط زمانی ———
+    const line = sessionReport({ session, baseRows, fees, peers: [], netPnl: 0, capital: 1 }).timeline;
+    check('خط زمانی تصمیم و رویداد را با هم و مرتب می‌دهد',
+      line.length > 0 && line.every((row, at) => at === 0
+        || (row.at.date * 100000 + row.at.second) >= (line[at - 1].at.date * 100000 + line[at - 1].at.second)));
+    check('متن دلیل کاربر در خط زمانی می‌ماند',
+      line.some((row) => row.reason === 'حمایت'));
+    check('برچسب رویداد در خط زمانی فارسی است، نه کلید انگلیسی', (() => {
+      const withEvent = recordEvent(session, { kind: 'marginCall', detail: 'کسری' }).session;
+      const rows = sessionTimeline(withEvent);
+      const hit = rows.find((row) => row.kind === 'marginCall');
+      return hit?.label === 'کال مارجین' && !/[A-Za-z]/.test(hit.label);
+    })());
+    check('برچسب «موقعیت باز شد» هم ترجمه دارد', (() => {
+      const opened = recordEvent(session, { kind: 'open', detail: 'x' }).session;
+      return sessionTimeline(opened).some((row) => row.label === 'موقعیت باز شد');
+    })());
+  }
+
+  // ——— داشبورد تجمیعی ———
+  {
+    const rows = [];
+    for (let at = 0; at < 24; at += 1) {
+      rows.push({
+        defName: at % 2 ? 'Long Call' : 'Bull Call Spread',
+        regime: at % 3 === 0 ? 'up' : at % 3 === 1 ? 'down' : 'flat',
+        daysToExpiry: 5 + at, moneynessPct: at - 12, ivPercentile: at * 4,
+        confidence: at < 8 ? 0.3 : at < 16 ? 0.55 : 0.85,
+        holdDays: 1 + at, excessBuyHoldPct: at - 10, returnPct: at - 8,
+        forecastHit: at % 3 !== 0, myRank: 1 + (at % 5), candidateCount: 8,
+        state: at === 5 ? 'abandoned' : 'closed',
+        manualStart: at === 2, practice: at === 23,
+      });
+    }
+
+    check('جلسهٔ تمرینی وارد آمار نمی‌شود', (() => {
+      const s = sliceSessions(rows, 'structure');
+      return s.excluded === 1 && s.total === 23;
+    })());
+    check('جلسهٔ رهاشده وارد می‌شود و جدا شمرده می‌شود', (() => {
+      const s = sliceSessions(rows, 'structure');
+      return s.groups.reduce((sum, g) => sum + g.abandoned, 0) === 1;
+    })());
+    check('همهٔ برش‌های سند موجودند',
+      SLICES.length === 7 && ['structure', 'regime', 'dte', 'moneyness', 'ivPercentile', 'confidence', 'horizon']
+        .every((key) => !!SLICE_BY_KEY[key]));
+    check('برش ناشناخته گروهی نمی‌سازد', sliceSessions(rows, 'nope').ok === false);
+    check('سطل‌بندی روز مانده یک تعریف دارد',
+      dteBucket(3) === 'تا ۷ روز' && dteBucket(30) === '۲۲ تا ۴۵ روز' && dteBucket(NaN) === 'نامعلوم');
+    check('سطل‌بندی فاصله از اعمال، باارزش و بی‌ارزش را جدا می‌کند',
+      moneynessBucket(-15) === 'عمیقاً باارزش' && moneynessBucket(0) === 'روی پایه'
+      && moneynessBucket(20) === 'عمیقاً بی‌ارزش');
+    check('اطمینان هم به کسر و هم به درصد فهمیده می‌شود',
+      confidenceBucket(0.85) === confidenceBucket(85));
+
+    check('مازاد پیش از بازده مطلق گزارش می‌شود', (() => {
+      const g = groupStats(rows.filter((row) => !row.practice));
+      return Number.isFinite(g.excessMeanPct) && Number.isFinite(g.returnMeanPct)
+        && Object.keys(g).indexOf('excessMeanPct') < Object.keys(g).indexOf('returnMeanPct');
+    })());
+    check('دقت پیش‌بینی جدا از نتیجهٔ مالی حساب می‌شود', (() => {
+      const g = groupStats(rows.filter((row) => !row.practice));
+      return Number.isFinite(g.forecastAccuracyPct) && g.forecastGraded === 23
+        && Math.abs(g.forecastAccuracyPct - g.winRatePct) > 1;
+    })());
+
+    // ═══ ادعای اصلی دوم: نمونهٔ ناکافی همیشه برچسب می‌خورد ═══
+    check('گروه کوچک، «نمونه ناکافی» می‌گیرد', (() => {
+      const small = groupStats(rows.slice(0, 3));
+      return small.enough === false && sampleNote(small).includes('نمونه ناکافی');
+    })());
+    check('برچسب، عدد را حذف نمی‌کند بلکه کنارش می‌نشیند', (() => {
+      const small = groupStats(rows.slice(0, 3));
+      return Number.isFinite(small.excessMeanPct) && small.count === 3 && small.needed === MIN_SAMPLE;
+    })());
+    check('گروه بزرگ برچسب ناکافی نمی‌گیرد', (() => {
+      const big = groupStats(rows.filter((row) => !row.practice));
+      return big.enough === true && sampleNote(big).includes('از آستانهٔ معناداری گذشته');
+    })());
+    check('جملهٔ نمونه رقم لاتین ندارد',
+      /^[^0-9]*$/.test(sampleNote(groupStats(rows.slice(0, 3)))));
+
+    // ——— کالیبراسیون ———
+    {
+      const calib = calibration(rows);
+      check('کالیبراسیون سه سطل اطمینان دارد', calib.points.length === 3);
+      check('سطل کم‌جمعیت، کافی علامت نمی‌خورد',
+        calib.points.every((point) => point.enough === (point.count >= MIN_SAMPLE)));
+      check('بدون سطل کافی، شکاف ادعا نمی‌شود',
+        Number.isNaN(calib.gapPp) && calib.note.includes('جلسهٔ کافی'));
+      check('کالیبراسیون با آستانهٔ پایین، شکاف می‌سازد', (() => {
+        const loose = calibration(rows, { minSample: 3 });
+        return Number.isFinite(loose.gapPp) && loose.note.length > 0;
+      })());
+      check('بیش‌اعتمادی و کم‌اعتمادی دو جملهٔ متفاوت دارند', (() => {
+        const over = calibration(rows.map((row) => ({ ...row, confidence: 0.9, forecastHit: false })), { minSample: 2 });
+        const under = calibration(rows.map((row) => ({ ...row, confidence: 0.2, forecastHit: true })), { minSample: 2 });
+        return over.note.includes('بیش‌اعتمادی') && under.note.includes('کم‌اعتمادی');
+      })());
+    }
+
+    check('دو معیار کلیدی روی کل مجموعه می‌آیند', (() => {
+      const head = headlineMetrics(rows);
+      return Number.isFinite(head.forecastAccuracyPct) && Number.isFinite(head.meanRank)
+        && head.selectionNote.includes('رتبهٔ میانگین');
+    })());
+    check('جملهٔ کیفیت انتخاب رقم لاتین ندارد',
+      /^[^0-9]*$/.test(headlineMetrics(rows).selectionNote));
+    check('بدون رتبه، کیفیت انتخاب ادعا نمی‌شود',
+      headlineMetrics(rows.map((row) => ({ ...row, myRank: NaN })))
+        .selectionNote.includes('لازم است'));
+  }
+}
+
+// ═══════════════════ ۱۱۱. بایگانی دیده‌بان و سوگیری بقا ═══════════════════
+//
+// بالادست نسخهٔ تاریخ‌دار فهرست قراردادها را نمی‌دهد. تنها راهش ضبط روزانه
+// است، و خطرناک‌ترین حالتِ ممکن این است که بایگانی نبودن **بی‌صدا** به
+// فهرست امروز برگردد — همان سوگیری بقا، با ظاهرِ حل‌شده.
+group('۱۱۱. بایگانی دیده‌بان و سوگیری بقا');
+{
+  const watchRow = (ua, strike, expiry, extra = {}) => ({
+    uaInsCode: ua, lval30_UA: 'آزمون',
+    insCode_C: `c${strike}`, insCode_P: `p${strike}`,
+    lVal18AFC_C: `ضآز${strike}`, lVal18AFC_P: `طآز${strike}`,
+    strikePrice: strike, contractSize: 1000, endDate: expiry, remainedDay: 30,
+    pDrCotVal_UA: 10_500, pClosing_UA: 10_400, pDrCotVal_C: 600, pClosing_C: 590,
+    qTotTran5J_C: 5000, oP_C: 900,
+    ...extra,
+  });
+
+  check('تاریخ بایگانی هشت رقم میلادی است',
+    validArchiveDate('20260521') && !validArchiveDate('1405/03/01')
+    && !validArchiveDate('2026052') && !validArchiveDate('../x'));
+  check('نام فایل فقط از تاریخ معتبر ساخته می‌شود',
+    archiveName('20260521') === '20260521.json' && archiveName('../x') === null);
+
+  // ——— فشرده‌سازی ———
+  {
+    const rows = [
+      watchRow('900001', 10_000, 20260620),
+      watchRow('900001', 11_000, 20260620),
+      watchRow('900001', 10_000, 20260620),          // تکراری
+      { strikePrice: 5 },                            // بی‌کد پایه
+      watchRow('900001', 0, 20260620),               // بی‌قیمت اعمال
+    ];
+    const archive = makeArchive(20260521, rows, { at: 12345 });
+    check('ردیف تکراری دو بار ذخیره نمی‌شود', archive.count === 2);
+    check('ردیف بی‌هویت اصلاً ذخیره نمی‌شود',
+      archive.rows.every((row) => row.ua && row.k > 0));
+    check('پرونده تاریخ و ساعت و نسخه دارد',
+      archive.date === 20260521 && archive.at === 12345 && archive.version === ARCHIVE_VERSION);
+
+    // ═══ ادعای اصلی یک: بایگانی قیمت نگه نمی‌دارد ═══
+    check('هیچ میدان قیمتی در فشرده نیست', (() => {
+      const text = JSON.stringify(archive);
+      return !text.includes('10500') && !text.includes('10400')
+        && !text.includes('600') && !text.includes('590');
+    })());
+    check('اما هویت و مشخصات قرارداد کامل می‌ماند', (() => {
+      const one = archive.rows[0];
+      return one.ua === '900001' && one.c === 'c10000' && one.p === 'p10000'
+        && one.k === 10_000 && one.size === 1000 && one.end === 20260620 && one.days === 30;
+    })());
+  }
+
+  // ——— بازسازی ———
+  {
+    const archive = makeArchive(20260521, [watchRow('900001', 10_000, 20260620), watchRow('900001', 11_000, 20260620)]);
+    const rows = chainRowsFrom(archive);
+    check('بازسازی، شکل مورد نیاز زنجیره را می‌دهد', rows.length === 2);
+    check('زنجیره از بایگانی ساخته می‌شود', (() => {
+      const chain = buildChain(rows);
+      const ua = chain.get('900001');
+      return !!ua && ua.contracts === 4 && ua.expiryList.length === 1
+        && ua.expiryList[0].strikeList.map((s) => s.strike).join(',') === '10000,11000';
+    })());
+    check('اندازهٔ قرارداد از خود بایگانی می‌آید',
+      buildChain(rows).get('900001').expiryList[0].strikeList[0].size === 1000);
+    check('هر میدان قیمتیِ بازسازی صفر است',
+      rows.every((row) => row.pClosing_UA === 0 && row.pDrCotVal_C === 0 && row.pMeDem_P === 0));
+    check('بازسازی نشان‌دار است تا با عکس زنده اشتباه نشود',
+      rows.every((row) => row.fromArchive === true));
+    check('پروندهٔ خراب، ردیفی نمی‌سازد',
+      chainRowsFrom(null).length === 0 && chainRowsFrom({ rows: 'x' }).length === 0);
+  }
+
+  // ═══ ادعای اصلی دو: نبودن بایگانی بی‌صدا نمی‌ماند ═══
+  {
+    const found = archiveNote({ wanted: 20260521, found: true, count: 120 });
+    const gap = archiveNote({ wanted: 20260101, found: false, firstDate: 20260521 });
+    const none = archiveNote({ wanted: 20260101, found: false, firstDate: 0 });
+    check('حالت «بایگانی داریم» می‌گوید سوگیری بقا نیست',
+      found.includes('سوگیری بقا در این جلسه وجود ندارد'));
+    check('حالت «بایگانی داریم ولی نه برای این روز» صریح هشدار می‌دهد',
+      gap.includes('بایگانی نداریم') && gap.includes('خوش‌بین‌تر از واقعیت'));
+    check('حالت «هیچ بایگانی نداریم» جمله‌اش فرق دارد',
+      none.includes('هنوز هیچ بایگانی') && none !== gap);
+    check('هر سه جمله رقم فارسی دارند',
+      [found, gap, none].every((text) => /^[^0-9]*$/.test(text)));
+  }
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════
