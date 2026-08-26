@@ -12,6 +12,7 @@
 import { EPS, num } from './num.mjs';
 import { moment, momentKey, sameMoment } from './trading-calendar.mjs';
 import { DEFAULT_CAPITAL_RIAL } from './bereket-session.mjs';
+import { combineDataQuality } from './data-quality.mjs';
 
 export const PORTFOLIO_SCHEMA_VERSION = 1;
 
@@ -131,6 +132,8 @@ export function createPortfolioSession({
       capital,
       allocations: [],
       lockedAllocations: [],
+      startSnapshot: null,
+      dataWarnings: [],
       events: [],
       counters: { event: 0, transaction: 0, position: 0, execution: 0, lot: 0 },
     },
@@ -193,7 +196,7 @@ export function setFamilyAllocations(session, rows = []) {
 }
 
 /** قفل طرح سرمایه و آغاز دفتر رویداد در همان لحظه شروع. */
-export function activatePortfolioSession(session, { at = null } = {}) {
+export function activatePortfolioSession(session, { at = null, snapshot = null } = {}) {
   if (!session || session.state !== 'draft') {
     return { ok: false, why: 'فقط پیش‌نویس را می‌شود فعال کرد', session };
   }
@@ -204,6 +207,18 @@ export function activatePortfolioSession(session, { at = null } = {}) {
   if (!sameMoment(point, session.start)) {
     return { ok: false, why: 'عکس شروع باید دقیقاً در لحظه شروع جلسه قفل شود', session };
   }
+  const rawSnapshot = snapshot && typeof snapshot === 'object' ? copy(snapshot) : {};
+  const qualities = [
+    rawSnapshot.quality,
+    rawSnapshot.universe?.quality,
+    rawSnapshot.daily?.quality,
+    rawSnapshot.intraday?.quality,
+    rawSnapshot.book?.quality,
+  ].filter(Boolean);
+  const quality = combineDataQuality(qualities, {
+    source: 'portfolio-start-snapshot', asOf: point,
+  });
+  const startSnapshot = { ...rawSnapshot, at: { ...point }, quality };
   return {
     ok: true,
     why: '',
@@ -212,6 +227,8 @@ export function activatePortfolioSession(session, { at = null } = {}) {
       state: 'active',
       now: { ...point },
       lockedAllocations: copy(session.allocations),
+      startSnapshot,
+      dataWarnings: quality.reasons.slice(),
     },
   };
 }
