@@ -85,6 +85,9 @@ console.log(`کار بعدی   ${task.trim()}`);
 console.log(`دستهٔ آزمون ${suiteHint ? `tests/suites/${suiteHint}` : 'در NEXT.md مشخص نشده — node tools/next.mjs suites <کلیدواژه>'}`);
 console.log(`دروازه     node tools/check.mjs`);
 
+const prog = spawnSync(process.execPath, [path.join(ROOT, 'tools/progress.mjs'), '--line'], { cwd: ROOT, encoding: 'utf8' });
+if (prog.stdout.trim()) console.log(prog.stdout.trim());
+
 // ── بودجهٔ خواندن ─────────────────────────────────────────────────────
 // همان سقف‌هایی که نگهبان ۹ می‌سنجد. اگر اینجا زرد شد، پیش از آنکه CI
 // قرمز شود بایگانی کنید.

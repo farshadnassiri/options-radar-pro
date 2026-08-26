@@ -226,6 +226,12 @@ group('۷. آزمون به پایان‌خط سیستم‌عامل بند نیس
   const runSrc = fs.readFileSync(path.join(ROOT, 'tests/run.mjs'), 'utf8');
   check('بارگذار دسته‌ها را از روی پوشه برمی‌دارد',
     /readdirSync/.test(runSrc) && /suites/.test(runSrc));
+
+  // روی ویندوز مسیر مطلق `D:\...` است و `import()` پویا آن را رد می‌کند:
+  // «absolute paths must be valid file:// URLs». job ویندوزِ CI این را یک
+  // بار گرفت؛ این نگهبان نمی‌گذارد دوباره بی‌صدا برگردد.
+  check('بارگذار مسیر را به file:// تبدیل می‌کند — وگرنه ویندوز می‌شکند',
+    /pathToFileURL\(/.test(runSrc) && !/await import\(path\.join/.test(runSrc));
 }
 
 // ═════════════════════ ۸. شمار تب، یک عدد باشد نه سه ═════════════════════
@@ -489,7 +495,7 @@ group('۹. بودجهٔ خواندنِ اجباری از سقف نگذشته');
   check('هیچ دستهٔ آزمونی از ۴۰ کیلوبایت نگذشته', big.length === 0, big.join(' ،') || 'همه کوچک');
 
   // ابزارهایی که پروتکل به آن‌ها ارجاع می‌دهد باید واقعاً باشند.
-  for (const f of ['NEXT.md', 'PROTOCOL.md', 'BACKLOG.md', 'tools/next.mjs', 'tools/check.mjs', 'tests/harness.mjs']) {
+  for (const f of ['NEXT.md', 'PROTOCOL.md', 'BACKLOG.md', 'tools/next.mjs', 'tools/check.mjs', 'tools/progress.mjs', 'tests/harness.mjs']) {
     check(`${f} موجود است`, fs.existsSync(path.join(ROOT, f)));
   }
 }

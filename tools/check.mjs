@@ -42,5 +42,14 @@ for (const gate of ['tests/run.mjs', 'tests/guards.mjs', 'tests/commits.mjs']) {
   if (r.status !== 0) failed += 1;
 }
 
+// ── درصد پیشرفت ───────────────────────────────────────────────────────
+// همیشه نشان داده می‌شود، چون این دروازه دقیقاً پیش از هر پوش اجرا
+// می‌شود. اگر عددِ نوشته‌شده در نقشه با محاسبه نخواند، همین‌جا قرمز
+// می‌شود — عدد پیشرفت هم یک ادعای عددی است و از قاعدهٔ صداقت معاف نیست.
+const prog = run(['tools/progress.mjs', '--line']);
+process.stdout.write(prog.stdout);
+if (prog.stderr.trim()) process.stderr.write(prog.stderr);
+if (prog.status !== 0) failed += 1;
+
 console.log(failed ? `\n✘ ${failed} دروازه رد شد — پوش نکنید.` : '\n✔ همه سبز — آمادهٔ کامیت و پوش.');
 process.exit(failed ? 1 : 0);

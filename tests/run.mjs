@@ -12,7 +12,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { report } from './harness.mjs';
 
 const SUITES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'suites');
@@ -29,7 +29,10 @@ if (!files.length) {
 }
 
 for (const f of files) {
-  await import(path.join(SUITES, f));
+  // `pathToFileURL` لازم است، نه تزیین: روی ویندوز مسیر مطلق `D:\...` است و
+  // `import()` پویا آن را رد می‌کند («absolute paths must be valid file://
+  // URLs»). job ویندوزِ CI دقیقاً همین را گرفت.
+  await import(pathToFileURL(path.join(SUITES, f)).href);
 }
 
 report();
