@@ -15,6 +15,9 @@ import {
   previewPortfolioCapital, previewPortfolioRisk,
 } from '../portfolio-mission-form.mjs';
 import { gateLoaders } from '../bereket-data.mjs';
+import {
+  filterPortfolioEligibilityRows, portfolioSessionEligibility,
+} from '../portfolio-eligibility.mjs';
 import { listMissionSaves, loadMissionSave, saveMissionDraft } from '../portfolio-mission-data.mjs';
 import { missionSaveLabel, resumeMissionRecord } from '../portfolio-mission-resume.mjs';
 import { mountDateWheel } from '../datewheel.mjs';
@@ -224,6 +227,22 @@ export async function mount(root, { state, api }) {
             <ul id="pt-snapshot-reasons"><li>پس از قفل مأموریت، دادهٔ روزانه، ریزمعامله، دفتر سفارش و فهرست قراردادهای همان تاریخ بررسی می‌شوند.</li></ul>
           </section>
 
+          <section class="pt-eligibility" id="pt-eligibility" aria-labelledby="pt-eligibility-title" hidden>
+            <div class="pt-eligibility-head">
+              <div><p class="eyebrow">مدرک خام اجراپذیری</p><h3 id="pt-eligibility-title">حکم قراردادها در لحظه شروع</h3></div>
+              <div class="pt-eligibility-filters" aria-label="فیلتر حکم قراردادها">
+                <button type="button" class="ghost" data-pt-eligibility-filter="all" aria-pressed="true">همه</button>
+                <button type="button" class="ghost" data-pt-eligibility-filter="accepted" aria-pressed="false">پذیرفته</button>
+                <button type="button" class="ghost" data-pt-eligibility-filter="rejected" aria-pressed="false">ردشده</button>
+              </div>
+            </div>
+            <p class="pt-save-state" id="pt-eligibility-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، حکم‌های عکس قفل‌شده اینجا می‌آیند.</p>
+            <table class="pt-eligibility-table">
+              <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
+              <tbody id="pt-eligibility-body"></tbody>
+            </table>
+          </section>
+
           <div class="pt-stage-actions"><button type="button" class="primary" id="pt-start-mission">قفل مأموریت و عکس شروع</button><p class="pt-save-state" id="pt-mission-state" role="status" aria-live="polite">هدف، مبنای بازده، درصد هدف و افق نگهداری را صریح وارد کن.</p></div>
           <small class="pt-field-error" id="pt-mission-error" hidden></small>
         </section>
@@ -254,6 +273,7 @@ export async function mount(root, { state, api }) {
   let chain = new Map(), symbols = [], dates = [], loadedIns = '';
   let setupDraft = null, outlookDraft = null, riskDraft = null, allocationDraft = null;
   let missionDraft = null, draft = null;
+  let eligibilityRows = [], eligibilityFilter = 'all';
   let allocationRowId = 0;
   // شناسه دیگر ثابت نیست: ادامه‌دادن یک جلسه یعنی همان شناسه سرور را
   // برداشتن، وگرنه هر بار یک جلسه تازه ساخته می‌شد و «ادامه» معنایی
@@ -731,10 +751,56 @@ export async function mount(root, { state, api }) {
     $('pt-snapshot').dataset.quality = quality?.kind || 'missing';
   }
 
+  function eligibilityQuality(row) {
+    const candidate = row?.quality?.candidate?.label || 'فاقد مدرک نامزد';
+    const book = row?.quality?.book?.label || 'فاقد مدرک دفتر';
+    return `${candidate} · ${book}`;
+  }
+
+  function paintEligibilityRows() {
+    const visible = filterPortfolioEligibilityRows(eligibilityRows, eligibilityFilter);
+    const body = $('pt-eligibility-body');
+    body.innerHTML = visible.length ? visible.map((row) => {
+      const side = row.side === 'buy' ? 'خرید' : row.side === 'sell' ? 'فروش' : '—';
+      const verdict = row.accepted ? 'پذیرفته' : 'ردشده';
+      const reasons = row.reasons?.length
+        ? row.reasons.map((reason) => reason.label).join('؛ ')
+        : 'بدون علت رد';
+      const qty = row.executableQty === null ? '—' : fmt.int(row.executableQty);
+      return `<tr data-verdict="${row.accepted ? 'accepted' : 'rejected'}">
+        <td data-label="قرارداد">${esc(row.name || row.candidateId)}</td>
+        <td data-label="سمت">${side}</td>
+        <td data-label="حکم"><b>${verdict}</b></td>
+        <td data-label="علت‌های رد">${esc(reasons)}</td>
+        <td data-label="کیفیت">${esc(eligibilityQuality(row))}</td>
+        <td data-label="سقف اجرا">${qty}</td>
+      </tr>`;
+    }).join('') : '<tr class="pt-eligibility-empty"><td colspan="6">در این فیلتر قراردادی نیست.</td></tr>';
+    root.querySelectorAll('[data-pt-eligibility-filter]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.ptEligibilityFilter === eligibilityFilter));
+    });
+  }
+
+  function paintEligibility(session) {
+    const section = $('pt-eligibility');
+    const evidence = portfolioSessionEligibility(session);
+    if (!evidence.ok) {
+      eligibilityRows = [];
+      section.hidden = true;
+      return;
+    }
+    eligibilityRows = evidence.rows;
+    eligibilityFilter = 'all';
+    section.hidden = false;
+    const accepted = evidence.rows.filter((row) => row.accepted).length;
+    $('pt-eligibility-state').textContent = `${fmt.int(evidence.rows.length)} حکم از عکس قفل‌شده · ${fmt.int(accepted)} پذیرفته · ${fmt.int(evidence.rows.length - accepted)} ردشده`;
+    paintEligibilityRows();
+  }
+
   function lockMissionEditor() {
     root.dataset.missionActive = 'true';
     root.querySelectorAll('input, select, textarea, button').forEach((control) => {
-      control.disabled = true;
+      if (!control.closest('#pt-eligibility')) control.disabled = true;
     });
   }
 
@@ -966,6 +1032,11 @@ export async function mount(root, { state, api }) {
         paintFinalReview();
       }
 
+      if (record.readOnly) {
+        draft = record.draft;
+        paintSnapshot(record.session.startSnapshot);
+      }
+      paintEligibility(record.session);
       paintProgress(record.stage);
       return { ok: true, why: '' };
     } finally {
@@ -1117,6 +1188,12 @@ export async function mount(root, { state, api }) {
     })[button.dataset.ptEdit];
     target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  $('pt-eligibility').onclick = (event) => {
+    const button = event.target.closest('[data-pt-eligibility-filter]');
+    if (!button) return;
+    eligibilityFilter = button.dataset.ptEligibilityFilter;
+    paintEligibilityRows();
+  };
   $('pt-start-mission').onclick = async () => {
     const locked = createPortfolioMissionDraft(allocationDraft, currentMissionForm());
     if (!locked.ok) { showMissionError(locked.why); return; }
@@ -1134,6 +1211,7 @@ export async function mount(root, { state, api }) {
       if (!active.ok) throw new Error(active.why);
       draft = active.draft;
       paintSnapshot(active.draft.snapshot);
+      paintEligibility(active.draft.session);
       paintProgress('active');
       $('pt-mission-state').textContent = active.draft.snapshot.quality.sufficient
         ? 'مأموریت و عکس شروع قفل شدند؛ هنوز هیچ پیشنهاد یا معامله‌ای ساخته نشده است.'
