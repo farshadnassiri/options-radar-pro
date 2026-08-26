@@ -49,7 +49,12 @@ export function candidateId(defId, legs = []) {
  * شود، موجود فرض می‌شود. جداسازی عمدی است — «کدام قرارداد آن روز بود»
  * پرسشی دربارهٔ داده است و به دروازهٔ زمان تعلق دارد، نه به تولید ترکیب.
  */
-export function combosFor(def, contracts = [], spot, { maxPerDef = MAX_PER_DEF, steps = STRIKE_STEPS, contractSize = 1000 } = {}) {
+export function combosFor(def, contracts = [], spot, {
+  maxPerDef = MAX_PER_DEF,
+  steps = STRIKE_STEPS,
+  contractSize = 1000,
+  contractAllowed = null,
+} = {}) {
   const S = num(spot, NaN);
   const list = (contracts || []).filter((row) => num(row?.strike, 0) > 0 && row?.kind);
   if (!def || !list.length || !(S > 0)) return [];
@@ -88,7 +93,8 @@ export function combosFor(def, contracts = [], spot, { maxPerDef = MAX_PER_DEF, 
           }
           const wantExpiry = plan[Math.min(template.exp, plan.length - 1)];
           const contract = pool.find((row) => row.kind === template.kind
-            && num(row.strike) === picked[template.slot - 1] && num(row.expiry) === wantExpiry);
+            && num(row.strike) === picked[template.slot - 1] && num(row.expiry) === wantExpiry
+            && (typeof contractAllowed !== 'function' || contractAllowed(row, template, def)));
           if (!contract) { complete = false; break; }
           legs.push({
             kind: template.kind, side: template.side, ratio: template.ratio,
