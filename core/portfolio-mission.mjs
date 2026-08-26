@@ -129,6 +129,106 @@ export function validateMissionOutlook(input = {}) {
   };
 }
 
+function riskFail(why) {
+  return { ok: false, why, risk: null };
+}
+
+/** اعتبارسنجی مستقل قیود ریسک و وجه تضمین. */
+export function validateMissionRisk(input = {}) {
+  const risk = input || {};
+  const maxLossPct = finiteField(risk, 'maxLossPct');
+  const maxDrawdownPct = finiteField(risk, 'maxDrawdownPct');
+  const minFreeCapitalPct = finiteField(risk, 'minFreeCapitalPct');
+  const maxMarginUsePct = finiteField(risk, 'maxMarginUsePct');
+  const allowUnlimitedRisk = boolField(risk, 'allowUnlimitedRisk');
+  if (!Number.isFinite(maxLossPct) || !(maxLossPct > 0) || maxLossPct > 100) {
+    return riskFail('سقف زیان باید بزرگ‌تر از صفر و حداکثر صد درصد باشد');
+  }
+  if (!Number.isFinite(maxDrawdownPct) || !(maxDrawdownPct > 0) || maxDrawdownPct > 100) {
+    return riskFail('سقف افت سرمایه باید بزرگ‌تر از صفر و حداکثر صد درصد باشد');
+  }
+  if (maxLossPct > maxDrawdownPct) return riskFail('سقف زیان معامله نمی‌تواند از سقف افت کل بیشتر باشد');
+  if (!Number.isFinite(minFreeCapitalPct) || minFreeCapitalPct < 0 || minFreeCapitalPct > 100) {
+    return riskFail('حداقل سرمایه آزاد باید بین صفر و صد درصد باشد');
+  }
+  if (!Number.isFinite(maxMarginUsePct) || maxMarginUsePct < 0 || maxMarginUsePct > 100) {
+    return riskFail('سقف مصرف وجه تضمین باید بین صفر و صد درصد باشد');
+  }
+  if (minFreeCapitalPct + maxMarginUsePct > 100) {
+    return riskFail('سرمایه آزاد و سقف وجه تضمین با هم از صد درصد بیشتر شده‌اند');
+  }
+  if (allowUnlimitedRisk === null) return riskFail('اجازه ریسک نامحدود باید صریح روشن یا خاموش شود');
+  return {
+    ok: true,
+    why: '',
+    risk: {
+      maxLossPct, maxDrawdownPct, minFreeCapitalPct, maxMarginUsePct,
+      allowUnlimitedRisk,
+    },
+  };
+}
+
+function liquidityFail(why) {
+  return { ok: false, why, liquidity: null };
+}
+
+/** اعتبارسنجی مستقل دروازه نقدشوندگی و دفتر سفارش. */
+export function validateMissionLiquidity(input = {}) {
+  const liquidity = input || {};
+  const minUnderlyingDailyValueRial = finiteField(liquidity, 'minUnderlyingDailyValueRial');
+  const minOptionDailyValueRial = finiteField(liquidity, 'minOptionDailyValueRial');
+  const minOpenInterest = finiteField(liquidity, 'minOpenInterest');
+  const maxSpreadPct = finiteField(liquidity, 'maxSpreadPct');
+  const maxBookTakePct = finiteField(liquidity, 'maxBookTakePct');
+  const requireFullBook = boolField(liquidity, 'requireFullBook');
+  if (!Number.isFinite(minUnderlyingDailyValueRial) || minUnderlyingDailyValueRial < 0) {
+    return liquidityFail('حداقل ارزش روزانه نماد پایه باید عددی نامنفی باشد');
+  }
+  if (!Number.isFinite(minOptionDailyValueRial) || minOptionDailyValueRial < 0) {
+    return liquidityFail('حداقل ارزش روزانه اختیار باید عددی نامنفی باشد');
+  }
+  if (!Number.isInteger(minOpenInterest) || minOpenInterest < 0) {
+    return liquidityFail('حداقل موقعیت باز باید عدد صحیح نامنفی باشد');
+  }
+  if (!Number.isFinite(maxSpreadPct) || !(maxSpreadPct > 0) || maxSpreadPct > 100) {
+    return liquidityFail('حداکثر اسپرد باید بزرگ‌تر از صفر و حداکثر صد درصد باشد');
+  }
+  if (!Number.isFinite(maxBookTakePct) || !(maxBookTakePct > 0) || maxBookTakePct > 100) {
+    return liquidityFail('حداکثر مصرف عمق باید بزرگ‌تر از صفر و حداکثر صد درصد باشد');
+  }
+  if (requireFullBook === null) return liquidityFail('الزام پنج سطح دفتر باید صریح روشن یا خاموش شود');
+  return {
+    ok: true,
+    why: '',
+    liquidity: {
+      minUnderlyingDailyValueRial, minOptionDailyValueRial, minOpenInterest,
+      maxSpreadPct, maxBookTakePct, requireFullBook,
+    },
+  };
+}
+
+/** بودجه دیداری مرحله ریسک؛ همه اعداد از سرمایه جلسه و قیود معتبر می‌آیند. */
+export function portfolioMissionRiskBudget(session, input = {}) {
+  const checked = validateMissionRisk(input);
+  const allocatableRial = num(session?.capital?.allocatableRial, NaN);
+  if (!checked.ok || !(allocatableRial > 0)) {
+    return { ok: false, why: checked.ok ? 'سرمایه قابل تخصیص معتبر نیست' : checked.why, budget: null };
+  }
+  const { minFreeCapitalPct, maxMarginUsePct } = checked.risk;
+  return {
+    ok: true,
+    why: '',
+    budget: {
+      allocatableRial,
+      minFreeCapitalPct,
+      maxMarginUsePct,
+      flexiblePct: 100 - minFreeCapitalPct - maxMarginUsePct,
+      minFreeCapitalRial: Math.round(allocatableRial * minFreeCapitalPct / 100),
+      maxMarginUseRial: Math.round(allocatableRial * maxMarginUsePct / 100),
+    },
+  };
+}
+
 /**
  * ساخت مأموریت از session و ورودی صریح کاربر.
  *
@@ -165,51 +265,10 @@ export function createPortfolioMission(session, input = {}) {
   const checkedOutlook = validateMissionOutlook(outlook);
   if (!checkedOutlook.ok) return fail(checkedOutlook.why);
 
-  const maxLossPct = finiteField(risk, 'maxLossPct');
-  const maxDrawdownPct = finiteField(risk, 'maxDrawdownPct');
-  const minFreeCapitalPct = finiteField(risk, 'minFreeCapitalPct');
-  const maxMarginUsePct = finiteField(risk, 'maxMarginUsePct');
-  const allowUnlimitedRisk = boolField(risk, 'allowUnlimitedRisk');
-  if (!Number.isFinite(maxLossPct) || !(maxLossPct > 0) || maxLossPct > 100) {
-    return fail('سقف زیان باید بزرگ‌تر از صفر و حداکثر صد درصد باشد');
-  }
-  if (!Number.isFinite(maxDrawdownPct) || !(maxDrawdownPct > 0) || maxDrawdownPct > 100) {
-    return fail('سقف افت سرمایه باید بزرگ‌تر از صفر و حداکثر صد درصد باشد');
-  }
-  if (maxLossPct > maxDrawdownPct) return fail('سقف زیان معامله نمی‌تواند از سقف افت کل بیشتر باشد');
-  if (!Number.isFinite(minFreeCapitalPct) || minFreeCapitalPct < 0 || minFreeCapitalPct > 100) {
-    return fail('حداقل سرمایه آزاد باید بین صفر و صد درصد باشد');
-  }
-  if (!Number.isFinite(maxMarginUsePct) || maxMarginUsePct < 0 || maxMarginUsePct > 100) {
-    return fail('سقف مصرف وجه تضمین باید بین صفر و صد درصد باشد');
-  }
-  if (minFreeCapitalPct + maxMarginUsePct > 100) {
-    return fail('سرمایه آزاد و سقف وجه تضمین با هم از صد درصد بیشتر شده‌اند');
-  }
-  if (allowUnlimitedRisk === null) return fail('اجازه ریسک نامحدود باید صریح روشن یا خاموش شود');
-
-  const minUnderlyingDailyValueRial = finiteField(liquidity, 'minUnderlyingDailyValueRial');
-  const minOptionDailyValueRial = finiteField(liquidity, 'minOptionDailyValueRial');
-  const minOpenInterest = finiteField(liquidity, 'minOpenInterest');
-  const maxSpreadPct = finiteField(liquidity, 'maxSpreadPct');
-  const maxBookTakePct = finiteField(liquidity, 'maxBookTakePct');
-  const requireFullBook = boolField(liquidity, 'requireFullBook');
-  if (!Number.isFinite(minUnderlyingDailyValueRial) || minUnderlyingDailyValueRial < 0) {
-    return fail('حداقل ارزش روزانه نماد پایه باید عددی نامنفی باشد');
-  }
-  if (!Number.isFinite(minOptionDailyValueRial) || minOptionDailyValueRial < 0) {
-    return fail('حداقل ارزش روزانه اختیار باید عددی نامنفی باشد');
-  }
-  if (!Number.isInteger(minOpenInterest) || minOpenInterest < 0) {
-    return fail('حداقل موقعیت باز باید عدد صحیح نامنفی باشد');
-  }
-  if (!Number.isFinite(maxSpreadPct) || !(maxSpreadPct > 0) || maxSpreadPct > 100) {
-    return fail('حداکثر اسپرد باید بزرگ‌تر از صفر و حداکثر صد درصد باشد');
-  }
-  if (!Number.isFinite(maxBookTakePct) || !(maxBookTakePct > 0) || maxBookTakePct > 100) {
-    return fail('حداکثر مصرف عمق باید بزرگ‌تر از صفر و حداکثر صد درصد باشد');
-  }
-  if (requireFullBook === null) return fail('الزام پنج سطح دفتر باید صریح روشن یا خاموش شود');
+  const checkedRisk = validateMissionRisk(risk);
+  if (!checkedRisk.ok) return fail(checkedRisk.why);
+  const checkedLiquidity = validateMissionLiquidity(liquidity);
+  if (!checkedLiquidity.ok) return fail(checkedLiquidity.why);
 
   const capitalBaseRial = returnBase === 'initial'
     ? num(session.capital.initialRial, NaN)
@@ -238,14 +297,8 @@ export function createPortfolioMission(session, input = {}) {
         grain, grainSeconds: MISSION_REPLAY_GRAINS[grain].seconds,
       },
       outlook: checkedOutlook.outlook,
-      risk: {
-        maxLossPct, maxDrawdownPct, minFreeCapitalPct, maxMarginUsePct,
-        allowUnlimitedRisk,
-      },
-      liquidity: {
-        minUnderlyingDailyValueRial, minOptionDailyValueRial, minOpenInterest,
-        maxSpreadPct, maxBookTakePct, requireFullBook,
-      },
+      risk: checkedRisk.risk,
+      liquidity: checkedLiquidity.liquidity,
     },
   };
 }

@@ -4,8 +4,8 @@ import {
   MISSION_DIRECTIONS, MISSION_REPLAY_GRAINS, MISSION_VOLATILITY_VIEWS,
 } from '../../core/portfolio-mission.mjs';
 import {
-  createPortfolioOutlookDraft, createPortfolioStepOneDraft,
-  parseTomanInput, previewPortfolioCapital,
+  createPortfolioOutlookDraft, createPortfolioRiskDraft, createPortfolioStepOneDraft,
+  parseTomanInput, previewPortfolioCapital, previewPortfolioRisk,
 } from '../portfolio-mission-form.mjs';
 import { mountDateWheel } from '../datewheel.mjs';
 import { fmt, faDigits } from '../fmt.mjs';
@@ -45,7 +45,7 @@ export async function mount(root, { state, api }) {
     <nav class="pt-progress" aria-label="مراحل ساخت سبد">
       <div class="active" id="pt-progress-setup" aria-current="step"><b>۱</b><span>زمان و سرمایه</span><small>در حال تکمیل</small></div>
       <div id="pt-progress-outlook"><b>۲</b><span>انتظار بازار</span><small>قفل</small></div>
-      <div><b>۳</b><span>ریسک و نقدشوندگی</span><small>قفل</small></div>
+      <div id="pt-progress-risk"><b>۳</b><span>ریسک و نقدشوندگی</span><small>قفل</small></div>
       <div><b>۴</b><span>تخصیص خانواده‌ها</span><small>قفل</small></div>
       <div><b>۵</b><span>مرور و شروع</span><small>قفل</small></div>
     </nav>
@@ -113,11 +113,47 @@ export async function mount(root, { state, api }) {
           <label class="field pt-thesis"><span>دلیل تصمیم و چیزی که انتظار داری رخ دهد</span><textarea id="pt-thesis" maxlength="2000" rows="4" placeholder="مثلاً انتظار دارم بعد از شکست مقاومت، قیمت با تلاطم بیشتر رشد کند." aria-describedby="pt-thesis-count pt-thesis-error"></textarea><small class="hint" id="pt-thesis-count">۰ از ۲٬۰۰۰ نویسه</small><small class="pt-field-error" id="pt-thesis-error" hidden></small></label>
           <div class="pt-stage-actions"><button type="button" class="primary" id="pt-save-outlook">ثبت انتظار بازار</button><p class="pt-save-state" id="pt-outlook-state" role="status" aria-live="polite">ابتدا فرض خود را کامل کن.</p></div>
         </section>
+
+        <section class="card pt-card pt-risk-card" id="pt-risk-step" aria-labelledby="pt-risk-title" hidden>
+          <div class="section-head"><div><p class="eyebrow">مرحله سوم · مرزهای بقا</p><h2 id="pt-risk-title">پیش از سود، حد تحمل سبد را مشخص کن</h2></div><span class="pt-stage-badge">بدون مقدار پنهان</span></div>
+
+          <div class="pt-risk-input-grid">
+            <label class="field"><span>سقف زیان هر معامله</span><input id="pt-max-loss" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-max-loss-hint pt-max-loss-error"><small class="hint" id="pt-max-loss-hint">نسبت به سرمایه قابل تخصیص</small><small class="pt-field-error" id="pt-max-loss-error" hidden></small></label>
+            <label class="field"><span>سقف افت کل سبد</span><input id="pt-max-drawdown" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-max-drawdown-hint pt-max-drawdown-error"><small class="hint" id="pt-max-drawdown-hint">باید حداقل برابر سقف زیان معامله باشد.</small><small class="pt-field-error" id="pt-max-drawdown-error" hidden></small></label>
+            <label class="field"><span>حداقل سرمایه آزاد</span><input id="pt-min-free" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-min-free-hint pt-min-free-error"><small class="hint" id="pt-min-free-hint">همیشه خارج از موقعیت‌ها نگه داشته می‌شود.</small><small class="pt-field-error" id="pt-min-free-error" hidden></small></label>
+            <label class="field"><span>سقف مصرف وجه تضمین</span><input id="pt-max-margin" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-max-margin-hint pt-max-margin-error"><small class="hint" id="pt-max-margin-hint">جمع آن با سرمایه آزاد نباید از صد بگذرد.</small><small class="pt-field-error" id="pt-max-margin-error" hidden></small></label>
+          </div>
+
+          <fieldset class="pt-fieldset pt-binary-field" id="pt-unlimited-field"><legend>آیا استراتژی با ریسک نظری نامحدود مجاز است؟</legend><div class="pt-binary" id="pt-unlimited"><label><input type="radio" name="pt-unlimited" value="no"><span>خیر، فقط ریسک محدود</span></label><label><input type="radio" name="pt-unlimited" value="yes"><span>بله، با رعایت سایر سقف‌ها</span></label></div><small class="pt-field-error" id="pt-unlimited-error" hidden></small></fieldset>
+
+          <section class="pt-budget" aria-labelledby="pt-budget-title">
+            <div><p class="eyebrow">بودجه روی سرمایه قابل تخصیص</p><h3 id="pt-budget-title">نقشه درگیری سرمایه</h3></div>
+            <div class="pt-budget-track" id="pt-budget-track"><i class="free" id="pt-budget-free-bar"></i><i class="margin" id="pt-budget-margin-bar"></i><i class="flex" id="pt-budget-flex-bar"></i></div>
+            <div class="pt-budget-values">
+              <article><span>حداقل آزاد</span><b id="pt-budget-free-pct">—</b><small id="pt-budget-free-rial">—</small></article>
+              <article><span>سقف وجه تضمین</span><b id="pt-budget-margin-pct">—</b><small id="pt-budget-margin-rial">—</small></article>
+              <article><span>بخش انعطاف‌پذیر</span><b id="pt-budget-flex-pct">—</b><small>اختصاص‌نیافته بین دو سقف</small></article>
+            </div>
+            <p>این نمودار پیشنهاد تخصیص نیست؛ فقط مرزهایی را که خودت ثبت کرده‌ای روی سرمایه نشان می‌دهد.</p>
+          </section>
+
+          <div class="section-head pt-subhead"><div><p class="eyebrow">دروازه اجرای واقعی</p><h3>حداقل کیفیت نقدشوندگی</h3></div></div>
+          <div class="pt-liquidity-grid">
+            <label class="field"><span>حداقل ارزش روزانه نماد پایه</span><input id="pt-underlying-value" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-underlying-value-error"><small class="pt-field-error" id="pt-underlying-value-error" hidden></small></label>
+            <label class="field"><span>حداقل ارزش روزانه اختیار</span><input id="pt-option-value" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-option-value-error"><small class="pt-field-error" id="pt-option-value-error" hidden></small></label>
+            <label class="field"><span>حداقل موقعیت باز</span><input id="pt-open-interest" type="text" inputmode="numeric" placeholder="تعداد" aria-describedby="pt-open-interest-error"><small class="pt-field-error" id="pt-open-interest-error" hidden></small></label>
+            <label class="field"><span>حداکثر اسپرد خرید/فروش</span><input id="pt-max-spread" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-max-spread-error"><small class="pt-field-error" id="pt-max-spread-error" hidden></small></label>
+            <label class="field"><span>حداکثر مصرف عمق دفتر</span><input id="pt-book-take" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-book-take-error"><small class="pt-field-error" id="pt-book-take-error" hidden></small></label>
+          </div>
+          <fieldset class="pt-fieldset pt-binary-field" id="pt-full-book-field"><legend>پنج سطح کامل دفتر سفارش الزامی است؟</legend><div class="pt-binary" id="pt-full-book"><label><input type="radio" name="pt-full-book" value="yes"><span>بله، دفتر کامل لازم است</span></label><label><input type="radio" name="pt-full-book" value="no"><span>خیر، کفایت ثبت‌شده سنجیده شود</span></label></div><small class="pt-field-error" id="pt-full-book-error" hidden></small></fieldset>
+
+          <div class="pt-stage-actions"><button type="button" class="primary" id="pt-save-risk">ثبت مرزهای ریسک و اجرا</button><p class="pt-save-state" id="pt-risk-state" role="status" aria-live="polite">همه مرزها باید صریح وارد شوند.</p></div>
+        </section>
       </div>
 
       <aside class="card pt-review">
         <p class="eyebrow">پیش‌نویس زنده</p><h2>گذرنامه سفر</h2>
-        <dl><div><dt>سرمایه قابل تخصیص</dt><dd id="pt-review-capital">—</dd></div><div><dt>نماد پایه</dt><dd id="pt-review-base">انتخاب نشده</dd></div><div><dt>شروع</dt><dd id="pt-review-start">انتخاب نشده</dd></div><div><dt>پایان</dt><dd id="pt-review-end">انتخاب نشده</dd></div><div><dt>پخش مسیر</dt><dd id="pt-review-grain">نیم‌ساعته</dd></div><div><dt>انتظار بازار</dt><dd id="pt-review-outlook">ثبت نشده</dd></div><div><dt>اطمینان</dt><dd id="pt-review-confidence">—</dd></div></dl>
+        <dl><div><dt>سرمایه قابل تخصیص</dt><dd id="pt-review-capital">—</dd></div><div><dt>نماد پایه</dt><dd id="pt-review-base">انتخاب نشده</dd></div><div><dt>شروع</dt><dd id="pt-review-start">انتخاب نشده</dd></div><div><dt>پایان</dt><dd id="pt-review-end">انتخاب نشده</dd></div><div><dt>پخش مسیر</dt><dd id="pt-review-grain">نیم‌ساعته</dd></div><div><dt>انتظار بازار</dt><dd id="pt-review-outlook">ثبت نشده</dd></div><div><dt>اطمینان</dt><dd id="pt-review-confidence">—</dd></div><div><dt>مرز سرمایه آزاد / وجه تضمین</dt><dd id="pt-review-risk">ثبت نشده</dd></div><div><dt>دروازه نقدشوندگی</dt><dd id="pt-review-liquidity">ثبت نشده</dd></div></dl>
         <div class="pt-honesty"><b>تعهد این بازی</b><p>قیمت آینده، قراردادهای بعدی و نتیجه نهایی در لحظه انتخاب سبد وارد پیشنهاد نمی‌شوند.</p></div>
         <button type="button" class="primary" id="pt-save-step">ثبت پیش‌نویس مرحله اول</button>
         <p class="pt-save-state" id="pt-save-state" role="status" aria-live="polite">هنوز چیزی ثبت نشده است.</p>
@@ -127,8 +163,9 @@ export async function mount(root, { state, api }) {
 
   const $ = (id) => root.querySelector(`#${id}`);
   const capital = $('pt-capital'), reserve = $('pt-reserve'), base = $('pt-base');
-  const outlookStep = $('pt-outlook-step');
-  let chain = new Map(), symbols = [], dates = [], loadedIns = '', setupDraft = null, draft = null;
+  const outlookStep = $('pt-outlook-step'), riskStep = $('pt-risk-step');
+  let chain = new Map(), symbols = [], dates = [], loadedIns = '';
+  let setupDraft = null, outlookDraft = null, draft = null;
   const draftId = `pt-ui-${Date.now()}`;
 
   function clearErrors() {
@@ -136,6 +173,7 @@ export async function mount(root, { state, api }) {
     root.querySelectorAll('[aria-invalid="true"]').forEach((node) => node.removeAttribute('aria-invalid'));
     $('pt-save-state')?.removeAttribute('data-error');
     $('pt-outlook-state')?.removeAttribute('data-error');
+    $('pt-risk-state')?.removeAttribute('data-error');
   }
 
   function selectedValue(name) {
@@ -143,35 +181,60 @@ export async function mount(root, { state, api }) {
   }
 
   function paintProgress(stage = 'setup') {
-    const setup = $('pt-progress-setup'), outlook = $('pt-progress-outlook');
+    const setup = $('pt-progress-setup'), outlook = $('pt-progress-outlook'), risk = $('pt-progress-risk');
     setup.classList.toggle('active', stage === 'setup');
     setup.classList.toggle('done', stage !== 'setup');
     setup.toggleAttribute('aria-current', stage === 'setup');
     setup.querySelector('small').textContent = stage === 'setup' ? 'در حال تکمیل' : 'کامل';
     outlook.classList.toggle('active', stage === 'outlook');
+    outlook.classList.toggle('done', stage === 'risk' || stage === 'risk-complete');
     outlook.toggleAttribute('aria-current', stage === 'outlook');
-    outlook.querySelector('small').textContent = stage === 'outlook' ? 'در حال تکمیل' : 'قفل';
+    outlook.querySelector('small').textContent = stage === 'outlook' ? 'در حال تکمیل' : stage === 'setup' ? 'قفل' : 'کامل';
+    risk.classList.toggle('active', stage === 'risk');
+    risk.classList.toggle('done', stage === 'risk-complete');
+    risk.toggleAttribute('aria-current', stage === 'risk');
+    risk.querySelector('small').textContent = stage === 'risk' ? 'در حال تکمیل' : stage === 'risk-complete' ? 'کامل' : 'قفل';
   }
 
   function invalidateSetupDraft() {
     if (!setupDraft) return;
-    setupDraft = null; draft = null;
+    setupDraft = null; outlookDraft = null; draft = null;
     root.removeAttribute('data-draft-ready');
     root.removeAttribute('data-outlook-ready');
+    root.removeAttribute('data-risk-ready');
     outlookStep.hidden = true;
+    riskStep.hidden = true;
     paintProgress('setup');
     $('pt-save-step').textContent = 'ثبت دوباره پیش‌نویس مرحله اول';
     $('pt-save-state').textContent = 'ورودی مرحله نخست تغییر کرد؛ برای ادامه دوباره ثبتش کن.';
     $('pt-review-outlook').textContent = 'ثبت نشده';
     $('pt-review-confidence').textContent = '—';
+    $('pt-review-risk').textContent = 'ثبت نشده';
+    $('pt-review-liquidity').textContent = 'ثبت نشده';
   }
 
   function invalidateOutlookDraft() {
-    if (draft?.step !== 'outlook') return;
+    if (!outlookDraft) return;
+    outlookDraft = null;
     draft = setupDraft;
     root.removeAttribute('data-outlook-ready');
+    root.removeAttribute('data-risk-ready');
+    riskStep.hidden = true;
+    paintProgress('outlook');
     $('pt-save-outlook').textContent = 'ثبت دوباره انتظار بازار';
     $('pt-outlook-state').textContent = 'فرض بازار تغییر کرد؛ نسخه تازه را ثبت کن.';
+    $('pt-review-risk').textContent = 'ثبت نشده';
+    $('pt-review-liquidity').textContent = 'ثبت نشده';
+  }
+
+  function invalidateRiskDraft() {
+    if (draft?.step !== 'risk') return;
+    draft = outlookDraft;
+    root.removeAttribute('data-risk-ready');
+    paintProgress('risk');
+    $('pt-save-risk').textContent = 'ثبت دوباره مرزهای ریسک و اجرا';
+    $('pt-risk-state').textContent = 'مرزها تغییر کردند؛ نسخه تازه را ثبت کن.';
+    $('pt-review-liquidity').textContent = 'ثبت نشده';
   }
 
   function showError(why) {
@@ -205,6 +268,26 @@ export async function mount(root, { state, api }) {
     control?.setAttribute('aria-invalid', 'true');
     $('pt-outlook-state').textContent = text;
     $('pt-outlook-state').dataset.error = 'true';
+  }
+
+  function showRiskError(why) {
+    clearErrors();
+    const text = String(why || 'مرزهای ریسک و اجرا کامل نیست');
+    const target = text.includes('سقف زیان') ? 'max-loss'
+      : text.includes('سقف افت') ? 'max-drawdown'
+        : text.includes('سرمایه آزاد') ? 'min-free'
+          : text.includes('وجه تضمین') ? 'max-margin'
+            : text.includes('ریسک نامحدود') ? 'unlimited'
+              : text.includes('نماد پایه') ? 'underlying-value'
+                : text.includes('ارزش روزانه اختیار') ? 'option-value'
+                  : text.includes('موقعیت باز') ? 'open-interest'
+                    : text.includes('اسپرد') ? 'max-spread'
+                      : text.includes('مصرف عمق') ? 'book-take' : 'full-book';
+    const error = $(`pt-${target}-error`), control = $(`pt-${target}`);
+    if (error) { error.textContent = text; error.hidden = false; }
+    control?.setAttribute('aria-invalid', 'true');
+    $('pt-risk-state').textContent = text;
+    $('pt-risk-state').dataset.error = 'true';
   }
 
   function moneyText(value) {
@@ -252,6 +335,39 @@ export async function mount(root, { state, api }) {
     $('pt-scenario-track').dataset.direction = direction;
     $('pt-review-outlook').textContent = setupDraft ? (MISSION_DIRECTIONS[direction] || 'ثبت نشده') : 'ثبت نشده';
     $('pt-review-confidence').textContent = setupDraft ? `${fmt.int(confidence)}٪` : '—';
+  }
+
+  function currentRiskForm() {
+    return {
+      maxLossPct: $('pt-max-loss').value,
+      maxDrawdownPct: $('pt-max-drawdown').value,
+      minFreeCapitalPct: $('pt-min-free').value,
+      maxMarginUsePct: $('pt-max-margin').value,
+      allowUnlimitedRisk: selectedValue('pt-unlimited'),
+      minUnderlyingDailyValueToman: $('pt-underlying-value').value,
+      minOptionDailyValueToman: $('pt-option-value').value,
+      minOpenInterest: $('pt-open-interest').value,
+      maxSpreadPct: $('pt-max-spread').value,
+      maxBookTakePct: $('pt-book-take').value,
+      requireFullBook: selectedValue('pt-full-book'),
+    };
+  }
+
+  function paintRisk() {
+    const result = previewPortfolioRisk(outlookDraft, currentRiskForm());
+    const budget = result.ok ? result.budget : null;
+    const freePct = budget?.minFreeCapitalPct ?? 0;
+    const marginPct = budget?.maxMarginUsePct ?? 0;
+    const flexPct = budget?.flexiblePct ?? 0;
+    $('pt-budget-free-bar').style.flexBasis = `${freePct}%`;
+    $('pt-budget-margin-bar').style.flexBasis = `${marginPct}%`;
+    $('pt-budget-flex-bar').style.flexBasis = `${flexPct}%`;
+    $('pt-budget-free-pct').textContent = budget ? `${fmt.pct(freePct)}٪` : '—';
+    $('pt-budget-margin-pct').textContent = budget ? `${fmt.pct(marginPct)}٪` : '—';
+    $('pt-budget-flex-pct').textContent = budget ? `${fmt.pct(flexPct)}٪` : '—';
+    $('pt-budget-free-rial').textContent = budget ? `${moneyText(budget.minFreeCapitalRial / 10)} تومان` : '—';
+    $('pt-budget-margin-rial').textContent = budget ? `${moneyText(budget.maxMarginUseRial / 10)} تومان` : '—';
+    $('pt-review-risk').textContent = budget ? `${fmt.pct(freePct)}٪ آزاد · ${fmt.pct(marginPct)}٪ تضمین` : 'ثبت نشده';
   }
 
   function reviewDates() {
@@ -342,6 +458,10 @@ export async function mount(root, { state, api }) {
     });
   }
 
+  function currentRiskDraft() {
+    return createPortfolioRiskDraft(outlookDraft, currentRiskForm());
+  }
+
   capital.oninput = () => { paintCapital(); invalidateSetupDraft(); };
   reserve.oninput = () => { paintCapital(); invalidateSetupDraft(); };
   capital.onblur = () => formatMoneyInput(capital); reserve.onblur = () => formatMoneyInput(reserve);
@@ -373,14 +493,35 @@ export async function mount(root, { state, api }) {
   $('pt-save-outlook').onclick = () => {
     const result = currentOutlookDraft();
     if (!result.ok) { showOutlookError(result.why); return; }
-    clearErrors(); draft = result.draft; root.dataset.outlookReady = 'true';
+    clearErrors(); outlookDraft = result.draft; draft = result.draft; root.dataset.outlookReady = 'true';
     $('pt-outlook-state').removeAttribute('data-error');
     $('pt-outlook-state').textContent = 'انتظار بازار ثبت شد؛ هنوز مأموریت فعال و آینده آشکار نشده است.';
     $('pt-save-outlook').textContent = 'به‌روزرسانی انتظار بازار';
-    paintOutlook();
+    riskStep.hidden = false; paintProgress('risk'); paintOutlook(); paintRisk();
   };
 
-  paintCapital(); paintOutlook();
+  const riskInputIds = ['pt-max-loss', 'pt-max-drawdown', 'pt-min-free', 'pt-max-margin',
+    'pt-underlying-value', 'pt-option-value', 'pt-open-interest', 'pt-max-spread', 'pt-book-take'];
+  riskInputIds.forEach((id) => {
+    $(id).oninput = () => { clearErrors(); invalidateRiskDraft(); paintRisk(); };
+  });
+  ['pt-underlying-value', 'pt-option-value', 'pt-open-interest'].forEach((id) => {
+    $(id).onblur = () => { formatOptionalMoney($(id)); paintRisk(); };
+  });
+  root.querySelectorAll('input[name="pt-unlimited"], input[name="pt-full-book"]').forEach((input) => {
+    input.onchange = () => { clearErrors(); invalidateRiskDraft(); paintRisk(); };
+  });
+  $('pt-save-risk').onclick = () => {
+    const result = currentRiskDraft();
+    if (!result.ok) { showRiskError(result.why); return; }
+    clearErrors(); draft = result.draft; root.dataset.riskReady = 'true';
+    $('pt-risk-state').textContent = 'مرزهای ریسک و اجرا ثبت شدند؛ مأموریت هنوز فعال نشده است.';
+    $('pt-save-risk').textContent = 'به‌روزرسانی مرزهای ریسک و اجرا';
+    $('pt-review-liquidity').textContent = 'دروازه کامل ثبت شد';
+    paintProgress('risk-complete'); paintRisk();
+  };
+
+  paintCapital(); paintOutlook(); paintRisk();
   const unwatch = api.subscribeWatch(paintSymbols);
   const unfeed = api.onFeed((feed) => {
     if (feed.status === 'failed') {
@@ -388,5 +529,5 @@ export async function mount(root, { state, api }) {
       $('pt-feed-status').dataset.error = 'true'; $('pt-retry').hidden = false;
     }
   });
-  return () => { unwatch?.(); unfeed?.(); setupDraft = null; draft = null; };
+  return () => { unwatch?.(); unfeed?.(); setupDraft = null; outlookDraft = null; draft = null; };
 }
