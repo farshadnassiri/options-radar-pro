@@ -773,23 +773,35 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-snapshot[data-quality="missing"] .pt-snapshot-grid article:first-child b,
 .pt-snapshot[data-quality="estimated"] .pt-snapshot-grid article:first-child b { color: var(--warn); }
 .pt-snapshot ul { display: grid; gap: 6px; margin: 0; padding: 0 20px 0 0; color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-normal); }
-.pt-eligibility { min-width: 0; display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--panel-2); }
-.pt-eligibility[hidden] { display: none; }
-.pt-eligibility-head { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); }
-.pt-eligibility-head h3 { margin: 0; }
+.pt-eligibility, .pt-proposals { min-width: 0; display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--panel-2); }
+.pt-eligibility[hidden], .pt-proposals[hidden] { display: none; }
+.pt-eligibility-head, .pt-proposals-head { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); }
+.pt-eligibility-head h3, .pt-proposals-head h3 { margin: 0; }
 .pt-eligibility-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .pt-eligibility-filters button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
-.pt-eligibility-table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
-.pt-eligibility-table th, .pt-eligibility-table td { padding: 10px; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; overflow-wrap: anywhere; }
-.pt-eligibility-table th { color: var(--muted); background: var(--panel-2); font-size: var(--fs-xs); }
-.pt-eligibility-table td { color: var(--ink-2); font-size: var(--fs-xs); line-height: var(--lh-normal); }
+.pt-eligibility-table, .pt-proposals-table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.pt-eligibility-table th, .pt-eligibility-table td,
+.pt-proposals-table th, .pt-proposals-table td { padding: 10px; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; overflow-wrap: anywhere; }
+.pt-eligibility-table th, .pt-proposals-table th { color: var(--muted); background: var(--panel-2); font-size: var(--fs-xs); }
+.pt-eligibility-table td, .pt-proposals-table td { color: var(--ink-2); font-size: var(--fs-xs); line-height: var(--lh-normal); }
 .pt-eligibility-table th:nth-child(1) { width: 16%; }
 .pt-eligibility-table th:nth-child(2), .pt-eligibility-table th:nth-child(3), .pt-eligibility-table th:nth-child(6) { width: 10%; }
 .pt-eligibility-table th:nth-child(4) { width: 34%; }
 .pt-eligibility-table th:nth-child(5) { width: 20%; }
 .pt-eligibility-table tr[data-verdict="accepted"] td:nth-child(3) b { color: var(--gain); }
 .pt-eligibility-table tr[data-verdict="rejected"] td:nth-child(3) b { color: var(--loss); }
-.pt-eligibility-empty td { text-align: center; color: var(--muted); }
+.pt-eligibility-empty td, .pt-proposals-empty td { text-align: center; color: var(--muted); }
+
+/* پیشنهادها: رتبه و امتیاز باریک، «چرا این جایگاه» پهن. */
+.pt-proposals-table th:nth-child(1) { width: 6%; }
+.pt-proposals-table th:nth-child(2) { width: 18%; }
+.pt-proposals-table th:nth-child(3), .pt-proposals-table th:nth-child(4),
+.pt-proposals-table th:nth-child(5), .pt-proposals-table th:nth-child(6) { width: 11%; }
+.pt-proposals-table th:nth-child(7) { width: 22%; }
+.pt-proposals-table tbody b { color: var(--gain); }
+.pt-proposals-aside-table th:nth-child(1) { width: 24%; }
+.pt-proposals-aside-table th:nth-child(2) { width: 16%; }
+.pt-proposals-aside[data-kind="unknownScore"] b { color: var(--muted); }
 .pt-studio[data-mission-active="true"] .pt-mission-card { border-color: color-mix(in srgb, var(--gain) 45%, var(--line)); }
 
 .pt-review { position: sticky; top: var(--space-3); margin: 0; border-top: 4px solid var(--accent); }
@@ -844,12 +856,13 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .pt-allocation-row { grid-template-columns: 1fr; align-items: stretch; }
   .pt-allocation-row .pt-remove-allocation { justify-self: start; }
   .pt-stage-actions { grid-template-columns: 1fr; }
-  .pt-eligibility-head { align-items: stretch; flex-direction: column; }
-  .pt-eligibility-table, .pt-eligibility-table tbody { display: grid; grid-template-columns: minmax(0, 1fr); border: 0; background: transparent; }
-  .pt-eligibility-table thead { display: none; }
-  .pt-eligibility-table tr { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); margin-bottom: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); overflow: hidden; }
-  .pt-eligibility-table td { min-width: 0; display: grid; grid-template-columns: minmax(82px, .38fr) minmax(0, 1fr); gap: var(--space-2); padding: 9px 11px; }
-  .pt-eligibility-table td::before { content: attr(data-label); color: var(--muted); font-weight: 700; }
+  .pt-eligibility-head, .pt-proposals-head { align-items: stretch; flex-direction: column; }
+  .pt-eligibility-table, .pt-eligibility-table tbody,
+  .pt-proposals-table, .pt-proposals-table tbody { display: grid; grid-template-columns: minmax(0, 1fr); border: 0; background: transparent; }
+  .pt-eligibility-table thead, .pt-proposals-table thead { display: none; }
+  .pt-eligibility-table tr, .pt-proposals-table tr { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); margin-bottom: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); overflow: hidden; }
+  .pt-eligibility-table td, .pt-proposals-table td { min-width: 0; display: grid; grid-template-columns: minmax(82px, .38fr) minmax(0, 1fr); gap: var(--space-2); padding: 9px 11px; }
+  .pt-eligibility-table td::before, .pt-proposals-table td::before { content: attr(data-label); color: var(--muted); font-weight: 700; }
   .pt-eligibility-table .pt-eligibility-empty td { display: block; }
   .pt-eligibility-table .pt-eligibility-empty td::before { content: none; }
   .pt-symbol-row { grid-template-columns: 1fr; }
