@@ -1,14 +1,20 @@
 import { buildChain, underlyingList } from '../../core/chain.mjs';
+import { makeDataQuality } from '../../core/data-quality.mjs';
 import { historyDateLabel, normalizeHistoryDate } from '../../core/history.mjs';
 import {
-  MISSION_DIRECTIONS, MISSION_REPLAY_GRAINS, MISSION_VOLATILITY_VIEWS,
+  MISSION_DIRECTIONS, MISSION_OBJECTIVES, MISSION_REPLAY_GRAINS,
+  MISSION_RETURN_BASES, MISSION_VOLATILITY_VIEWS,
 } from '../../core/portfolio-mission.mjs';
+import { createTimeGate } from '../../core/time-gate.mjs';
 import { GROUPS as STRATEGY_FAMILIES } from '../../strategies/catalog.mjs';
 import {
-  createPortfolioAllocationDraft, createPortfolioOutlookDraft, createPortfolioRiskDraft,
-  createPortfolioStepOneDraft, parseTomanInput, previewPortfolioAllocations,
+  activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
+  createPortfolioOutlookDraft, createPortfolioRiskDraft,
+  createPortfolioStepOneDraft, parseIntegerInput, parsePercentInput, parseTomanInput,
+  previewPortfolioAllocations,
   previewPortfolioCapital, previewPortfolioRisk,
 } from '../portfolio-mission-form.mjs';
+import { gateLoaders } from '../bereket-data.mjs';
 import { mountDateWheel } from '../datewheel.mjs';
 import { fmt, faDigits } from '../fmt.mjs';
 
@@ -38,6 +44,12 @@ const volatilityCards = () => Object.entries(MISSION_VOLATILITY_VIEWS).map(([val
 const familyOptions = (selected = '') => `<option value="">انتخاب خانواده…</option>${Object.entries(STRATEGY_FAMILIES)
   .map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${esc(label)}</option>`).join('')}`;
 
+const objectiveCards = () => Object.entries(MISSION_OBJECTIVES).map(([value, label]) =>
+  `<label class="pt-choice compact"><input type="radio" name="pt-objective" value="${value}"><span><b>${label}</b></span></label>`).join('');
+
+const returnBaseCards = () => Object.entries(MISSION_RETURN_BASES).map(([value, label]) =>
+  `<label><input type="radio" name="pt-return-base" value="${value}"><span>${label}</span></label>`).join('');
+
 export async function mount(root, { state, api }) {
   root.innerHTML = `<div class="pt-studio">
     <section class="pt-hero">
@@ -52,7 +64,7 @@ export async function mount(root, { state, api }) {
       <div id="pt-progress-outlook"><b>۲</b><span>انتظار بازار</span><small>قفل</small></div>
       <div id="pt-progress-risk"><b>۳</b><span>ریسک و نقدشوندگی</span><small>قفل</small></div>
       <div id="pt-progress-allocation"><b>۴</b><span>تخصیص خانواده‌ها</span><small>قفل</small></div>
-      <div><b>۵</b><span>مرور و شروع</span><small>قفل</small></div>
+      <div id="pt-progress-review"><b>۵</b><span>مرور و شروع</span><small>قفل</small></div>
     </nav>
 
     <section class="pt-layout">
@@ -176,6 +188,43 @@ export async function mount(root, { state, api }) {
 
           <div class="pt-stage-actions"><button type="button" class="primary" id="pt-save-allocation">ثبت تخصیص خانواده‌ها</button><p class="pt-save-state" id="pt-allocation-state" role="status" aria-live="polite">دست‌کم یک خانواده و درصد آن را وارد کن.</p></div>
         </section>
+
+        <section class="card pt-card pt-mission-card" id="pt-review-step" aria-labelledby="pt-review-title" hidden>
+          <div class="section-head"><div><p class="eyebrow">مرحله پنجم · مرور و قفل</p><h2 id="pt-review-title">قواعد سفر را یک‌جا ببین و مأموریت را شروع کن</h2></div><span class="pt-stage-badge">آخرین نقطه قابل ویرایش</span></div>
+          <p class="pt-allocation-intro">هیچ هدف مالی از طرف سیستم انتخاب نمی‌شود. چهار ورودی زیر را صریح ثبت کن؛ سپس قرارداد کامل و عکس دادهٔ همان لحظه قفل می‌شوند.</p>
+
+          <fieldset class="pt-fieldset" id="pt-objective-field"><legend>هدف اصلی مأموریت</legend><div class="pt-choice-grid" id="pt-objective">${objectiveCards()}</div><small class="pt-field-error" id="pt-objective-error" hidden></small></fieldset>
+          <fieldset class="pt-fieldset pt-binary-field" id="pt-return-base-field"><legend>مبنای سنجش بازده هدف</legend><div class="pt-binary" id="pt-return-base">${returnBaseCards()}</div><small class="pt-field-error" id="pt-return-base-error" hidden></small></fieldset>
+          <div class="pt-form-grid pt-mission-objective-grid">
+            <label class="field"><span>بازده هدف</span><input id="pt-target-return" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-target-return-error"><small class="pt-field-error" id="pt-target-return-error" hidden></small></label>
+            <label class="field"><span>حداکثر افق نگهداری</span><input id="pt-max-holding" type="text" inputmode="numeric" placeholder="روز معاملاتی" aria-describedby="pt-max-holding-error"><small class="pt-field-error" id="pt-max-holding-error" hidden></small></label>
+          </div>
+
+          <section class="pt-final-review" aria-labelledby="pt-final-review-title">
+            <div><p class="eyebrow">بازبینی نهایی</p><h3 id="pt-final-review-title">پنج ایستگاه تصمیم</h3></div>
+            <div class="pt-final-review-grid">
+              <article><span>زمان و سرمایه</span><b id="pt-final-setup">—</b><button type="button" class="ghost" data-pt-edit="setup">ویرایش</button></article>
+              <article><span>انتظار بازار</span><b id="pt-final-outlook">—</b><button type="button" class="ghost" data-pt-edit="outlook">ویرایش</button></article>
+              <article><span>ریسک و اجرا</span><b id="pt-final-risk">—</b><button type="button" class="ghost" data-pt-edit="risk">ویرایش</button></article>
+              <article><span>تخصیص و نقد آزاد</span><b id="pt-final-allocation">—</b><button type="button" class="ghost" data-pt-edit="allocation">ویرایش</button></article>
+              <article><span>هدف و افق</span><b id="pt-final-objective">ثبت نشده</b><button type="button" class="ghost" data-pt-edit="objective">ویرایش</button></article>
+            </div>
+          </section>
+
+          <section class="pt-snapshot" id="pt-snapshot" aria-live="polite">
+            <div><p class="eyebrow">عکس شروع قابل ممیزی</p><h3>کیفیت خوراک در لحظه ورود</h3></div>
+            <div class="pt-snapshot-grid">
+              <article><span>وضعیت کل</span><b id="pt-snapshot-kind">هنوز ساخته نشده</b></article>
+              <article><span>کفایت</span><b id="pt-snapshot-sufficient">—</b></article>
+              <article><span>منبع</span><b id="pt-snapshot-source">—</b></article>
+              <article><span>لحظه</span><b id="pt-snapshot-at">—</b></article>
+            </div>
+            <ul id="pt-snapshot-reasons"><li>پس از قفل مأموریت، دادهٔ روزانه، ریزمعامله، دفتر سفارش و فهرست قراردادهای همان تاریخ بررسی می‌شوند.</li></ul>
+          </section>
+
+          <div class="pt-stage-actions"><button type="button" class="primary" id="pt-start-mission">قفل مأموریت و عکس شروع</button><p class="pt-save-state" id="pt-mission-state" role="status" aria-live="polite">هدف، مبنای بازده، درصد هدف و افق نگهداری را صریح وارد کن.</p></div>
+          <small class="pt-field-error" id="pt-mission-error" hidden></small>
+        </section>
       </div>
 
       <aside class="card pt-review">
@@ -192,8 +241,10 @@ export async function mount(root, { state, api }) {
   const capital = $('pt-capital'), reserve = $('pt-reserve'), base = $('pt-base');
   const outlookStep = $('pt-outlook-step'), riskStep = $('pt-risk-step');
   const allocationStep = $('pt-allocation-step'), allocationRowsRoot = $('pt-allocation-rows');
+  const reviewStep = $('pt-review-step');
   let chain = new Map(), symbols = [], dates = [], loadedIns = '';
-  let setupDraft = null, outlookDraft = null, riskDraft = null, draft = null;
+  let setupDraft = null, outlookDraft = null, riskDraft = null, allocationDraft = null;
+  let missionDraft = null, draft = null;
   let allocationRowId = 0;
   const draftId = `pt-ui-${Date.now()}`;
 
@@ -204,6 +255,7 @@ export async function mount(root, { state, api }) {
     $('pt-outlook-state')?.removeAttribute('data-error');
     $('pt-risk-state')?.removeAttribute('data-error');
     $('pt-allocation-state')?.removeAttribute('data-error');
+    $('pt-mission-state')?.removeAttribute('data-error');
   }
 
   function selectedValue(name) {
@@ -213,24 +265,30 @@ export async function mount(root, { state, api }) {
   function paintProgress(stage = 'setup') {
     const setup = $('pt-progress-setup'), outlook = $('pt-progress-outlook');
     const risk = $('pt-progress-risk'), allocation = $('pt-progress-allocation');
+    const review = $('pt-progress-review');
     setup.classList.toggle('active', stage === 'setup');
     setup.classList.toggle('done', stage !== 'setup');
     setup.toggleAttribute('aria-current', stage === 'setup');
     setup.querySelector('small').textContent = stage === 'setup' ? 'در حال تکمیل' : 'کامل';
     outlook.classList.toggle('active', stage === 'outlook');
-    outlook.classList.toggle('done', ['risk', 'allocation', 'allocation-complete'].includes(stage));
+    outlook.classList.toggle('done', ['risk', 'allocation', 'review', 'active'].includes(stage));
     outlook.toggleAttribute('aria-current', stage === 'outlook');
     outlook.querySelector('small').textContent = stage === 'outlook' ? 'در حال تکمیل' : stage === 'setup' ? 'قفل' : 'کامل';
     risk.classList.toggle('active', stage === 'risk');
-    risk.classList.toggle('done', stage === 'allocation' || stage === 'allocation-complete');
+    risk.classList.toggle('done', ['allocation', 'review', 'active'].includes(stage));
     risk.toggleAttribute('aria-current', stage === 'risk');
     risk.querySelector('small').textContent = stage === 'risk' ? 'در حال تکمیل'
-      : stage === 'allocation' || stage === 'allocation-complete' ? 'کامل' : 'قفل';
-    allocation.classList.toggle('active', stage === 'allocation' || stage === 'allocation-complete');
-    allocation.classList.toggle('done', stage === 'allocation-complete');
-    allocation.toggleAttribute('aria-current', stage === 'allocation' || stage === 'allocation-complete');
+      : ['allocation', 'review', 'active'].includes(stage) ? 'کامل' : 'قفل';
+    allocation.classList.toggle('active', stage === 'allocation');
+    allocation.classList.toggle('done', stage === 'review' || stage === 'active');
+    allocation.toggleAttribute('aria-current', stage === 'allocation');
     allocation.querySelector('small').textContent = stage === 'allocation' ? 'در حال تکمیل'
-      : stage === 'allocation-complete' ? 'کامل' : 'قفل';
+      : stage === 'review' || stage === 'active' ? 'کامل' : 'قفل';
+    review.classList.toggle('active', stage === 'review' || stage === 'active');
+    review.classList.toggle('done', stage === 'active');
+    review.toggleAttribute('aria-current', stage === 'review' || stage === 'active');
+    review.querySelector('small').textContent = stage === 'review' ? 'در حال تکمیل'
+      : stage === 'active' ? 'قفل‌شده' : 'قفل';
   }
 
   function resetAllocationRows() {
@@ -240,14 +298,16 @@ export async function mount(root, { state, api }) {
 
   function invalidateSetupDraft() {
     if (!setupDraft) return;
-    setupDraft = null; outlookDraft = null; riskDraft = null; draft = null;
+    setupDraft = null; outlookDraft = null; riskDraft = null; allocationDraft = null; missionDraft = null; draft = null;
     root.removeAttribute('data-draft-ready');
     root.removeAttribute('data-outlook-ready');
     root.removeAttribute('data-risk-ready');
     root.removeAttribute('data-allocation-ready');
+    root.removeAttribute('data-mission-ready');
     outlookStep.hidden = true;
     riskStep.hidden = true;
     allocationStep.hidden = true;
+    reviewStep.hidden = true;
     resetAllocationRows();
     paintProgress('setup');
     $('pt-save-step').textContent = 'ثبت دوباره پیش‌نویس مرحله اول';
@@ -261,13 +321,15 @@ export async function mount(root, { state, api }) {
 
   function invalidateOutlookDraft() {
     if (!outlookDraft) return;
-    outlookDraft = null; riskDraft = null;
+    outlookDraft = null; riskDraft = null; allocationDraft = null; missionDraft = null;
     draft = setupDraft;
     root.removeAttribute('data-outlook-ready');
     root.removeAttribute('data-risk-ready');
     root.removeAttribute('data-allocation-ready');
+    root.removeAttribute('data-mission-ready');
     riskStep.hidden = true;
     allocationStep.hidden = true;
+    reviewStep.hidden = true;
     resetAllocationRows();
     paintProgress('outlook');
     $('pt-save-outlook').textContent = 'ثبت دوباره انتظار بازار';
@@ -279,10 +341,12 @@ export async function mount(root, { state, api }) {
 
   function invalidateRiskDraft() {
     if (!riskDraft) return;
-    riskDraft = null; draft = outlookDraft;
+    riskDraft = null; allocationDraft = null; missionDraft = null; draft = outlookDraft;
     root.removeAttribute('data-risk-ready');
     root.removeAttribute('data-allocation-ready');
+    root.removeAttribute('data-mission-ready');
     allocationStep.hidden = true;
+    reviewStep.hidden = true;
     resetAllocationRows();
     paintProgress('risk');
     $('pt-save-risk').textContent = 'ثبت دوباره مرزهای ریسک و اجرا';
@@ -293,8 +357,10 @@ export async function mount(root, { state, api }) {
 
   function invalidateAllocationDraft() {
     if (draft?.step !== 'allocation') return;
-    draft = riskDraft;
+    allocationDraft = null; missionDraft = null; draft = riskDraft;
     root.removeAttribute('data-allocation-ready');
+    root.removeAttribute('data-mission-ready');
+    reviewStep.hidden = true;
     paintProgress('allocation');
     $('pt-save-allocation').textContent = 'ثبت دوباره تخصیص خانواده‌ها';
     $('pt-allocation-state').textContent = 'تخصیص تغییر کرد؛ نسخه تازه را ثبت کن.';
@@ -362,6 +428,24 @@ export async function mount(root, { state, api }) {
     $('pt-allocation-rows').setAttribute('aria-invalid', 'true');
     $('pt-allocation-state').textContent = text;
     $('pt-allocation-state').dataset.error = 'true';
+  }
+
+  function showMissionError(why) {
+    clearErrors();
+    const text = String(why || 'قرارداد کامل مأموریت معتبر نیست');
+    const target = text.includes('هدف مأموریت') ? 'objective'
+      : text.includes('مبنای بازده') ? 'return-base'
+        : text.includes('بازده هدف') ? 'target-return'
+          : text.includes('روز نگهداری') ? 'max-holding' : 'mission';
+    const error = $(`pt-${target}-error`);
+    const control = target === 'objective' ? $('pt-objective')
+      : target === 'return-base' ? $('pt-return-base')
+        : target === 'target-return' ? $('pt-target-return')
+          : target === 'max-holding' ? $('pt-max-holding') : reviewStep;
+    if (error) { error.textContent = text; error.hidden = false; }
+    control?.setAttribute('aria-invalid', 'true');
+    $('pt-mission-state').textContent = text;
+    $('pt-mission-state').dataset.error = 'true';
   }
 
   function moneyText(value) {
@@ -475,6 +559,164 @@ export async function mount(root, { state, api }) {
     const budgets = preview.ok ? preview.session.allocations : [];
     allocationRowsRoot.querySelectorAll('.pt-allocation-budget').forEach((output, index) => {
       output.textContent = budgets[index] ? `${moneyText(budgets[index].targetRial / 10)} تومان` : '—';
+    });
+  }
+
+  function currentMissionForm() {
+    return {
+      objectiveMode: selectedValue('pt-objective'),
+      returnBase: selectedValue('pt-return-base'),
+      targetReturnPct: $('pt-target-return').value,
+      maxHoldingDays: $('pt-max-holding').value,
+    };
+  }
+
+  function paintFinalReview() {
+    if (!allocationDraft) return;
+    const session = allocationDraft.session;
+    const momentText = (point) => {
+      const time = TIME_OPTIONS.find(([second]) => second === point.second)?.[1] || '—';
+      return `${faDigits(historyDateLabel(point.date))} ساعت ${time}`;
+    };
+    $('pt-final-setup').textContent = [
+      `نماد ${base.selectedOptions[0]?.textContent || session.baseIns}`,
+      `سرمایه شروع ${moneyText(session.capital.initialRial / 10)} تومان`,
+      `ذخیره ${moneyText(session.capital.reserveRial / 10)} تومان`,
+      `قابل تخصیص ${moneyText(session.capital.allocatableRial / 10)} تومان`,
+      `شروع ${momentText(session.start)}`, `پایان ${momentText(session.end)}`,
+      `پخش ${MISSION_REPLAY_GRAINS[allocationDraft.replay.grain]?.label || '—'}`,
+    ].join(' · ');
+    const outlook = allocationDraft.outlook;
+    const outlookParts = [
+      MISSION_DIRECTIONS[outlook.direction],
+      `دید تلاطم ${MISSION_VOLATILITY_VIEWS[outlook.volatilityView]}`,
+      `اطمینان ${fmt.pct(outlook.confidencePct)}٪`,
+    ];
+    if (Number.isFinite(outlook.targetPriceRial)) outlookParts.push(`هدف ${moneyText(outlook.targetPriceRial / 10)} تومان`);
+    if (Number.isFinite(outlook.rangeLowRial) && Number.isFinite(outlook.rangeHighRial)) {
+      outlookParts.push(`بازه ${moneyText(outlook.rangeLowRial / 10)} تا ${moneyText(outlook.rangeHighRial / 10)} تومان`);
+    }
+    if (Number.isFinite(outlook.expectedVolatilityPct)) outlookParts.push(`تلاطم مورد انتظار ${fmt.pct(outlook.expectedVolatilityPct)}٪`);
+    outlookParts.push(`دلیل: ${outlook.thesis}`);
+    $('pt-final-outlook').textContent = outlookParts.join(' · ');
+    const risk = allocationDraft.risk, liquidity = allocationDraft.liquidity;
+    $('pt-final-risk').textContent = [
+      `زیان معامله ${fmt.pct(risk.maxLossPct)}٪`, `افت کل ${fmt.pct(risk.maxDrawdownPct)}٪`,
+      `سرمایه آزاد ${fmt.pct(risk.minFreeCapitalPct)}٪`, `وجه تضمین ${fmt.pct(risk.maxMarginUsePct)}٪`,
+      `ریسک نامحدود ${risk.allowUnlimitedRisk ? 'مجاز' : 'غیرمجاز'}`,
+      `ارزش روزانه پایه ${moneyText(liquidity.minUnderlyingDailyValueRial / 10)} تومان`,
+      `ارزش روزانه اختیار ${moneyText(liquidity.minOptionDailyValueRial / 10)} تومان`,
+      `موقعیت باز ${fmt.int(liquidity.minOpenInterest)}`, `اسپرد ${fmt.pct(liquidity.maxSpreadPct)}٪`,
+      `مصرف عمق ${fmt.pct(liquidity.maxBookTakePct)}٪`, `پنج سطح ${liquidity.requireFullBook ? 'الزامی' : 'غیرالزامی'}`,
+    ].join(' · ');
+    $('pt-final-allocation').textContent = [
+      ...session.allocations.map((row) => `${row.label} ${fmt.pct(row.pct)}٪ / ${moneyText(row.targetRial / 10)} تومان`),
+      `جمع ${moneyText(session.capital.assignedRial / 10)} تومان`,
+      `تخصیص‌نیافته ${moneyText(session.capital.unassignedRial / 10)} تومان`,
+    ].join(' · ');
+    const objective = MISSION_OBJECTIVES[selectedValue('pt-objective')] || 'هدف ثبت نشده';
+    const returnBase = MISSION_RETURN_BASES[selectedValue('pt-return-base')] || 'مبنای بازده ثبت نشده';
+    const target = parsePercentInput($('pt-target-return').value);
+    const horizon = parseIntegerInput($('pt-max-holding').value);
+    $('pt-final-objective').textContent = Number.isFinite(target) && Number.isFinite(horizon)
+      ? `${objective} · مبنا ${returnBase} · بازده هدف ${fmt.pct(target)}٪ · حداکثر ${fmt.int(horizon)} روز`
+      : `${objective} · ${returnBase}`;
+  }
+
+  async function startSnapshot(session) {
+    const at = session.start;
+    const failures = [];
+    const rawLoaders = gateLoaders();
+    const feedLabels = { dailies: 'داده روزانه', trades: 'ریزمعامله', book: 'دفتر سفارش' };
+    const safe = (name, fallback) => async (...args) => {
+      try { return await rawLoaders[name](...args); }
+      catch (error) {
+        failures.push(`${feedLabels[name]}: ${String(error?.message || 'خوراک دریافت نشد')}`);
+        return fallback;
+      }
+    };
+    const gate = createTimeGate({
+      sessionId: session.id,
+      now: at,
+      days: dates,
+      load: {
+        dailies: safe('dailies', []),
+        trades: safe('trades', []),
+        book: safe('book', []),
+      },
+    });
+    const loadUniverse = async () => {
+      try {
+        const response = await fetch(`/api/history/universe?date=${encodeURIComponent(String(at.date))}`);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.error) throw new Error(payload.error || 'فهرست تاریخی دریافت نشد');
+        return {
+          rows: Array.isArray(payload.rows) ? payload.rows : [],
+          quality: payload.quality || makeDataQuality({
+            kind: 'missing', source: 'watch-archive', asOf: at,
+            reason: 'مدرک کیفیت فهرست قراردادها در پاسخ ثبت نشده است',
+          }),
+        };
+      } catch (error) {
+        const reason = String(error?.message || 'فهرست تاریخی دریافت نشد');
+        failures.push(`فهرست قراردادها: ${reason}`);
+        return {
+          rows: [],
+          quality: makeDataQuality({ kind: 'missing', source: 'watch-archive', asOf: at, reason }),
+        };
+      }
+    };
+    const [daily, point, universe] = await Promise.all([
+      gate.history(session.baseIns), gate.snapshot(session.baseIns), loadUniverse(),
+    ]);
+    const snapshot = {
+      universe,
+      daily,
+      intraday: { trade: point.trade, quality: point.tradeQuality },
+      book: { quote: point.quote, quality: point.bookQuality },
+    };
+    if (failures.length) {
+      snapshot.quality = makeDataQuality({
+        kind: 'missing', source: 'portfolio-start-feed', asOf: at, reasons: failures,
+      });
+    }
+    return snapshot;
+  }
+
+  function paintSnapshot(snapshot) {
+    const quality = snapshot?.quality;
+    const sourceLabels = {
+      'portfolio-start-snapshot': 'عکس شروع سبد',
+      'portfolio-start-feed': 'خوراک شروع سبد',
+      'watch-archive': 'بایگانی دیده‌بان',
+      'current-watch-fallback': 'جایگزین دیده‌بان امروز',
+      'historical-daily': 'تاریخچه روزانه',
+      'historical-trades': 'ریزمعامله تاریخی',
+      'best-limits-history': 'دفتر سفارش تاریخی',
+      'time-gate-snapshot': 'دروازه زمان',
+    };
+    $('pt-snapshot-kind').textContent = quality?.label || 'فاقد داده';
+    $('pt-snapshot-sufficient').textContent = quality?.sufficient ? 'کافی' : 'ناکافی';
+    $('pt-snapshot-source').textContent = sourceLabels[quality?.source] || quality?.source || 'نامشخص';
+    const at = snapshot?.at;
+    $('pt-snapshot-at').textContent = at?.date
+      ? `${faDigits(historyDateLabel(at.date))} · ${fmt.int(Math.trunc(at.second / 3600)).padStart(2, '۰')}:${fmt.int(Math.trunc(at.second % 3600 / 60)).padStart(2, '۰')}`
+      : '—';
+    const reasons = quality?.reasons?.length ? quality.reasons : ['هیچ هشدار کیفیتی ثبت نشده است.'];
+    const list = $('pt-snapshot-reasons');
+    list.innerHTML = '';
+    for (const reason of reasons) {
+      const item = document.createElement('li');
+      item.textContent = reason;
+      list.append(item);
+    }
+    $('pt-snapshot').dataset.quality = quality?.kind || 'missing';
+  }
+
+  function lockMissionEditor() {
+    root.dataset.missionActive = 'true';
+    root.querySelectorAll('input, select, textarea, button').forEach((control) => {
+      control.disabled = true;
     });
   }
 
@@ -650,12 +892,60 @@ export async function mount(root, { state, api }) {
   $('pt-save-allocation').onclick = () => {
     const result = currentAllocationDraft();
     if (!result.ok) { showAllocationError(result.why); paintAllocation(); return; }
-    clearErrors(); draft = result.draft; root.dataset.allocationReady = 'true';
-    $('pt-allocation-state').textContent = 'تخصیص ثبت شد؛ مأموریت، snapshot و پیشنهاد هنوز فعال نشده‌اند.';
+    clearErrors(); allocationDraft = result.draft; missionDraft = null; draft = result.draft; root.dataset.allocationReady = 'true';
+    $('pt-allocation-state').textContent = 'تخصیص ثبت شد؛ مأموریت، عکس شروع و پیشنهاد هنوز فعال نشده‌اند.';
     $('pt-save-allocation').textContent = 'به‌روزرسانی تخصیص خانواده‌ها';
     const plan = previewPortfolioAllocations(riskDraft, allocationRows()).plan;
     $('pt-review-allocation').textContent = `${fmt.pct(plan.allocationPct)}٪ تخصیص · ${fmt.pct(100 - plan.allocationPct)}٪ آزاد`;
-    paintProgress('allocation-complete'); paintAllocation();
+    reviewStep.hidden = false;
+    paintProgress('review'); paintAllocation(); paintFinalReview();
+  };
+
+  root.querySelectorAll('input[name="pt-objective"], input[name="pt-return-base"]').forEach((input) => {
+    input.onchange = () => { clearErrors(); missionDraft = null; root.removeAttribute('data-mission-ready'); paintFinalReview(); };
+  });
+  ['pt-target-return', 'pt-max-holding'].forEach((id) => {
+    $(id).oninput = () => { clearErrors(); missionDraft = null; root.removeAttribute('data-mission-ready'); paintFinalReview(); };
+  });
+  reviewStep.onclick = (event) => {
+    const button = event.target.closest('[data-pt-edit]');
+    if (!button) return;
+    const target = ({
+      setup: root.querySelector('.pt-main > .pt-card'),
+      outlook: outlookStep, risk: riskStep, allocation: allocationStep, objective: reviewStep,
+    })[button.dataset.ptEdit];
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  $('pt-start-mission').onclick = async () => {
+    const locked = createPortfolioMissionDraft(allocationDraft, currentMissionForm());
+    if (!locked.ok) { showMissionError(locked.why); return; }
+    clearErrors();
+    const sourceDraft = allocationDraft;
+    missionDraft = locked.draft;
+    root.dataset.missionReady = 'true';
+    root.setAttribute('aria-busy', 'true');
+    $('pt-start-mission').disabled = true;
+    $('pt-mission-state').textContent = 'در حال بریدن خوراک‌ها دقیقاً در لحظه شروع…';
+    try {
+      const snapshot = await startSnapshot(missionDraft.session);
+      if (allocationDraft !== sourceDraft) throw new Error('تخصیص هنگام ساخت عکس شروع تغییر کرد؛ دوباره قفل کن');
+      const active = activatePortfolioMissionDraft(missionDraft, snapshot);
+      if (!active.ok) throw new Error(active.why);
+      draft = active.draft;
+      paintSnapshot(active.draft.snapshot);
+      paintProgress('active');
+      $('pt-mission-state').textContent = active.draft.snapshot.quality.sufficient
+        ? 'مأموریت و عکس شروع قفل شدند؛ هنوز هیچ پیشنهاد یا معامله‌ای ساخته نشده است.'
+        : 'مأموریت قفل شد؛ عکس شروع ناکافی است و علت‌ها بدون جایگزینی عدد نمایش داده شده‌اند.';
+      lockMissionEditor();
+    } catch (error) {
+      missionDraft = null;
+      root.removeAttribute('data-mission-ready');
+      showMissionError(error?.message || 'عکس شروع قفل نشد');
+      $('pt-start-mission').disabled = false;
+    } finally {
+      root.removeAttribute('aria-busy');
+    }
   };
 
   paintCapital(); paintOutlook(); paintRisk(); paintAllocation();
@@ -666,5 +956,8 @@ export async function mount(root, { state, api }) {
       $('pt-feed-status').dataset.error = 'true'; $('pt-retry').hidden = false;
     }
   });
-  return () => { unwatch?.(); unfeed?.(); setupDraft = null; outlookDraft = null; riskDraft = null; draft = null; };
+  return () => {
+    unwatch?.(); unfeed?.(); setupDraft = null; outlookDraft = null; riskDraft = null;
+    allocationDraft = null; missionDraft = null; draft = null;
+  };
 }

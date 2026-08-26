@@ -2,10 +2,11 @@
 // رابط تومان و رشتهٔ فارسی می‌گیرد؛ هسته فقط ریال و لحظه معتبر می‌بیند.
 
 import {
-  createPortfolioSession, portfolioCapitalPlan, setFamilyAllocations,
+  activatePortfolioSession, createPortfolioSession, portfolioCapitalPlan,
+  setFamilyAllocations, setPortfolioMission,
 } from '../core/portfolio-session.mjs';
 import {
-  MISSION_REPLAY_GRAINS, portfolioMissionRiskBudget,
+  createPortfolioMission, MISSION_REPLAY_GRAINS, portfolioMissionRiskBudget,
   validateMissionLiquidity, validateMissionOutlook, validateMissionRisk,
 } from '../core/portfolio-mission.mjs';
 import { GROUPS as STRATEGY_FAMILIES } from '../strategies/catalog.mjs';
@@ -306,6 +307,76 @@ export function createPortfolioAllocationDraft(riskDraft, rows = []) {
       ...riskDraft,
       step: 'allocation',
       session: preview.session,
+    },
+  };
+}
+
+function missionInputFromForm(allocationDraft, form = {}) {
+  return {
+    ok: true,
+    why: '',
+    input: {
+      objective: {
+        mode: String(form.objectiveMode || ''),
+        returnBase: String(form.returnBase || ''),
+        targetReturnPct: parsePercentInput(form.targetReturnPct),
+        maxHoldingDays: parseIntegerInput(form.maxHoldingDays),
+      },
+      replay: { grain: allocationDraft.replay?.grain || '' },
+      outlook: allocationDraft.outlook,
+      risk: allocationDraft.risk,
+      liquidity: allocationDraft.liquidity,
+    },
+  };
+}
+
+/** مرور زندهٔ قرارداد کامل؛ تنها اعتبارسنج، همان سازنده هسته است. */
+export function previewPortfolioMission(allocationDraft, form = {}) {
+  if (!allocationDraft?.session || allocationDraft.step !== 'allocation') {
+    return { ok: false, why: 'پیش‌نویس معتبر تخصیص خانواده‌ها لازم است', mission: null };
+  }
+  const parsed = missionInputFromForm(allocationDraft, form);
+  if (!parsed.ok) return { ok: false, why: parsed.why, mission: null };
+  return createPortfolioMission(allocationDraft.session, parsed.input);
+}
+
+/** مرحله پنجم، مأموریت معتبر را با قرارداد session قفل می‌کند. */
+export function createPortfolioMissionDraft(allocationDraft, form = {}) {
+  const preview = previewPortfolioMission(allocationDraft, form);
+  if (!preview.ok) return formFail(preview.why);
+  const parsed = missionInputFromForm(allocationDraft, form);
+  const locked = setPortfolioMission(allocationDraft.session, parsed.input);
+  if (!locked.ok) return formFail(locked.why);
+  return {
+    ok: true,
+    why: '',
+    draft: {
+      ...allocationDraft,
+      step: 'mission',
+      mission: preview.mission,
+      session: locked.session,
+    },
+  };
+}
+
+/** عکس بریده‌شدهٔ تزریق‌شده را در همان لحظه شروع قفل و جلسه را فعال می‌کند. */
+export function activatePortfolioMissionDraft(missionDraft, snapshot) {
+  if (!missionDraft?.session || missionDraft.step !== 'mission') {
+    return formFail('پیش‌نویس معتبر مأموریت لازم است');
+  }
+  const active = activatePortfolioSession(missionDraft.session, {
+    at: missionDraft.session.start,
+    snapshot,
+  });
+  if (!active.ok) return formFail(active.why);
+  return {
+    ok: true,
+    why: '',
+    draft: {
+      ...missionDraft,
+      step: 'active',
+      snapshot: active.session.startSnapshot,
+      session: active.session,
     },
   };
 }
