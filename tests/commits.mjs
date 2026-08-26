@@ -107,7 +107,23 @@ for (const c of commits) {
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════
+// حالت خلاصه: فقط ردها و یک خط جمع‌بندی.
+//
+// چرا هست: گزارش کامل چند هزار خط «✔» است. برای آدمی که ترمینال را
+// می‌بیند مفید است، ولی عاملی که این خروجی را در بافتار خودش می‌ریزد،
+// هر بار ده‌ها هزار توکن بابت سطرهایی می‌دهد که همه سبزند. قاعده:
+// عامل با `--quiet` اجرا کند، آدم بدون آن.
+const QUIET = process.argv.includes('--quiet') || process.argv.includes('-q');
 const W = 62;
+if (QUIET) {
+  let head = '';
+  for (const [mark, name, detail] of results) {
+    if (mark === '—') { head = name; continue; }
+    if (mark === '✘') console.log(` ✘ ${head} › ${name} ${detail}`);
+  }
+  console.log(`نگهبان پیام کامیت — قبول ${pass}   رد ${fail}`);
+  process.exit(fail ? 1 : 0);
+}
 console.log('\n' + '═'.repeat(W));
 console.log('  نگهبان پیام کامیت');
 console.log('═'.repeat(W));
