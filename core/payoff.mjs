@@ -79,6 +79,71 @@ export function breakpoints(legs) {
   return [...set].sort((a, b) => a - b);
 }
 
+/**
+ * قیمتی که از آن به بعد اعمالِ یک پای خریداری‌شده به‌صرفه است.
+ *
+ * «در سود بودن» شرط لازم اعمال است، نه کافی. اعمال دو هزینه دارد که هر دو
+ * روی **کل ارزش اسمی** می‌نشینند، نه روی ارزش ذاتی: کارمزد اعمال، و
+ * کارمزد نقد کردن سهمی که دستمان می‌آید یا باید تحویل بدهیم. اختیاری که
+ * یک ریال در سود است، اعمالش چند میلیون کارمزد می‌گیرد تا یک ریال بگیرد.
+ * کسی این کار را نمی‌کند، پس موتور هم نباید فرضش کند.
+ *
+ * کال خریداری‌شده: سهم می‌گیریم و می‌فروشیم، پس
+ *   S − K ≥ K·کارمزد اعمال + S·کارمزد فروش   →   S ≥ K(1+e)/(1−sell)
+ * پوت خریداری‌شده: سهم می‌خریم و تحویل می‌دهیم، پس
+ *   K − S ≥ K·کارمزد اعمال + S·کارمزد خرید   →   S ≤ K(1−e)/(1+buy)
+ *
+ * **پای فروخته‌شده آستانه ندارد و روی خود قیمت اعمال می‌ماند.** تصمیم
+ * اعمال آنجا مال طرف مقابل است، نه ما؛ و چون موقعیت او را نمی‌دانیم،
+ * بدترین حالت را فرض می‌کنیم. این محافظه‌کاری ریسک تخصیص را کم گزارش
+ * نمی‌کند.
+ *
+ * وقتی کارمزدی در کار نباشد، هر سه آستانه دقیقاً به K برمی‌گردند و رفتار
+ * موتور همان می‌شود که بود.
+ *
+ * نکتهٔ صریح دربارهٔ تقریب: کارمزد سهم اینجا «قیمت بازار» فرض می‌شود، در
+ * حالی که در ترکیبی مثل کالِ خریداری‌شده روی سهمِ فروخته‌شده، سهمِ اعمال
+ * ممکن است اصلاً به بازار نرود. آن حالت اعمال را کمی دیرتر از واقع نشان
+ * می‌دهد. این تقریب عمدی است — بدیلش انتخاب بهینهٔ زیرمجموعهٔ پاهاست که
+ * تصمیم را از خواندن درمی‌آورد.
+ */
+export function exerciseThreshold(leg, fees = NO_FEES) {
+  const K = num(leg.strike);
+  if (!(K > 0)) return NaN;
+  if (leg.side === 'sell') return K;
+  const e = num(fees.exercise);
+  if (leg.kind === 'call') {
+    const share = 1 - num(fees.sellStock);
+    return share > EPS ? (K * (1 + e)) / share : Infinity;
+  }
+  if (leg.kind === 'put') return (K * (1 - e)) / (1 + num(fees.buyStock));
+  return NaN;
+}
+
+/** آیا پا در قیمت داده‌شده واقعاً اعمال می‌شود — نه فقط در سود است. */
+export function isExercised(leg, S, fees = NO_FEES) {
+  if (leg.kind !== 'call' && leg.kind !== 'put') return false;
+  const bound = exerciseThreshold(leg, fees);
+  if (!Number.isFinite(bound)) return false;
+  return leg.kind === 'call' ? S > bound + EPS : bound > S + EPS;
+}
+
+/**
+ * مرزهای بخش‌بندی نمودار: جایی که مجموعهٔ پاهای اعمال‌شده عوض می‌شود.
+ *
+ * این دیگر لزوماً قیمت‌های اعمال نیستند. `breakpoints` همچنان قیمت‌های
+ * اعمال را می‌دهد چون برای نمایش لازم است؛ بخش‌بندی باید از آستانهٔ واقعی
+ * بیاید وگرنه داخل یک بخش، تابع خطی نمی‌ماند.
+ */
+export function settlementBounds(legs, fees = NO_FEES) {
+  const set = new Set();
+  for (const l of legs) {
+    const bound = exerciseThreshold(l, fees);
+    if (Number.isFinite(bound) && bound > 0) set.add(bound);
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
 /** آیا پا در قیمت داده‌شده در سود است. سر قیمت اعمال، بی‌ارزش شمرده می‌شود. */
 export function isItm(leg, S) {
   if (leg.kind === 'call') return S > num(leg.strike) + EPS;
@@ -98,7 +163,7 @@ function affineOn(legs, Sm, netCash, fees) {
   for (const l of legs) {
     const q = signedQty(l);
     if (l.kind === 'underlying') { a += q; sharesAfter += q; continue; }
-    if (!isItm(l, Sm)) continue;
+    if (!isExercised(l, Sm, fees)) continue;
 
     const K = num(l.strike);
     if (l.kind === 'call') {
@@ -136,7 +201,7 @@ function affineOn(legs, Sm, netCash, fees) {
 export function analyzePayoff(legs, netCash, opt = {}) {
   const fees = opt.fees || NO_FEES;
   const ks = breakpoints(legs);
-  const bounds = [0, ...ks, Infinity];
+  const bounds = [0, ...settlementBounds(legs, fees), Infinity];
 
   const segments = [];
   for (let i = 0; i < bounds.length - 1; i++) {
