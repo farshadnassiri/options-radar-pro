@@ -3,9 +3,11 @@ import { historyDateLabel, normalizeHistoryDate } from '../../core/history.mjs';
 import {
   MISSION_DIRECTIONS, MISSION_REPLAY_GRAINS, MISSION_VOLATILITY_VIEWS,
 } from '../../core/portfolio-mission.mjs';
+import { GROUPS as STRATEGY_FAMILIES } from '../../strategies/catalog.mjs';
 import {
-  createPortfolioOutlookDraft, createPortfolioRiskDraft, createPortfolioStepOneDraft,
-  parseTomanInput, previewPortfolioCapital, previewPortfolioRisk,
+  createPortfolioAllocationDraft, createPortfolioOutlookDraft, createPortfolioRiskDraft,
+  createPortfolioStepOneDraft, parseTomanInput, previewPortfolioAllocations,
+  previewPortfolioCapital, previewPortfolioRisk,
 } from '../portfolio-mission-form.mjs';
 import { mountDateWheel } from '../datewheel.mjs';
 import { fmt, faDigits } from '../fmt.mjs';
@@ -33,6 +35,9 @@ const directionCards = () => Object.entries(MISSION_DIRECTIONS).map(([value, lab
 const volatilityCards = () => Object.entries(MISSION_VOLATILITY_VIEWS).map(([value, label], index) =>
   `<label class="pt-choice compact"><input type="radio" name="pt-volatility" value="${value}"${index === 1 ? ' checked' : ''}><span><b>${label}</b></span></label>`).join('');
 
+const familyOptions = (selected = '') => `<option value="">انتخاب خانواده…</option>${Object.entries(STRATEGY_FAMILIES)
+  .map(([value, label]) => `<option value="${value}"${value === selected ? ' selected' : ''}>${esc(label)}</option>`).join('')}`;
+
 export async function mount(root, { state, api }) {
   root.innerHTML = `<div class="pt-studio">
     <section class="pt-hero">
@@ -46,7 +51,7 @@ export async function mount(root, { state, api }) {
       <div class="active" id="pt-progress-setup" aria-current="step"><b>۱</b><span>زمان و سرمایه</span><small>در حال تکمیل</small></div>
       <div id="pt-progress-outlook"><b>۲</b><span>انتظار بازار</span><small>قفل</small></div>
       <div id="pt-progress-risk"><b>۳</b><span>ریسک و نقدشوندگی</span><small>قفل</small></div>
-      <div><b>۴</b><span>تخصیص خانواده‌ها</span><small>قفل</small></div>
+      <div id="pt-progress-allocation"><b>۴</b><span>تخصیص خانواده‌ها</span><small>قفل</small></div>
       <div><b>۵</b><span>مرور و شروع</span><small>قفل</small></div>
     </nav>
 
@@ -149,11 +154,33 @@ export async function mount(root, { state, api }) {
 
           <div class="pt-stage-actions"><button type="button" class="primary" id="pt-save-risk">ثبت مرزهای ریسک و اجرا</button><p class="pt-save-state" id="pt-risk-state" role="status" aria-live="polite">همه مرزها باید صریح وارد شوند.</p></div>
         </section>
+
+        <section class="card pt-card pt-allocation-card" id="pt-allocation-step" aria-labelledby="pt-allocation-title" hidden>
+          <div class="section-head"><div><p class="eyebrow">مرحله چهارم · نقشه سرمایه</p><h2 id="pt-allocation-title">سرمایه را بین خانواده‌های استراتژی تقسیم کن</h2></div><span class="pt-stage-badge">بدون پخش پنهان</span></div>
+          <p class="pt-allocation-intro">هر خانواده و درصدش را خودت انتخاب کن. باقیمانده تا صد درصد نقد و تخصیص‌نیافته می‌ماند و بعداً بی‌صدا بین ردیف‌ها پخش نمی‌شود.</p>
+
+          <div class="pt-allocation-head" aria-hidden="true"><span>خانواده استراتژی</span><span>درصد سرمایه قابل تخصیص</span><span>بودجه زنده</span><span></span></div>
+          <div class="pt-allocation-rows" id="pt-allocation-rows"></div>
+          <button type="button" class="ghost pt-add-allocation" id="pt-add-allocation">افزودن خانواده</button>
+          <small class="pt-field-error" id="pt-allocation-error" hidden></small>
+
+          <section class="pt-allocation-summary" aria-live="polite" aria-labelledby="pt-allocation-summary-title">
+            <div><p class="eyebrow">جمع زنده</p><h3 id="pt-allocation-summary-title">تراز تخصیص</h3></div>
+            <div class="pt-allocation-totals">
+              <article><span>جمع درصدها</span><b id="pt-allocation-total">۰٪</b></article>
+              <article><span>فاصله تا صد</span><b id="pt-allocation-remaining">۱۰۰٪</b></article>
+              <article><span>بودجه تخصیص‌یافته</span><b id="pt-allocation-assigned">—</b><small>تومان</small></article>
+              <article><span>سرمایه تخصیص‌نیافته</span><b id="pt-allocation-unassigned">—</b><small>تومان</small></article>
+            </div>
+          </section>
+
+          <div class="pt-stage-actions"><button type="button" class="primary" id="pt-save-allocation">ثبت تخصیص خانواده‌ها</button><p class="pt-save-state" id="pt-allocation-state" role="status" aria-live="polite">دست‌کم یک خانواده و درصد آن را وارد کن.</p></div>
+        </section>
       </div>
 
       <aside class="card pt-review">
         <p class="eyebrow">پیش‌نویس زنده</p><h2>گذرنامه سفر</h2>
-        <dl><div><dt>سرمایه قابل تخصیص</dt><dd id="pt-review-capital">—</dd></div><div><dt>نماد پایه</dt><dd id="pt-review-base">انتخاب نشده</dd></div><div><dt>شروع</dt><dd id="pt-review-start">انتخاب نشده</dd></div><div><dt>پایان</dt><dd id="pt-review-end">انتخاب نشده</dd></div><div><dt>پخش مسیر</dt><dd id="pt-review-grain">نیم‌ساعته</dd></div><div><dt>انتظار بازار</dt><dd id="pt-review-outlook">ثبت نشده</dd></div><div><dt>اطمینان</dt><dd id="pt-review-confidence">—</dd></div><div><dt>مرز سرمایه آزاد / وجه تضمین</dt><dd id="pt-review-risk">ثبت نشده</dd></div><div><dt>دروازه نقدشوندگی</dt><dd id="pt-review-liquidity">ثبت نشده</dd></div></dl>
+        <dl><div><dt>سرمایه قابل تخصیص</dt><dd id="pt-review-capital">—</dd></div><div><dt>نماد پایه</dt><dd id="pt-review-base">انتخاب نشده</dd></div><div><dt>شروع</dt><dd id="pt-review-start">انتخاب نشده</dd></div><div><dt>پایان</dt><dd id="pt-review-end">انتخاب نشده</dd></div><div><dt>پخش مسیر</dt><dd id="pt-review-grain">نیم‌ساعته</dd></div><div><dt>انتظار بازار</dt><dd id="pt-review-outlook">ثبت نشده</dd></div><div><dt>اطمینان</dt><dd id="pt-review-confidence">—</dd></div><div><dt>مرز سرمایه آزاد / وجه تضمین</dt><dd id="pt-review-risk">ثبت نشده</dd></div><div><dt>دروازه نقدشوندگی</dt><dd id="pt-review-liquidity">ثبت نشده</dd></div><div><dt>تخصیص خانواده‌ها</dt><dd id="pt-review-allocation">ثبت نشده</dd></div></dl>
         <div class="pt-honesty"><b>تعهد این بازی</b><p>قیمت آینده، قراردادهای بعدی و نتیجه نهایی در لحظه انتخاب سبد وارد پیشنهاد نمی‌شوند.</p></div>
         <button type="button" class="primary" id="pt-save-step">ثبت پیش‌نویس مرحله اول</button>
         <p class="pt-save-state" id="pt-save-state" role="status" aria-live="polite">هنوز چیزی ثبت نشده است.</p>
@@ -164,8 +191,10 @@ export async function mount(root, { state, api }) {
   const $ = (id) => root.querySelector(`#${id}`);
   const capital = $('pt-capital'), reserve = $('pt-reserve'), base = $('pt-base');
   const outlookStep = $('pt-outlook-step'), riskStep = $('pt-risk-step');
+  const allocationStep = $('pt-allocation-step'), allocationRowsRoot = $('pt-allocation-rows');
   let chain = new Map(), symbols = [], dates = [], loadedIns = '';
-  let setupDraft = null, outlookDraft = null, draft = null;
+  let setupDraft = null, outlookDraft = null, riskDraft = null, draft = null;
+  let allocationRowId = 0;
   const draftId = `pt-ui-${Date.now()}`;
 
   function clearErrors() {
@@ -174,6 +203,7 @@ export async function mount(root, { state, api }) {
     $('pt-save-state')?.removeAttribute('data-error');
     $('pt-outlook-state')?.removeAttribute('data-error');
     $('pt-risk-state')?.removeAttribute('data-error');
+    $('pt-allocation-state')?.removeAttribute('data-error');
   }
 
   function selectedValue(name) {
@@ -181,29 +211,44 @@ export async function mount(root, { state, api }) {
   }
 
   function paintProgress(stage = 'setup') {
-    const setup = $('pt-progress-setup'), outlook = $('pt-progress-outlook'), risk = $('pt-progress-risk');
+    const setup = $('pt-progress-setup'), outlook = $('pt-progress-outlook');
+    const risk = $('pt-progress-risk'), allocation = $('pt-progress-allocation');
     setup.classList.toggle('active', stage === 'setup');
     setup.classList.toggle('done', stage !== 'setup');
     setup.toggleAttribute('aria-current', stage === 'setup');
     setup.querySelector('small').textContent = stage === 'setup' ? 'در حال تکمیل' : 'کامل';
     outlook.classList.toggle('active', stage === 'outlook');
-    outlook.classList.toggle('done', stage === 'risk' || stage === 'risk-complete');
+    outlook.classList.toggle('done', ['risk', 'allocation', 'allocation-complete'].includes(stage));
     outlook.toggleAttribute('aria-current', stage === 'outlook');
     outlook.querySelector('small').textContent = stage === 'outlook' ? 'در حال تکمیل' : stage === 'setup' ? 'قفل' : 'کامل';
     risk.classList.toggle('active', stage === 'risk');
-    risk.classList.toggle('done', stage === 'risk-complete');
+    risk.classList.toggle('done', stage === 'allocation' || stage === 'allocation-complete');
     risk.toggleAttribute('aria-current', stage === 'risk');
-    risk.querySelector('small').textContent = stage === 'risk' ? 'در حال تکمیل' : stage === 'risk-complete' ? 'کامل' : 'قفل';
+    risk.querySelector('small').textContent = stage === 'risk' ? 'در حال تکمیل'
+      : stage === 'allocation' || stage === 'allocation-complete' ? 'کامل' : 'قفل';
+    allocation.classList.toggle('active', stage === 'allocation' || stage === 'allocation-complete');
+    allocation.classList.toggle('done', stage === 'allocation-complete');
+    allocation.toggleAttribute('aria-current', stage === 'allocation' || stage === 'allocation-complete');
+    allocation.querySelector('small').textContent = stage === 'allocation' ? 'در حال تکمیل'
+      : stage === 'allocation-complete' ? 'کامل' : 'قفل';
+  }
+
+  function resetAllocationRows() {
+    allocationRowsRoot.innerHTML = '';
+    allocationRowId = 0;
   }
 
   function invalidateSetupDraft() {
     if (!setupDraft) return;
-    setupDraft = null; outlookDraft = null; draft = null;
+    setupDraft = null; outlookDraft = null; riskDraft = null; draft = null;
     root.removeAttribute('data-draft-ready');
     root.removeAttribute('data-outlook-ready');
     root.removeAttribute('data-risk-ready');
+    root.removeAttribute('data-allocation-ready');
     outlookStep.hidden = true;
     riskStep.hidden = true;
+    allocationStep.hidden = true;
+    resetAllocationRows();
     paintProgress('setup');
     $('pt-save-step').textContent = 'ثبت دوباره پیش‌نویس مرحله اول';
     $('pt-save-state').textContent = 'ورودی مرحله نخست تغییر کرد؛ برای ادامه دوباره ثبتش کن.';
@@ -211,30 +256,49 @@ export async function mount(root, { state, api }) {
     $('pt-review-confidence').textContent = '—';
     $('pt-review-risk').textContent = 'ثبت نشده';
     $('pt-review-liquidity').textContent = 'ثبت نشده';
+    $('pt-review-allocation').textContent = 'ثبت نشده';
   }
 
   function invalidateOutlookDraft() {
     if (!outlookDraft) return;
-    outlookDraft = null;
+    outlookDraft = null; riskDraft = null;
     draft = setupDraft;
     root.removeAttribute('data-outlook-ready');
     root.removeAttribute('data-risk-ready');
+    root.removeAttribute('data-allocation-ready');
     riskStep.hidden = true;
+    allocationStep.hidden = true;
+    resetAllocationRows();
     paintProgress('outlook');
     $('pt-save-outlook').textContent = 'ثبت دوباره انتظار بازار';
     $('pt-outlook-state').textContent = 'فرض بازار تغییر کرد؛ نسخه تازه را ثبت کن.';
     $('pt-review-risk').textContent = 'ثبت نشده';
     $('pt-review-liquidity').textContent = 'ثبت نشده';
+    $('pt-review-allocation').textContent = 'ثبت نشده';
   }
 
   function invalidateRiskDraft() {
-    if (draft?.step !== 'risk') return;
-    draft = outlookDraft;
+    if (!riskDraft) return;
+    riskDraft = null; draft = outlookDraft;
     root.removeAttribute('data-risk-ready');
+    root.removeAttribute('data-allocation-ready');
+    allocationStep.hidden = true;
+    resetAllocationRows();
     paintProgress('risk');
     $('pt-save-risk').textContent = 'ثبت دوباره مرزهای ریسک و اجرا';
     $('pt-risk-state').textContent = 'مرزها تغییر کردند؛ نسخه تازه را ثبت کن.';
     $('pt-review-liquidity').textContent = 'ثبت نشده';
+    $('pt-review-allocation').textContent = 'ثبت نشده';
+  }
+
+  function invalidateAllocationDraft() {
+    if (draft?.step !== 'allocation') return;
+    draft = riskDraft;
+    root.removeAttribute('data-allocation-ready');
+    paintProgress('allocation');
+    $('pt-save-allocation').textContent = 'ثبت دوباره تخصیص خانواده‌ها';
+    $('pt-allocation-state').textContent = 'تخصیص تغییر کرد؛ نسخه تازه را ثبت کن.';
+    $('pt-review-allocation').textContent = 'ثبت نشده';
   }
 
   function showError(why) {
@@ -288,6 +352,16 @@ export async function mount(root, { state, api }) {
     control?.setAttribute('aria-invalid', 'true');
     $('pt-risk-state').textContent = text;
     $('pt-risk-state').dataset.error = 'true';
+  }
+
+  function showAllocationError(why) {
+    clearErrors();
+    const text = String(why || 'تخصیص خانواده‌ها کامل نیست');
+    $('pt-allocation-error').textContent = text;
+    $('pt-allocation-error').hidden = false;
+    $('pt-allocation-rows').setAttribute('aria-invalid', 'true');
+    $('pt-allocation-state').textContent = text;
+    $('pt-allocation-state').dataset.error = 'true';
   }
 
   function moneyText(value) {
@@ -368,6 +442,40 @@ export async function mount(root, { state, api }) {
     $('pt-budget-free-rial').textContent = budget ? `${moneyText(budget.minFreeCapitalRial / 10)} تومان` : '—';
     $('pt-budget-margin-rial').textContent = budget ? `${moneyText(budget.maxMarginUseRial / 10)} تومان` : '—';
     $('pt-review-risk').textContent = budget ? `${fmt.pct(freePct)}٪ آزاد · ${fmt.pct(marginPct)}٪ تضمین` : 'ثبت نشده';
+  }
+
+  function allocationRows() {
+    return [...allocationRowsRoot.querySelectorAll('.pt-allocation-row')].map((row) => ({
+      familyId: row.querySelector('select')?.value || '',
+      pct: row.querySelector('input')?.value || '',
+    }));
+  }
+
+  function addAllocationRow({ familyId = '', pct = '' } = {}) {
+    const rowId = ++allocationRowId;
+    allocationRowsRoot.insertAdjacentHTML('beforeend', `<div class="pt-allocation-row" data-row-id="${rowId}">
+      <label><span>خانواده</span><select aria-label="خانواده استراتژی ردیف ${rowId}">${familyOptions(familyId)}</select></label>
+      <label><span>درصد</span><input type="text" inputmode="decimal" value="${esc(pct)}" placeholder="درصد" aria-label="درصد تخصیص ردیف ${rowId}"></label>
+      <output class="pt-allocation-budget" aria-label="بودجه خانواده">—</output>
+      <button type="button" class="ghost pt-remove-allocation" aria-label="حذف ردیف تخصیص">حذف</button>
+    </div>`);
+  }
+
+  function paintAllocation() {
+    const preview = previewPortfolioAllocations(riskDraft, allocationRows());
+    const total = preview.totalPct || 0;
+    const remaining = preview.remainingPct ?? (100 - total);
+    $('pt-allocation-total').textContent = `${fmt.pct(total)}٪`;
+    $('pt-allocation-remaining').textContent = remaining >= 0
+      ? `${fmt.pct(remaining)}٪`
+      : `${fmt.pct(Math.abs(remaining))}٪ بیش از سقف`;
+    $('pt-allocation-remaining').toggleAttribute('data-error', remaining < 0);
+    $('pt-allocation-assigned').textContent = preview.ok ? moneyText(preview.plan.assignedRial / 10) : '—';
+    $('pt-allocation-unassigned').textContent = preview.ok ? moneyText(preview.plan.unassignedRial / 10) : '—';
+    const budgets = preview.ok ? preview.session.allocations : [];
+    allocationRowsRoot.querySelectorAll('.pt-allocation-budget').forEach((output, index) => {
+      output.textContent = budgets[index] ? `${moneyText(budgets[index].targetRial / 10)} تومان` : '—';
+    });
   }
 
   function reviewDates() {
@@ -462,6 +570,10 @@ export async function mount(root, { state, api }) {
     return createPortfolioRiskDraft(outlookDraft, currentRiskForm());
   }
 
+  function currentAllocationDraft() {
+    return createPortfolioAllocationDraft(riskDraft, allocationRows());
+  }
+
   capital.oninput = () => { paintCapital(); invalidateSetupDraft(); };
   reserve.oninput = () => { paintCapital(); invalidateSetupDraft(); };
   capital.onblur = () => formatMoneyInput(capital); reserve.onblur = () => formatMoneyInput(reserve);
@@ -514,14 +626,39 @@ export async function mount(root, { state, api }) {
   $('pt-save-risk').onclick = () => {
     const result = currentRiskDraft();
     if (!result.ok) { showRiskError(result.why); return; }
-    clearErrors(); draft = result.draft; root.dataset.riskReady = 'true';
+    clearErrors(); riskDraft = result.draft; draft = result.draft; root.dataset.riskReady = 'true';
     $('pt-risk-state').textContent = 'مرزهای ریسک و اجرا ثبت شدند؛ مأموریت هنوز فعال نشده است.';
     $('pt-save-risk').textContent = 'به‌روزرسانی مرزهای ریسک و اجرا';
     $('pt-review-liquidity').textContent = 'دروازه کامل ثبت شد';
-    paintProgress('risk-complete'); paintRisk();
+    resetAllocationRows(); addAllocationRow();
+    allocationStep.hidden = false;
+    paintProgress('allocation'); paintRisk(); paintAllocation();
   };
 
-  paintCapital(); paintOutlook(); paintRisk();
+  $('pt-add-allocation').onclick = () => {
+    clearErrors(); invalidateAllocationDraft(); addAllocationRow(); paintAllocation();
+  };
+  allocationRowsRoot.oninput = () => { clearErrors(); invalidateAllocationDraft(); paintAllocation(); };
+  allocationRowsRoot.onchange = () => { clearErrors(); invalidateAllocationDraft(); paintAllocation(); };
+  allocationRowsRoot.onclick = (event) => {
+    const button = event.target.closest('.pt-remove-allocation');
+    if (!button) return;
+    clearErrors(); invalidateAllocationDraft();
+    button.closest('.pt-allocation-row')?.remove();
+    paintAllocation();
+  };
+  $('pt-save-allocation').onclick = () => {
+    const result = currentAllocationDraft();
+    if (!result.ok) { showAllocationError(result.why); paintAllocation(); return; }
+    clearErrors(); draft = result.draft; root.dataset.allocationReady = 'true';
+    $('pt-allocation-state').textContent = 'تخصیص ثبت شد؛ مأموریت، snapshot و پیشنهاد هنوز فعال نشده‌اند.';
+    $('pt-save-allocation').textContent = 'به‌روزرسانی تخصیص خانواده‌ها';
+    const plan = previewPortfolioAllocations(riskDraft, allocationRows()).plan;
+    $('pt-review-allocation').textContent = `${fmt.pct(plan.allocationPct)}٪ تخصیص · ${fmt.pct(100 - plan.allocationPct)}٪ آزاد`;
+    paintProgress('allocation-complete'); paintAllocation();
+  };
+
+  paintCapital(); paintOutlook(); paintRisk(); paintAllocation();
   const unwatch = api.subscribeWatch(paintSymbols);
   const unfeed = api.onFeed((feed) => {
     if (feed.status === 'failed') {
@@ -529,5 +666,5 @@ export async function mount(root, { state, api }) {
       $('pt-feed-status').dataset.error = 'true'; $('pt-retry').hidden = false;
     }
   });
-  return () => { unwatch?.(); unfeed?.(); setupDraft = null; outlookDraft = null; draft = null; };
+  return () => { unwatch?.(); unfeed?.(); setupDraft = null; outlookDraft = null; riskDraft = null; draft = null; };
 }

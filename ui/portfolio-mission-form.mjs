@@ -1,11 +1,14 @@
 // آداپتر خالص مرحله نخست فرم مأموریت.
 // رابط تومان و رشتهٔ فارسی می‌گیرد؛ هسته فقط ریال و لحظه معتبر می‌بیند.
 
-import { createPortfolioSession, portfolioCapitalPlan } from '../core/portfolio-session.mjs';
+import {
+  createPortfolioSession, portfolioCapitalPlan, setFamilyAllocations,
+} from '../core/portfolio-session.mjs';
 import {
   MISSION_REPLAY_GRAINS, portfolioMissionRiskBudget,
   validateMissionLiquidity, validateMissionOutlook, validateMissionRisk,
 } from '../core/portfolio-mission.mjs';
+import { GROUPS as STRATEGY_FAMILIES } from '../strategies/catalog.mjs';
 
 const DIGITS = { '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
   '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9' };
@@ -241,6 +244,68 @@ export function createPortfolioRiskDraft(outlookDraft, form = {}) {
       step: 'risk',
       risk: checkedRisk.risk,
       liquidity: checkedLiquidity.liquidity,
+    },
+  };
+}
+
+function allocationRowsFromForm(rows = []) {
+  if (!Array.isArray(rows)) return formFail('فهرست تخصیص خانواده‌ها معتبر نیست');
+  const allocations = [];
+  let totalPct = 0;
+  for (const row of rows) {
+    const familyId = String(row?.familyId || '').trim();
+    if (!Object.prototype.hasOwnProperty.call(STRATEGY_FAMILIES, familyId)) {
+      return { ...formFail('خانواده استراتژی هر ردیف باید صریح انتخاب شود'), totalPct };
+    }
+    const pct = parsePercentInput(row?.pct);
+    if (!Number.isFinite(pct)) {
+      return { ...formFail(`درصد خانواده «${STRATEGY_FAMILIES[familyId]}» باید معتبر باشد`), totalPct };
+    }
+    totalPct += pct;
+    allocations.push({ familyId, label: STRATEGY_FAMILIES[familyId], pct });
+  }
+  return { ok: true, why: '', allocations, totalPct };
+}
+
+/**
+ * جمع و بودجه زنده تخصیص‌ها؛ ریال هر خانواده فقط از قرارداد session می‌آید.
+ * مقدار منفی remainingPct عمداً اضافه‌تخصیص را آشکار نگه می‌دارد.
+ */
+export function previewPortfolioAllocations(riskDraft, rows = []) {
+  if (!riskDraft?.session || riskDraft.step !== 'risk') {
+    return { ok: false, why: 'پیش‌نویس معتبر مرحله ریسک لازم است', totalPct: 0, remainingPct: 100, session: null, plan: null };
+  }
+  const parsed = allocationRowsFromForm(rows);
+  const totalPct = parsed.totalPct || 0;
+  if (!parsed.ok) {
+    return { ok: false, why: parsed.why, totalPct, remainingPct: 100 - totalPct, session: null, plan: null };
+  }
+  const allocated = setFamilyAllocations(riskDraft.session, parsed.allocations);
+  if (!allocated.ok) {
+    return { ok: false, why: allocated.why, totalPct, remainingPct: 100 - totalPct, session: null, plan: null };
+  }
+  const plan = portfolioCapitalPlan(allocated.session);
+  return {
+    ok: true,
+    why: '',
+    totalPct: plan.allocationPct,
+    remainingPct: 100 - plan.allocationPct,
+    session: allocated.session,
+    plan,
+  };
+}
+
+/** مرحله چهارم فقط تخصیص معتبر را به session پیش‌نویس وصل می‌کند. */
+export function createPortfolioAllocationDraft(riskDraft, rows = []) {
+  const preview = previewPortfolioAllocations(riskDraft, rows);
+  if (!preview.ok) return formFail(preview.why);
+  return {
+    ok: true,
+    why: '',
+    draft: {
+      ...riskDraft,
+      step: 'allocation',
+      session: preview.session,
     },
   };
 }

@@ -230,7 +230,7 @@ strategies/catalog.mjs   ۳۶ استراتژی، اعلانی
 server/server.mjs      سرور محلی
 worker/scan-worker.mjs   ریسه اسکن
 ui/                    پوسته ، جدول ، انتخابگر تاریخ ، نمودار ، تب‌ها
-ui/portfolio-mission-form.mjs آداپتر تومان و پیش‌نویس مرحله نخست مأموریت
+ui/portfolio-mission-form.mjs آداپتر تومان و پیش‌نویس مرحله‌ای مأموریت و تخصیص
 ui/tabs/portfolio-time.mjs تب مستقل استودیوی سفر زمانی سبد
 tests/run.mjs          آزمون صحت‌سنجی
 ```
