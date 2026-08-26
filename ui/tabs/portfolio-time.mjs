@@ -15,6 +15,8 @@ import {
   previewPortfolioCapital, previewPortfolioRisk,
 } from '../portfolio-mission-form.mjs';
 import { gateLoaders } from '../bereket-data.mjs';
+import { listMissionSaves, loadMissionSave, saveMissionDraft } from '../portfolio-mission-data.mjs';
+import { missionSaveLabel, resumeMissionRecord } from '../portfolio-mission-resume.mjs';
 import { mountDateWheel } from '../datewheel.mjs';
 import { fmt, faDigits } from '../fmt.mjs';
 
@@ -231,8 +233,15 @@ export async function mount(root, { state, api }) {
         <p class="eyebrow">پیش‌نویس زنده</p><h2>گذرنامه سفر</h2>
         <dl><div><dt>سرمایه قابل تخصیص</dt><dd id="pt-review-capital">—</dd></div><div><dt>نماد پایه</dt><dd id="pt-review-base">انتخاب نشده</dd></div><div><dt>شروع</dt><dd id="pt-review-start">انتخاب نشده</dd></div><div><dt>پایان</dt><dd id="pt-review-end">انتخاب نشده</dd></div><div><dt>پخش مسیر</dt><dd id="pt-review-grain">نیم‌ساعته</dd></div><div><dt>انتظار بازار</dt><dd id="pt-review-outlook">ثبت نشده</dd></div><div><dt>اطمینان</dt><dd id="pt-review-confidence">—</dd></div><div><dt>مرز سرمایه آزاد / وجه تضمین</dt><dd id="pt-review-risk">ثبت نشده</dd></div><div><dt>دروازه نقدشوندگی</dt><dd id="pt-review-liquidity">ثبت نشده</dd></div><div><dt>تخصیص خانواده‌ها</dt><dd id="pt-review-allocation">ثبت نشده</dd></div></dl>
         <div class="pt-honesty"><b>تعهد این بازی</b><p>قیمت آینده، قراردادهای بعدی و نتیجه نهایی در لحظه انتخاب سبد وارد پیشنهاد نمی‌شوند.</p></div>
+        <section class="pt-resume" id="pt-resume">
+          <p class="eyebrow">ادامه سفر</p>
+          <label class="field"><span>جلسه‌های ذخیره‌شده روی سرور</span><select id="pt-resume-pick" aria-describedby="pt-resume-state"><option value="">در حال خواندن…</option></select></label>
+          <button type="button" class="ghost" id="pt-resume-open">ادامه همین جلسه</button>
+          <p class="pt-save-state" id="pt-resume-state" role="status" aria-live="polite">فهرست جلسه‌ها هنوز خوانده نشده است.</p>
+        </section>
         <button type="button" class="primary" id="pt-save-step">ثبت پیش‌نویس مرحله اول</button>
         <p class="pt-save-state" id="pt-save-state" role="status" aria-live="polite">هنوز چیزی ثبت نشده است.</p>
+        <p class="pt-save-state" id="pt-persist-state" role="status" aria-live="polite">هنوز روی سرور ثبت نشده است.</p>
       </aside>
     </section>
   </div>`;
@@ -246,7 +255,16 @@ export async function mount(root, { state, api }) {
   let setupDraft = null, outlookDraft = null, riskDraft = null, allocationDraft = null;
   let missionDraft = null, draft = null;
   let allocationRowId = 0;
-  const draftId = `pt-ui-${Date.now()}`;
+  // شناسه دیگر ثابت نیست: ادامه‌دادن یک جلسه یعنی همان شناسه سرور را
+  // برداشتن، وگرنه هر بار یک جلسه تازه ساخته می‌شد و «ادامه» معنایی
+  // نداشت.
+  let draftId = `pt-ui-${Date.now()}`;
+  // زمان ثبت سرور، هم برچسب وضعیت است و هم قفل خوش‌بینانه PUT بعدی.
+  let lastSavedAt = null;
+  // حین بازسازی، همان دکمه‌های مرحله صدا زده می‌شوند. بدون این پرچم، هر
+  // مرحله دوباره روی سرور نوشته می‌شد و رکوردی که تازه خواندیم را با
+  // خودش بازنویسی می‌کرد.
+  let resuming = false;
 
   function clearErrors() {
     root.querySelectorAll('.pt-field-error').forEach((node) => { node.hidden = true; node.textContent = ''; });
@@ -816,6 +834,150 @@ export async function mount(root, { state, api }) {
     return createPortfolioAllocationDraft(riskDraft, allocationRows());
   }
 
+  /**
+   * ثبت پیش‌نویس مرحله جاری روی سرور.
+   *
+   * قاعده یکی است: **ناموفق هرگز موفق نمایش داده نمی‌شود.** شبکه قطع،
+   * ۵۰۰ سرور و تعارض نسخه، هر سه پیام خطای خودشان را کنار همین کنترل
+   * می‌گذارند. اگر این تابع ساکت شکست بخورد، کاربر با خیال راحت تب را
+   * می‌بندد و کار نیم‌ساعتش را از دست می‌دهد.
+   */
+  async function persist(next) {
+    if (resuming || !next?.session?.id) return;
+    const state = $('pt-persist-state');
+    state.removeAttribute('data-error');
+    state.textContent = 'در حال ثبت روی سرور…';
+    const saved = await saveMissionDraft(next, { expectedSavedAt: lastSavedAt });
+    if (!saved.ok) {
+      state.dataset.error = 'true';
+      state.textContent = saved.conflict
+        ? `روی سرور ثبت نشد — ${saved.why} جلسه را از فهرست دوباره باز کن.`
+        : `روی سرور ثبت نشد — ${saved.why}`;
+      return;
+    }
+    lastSavedAt = saved.savedAt;
+    state.textContent = `روی سرور ثبت شد · ${faDigits(new Date(saved.savedAt).toLocaleTimeString('fa-IR', { hour12: false }))}`;
+    refreshSessions();
+  }
+
+  /** فهرست جلسه‌های سرور. خطای خواندن، فهرست خالیِ «سالم» نشان نمی‌دهد. */
+  async function refreshSessions() {
+    const pick = $('pt-resume-pick'), state = $('pt-resume-state');
+    const listed = await listMissionSaves();
+    if (!listed.ok) {
+      pick.innerHTML = '<option value="">فهرست خوانده نشد</option>';
+      state.dataset.error = 'true';
+      state.textContent = `فهرست جلسه‌ها خوانده نشد — ${listed.why}`;
+      return;
+    }
+    state.removeAttribute('data-error');
+    const rows = listed.sessions.filter((row) => row?.id && row.id !== draftId);
+    if (!rows.length) {
+      pick.innerHTML = '<option value="">جلسه‌ای برای ادامه نیست</option>';
+      state.textContent = 'هنوز جلسه‌ای روی سرور ذخیره نشده است.';
+      return;
+    }
+    // برچسب ردیف، شناسه خام نیست. شناسه هم رقم لاتین دارد (قاعده ۲-۳) و
+    // هم به کاربر نمی‌گوید کدام سفر است؛ تاریخ شروع و مرحله می‌گوید.
+    pick.innerHTML = rows.map((row) => {
+      const day = Number(row?.start?.date);
+      const when = Number.isFinite(day) && day > 0 ? faDigits(historyDateLabel(day)) : 'تاریخ نامعلوم';
+      return `<option value="${esc(row.id)}">${esc(when)} — ${esc(missionSaveLabel(row))}</option>`;
+    }).join('');
+    state.textContent = `${fmt.int(rows.length)} جلسه روی سرور ذخیره شده است.`;
+  }
+
+  /**
+   * رکورد ذخیره‌شده را به فرم برمی‌گرداند.
+   *
+   * مرحله‌ها با همان دکمه‌هایی بازساخته می‌شوند که کاربر می‌زند، نه با یک
+   * مسیر موازی. اگر مسیر دومی برای ساختن draft وجود داشت، روزی یکی از دو
+   * مسیر اعتبارسنجی تازه‌ای می‌گرفت و آن‌یکی نه — و پیش‌نویسِ ادامه‌داده‌شده
+   * از قیدی رد می‌شد که پیش‌نویسِ تازه از آن رد نمی‌شود.
+   */
+  async function applyResumed(record) {
+    const { inputs } = record;
+    resuming = true;
+    try {
+      draftId = record.id;
+      lastSavedAt = record.savedAt;
+
+      base.value = inputs.setup.baseIns;
+      loadedIns = '';
+      await loadDates();
+      if (!dates.includes(inputs.setup.startDate) || !dates.includes(inputs.setup.endDate)) {
+        return { ok: false, why: 'روزهای ذخیره‌شده در تقویم این نماد نیستند' };
+      }
+      $('pt-start-date').dataset.value = String(inputs.setup.startDate);
+      mountCalendars();
+      $('pt-end-date').dataset.value = String(inputs.setup.endDate);
+      paintEndCalendar();
+      $('pt-start-time').value = String(inputs.setup.startSecond);
+      $('pt-end-time').value = String(inputs.setup.endSecond);
+      $('pt-grain').value = inputs.setup.grain;
+      capital.value = inputs.setup.capitalToman;
+      reserve.value = inputs.setup.reserveToman;
+      formatMoneyInput(capital); formatMoneyInput(reserve);
+      paintCapital();
+      $('pt-save-step').onclick();
+      if (!setupDraft) return { ok: false, why: 'مرحله نخست از رکورد ذخیره‌شده بازسازی نشد' };
+
+      if (inputs.outlook) {
+        setRadio('pt-direction', inputs.outlook.direction);
+        setRadio('pt-volatility', inputs.outlook.volatilityView);
+        $('pt-target-price').value = inputs.outlook.targetPriceToman;
+        $('pt-range-low').value = inputs.outlook.rangeLowToman;
+        $('pt-range-high').value = inputs.outlook.rangeHighToman;
+        $('pt-expected-volatility').value = inputs.outlook.expectedVolatilityPct;
+        $('pt-confidence').value = inputs.outlook.confidencePct;
+        $('pt-thesis').value = inputs.outlook.thesis;
+        $('pt-save-outlook').onclick();
+        if (!outlookDraft) return { ok: false, why: 'انتظار بازار از رکورد ذخیره‌شده بازسازی نشد' };
+      }
+
+      if (inputs.risk) {
+        $('pt-max-loss').value = inputs.risk.maxLossPct;
+        $('pt-max-drawdown').value = inputs.risk.maxDrawdownPct;
+        $('pt-min-free').value = inputs.risk.minFreeCapitalPct;
+        $('pt-max-margin').value = inputs.risk.maxMarginUsePct;
+        $('pt-underlying-value').value = inputs.risk.minUnderlyingDailyValueToman;
+        $('pt-option-value').value = inputs.risk.minOptionDailyValueToman;
+        $('pt-open-interest').value = inputs.risk.minOpenInterest;
+        $('pt-max-spread').value = inputs.risk.maxSpreadPct;
+        $('pt-book-take').value = inputs.risk.maxBookTakePct;
+        setRadio('pt-unlimited', inputs.risk.allowUnlimitedRisk);
+        setRadio('pt-full-book', inputs.risk.requireFullBook);
+        $('pt-save-risk').onclick();
+        if (!riskDraft) return { ok: false, why: 'قیود ریسک از رکورد ذخیره‌شده بازسازی نشد' };
+      }
+
+      if (inputs.allocation) {
+        resetAllocationRows();
+        inputs.allocation.forEach((row) => addAllocationRow(row));
+        $('pt-save-allocation').onclick();
+        if (!allocationDraft) return { ok: false, why: 'تخصیص خانواده‌ها از رکورد ذخیره‌شده بازسازی نشد' };
+      }
+
+      if (inputs.mission) {
+        setRadio('pt-objective', inputs.mission.objectiveMode);
+        setRadio('pt-return-base', inputs.mission.returnBase);
+        $('pt-target-return').value = inputs.mission.targetReturnPct;
+        $('pt-max-holding').value = inputs.mission.maxHoldingDays;
+        paintFinalReview();
+      }
+
+      paintProgress(record.stage);
+      return { ok: true, why: '' };
+    } finally {
+      resuming = false;
+    }
+  }
+
+  function setRadio(name, value) {
+    const input = root.querySelector(`input[name="${name}"][value="${value}"]`);
+    if (input) input.checked = true;
+  }
+
   capital.oninput = () => { paintCapital(); invalidateSetupDraft(); };
   reserve.oninput = () => { paintCapital(); invalidateSetupDraft(); };
   capital.onblur = () => formatMoneyInput(capital); reserve.onblur = () => formatMoneyInput(reserve);
@@ -824,6 +986,41 @@ export async function mount(root, { state, api }) {
   $('pt-end-time').onchange = () => { reviewDates(); invalidateSetupDraft(); };
   $('pt-grain').onchange = () => { $('pt-review-grain').textContent = $('pt-grain').selectedOptions[0]?.textContent || '—'; clearErrors(); invalidateSetupDraft(); };
   $('pt-retry').onclick = () => api.retryFeed();
+  $('pt-resume-open').onclick = async () => {
+    const id = $('pt-resume-pick').value;
+    const state = $('pt-resume-state');
+    if (!id) { state.dataset.error = 'true'; state.textContent = 'اول یک جلسه را انتخاب کن.'; return; }
+    state.removeAttribute('data-error');
+    state.textContent = 'در حال خواندن جلسه از سرور…';
+    const loaded = await loadMissionSave(id);
+    if (!loaded.ok) {
+      state.dataset.error = 'true';
+      state.textContent = loaded.notFound ? 'این جلسه روی سرور نیست.' : `جلسه خوانده نشد — ${loaded.why}`;
+      return;
+    }
+    // رکورد را دوباره می‌سنجیم. سرور هم سنجیده، ولی اینجاست که ریال به
+    // تومان برمی‌گردد و رکوردی که از نظر قرارداد درست است می‌تواند به
+    // ورودی فرم برنگردد.
+    const restored = resumeMissionRecord(loaded.record);
+    if (!restored.ok) {
+      state.dataset.error = 'true';
+      state.textContent = `این جلسه ادامه‌پذیر نیست — ${restored.why}`;
+      return;
+    }
+    const applied = await applyResumed(restored.record);
+    if (!applied.ok) {
+      state.dataset.error = 'true';
+      state.textContent = `ادامه ناموفق — ${applied.why}`;
+      return;
+    }
+    if (restored.record.readOnly) {
+      lockMissionEditor();
+      state.textContent = 'جلسه فعال است؛ مأموریت و عکس شروع قفل‌اند و فقط خوانده می‌شوند.';
+    } else {
+      state.textContent = `ادامه از ${missionSaveLabel(restored.record)}.`;
+    }
+    $('pt-persist-state').textContent = `آخرین ثبت سرور · ${faDigits(new Date(restored.record.savedAt).toLocaleTimeString('fa-IR', { hour12: false }))}`;
+  };
   $('pt-save-step').onclick = () => {
     const result = currentDraft();
     if (!result.ok) { showError(result.why); return; }
@@ -832,6 +1029,7 @@ export async function mount(root, { state, api }) {
     $('pt-save-state').textContent = 'مرحله نخست ثبت شد؛ حالا انتظار خودت از بازار را ثبت کن.';
     $('pt-save-step').textContent = 'به‌روزرسانی پیش‌نویس مرحله اول';
     outlookStep.hidden = false; paintProgress('outlook'); paintOutlook();
+    persist(result.draft);
   };
 
   root.querySelectorAll('input[name="pt-direction"], input[name="pt-volatility"]').forEach((input) => {
@@ -852,6 +1050,7 @@ export async function mount(root, { state, api }) {
     $('pt-outlook-state').textContent = 'انتظار بازار ثبت شد؛ هنوز مأموریت فعال و آینده آشکار نشده است.';
     $('pt-save-outlook').textContent = 'به‌روزرسانی انتظار بازار';
     riskStep.hidden = false; paintProgress('risk'); paintOutlook(); paintRisk();
+    persist(result.draft);
   };
 
   const riskInputIds = ['pt-max-loss', 'pt-max-drawdown', 'pt-min-free', 'pt-max-margin',
@@ -875,6 +1074,7 @@ export async function mount(root, { state, api }) {
     resetAllocationRows(); addAllocationRow();
     allocationStep.hidden = false;
     paintProgress('allocation'); paintRisk(); paintAllocation();
+    persist(result.draft);
   };
 
   $('pt-add-allocation').onclick = () => {
@@ -899,6 +1099,7 @@ export async function mount(root, { state, api }) {
     $('pt-review-allocation').textContent = `${fmt.pct(plan.allocationPct)}٪ تخصیص · ${fmt.pct(100 - plan.allocationPct)}٪ آزاد`;
     reviewStep.hidden = false;
     paintProgress('review'); paintAllocation(); paintFinalReview();
+    persist(result.draft);
   };
 
   root.querySelectorAll('input[name="pt-objective"], input[name="pt-return-base"]').forEach((input) => {
@@ -937,6 +1138,7 @@ export async function mount(root, { state, api }) {
       $('pt-mission-state').textContent = active.draft.snapshot.quality.sufficient
         ? 'مأموریت و عکس شروع قفل شدند؛ هنوز هیچ پیشنهاد یا معامله‌ای ساخته نشده است.'
         : 'مأموریت قفل شد؛ عکس شروع ناکافی است و علت‌ها بدون جایگزینی عدد نمایش داده شده‌اند.';
+      await persist(active.draft);
       lockMissionEditor();
     } catch (error) {
       missionDraft = null;
@@ -949,6 +1151,9 @@ export async function mount(root, { state, api }) {
   };
 
   paintCapital(); paintOutlook(); paintRisk(); paintAllocation();
+  // فهرست جلسه‌ها همان اول خوانده می‌شود تا کاربر پیش از پر کردن دوباره
+  // مرحله یک ببیند که پیش‌نویس نیمه‌کاره‌ای روی سرور دارد.
+  refreshSessions();
   const unwatch = api.subscribeWatch(paintSymbols);
   const unfeed = api.onFeed((feed) => {
     if (feed.status === 'failed') {

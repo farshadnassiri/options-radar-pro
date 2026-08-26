@@ -460,6 +460,7 @@ group('۹. بودجهٔ خواندنِ اجباری از سقف نگذشته');
 {
   const CAPS = [
     ['NEXT.md', 8],
+    ['PROTOCOL.md', 8],
     ['AGENTS.md', 16],
     ['WORKLOG.md', 48],
     ['TASK_STATUS.md', 24],
@@ -488,7 +489,7 @@ group('۹. بودجهٔ خواندنِ اجباری از سقف نگذشته');
   check('هیچ دستهٔ آزمونی از ۴۰ کیلوبایت نگذشته', big.length === 0, big.join(' ،') || 'همه کوچک');
 
   // ابزارهایی که پروتکل به آن‌ها ارجاع می‌دهد باید واقعاً باشند.
-  for (const f of ['NEXT.md', 'BACKLOG.md', 'tools/next.mjs', 'tools/check.mjs', 'tests/harness.mjs']) {
+  for (const f of ['NEXT.md', 'PROTOCOL.md', 'BACKLOG.md', 'tools/next.mjs', 'tools/check.mjs', 'tests/harness.mjs']) {
     check(`${f} موجود است`, fs.existsSync(path.join(ROOT, f)));
   }
 }

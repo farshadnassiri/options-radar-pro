@@ -42,7 +42,7 @@ if (mode === 'suites') {
 
 // ── نقشهٔ ماژول‌ها ──────────────────────────────────────────────────────
 if (mode === 'map') {
-  const dirs = ['core', 'ui', 'ui/tabs', 'worker'].filter((d) => fs.existsSync(path.join(ROOT, d)));
+  const dirs = ['core', 'ui', 'ui/tabs', 'worker', 'server'].filter((d) => fs.existsSync(path.join(ROOT, d)));
   const files = dirs.flatMap((d) => fs.readdirSync(path.join(ROOT, d))
     .filter((f) => f.endsWith('.mjs')).map((f) => `${d}/${f}`));
   const names = (src) => {
@@ -88,7 +88,7 @@ console.log(`دروازه     node tools/check.mjs`);
 // ── بودجهٔ خواندن ─────────────────────────────────────────────────────
 // همان سقف‌هایی که نگهبان ۹ می‌سنجد. اگر اینجا زرد شد، پیش از آنکه CI
 // قرمز شود بایگانی کنید.
-const CAPS = { 'NEXT.md': 8, 'AGENTS.md': 16, 'WORKLOG.md': 48, 'TASK_STATUS.md': 24 };
+const CAPS = { 'NEXT.md': 8, 'PROTOCOL.md': 8, 'AGENTS.md': 16, 'WORKLOG.md': 48, 'TASK_STATUS.md': 24 };
 let total = 0;
 const parts = Object.entries(CAPS).map(([f, capKb]) => {
   const size = fs.existsSync(path.join(ROOT, f)) ? fs.statSync(path.join(ROOT, f)).size : 0;
