@@ -20,6 +20,7 @@ import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
 import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
+import { portfolioWatchView } from '../portfolio-watch-view.mjs';
 import { mountPayoff } from '../chart.mjs';
 import { feesOf, marginParamsOf } from '../../core/settings.mjs';
 import {
@@ -255,6 +256,17 @@ export async function mount(root, { state, api }) {
             <table class="pt-eligibility-table">
               <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
               <tbody id="pt-eligibility-body"></tbody>
+            </table>
+          </section>
+
+          <section class="pt-watch" id="pt-watch" aria-labelledby="pt-watch-title" hidden>
+            <div class="pt-watch-head">
+              <div><p class="eyebrow">پایش قیود ریسک</p><h3 id="pt-watch-title">آنچه از لحظهٔ ثبت عوض شده</h3></div>
+              <b class="pt-watch-headline" id="pt-watch-headline">—</b>
+            </div>
+            <table class="pt-watch-table" id="pt-watch-table" hidden>
+              <thead><tr><th>قید</th><th>حکم</th><th>اکنون</th><th>حد</th><th>فاصله</th><th>تغییر</th></tr></thead>
+              <tbody id="pt-watch-body"></tbody>
             </table>
           </section>
 
@@ -911,6 +923,38 @@ export async function mount(root, { state, api }) {
   // ساعت بالای همهٔ بخش‌ها می‌نشیند، چون همهٔ آن‌ها به لحظهٔ جاری بند
   // هستند. هیچ گامی اینجا برداشته نمی‌شود؛ فقط نشان داده می‌شود چه
   // ممکن است.
+  // نوار هشدار بالای همه‌چیز است، حتی بالای ساعت: کاربری که باید
+  // اسکرول کند تا هشدارِ شکسته را ببیند، آن را نمی‌بیند.
+  function paintWatch(session) {
+    const section = $('pt-watch');
+    const table = $('pt-watch-table');
+    const view = portfolioWatchView(session, portfolioSessionEligibility(session));
+    if (!view.ok) {
+      // «هنوز موقعیتی نیست» هشدار نیست؛ نوار اصلاً نمی‌آید.
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    section.dataset.tone = view.tone;
+    $('pt-watch-headline').textContent = view.headlineText;
+    $('pt-watch-headline').className = `pt-watch-headline ${view.tone}`;
+    // وقتی همه‌چیز رعایت شده، جدول بسته می‌ماند و فقط یک جمله می‌آید.
+    // هشدارِ همیشگی بعد از چند بار نادیده گرفته می‌شود.
+    table.hidden = view.quiet;
+    if (view.quiet) { $('pt-watch-body').innerHTML = ''; return; }
+    $('pt-watch-body').innerHTML = view.rows.map((row) => `<tr data-state="${esc(row.state)}">
+      <td data-label="قید">${esc(row.label)}${row.basisLabel
+        ? `<br><small>${esc(row.basisLabel)}</small>` : ''}</td>
+      <td data-label="حکم"><b>${esc(row.stateLabel)}</b></td>
+      <td data-label="اکنون">${esc(row.currentText)}${row.why
+        ? `<br><small>${esc(row.why)}</small>` : ''}</td>
+      <td data-label="حد">${esc(row.limitText)}</td>
+      <td data-label="فاصله">${esc(row.headroomText)}</td>
+      <td data-label="تغییر">${esc(row.changeText || '—')}${row.atCommitText
+        ? `<br><small>در ثبت: ${esc(row.atCommitText)}</small>` : ''}</td>
+    </tr>`).join('');
+  }
+
   function paintClock(session) {
     const section = $('pt-clock');
     if (!session?.now?.date) { section.hidden = true; return; }
@@ -1045,6 +1089,7 @@ export async function mount(root, { state, api }) {
     // یک نقطهٔ فراخوانی: نوار سرمایه و پیشنهادها همیشه از یک جلسه ساخته
     // می‌شوند. دو فراخوانی جدا یعنی روزی یکی جا می‌ماند و کاربر وضعیت یک
     // جلسه را کنار پیشنهاد جلسهٔ دیگر می‌بیند.
+    paintWatch(session);
     paintClock(session);
     paintLedger(session);
     paintPositions(session);
@@ -1094,7 +1139,7 @@ export async function mount(root, { state, api }) {
     root.querySelectorAll('input, select, textarea, button').forEach((control) => {
       if (!control.closest('#pt-eligibility') && !control.closest('#pt-proposals')
         && !control.closest('#pt-ledger') && !control.closest('#pt-positions')
-        && !control.closest('#pt-clock')) control.disabled = true;
+        && !control.closest('#pt-clock') && !control.closest('#pt-watch')) control.disabled = true;
     });
   }
 
