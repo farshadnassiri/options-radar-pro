@@ -7,6 +7,7 @@
 import { generateCandidates } from './bereket-candidates.mjs';
 import { num } from './num.mjs';
 import { CATALOG } from '../strategies/catalog.mjs';
+import { activeSnapshot, snapshotWithinSession } from './portfolio-snapshot.mjs';
 
 export const PORTFOLIO_CANDIDATES_VERSION = 1;
 
@@ -39,6 +40,9 @@ function fail(code, now = null, sessionId = null) {
     version: PORTFOLIO_CANDIDATES_VERSION,
     ok: false,
     why: PORTFOLIO_CANDIDATE_REASONS[code],
+    // بقیهٔ ماژول‌ها علت را با کد برمی‌گردانند؛ نبودش اینجا یعنی
+    // مصرف‌کننده ناچار روی متن فارسی شرط بگذارد.
+    reason: code,
     sessionId,
     now,
     candidates: [],
@@ -133,13 +137,15 @@ function allocationIndex(session) {
 /**
  * ساخت ترکیب‌های خام و قابل اجرا برای یک جلسه فعال.
  *
- * قراردادها و spot عمداً از `session.startSnapshot` خوانده می‌شوند. `evidence`
- * همان خروجی حکم‌های جلسه است و باید `now` هم‌لحظه با snapshot داشته باشد.
+ * قراردادها و spot از عکسِ **لحظهٔ جاری** خوانده می‌شوند — که تا پیش از
+ * نخستین گام زمانی، همان عکسِ شروع است. `evidence` همان خروجی حکم‌های
+ * جلسه است و باید `now` هم‌لحظه با snapshot داشته باشد؛ این قید عوض
+ * نشده، فقط لحظه‌اش دیگر لزوماً لحظهٔ شروع نیست.
  */
 export function portfolioCandidates(session, defs = [], evidence = {}, options = {}) {
   if (!session || session.state !== 'active') return fail('inactiveSession');
-  const snapshot = session.startSnapshot;
-  if (!snapshot || !sameMoment(snapshot.at, session.start)) {
+  const snapshot = activeSnapshot(session);
+  if (!snapshot || !snapshotWithinSession(session, snapshot)) {
     return fail('missingSnapshot', null, text(session.id) || null);
   }
   if (!evidence?.ok || !sameMoment(evidence.now, snapshot.at)) {

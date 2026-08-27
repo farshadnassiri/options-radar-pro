@@ -25,7 +25,10 @@
 //
 // اینجا نه بودجه عوض می‌شود، نه ظرفیت ورود کوچک می‌شود. فقط گزارش.
 
-import { combineDataQuality, isDataQuality, makeDataQuality } from './data-quality.mjs';
+import {
+  combineDataQuality, isDataQuality, makeDataQuality,
+} from './data-quality.mjs';
+import { activeSnapshot, snapshotWithinSession } from './portfolio-snapshot.mjs';
 import { analyzePayoff, pnlAtExpiry } from './payoff.mjs';
 import { PORTFOLIO_CAPITAL_VERSION, portfolioCapitalRequirement } from './portfolio-capital.mjs';
 import { PORTFOLIO_ENTRY_VERSION } from './portfolio-entry.mjs';
@@ -158,8 +161,8 @@ function missionPoints(outlook) {
  */
 export function portfolioPlanEvaluation(session, candidateSet, evidence, entry, capital) {
   if (!session || session.state !== 'active') return fail('inactiveSession', session, capital);
-  const snapshot = session.startSnapshot;
-  if (!snapshot || !sameMoment(snapshot.at, session.start)
+  const snapshot = activeSnapshot(session);
+  if (!snapshot || !snapshotWithinSession(session, snapshot)
     || capital?.version !== PORTFOLIO_CAPITAL_VERSION || capital?.ok !== true
     || text(capital.sessionId) !== text(session.id) || !sameMoment(capital.now, snapshot.at)
     || entry?.version !== PORTFOLIO_ENTRY_VERSION || entry?.ok !== true

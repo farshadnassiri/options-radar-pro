@@ -43,14 +43,12 @@ group('۱۴۳. عکس لحظهٔ جاری');
     cands143.candidates.length === fx143.candidateSet.candidates.length
     && cands143.candidates.length > 0,
     `${cands143.candidates.length} در برابر ${fx143.candidateSet.candidates.length}`);
-  // موتور ترکیب‌ها عمداً فقط لحظهٔ شروع را می‌پذیرد؛ عکسِ لحظهٔ بعد را
-  // رد می‌کند. این محدودیتِ امروزِ سامانه است، نه اشکالِ این ماژول —
-  // برداشتنش قلم بعدی است.
-  const laterCands143 = portfolioCandidates({ ...session143, startSnapshot: out143.snapshot },
+  const laterCands143 = portfolioCandidates(
+    { ...session143, momentSnapshot: out143.snapshot },
     [byId('long-call')], { ...fx143.evidence, now: { ...later143 } });
-  check('و موتور هنوز عکسِ لحظهٔ بعد را نمی‌پذیرد — محدودیت شناخته‌شده',
-    laterCands143.candidates.length === 0 && laterCands143.why.includes('عکس'),
-    laterCands143.why);
+  check('و موتور عکسِ لحظهٔ بعد را هم می‌پذیرد',
+    laterCands143.ok && laterCands143.candidates.length > 0,
+    `${laterCands143.reason || ''} ${laterCands143.why || ''}`);
 
   // ── بند ۲: capitalInputs قفل‌شده ────────────────────────────────────
   check('نرخ کارمزد و پارامتر تضمین از عکس شروع می‌آیند، نه بازخوانی',

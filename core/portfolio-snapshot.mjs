@@ -117,6 +117,35 @@ function contractAt(row, at) {
 }
 
 /**
+ * عکسِ لحظهٔ جاریِ جلسه.
+ *
+ * تا پیش از این، موتورها مستقیم `session.startSnapshot` را می‌خواندند و
+ * صریح شرط می‌گذاشتند که لحظه‌اش همان لحظهٔ شروع باشد. یعنی جلسه پس از
+ * یک گام زمانی به دیوار می‌خورد.
+ *
+ * حالا جلسه می‌تواند `momentSnapshot` داشته باشد — عکسِ لحظه‌ای که ساعت
+ * روی آن ایستاده. نبودنش یعنی هنوز از شروع تکان نخورده‌ایم، پس همان
+ * عکسِ شروع پاسخ است. **یک** دسترسیِ مشترک، وگرنه هر موتور قاعدهٔ خودش
+ * را می‌سازد و روزی دو موتور دو عکس متفاوت می‌بینند.
+ */
+export function activeSnapshot(session) {
+  return session?.momentSnapshot ?? session?.startSnapshot ?? null;
+}
+
+/**
+ * آیا این عکس، عکسِ معتبرِ یک لحظه از همین جلسه است.
+ *
+ * قید عوض شد، برداشته نشد: لحظهٔ عکس باید **داخل بازهٔ جلسه** باشد — نه
+ * لزوماً لحظهٔ شروع. عکسی از بیرون بازه یعنی سنجیدنِ جلسه با داده‌ای که
+ * به آن تعلق ندارد.
+ */
+export function snapshotWithinSession(session, snapshot) {
+  const key = momentKey(snapshot?.at);
+  if (!Number.isFinite(key)) return false;
+  return key >= momentKey(session?.start) && key <= momentKey(session?.end);
+}
+
+/**
  * عکس قراردادها در یک لحظهٔ دلخواه.
  *
  * `rows` همان چیزی است که لایهٔ داده برای **این لحظه** آورده — اینجا
