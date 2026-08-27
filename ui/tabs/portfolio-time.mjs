@@ -21,6 +21,7 @@ import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs'
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
 import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
 import { portfolioWatchView } from '../portfolio-watch-view.mjs';
+import { closeoutPreflight, closeoutView } from '../portfolio-closeout-view.mjs';
 import { mountPayoff } from '../chart.mjs';
 import { feesOf, marginParamsOf } from '../../core/settings.mjs';
 import {
@@ -257,6 +258,23 @@ export async function mount(root, { state, api }) {
               <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
               <tbody id="pt-eligibility-body"></tbody>
             </table>
+          </section>
+
+          <section class="pt-closeout pt-live" id="pt-closeout" aria-labelledby="pt-closeout-title" hidden>
+            <div class="pt-closeout-head">
+              <div><p class="eyebrow">پایان جلسه</p><h3 id="pt-closeout-title">بستن جلسه و پروندهٔ پایان</h3></div>
+              <button type="button" class="ghost" id="pt-closeout-do" data-pt-keep-enabled="true">بستن جلسه</button>
+            </div>
+            <p class="pt-field-error" id="pt-closeout-warn" hidden></p>
+            <p class="pt-save-state" id="pt-closeout-state" role="status" aria-live="polite"></p>
+            <div class="pt-closeout-dossier" id="pt-closeout-dossier" hidden>
+              <dl class="pt-closeout-figures" id="pt-closeout-figures"></dl>
+              <p class="pt-closeout-open" id="pt-closeout-open" hidden></p>
+              <table class="pt-closeout-table" id="pt-closeout-table" hidden>
+                <thead><tr><th>موقعیت</th><th>حجم بسته‌شده</th><th>نقد خروج</th><th>تحقق‌یافته</th></tr></thead>
+                <tbody id="pt-closeout-body"></tbody>
+              </table>
+            </div>
           </section>
 
           <section class="pt-watch pt-live" id="pt-watch" aria-labelledby="pt-watch-title" hidden>
@@ -925,6 +943,80 @@ export async function mount(root, { state, api }) {
   // ممکن است.
   // نوار هشدار بالای همه‌چیز است، حتی بالای ساعت: کاربری که باید
   // اسکرول کند تا هشدارِ شکسته را ببیند، آن را نمی‌بیند.
+  // پروندهٔ پایان. تا وقتی جلسه بسته نشده، فقط دکمه و هشدارِ پیش از
+  // بستن دیده می‌شود.
+  let closeoutArmed = false;
+  function paintCloseout(session) {
+    const section = $('pt-closeout');
+    if (!session || session.state === 'draft') { section.hidden = true; return; }
+    section.hidden = false;
+    const closed = session.state === 'closed';
+    $('pt-closeout-do').hidden = closed;
+    if (closed) return;
+    // تصمیم پیش از عمل گرفته می‌شود: اگر پس از بستن بگوییم «راستی، سه
+    // موقعیت باز بود»، دیگر کاری نمی‌شود کرد.
+    const pre = closeoutPreflight(session);
+    $('pt-closeout-warn').hidden = !pre.ok || !pre.warningText;
+    $('pt-closeout-warn').textContent = pre.ok ? pre.warningText : pre.why;
+    $('pt-closeout-do').textContent = pre.ok && pre.needsConfirm && closeoutArmed
+      ? 'تأیید می‌کنم؛ ببند' : 'بستن جلسه';
+  }
+
+  function paintDossier(view) {
+    const box = $('pt-closeout-dossier');
+    box.hidden = false;
+    $('pt-closeout-state').textContent = `${view.headlineText} · ${view.positionsText}`;
+    // تحقق‌یافته و تحقق‌نیافته دو جای جدا: کنارِ هم نشستنشان یعنی
+    // خواننده جمعشان می‌کند، و آن جمع هیچ‌کدام نیست.
+    const figures = [
+      ['سود و زیان تحقق‌یافته', view.realized.totalText, view.realized.tone],
+      ['حسابداری جلسه', view.accountingText || view.accountingWhy, ''],
+    ];
+    $('pt-closeout-figures').innerHTML = figures
+      .map(([label, value, tone]) => `<div><dt>${esc(label)}</dt>`
+        + `<dd class="${esc(tone)}">${esc(value)}</dd></div>`).join('');
+    // تعهدِ باز حتی پس از بستن صریح می‌ماند.
+    $('pt-closeout-open').hidden = !view.openText;
+    $('pt-closeout-open').textContent = view.openText;
+    const table = $('pt-closeout-table');
+    table.hidden = view.realized.rows.length === 0;
+    $('pt-closeout-body').innerHTML = view.realized.rows.map((row) => `<tr>
+      <td data-label="موقعیت">${esc(row.idText)}</td>
+      <td data-label="حجم بسته‌شده">${esc(row.closedQtyText)}</td>
+      <td data-label="نقد خروج">${esc(row.exitCashText)}</td>
+      <td data-label="تحقق‌یافته" class="${esc(row.tone)}">${esc(row.realizedText)}</td>
+    </tr>`).join('');
+    if (view.realized.unknownText) {
+      $('pt-closeout-warn').hidden = false;
+      $('pt-closeout-warn').textContent = view.realized.unknownText;
+    }
+  }
+
+  $('pt-closeout').onclick = () => {
+    const button = $('pt-closeout-do');
+    if (!proposalSession || proposalSession.state === 'closed') return;
+    const pre = closeoutPreflight(proposalSession);
+    // بستنِ زودهنگام یا با تعهدِ باز، یک کلیک نیست.
+    if (pre.ok && pre.needsConfirm && !closeoutArmed) {
+      closeoutArmed = true;
+      button.textContent = 'تأیید می‌کنم؛ ببند';
+      $('pt-closeout-state').textContent = 'برای بستن، دوباره بزن.';
+      return;
+    }
+    const view = closeoutView(proposalSession, portfolioSessionEligibility(proposalSession),
+      { force: true });
+    closeoutArmed = false;
+    if (!view.ok) { $('pt-closeout-state').textContent = view.why; return; }
+    // پس از بستن، هیچ‌کدام از دکمه‌های معامله و گام نباید کار کنند —
+    // جلسه دیگر فعال نیست و موتورها هم ردشان می‌کنند.
+    proposalSession = view.session;
+    paintProposals(view.session);
+    paintDossier(view);
+    root.querySelectorAll('[data-pt-commit], [data-pt-close], [data-pt-step]')
+      .forEach((control) => { control.disabled = true; });
+    button.hidden = true;
+  };
+
   function paintWatch(session) {
     const section = $('pt-watch');
     const table = $('pt-watch-table');
@@ -1090,6 +1182,7 @@ export async function mount(root, { state, api }) {
     // می‌شوند. دو فراخوانی جدا یعنی روزی یکی جا می‌ماند و کاربر وضعیت یک
     // جلسه را کنار پیشنهاد جلسهٔ دیگر می‌بیند.
     paintWatch(session);
+    paintCloseout(session);
     paintClock(session);
     paintLedger(session);
     paintPositions(session);
@@ -1181,6 +1274,7 @@ export async function mount(root, { state, api }) {
       if (!control.closest('#pt-eligibility') && !control.closest('#pt-proposals')
         && !control.closest('#pt-ledger') && !control.closest('#pt-positions')
         && !control.closest('#pt-clock') && !control.closest('#pt-watch')
+        && !control.closest('#pt-closeout')
         && control.dataset.ptKeepEnabled !== 'true') control.disabled = true;
     });
     collapseWizard();
