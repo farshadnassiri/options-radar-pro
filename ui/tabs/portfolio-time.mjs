@@ -16,6 +16,7 @@ import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfo
 import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
 import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
 import { portfolioDossierAnalysis } from '../../core/portfolio-dossier-analysis.mjs';
+import { portfolioDossierWeaknesses } from '../../core/portfolio-dossier-weakness.mjs';
 import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
@@ -23,6 +24,7 @@ import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
 import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
 import { portfolioWatchView } from '../portfolio-watch-view.mjs';
 import { portfolioDossierAnalysisView } from '../portfolio-dossier-analysis-view.mjs';
+import { portfolioDossierWeaknessView } from '../portfolio-dossier-weakness-view.mjs';
 import {
   closeoutPreflight, closeoutView, dossierRecordView,
 } from '../portfolio-closeout-view.mjs';
@@ -281,6 +283,13 @@ export async function mount(root, { state, api }) {
                 <dl class="pt-dossier-analysis-figures" id="pt-dossier-analysis-figures"></dl>
                 <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
                 <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
+              </section>
+              <section class="pt-dossier-weakness" id="pt-dossier-weakness" aria-labelledby="pt-dossier-weakness-title">
+                <div class="pt-dossier-weakness-head">
+                  <h4 id="pt-dossier-weakness-title">یافته‌های مستند پرونده</h4>
+                  <b id="pt-dossier-weakness-summary"></b>
+                </div>
+                <div class="pt-dossier-weakness-rows" id="pt-dossier-weakness-rows"></div>
               </section>
               <p class="pt-closeout-open" id="pt-closeout-open" hidden></p>
               <table class="pt-closeout-table" id="pt-closeout-table" hidden>
@@ -1011,6 +1020,19 @@ export async function mount(root, { state, api }) {
     issues.hidden = !analyzed.ok || analyzed.issues.length === 0;
     issues.innerHTML = analyzed.ok ? analyzed.issues.map((row) => `<li>${esc(row.label)}`
       + `${row.detail ? ` — ${esc(row.detail)}` : ''}</li>`).join('') : '';
+    const weakness = portfolioDossierWeaknessView(
+      portfolioDossierWeaknesses(view.session, view.dossier),
+    );
+    $('pt-dossier-weakness-summary').textContent = weakness.ok
+      ? weakness.summaryText : weakness.why;
+    $('pt-dossier-weakness-rows').innerHTML = weakness.ok ? weakness.rows.map((row) => {
+      const evidence = row.evidence.length
+        ? `<dl>${row.evidence.map((item) => `<div><dt>${esc(item.label)}</dt>`
+          + `<dd>${esc(item.valueText)}</dd></div>`).join('')}</dl>` : '';
+      return `<article data-severity="${esc(row.severity)}" data-code="${esc(row.code)}">
+        <header><h5>${esc(row.title)}</h5><span>${esc(row.severityLabel)}</span></header>
+        <p>${esc(row.description)}</p>${evidence}</article>`;
+    }).join('') : '';
     // تعهدِ باز حتی پس از بستن صریح می‌ماند.
     $('pt-closeout-open').hidden = !view.openText;
     $('pt-closeout-open').textContent = view.openText;
