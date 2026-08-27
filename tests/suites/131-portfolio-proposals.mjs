@@ -144,9 +144,18 @@ group('۱۳۱. مدل نمایش پیشنهادهای سبد');
     ['pt-proposals', 'pt-proposals-state', 'pt-proposals-body',
       'pt-proposals-aside', 'pt-proposals-aside-body']
       .every((id) => tabSrc131.includes(`id="${id}"`)));
-  check('پیشنهادها هرجا حکم اجراپذیری رسم می‌شود، رسم می‌شوند',
-    (tabSrc131.match(/paintProposals\(/g) || []).length
-      === (tabSrc131.match(/paintEligibility\(/g) || []).length);
+  // شمردن فراخوانی‌ها معیار بدی بود: دستگیرهٔ ثبت هم به‌درستی دوباره رسم
+  // می‌کند و شمارش را به‌هم می‌زند. آنچه واقعاً باید درست باشد این است که
+  // هر جا حکم اجراپذیری با یک جلسه رسم می‌شود، پیشنهادها هم با **همان**
+  // جلسه رسم شوند — وگرنه کاربر حکم یک جلسه و پیشنهاد جلسهٔ دیگر را
+  // کنار هم می‌بیند.
+  const paintPairs131 = [...tabSrc131.matchAll(/paintEligibility\(([^)]*)\);/g)]
+    .map((hit) => ({ arg: hit[1].trim(), after: tabSrc131.slice(hit.index, hit.index + 160) }))
+    .filter(({ arg }) => arg.length > 0);
+  check('هرجا حکم اجراپذیری رسم می‌شود، پیشنهادها با همان جلسه رسم می‌شوند',
+    paintPairs131.length >= 2
+    && paintPairs131.every(({ arg, after }) => after.includes(`paintProposals(${arg})`)),
+    paintPairs131.map(({ arg }) => arg).join(' ،') || 'هیچ فراخوانی‌ای پیدا نشد');
   check('قفل ویرایشگر مأموریت، بخش پیشنهاد را غیرفعال نمی‌کند',
     /!control\.closest\('#pt-proposals'\)/.test(tabSrc131));
   check('تب هیچ عدد مالی تازه‌ای برای این بخش حساب نمی‌کند',

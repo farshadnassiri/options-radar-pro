@@ -17,6 +17,7 @@
 import { makeDataQuality } from '../../core/data-quality.mjs';
 import { bookCapacity, walkBook } from '../../core/exec.mjs';
 import { createPortfolioMission } from '../../core/portfolio-mission.mjs';
+import { PORTFOLIO_SCHEMA_VERSION } from '../../core/portfolio-session.mjs';
 import { portfolioCandidates } from '../../core/portfolio-candidates.mjs';
 import { portfolioEntryPlan } from '../../core/portfolio-entry.mjs';
 import { portfolioCapitalRequirement } from '../../core/portfolio-capital.mjs';
@@ -83,8 +84,15 @@ export function portfolioFixture(tag = 'test') {
     allocatableRial: 10_000_000, assignedRial: 0, unassignedRial: 10_000_000,
   };
   const baseSession = {
+    schemaVersion: PORTFOLIO_SCHEMA_VERSION,
     id: `pt-${tag}`, portfolioId: `pf-${tag}`, baseIns: '900001', state: 'active',
     start: at, end: { date: 20260620, second: 12 * 3600 },
+    // دفتر رویداد خالی، همان‌طور که `createPortfolioSession` می‌سازدش.
+    // بدون این‌ها هر ثبتی روی چیدمان می‌شکند و آزمون به‌جای رفتار، نبودِ
+    // فیلد را می‌سنجد.
+    now: { ...at },
+    events: [],
+    counters: { event: 0, transaction: 0, position: 0, execution: 0, lot: 0 },
     capital,
     lockedAllocations: [
       { familyId: 'single', pct: 20, targetRial: 2_000_000 },

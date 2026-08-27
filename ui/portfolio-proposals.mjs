@@ -22,21 +22,12 @@
 // اینجا DOM نیست و رشته‌های HTML ساخته نمی‌شوند؛ تب خودش رسم می‌کند.
 
 import { fmt, faDigits } from './fmt.mjs';
-import { portfolioCandidates } from '../core/portfolio-candidates.mjs';
-import { portfolioEntryPlan } from '../core/portfolio-entry.mjs';
-import { portfolioCapitalRequirement } from '../core/portfolio-capital.mjs';
-import { portfolioPlanEvaluation } from '../core/portfolio-evaluation.mjs';
-import { portfolioPlanScore } from '../core/portfolio-score.mjs';
-import { rankPlanScores } from '../core/portfolio-ranking.mjs';
+import { PORTFOLIO_PLANS_REASONS, portfolioRankedPlans } from '../core/portfolio-plans.mjs';
 import { GROUPS as STRATEGY_FAMILIES, byId } from '../strategies/catalog.mjs';
 
-export const PROPOSALS_REASONS = Object.freeze({
-  inactiveSession: 'پیشنهادها فقط برای جلسهٔ فعال ساخته می‌شوند',
-  missingEvidence: 'مدرک اجراپذیری هم‌لحظه برای ساخت پیشنهاد لازم است',
-  noCandidates: 'با مأموریت قفل‌شده و مدرک این لحظه، هیچ ترکیبی ساخته نشد',
-  noPlans: 'هیچ ترکیبی طرح ورود و مبنای سرمایهٔ کامل نداشت',
-  rankFailed: 'چیدن امتیازها ممکن نشد',
-});
+// علت‌ها از خودِ زنجیره می‌آیند؛ دو متن برای یک حالت یعنی روزی یکی‌شان
+// عوض می‌شود و کاربر دو جواب متفاوت برای یک چیز می‌بیند.
+export const PROPOSALS_REASONS = PORTFOLIO_PLANS_REASONS;
 
 const text = (value) => String(value ?? '').trim();
 
@@ -91,33 +82,13 @@ function fail(reason, now = null) {
  * دوباره ساخته نمی‌شود.
  */
 export function portfolioSessionProposals(session, evidence, { limit = 3 } = {}) {
-  if (!session || session.state !== 'active') return fail('inactiveSession');
-  const now = session.startSnapshot?.at ?? null;
-  if (!evidence?.ok || !Array.isArray(evidence.rows)) return fail('missingEvidence', now);
+  const now = session?.startSnapshot?.at ?? null;
 
-  const set = portfolioCandidates(session, [], evidence);
-  if (!set.ok || !Array.isArray(set.candidates) || set.candidates.length === 0) {
-    return fail('noCandidates', now);
-  }
+  const plans = portfolioRankedPlans(session, evidence, { limit });
+  if (!plans.ok) return fail(plans.reason, now);
+  const ranked = plans.ranking;
 
-  const scores = [];
-  for (const candidate of set.candidates) {
-    const entry = portfolioEntryPlan(session, set, evidence, candidate.id);
-    if (!entry.ok) continue;
-    const capital = portfolioCapitalRequirement(session, set, evidence, entry);
-    if (!capital.ok) continue;
-    const evaluation = portfolioPlanEvaluation(session, set, evidence, entry, capital);
-    // ارزیابیِ ردشده هم امتیاز می‌رود تا در بخش کنارگذاشته‌ها با علتش
-    // دیده شود. حذفش یعنی کاربر نفهمد چیزی بوده و رد شده.
-    const score = portfolioPlanScore(session, set, evidence, entry, capital, evaluation);
-    scores.push({ score, capital, evaluation, defId: candidate.defId });
-  }
-  if (scores.length === 0) return fail('noPlans', now);
-
-  const ranked = rankPlanScores(scores.map((row) => row.score), { limit });
-  if (!ranked.ok) return fail('rankFailed', now);
-
-  const byCandidate = new Map(scores.map((row) => [text(row.score.candidateId), row]));
+  const byCandidate = plans.sources;
 
   const shortlist = ranked.shortlist.map((row) => {
     const source = byCandidate.get(row.candidateId);

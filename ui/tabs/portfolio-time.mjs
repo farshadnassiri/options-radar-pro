@@ -8,6 +8,7 @@ import {
 import { createTimeGate } from '../../core/time-gate.mjs';
 import { GROUPS as STRATEGY_FAMILIES } from '../../strategies/catalog.mjs';
 import { portfolioSessionProposals } from '../portfolio-proposals.mjs';
+import { commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
   createPortfolioOutlookDraft, createPortfolioRiskDraft,
@@ -250,7 +251,7 @@ export async function mount(root, { state, api }) {
             </div>
             <p class="pt-save-state" id="pt-proposals-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، طرح‌های در دسترس اینجا می‌آیند.</p>
             <table class="pt-proposals-table">
-              <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم (تومان)</th><th>بیشترین سود (تومان)</th><th>بیشترین زیان (تومان)</th><th>چرا این جایگاه</th><th>کیفیت</th></tr></thead>
+              <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم (تومان)</th><th>بیشترین سود (تومان)</th><th>بیشترین زیان (تومان)</th><th>چرا این جایگاه</th><th>کیفیت</th><th>انتخاب</th></tr></thead>
               <tbody id="pt-proposals-body"></tbody>
             </table>
             <p class="eyebrow" id="pt-proposals-aside-title" hidden>کنار گذاشته‌شده‌ها و نامعلوم‌ها</p>
@@ -816,7 +817,14 @@ export async function mount(root, { state, api }) {
 
   // پیشنهادها از همان مدرکی ساخته می‌شوند که بالا رسم شد؛ اینجا دوباره
   // ساخته نمی‌شود و هیچ عددی هم اینجا حساب نمی‌شود.
+  // جلسه‌ای که پیشنهادها از رویش ساخته شده. ثبت، جلسهٔ تازه برمی‌گرداند و
+  // همین‌جا جایگزین می‌شود تا بودجهٔ باقی‌مانده و «ثبت‌شده»ها در رسم بعدی
+  // درست دربیایند.
+  let proposalSession = null;
+  const committedIds = new Set();
+
   function paintProposals(session) {
+    proposalSession = session;
     const section = $('pt-proposals');
     const evidence = portfolioSessionEligibility(session);
     const view = portfolioSessionProposals(session, evidence);
@@ -826,7 +834,7 @@ export async function mount(root, { state, api }) {
       // جدول خالی چیزی نمی‌گوید؛ علت می‌گوید.
       section.hidden = view.reason === 'inactiveSession';
       $('pt-proposals-state').textContent = view.why;
-      $('pt-proposals-body').innerHTML = '<tr class="pt-proposals-empty"><td colspan="8">—</td></tr>';
+      $('pt-proposals-body').innerHTML = '<tr class="pt-proposals-empty"><td colspan="9">—</td></tr>';
       asideTable.hidden = true;
       asideTitle.hidden = true;
       return;
@@ -842,7 +850,10 @@ export async function mount(root, { state, api }) {
       <td data-label="بیشترین زیان">${esc(row.maxLossTomanText)}</td>
       <td data-label="چرا این جایگاه">${esc(row.liftedText)}${row.draggedText === '—' ? '' : `<br><small>کاهنده: ${esc(row.draggedText)}</small>`}</td>
       <td data-label="کیفیت">${esc(row.qualityLabel)}${row.qualityReason ? `<br><small>${esc(row.qualityReason)}</small>` : ''}</td>
-    </tr>`).join('') : '<tr class="pt-proposals-empty"><td colspan="8">هیچ طرحی با این مأموریت رتبه نگرفت.</td></tr>';
+      <td data-label="انتخاب">${committedIds.has(row.candidateId)
+        ? '<b class="pt-committed">ثبت شد</b>'
+        : `<button type="button" class="ghost" data-pt-commit="${esc(row.candidateId)}">انتخاب و ثبت</button>`}</td>
+    </tr>`).join('') : '<tr class="pt-proposals-empty"><td colspan="9">هیچ طرحی با این مأموریت رتبه نگرفت.</td></tr>';
 
     asideTable.hidden = view.setAside.length === 0;
     asideTitle.hidden = view.setAside.length === 0;
@@ -1246,6 +1257,24 @@ export async function mount(root, { state, api }) {
     })[button.dataset.ptEdit];
     target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  $('pt-proposals').onclick = (event) => {
+    const button = event.target.closest('[data-pt-commit]');
+    if (!button || !proposalSession) return;
+    const candidateId = button.dataset.ptCommit;
+    const evidence = portfolioSessionEligibility(proposalSession);
+    const done = commitPortfolioPlan(proposalSession, evidence, candidateId);
+    if (!done.ok) {
+      // شکست ثبت هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود.
+      $('pt-proposals-state').textContent = done.why;
+      return;
+    }
+    committedIds.add(candidateId);
+    paintProposals(done.session);
+    const remaining = done.budget.remainingRial;
+    $('pt-proposals-state').textContent = `ثبت شد — موقعیت ${faDigits(done.positionId)}`
+      + `${Number.isFinite(remaining) ? ` · باقی‌ماندهٔ خانواده ${fmt.int(remaining / 10)} تومان` : ''}`;
+  };
+
   $('pt-eligibility').onclick = (event) => {
     const button = event.target.closest('[data-pt-eligibility-filter]');
     if (!button) return;
