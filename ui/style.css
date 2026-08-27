@@ -873,6 +873,17 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-closeout-figures dd { margin: 2px 0 0; color: var(--ink-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .pt-closeout-figures dd.gain { color: var(--gain); }
 .pt-closeout-figures dd.loss { color: var(--loss); }
+.pt-dossier-analysis { min-width: 0; display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-2); }
+.pt-dossier-analysis h4 { margin: 0; color: var(--ink); font-size: var(--fs-sm); }
+.pt-dossier-analysis-figures { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-2); margin: 0; }
+.pt-dossier-analysis-figures > div { min-width: 0; padding: var(--space-2); border-radius: var(--radius-sm); background: var(--panel); }
+.pt-dossier-analysis-figures dt { color: var(--muted); font-size: var(--fs-xs); }
+.pt-dossier-analysis-figures dd { margin: 2px 0 0; color: var(--ink-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.pt-dossier-analysis-figures dd.gain { color: var(--gain); }
+.pt-dossier-analysis-figures dd.loss { color: var(--loss); }
+.pt-dossier-analysis-state { margin: 0; color: var(--ink-2); font-size: var(--fs-xs); }
+.pt-dossier-analysis-issues { display: grid; gap: 4px; margin: 0; padding-inline-start: var(--space-4); color: var(--loss); font-size: var(--fs-xs); }
+.pt-dossier-analysis-issues[hidden] { display: none; }
 .pt-closeout-open { margin: 0; color: var(--loss); font-size: var(--fs-xs); }
 .pt-closeout-table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
 .pt-closeout-table[hidden] { display: none; }
@@ -955,6 +966,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .pt-eligibility-head, .pt-proposals-head, .pt-ledger-head,
   .pt-positions-head, .pt-clock-head, .pt-watch-head,
   .pt-closeout-head { align-items: stretch; flex-direction: column; }
+  .pt-dossier-analysis-figures { grid-template-columns: minmax(0, 1fr); }
   .pt-eligibility-table, .pt-eligibility-table tbody,
   .pt-proposals-table, .pt-proposals-table tbody,
   .pt-ledger-table, .pt-ledger-table tbody,

@@ -15,12 +15,14 @@ import {
 import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
 import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
 import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
+import { portfolioDossierAnalysis } from '../../core/portfolio-dossier-analysis.mjs';
 import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
 import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
 import { portfolioWatchView } from '../portfolio-watch-view.mjs';
+import { portfolioDossierAnalysisView } from '../portfolio-dossier-analysis-view.mjs';
 import {
   closeoutPreflight, closeoutView, dossierRecordView,
 } from '../portfolio-closeout-view.mjs';
@@ -274,6 +276,12 @@ export async function mount(root, { state, api }) {
             <p class="pt-save-state" id="pt-closeout-state" role="status" aria-live="polite"></p>
             <div class="pt-closeout-dossier" id="pt-closeout-dossier" hidden>
               <dl class="pt-closeout-figures" id="pt-closeout-figures"></dl>
+              <section class="pt-dossier-analysis" id="pt-dossier-analysis" aria-labelledby="pt-dossier-analysis-title">
+                <h4 id="pt-dossier-analysis-title">سرمایه نهایی و فاصله از هدف</h4>
+                <dl class="pt-dossier-analysis-figures" id="pt-dossier-analysis-figures"></dl>
+                <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
+                <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
+              </section>
               <p class="pt-closeout-open" id="pt-closeout-open" hidden></p>
               <table class="pt-closeout-table" id="pt-closeout-table" hidden>
                 <thead><tr><th>موقعیت</th><th>حجم بسته‌شده</th><th>نقد خروج</th><th>تحقق‌یافته</th></tr></thead>
@@ -981,6 +989,28 @@ export async function mount(root, { state, api }) {
     $('pt-closeout-figures').innerHTML = figures
       .map(([label, value, tone]) => `<div><dt>${esc(label)}</dt>`
         + `<dd class="${esc(tone)}">${esc(value)}</dd></div>`).join('');
+    // تمام حساب‌های سرمایه و هدف در core انجام شده‌اند. تب فقط مدل آمادهٔ
+    // نمایش را می‌چیند؛ همین تابع برای پرونده زنده و بازیابی‌شده مشترک است.
+    const analysis = portfolioDossierAnalysis(view.session, view.dossier);
+    const analyzed = portfolioDossierAnalysisView(analysis);
+    const analysisRows = analyzed.ok ? [
+      ['سرمایه شروع', analyzed.initialText, ''],
+      ['تحقق‌یافته', analyzed.realizedText, ''],
+      ['سرمایه نهایی', analyzed.finalText, ''],
+      [`مبنای هدف — ${analyzed.returnBaseLabel}`, analyzed.returnBaseText, ''],
+      ['بازده تحقق‌یافته', analyzed.realizedReturnText, ''],
+      ['هدف مأموریت', `${analyzed.targetReturnText} · ${analyzed.targetProfitText}`, ''],
+      ['فاصله از هدف', `${analyzed.targetGapPctText} · ${analyzed.targetGapText}`, analyzed.targetTone],
+    ] : [];
+    $('pt-dossier-analysis-figures').innerHTML = analysisRows
+      .map(([label, value, tone]) => `<div><dt>${esc(label)}</dt>`
+        + `<dd class="${esc(tone)}">${esc(value)}</dd></div>`).join('');
+    $('pt-dossier-analysis-state').textContent = analyzed.ok
+      ? analyzed.targetStateLabel : analyzed.why;
+    const issues = $('pt-dossier-analysis-issues');
+    issues.hidden = !analyzed.ok || analyzed.issues.length === 0;
+    issues.innerHTML = analyzed.ok ? analyzed.issues.map((row) => `<li>${esc(row.label)}`
+      + `${row.detail ? ` — ${esc(row.detail)}` : ''}</li>`).join('') : '';
     // تعهدِ باز حتی پس از بستن صریح می‌ماند.
     $('pt-closeout-open').hidden = !view.openText;
     $('pt-closeout-open').textContent = view.openText;
