@@ -21,6 +21,9 @@ group('۱۲۵. ترکیب خام فقط از حکم‌های پذیرفتهٔ س
   }
   const active125 = {
     state: 'active', start: at125,
+    // بازهٔ جلسه: عکس باید داخلش بنشیند، حالا که موتور لحظهٔ دلخواه را
+    // می‌پذیرد و مرزها را می‌سنجد.
+    end: { date: at125.date + 100, second: at125.second },
     lockedAllocations: [
       { familyId: 'vertical', pct: 40, targetRial: 4_000_000_000 },
       { familyId: 'wing', pct: 0, targetRial: 0 },

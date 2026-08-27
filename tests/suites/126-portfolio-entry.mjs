@@ -29,6 +29,7 @@ group('۱۲۶. ظرفیت مشترک و قیمت اجرایی ورود ترکی�
   }
   const session126 = {
     id: 'pt-entry-126', baseIns: '900001', state: 'active', start: at126,
+    end: { date: at126.date + 100, second: at126.second },
     lockedAllocations: [{ familyId: 'wing', pct: 100, targetRial: 250_000 }],
     lockedMission: {
       liquidity: {

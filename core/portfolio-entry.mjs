@@ -12,6 +12,7 @@ import { PORTFOLIO_CANDIDATES_VERSION } from './portfolio-candidates.mjs';
 import { candidateId as stableCandidateId } from './bereket-candidates.mjs';
 import { num } from './num.mjs';
 import { byId } from '../strategies/catalog.mjs';
+import { activeSnapshot, snapshotWithinSession } from './portfolio-snapshot.mjs';
 
 export const PORTFOLIO_ENTRY_VERSION = 1;
 
@@ -49,7 +50,7 @@ function fail(code, session = null, candidateId = '') {
     reason: { code, label: PORTFOLIO_ENTRY_REASONS[code] },
     sessionId: text(session?.id) || null,
     candidateId: text(candidateId),
-    now: session?.startSnapshot?.at ? { ...session.startSnapshot.at } : null,
+    now: activeSnapshot(session)?.at ? { ...activeSnapshot(session).at } : null,
     executableQty: null,
     legs: [],
     unitEntryCashRial: null,
@@ -119,7 +120,7 @@ function sameContract(leg, contract) {
 }
 
 function underlyingContract(session, leg) {
-  const raw = session?.startSnapshot?.underlying;
+  const raw = activeSnapshot(session)?.underlying;
   if (!raw || typeof raw !== 'object') return null;
   const quote = raw.quote && typeof raw.quote === 'object' ? raw.quote : raw;
   return {
@@ -173,8 +174,8 @@ function sameNumber(left, right) {
  */
 export function portfolioEntryPlan(session, candidateSet, evidence, candidateId) {
   if (!session || session.state !== 'active') return fail('inactiveSession', session, candidateId);
-  const snapshot = session.startSnapshot;
-  if (!snapshot || !sameMoment(snapshot.at, session.start)) {
+  const snapshot = activeSnapshot(session);
+  if (!snapshot || !snapshotWithinSession(session, snapshot)) {
     return fail('missingSnapshot', session, candidateId);
   }
   if (!candidateSet?.ok || candidateSet.version !== PORTFOLIO_CANDIDATES_VERSION

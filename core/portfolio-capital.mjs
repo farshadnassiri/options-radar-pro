@@ -10,6 +10,7 @@ import { strategyMargin } from './margin.mjs';
 import { entryFees } from './payoff.mjs';
 import { PORTFOLIO_ENTRY_VERSION, portfolioEntryPlan } from './portfolio-entry.mjs';
 import { EPS } from './num.mjs';
+import { activeSnapshot, snapshotWithinSession } from './portfolio-snapshot.mjs';
 
 export const PORTFOLIO_CAPITAL_VERSION = 1;
 
@@ -52,7 +53,7 @@ function fail(code, session = null, entry = null, extra = {}) {
     reason: { code, label: PORTFOLIO_CAPITAL_REASONS[code] },
     sessionId: text(session?.id) || null,
     candidateId: text(entry?.candidateId),
-    now: session?.startSnapshot?.at ? { ...session.startSnapshot.at } : null,
+    now: activeSnapshot(session)?.at ? { ...activeSnapshot(session).at } : null,
     executableQty: null,
     components: blankComponents(),
     basis: null,
@@ -207,8 +208,8 @@ function allocationOf(session, entry) {
  */
 export function portfolioCapitalRequirement(session, candidateSet, evidence, entry) {
   if (!session || session.state !== 'active') return fail('inactiveSession', session, entry);
-  const snapshot = session.startSnapshot;
-  if (!snapshot || !sameMoment(snapshot.at, session.start)
+  const snapshot = activeSnapshot(session);
+  if (!snapshot || !snapshotWithinSession(session, snapshot)
     || entry?.version !== PORTFOLIO_ENTRY_VERSION || entry?.ok !== true
     || text(entry.sessionId) !== text(session.id) || !sameMoment(entry.now, snapshot.at)) {
     return fail('invalidEntry', session, entry);

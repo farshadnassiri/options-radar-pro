@@ -47,6 +47,7 @@ group('۱۲۷. سرمایه لازم و وجه تضمین طرح ورود');
   };
   const session127 = {
     id: 'pt-capital-127', baseIns: '900001', state: 'active', start: at127,
+    end: { date: at127.date + 100, second: at127.second },
     lockedAllocations: [
       { familyId: 'single', pct: 20, targetRial: 2_000_000 },
       { familyId: 'vol', pct: 80, targetRial: 8_000_000 },

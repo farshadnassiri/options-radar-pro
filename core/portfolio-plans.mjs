@@ -13,6 +13,7 @@ import { portfolioCapitalRequirement } from './portfolio-capital.mjs';
 import { portfolioPlanEvaluation } from './portfolio-evaluation.mjs';
 import { portfolioPlanScore } from './portfolio-score.mjs';
 import { rankPlanScores } from './portfolio-ranking.mjs';
+import { activeSnapshot } from './portfolio-snapshot.mjs';
 
 export const PORTFOLIO_PLANS_REASONS = Object.freeze({
   inactiveSession: 'طرح‌ها فقط برای جلسهٔ فعال ساخته می‌شوند',
@@ -44,7 +45,7 @@ function fail(reason, now = null) {
  */
 export function portfolioRankedPlans(session, evidence, { limit = 3 } = {}) {
   if (!session || session.state !== 'active') return fail('inactiveSession');
-  const now = session.startSnapshot?.at ?? null;
+  const now = activeSnapshot(session)?.at ?? null;
   if (!evidence?.ok || !Array.isArray(evidence.rows)) return fail('missingEvidence', now);
 
   const set = portfolioCandidates(session, [], evidence);
