@@ -838,6 +838,14 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-clock-now { font-family: var(--mono); font-size: var(--fs-lg); color: var(--accent-ink); direction: ltr; }
 .pt-clock-steps { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .pt-clock-steps button[disabled] { opacity: .45; cursor: not-allowed; }
+/* جمع‌شدن مراحل پس از قفل مأموریت. سرِ مرحله می‌ماند تا کاربر بداند چه
+   قفل کرده؛ بخش‌های زندهٔ جلسه (`.pt-live`) جمع نمی‌شوند چون خودشان
+   دلیلِ وجودِ صفحه‌اند. */
+.pt-card[data-collapsed="true"] > *:not(.section-head):not(.pt-live) { display: none; }
+.pt-card[data-collapsed="true"] { gap: 0; }
+.pt-card[data-collapsed="true"] > .section-head { margin: 0; }
+.pt-expand { margin-inline-start: auto; }
+.section-head .pt-expand { align-self: center; }
 .pt-watch[data-tone="loss"] { border-color: color-mix(in srgb, var(--loss) 45%, var(--line)); }
 .pt-watch[data-tone="warn"] { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .pt-watch-headline { font-size: var(--fs-sm); }

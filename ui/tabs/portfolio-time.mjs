@@ -243,7 +243,7 @@ export async function mount(root, { state, api }) {
             <ul id="pt-snapshot-reasons"><li>پس از قفل مأموریت، دادهٔ روزانه، ریزمعامله، دفتر سفارش و فهرست قراردادهای همان تاریخ بررسی می‌شوند.</li></ul>
           </section>
 
-          <section class="pt-eligibility" id="pt-eligibility" aria-labelledby="pt-eligibility-title" hidden>
+          <section class="pt-eligibility pt-live" id="pt-eligibility" aria-labelledby="pt-eligibility-title" hidden>
             <div class="pt-eligibility-head">
               <div><p class="eyebrow">مدرک خام اجراپذیری</p><h3 id="pt-eligibility-title">حکم قراردادها در لحظه شروع</h3></div>
               <div class="pt-eligibility-filters" aria-label="فیلتر حکم قراردادها">
@@ -259,7 +259,7 @@ export async function mount(root, { state, api }) {
             </table>
           </section>
 
-          <section class="pt-watch" id="pt-watch" aria-labelledby="pt-watch-title" hidden>
+          <section class="pt-watch pt-live" id="pt-watch" aria-labelledby="pt-watch-title" hidden>
             <div class="pt-watch-head">
               <div><p class="eyebrow">پایش قیود ریسک</p><h3 id="pt-watch-title">آنچه از لحظهٔ ثبت عوض شده</h3></div>
               <b class="pt-watch-headline" id="pt-watch-headline">—</b>
@@ -270,7 +270,7 @@ export async function mount(root, { state, api }) {
             </table>
           </section>
 
-          <section class="pt-clock" id="pt-clock" aria-labelledby="pt-clock-title" hidden>
+          <section class="pt-clock pt-live" id="pt-clock" aria-labelledby="pt-clock-title" hidden>
             <div class="pt-clock-head">
               <div><p class="eyebrow">ساعت جلسه</p><h3 id="pt-clock-title">لحظه‌ای که جلسه روی آن ایستاده</h3></div>
               <b class="pt-clock-now" id="pt-clock-now">—</b>
@@ -280,7 +280,7 @@ export async function mount(root, { state, api }) {
             <p class="pt-field-error" id="pt-clock-warn" hidden></p>
           </section>
 
-          <section class="pt-ledger" id="pt-ledger" aria-labelledby="pt-ledger-title" hidden>
+          <section class="pt-ledger pt-live" id="pt-ledger" aria-labelledby="pt-ledger-title" hidden>
             <div class="pt-ledger-head">
               <div><p class="eyebrow">دفتر سرمایه</p><h3 id="pt-ledger-title">چقدر درگیر شده و چقدر جا مانده</h3></div>
             </div>
@@ -294,7 +294,7 @@ export async function mount(root, { state, api }) {
             <p class="pt-field-error" id="pt-ledger-unpriced" hidden></p>
           </section>
 
-          <section class="pt-positions" id="pt-positions" aria-labelledby="pt-positions-title" hidden>
+          <section class="pt-positions pt-live" id="pt-positions" aria-labelledby="pt-positions-title" hidden>
             <div class="pt-positions-head">
               <div><p class="eyebrow">موقعیت‌های جلسه</p><h3 id="pt-positions-title">چه چیزی در دست است</h3></div>
             </div>
@@ -317,7 +317,7 @@ export async function mount(root, { state, api }) {
             <p class="pt-field-error" id="pt-positions-undocumented" hidden></p>
           </section>
 
-          <section class="pt-proposals" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
+          <section class="pt-proposals pt-live" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
             <div class="pt-proposals-head">
               <div><p class="eyebrow">پیشنهاد اجراپذیر</p><h3 id="pt-proposals-title">طرح‌های در دسترس با این مأموریت</h3></div>
             </div>
@@ -1134,13 +1134,56 @@ export async function mount(root, { state, api }) {
     </tr>`).join('');
   }
 
+  /**
+   * مراحل ویزارد پس از قفل.
+   *
+   * قفل‌شدن جای مرحله را کم نمی‌کرد: اندازه‌گیری مرورگر نشان داد نوار
+   * هشدار ۲۴۶۰ پیکسل (و در موبایل ۵۱۹۲) از بالای صفحه فاصله دارد، یعنی
+   * کاربر باید کل ویزارد را رد کند تا بفهمد قیدی شکسته.
+   *
+   * جمع‌شدن یعنی **کوچک‌شدن، نه ناپدیدشدن**: سرِ هر مرحله می‌ماند تا
+   * کاربر بداند چه قفل کرده، و با یک دکمه باز می‌شود — برای دیدن، نه
+   * ویرایش؛ قفل ویرایش سرِ جایش است.
+   */
+  const WIZARD_STEPS = ['pt-outlook-step', 'pt-risk-step', 'pt-allocation-step',
+    'pt-review-step'];
+
+  function collapseWizard() {
+    const cards = [root.querySelector('.pt-main > .pt-card'),
+      ...WIZARD_STEPS.map((id) => $(id))].filter(Boolean);
+    for (const card of cards) {
+      card.dataset.collapsed = 'true';
+      const head = card.querySelector('.section-head');
+      if (!head || head.querySelector('[data-pt-expand]')) continue;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ghost pt-expand';
+      button.dataset.ptExpand = card.id || 'setup';
+      button.textContent = 'نمایش';
+      // این دکمه باید بعد از قفل هم کار کند، پس از قفلِ عمومی مستثناست.
+      button.dataset.ptKeepEnabled = 'true';
+      head.append(button);
+    }
+  }
+
+  root.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-pt-expand]');
+    if (!button) return;
+    const card = button.closest('.pt-card');
+    const open = card.dataset.collapsed !== 'true';
+    card.dataset.collapsed = open ? 'true' : 'false';
+    button.textContent = open ? 'نمایش' : 'جمع کن';
+  });
+
   function lockMissionEditor() {
     root.dataset.missionActive = 'true';
     root.querySelectorAll('input, select, textarea, button').forEach((control) => {
       if (!control.closest('#pt-eligibility') && !control.closest('#pt-proposals')
         && !control.closest('#pt-ledger') && !control.closest('#pt-positions')
-        && !control.closest('#pt-clock') && !control.closest('#pt-watch')) control.disabled = true;
+        && !control.closest('#pt-clock') && !control.closest('#pt-watch')
+        && control.dataset.ptKeepEnabled !== 'true') control.disabled = true;
     });
+    collapseWizard();
   }
 
   function reviewDates() {
