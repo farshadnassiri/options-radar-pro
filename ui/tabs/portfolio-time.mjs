@@ -459,6 +459,11 @@ export async function mount(root, { state, api }) {
   let draftId = `pt-ui-${Date.now()}`;
   // زمان ثبت سرور، هم برچسب وضعیت است و هم قفل خوش‌بینانه PUT بعدی.
   let lastSavedAt = null;
+  // ثبت مرحله‌ها باید به همان ترتیبی به سرور برسد که کاربر آن‌ها را
+  // تأیید کرده است. کلیک سریع روی چند مرحله نباید پاسخ دیرترِ مرحلهٔ
+  // قبلی را روی زمان نسخهٔ تازه بنویسد یا active را جلوتر از allocation
+  // به ذخیره‌ساز برساند.
+  let persistQueue = Promise.resolve();
   // حین بازسازی، همان دکمه‌های مرحله صدا زده می‌شوند. بدون این پرچم، هر
   // مرحله دوباره روی سرور نوشته می‌شد و رکوردی که تازه خواندیم را با
   // خودش بازنویسی می‌کرد.
@@ -1726,8 +1731,7 @@ export async function mount(root, { state, api }) {
    * می‌گذارند. اگر این تابع ساکت شکست بخورد، کاربر با خیال راحت تب را
    * می‌بندد و کار نیم‌ساعتش را از دست می‌دهد.
    */
-  async function persist(next) {
-    if (resuming || !next?.session?.id) return;
+  async function persistNow(next) {
     const state = $('pt-persist-state');
     state.removeAttribute('data-error');
     state.textContent = 'در حال ثبت روی سرور…';
@@ -1737,11 +1741,21 @@ export async function mount(root, { state, api }) {
       state.textContent = saved.conflict
         ? `روی سرور ثبت نشد — ${saved.why} جلسه را از فهرست دوباره باز کن.`
         : `روی سرور ثبت نشد — ${saved.why}`;
-      return;
+      return saved;
     }
     lastSavedAt = saved.savedAt;
     state.textContent = `روی سرور ثبت شد · ${faDigits(new Date(saved.savedAt).toLocaleTimeString('fa-IR', { hour12: false }))}`;
     refreshSessions();
+    return saved;
+  }
+
+  async function persist(next) {
+    if (resuming || !next?.session?.id) return;
+    const operation = persistQueue.then(() => persistNow(next));
+    // شکست یک ثبت، صف را برای تلاش صریح بعدی مسموم نمی‌کند؛ خود فراخوان
+    // همچنان نتیجهٔ شکست را می‌گیرد و حق ندارد آن را موفق نشان دهد.
+    persistQueue = operation.catch(() => {});
+    return operation;
   }
 
   /** فهرست جلسه‌ها و پرونده‌های سرور. خطا، فهرست خالیِ «سالم» نیست. */
@@ -2200,6 +2214,8 @@ export async function mount(root, { state, api }) {
       if (allocationDraft !== sourceDraft) throw new Error('تخصیص هنگام ساخت عکس شروع تغییر کرد؛ دوباره قفل کن');
       const active = activatePortfolioMissionDraft(missionDraft, snapshot);
       if (!active.ok) throw new Error(active.why);
+      const saved = await persist(active.draft);
+      if (!saved?.ok) throw new Error(saved?.why || 'جلسه فعال روی سرور ثبت نشد');
       draft = active.draft;
       paintSnapshot(active.draft.snapshot);
       paintEligibility(active.draft.session);
@@ -2208,7 +2224,6 @@ export async function mount(root, { state, api }) {
       $('pt-mission-state').textContent = active.draft.snapshot.quality.sufficient
         ? 'مأموریت و عکس شروع قفل شدند؛ هنوز هیچ پیشنهاد یا معامله‌ای ساخته نشده است.'
         : 'مأموریت قفل شد؛ عکس شروع ناکافی است و علت‌ها بدون جایگزینی عدد نمایش داده شده‌اند.';
-      await persist(active.draft);
       lockMissionEditor();
     } catch (error) {
       missionDraft = null;
