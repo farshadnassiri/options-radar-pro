@@ -21,7 +21,9 @@ import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs'
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
 import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
 import { portfolioWatchView } from '../portfolio-watch-view.mjs';
-import { closeoutPreflight, closeoutView } from '../portfolio-closeout-view.mjs';
+import {
+  closeoutPreflight, closeoutView, dossierRecordView,
+} from '../portfolio-closeout-view.mjs';
 import { mountPayoff } from '../chart.mjs';
 import { feesOf, marginParamsOf } from '../../core/settings.mjs';
 import {
@@ -36,7 +38,9 @@ import {
   filterPortfolioEligibilityRows, portfolioSessionEligibility,
 } from '../portfolio-eligibility.mjs';
 import { listMissionSaves, loadMissionSave, saveMissionDraft } from '../portfolio-mission-data.mjs';
-import { persistDossierView } from '../portfolio-dossier-data.mjs';
+import {
+  listDossiers, loadDossier, persistDossierView,
+} from '../portfolio-dossier-data.mjs';
 import { missionSaveLabel, resumeMissionRecord } from '../portfolio-mission-resume.mjs';
 import { mountDateWheel } from '../datewheel.mjs';
 import { fmt, faDigits } from '../fmt.mjs';
@@ -1420,31 +1424,49 @@ export async function mount(root, { state, api }) {
     refreshSessions();
   }
 
-  /** فهرست جلسه‌های سرور. خطای خواندن، فهرست خالیِ «سالم» نشان نمی‌دهد. */
+  /** فهرست جلسه‌ها و پرونده‌های سرور. خطا، فهرست خالیِ «سالم» نیست. */
   async function refreshSessions() {
     const pick = $('pt-resume-pick'), state = $('pt-resume-state');
-    const listed = await listMissionSaves();
-    if (!listed.ok) {
+    const [listed, dossiers] = await Promise.all([listMissionSaves(), listDossiers()]);
+    if (!listed.ok && !dossiers.ok) {
       pick.innerHTML = '<option value="">فهرست خوانده نشد</option>';
       state.dataset.error = 'true';
-      state.textContent = `فهرست جلسه‌ها خوانده نشد — ${listed.why}`;
+      state.textContent = `فهرست‌های سرور خوانده نشدند — ${listed.why} · ${dossiers.why}`;
       return;
     }
-    state.removeAttribute('data-error');
-    const rows = listed.sessions.filter((row) => row?.id && row.id !== draftId);
-    if (!rows.length) {
+    const missionRows = listed.ok
+      ? listed.sessions.filter((row) => row?.id && row.id !== draftId) : [];
+    const dossierRows = dossiers.ok ? dossiers.dossiers.filter((row) => row?.id) : [];
+    const options = [];
+    for (const row of dossierRows) {
+      if (row.broken) {
+        options.push(`<option value="" data-kind="broken" disabled>پرونده خراب — ${esc(row.why || 'خوانده نشد')}</option>`);
+        continue;
+      }
+      const day = Number(row?.closedAt?.date);
+      const when = Number.isFinite(day) && day > 0 ? faDigits(historyDateLabel(day)) : 'تاریخ نامعلوم';
+      options.push(`<option value="${esc(row.id)}" data-kind="dossier">${esc(when)} — پرونده بسته‌شده</option>`);
+    }
+    for (const row of missionRows) {
+      // برچسب ردیف، شناسه خام نیست. شناسه هم رقم لاتین دارد (قاعده ۲-۳) و
+      // هم به کاربر نمی‌گوید کدام سفر است؛ تاریخ شروع و مرحله می‌گوید.
+      const day = Number(row?.start?.date);
+      const when = Number.isFinite(day) && day > 0 ? faDigits(historyDateLabel(day)) : 'تاریخ نامعلوم';
+      options.push(`<option value="${esc(row.id)}" data-kind="mission">${esc(when)} — ${esc(missionSaveLabel(row))}</option>`);
+    }
+    if (!options.length) {
       pick.innerHTML = '<option value="">جلسه‌ای برای ادامه نیست</option>';
       state.textContent = 'هنوز جلسه‌ای روی سرور ذخیره نشده است.';
       return;
     }
-    // برچسب ردیف، شناسه خام نیست. شناسه هم رقم لاتین دارد (قاعده ۲-۳) و
-    // هم به کاربر نمی‌گوید کدام سفر است؛ تاریخ شروع و مرحله می‌گوید.
-    pick.innerHTML = rows.map((row) => {
-      const day = Number(row?.start?.date);
-      const when = Number.isFinite(day) && day > 0 ? faDigits(historyDateLabel(day)) : 'تاریخ نامعلوم';
-      return `<option value="${esc(row.id)}">${esc(when)} — ${esc(missionSaveLabel(row))}</option>`;
-    }).join('');
-    state.textContent = `${fmt.int(rows.length)} جلسه روی سرور ذخیره شده است.`;
+    pick.innerHTML = options.join('');
+    const failures = [!listed.ok ? `جلسه‌ها: ${listed.why}` : '',
+      !dossiers.ok ? `پرونده‌ها: ${dossiers.why}` : ''].filter(Boolean);
+    if (failures.length) state.dataset.error = 'true';
+    else state.removeAttribute('data-error');
+    state.textContent = failures.length
+      ? `${fmt.int(options.length)} ردیف خوانده شد؛ ${failures.join(' · ')}`
+      : `${fmt.int(options.length)} جلسه یا پرونده روی سرور ذخیره شده است.`;
   }
 
   /**
@@ -1553,10 +1575,37 @@ export async function mount(root, { state, api }) {
   $('pt-grain').onchange = () => { $('pt-review-grain').textContent = $('pt-grain').selectedOptions[0]?.textContent || '—'; clearErrors(); invalidateSetupDraft(); };
   $('pt-retry').onclick = () => api.retryFeed();
   $('pt-resume-open').onclick = async () => {
-    const id = $('pt-resume-pick').value;
+    const pick = $('pt-resume-pick');
+    const id = pick.value;
+    const kind = pick.selectedOptions[0]?.dataset.kind || 'mission';
     const state = $('pt-resume-state');
     if (!id) { state.dataset.error = 'true'; state.textContent = 'اول یک جلسه را انتخاب کن.'; return; }
     state.removeAttribute('data-error');
+    if (kind === 'dossier') {
+      state.textContent = 'در حال خواندن پرونده از سرور…';
+      const loaded = await loadDossier(id);
+      if (!loaded.ok) {
+        state.dataset.error = 'true';
+        state.textContent = loaded.notFound ? 'این پرونده روی سرور نیست.' : `پرونده خوانده نشد — ${loaded.why}`;
+        return;
+      }
+      const restored = dossierRecordView(loaded.record);
+      if (!restored.ok) {
+        state.dataset.error = 'true';
+        state.textContent = `این پرونده نمایش‌پذیر نیست — ${restored.why}`;
+        return;
+      }
+      paintProgress('active');
+      paintSnapshot(restored.session.startSnapshot);
+      paintProposals(restored.session);
+      paintDossier(restored);
+      lockMissionEditor();
+      root.querySelectorAll('[data-pt-commit], [data-pt-close], [data-pt-step]')
+        .forEach((control) => { control.disabled = true; });
+      $('pt-closeout-do').hidden = true;
+      state.textContent = 'پرونده بسته‌شده از سرور باز شد؛ همه کنترل‌های معامله فقط‌خواندنی‌اند.';
+      return;
+    }
     state.textContent = 'در حال خواندن جلسه از سرور…';
     const loaded = await loadMissionSave(id);
     if (!loaded.ok) {
