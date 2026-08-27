@@ -14,6 +14,7 @@ import {
 } from '../portfolio-positions-view.mjs';
 import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
 import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
+import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
   createPortfolioOutlookDraft, createPortfolioRiskDraft,
@@ -269,10 +270,13 @@ export async function mount(root, { state, api }) {
               <div><p class="eyebrow">موقعیت‌های جلسه</p><h3 id="pt-positions-title">چه چیزی در دست است</h3></div>
             </div>
             <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
+            <div class="pt-table-scroll">
             <table class="pt-positions-table">
-              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>پاها</th><th>کیفیت</th><th>بستن</th></tr></thead>
+              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>بستن</th></tr></thead>
               <tbody id="pt-positions-body"></tbody>
             </table>
+            </div>
+            <p class="pt-positions-total" id="pt-positions-total"></p>
             <p class="pt-field-error" id="pt-positions-undocumented" hidden></p>
           </section>
 
@@ -899,12 +903,17 @@ export async function mount(root, { state, api }) {
   // است، بعد چه می‌شود ثبت کرد. هیچ عددی اینجا حساب نمی‌شود.
   function paintPositions(session) {
     const section = $('pt-positions');
-    const view = portfolioSessionPositionsView(session);
+    // ارزش‌گذاری از همان مدرک هم‌لحظه‌ای می‌آید که حکم اجراپذیری از آن
+    // ساخته شد. اگر نشود ارزش‌گذاری کرد، جدول نمی‌شکند — ستون‌ها ساکت
+    // می‌مانند و علتش بالای جدول می‌آید.
+    const valuation = portfolioSessionValuation(session, portfolioSessionEligibility(session));
+    const view = portfolioSessionPositionsView(session, valuation);
     const warn = $('pt-positions-undocumented');
     if (!view.ok) {
       section.hidden = view.reason === 'noSession';
       $('pt-positions-state').textContent = view.why;
-      $('pt-positions-body').innerHTML = '<tr class="pt-positions-empty"><td colspan="7">—</td></tr>';
+      $('pt-positions-body').innerHTML = '<tr class="pt-positions-empty"><td colspan="9">—</td></tr>';
+      $('pt-positions-total').textContent = '';
       warn.hidden = true;
       return;
     }
@@ -916,6 +925,9 @@ export async function mount(root, { state, api }) {
       <td data-label="وضعیت"><b>${esc(row.statusLabel)}</b></td>
       <td data-label="حجم">${esc(row.openQtyText)}${row.openQtyText === row.initialQtyText ? '' : `<br><small>از ${esc(row.initialQtyText)}</small>`}</td>
       <td data-label="سرمایه">${esc(row.capitalTomanText)}</td>
+      <td data-label="ارزش جاری">${esc(row.valueTomanText)}${row.valuedWhy
+        ? `<br><small>${esc(row.valuedWhy)}</small>` : ''}</td>
+      <td data-label="سود تحقق‌نیافته" class="${esc(row.unrealizedTone)}">${esc(row.unrealizedTomanText)}</td>
       <td data-label="پاها">${row.legTexts.length
         ? row.legTexts.map((leg) => `<div>${esc(leg)}</div>`).join('')
         : `<span class="pt-positions-why">${esc(row.why || '—')}</span>`}</td>
@@ -923,7 +935,11 @@ export async function mount(root, { state, api }) {
       <td data-label="بستن">${row.closable
         ? `<button type="button" class="ghost" data-pt-close="${esc(row.id)}">بستن کامل</button>`
         : '—'}</td>
-    </tr>`).join('') : '<tr class="pt-positions-empty"><td colspan="7">—</td></tr>';
+    </tr>`).join('') : '<tr class="pt-positions-empty"><td colspan="9">—</td></tr>';
+    // جمعِ کل فقط وقتی نوشته می‌شود که کامل باشد؛ وگرنه علتش.
+    const total = $('pt-positions-total');
+    total.textContent = view.valuationText || view.valuationWhy;
+    total.className = `pt-positions-total ${view.valuationText ? view.valuationTone : ''}`.trim();
     warn.hidden = !view.undocumentedText;
     warn.textContent = view.undocumentedText;
   }

@@ -21,7 +21,7 @@
 //
 // اینجا DOM نیست و رشتهٔ HTML ساخته نمی‌شود؛ تب خودش رسم می‌کند.
 
-import { fmt, faDigits } from './fmt.mjs';
+import { fmt, faDigits, signTone } from './fmt.mjs';
 import { historyDateLabel } from '../core/history.mjs';
 import {
   PORTFOLIO_POSITIONS_REASONS, portfolioSessionPositions,
@@ -91,8 +91,46 @@ function fail(reason, why = '') {
   };
 }
 
+/**
+ * ارزش جاری یک موقعیت، آمادهٔ نمایش.
+ *
+ * `null` یعنی ارزش‌گذاری اصلاً انجام نشده (مدرک کهنه، ماژول صدا زده
+ * نشده) — که با «انجام شد ولی این موقعیت ارزش ندارد» یکی نیست. اولی
+ * ستون را ساکت می‌گذارد، دومی علت دارد.
+ */
+function valueCells(valued) {
+  if (!valued) {
+    return {
+      hasValuation: false,
+      valueTomanText: '—',
+      unrealizedTomanText: '—',
+      unrealizedTone: '',
+      valuedWhy: '',
+    };
+  }
+  if (!valued.valued) {
+    return {
+      hasValuation: true,
+      valueTomanText: '—',
+      unrealizedTomanText: '—',
+      unrealizedTone: '',
+      // «—»ی خالی می‌تواند «هنوز نیامده» خوانده شود؛ علت روشن می‌کند
+      // که سنجیده شد و نشد.
+      valuedWhy: faDigits(text(valued.why)),
+    };
+  }
+  return {
+    hasValuation: true,
+    valueTomanText: toman(valued.valueRial),
+    unrealizedTomanText: toman(valued.unrealizedRial),
+    // سود منفی باید بدون گشتن دیده شود.
+    unrealizedTone: signTone(valued.unrealizedRial),
+    valuedWhy: '',
+  };
+}
+
 /** یک ردیف موقعیت، آمادهٔ نمایش. */
-function toRow(row) {
+function toRow(row, valued = null) {
   const quality = qualityText(row.quality);
   return {
     id: row.id,
@@ -116,6 +154,7 @@ function toRow(row) {
     // فقط موقعیت باز بسته می‌شود؛ دکمه روی ردیف بسته یعنی کاری که
     // شکست می‌خورد.
     closable: row.status === 'open',
+    ...valueCells(valued),
   };
 }
 
@@ -158,16 +197,46 @@ export function closeDoneText(result) {
 }
 
 /**
+ * جمعِ ارزش‌گذاری، یا اینکه چرا جمعی نیست.
+ *
+ * جمعِ کل فقط وقتی نوشته می‌شود که موتور گفته باشد کامل است. جمعِ نصفه
+ * شبیه عدد است و همان چیزی است که کاربر باورش می‌کند.
+ */
+function valuationSummary(valuation) {
+  if (!valuation) return { valuationText: '', valuationTone: '', valuationWhy: '' };
+  if (!valuation.ok) return { valuationText: '', valuationTone: '', valuationWhy: faDigits(text(valuation.why)) };
+  const totals = valuation.totals;
+  if (!totals.complete) {
+    return {
+      valuationText: '',
+      valuationTone: '',
+      valuationWhy: totals.openCount === 0 ? ''
+        : `${count(totals.unvaluedCount)} از ${count(totals.openCount)} موقعیت باز ارزش‌گذاری نشد،`
+          + ' پس جمعِ کل ساخته نشد',
+    };
+  }
+  return {
+    valuationText: `ارزش جاری ${toman(totals.valueRial)} تومان`
+      + ` · سود تحقق‌نیافته ${toman(totals.unrealizedRial)} تومان`,
+    valuationTone: signTone(totals.unrealizedRial),
+    valuationWhy: '',
+  };
+}
+
+/**
  * موقعیت‌های یک جلسه، آمادهٔ نمایش.
  *
  * جلسهٔ بدون موقعیت هم جواب می‌گیرد — با جمله، نه جدول خالی که شبیه
  * «چیزی نمی‌دانیم» است.
  */
-export function portfolioSessionPositionsView(session) {
+export function portfolioSessionPositionsView(session, valuation = null) {
   const state = portfolioSessionPositions(session);
   if (!state.ok) return fail(state.reason, state.why);
 
-  const rows = state.positions.map(toRow);
+  // ارزش‌گذاری اختیاری است: بدون آن جدول همان جدول قبلی است و نمی‌شکند.
+  const valued = new Map();
+  if (valuation?.ok) for (const row of valuation.rows) valued.set(row.id, row);
+  const rows = state.positions.map((row) => toRow(row, valued.get(row.id) || null));
   const open = rows.filter((row) => row.status === 'open');
   const closed = rows.filter((row) => row.status === 'closed');
 
@@ -186,5 +255,6 @@ export function portfolioSessionPositionsView(session) {
     // پنهان‌کردنش یعنی ردیف‌های بی‌سند شبیه بقیه دیده می‌شوند.
     undocumentedText: state.counts.undocumented === 0 ? ''
       : `${count(state.counts.undocumented)} موقعیت سند طرحش خوانده نشد`,
+    ...valuationSummary(valuation),
   };
 }

@@ -97,10 +97,18 @@ group('۱۳۸. بستن موقعیت در تب');
     /closePortfolioPosition/.test(tabSrc138)
     && /closeFailureText/.test(tabSrc138) && /closeDoneText/.test(tabSrc138)
     && /from '\.\.\/\.\.\/core\/portfolio-close\.mjs'/.test(tabSrc138));
-  check('ستون بستن در سرستون جدول هست و ستون‌ها با هم می‌خوانند',
-    tabSrc138.includes('<th>بستن</th>')
-    && tabSrc138.includes('data-label="بستن"')
-    && tabSrc138.includes('colspan="7"'));
+  const positionsHead138 = tabSrc138
+    .slice(tabSrc138.indexOf('<table class="pt-positions-table">'));
+  const headCells138 = (positionsHead138.slice(0, positionsHead138.indexOf('</thead>'))
+    .match(/<th>/g) || []).length;
+  const emptySpans138 = [...tabSrc138.matchAll(/pt-positions-empty"><td colspan="(\d+)"/g)]
+    .map((hit) => Number(hit[1]));
+  check('ستون بستن در سرستون جدول هست',
+    tabSrc138.includes('<th>بستن</th>') && tabSrc138.includes('data-label="بستن"'));
+  check('و colspan هر ردیف خالی با شمار سرستون‌ها می‌خواند',
+    headCells138 > 0 && emptySpans138.length > 0
+    && emptySpans138.every((span) => span === headCells138),
+    `${emptySpans138.join(' ،')} در برابر ${headCells138}`);
   check('دکمه فقط برای ردیف بستنی ساخته می‌شود',
     /row\.closable[\s\S]{0,120}?data-pt-close=/.test(tabSrc138));
   // بند ۲: پس از بستن، سرمایهٔ آزاد عوض شده است؛ رسم‌کردن فقط جدول
