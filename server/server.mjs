@@ -51,9 +51,13 @@ const SETTINGS_FILE = path.join(ROOT, 'data', 'settings.json');
 const PORTFOLIO_MISSION_DIR = path.join(ROOT, 'data', 'portfolio-missions');
 const PORTFOLIO_DOSSIER_DIR = path.join(ROOT, 'data', 'portfolio-dossiers');
 
-// سقف بدنه درخواست. تنظیمات چند کیلوبایت است و فهرست موقعیت‌ها هم کوچک؛
-// یک مگابایت جای فراوانی می‌دهد و هنوز جلوی پر کردن حافظه را می‌گیرد.
+// سقف عمومی بدنه درخواست. تنظیمات و فهرست‌های معمولی باید کوچک بمانند.
 const MAX_BODY = 1024 * 1024;
+
+// پرونده پایان سفر، اسنپ‌شات واقعی بازار را هم برای بازپخش قابل حسابرسی نگه
+// می‌دارد و ممکن است از سقف عمومی بزرگ‌تر شود. این استثنا فقط برای همان
+// endpoint است و سقف محدود ۱۶ مگابایتی جلوی رشد نامحدود حافظه را می‌گیرد.
+const PORTFOLIO_DOSSIER_MAX_BODY = 16 * 1024 * 1024;
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
@@ -894,7 +898,7 @@ async function handle(req, res) {
         return sendJson(res, 200, loaded.record);
       }
       if (req.method === 'PUT') {
-        const body = JSON.parse(await readBody(req, MAX_BODY) || 'null');
+        const body = JSON.parse(await readBody(req, PORTFOLIO_DOSSIER_MAX_BODY) || 'null');
         if (!body || typeof body !== 'object' || Array.isArray(body)) {
           return sendJson(res, 400, { error: 'بدنه ذخیره پرونده لازم است' });
         }
