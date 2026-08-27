@@ -18,6 +18,8 @@ import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
 import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
+import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
+import { feesOf, marginParamsOf } from '../../core/settings.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
   createPortfolioOutlookDraft, createPortfolioRiskDraft,
@@ -773,11 +775,33 @@ export async function mount(root, { state, api }) {
     const [daily, point, universe] = await Promise.all([
       gate.history(session.baseIns), gate.snapshot(session.baseIns), loadUniverse(),
     ]);
+    const priced = await loadMomentContracts(session, at, { days: dates });
+    if (priced.warnings.length) failures.push(...priced.warnings);
+    const settings = state.settings;
     const snapshot = {
       universe,
       daily,
       intraday: { trade: point.trade, quality: point.tradeQuality },
       book: { quote: point.quote, quality: point.bookQuality },
+      // شکلی که موتورهای سبد مصرف می‌کنند. تا پیش از این ساخته نمی‌شد و
+      // حکم و ترکیب و پیشنهاد در برنامهٔ زنده هیچ‌وقت داده نمی‌دیدند.
+      spot: priced.spot ?? (Number(point.trade?.close) > 0 ? Number(point.trade.close) : null),
+      contracts: priced.rows.map((row) => ({
+        ins: row.ins, kind: row.kind, strike: row.strike,
+        expiry: row.expiry, size: row.size,
+        quote: { book: row.book, close: row.close, quality: point.bookQuality },
+      })),
+      // نرخ‌ها همین‌جا قفل می‌شوند؛ بعد از این بازخوانی نمی‌شوند.
+      capitalInputs: {
+        fees: { ...feesOf(settings), quality: point.bookQuality },
+        margin: {
+          spotCloseRial: Number(point.trade?.close) || 0,
+          params: marginParamsOf(settings),
+          creditMode: settings.marginCreditMode || 'FULL',
+          nakedComboMargin: settings.marginNakedCombo || 'MAX_PLUS_PREMIUM',
+          quality: point.bookQuality,
+        },
+      },
     };
     if (failures.length) {
       snapshot.quality = makeDataQuality({
