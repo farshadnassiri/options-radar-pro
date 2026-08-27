@@ -15,13 +15,23 @@ import {
 import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
 import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
 import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
+import { portfolioDossierAnalysis } from '../../core/portfolio-dossier-analysis.mjs';
+import { portfolioDossierWeaknesses } from '../../core/portfolio-dossier-weakness.mjs';
+import { portfolioDossierComparison } from '../../core/portfolio-dossier-compare.mjs';
+import { momentKey } from '../../core/trading-calendar.mjs';
 import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
 import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
 import { portfolioWatchView } from '../portfolio-watch-view.mjs';
-import { closeoutPreflight, closeoutView } from '../portfolio-closeout-view.mjs';
+import { portfolioDossierAnalysisView } from '../portfolio-dossier-analysis-view.mjs';
+import { portfolioDossierWeaknessView } from '../portfolio-dossier-weakness-view.mjs';
+import { portfolioDossierComparisonView } from '../portfolio-dossier-compare-view.mjs';
+import { downloadPortfolioDossier } from '../portfolio-dossier-export.mjs';
+import {
+  closeoutPreflight, closeoutView, dossierRecordView,
+} from '../portfolio-closeout-view.mjs';
 import { mountPayoff } from '../chart.mjs';
 import { feesOf, marginParamsOf } from '../../core/settings.mjs';
 import {
@@ -36,6 +46,9 @@ import {
   filterPortfolioEligibilityRows, portfolioSessionEligibility,
 } from '../portfolio-eligibility.mjs';
 import { listMissionSaves, loadMissionSave, saveMissionDraft } from '../portfolio-mission-data.mjs';
+import {
+  listDossiers, loadDossier, persistDossierView,
+} from '../portfolio-dossier-data.mjs';
 import { missionSaveLabel, resumeMissionRecord } from '../portfolio-mission-resume.mjs';
 import { mountDateWheel } from '../datewheel.mjs';
 import { fmt, faDigits } from '../fmt.mjs';
@@ -269,6 +282,33 @@ export async function mount(root, { state, api }) {
             <p class="pt-save-state" id="pt-closeout-state" role="status" aria-live="polite"></p>
             <div class="pt-closeout-dossier" id="pt-closeout-dossier" hidden>
               <dl class="pt-closeout-figures" id="pt-closeout-figures"></dl>
+              <section class="pt-dossier-analysis" id="pt-dossier-analysis" aria-labelledby="pt-dossier-analysis-title">
+                <h4 id="pt-dossier-analysis-title">سرمایه نهایی و فاصله از هدف</h4>
+                <dl class="pt-dossier-analysis-figures" id="pt-dossier-analysis-figures"></dl>
+                <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
+                <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
+              </section>
+              <section class="pt-dossier-weakness" id="pt-dossier-weakness" aria-labelledby="pt-dossier-weakness-title">
+                <div class="pt-dossier-weakness-head">
+                  <h4 id="pt-dossier-weakness-title">یافته‌های مستند پرونده</h4>
+                  <b id="pt-dossier-weakness-summary"></b>
+                </div>
+                <div class="pt-dossier-weakness-rows" id="pt-dossier-weakness-rows"></div>
+              </section>
+              <div class="pt-dossier-export" id="pt-dossier-export">
+                <button type="button" class="ghost" id="pt-dossier-export-do" aria-describedby="pt-dossier-export-state" disabled>دانلود Excel پرونده</button>
+                <p id="pt-dossier-export-state" role="status" aria-live="polite">پرونده‌ای برای خروجی آماده نیست.</p>
+              </div>
+              <section class="pt-dossier-compare" id="pt-dossier-compare" aria-labelledby="pt-dossier-compare-title">
+                <div class="pt-dossier-compare-head">
+                  <h4 id="pt-dossier-compare-title">مقایسه با نزدیک‌ترین پرونده قدیمی‌تر</h4>
+                  <b id="pt-dossier-compare-base"></b>
+                </div>
+                <p class="pt-dossier-compare-state" id="pt-dossier-compare-state" role="status" aria-live="polite"></p>
+                <div class="pt-dossier-compare-identities" id="pt-dossier-compare-identities" hidden></div>
+                <div class="pt-dossier-compare-metrics" id="pt-dossier-compare-metrics"></div>
+                <div class="pt-dossier-compare-findings" id="pt-dossier-compare-findings"></div>
+              </section>
               <p class="pt-closeout-open" id="pt-closeout-open" hidden></p>
               <table class="pt-closeout-table" id="pt-closeout-table" hidden>
                 <thead><tr><th>موقعیت</th><th>حجم بسته‌شده</th><th>نقد خروج</th><th>تحقق‌یافته</th></tr></thead>
@@ -382,6 +422,8 @@ export async function mount(root, { state, api }) {
   let setupDraft = null, outlookDraft = null, riskDraft = null, allocationDraft = null;
   let missionDraft = null, draft = null;
   let eligibilityRows = [], eligibilityFilter = 'all';
+  let dossierSummaries = [], dossierCompareToken = 0;
+  let dossierExportView = null, dossierExportBusy = false;
   let allocationRowId = 0;
   // شناسه دیگر ثابت نیست: ادامه‌دادن یک جلسه یعنی همان شناسه سرور را
   // برداشتن، وگرنه هر بار یک جلسه تازه ساخته می‌شد و «ادامه» معنایی
@@ -946,6 +988,7 @@ export async function mount(root, { state, api }) {
   // پروندهٔ پایان. تا وقتی جلسه بسته نشده، فقط دکمه و هشدارِ پیش از
   // بستن دیده می‌شود.
   let closeoutArmed = false;
+  let closeoutSaving = false;
   function paintCloseout(session) {
     const section = $('pt-closeout');
     if (!session || session.state === 'draft') { section.hidden = true; return; }
@@ -953,6 +996,9 @@ export async function mount(root, { state, api }) {
     const closed = session.state === 'closed';
     $('pt-closeout-do').hidden = closed;
     if (closed) return;
+    dossierExportView = null;
+    $('pt-dossier-export-do').disabled = true;
+    $('pt-dossier-export-state').textContent = 'پرونده‌ای برای خروجی آماده نیست.';
     // تصمیم پیش از عمل گرفته می‌شود: اگر پس از بستن بگوییم «راستی، سه
     // موقعیت باز بود»، دیگر کاری نمی‌شود کرد.
     const pre = closeoutPreflight(session);
@@ -965,6 +1011,10 @@ export async function mount(root, { state, api }) {
   function paintDossier(view) {
     const box = $('pt-closeout-dossier');
     box.hidden = false;
+    dossierExportView = view;
+    dossierExportBusy = false;
+    $('pt-dossier-export-do').disabled = false;
+    $('pt-dossier-export-state').textContent = 'خروجی نسخه‌دار پرونده آماده است.';
     $('pt-closeout-state').textContent = `${view.headlineText} · ${view.positionsText}`;
     // تحقق‌یافته و تحقق‌نیافته دو جای جدا: کنارِ هم نشستنشان یعنی
     // خواننده جمعشان می‌کند، و آن جمع هیچ‌کدام نیست.
@@ -975,6 +1025,41 @@ export async function mount(root, { state, api }) {
     $('pt-closeout-figures').innerHTML = figures
       .map(([label, value, tone]) => `<div><dt>${esc(label)}</dt>`
         + `<dd class="${esc(tone)}">${esc(value)}</dd></div>`).join('');
+    // تمام حساب‌های سرمایه و هدف در core انجام شده‌اند. تب فقط مدل آمادهٔ
+    // نمایش را می‌چیند؛ همین تابع برای پرونده زنده و بازیابی‌شده مشترک است.
+    const analysis = portfolioDossierAnalysis(view.session, view.dossier);
+    const analyzed = portfolioDossierAnalysisView(analysis);
+    const analysisRows = analyzed.ok ? [
+      ['سرمایه شروع', analyzed.initialText, ''],
+      ['تحقق‌یافته', analyzed.realizedText, ''],
+      ['سرمایه نهایی', analyzed.finalText, ''],
+      [`مبنای هدف — ${analyzed.returnBaseLabel}`, analyzed.returnBaseText, ''],
+      ['بازده تحقق‌یافته', analyzed.realizedReturnText, ''],
+      ['هدف مأموریت', `${analyzed.targetReturnText} · ${analyzed.targetProfitText}`, ''],
+      ['فاصله از هدف', `${analyzed.targetGapPctText} · ${analyzed.targetGapText}`, analyzed.targetTone],
+    ] : [];
+    $('pt-dossier-analysis-figures').innerHTML = analysisRows
+      .map(([label, value, tone]) => `<div><dt>${esc(label)}</dt>`
+        + `<dd class="${esc(tone)}">${esc(value)}</dd></div>`).join('');
+    $('pt-dossier-analysis-state').textContent = analyzed.ok
+      ? analyzed.targetStateLabel : analyzed.why;
+    const issues = $('pt-dossier-analysis-issues');
+    issues.hidden = !analyzed.ok || analyzed.issues.length === 0;
+    issues.innerHTML = analyzed.ok ? analyzed.issues.map((row) => `<li>${esc(row.label)}`
+      + `${row.detail ? ` — ${esc(row.detail)}` : ''}</li>`).join('') : '';
+    const weakness = portfolioDossierWeaknessView(
+      portfolioDossierWeaknesses(view.session, view.dossier),
+    );
+    $('pt-dossier-weakness-summary').textContent = weakness.ok
+      ? weakness.summaryText : weakness.why;
+    $('pt-dossier-weakness-rows').innerHTML = weakness.ok ? weakness.rows.map((row) => {
+      const evidence = row.evidence.length
+        ? `<dl>${row.evidence.map((item) => `<div><dt>${esc(item.label)}</dt>`
+          + `<dd>${esc(item.valueText)}</dd></div>`).join('')}</dl>` : '';
+      return `<article data-severity="${esc(row.severity)}" data-code="${esc(row.code)}">
+        <header><h5>${esc(row.title)}</h5><span>${esc(row.severityLabel)}</span></header>
+        <p>${esc(row.description)}</p>${evidence}</article>`;
+    }).join('') : '';
     // تعهدِ باز حتی پس از بستن صریح می‌ماند.
     $('pt-closeout-open').hidden = !view.openText;
     $('pt-closeout-open').textContent = view.openText;
@@ -990,11 +1075,102 @@ export async function mount(root, { state, api }) {
       $('pt-closeout-warn').hidden = false;
       $('pt-closeout-warn').textContent = view.realized.unknownText;
     }
+    // مقایسه مستقل و ناهمگام است: شکست خواندن پرونده قبلی نباید کارت
+    // پرونده فعلی را که همین حالا کامل رسم شده، پس بزند.
+    void paintPreviousDossierComparison(view);
   }
 
-  $('pt-closeout').onclick = () => {
+  $('pt-dossier-export-do').onclick = async () => {
+    if (!dossierExportView || dossierExportBusy) return;
+    const view = dossierExportView;
+    const button = $('pt-dossier-export-do'), status = $('pt-dossier-export-state');
+    dossierExportBusy = true;
+    button.disabled = true;
+    button.textContent = 'در حال ساخت Excel…';
+    status.removeAttribute('data-error');
+    status.textContent = 'در حال ساخت فایل از سند همین پرونده…';
+    const result = await downloadPortfolioDossier(view.session, view.dossier);
+    if (view !== dossierExportView) return;
+    dossierExportBusy = false;
+    button.disabled = false;
+    button.textContent = 'دانلود Excel پرونده';
+    if (!result.ok) {
+      status.dataset.error = 'true';
+      status.textContent = `خروجی ساخته نشد — ${result.why}`;
+      return;
+    }
+    status.textContent = `فایل ${faDigits(result.name)}.xlsx ساخته شد.`;
+  };
+
+  async function paintPreviousDossierComparison(current) {
+    const token = ++dossierCompareToken;
+    const state = $('pt-dossier-compare-state');
+    const identities = $('pt-dossier-compare-identities');
+    $('pt-dossier-compare-base').textContent = '';
+    identities.hidden = true;
+    identities.innerHTML = '';
+    $('pt-dossier-compare-metrics').innerHTML = '';
+    $('pt-dossier-compare-findings').innerHTML = '';
+
+    const currentKey = momentKey(current?.dossier?.closedAt);
+    const previous = dossierSummaries
+      .filter((row) => row.id !== current?.session?.id
+        && Number.isFinite(momentKey(row.closedAt))
+        && momentKey(row.closedAt) < currentKey)
+      .sort((left, right) => momentKey(right.closedAt) - momentKey(left.closedAt))[0];
+    if (!previous) {
+      state.textContent = 'پرونده قدیمی‌تری برای مقایسه ثبت نشده است.';
+      return;
+    }
+
+    state.textContent = 'در حال خواندن پرونده قدیمی‌تر…';
+    const loaded = await loadDossier(previous.id);
+    if (token !== dossierCompareToken) return;
+    if (!loaded.ok) {
+      state.textContent = loaded.notFound
+        ? 'پرونده قدیمی‌تر دیگر روی سرور نیست؛ پرونده فعلی همچنان نمایش داده می‌شود.'
+        : `مقایسه خوانده نشد — ${loaded.why}`;
+      return;
+    }
+    const older = dossierRecordView(loaded.record);
+    if (!older.ok) {
+      state.textContent = `پرونده قدیمی‌تر مقایسه‌پذیر نیست — ${older.why}`;
+      return;
+    }
+    const compared = portfolioDossierComparison(
+      older.session, older.dossier, current.session, current.dossier,
+    );
+    const shown = portfolioDossierComparisonView(compared);
+    if (!shown.ok) {
+      state.textContent = shown.why;
+      return;
+    }
+
+    state.textContent = 'تغییرها فقط تفاوت دو سند پیاپی‌اند.';
+    $('pt-dossier-compare-base').textContent = shown.baseStateText;
+    identities.hidden = false;
+    identities.innerHTML = [
+      ['قدیمی‌تر', shown.older], ['جدیدتر', shown.newer],
+    ].map(([label, row]) => `<article><span>${label}</span><b>${esc(row.closedText)}</b>`
+      + `<small>نماد ${esc(row.baseText)} · پرونده ${esc(row.idText)}</small></article>`).join('');
+    $('pt-dossier-compare-metrics').innerHTML = shown.rows.map((row) => `<article data-metric="${esc(row.key)}">
+      <h5>${esc(row.label)}</h5><dl>
+        <div><dt>قدیمی‌تر</dt><dd>${esc(row.olderText)}</dd></div>
+        <div><dt>جدیدتر</dt><dd>${esc(row.newerText)}</dd></div>
+        <div><dt>${esc(row.changeLabel)}</dt><dd>${esc(row.deltaText)}</dd></div>
+      </dl></article>`).join('');
+    $('pt-dossier-compare-findings').innerHTML = shown.findingGroups.map((group) => {
+      const rows = group.rows.length
+        ? `<ul>${group.rows.map((row) => `<li data-code="${esc(row.code)}">${esc(row.title)}</li>`).join('')}</ul>`
+        : `<p>${esc(group.emptyText)}</p>`;
+      return `<article data-kind="${esc(group.key)}"><h5>${esc(group.label)}</h5>${rows}</article>`;
+    }).join('');
+  }
+
+  $('pt-closeout').onclick = async () => {
     const button = $('pt-closeout-do');
     if (!proposalSession || proposalSession.state === 'closed') return;
+    if (closeoutSaving) return;
     const pre = closeoutPreflight(proposalSession);
     // بستنِ زودهنگام یا با تعهدِ باز، یک کلیک نیست.
     if (pre.ok && pre.needsConfirm && !closeoutArmed) {
@@ -1007,11 +1183,26 @@ export async function mount(root, { state, api }) {
       { force: true });
     closeoutArmed = false;
     if (!view.ok) { $('pt-closeout-state').textContent = view.why; return; }
+    // بستن در موتور خالص است، اما وضعیت محلی فقط پس از مدرک ثبت سرور
+    // عوض می‌شود. تا آن لحظه `proposalSession` همان جلسه فعال می‌ماند.
+    closeoutSaving = true;
+    button.disabled = true;
+    button.textContent = 'در حال ذخیره…';
+    $('pt-closeout-state').textContent = 'در حال ذخیره پرونده روی سرور…';
+    const persisted = await persistDossierView(view);
+    closeoutSaving = false;
+    if (!persisted.ok) {
+      button.disabled = false;
+      closeoutArmed = pre.ok && pre.needsConfirm;
+      paintCloseout(proposalSession);
+      $('pt-closeout-state').textContent = `پرونده روی سرور ثبت نشد: ${persisted.why}`;
+      return;
+    }
     // پس از بستن، هیچ‌کدام از دکمه‌های معامله و گام نباید کار کنند —
     // جلسه دیگر فعال نیست و موتورها هم ردشان می‌کنند.
-    proposalSession = view.session;
-    paintProposals(view.session);
-    paintDossier(view);
+    proposalSession = persisted.session;
+    paintProposals(persisted.session);
+    paintDossier(persisted.view);
     root.querySelectorAll('[data-pt-commit], [data-pt-close], [data-pt-step]')
       .forEach((control) => { control.disabled = true; });
     button.hidden = true;
@@ -1402,31 +1593,51 @@ export async function mount(root, { state, api }) {
     refreshSessions();
   }
 
-  /** فهرست جلسه‌های سرور. خطای خواندن، فهرست خالیِ «سالم» نشان نمی‌دهد. */
+  /** فهرست جلسه‌ها و پرونده‌های سرور. خطا، فهرست خالیِ «سالم» نیست. */
   async function refreshSessions() {
     const pick = $('pt-resume-pick'), state = $('pt-resume-state');
-    const listed = await listMissionSaves();
-    if (!listed.ok) {
+    const [listed, dossiers] = await Promise.all([listMissionSaves(), listDossiers()]);
+    dossierSummaries = dossiers.ok
+      ? dossiers.dossiers.filter((row) => row?.id && !row.broken) : [];
+    if (!listed.ok && !dossiers.ok) {
       pick.innerHTML = '<option value="">فهرست خوانده نشد</option>';
       state.dataset.error = 'true';
-      state.textContent = `فهرست جلسه‌ها خوانده نشد — ${listed.why}`;
+      state.textContent = `فهرست‌های سرور خوانده نشدند — ${listed.why} · ${dossiers.why}`;
       return;
     }
-    state.removeAttribute('data-error');
-    const rows = listed.sessions.filter((row) => row?.id && row.id !== draftId);
-    if (!rows.length) {
+    const missionRows = listed.ok
+      ? listed.sessions.filter((row) => row?.id && row.id !== draftId) : [];
+    const dossierRows = dossiers.ok ? dossiers.dossiers.filter((row) => row?.id) : [];
+    const options = [];
+    for (const row of dossierRows) {
+      if (row.broken) {
+        options.push(`<option value="" data-kind="broken" disabled>پرونده خراب — ${esc(row.why || 'خوانده نشد')}</option>`);
+        continue;
+      }
+      const day = Number(row?.closedAt?.date);
+      const when = Number.isFinite(day) && day > 0 ? faDigits(historyDateLabel(day)) : 'تاریخ نامعلوم';
+      options.push(`<option value="${esc(row.id)}" data-kind="dossier">${esc(when)} — پرونده بسته‌شده</option>`);
+    }
+    for (const row of missionRows) {
+      // برچسب ردیف، شناسه خام نیست. شناسه هم رقم لاتین دارد (قاعده ۲-۳) و
+      // هم به کاربر نمی‌گوید کدام سفر است؛ تاریخ شروع و مرحله می‌گوید.
+      const day = Number(row?.start?.date);
+      const when = Number.isFinite(day) && day > 0 ? faDigits(historyDateLabel(day)) : 'تاریخ نامعلوم';
+      options.push(`<option value="${esc(row.id)}" data-kind="mission">${esc(when)} — ${esc(missionSaveLabel(row))}</option>`);
+    }
+    if (!options.length) {
       pick.innerHTML = '<option value="">جلسه‌ای برای ادامه نیست</option>';
       state.textContent = 'هنوز جلسه‌ای روی سرور ذخیره نشده است.';
       return;
     }
-    // برچسب ردیف، شناسه خام نیست. شناسه هم رقم لاتین دارد (قاعده ۲-۳) و
-    // هم به کاربر نمی‌گوید کدام سفر است؛ تاریخ شروع و مرحله می‌گوید.
-    pick.innerHTML = rows.map((row) => {
-      const day = Number(row?.start?.date);
-      const when = Number.isFinite(day) && day > 0 ? faDigits(historyDateLabel(day)) : 'تاریخ نامعلوم';
-      return `<option value="${esc(row.id)}">${esc(when)} — ${esc(missionSaveLabel(row))}</option>`;
-    }).join('');
-    state.textContent = `${fmt.int(rows.length)} جلسه روی سرور ذخیره شده است.`;
+    pick.innerHTML = options.join('');
+    const failures = [!listed.ok ? `جلسه‌ها: ${listed.why}` : '',
+      !dossiers.ok ? `پرونده‌ها: ${dossiers.why}` : ''].filter(Boolean);
+    if (failures.length) state.dataset.error = 'true';
+    else state.removeAttribute('data-error');
+    state.textContent = failures.length
+      ? `${fmt.int(options.length)} ردیف خوانده شد؛ ${failures.join(' · ')}`
+      : `${fmt.int(options.length)} جلسه یا پرونده روی سرور ذخیره شده است.`;
   }
 
   /**
@@ -1535,10 +1746,37 @@ export async function mount(root, { state, api }) {
   $('pt-grain').onchange = () => { $('pt-review-grain').textContent = $('pt-grain').selectedOptions[0]?.textContent || '—'; clearErrors(); invalidateSetupDraft(); };
   $('pt-retry').onclick = () => api.retryFeed();
   $('pt-resume-open').onclick = async () => {
-    const id = $('pt-resume-pick').value;
+    const pick = $('pt-resume-pick');
+    const id = pick.value;
+    const kind = pick.selectedOptions[0]?.dataset.kind || 'mission';
     const state = $('pt-resume-state');
     if (!id) { state.dataset.error = 'true'; state.textContent = 'اول یک جلسه را انتخاب کن.'; return; }
     state.removeAttribute('data-error');
+    if (kind === 'dossier') {
+      state.textContent = 'در حال خواندن پرونده از سرور…';
+      const loaded = await loadDossier(id);
+      if (!loaded.ok) {
+        state.dataset.error = 'true';
+        state.textContent = loaded.notFound ? 'این پرونده روی سرور نیست.' : `پرونده خوانده نشد — ${loaded.why}`;
+        return;
+      }
+      const restored = dossierRecordView(loaded.record);
+      if (!restored.ok) {
+        state.dataset.error = 'true';
+        state.textContent = `این پرونده نمایش‌پذیر نیست — ${restored.why}`;
+        return;
+      }
+      paintProgress('active');
+      paintSnapshot(restored.session.startSnapshot);
+      paintProposals(restored.session);
+      paintDossier(restored);
+      lockMissionEditor();
+      root.querySelectorAll('[data-pt-commit], [data-pt-close], [data-pt-step]')
+        .forEach((control) => { control.disabled = true; });
+      $('pt-closeout-do').hidden = true;
+      state.textContent = 'پرونده بسته‌شده از سرور باز شد؛ همه کنترل‌های معامله فقط‌خواندنی‌اند.';
+      return;
+    }
     state.textContent = 'در حال خواندن جلسه از سرور…';
     const loaded = await loadMissionSave(id);
     if (!loaded.ok) {

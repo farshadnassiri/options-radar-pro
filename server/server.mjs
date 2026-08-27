@@ -39,12 +39,17 @@ import {
   PORTFOLIO_MISSION_SAVE_VERSION, listPortfolioMissionSaves,
   loadPortfolioMissionSave, savePortfolioMissionDraft,
 } from './portfolio-mission-store.mjs';
+import {
+  PORTFOLIO_DOSSIER_SAVE_VERSION, listPortfolioDossierSaves,
+  loadPortfolioDossierSave, savePortfolioDossier,
+} from './portfolio-dossier-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const PORT = Number(process.env.PORT || 8787);
 const SETTINGS_FILE = path.join(ROOT, 'data', 'settings.json');
 const PORTFOLIO_MISSION_DIR = path.join(ROOT, 'data', 'portfolio-missions');
+const PORTFOLIO_DOSSIER_DIR = path.join(ROOT, 'data', 'portfolio-dossiers');
 
 // سقف بدنه درخواست. تنظیمات چند کیلوبایت است و فهرست موقعیت‌ها هم کوچک؛
 // یک مگابایت جای فراوانی می‌دهد و هنوز جلوی پر کردن حافظه را می‌گیرد.
@@ -868,6 +873,46 @@ async function handle(req, res) {
         await fs.writeFile(file, JSON.stringify(list, null, 2), 'utf8');
         log(`موقعیت‌ها ذخیره شد — ${list.length} ردیف`);
         return sendJson(res, 200, list);
+      }
+      return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
+    }
+
+    // ——— پرونده‌های پایان جلسهٔ سفر زمانی سبد ———
+    // هر شناسه فقط یک بار نوشته می‌شود. حذف و بازنویسی عمدی وجود ندارد.
+    if (p === '/api/portfolio/dossiers') {
+      if (req.method !== 'GET') return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
+      const listed = await listPortfolioDossierSaves(PORTFOLIO_DOSSIER_DIR);
+      return sendJson(res, 200, { count: listed.records.length, dossiers: listed.records });
+    }
+
+    if (p === '/api/portfolio/dossier') {
+      const id = u.searchParams.get('id');
+      if (!validSessionId(id)) return sendJson(res, 400, { error: 'شناسه جلسه معتبر نیست' });
+      if (req.method === 'GET') {
+        const loaded = await loadPortfolioDossierSave(PORTFOLIO_DOSSIER_DIR, id);
+        if (!loaded.ok) return sendJson(res, loaded.notFound ? 404 : 409, { error: loaded.why });
+        return sendJson(res, 200, loaded.record);
+      }
+      if (req.method === 'PUT') {
+        const body = JSON.parse(await readBody(req, MAX_BODY) || 'null');
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          return sendJson(res, 400, { error: 'بدنه ذخیره پرونده لازم است' });
+        }
+        if (body.schemaVersion !== PORTFOLIO_DOSSIER_SAVE_VERSION) {
+          return sendJson(res, 400, { error: 'نسخه ذخیره پرونده ناشناخته یا پشتیبانی‌نشده است' });
+        }
+        if (body.session?.id !== id || body.dossier?.sessionId !== id) {
+          return sendJson(res, 400, { error: 'شناسه بدنه با شناسه درخواست یکی نیست' });
+        }
+        const saved = await savePortfolioDossier(
+          PORTFOLIO_DOSSIER_DIR, body.session, body.dossier, { savedAt: Date.now() },
+        );
+        if (!saved.ok) return sendJson(res, saved.conflict ? 409 : 400, { error: saved.why });
+        log(`پرونده پایان سفر زمانی ذخیره شد — ${id}`);
+        return sendJson(res, 200, {
+          ok: true, id, schemaVersion: saved.record.schemaVersion,
+          savedAt: saved.record.savedAt, closedAt: saved.record.dossier.closedAt,
+        });
       }
       return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
     }
