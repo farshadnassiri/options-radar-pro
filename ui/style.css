@@ -773,10 +773,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-snapshot[data-quality="missing"] .pt-snapshot-grid article:first-child b,
 .pt-snapshot[data-quality="estimated"] .pt-snapshot-grid article:first-child b { color: var(--warn); }
 .pt-snapshot ul { display: grid; gap: 6px; margin: 0; padding: 0 20px 0 0; color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-normal); }
-.pt-eligibility, .pt-proposals { min-width: 0; display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--panel-2); }
-.pt-eligibility[hidden], .pt-proposals[hidden] { display: none; }
-.pt-eligibility-head, .pt-proposals-head { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); }
-.pt-eligibility-head h3, .pt-proposals-head h3 { margin: 0; }
+.pt-eligibility, .pt-proposals, .pt-ledger { min-width: 0; display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--panel-2); }
+.pt-eligibility[hidden], .pt-proposals[hidden], .pt-ledger[hidden] { display: none; }
+.pt-eligibility-head, .pt-proposals-head, .pt-ledger-head { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); }
+.pt-eligibility-head h3, .pt-proposals-head h3, .pt-ledger-head h3 { margin: 0; }
 .pt-eligibility-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .pt-eligibility-filters button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
 .pt-eligibility-table, .pt-proposals-table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
@@ -804,6 +804,22 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-proposals-aside-table th:nth-child(1) { width: 24%; }
 .pt-proposals-aside-table th:nth-child(2) { width: 16%; }
 .pt-proposals-aside[data-kind="unknownScore"] b { color: var(--muted); }
+.pt-ledger-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-2); margin: 0; }
+.pt-ledger-figures > div { min-width: 0; padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.pt-ledger-figures dt { color: var(--muted); font-size: var(--fs-xs); }
+.pt-ledger-figures dd { margin: 2px 0 0; color: var(--ink-2); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.pt-ledger-table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.pt-ledger-table th, .pt-ledger-table td { padding: 10px; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; overflow-wrap: anywhere; }
+.pt-ledger-table th { color: var(--muted); background: var(--panel-2); font-size: var(--fs-xs); }
+.pt-ledger-table td { color: var(--ink-2); font-size: var(--fs-xs); line-height: var(--lh-normal); }
+.pt-ledger-table th:nth-child(1) { width: 22%; }
+.pt-ledger-table th:nth-child(5) { width: 12%; }
+.pt-ledger-table tr[data-state="clear"] b { color: var(--gain); }
+.pt-ledger-table tr[data-state="breached"] b { color: var(--loss); }
+.pt-ledger-empty td { text-align: center; color: var(--muted); }
+.pt-ledger-families { margin: 0; color: var(--muted); font-size: var(--fs-xs); }
+.pt-ledger-families:empty { display: none; }
+
 .pt-studio[data-mission-active="true"] .pt-mission-card { border-color: color-mix(in srgb, var(--gain) 45%, var(--line)); }
 
 .pt-review { position: sticky; top: var(--space-3); margin: 0; border-top: 4px solid var(--accent); }
@@ -858,13 +874,15 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .pt-allocation-row { grid-template-columns: 1fr; align-items: stretch; }
   .pt-allocation-row .pt-remove-allocation { justify-self: start; }
   .pt-stage-actions { grid-template-columns: 1fr; }
-  .pt-eligibility-head, .pt-proposals-head { align-items: stretch; flex-direction: column; }
+  .pt-eligibility-head, .pt-proposals-head, .pt-ledger-head { align-items: stretch; flex-direction: column; }
   .pt-eligibility-table, .pt-eligibility-table tbody,
-  .pt-proposals-table, .pt-proposals-table tbody { display: grid; grid-template-columns: minmax(0, 1fr); border: 0; background: transparent; }
-  .pt-eligibility-table thead, .pt-proposals-table thead { display: none; }
-  .pt-eligibility-table tr, .pt-proposals-table tr { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); margin-bottom: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); overflow: hidden; }
-  .pt-eligibility-table td, .pt-proposals-table td { min-width: 0; display: grid; grid-template-columns: minmax(82px, .38fr) minmax(0, 1fr); gap: var(--space-2); padding: 9px 11px; }
-  .pt-eligibility-table td::before, .pt-proposals-table td::before { content: attr(data-label); color: var(--muted); font-weight: 700; }
+  .pt-proposals-table, .pt-proposals-table tbody,
+  .pt-ledger-table, .pt-ledger-table tbody { display: grid; grid-template-columns: minmax(0, 1fr); border: 0; background: transparent; }
+  .pt-eligibility-table thead, .pt-proposals-table thead, .pt-ledger-table thead { display: none; }
+  .pt-eligibility-table tr, .pt-proposals-table tr, .pt-ledger-table tr { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); margin-bottom: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); overflow: hidden; }
+  .pt-eligibility-table td, .pt-proposals-table td, .pt-ledger-table td { min-width: 0; display: grid; grid-template-columns: minmax(82px, .38fr) minmax(0, 1fr); gap: var(--space-2); padding: 9px 11px; }
+  .pt-eligibility-table td::before, .pt-proposals-table td::before,
+  .pt-ledger-table td::before { content: attr(data-label); color: var(--muted); font-weight: 700; }
   .pt-eligibility-table .pt-eligibility-empty td { display: block; }
   .pt-eligibility-table .pt-eligibility-empty td::before { content: none; }
   .pt-symbol-row { grid-template-columns: 1fr; }

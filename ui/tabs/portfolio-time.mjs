@@ -8,7 +8,8 @@ import {
 import { createTimeGate } from '../../core/time-gate.mjs';
 import { GROUPS as STRATEGY_FAMILIES } from '../../strategies/catalog.mjs';
 import { portfolioSessionProposals } from '../portfolio-proposals.mjs';
-import { commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
+import { breachText, portfolioLedgerView } from '../portfolio-ledger-view.mjs';
+import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
   createPortfolioOutlookDraft, createPortfolioRiskDraft,
@@ -243,6 +244,20 @@ export async function mount(root, { state, api }) {
               <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
               <tbody id="pt-eligibility-body"></tbody>
             </table>
+          </section>
+
+          <section class="pt-ledger" id="pt-ledger" aria-labelledby="pt-ledger-title" hidden>
+            <div class="pt-ledger-head">
+              <div><p class="eyebrow">دفتر سرمایه</p><h3 id="pt-ledger-title">چقدر درگیر شده و چقدر جا مانده</h3></div>
+            </div>
+            <p class="pt-save-state" id="pt-ledger-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، وضعیت سرمایه اینجا می‌آید.</p>
+            <dl class="pt-ledger-figures" id="pt-ledger-figures"></dl>
+            <table class="pt-ledger-table">
+              <thead><tr><th>قید ریسک</th><th>اکنون</th><th>حد مأموریت</th><th>فاصله</th><th>حکم</th></tr></thead>
+              <tbody id="pt-ledger-risk"></tbody>
+            </table>
+            <p class="pt-ledger-families" id="pt-ledger-families"></p>
+            <p class="pt-field-error" id="pt-ledger-unpriced" hidden></p>
           </section>
 
           <section class="pt-proposals" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
@@ -823,8 +838,53 @@ export async function mount(root, { state, api }) {
   let proposalSession = null;
   const committedIds = new Set();
 
+  // نوار سرمایه پیش از پیشنهادها رسم می‌شود، چون همان چیزی است که
+  // می‌گوید آیا ثبت بعدی اصلاً جا دارد. هیچ عددی اینجا حساب نمی‌شود؛ هر
+  // رقم از مدل نمایش می‌آید.
+  function paintLedger(session) {
+    const section = $('pt-ledger');
+    const view = portfolioLedgerView(session);
+    if (!view.ok) {
+      // علت را می‌گوییم؛ نوارِ خالی شبیه «همه‌چیز صفر است» دیده می‌شود.
+      section.hidden = view.reason === 'noSession';
+      $('pt-ledger-state').textContent = view.why;
+      $('pt-ledger-figures').innerHTML = '';
+      $('pt-ledger-risk').innerHTML = '<tr class="pt-ledger-empty"><td colspan="5">—</td></tr>';
+      $('pt-ledger-families').textContent = '';
+      $('pt-ledger-unpriced').hidden = true;
+      return;
+    }
+    section.hidden = false;
+    $('pt-ledger-state').textContent = view.headlineText;
+    const figures = [
+      ['سرمایهٔ جلسه', `${view.baseTomanText} تومان`],
+      ['درگیر', `${view.committedTomanText} تومان`],
+      ['آزاد', `${view.freeTomanText} تومان · ${view.freePctText}`],
+      ...view.components.map((row) => [row.label, `${row.tomanText} تومان`]),
+    ];
+    $('pt-ledger-figures').innerHTML = figures
+      .map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('');
+    $('pt-ledger-risk').innerHTML = view.risks.map((row) => `<tr data-state="${esc(row.state)}">
+      <td data-label="قید ریسک">${esc(row.label)}</td>
+      <td data-label="اکنون">${esc(row.currentText)}</td>
+      <td data-label="حد مأموریت">${esc(row.limitText)}</td>
+      <td data-label="فاصله">${esc(row.headroomText)}<br><small>${esc(row.headroomLabel)}</small></td>
+      <td data-label="حکم"><b>${esc(row.stateLabel)}</b></td>
+    </tr>`).join('');
+    $('pt-ledger-families').textContent = view.families.length
+      ? view.families.map((row) => `${row.label}: ${row.tomanText} تومان (${row.countText} ثبت)`).join(' · ')
+      : '';
+    // شمردنِ نداشته‌ها، نه پنهان‌کردنشان.
+    $('pt-ledger-unpriced').hidden = !view.unpriced;
+    $('pt-ledger-unpriced').textContent = view.unpriced ? view.unpriced.why : '';
+  }
+
   function paintProposals(session) {
     proposalSession = session;
+    // یک نقطهٔ فراخوانی: نوار سرمایه و پیشنهادها همیشه از یک جلسه ساخته
+    // می‌شوند. دو فراخوانی جدا یعنی روزی یکی جا می‌ماند و کاربر وضعیت یک
+    // جلسه را کنار پیشنهاد جلسهٔ دیگر می‌بیند.
+    paintLedger(session);
     const section = $('pt-proposals');
     const evidence = portfolioSessionEligibility(session);
     const view = portfolioSessionProposals(session, evidence);
@@ -868,7 +928,8 @@ export async function mount(root, { state, api }) {
   function lockMissionEditor() {
     root.dataset.missionActive = 'true';
     root.querySelectorAll('input, select, textarea, button').forEach((control) => {
-      if (!control.closest('#pt-eligibility') && !control.closest('#pt-proposals')) control.disabled = true;
+      if (!control.closest('#pt-eligibility') && !control.closest('#pt-proposals')
+        && !control.closest('#pt-ledger')) control.disabled = true;
     });
   }
 
@@ -1264,8 +1325,16 @@ export async function mount(root, { state, api }) {
     const evidence = portfolioSessionEligibility(proposalSession);
     const done = commitPortfolioPlan(proposalSession, evidence, candidateId);
     if (!done.ok) {
-      // شکست ثبت هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود.
-      $('pt-proposals-state').textContent = done.why;
+      // شکست ثبت هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود — و «کدام قید و
+      // چقدر عبور» بخشی از همان خبر است، نه چیزی که کاربر باید حدس بزند.
+      //
+      // متنِ خودِ موتور اینجا استفاده نمی‌شود چون درصدهایش رقم لاتین‌اند؛
+      // قالب‌بندی کار لایهٔ نمایش است. علتِ خام از همان جدول موتور می‌آید
+      // تا دو متن برای یک حالت وجود نداشته باشد.
+      const detail = breachText(done.breaches);
+      $('pt-proposals-state').textContent = detail
+        ? `${PORTFOLIO_COMMIT_REASONS[done.reason]} — ${detail}`
+        : done.why;
       return;
     }
     committedIds.add(candidateId);

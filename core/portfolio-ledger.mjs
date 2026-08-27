@@ -108,6 +108,25 @@ export function portfolioCapitalLedger(session) {
   const minFreePct = Number(risk.minFreeCapitalPct);
   const maxMarginPct = Number(risk.maxMarginUsePct);
 
+  // فاصله تا شکستن، نه فقط حکم شکسته/نشکسته.
+  //
+  // «قید رعایت شده» به کاربر نمی‌گوید چقدر جا مانده، و «شکست» نمی‌گوید
+  // چقدر عقب‌گرد لازم است. علامت یکسان است: مثبت یعنی جای باقی‌مانده،
+  // منفی یعنی همان‌قدر عبور کرده.
+  //
+  // اینجا حساب می‌شود نه در لایهٔ نمایش — لایهٔ نمایش حق ساختن عدد مالی
+  // ندارد، و تفریقی که آنجا انجام شود هیچ آزمونی بالای سرش نیست.
+  const constraint = (label, currentPct, currentRial, limitPct, headroomPct, headroomRial) => ({
+    label,
+    limitPct,
+    limitRial: Math.round((baseRial * limitPct) / 100),
+    currentPct,
+    currentRial,
+    headroomPct,
+    headroomRial,
+    breached: headroomPct < 0,
+  });
+
   return {
     version: PORTFOLIO_LEDGER_VERSION,
     ok: true,
@@ -125,22 +144,16 @@ export function portfolioCapitalLedger(session) {
     },
     free: { rial: freeRial, pct: freePct },
     risk: {
-      minFreeCapital: {
-        limitPct: minFreePct,
-        limitRial: Math.round((baseRial * minFreePct) / 100),
-        currentPct: freePct,
-        currentRial: freeRial,
-        breached: freePct < minFreePct,
-        label: 'حداقل سرمایهٔ آزاد',
-      },
-      maxMarginUse: {
-        limitPct: maxMarginPct,
-        limitRial: Math.round((baseRial * maxMarginPct) / 100),
-        currentPct: marginPct,
-        currentRial: marginRial,
-        breached: marginPct > maxMarginPct,
-        label: 'سقف مصرف وجه تضمین',
-      },
+      // کف: هرچه سرمایهٔ آزاد بیشتر از حد باشد، جا بیشتر است.
+      minFreeCapital: constraint(
+        'حداقل سرمایهٔ آزاد', freePct, freeRial, minFreePct,
+        freePct - minFreePct, freeRial - Math.round((baseRial * minFreePct) / 100),
+      ),
+      // سقف: هرچه وجه تضمین کمتر از حد باشد، جا بیشتر است.
+      maxMarginUse: constraint(
+        'سقف مصرف وجه تضمین', marginPct, marginRial, maxMarginPct,
+        maxMarginPct - marginPct, Math.round((baseRial * maxMarginPct) / 100) - marginRial,
+      ),
     },
     unpriced: { count: unpricedIds.length, eventIds: unpricedIds },
     positions: replay.positions.length,
