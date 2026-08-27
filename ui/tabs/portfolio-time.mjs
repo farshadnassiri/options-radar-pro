@@ -24,6 +24,7 @@ import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
+import { createPortfolioHistoryRequestGate } from '../portfolio-history-request.mjs';
 import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
 import { portfolioWatchView } from '../portfolio-watch-view.mjs';
 import { portfolioDossierAnalysisView } from '../portfolio-dossier-analysis-view.mjs';
@@ -444,6 +445,7 @@ export async function mount(root, { state, api }) {
   const allocationStep = $('pt-allocation-step'), allocationRowsRoot = $('pt-allocation-rows');
   const reviewStep = $('pt-review-step');
   let chain = new Map(), symbols = [], dates = [], loadedIns = '';
+  const historyRequests = createPortfolioHistoryRequestGate();
   let setupDraft = null, outlookDraft = null, riskDraft = null, allocationDraft = null;
   let missionDraft = null, draft = null;
   let eligibilityRows = [], eligibilityFilter = 'all';
@@ -1211,10 +1213,9 @@ export async function mount(root, { state, api }) {
       base.insertAdjacentHTML('afterbegin', '<option value="">نماد پایه را انتخاب کن</option>');
     }
     base.value = '';
-    loadedIns = ''; dates = [];
-    $('pt-dates').hidden = true;
-    $('pt-start-date').dataset.value = '';
-    $('pt-end-date').dataset.value = '';
+    historyRequests.invalidate();
+    loadedIns = '';
+    resetHistoryDates();
     $('pt-review-base').textContent = 'انتخاب نشده';
     $('pt-review-start').textContent = 'انتخاب نشده';
     $('pt-review-end').textContent = 'انتخاب نشده';
@@ -1613,6 +1614,14 @@ export async function mount(root, { state, api }) {
     $('pt-review-end').textContent = endLabel ? `${endLabel} · ${endTime}` : 'انتخاب نشده';
   }
 
+  function resetHistoryDates() {
+    dates = [];
+    $('pt-dates').hidden = true;
+    $('pt-start-date').dataset.value = '';
+    $('pt-end-date').dataset.value = '';
+    reviewDates();
+  }
+
   function paintEndCalendar() {
     const start = Number($('pt-start-date').dataset.value);
     const allowed = dates.filter((date) => date >= start);
@@ -1634,19 +1643,25 @@ export async function mount(root, { state, api }) {
     const ins = String(base.value || '');
     $('pt-review-base').textContent = base.selectedOptions[0]?.textContent || 'انتخاب نشده';
     if (!ins || ins === loadedIns) return;
-    loadedIns = ins; dates = []; $('pt-dates').hidden = true;
+    const ticket = historyRequests.begin(ins);
+    loadedIns = ins;
+    resetHistoryDates();
     $('pt-feed-status').textContent = 'در حال دریافت روزهای معاملاتی…';
     try {
       const response = await fetch(`/api/dailies?ins=${encodeURIComponent(ins)}&n=0`);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
-      dates = (payload?.[ins]?.rows || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
-      if (!dates.length) throw new Error('برای این نماد روز معاملاتی ثبت نشده است');
+      const nextDates = (payload?.[ins]?.rows || [])
+        .map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
+      if (!nextDates.length) throw new Error('برای این نماد روز معاملاتی ثبت نشده است');
+      if (!historyRequests.accepts(ticket, base.value)) return;
+      dates = nextDates;
       mountCalendars();
       $('pt-feed-status').textContent = `${fmt.int(dates.length)} روز معاملاتی آماده است`;
       $('pt-feed-status').removeAttribute('data-error');
       clearErrors();
     } catch (error) {
+      if (!historyRequests.accepts(ticket, base.value)) return;
       loadedIns = '';
       $('pt-feed-status').textContent = String(error?.message || 'تاریخچه دریافت نشد');
       $('pt-feed-status').dataset.error = 'true';
@@ -1794,7 +1809,9 @@ export async function mount(root, { state, api }) {
         ? structuredClone(record.draft.capitalContinuity) : null;
 
       base.value = inputs.setup.baseIns;
+      historyRequests.invalidate();
       loadedIns = '';
+      resetHistoryDates();
       await loadDates();
       if (!dates.includes(inputs.setup.startDate) || !dates.includes(inputs.setup.endDate)) {
         return { ok: false, why: 'روزهای ذخیره‌شده در تقویم این نماد نیستند' };
@@ -1882,7 +1899,10 @@ export async function mount(root, { state, api }) {
   };
   reserve.oninput = () => { paintCapital(); invalidateSetupDraft(); };
   capital.onblur = () => formatMoneyInput(capital); reserve.onblur = () => formatMoneyInput(reserve);
-  base.onchange = () => { loadedIns = ''; clearErrors(); invalidateSetupDraft(); loadDates(); };
+  base.onchange = () => {
+    historyRequests.invalidate(); loadedIns = ''; resetHistoryDates();
+    clearErrors(); invalidateSetupDraft(); loadDates();
+  };
   $('pt-start-time').onchange = () => { reviewDates(); invalidateSetupDraft(); };
   $('pt-end-time').onchange = () => { reviewDates(); invalidateSetupDraft(); };
   $('pt-grain').onchange = () => { $('pt-review-grain').textContent = $('pt-grain').selectedOptions[0]?.textContent || '—'; clearErrors(); invalidateSetupDraft(); };
@@ -2212,6 +2232,7 @@ export async function mount(root, { state, api }) {
     }
   });
   return () => {
+    historyRequests.invalidate();
     unwatch?.(); unfeed?.(); setupDraft = null; outlookDraft = null; riskDraft = null;
     allocationDraft = null; missionDraft = null; draft = null;
   };
