@@ -17,6 +17,8 @@ import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
 import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
 import { portfolioDossierAnalysis } from '../../core/portfolio-dossier-analysis.mjs';
 import { portfolioDossierWeaknesses } from '../../core/portfolio-dossier-weakness.mjs';
+import { portfolioDossierComparison } from '../../core/portfolio-dossier-compare.mjs';
+import { momentKey } from '../../core/trading-calendar.mjs';
 import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
@@ -25,6 +27,7 @@ import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view
 import { portfolioWatchView } from '../portfolio-watch-view.mjs';
 import { portfolioDossierAnalysisView } from '../portfolio-dossier-analysis-view.mjs';
 import { portfolioDossierWeaknessView } from '../portfolio-dossier-weakness-view.mjs';
+import { portfolioDossierComparisonView } from '../portfolio-dossier-compare-view.mjs';
 import {
   closeoutPreflight, closeoutView, dossierRecordView,
 } from '../portfolio-closeout-view.mjs';
@@ -291,6 +294,16 @@ export async function mount(root, { state, api }) {
                 </div>
                 <div class="pt-dossier-weakness-rows" id="pt-dossier-weakness-rows"></div>
               </section>
+              <section class="pt-dossier-compare" id="pt-dossier-compare" aria-labelledby="pt-dossier-compare-title">
+                <div class="pt-dossier-compare-head">
+                  <h4 id="pt-dossier-compare-title">مقایسه با نزدیک‌ترین پرونده قدیمی‌تر</h4>
+                  <b id="pt-dossier-compare-base"></b>
+                </div>
+                <p class="pt-dossier-compare-state" id="pt-dossier-compare-state" role="status" aria-live="polite"></p>
+                <div class="pt-dossier-compare-identities" id="pt-dossier-compare-identities" hidden></div>
+                <div class="pt-dossier-compare-metrics" id="pt-dossier-compare-metrics"></div>
+                <div class="pt-dossier-compare-findings" id="pt-dossier-compare-findings"></div>
+              </section>
               <p class="pt-closeout-open" id="pt-closeout-open" hidden></p>
               <table class="pt-closeout-table" id="pt-closeout-table" hidden>
                 <thead><tr><th>موقعیت</th><th>حجم بسته‌شده</th><th>نقد خروج</th><th>تحقق‌یافته</th></tr></thead>
@@ -404,6 +417,7 @@ export async function mount(root, { state, api }) {
   let setupDraft = null, outlookDraft = null, riskDraft = null, allocationDraft = null;
   let missionDraft = null, draft = null;
   let eligibilityRows = [], eligibilityFilter = 'all';
+  let dossierSummaries = [], dossierCompareToken = 0;
   let allocationRowId = 0;
   // شناسه دیگر ثابت نیست: ادامه‌دادن یک جلسه یعنی همان شناسه سرور را
   // برداشتن، وگرنه هر بار یک جلسه تازه ساخته می‌شد و «ادامه» معنایی
@@ -1048,6 +1062,74 @@ export async function mount(root, { state, api }) {
       $('pt-closeout-warn').hidden = false;
       $('pt-closeout-warn').textContent = view.realized.unknownText;
     }
+    // مقایسه مستقل و ناهمگام است: شکست خواندن پرونده قبلی نباید کارت
+    // پرونده فعلی را که همین حالا کامل رسم شده، پس بزند.
+    void paintPreviousDossierComparison(view);
+  }
+
+  async function paintPreviousDossierComparison(current) {
+    const token = ++dossierCompareToken;
+    const state = $('pt-dossier-compare-state');
+    const identities = $('pt-dossier-compare-identities');
+    $('pt-dossier-compare-base').textContent = '';
+    identities.hidden = true;
+    identities.innerHTML = '';
+    $('pt-dossier-compare-metrics').innerHTML = '';
+    $('pt-dossier-compare-findings').innerHTML = '';
+
+    const currentKey = momentKey(current?.dossier?.closedAt);
+    const previous = dossierSummaries
+      .filter((row) => row.id !== current?.session?.id
+        && Number.isFinite(momentKey(row.closedAt))
+        && momentKey(row.closedAt) < currentKey)
+      .sort((left, right) => momentKey(right.closedAt) - momentKey(left.closedAt))[0];
+    if (!previous) {
+      state.textContent = 'پرونده قدیمی‌تری برای مقایسه ثبت نشده است.';
+      return;
+    }
+
+    state.textContent = 'در حال خواندن پرونده قدیمی‌تر…';
+    const loaded = await loadDossier(previous.id);
+    if (token !== dossierCompareToken) return;
+    if (!loaded.ok) {
+      state.textContent = loaded.notFound
+        ? 'پرونده قدیمی‌تر دیگر روی سرور نیست؛ پرونده فعلی همچنان نمایش داده می‌شود.'
+        : `مقایسه خوانده نشد — ${loaded.why}`;
+      return;
+    }
+    const older = dossierRecordView(loaded.record);
+    if (!older.ok) {
+      state.textContent = `پرونده قدیمی‌تر مقایسه‌پذیر نیست — ${older.why}`;
+      return;
+    }
+    const compared = portfolioDossierComparison(
+      older.session, older.dossier, current.session, current.dossier,
+    );
+    const shown = portfolioDossierComparisonView(compared);
+    if (!shown.ok) {
+      state.textContent = shown.why;
+      return;
+    }
+
+    state.textContent = 'تغییرها فقط تفاوت دو سند پیاپی‌اند.';
+    $('pt-dossier-compare-base').textContent = shown.baseStateText;
+    identities.hidden = false;
+    identities.innerHTML = [
+      ['قدیمی‌تر', shown.older], ['جدیدتر', shown.newer],
+    ].map(([label, row]) => `<article><span>${label}</span><b>${esc(row.closedText)}</b>`
+      + `<small>نماد ${esc(row.baseText)} · پرونده ${esc(row.idText)}</small></article>`).join('');
+    $('pt-dossier-compare-metrics').innerHTML = shown.rows.map((row) => `<article data-metric="${esc(row.key)}">
+      <h5>${esc(row.label)}</h5><dl>
+        <div><dt>قدیمی‌تر</dt><dd>${esc(row.olderText)}</dd></div>
+        <div><dt>جدیدتر</dt><dd>${esc(row.newerText)}</dd></div>
+        <div><dt>${esc(row.changeLabel)}</dt><dd>${esc(row.deltaText)}</dd></div>
+      </dl></article>`).join('');
+    $('pt-dossier-compare-findings').innerHTML = shown.findingGroups.map((group) => {
+      const rows = group.rows.length
+        ? `<ul>${group.rows.map((row) => `<li data-code="${esc(row.code)}">${esc(row.title)}</li>`).join('')}</ul>`
+        : `<p>${esc(group.emptyText)}</p>`;
+      return `<article data-kind="${esc(group.key)}"><h5>${esc(group.label)}</h5>${rows}</article>`;
+    }).join('');
   }
 
   $('pt-closeout').onclick = async () => {
@@ -1480,6 +1562,8 @@ export async function mount(root, { state, api }) {
   async function refreshSessions() {
     const pick = $('pt-resume-pick'), state = $('pt-resume-state');
     const [listed, dossiers] = await Promise.all([listMissionSaves(), listDossiers()]);
+    dossierSummaries = dossiers.ok
+      ? dossiers.dossiers.filter((row) => row?.id && !row.broken) : [];
     if (!listed.ok && !dossiers.ok) {
       pick.innerHTML = '<option value="">فهرست خوانده نشد</option>';
       state.dataset.error = 'true';
