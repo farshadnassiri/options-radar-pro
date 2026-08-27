@@ -9,6 +9,7 @@ import { createTimeGate } from '../../core/time-gate.mjs';
 import { GROUPS as STRATEGY_FAMILIES } from '../../strategies/catalog.mjs';
 import { portfolioSessionProposals } from '../portfolio-proposals.mjs';
 import { breachText, portfolioLedgerView } from '../portfolio-ledger-view.mjs';
+import { portfolioSessionPositionsView } from '../portfolio-positions-view.mjs';
 import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
@@ -258,6 +259,18 @@ export async function mount(root, { state, api }) {
             </table>
             <p class="pt-ledger-families" id="pt-ledger-families"></p>
             <p class="pt-field-error" id="pt-ledger-unpriced" hidden></p>
+          </section>
+
+          <section class="pt-positions" id="pt-positions" aria-labelledby="pt-positions-title" hidden>
+            <div class="pt-positions-head">
+              <div><p class="eyebrow">موقعیت‌های جلسه</p><h3 id="pt-positions-title">چه چیزی در دست است</h3></div>
+            </div>
+            <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
+            <table class="pt-positions-table">
+              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>پاها</th><th>کیفیت</th></tr></thead>
+              <tbody id="pt-positions-body"></tbody>
+            </table>
+            <p class="pt-field-error" id="pt-positions-undocumented" hidden></p>
           </section>
 
           <section class="pt-proposals" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
@@ -879,12 +892,43 @@ export async function mount(root, { state, api }) {
     $('pt-ledger-unpriced').textContent = view.unpriced ? view.unpriced.why : '';
   }
 
+  // موقعیت‌ها زیر نوار سرمایه: اول چقدر جا مانده، بعد چه چیزی در دست
+  // است، بعد چه می‌شود ثبت کرد. هیچ عددی اینجا حساب نمی‌شود.
+  function paintPositions(session) {
+    const section = $('pt-positions');
+    const view = portfolioSessionPositionsView(session);
+    const warn = $('pt-positions-undocumented');
+    if (!view.ok) {
+      section.hidden = view.reason === 'noSession';
+      $('pt-positions-state').textContent = view.why;
+      $('pt-positions-body').innerHTML = '<tr class="pt-positions-empty"><td colspan="6">—</td></tr>';
+      warn.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    // جدول خالی شبیه «چیزی نمی‌دانیم» است؛ جمله می‌گوید هنوز ثبتی نشده.
+    $('pt-positions-state').textContent = view.empty ? view.note : view.countsText;
+    $('pt-positions-body').innerHTML = view.rows.length ? view.rows.map((row) => `<tr data-status="${esc(row.status)}" data-documented="${row.documented}">
+      <td data-label="موقعیت">${esc(row.defLabel)}<br><small>${esc(row.familyLabelFromId)} · ${esc(row.idText)}</small></td>
+      <td data-label="وضعیت"><b>${esc(row.statusLabel)}</b></td>
+      <td data-label="حجم">${esc(row.openQtyText)}${row.openQtyText === row.initialQtyText ? '' : `<br><small>از ${esc(row.initialQtyText)}</small>`}</td>
+      <td data-label="سرمایه">${esc(row.capitalTomanText)}</td>
+      <td data-label="پاها">${row.legTexts.length
+        ? row.legTexts.map((leg) => `<div>${esc(leg)}</div>`).join('')
+        : `<span class="pt-positions-why">${esc(row.why || '—')}</span>`}</td>
+      <td data-label="کیفیت">${esc(row.qualityLabel)}${row.qualityReason ? `<br><small>${esc(row.qualityReason)}</small>` : ''}</td>
+    </tr>`).join('') : '<tr class="pt-positions-empty"><td colspan="6">—</td></tr>';
+    warn.hidden = !view.undocumentedText;
+    warn.textContent = view.undocumentedText;
+  }
+
   function paintProposals(session) {
     proposalSession = session;
     // یک نقطهٔ فراخوانی: نوار سرمایه و پیشنهادها همیشه از یک جلسه ساخته
     // می‌شوند. دو فراخوانی جدا یعنی روزی یکی جا می‌ماند و کاربر وضعیت یک
     // جلسه را کنار پیشنهاد جلسهٔ دیگر می‌بیند.
     paintLedger(session);
+    paintPositions(session);
     const section = $('pt-proposals');
     const evidence = portfolioSessionEligibility(session);
     const view = portfolioSessionProposals(session, evidence);
@@ -929,7 +973,7 @@ export async function mount(root, { state, api }) {
     root.dataset.missionActive = 'true';
     root.querySelectorAll('input, select, textarea, button').forEach((control) => {
       if (!control.closest('#pt-eligibility') && !control.closest('#pt-proposals')
-        && !control.closest('#pt-ledger')) control.disabled = true;
+        && !control.closest('#pt-ledger') && !control.closest('#pt-positions')) control.disabled = true;
     });
   }
 
