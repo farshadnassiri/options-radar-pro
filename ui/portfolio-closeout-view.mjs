@@ -21,6 +21,7 @@ import { fmt, faDigits, signTone } from './fmt.mjs';
 import {
   PORTFOLIO_CLOSEOUT_REASONS, PORTFOLIO_CLOSEOUT_VERSION, closeoutPortfolioSession,
 } from '../core/portfolio-closeout.mjs';
+import { validatePortfolioCapitalContinuity } from '../core/portfolio-capital-continuity.mjs';
 import { portfolioSessionPositions } from '../core/portfolio-positions.mjs';
 import { DOSSIER_SAVE_VERSION } from './portfolio-dossier-data.mjs';
 
@@ -30,6 +31,7 @@ const text = (value) => String(value ?? '').trim();
 const toman = (rial) => (Number.isFinite(rial) ? fmt.int(rial / 10) : '—');
 const count = (value) => faDigits(String(Number(value) || 0));
 const isObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
+const own = (row, key) => !!row && Object.prototype.hasOwnProperty.call(row, key);
 const sameMoment = (left, right) => isObject(left) && isObject(right)
   && Number(left.date) === Number(right.date) && Number(left.second) === Number(right.second);
 
@@ -186,7 +188,24 @@ export function dossierRecordView(raw) {
     return fail('invalidSavedAt', 'زمان ثبت پرونده معتبر نیست');
   }
   const view = portfolioDossierView(raw.session, raw.dossier);
-  return view.ok ? { ...view, savedAt: raw.savedAt } : view;
+  if (!view.ok) return view;
+  if (!own(raw, 'capitalContinuity')) {
+    return { ...view, savedAt: raw.savedAt, capitalContinuity: null };
+  }
+  const continuity = validatePortfolioCapitalContinuity(raw.capitalContinuity, {
+    initialCapitalRial: raw.session.capital?.initialRial,
+    sessionId: raw.session.id,
+    portfolioId: raw.session.portfolioId,
+  });
+  if (!continuity.ok || continuity.continuity.state !== 'ready'
+    || JSON.stringify(continuity.continuity) !== JSON.stringify(raw.capitalContinuity)) {
+    return fail('invalidContinuity', `تداوم سرمایه پرونده معتبر نیست: ${continuity.why}`);
+  }
+  return {
+    ...view,
+    savedAt: raw.savedAt,
+    capitalContinuity: continuity.continuity,
+  };
 }
 
 /**

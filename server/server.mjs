@@ -909,7 +909,9 @@ async function handle(req, res) {
           return sendJson(res, 400, { error: 'شناسه بدنه با شناسه درخواست یکی نیست' });
         }
         const saved = await savePortfolioDossier(
-          PORTFOLIO_DOSSIER_DIR, body.session, body.dossier, { savedAt: Date.now() },
+          PORTFOLIO_DOSSIER_DIR, body.session, body.dossier, {
+            savedAt: Date.now(), capitalContinuity: body.capitalContinuity,
+          },
         );
         if (!saved.ok) return sendJson(res, saved.conflict ? 409 : 400, { error: saved.why });
         log(`پرونده پایان سفر زمانی ذخیره شد — ${id}`);

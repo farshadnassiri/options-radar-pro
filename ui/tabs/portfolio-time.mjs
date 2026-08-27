@@ -1068,13 +1068,22 @@ export async function mount(root, { state, api }) {
     issues.hidden = !analyzed.ok || analyzed.issues.length === 0;
     issues.innerHTML = analyzed.ok ? analyzed.issues.map((row) => `<li>${esc(row.label)}`
       + `${row.detail ? ` — ${esc(row.detail)}` : ''}</li>`).join('') : '';
-    dossierContinuity = portfolioCapitalContinuityView(view.session, view.dossier);
+    dossierContinuity = view.capitalContinuity
+      ? portfolioCapitalContinuityView(view.session, view.dossier, {
+        previous: view.capitalContinuity,
+      })
+      : portfolioCapitalContinuityView(view.session, view.dossier);
     $('pt-capital-continuity-amount').textContent = dossierContinuity.capitalText;
     $('pt-capital-continuity-source').innerHTML = [
       ['نماد پایه', dossierContinuity.baseText],
       ['جلسه منشأ', dossierContinuity.sourceSessionText],
       ['سبد منشأ', dossierContinuity.sourcePortfolioText],
       ['لحظه بستن', dossierContinuity.closedAtText],
+      ...dossierContinuity.lineageRows.map((row) => [
+        `سفر ${row.indexText}`,
+        `جلسه ${row.sessionText} · سبد ${row.portfolioText} · نماد ${row.baseText}`
+          + ` · ${row.initialText} ← ${row.finalText} · بسته‌شده ${row.closedAtText}`,
+      ]),
     ].map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('');
     $('pt-capital-continuity-state').textContent = dossierContinuity.available
       ? 'سرمایه قطعی آماده انتقال است؛ نماد و تاریخ جلسه بعد را خودت انتخاب می‌کنی.'
@@ -1272,7 +1281,9 @@ export async function mount(root, { state, api }) {
     button.disabled = true;
     button.textContent = 'در حال ذخیره…';
     $('pt-closeout-state').textContent = 'در حال ذخیره پرونده روی سرور…';
-    const persisted = await persistDossierView(view);
+    const persisted = draft?.capitalContinuity
+      ? await persistDossierView(view, { capitalContinuity: draft.capitalContinuity })
+      : await persistDossierView(view);
     closeoutSaving = false;
     if (!persisted.ok) {
       button.disabled = false;
@@ -1741,6 +1752,8 @@ export async function mount(root, { state, api }) {
     try {
       draftId = record.id;
       lastSavedAt = record.savedAt;
+      capitalContinuitySeed = record.draft.capitalContinuity
+        ? structuredClone(record.draft.capitalContinuity) : null;
 
       base.value = inputs.setup.baseIns;
       loadedIns = '';

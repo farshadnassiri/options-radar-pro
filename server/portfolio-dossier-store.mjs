@@ -6,6 +6,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { validatePortfolioCapitalContinuity } from '../core/portfolio-capital-continuity.mjs';
 import { PORTFOLIO_CLOSEOUT_VERSION } from '../core/portfolio-closeout.mjs';
 import { PORTFOLIO_SCHEMA_VERSION, replayPortfolioSession } from '../core/portfolio-session.mjs';
 import { momentKey } from '../core/trading-calendar.mjs';
@@ -15,6 +16,7 @@ export const PORTFOLIO_DOSSIER_SAVE_VERSION = 1;
 
 const copy = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
 const isObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
+const own = (row, key) => !!row && Object.prototype.hasOwnProperty.call(row, key);
 
 function same(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -68,6 +70,20 @@ export function restorePortfolioDossierSave(raw) {
   if (raw.session.state !== 'closed') return fail('فقط جلسه بسته‌شده پرونده دارد');
   if (raw.session.id !== raw.id) return fail('شناسه رکورد با شناسه جلسه یکی نیست');
 
+  if (own(raw, 'capitalContinuity')) {
+    const continuity = validatePortfolioCapitalContinuity(raw.capitalContinuity, {
+      initialCapitalRial: raw.session.capital?.initialRial,
+      sessionId: raw.session.id,
+      portfolioId: raw.session.portfolioId,
+    });
+    if (!continuity.ok || continuity.continuity.state !== 'ready') {
+      return fail(`تداوم سرمایه پرونده معتبر نیست: ${continuity.why}`);
+    }
+    if (!same(raw.capitalContinuity, continuity.continuity)) {
+      return fail('تداوم سرمایه پرونده canonical نیست');
+    }
+  }
+
   const dossier = validDossierShape(raw.dossier);
   if (!dossier.ok) return dossier;
   if (raw.dossier.sessionId !== raw.id) return fail('شناسه پرونده با شناسه جلسه یکی نیست');
@@ -81,7 +97,9 @@ export function restorePortfolioDossierSave(raw) {
 }
 
 /** بسته‌بندی خروج معتبر موتور با نسخه و زمان ثبت سرور. */
-export function createPortfolioDossierSave(session, dossier, { savedAt = Date.now() } = {}) {
+export function createPortfolioDossierSave(session, dossier, {
+  savedAt = Date.now(), capitalContinuity,
+} = {}) {
   const raw = {
     schemaVersion: PORTFOLIO_DOSSIER_SAVE_VERSION,
     id: String(session?.id || ''),
@@ -89,6 +107,7 @@ export function createPortfolioDossierSave(session, dossier, { savedAt = Date.no
     session: copy(session),
     dossier: copy(dossier),
   };
+  if (capitalContinuity !== undefined) raw.capitalContinuity = copy(capitalContinuity);
   return restorePortfolioDossierSave(raw);
 }
 
@@ -120,8 +139,10 @@ export async function loadPortfolioDossierSave(dir, id) {
 }
 
 /** پرونده موجود هرگز بازنویسی نمی‌شود؛ `wx` این قاعده را در خود فایل‌سیستم قفل می‌کند. */
-export async function savePortfolioDossier(dir, session, dossier, { savedAt = Date.now() } = {}) {
-  const made = createPortfolioDossierSave(session, dossier, { savedAt });
+export async function savePortfolioDossier(dir, session, dossier, {
+  savedAt = Date.now(), capitalContinuity,
+} = {}) {
+  const made = createPortfolioDossierSave(session, dossier, { savedAt, capitalContinuity });
   if (!made.ok) return made;
   const file = recordFile(dir, made.record.id);
   await fs.mkdir(dir, { recursive: true });

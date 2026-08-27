@@ -4,7 +4,7 @@
 // به تومان تبدیل می‌کند و همان قرارداد را، بدون تغییر، به draft تازه می‌چسباند.
 
 import {
-  PORTFOLIO_CAPITAL_CONTINUITY_VERSION, portfolioCapitalContinuity,
+  portfolioCapitalContinuity, validatePortfolioCapitalContinuity,
 } from '../core/portfolio-capital-continuity.mjs';
 import { momentText } from './portfolio-clock-view.mjs';
 import { faDigits, fmt } from './fmt.mjs';
@@ -12,6 +12,19 @@ import { faDigits, fmt } from './fmt.mjs';
 const money = (rial) => (Number.isFinite(rial) ? `${fmt.int(rial / 10)} تومان` : '—');
 const inputMoney = (rial) => (Number.isFinite(rial) ? fmt.int(rial / 10) : '');
 const text = (value) => faDigits(String(value ?? '').trim());
+
+function lineageRows(continuity) {
+  return Array.isArray(continuity?.lineage) ? continuity.lineage.map((row, index) => ({
+    indexText: faDigits(String(index + 1)),
+    sessionText: text(row.sessionId),
+    portfolioText: text(row.portfolioId),
+    baseText: text(row.baseIns),
+    closedAtText: momentText(row.closedAt),
+    initialText: money(row.initialCapitalRial),
+    realizedText: money(row.realizedRial),
+    finalText: money(row.finalCapitalRial),
+  })) : [];
+}
 
 function unavailable(why, continuity = null) {
   return {
@@ -25,14 +38,17 @@ function unavailable(why, continuity = null) {
     sourceSessionText: continuity ? text(continuity.sourceSessionId) : '—',
     sourcePortfolioText: continuity ? text(continuity.sourcePortfolioId) : '—',
     closedAtText: continuity ? momentText(continuity.closedAt) : '—',
+    lineageRows: lineageRows(continuity),
     actionLabel: 'جلسه بعد با این سرمایه',
     continuity,
   };
 }
 
 /** پرونده بسته → مدل آماده رسم، بدون محاسبه مالی تازه. */
-export function portfolioCapitalContinuityView(session, dossier) {
-  const continuity = portfolioCapitalContinuity(session, dossier);
+export function portfolioCapitalContinuityView(session, dossier, { previous = null } = {}) {
+  const continuity = previous == null
+    ? portfolioCapitalContinuity(session, dossier)
+    : portfolioCapitalContinuity(session, dossier, { previous });
   if (!continuity.ok) return unavailable(continuity.why);
   if (continuity.state === 'exhausted') {
     return unavailable('سرمایه نهایی صفر است؛ سرمایه‌ای برای شروع جلسه بعد باقی نمانده.', continuity);
@@ -48,6 +64,7 @@ export function portfolioCapitalContinuityView(session, dossier) {
     sourceSessionText: text(continuity.sourceSessionId),
     sourcePortfolioText: text(continuity.sourcePortfolioId),
     closedAtText: momentText(continuity.closedAt),
+    lineageRows: lineageRows(continuity),
     actionLabel: 'جلسه بعد با این سرمایه',
     continuity,
   };
@@ -61,26 +78,21 @@ export function attachPortfolioCapitalContinuity(stepOneDraft, continuity) {
   if (!stepOneDraft?.session || stepOneDraft.step !== 'setup') {
     return { ok: false, why: 'پیش‌نویس معتبر مرحله نخست لازم است', draft: null };
   }
-  if (!continuity?.ok
-    || continuity.version !== PORTFOLIO_CAPITAL_CONTINUITY_VERSION
-    || continuity.state !== 'ready'
-    || !Number.isFinite(continuity.finalCapitalRial)
-    || continuity.finalCapitalRial <= 0) {
-    return { ok: false, why: 'قرارداد سرمایه آماده ادامه نیست', draft: null };
-  }
-  if (stepOneDraft.session.capital?.initialRial !== continuity.finalCapitalRial) {
-    return { ok: false, why: 'سرمایه فرم با سرمایه قطعی پرونده برابر نیست', draft: null };
-  }
-  if (stepOneDraft.session.id === continuity.sourceSessionId
-    || stepOneDraft.session.portfolioId === continuity.sourcePortfolioId) {
-    return { ok: false, why: 'جلسه بعد باید شناسه جلسه و سبد تازه داشته باشد', draft: null };
+  const checked = validatePortfolioCapitalContinuity(continuity, {
+    initialCapitalRial: stepOneDraft.session.capital?.initialRial,
+    sessionId: stepOneDraft.session.id,
+    portfolioId: stepOneDraft.session.portfolioId,
+  });
+  if (!checked.ok || checked.continuity.state !== 'ready'
+    || JSON.stringify(checked.continuity) !== JSON.stringify(continuity)) {
+    return { ok: false, why: checked.why || 'قرارداد سرمایه آماده ادامه نیست', draft: null };
   }
   return {
     ok: true,
     why: '',
     draft: {
       ...stepOneDraft,
-      capitalContinuity: structuredClone(continuity),
+      capitalContinuity: structuredClone(checked.continuity),
     },
   };
 }
