@@ -1169,7 +1169,9 @@ export async function mount(root, { state, api }) {
     button.textContent = 'در حال ساخت Excel…';
     status.removeAttribute('data-error');
     status.textContent = 'در حال ساخت فایل از سند همین پرونده…';
-    const result = await downloadPortfolioDossier(view.session, view.dossier);
+    const result = await downloadPortfolioDossier(view.session, view.dossier, {
+      capitalContinuity: dossierContinuity?.continuity,
+    });
     if (view !== dossierExportView) return;
     dossierExportBusy = false;
     button.disabled = false;

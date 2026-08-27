@@ -60,7 +60,7 @@ group('۱۶۳. دانلود XLSX پرونده از کارت پایان');
 
   const export163 = readSrc('../ui/portfolio-dossier-export.mjs');
   check('تابع دانلود قرارداد موجود و downloadXlsx را به‌ترتیب مصرف می‌کند',
-    export163.indexOf('portfolioDossierWorkbook(session, dossier, { generatedAt })')
+    export163.indexOf('portfolioDossierWorkbook(session, dossier, {')
       < export163.indexOf('await downloadImpl(name, workbook.sheets)')
     && export163.includes("import { downloadXlsx, sheet, sheetParts } from './xlsx.mjs'"));
   check('تابع دانلود شبکه یا مسیر فایل خام ندارد',
@@ -78,8 +78,8 @@ group('۱۶۳. دانلود XLSX پرونده از کارت پایان');
     && /dossierExportView = view;/.test(tab163)
     && tab163.includes('paintDossier(persisted.view)')
     && tab163.includes('paintDossier(restored)'));
-  check('تب فقط جلسه و سند خام مدل فعلی را به دانلود می‌دهد',
-    /downloadPortfolioDossier\(view\.session, view\.dossier\)/.test(tab163)
+  check('تب جلسه، سند خام و continuity معتبر مدل فعلی را به دانلود می‌دهد',
+    /downloadPortfolioDossier\(view\.session, view\.dossier, \{[\s\S]*?capitalContinuity: dossierContinuity\?\.continuity/.test(tab163)
     && !/portfolioDossierWorkbook\(/.test(tab163)
     && !/downloadXlsx\(/.test(tab163));
   check('هنگام ساخت کنترل قفل و پس از نتیجه برای تلاش دوباره آزاد می‌شود',
