@@ -139,6 +139,23 @@ group('۱۴۰. ارزش جاری موقعیت');
     blindRow140.valued === false && blindRow140.reason === 'undocumented'
     && blindRow140.valueRial === null);
 
+  const noCash140 = JSON.parse(JSON.stringify(done140.session));
+  delete noCash140.events.find((e) => e?.data?.commitVersion !== undefined)
+    .data.entryCashRial;
+  const noCashRow140 = portfolioSessionValuation(noCash140, fx140.evidence).rows[0] || {};
+  check('نقدِ ورودِ نبوده صفر حساب نمی‌شود',
+    noCashRow140.valued === false && noCashRow140.reason === 'unknownEntryCash'
+    && noCashRow140.unrealizedRial === null,
+    `${noCashRow140.reason} | ${noCashRow140.unrealizedRial}`);
+  // اگر صفر حساب می‌شد، سود دقیقاً برابر کل ارزش درمی‌آمد.
+  check('و سودی به اندازهٔ کل ارزش ساخته نمی‌شود',
+    noCashRow140.unrealizedRial !== row140.valueRial);
+  const noFee140 = JSON.parse(JSON.stringify(done140.session));
+  delete noFee140.events.find((e) => e?.data?.commitVersion !== undefined)
+    .data.capital.components.feeRial;
+  check('کارمزد ورودِ نبوده هم صفر حساب نمی‌شود',
+    portfolioSessionValuation(noFee140, fx140.evidence).rows[0].valued === false);
+
   const feeless140 = JSON.parse(JSON.stringify(done140.session));
   delete feeless140.startSnapshot.capitalInputs.fees.option;
   check('نبودِ نرخ کارمزد، سودِ بی‌کارمزد نمی‌سازد',

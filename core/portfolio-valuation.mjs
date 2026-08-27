@@ -119,8 +119,11 @@ function valuePosition(position, verdicts, fees) {
   }
   if (!exitLegs.length) return { reason: 'unknownPrice' };
 
-  const docEntryCash = num(position.entryCashRial);
-  const docEntryFee = num(position.capital?.components?.feeRial);
+  // `num()` اینجا به‌کار نمی‌رود: `Number(null)` صفر است و از
+  // `Number.isFinite` رد می‌شود، یعنی نقدِ نبوده صفر حساب می‌شد و سودی
+  // به اندازهٔ کل ارزش می‌ساخت. مقدارِ خام سنجیده می‌شود.
+  const docEntryCash = position.entryCashRial;
+  const docEntryFee = position.capital?.components?.feeRial;
   if (!Number.isFinite(docEntryCash) || !Number.isFinite(docEntryFee)) {
     return { reason: 'unknownEntryCash' };
   }
