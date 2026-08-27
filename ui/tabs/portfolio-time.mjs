@@ -30,6 +30,9 @@ import { portfolioDossierWeaknessView } from '../portfolio-dossier-weakness-view
 import { portfolioDossierComparisonView } from '../portfolio-dossier-compare-view.mjs';
 import { downloadPortfolioDossier } from '../portfolio-dossier-export.mjs';
 import {
+  attachPortfolioCapitalContinuity, portfolioCapitalContinuityView,
+} from '../portfolio-capital-continuity-view.mjs';
+import {
   closeoutPreflight, closeoutView, dossierRecordView,
 } from '../portfolio-closeout-view.mjs';
 import { mountPayoff } from '../chart.mjs';
@@ -104,7 +107,7 @@ export async function mount(root, { state, api }) {
 
     <section class="pt-layout">
       <div class="pt-main">
-        <section class="card pt-card">
+        <section class="card pt-card" data-pt-setup>
           <div class="section-head"><div><p class="eyebrow">مرحله نخست · بخش یک</p><h2>سرمایه‌ای که با خودت به گذشته می‌بری</h2></div><span>واحد ورود: تومان</span></div>
           <div class="pt-form-grid pt-money-grid">
             <label class="field" id="pt-capital-field"><span>ارزش پورتفو در شروع</span>
@@ -119,9 +122,12 @@ export async function mount(root, { state, api }) {
             <article><span>ذخیره</span><b id="pt-reserve-view">—</b><small id="pt-reserve-pct">—</small></article>
             <article class="accent"><span>قابل تخصیص</span><b id="pt-allocatable">—</b><small>مبنای بودجه خانواده‌ها</small></article>
           </div>
+          <aside class="pt-capital-source" id="pt-capital-source" hidden>
+            <b>سرمایه از پرونده قبلی</b><p id="pt-capital-source-text"></p>
+          </aside>
         </section>
 
-        <section class="card pt-card">
+        <section class="card pt-card" data-pt-setup>
           <div class="section-head"><div><p class="eyebrow">مرحله نخست · بخش دو</p><h2>کدام نماد، در کدام لحظه؟</h2></div><b id="pt-feed-status" role="status" aria-live="polite">در حال دریافت فهرست نمادها…</b></div>
           <div class="pt-symbol-row">
             <label class="field" id="pt-base-field"><span>نماد پایه</span><select id="pt-base"><option value="">در حال دریافت…</option></select><small class="hint">نام و تاریخ واقعی پنهان نمی‌شود.</small><small class="pt-field-error" id="pt-base-error" hidden></small></label>
@@ -288,6 +294,15 @@ export async function mount(root, { state, api }) {
                 <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
                 <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
               </section>
+              <section class="pt-capital-continuity" id="pt-capital-continuity" aria-labelledby="pt-capital-continuity-title">
+                <div class="pt-capital-continuity-head">
+                  <div><p class="eyebrow">سفر بعدی</p><h4 id="pt-capital-continuity-title">ادامه زنجیره سرمایه</h4></div>
+                  <b id="pt-capital-continuity-amount">—</b>
+                </div>
+                <dl class="pt-capital-continuity-source" id="pt-capital-continuity-source"></dl>
+                <p id="pt-capital-continuity-state" role="status" aria-live="polite"></p>
+                <button type="button" class="primary" id="pt-capital-continuity-do" aria-describedby="pt-capital-continuity-state" disabled>جلسه بعد با این سرمایه</button>
+              </section>
               <section class="pt-dossier-weakness" id="pt-dossier-weakness" aria-labelledby="pt-dossier-weakness-title">
                 <div class="pt-dossier-weakness-head">
                   <h4 id="pt-dossier-weakness-title">یافته‌های مستند پرونده</h4>
@@ -424,6 +439,7 @@ export async function mount(root, { state, api }) {
   let eligibilityRows = [], eligibilityFilter = 'all';
   let dossierSummaries = [], dossierCompareToken = 0;
   let dossierExportView = null, dossierExportBusy = false;
+  let dossierContinuity = null, capitalContinuitySeed = null, continuityDraftCounter = 0;
   let allocationRowId = 0;
   // شناسه دیگر ثابت نیست: ادامه‌دادن یک جلسه یعنی همان شناسه سرور را
   // برداشتن، وگرنه هر بار یک جلسه تازه ساخته می‌شد و «ادامه» معنایی
@@ -997,8 +1013,13 @@ export async function mount(root, { state, api }) {
     $('pt-closeout-do').hidden = closed;
     if (closed) return;
     dossierExportView = null;
+    dossierContinuity = null;
     $('pt-dossier-export-do').disabled = true;
     $('pt-dossier-export-state').textContent = 'پرونده‌ای برای خروجی آماده نیست.';
+    $('pt-capital-continuity-do').disabled = true;
+    $('pt-capital-continuity-amount').textContent = '—';
+    $('pt-capital-continuity-source').innerHTML = '';
+    $('pt-capital-continuity-state').textContent = 'سرمایه قطعی پس از بستن کامل پرونده آماده می‌شود.';
     // تصمیم پیش از عمل گرفته می‌شود: اگر پس از بستن بگوییم «راستی، سه
     // موقعیت باز بود»، دیگر کاری نمی‌شود کرد.
     const pre = closeoutPreflight(session);
@@ -1047,6 +1068,20 @@ export async function mount(root, { state, api }) {
     issues.hidden = !analyzed.ok || analyzed.issues.length === 0;
     issues.innerHTML = analyzed.ok ? analyzed.issues.map((row) => `<li>${esc(row.label)}`
       + `${row.detail ? ` — ${esc(row.detail)}` : ''}</li>`).join('') : '';
+    dossierContinuity = portfolioCapitalContinuityView(view.session, view.dossier);
+    $('pt-capital-continuity-amount').textContent = dossierContinuity.capitalText;
+    $('pt-capital-continuity-source').innerHTML = [
+      ['نماد پایه', dossierContinuity.baseText],
+      ['جلسه منشأ', dossierContinuity.sourceSessionText],
+      ['سبد منشأ', dossierContinuity.sourcePortfolioText],
+      ['لحظه بستن', dossierContinuity.closedAtText],
+    ].map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('');
+    $('pt-capital-continuity-state').textContent = dossierContinuity.available
+      ? 'سرمایه قطعی آماده انتقال است؛ نماد و تاریخ جلسه بعد را خودت انتخاب می‌کنی.'
+      : dossierContinuity.why;
+    $('pt-capital-continuity-state').toggleAttribute('data-error', !dossierContinuity.available);
+    $('pt-capital-continuity-do').disabled = !dossierContinuity.available;
+    $('pt-capital-continuity-do').textContent = dossierContinuity.actionLabel;
     const weakness = portfolioDossierWeaknessView(
       portfolioDossierWeaknesses(view.session, view.dossier),
     );
@@ -1101,6 +1136,54 @@ export async function mount(root, { state, api }) {
     }
     status.textContent = `فایل ${faDigits(result.name)}.xlsx ساخته شد.`;
   };
+
+  function beginNextSessionFromDossier(view) {
+    if (!view?.available || !view.continuity) return;
+    if (capitalContinuitySeed?.sourceSessionId === view.continuity.sourceSessionId) return;
+    capitalContinuitySeed = structuredClone(view.continuity);
+    continuityDraftCounter += 1;
+    draftId = `pt-ui-${Date.now()}-${continuityDraftCounter}`;
+    lastSavedAt = null;
+    setupDraft = null; outlookDraft = null; riskDraft = null; allocationDraft = null;
+    missionDraft = null; draft = null;
+    ['draft-ready', 'outlook-ready', 'risk-ready', 'allocation-ready', 'mission-ready', 'mission-active']
+      .forEach((name) => root.removeAttribute(`data-${name}`));
+    outlookStep.hidden = true; riskStep.hidden = true; allocationStep.hidden = true; reviewStep.hidden = true;
+    resetAllocationRows(); paintProgress('setup'); clearErrors();
+    root.querySelectorAll('[data-pt-setup] input, [data-pt-setup] select, [data-pt-setup] button')
+      .forEach((control) => { control.disabled = false; });
+    root.querySelectorAll('[data-pt-setup]').forEach((card) => {
+      card.dataset.collapsed = 'false';
+      const expand = card.querySelector('[data-pt-expand]');
+      if (expand) expand.textContent = 'جمع کن';
+    });
+    $('pt-save-step').disabled = false;
+    capital.value = view.capitalInputText;
+    reserve.value = '۰';
+    if (!base.querySelector('option[value=""]')) {
+      base.insertAdjacentHTML('afterbegin', '<option value="">نماد پایه را انتخاب کن</option>');
+    }
+    base.value = '';
+    loadedIns = ''; dates = [];
+    $('pt-dates').hidden = true;
+    $('pt-start-date').dataset.value = '';
+    $('pt-end-date').dataset.value = '';
+    $('pt-review-base').textContent = 'انتخاب نشده';
+    $('pt-review-start').textContent = 'انتخاب نشده';
+    $('pt-review-end').textContent = 'انتخاب نشده';
+    $('pt-capital-source').hidden = false;
+    $('pt-capital-source-text').textContent = `${view.capitalText} از جلسه ${view.sourceSessionText}`
+      + ` · بسته‌شده در ${view.closedAtText}`;
+    $('pt-save-step').textContent = 'ثبت پیش‌نویس مرحله اول';
+    $('pt-save-state').textContent = 'سرمایه قطعی منتقل شد؛ نماد و تاریخ‌های جلسه تازه را صریح انتخاب کن.';
+    $('pt-persist-state').textContent = 'جلسه تازه هنوز روی سرور ثبت نشده است.';
+    $('pt-capital-continuity-do').disabled = true;
+    $('pt-capital-continuity-do').textContent = 'فرم جلسه بعد آماده شد';
+    paintCapital();
+    root.querySelector('[data-pt-setup]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  $('pt-capital-continuity-do').onclick = () => beginNextSessionFromDossier(dossierContinuity);
 
   async function paintPreviousDossierComparison(current) {
     const token = ++dossierCompareToken;
@@ -1526,9 +1609,11 @@ export async function mount(root, { state, api }) {
     chain = buildChain(watch?.rows || []);
     symbols = underlyingList(chain, state.settings);
     base.innerHTML = symbols.length
-      ? symbols.map((row) => `<option value="${esc(row.ins)}">${esc(row.name || 'نماد بدون نام')}</option>`).join('')
+      ? `${capitalContinuitySeed ? '<option value="">نماد پایه را انتخاب کن</option>' : ''}`
+        + symbols.map((row) => `<option value="${esc(row.ins)}">${esc(row.name || 'نماد بدون نام')}</option>`).join('')
       : '<option value="">نمادی در فهرست نیست</option>';
     if (symbols.some((row) => String(row.ins) === keep)) base.value = keep;
+    else if (capitalContinuitySeed) base.value = '';
     $('pt-review-base').textContent = base.selectedOptions[0]?.textContent || 'انتخاب نشده';
     $('pt-feed-status').textContent = symbols.length ? `${fmt.int(symbols.length)} نماد پایه آماده است` : 'فهرست نمادها خالی است';
     if (symbols.length) $('pt-feed-status').removeAttribute('data-error');
@@ -1537,13 +1622,15 @@ export async function mount(root, { state, api }) {
   }
 
   function currentDraft() {
-    return createPortfolioStepOneDraft({
+    const made = createPortfolioStepOneDraft({
       id: draftId, baseIns: base.value,
       capitalToman: capital.value, reserveToman: reserve.value,
       startDate: Number($('pt-start-date').dataset.value), startSecond: Number($('pt-start-time').value),
       endDate: Number($('pt-end-date').dataset.value), endSecond: Number($('pt-end-time').value),
       grain: $('pt-grain').value, createdAt: Date.now(),
     });
+    return made.ok && capitalContinuitySeed
+      ? attachPortfolioCapitalContinuity(made.draft, capitalContinuitySeed) : made;
   }
 
   function currentOutlookDraft() {
@@ -1737,7 +1824,11 @@ export async function mount(root, { state, api }) {
     if (input) input.checked = true;
   }
 
-  capital.oninput = () => { paintCapital(); invalidateSetupDraft(); };
+  capital.oninput = () => {
+    capitalContinuitySeed = null;
+    $('pt-capital-source').hidden = true;
+    paintCapital(); invalidateSetupDraft();
+  };
   reserve.oninput = () => { paintCapital(); invalidateSetupDraft(); };
   capital.onblur = () => formatMoneyInput(capital); reserve.onblur = () => formatMoneyInput(reserve);
   base.onchange = () => { loadedIns = ''; clearErrors(); invalidateSetupDraft(); loadDates(); };
