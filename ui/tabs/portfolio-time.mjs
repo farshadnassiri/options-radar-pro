@@ -24,6 +24,7 @@ import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
+import { createPortfolioHistoryRequestGate } from '../portfolio-history-request.mjs';
 import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
 import { portfolioWatchView } from '../portfolio-watch-view.mjs';
 import { portfolioDossierAnalysisView } from '../portfolio-dossier-analysis-view.mjs';
@@ -444,6 +445,7 @@ export async function mount(root, { state, api }) {
   const allocationStep = $('pt-allocation-step'), allocationRowsRoot = $('pt-allocation-rows');
   const reviewStep = $('pt-review-step');
   let chain = new Map(), symbols = [], dates = [], loadedIns = '';
+  const historyRequests = createPortfolioHistoryRequestGate();
   let setupDraft = null, outlookDraft = null, riskDraft = null, allocationDraft = null;
   let missionDraft = null, draft = null;
   let eligibilityRows = [], eligibilityFilter = 'all';
@@ -457,6 +459,11 @@ export async function mount(root, { state, api }) {
   let draftId = `pt-ui-${Date.now()}`;
   // زمان ثبت سرور، هم برچسب وضعیت است و هم قفل خوش‌بینانه PUT بعدی.
   let lastSavedAt = null;
+  // ثبت مرحله‌ها باید به همان ترتیبی به سرور برسد که کاربر آن‌ها را
+  // تأیید کرده است. کلیک سریع روی چند مرحله نباید پاسخ دیرترِ مرحلهٔ
+  // قبلی را روی زمان نسخهٔ تازه بنویسد یا active را جلوتر از allocation
+  // به ذخیره‌ساز برساند.
+  let persistQueue = Promise.resolve();
   // حین بازسازی، همان دکمه‌های مرحله صدا زده می‌شوند. بدون این پرچم، هر
   // مرحله دوباره روی سرور نوشته می‌شد و رکوردی که تازه خواندیم را با
   // خودش بازنویسی می‌کرد.
@@ -1169,7 +1176,9 @@ export async function mount(root, { state, api }) {
     button.textContent = 'در حال ساخت Excel…';
     status.removeAttribute('data-error');
     status.textContent = 'در حال ساخت فایل از سند همین پرونده…';
-    const result = await downloadPortfolioDossier(view.session, view.dossier);
+    const result = await downloadPortfolioDossier(view.session, view.dossier, {
+      capitalContinuity: dossierContinuity?.continuity,
+    });
     if (view !== dossierExportView) return;
     dossierExportBusy = false;
     button.disabled = false;
@@ -1209,10 +1218,9 @@ export async function mount(root, { state, api }) {
       base.insertAdjacentHTML('afterbegin', '<option value="">نماد پایه را انتخاب کن</option>');
     }
     base.value = '';
-    loadedIns = ''; dates = [];
-    $('pt-dates').hidden = true;
-    $('pt-start-date').dataset.value = '';
-    $('pt-end-date').dataset.value = '';
+    historyRequests.invalidate();
+    loadedIns = '';
+    resetHistoryDates();
     $('pt-review-base').textContent = 'انتخاب نشده';
     $('pt-review-start').textContent = 'انتخاب نشده';
     $('pt-review-end').textContent = 'انتخاب نشده';
@@ -1611,6 +1619,14 @@ export async function mount(root, { state, api }) {
     $('pt-review-end').textContent = endLabel ? `${endLabel} · ${endTime}` : 'انتخاب نشده';
   }
 
+  function resetHistoryDates() {
+    dates = [];
+    $('pt-dates').hidden = true;
+    $('pt-start-date').dataset.value = '';
+    $('pt-end-date').dataset.value = '';
+    reviewDates();
+  }
+
   function paintEndCalendar() {
     const start = Number($('pt-start-date').dataset.value);
     const allowed = dates.filter((date) => date >= start);
@@ -1632,19 +1648,25 @@ export async function mount(root, { state, api }) {
     const ins = String(base.value || '');
     $('pt-review-base').textContent = base.selectedOptions[0]?.textContent || 'انتخاب نشده';
     if (!ins || ins === loadedIns) return;
-    loadedIns = ins; dates = []; $('pt-dates').hidden = true;
+    const ticket = historyRequests.begin(ins);
+    loadedIns = ins;
+    resetHistoryDates();
     $('pt-feed-status').textContent = 'در حال دریافت روزهای معاملاتی…';
     try {
       const response = await fetch(`/api/dailies?ins=${encodeURIComponent(ins)}&n=0`);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
-      dates = (payload?.[ins]?.rows || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
-      if (!dates.length) throw new Error('برای این نماد روز معاملاتی ثبت نشده است');
+      const nextDates = (payload?.[ins]?.rows || [])
+        .map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
+      if (!nextDates.length) throw new Error('برای این نماد روز معاملاتی ثبت نشده است');
+      if (!historyRequests.accepts(ticket, base.value)) return;
+      dates = nextDates;
       mountCalendars();
       $('pt-feed-status').textContent = `${fmt.int(dates.length)} روز معاملاتی آماده است`;
       $('pt-feed-status').removeAttribute('data-error');
       clearErrors();
     } catch (error) {
+      if (!historyRequests.accepts(ticket, base.value)) return;
       loadedIns = '';
       $('pt-feed-status').textContent = String(error?.message || 'تاریخچه دریافت نشد');
       $('pt-feed-status').dataset.error = 'true';
@@ -1709,8 +1731,7 @@ export async function mount(root, { state, api }) {
    * می‌گذارند. اگر این تابع ساکت شکست بخورد، کاربر با خیال راحت تب را
    * می‌بندد و کار نیم‌ساعتش را از دست می‌دهد.
    */
-  async function persist(next) {
-    if (resuming || !next?.session?.id) return;
+  async function persistNow(next) {
     const state = $('pt-persist-state');
     state.removeAttribute('data-error');
     state.textContent = 'در حال ثبت روی سرور…';
@@ -1720,11 +1741,21 @@ export async function mount(root, { state, api }) {
       state.textContent = saved.conflict
         ? `روی سرور ثبت نشد — ${saved.why} جلسه را از فهرست دوباره باز کن.`
         : `روی سرور ثبت نشد — ${saved.why}`;
-      return;
+      return saved;
     }
     lastSavedAt = saved.savedAt;
     state.textContent = `روی سرور ثبت شد · ${faDigits(new Date(saved.savedAt).toLocaleTimeString('fa-IR', { hour12: false }))}`;
     refreshSessions();
+    return saved;
+  }
+
+  async function persist(next) {
+    if (resuming || !next?.session?.id) return;
+    const operation = persistQueue.then(() => persistNow(next));
+    // شکست یک ثبت، صف را برای تلاش صریح بعدی مسموم نمی‌کند؛ خود فراخوان
+    // همچنان نتیجهٔ شکست را می‌گیرد و حق ندارد آن را موفق نشان دهد.
+    persistQueue = operation.catch(() => {});
+    return operation;
   }
 
   /** فهرست جلسه‌ها و پرونده‌های سرور. خطا، فهرست خالیِ «سالم» نیست. */
@@ -1792,7 +1823,9 @@ export async function mount(root, { state, api }) {
         ? structuredClone(record.draft.capitalContinuity) : null;
 
       base.value = inputs.setup.baseIns;
+      historyRequests.invalidate();
       loadedIns = '';
+      resetHistoryDates();
       await loadDates();
       if (!dates.includes(inputs.setup.startDate) || !dates.includes(inputs.setup.endDate)) {
         return { ok: false, why: 'روزهای ذخیره‌شده در تقویم این نماد نیستند' };
@@ -1880,7 +1913,10 @@ export async function mount(root, { state, api }) {
   };
   reserve.oninput = () => { paintCapital(); invalidateSetupDraft(); };
   capital.onblur = () => formatMoneyInput(capital); reserve.onblur = () => formatMoneyInput(reserve);
-  base.onchange = () => { loadedIns = ''; clearErrors(); invalidateSetupDraft(); loadDates(); };
+  base.onchange = () => {
+    historyRequests.invalidate(); loadedIns = ''; resetHistoryDates();
+    clearErrors(); invalidateSetupDraft(); loadDates();
+  };
   $('pt-start-time').onchange = () => { reviewDates(); invalidateSetupDraft(); };
   $('pt-end-time').onchange = () => { reviewDates(); invalidateSetupDraft(); };
   $('pt-grain').onchange = () => { $('pt-review-grain').textContent = $('pt-grain').selectedOptions[0]?.textContent || '—'; clearErrors(); invalidateSetupDraft(); };
@@ -2178,6 +2214,8 @@ export async function mount(root, { state, api }) {
       if (allocationDraft !== sourceDraft) throw new Error('تخصیص هنگام ساخت عکس شروع تغییر کرد؛ دوباره قفل کن');
       const active = activatePortfolioMissionDraft(missionDraft, snapshot);
       if (!active.ok) throw new Error(active.why);
+      const saved = await persist(active.draft);
+      if (!saved?.ok) throw new Error(saved?.why || 'جلسه فعال روی سرور ثبت نشد');
       draft = active.draft;
       paintSnapshot(active.draft.snapshot);
       paintEligibility(active.draft.session);
@@ -2186,7 +2224,6 @@ export async function mount(root, { state, api }) {
       $('pt-mission-state').textContent = active.draft.snapshot.quality.sufficient
         ? 'مأموریت و عکس شروع قفل شدند؛ هنوز هیچ پیشنهاد یا معامله‌ای ساخته نشده است.'
         : 'مأموریت قفل شد؛ عکس شروع ناکافی است و علت‌ها بدون جایگزینی عدد نمایش داده شده‌اند.';
-      await persist(active.draft);
       lockMissionEditor();
     } catch (error) {
       missionDraft = null;
@@ -2210,6 +2247,7 @@ export async function mount(root, { state, api }) {
     }
   });
   return () => {
+    historyRequests.invalidate();
     unwatch?.(); unfeed?.(); setupDraft = null; outlookDraft = null; riskDraft = null;
     allocationDraft = null; missionDraft = null; draft = null;
   };

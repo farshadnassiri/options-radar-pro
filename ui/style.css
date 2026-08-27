@@ -1019,6 +1019,25 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .pt-review { position: static; }
 }
 @media (max-width: 760px) {
+  /* نوار بلند موبایل sticky نیست تا هنگام پیمایش روی عنوان و کنترل‌های
+     صفحه نیفتد. پنل ظرفیت هم درون جریان باز می‌شود: ارتفاع نوار را زیاد
+     می‌کند و به‌جای بیرون‌زدن از لبه RTL، محتوای بعدی را پایین می‌برد. */
+  .top { position: relative; align-items: flex-start; gap: var(--space-2); padding: 10px 12px; }
+  .brand { padding-top: 4px; }
+  .brand-name { font-size: var(--fs-xl); }
+  .health { min-width: 0; justify-content: flex-end; gap: var(--space-2); }
+  .health > * { max-width: 100%; }
+  .metric { min-width: 44px; }
+  .capacity[open] { flex: 1 0 100%; order: 10; min-width: 0; }
+  .capacity-panel {
+    position: static; width: 100%; max-height: min(55vh, 440px); margin-top: var(--space-2);
+  }
+  .capacity-list { grid-template-columns: minmax(0, 1fr); }
+  .capacity-list section, .capacity-list label { min-width: 0; }
+  .capacity-note, .capacity-list h4, .capacity-list small,
+  .capacity-actions span { overflow-wrap: anywhere; }
+  .capacity-actions { align-items: stretch; flex-direction: column; }
+  .capacity-actions button { width: 100%; }
   .backtest-hero, .backtest-date-grid, .backtest-chart-grid, .backtest-analysis-grid { grid-template-columns: 1fr; display: grid; }
   .backtest-hero > span { justify-self: start; }
   .backtest-form, .backtest-runbar { grid-template-columns: 1fr; }

@@ -5,6 +5,7 @@
 // عددهای مالی ریال و درصدها عدد خام می‌مانند؛ قالب نمایشی وارد Excel نمی‌شود.
 
 import { portfolioDossierAnalysis } from '../core/portfolio-dossier-analysis.mjs';
+import { portfolioCapitalGrowth } from '../core/portfolio-capital-growth.mjs';
 import { portfolioDossierWeaknesses } from '../core/portfolio-dossier-weakness.mjs';
 import { portfolioDossierView } from './portfolio-closeout-view.mjs';
 import { downloadXlsx, sheet, sheetParts } from './xlsx.mjs';
@@ -70,7 +71,9 @@ const flatSheet = (name, value) => sheet(
 );
 
 /** جلسه بسته و پرونده خام → برگ‌های پایدار دفترکار. */
-export function portfolioDossierWorkbook(session, dossier, { generatedAt = Date.now() } = {}) {
+export function portfolioDossierWorkbook(session, dossier, {
+  generatedAt = Date.now(), capitalContinuity,
+} = {}) {
   const valid = portfolioDossierView(session, dossier);
   if (!valid.ok) return fail(valid.why);
   if (!Number.isInteger(generatedAt) || generatedAt < 0) {
@@ -135,6 +138,38 @@ export function portfolioDossierWorkbook(session, dossier, { generatedAt = Date.
     row.code, row.severity, row.title, row.description, JSON.stringify(row.evidence || {}),
   ]);
 
+  let growthSheets = [];
+  if (capitalContinuity !== undefined) {
+    const growth = portfolioCapitalGrowth(capitalContinuity);
+    if (!growth.ok) return fail(`روند سرمایه معتبر نیست: ${growth.why}`);
+    const current = growth.rows.at(-1);
+    if (current.sessionId !== session.id
+      || current.portfolioId !== session.portfolioId
+      || current.baseIns !== session.baseIns
+      || moment(current.closedAt) !== moment(session.closedAt)
+      || current.initialCapitalRial !== analysis.initialCapitalRial
+      || current.realizedRial !== analysis.realizedRial
+      || current.finalCapitalRial !== analysis.finalCapitalRial) {
+      return fail('روند سرمایه به همین پرونده بسته‌شده تعلق ندارد');
+    }
+    const growthRows = growth.rows.map((row) => [
+      growth.version, row.index, row.sessionId, row.portfolioId, row.baseIns,
+      moment(row.closedAt), row.initialCapitalRial, row.realizedRial, row.finalCapitalRial,
+      row.changeRial, finite(row.changePct), row.percentageWhy, row.state,
+      row.cumulativeChangeRial, finite(row.cumulativeChangePct),
+      row.cumulativePercentageWhy,
+    ]);
+    growthSheets = sheetParts('روند سرمایه', [
+      'نسخه مدل', 'ترتیب سفر', 'شناسه جلسه', 'شناسه سبد', 'نماد پایه',
+      'لحظه بستن', 'سرمایه شروع (ریال)', 'تحقق‌یافته (ریال)',
+      'سرمایه نهایی (ریال)', 'تغییر سفر (ریال)', 'تغییر سفر (درصد)',
+      'علت نبود درصد سفر', 'کد وضعیت', 'تغییر تجمعی (ریال)',
+      'تغییر تجمعی (درصد)', 'علت نبود درصد تجمعی',
+    ], growthRows, [
+      85, 85, 210, 210, 110, 150, 145, 145, 145, 145, 130, 250, 95, 155, 140, 250,
+    ]);
+  }
+
   return {
     version: PORTFOLIO_DOSSIER_EXPORT_VERSION,
     ok: true,
@@ -156,6 +191,7 @@ export function portfolioDossierWorkbook(session, dossier, { generatedAt = Date.
       ], [220, 320]),
       flatSheet('مأموریت', mission),
       sheet('سرمایه', ['کد', 'عنوان', 'مقدار خام', 'واحد', 'علت نبود'], capitalRows),
+      ...growthSheets,
       flatSheet('حسابداری', {
         accounting: copy(dossier.accounting), accountingWhy: dossier.accountingWhy,
       }),
@@ -193,9 +229,11 @@ export function portfolioDossierFilename(session, dossier) {
 
 /** ساخت قرارداد و تحویل آن به نویسنده xlsx موجود. */
 export async function downloadPortfolioDossier(session, dossier, {
-  generatedAt = Date.now(), downloadImpl = downloadXlsx,
+  generatedAt = Date.now(), downloadImpl = downloadXlsx, capitalContinuity,
 } = {}) {
-  const workbook = portfolioDossierWorkbook(session, dossier, { generatedAt });
+  const workbook = portfolioDossierWorkbook(session, dossier, {
+    generatedAt, capitalContinuity,
+  });
   if (!workbook.ok) return { ok: false, why: workbook.why, name: '', bytes: null };
   const name = portfolioDossierFilename(session, dossier);
   try {
