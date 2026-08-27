@@ -838,6 +838,11 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-clock-now { font-family: var(--mono); font-size: var(--fs-lg); color: var(--accent-ink); direction: ltr; }
 .pt-clock-steps { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .pt-clock-steps button[disabled] { opacity: .45; cursor: not-allowed; }
+.pt-payoff { min-width: 0; display: grid; gap: var(--space-2); }
+.pt-payoff-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.pt-payoff-head b { color: var(--ink-2); font-size: var(--fs-xs); }
+.pt-payoff-chart { min-width: 0; min-height: 220px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.pt-payoff-chart svg { display: block; width: 100%; height: auto; }
 .pt-table-scroll { min-width: 0; overflow-x: auto; }
 .pt-positions-total { margin: 0; color: var(--ink-2); font-size: var(--fs-xs); }
 .pt-positions-total.gain { color: var(--gain); }

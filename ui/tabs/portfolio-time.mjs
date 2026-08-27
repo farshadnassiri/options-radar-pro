@@ -19,6 +19,8 @@ import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
+import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
+import { mountPayoff } from '../chart.mjs';
 import { feesOf, marginParamsOf } from '../../core/settings.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
@@ -292,6 +294,14 @@ export async function mount(root, { state, api }) {
             </table>
             </div>
             <p class="pt-positions-total" id="pt-positions-total"></p>
+            <div class="pt-payoff" id="pt-payoff">
+              <div class="pt-payoff-head">
+                <p class="eyebrow">منحنی بازده سبد در سررسید</p>
+                <b id="pt-payoff-summary">—</b>
+              </div>
+              <div class="pt-payoff-chart" id="pt-payoff-chart"></div>
+              <p class="pt-save-state" id="pt-payoff-state" role="status" aria-live="polite"></p>
+            </div>
             <p class="pt-field-error" id="pt-positions-undocumented" hidden></p>
           </section>
 
@@ -964,6 +974,29 @@ export async function mount(root, { state, api }) {
 
   // موقعیت‌ها زیر نوار سرمایه: اول چقدر جا مانده، بعد چه چیزی در دست
   // است، بعد چه می‌شود ثبت کرد. هیچ عددی اینجا حساب نمی‌شود.
+  // نمودار موجود مصرف می‌شود، نه SVG تازه: دو ظاهر برای یک چیز یعنی
+  // دو جا که باید هم‌زمان درست بمانند.
+  let payoffChart = null;
+  function paintPayoff(session) {
+    const host = $('pt-payoff-chart');
+    const view = portfolioPayoffView(session);
+    if (payoffChart) { payoffChart.destroy(); payoffChart = null; }
+    if (!view.ok) {
+      // نمودارِ خالی چیزی نمی‌گوید؛ علت می‌گوید.
+      host.innerHTML = '';
+      $('pt-payoff-summary').textContent = '—';
+      $('pt-payoff-state').textContent = view.why;
+      return;
+    }
+    $('pt-payoff-summary').textContent = payoffSummaryText(view);
+    // زیانِ نامحدود کنار نمودار گفته می‌شود، چون منحنی در لبه بریده
+    // می‌شود و بریدگی شبیه سقفِ زیان دیده می‌شود.
+    $('pt-payoff-state').textContent = `${view.positionsText} · اعمال‌ها ${view.strikesText}`
+      + (view.unlimitedLoss ? ' · زیان در این سمت سقف ندارد؛ لبهٔ نمودار سقف نیست.' : '');
+    payoffChart = mountPayoff(host, view.chart.legs, view.chart.netCashRial,
+      view.chart.options);
+  }
+
   function paintPositions(session) {
     const section = $('pt-positions');
     // ارزش‌گذاری از همان مدرک هم‌لحظه‌ای می‌آید که حکم اجراپذیری از آن
@@ -1015,6 +1048,7 @@ export async function mount(root, { state, api }) {
     paintClock(session);
     paintLedger(session);
     paintPositions(session);
+    paintPayoff(session);
     const section = $('pt-proposals');
     const evidence = portfolioSessionEligibility(session);
     const view = portfolioSessionProposals(session, evidence);
