@@ -15,6 +15,7 @@ import {
   MISSION_REPLAY_GRAINS, validateMissionLiquidity, validateMissionOutlook,
   validateMissionRisk,
 } from '../core/portfolio-mission.mjs';
+import { validatePortfolioCapitalContinuity } from '../core/portfolio-capital-continuity.mjs';
 import { validSessionId } from './guard.mjs';
 
 export const PORTFOLIO_MISSION_SAVE_VERSION = 1;
@@ -85,6 +86,22 @@ function validReplay(draft) {
   const grain = String(draft?.replay?.grain || '');
   const row = MISSION_REPLAY_GRAINS[grain];
   return !!row && draft.replay.grainSeconds === row.seconds;
+}
+
+function canonicalContinuity(draft, session) {
+  if (!own(draft, 'capitalContinuity')) return { ok: true, continuity: null };
+  const checked = validatePortfolioCapitalContinuity(draft.capitalContinuity, {
+    initialCapitalRial: session.capital?.initialRial,
+    sessionId: session.id,
+    portfolioId: session.portfolioId,
+  });
+  if (!checked.ok || checked.continuity.state !== 'ready') {
+    return fail(`تداوم سرمایه ذخیره‌شده معتبر نیست: ${checked.why}`);
+  }
+  if (!same(draft.capitalContinuity, checked.continuity)) {
+    return fail('تداوم سرمایه ذخیره‌شده canonical نیست');
+  }
+  return { ok: true, continuity: checked.continuity };
 }
 
 function validDraftShell(draft, state) {
@@ -189,6 +206,8 @@ export function restorePortfolioMissionSave(raw) {
   const state = draftSession(raw.draft);
   if (!state.ok) return state;
   if (state.session.id !== raw.id) return fail('شناسه رکورد با شناسه جلسه یکی نیست');
+  const continuity = canonicalContinuity(raw.draft, state.session);
+  if (!continuity.ok) return continuity;
 
   if (step !== 'active') {
     const shell = validDraftShell(raw.draft, state);
@@ -269,6 +288,9 @@ export function validatePortfolioMissionSaveTransition(previous, next) {
   const after = restorePortfolioMissionSave(next);
   if (!after.ok) return after;
   if (before.record.id !== after.record.id) return fail('شناسه جلسه هنگام ذخیره قابل تغییر نیست');
+  if (!same(before.record.draft.capitalContinuity, after.record.draft.capitalContinuity)) {
+    return fail('تداوم سرمایه هنگام گذار مراحل قابل تغییر نیست');
+  }
   if (before.record.draft.session.state !== 'active') return { ok: true, why: '' };
   if (after.record.draft.session.state !== 'active') return fail('جلسه فعال به پیش‌نویس برنمی‌گردد');
 

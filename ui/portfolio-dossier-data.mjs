@@ -42,7 +42,7 @@ export async function loadDossier(id, { fetchImpl } = {}) {
   return { ok: true, why: '', notFound: false, record: result.body };
 }
 
-export async function saveDossier(session, dossier, { fetchImpl } = {}) {
+export async function saveDossier(session, dossier, { fetchImpl, capitalContinuity } = {}) {
   const id = session?.id;
   if (typeof id !== 'string' || !id || dossier?.sessionId !== id) {
     return { ok: false, why: 'شناسه جلسه و پرونده معتبر و یکسان نیست', conflict: false, savedAt: null };
@@ -50,7 +50,10 @@ export async function saveDossier(session, dossier, { fetchImpl } = {}) {
   const result = await requestJson(`${DOSSIER_URL}?id=${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ schemaVersion: DOSSIER_SAVE_VERSION, session, dossier }),
+    body: JSON.stringify({
+      schemaVersion: DOSSIER_SAVE_VERSION, session, dossier,
+      ...(capitalContinuity === undefined ? {} : { capitalContinuity }),
+    }),
   }, fetchImpl);
   if (!result.ok) {
     return { ok: false, why: result.why, conflict: !!result.conflict, savedAt: null };
@@ -70,22 +73,28 @@ export async function saveDossier(session, dossier, { fetchImpl } = {}) {
  * `session` پس داده نمی‌شوند تا یک دستگیره نتواند اشتباهی حالت بسته را
  * به رابط نشت دهد.
  */
-export async function persistDossierView(view, { saveImpl = saveDossier } = {}) {
+export async function persistDossierView(view, {
+  saveImpl = saveDossier, capitalContinuity,
+} = {}) {
   if (!view?.ok || view.session?.state !== 'closed' || !view.dossier) {
     return {
       ok: false, why: 'پرونده بسته‌شده معتبر و آماده ذخیره نیست',
       conflict: false, savedAt: null, view: null, session: null,
     };
   }
-  const saved = await saveImpl(view.session, view.dossier);
+  const saved = await saveImpl(view.session, view.dossier, { capitalContinuity });
   if (!saved?.ok) {
     return {
       ok: false, why: saved?.why || 'پرونده روی سرور ثبت نشد',
       conflict: !!saved?.conflict, savedAt: null, view: null, session: null,
     };
   }
+  const savedView = capitalContinuity === undefined ? view : {
+    ...view,
+    capitalContinuity: structuredClone(capitalContinuity),
+  };
   return {
     ok: true, why: '', conflict: false, savedAt: saved.savedAt,
-    view, session: view.session,
+    view: savedView, session: view.session,
   };
 }

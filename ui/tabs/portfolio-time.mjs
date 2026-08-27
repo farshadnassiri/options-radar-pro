@@ -18,6 +18,7 @@ import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
 import { portfolioDossierAnalysis } from '../../core/portfolio-dossier-analysis.mjs';
 import { portfolioDossierWeaknesses } from '../../core/portfolio-dossier-weakness.mjs';
 import { portfolioDossierComparison } from '../../core/portfolio-dossier-compare.mjs';
+import { portfolioCapitalGrowth } from '../../core/portfolio-capital-growth.mjs';
 import { momentKey } from '../../core/trading-calendar.mjs';
 import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
@@ -32,6 +33,7 @@ import { downloadPortfolioDossier } from '../portfolio-dossier-export.mjs';
 import {
   attachPortfolioCapitalContinuity, portfolioCapitalContinuityView,
 } from '../portfolio-capital-continuity-view.mjs';
+import { portfolioCapitalGrowthView } from '../portfolio-capital-growth-view.mjs';
 import {
   closeoutPreflight, closeoutView, dossierRecordView,
 } from '../portfolio-closeout-view.mjs';
@@ -300,6 +302,14 @@ export async function mount(root, { state, api }) {
                   <b id="pt-capital-continuity-amount">—</b>
                 </div>
                 <dl class="pt-capital-continuity-source" id="pt-capital-continuity-source"></dl>
+                <section class="pt-capital-growth" id="pt-capital-growth" aria-labelledby="pt-capital-growth-title">
+                  <div class="pt-capital-growth-head">
+                    <h5 id="pt-capital-growth-title">روند قطعی سرمایه</h5>
+                    <b id="pt-capital-growth-summary">—</b>
+                  </div>
+                  <p id="pt-capital-growth-state" role="status">روند پس از اعتبارسنجی زنجیره آماده می‌شود.</p>
+                  <div class="pt-capital-growth-rows" id="pt-capital-growth-rows"></div>
+                </section>
                 <p id="pt-capital-continuity-state" role="status" aria-live="polite"></p>
                 <button type="button" class="primary" id="pt-capital-continuity-do" aria-describedby="pt-capital-continuity-state" disabled>جلسه بعد با این سرمایه</button>
               </section>
@@ -1019,6 +1029,9 @@ export async function mount(root, { state, api }) {
     $('pt-capital-continuity-do').disabled = true;
     $('pt-capital-continuity-amount').textContent = '—';
     $('pt-capital-continuity-source').innerHTML = '';
+    $('pt-capital-growth-summary').textContent = '—';
+    $('pt-capital-growth-state').textContent = 'روند پس از اعتبارسنجی زنجیره آماده می‌شود.';
+    $('pt-capital-growth-rows').innerHTML = '';
     $('pt-capital-continuity-state').textContent = 'سرمایه قطعی پس از بستن کامل پرونده آماده می‌شود.';
     // تصمیم پیش از عمل گرفته می‌شود: اگر پس از بستن بگوییم «راستی، سه
     // موقعیت باز بود»، دیگر کاری نمی‌شود کرد.
@@ -1068,14 +1081,46 @@ export async function mount(root, { state, api }) {
     issues.hidden = !analyzed.ok || analyzed.issues.length === 0;
     issues.innerHTML = analyzed.ok ? analyzed.issues.map((row) => `<li>${esc(row.label)}`
       + `${row.detail ? ` — ${esc(row.detail)}` : ''}</li>`).join('') : '';
-    dossierContinuity = portfolioCapitalContinuityView(view.session, view.dossier);
+    dossierContinuity = view.capitalContinuity
+      ? portfolioCapitalContinuityView(view.session, view.dossier, {
+        previous: view.capitalContinuity,
+      })
+      : portfolioCapitalContinuityView(view.session, view.dossier);
     $('pt-capital-continuity-amount').textContent = dossierContinuity.capitalText;
     $('pt-capital-continuity-source').innerHTML = [
       ['نماد پایه', dossierContinuity.baseText],
       ['جلسه منشأ', dossierContinuity.sourceSessionText],
       ['سبد منشأ', dossierContinuity.sourcePortfolioText],
       ['لحظه بستن', dossierContinuity.closedAtText],
+      ...dossierContinuity.lineageRows.map((row) => [
+        `سفر ${row.indexText}`,
+        `جلسه ${row.sessionText} · سبد ${row.portfolioText} · نماد ${row.baseText}`
+          + ` · ${row.initialText} ← ${row.finalText} · بسته‌شده ${row.closedAtText}`,
+      ]),
     ].map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('');
+    const capitalGrowth = portfolioCapitalGrowthView(
+      portfolioCapitalGrowth(dossierContinuity.continuity),
+    );
+    $('pt-capital-growth-summary').textContent = capitalGrowth.summaryText;
+    $('pt-capital-growth-summary').className = capitalGrowth.ok ? capitalGrowth.changeTone : '';
+    $('pt-capital-growth-state').textContent = capitalGrowth.ok
+      ? capitalGrowth.percentageWhy : capitalGrowth.why;
+    $('pt-capital-growth-state').hidden = capitalGrowth.ok && !capitalGrowth.percentageWhy;
+    $('pt-capital-growth-state').toggleAttribute('data-error', !capitalGrowth.ok);
+    $('pt-capital-growth-rows').innerHTML = capitalGrowth.ok
+      ? capitalGrowth.rows.map((row) => `<article data-state="${esc(row.state)}">
+          <header><b>سفر ${esc(row.indexText)}</b><span class="${esc(row.tone)}">${esc(row.stateLabel)}</span></header>
+          <p>جلسه ${esc(row.sessionText)} · سبد ${esc(row.portfolioText)} · نماد ${esc(row.baseText)} · ${esc(row.closedAtText)}</p>
+          <dl>
+            <div><dt>سرمایه شروع</dt><dd>${esc(row.initialText)}</dd></div>
+            <div><dt>تحقق‌یافته</dt><dd class="${esc(row.tone)}">${esc(row.realizedText)}</dd></div>
+            <div><dt>سرمایه نهایی</dt><dd>${esc(row.finalText)}</dd></div>
+            <div><dt>تغییر سفر</dt><dd class="${esc(row.tone)}">${esc(row.changeText)} · ${esc(row.changePctText)}</dd>
+              ${row.percentageWhy ? `<small>${esc(row.percentageWhy)}</small>` : ''}</div>
+            <div><dt>تغییر تجمعی</dt><dd class="${esc(row.cumulativeTone)}">${esc(row.cumulativeChangeText)} · ${esc(row.cumulativeChangePctText)}</dd>
+              ${row.cumulativePercentageWhy ? `<small>${esc(row.cumulativePercentageWhy)}</small>` : ''}</div>
+          </dl>
+        </article>`).join('') : '';
     $('pt-capital-continuity-state').textContent = dossierContinuity.available
       ? 'سرمایه قطعی آماده انتقال است؛ نماد و تاریخ جلسه بعد را خودت انتخاب می‌کنی.'
       : dossierContinuity.why;
@@ -1272,7 +1317,9 @@ export async function mount(root, { state, api }) {
     button.disabled = true;
     button.textContent = 'در حال ذخیره…';
     $('pt-closeout-state').textContent = 'در حال ذخیره پرونده روی سرور…';
-    const persisted = await persistDossierView(view);
+    const persisted = draft?.capitalContinuity
+      ? await persistDossierView(view, { capitalContinuity: draft.capitalContinuity })
+      : await persistDossierView(view);
     closeoutSaving = false;
     if (!persisted.ok) {
       button.disabled = false;
@@ -1741,6 +1788,8 @@ export async function mount(root, { state, api }) {
     try {
       draftId = record.id;
       lastSavedAt = record.savedAt;
+      capitalContinuitySeed = record.draft.capitalContinuity
+        ? structuredClone(record.draft.capitalContinuity) : null;
 
       base.value = inputs.setup.baseIns;
       loadedIns = '';
@@ -1857,6 +1906,10 @@ export async function mount(root, { state, api }) {
         state.textContent = `این پرونده نمایش‌پذیر نیست — ${restored.why}`;
         return;
       }
+      // پرونده در کارت مرحله مرور رسم می‌شود. این مرحله در شروع فرم hidden
+      // است و paintProgress فقط نوار پیشرفت را عوض می‌کند؛ پس بازیابی باید
+      // خود کارت را نیز آشکار کند تا پرونده و روند سرمایه واقعاً دیده شوند.
+      reviewStep.hidden = false;
       paintProgress('active');
       paintSnapshot(restored.session.startSnapshot);
       paintProposals(restored.session);

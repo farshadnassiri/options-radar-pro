@@ -64,38 +64,134 @@ function validLineageRow(row) {
     && finiteNonNegative(row.finalCapitalRial);
 }
 
-function priorLineage(previous, initialCapitalRial, sessionId) {
+function validationFailure(reason = 'invalidPrevious') {
+  return {
+    ok: false,
+    why: PORTFOLIO_CAPITAL_CONTINUITY_REASONS[reason],
+    reason,
+    continuity: null,
+  };
+}
+
+function canonicalLineageRow(row) {
+  return {
+    sessionId: text(row.sessionId),
+    portfolioId: text(row.portfolioId),
+    baseIns: text(row.baseIns),
+    closedAt: { date: row.closedAt.date, second: row.closedAt.second },
+    initialCapitalRial: row.initialCapitalRial,
+    realizedRial: row.realizedRial,
+    finalCapitalRial: row.finalCapitalRial,
+  };
+}
+
+/**
+ * قرارداد انتقالی خوانده‌شده از JSON را بدون ساختن عدد مالی canonical می‌کند.
+ * اگر هویت جلسه تازه داده شود، هم‌سرمایه‌بودن و تازه‌بودن هر دو شناسه هم
+ * همین‌جا سنجیده می‌شوند تا فرم و سرور دو تعریف متفاوت از lineage نداشته باشند.
+ */
+export function validatePortfolioCapitalContinuity(value, {
+  initialCapitalRial = null, sessionId = '', portfolioId = '',
+} = {}) {
+  if (!isObject(value)
+    || value.version !== PORTFOLIO_CAPITAL_CONTINUITY_VERSION
+    || value.ok !== true
+    || value.why !== '' || value.reason !== null
+    || !['ready', 'exhausted'].includes(value.state)
+    || value.analysisVersion !== PORTFOLIO_DOSSIER_ANALYSIS_VERSION
+    || !text(value.sourceSessionId) || !text(value.sourcePortfolioId)
+    || !text(value.baseIns) || !validMoment(value.closedAt)
+    || !finiteNonNegative(value.initialCapitalRial)
+    || !Number.isFinite(value.realizedRial)
+    || !finiteNonNegative(value.finalCapitalRial)
+    || !Array.isArray(value.lineage) || value.lineage.length === 0) {
+    return validationFailure();
+  }
+
+  const lineage = [];
+  const sessionIds = new Set();
+  const portfolioIds = new Set();
+  for (const raw of value.lineage) {
+    if (!validLineageRow(raw)) return validationFailure();
+    const row = canonicalLineageRow(raw);
+    if (row.finalCapitalRial - row.initialCapitalRial !== row.realizedRial) {
+      return validationFailure('capitalMismatch');
+    }
+    if (sessionIds.has(row.sessionId) || portfolioIds.has(row.portfolioId)) {
+      return validationFailure('duplicateSession');
+    }
+    const prior = lineage.at(-1);
+    if (prior && prior.finalCapitalRial !== row.initialCapitalRial) {
+      return validationFailure('capitalMismatch');
+    }
+    sessionIds.add(row.sessionId);
+    portfolioIds.add(row.portfolioId);
+    lineage.push(row);
+  }
+
+  const last = lineage.at(-1);
+  if (last.sessionId !== text(value.sourceSessionId)
+    || last.portfolioId !== text(value.sourcePortfolioId)
+    || last.baseIns !== text(value.baseIns)
+    || !sameMoment(last.closedAt, value.closedAt)
+    || last.initialCapitalRial !== value.initialCapitalRial
+    || last.realizedRial !== value.realizedRial
+    || last.finalCapitalRial !== value.finalCapitalRial) {
+    return validationFailure();
+  }
+  if (value.finalCapitalRial - value.initialCapitalRial !== value.realizedRial) {
+    return validationFailure('capitalMismatch');
+  }
+  if ((value.state === 'exhausted') !== (value.finalCapitalRial === 0)) {
+    return validationFailure();
+  }
+  if (initialCapitalRial !== null) {
+    if (!finiteNonNegative(initialCapitalRial)
+      || value.finalCapitalRial !== initialCapitalRial) {
+      return validationFailure('capitalMismatch');
+    }
+  }
+  const nextSessionId = text(sessionId);
+  const nextPortfolioId = text(portfolioId);
+  if ((nextSessionId && sessionIds.has(nextSessionId))
+    || (nextPortfolioId && portfolioIds.has(nextPortfolioId))) {
+    return validationFailure('duplicateSession');
+  }
+
+  return {
+    ok: true,
+    why: '',
+    reason: null,
+    continuity: {
+      version: PORTFOLIO_CAPITAL_CONTINUITY_VERSION,
+      ok: true,
+      why: '',
+      reason: null,
+      state: value.state,
+      analysisVersion: value.analysisVersion,
+      sourceSessionId: text(value.sourceSessionId),
+      sourcePortfolioId: text(value.sourcePortfolioId),
+      baseIns: text(value.baseIns),
+      closedAt: { date: value.closedAt.date, second: value.closedAt.second },
+      initialCapitalRial: value.initialCapitalRial,
+      realizedRial: value.realizedRial,
+      finalCapitalRial: value.finalCapitalRial,
+      lineage,
+    },
+  };
+}
+
+function priorLineage(previous, initialCapitalRial, sessionId, portfolioId) {
   if (previous == null) return { ok: true, lineage: [] };
-  if (!isObject(previous)
-    || previous.version !== PORTFOLIO_CAPITAL_CONTINUITY_VERSION
-    || previous.ok !== true
-    || !['ready', 'exhausted'].includes(previous.state)
-    || previous.analysisVersion !== PORTFOLIO_DOSSIER_ANALYSIS_VERSION
-    || !finiteNonNegative(previous.finalCapitalRial)
-    || !Array.isArray(previous.lineage) || previous.lineage.length === 0
-    || previous.lineage.some((row) => !validLineageRow(row))) {
-    return { ok: false, reason: 'invalidPrevious' };
-  }
-  const last = previous.lineage.at(-1);
-  if (last.sessionId !== previous.sourceSessionId
-    || last.portfolioId !== previous.sourcePortfolioId
-    || last.baseIns !== previous.baseIns
-    || !sameMoment(last.closedAt, previous.closedAt)
-    || last.initialCapitalRial !== previous.initialCapitalRial
-    || last.realizedRial !== previous.realizedRial
-    || last.finalCapitalRial !== previous.finalCapitalRial) {
-    return { ok: false, reason: 'invalidPrevious' };
-  }
   if (previous.state === 'exhausted' || previous.finalCapitalRial === 0) {
     return { ok: false, reason: 'exhaustedPrevious' };
   }
-  if (previous.finalCapitalRial !== initialCapitalRial) {
-    return { ok: false, reason: 'capitalMismatch' };
-  }
-  if (previous.lineage.some((row) => row.sessionId === sessionId)) {
-    return { ok: false, reason: 'duplicateSession' };
-  }
-  return { ok: true, lineage: structuredClone(previous.lineage) };
+  const checked = validatePortfolioCapitalContinuity(previous, {
+    initialCapitalRial, sessionId, portfolioId,
+  });
+  return checked.ok
+    ? { ok: true, lineage: structuredClone(checked.continuity.lineage) }
+    : { ok: false, reason: checked.reason };
 }
 
 /**
@@ -121,7 +217,7 @@ export function portfolioCapitalContinuity(session, dossier, { previous = null }
     return rejected('invalidCapital');
   }
 
-  const prior = priorLineage(previous, initialCapitalRial, sourceSessionId);
+  const prior = priorLineage(previous, initialCapitalRial, sourceSessionId, sourcePortfolioId);
   if (!prior.ok) return rejected(prior.reason);
 
   const source = {
