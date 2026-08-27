@@ -22,6 +22,7 @@
 // بگذرد رد می‌شود. کوچک‌کردن بی‌خبرِ حجم یعنی کاربر چیزی بگیرد که انتخاب
 // نکرده بود.
 
+import { ledgerRoomFor } from './portfolio-ledger.mjs';
 import { portfolioRankedPlans } from './portfolio-plans.mjs';
 import { PORTFOLIO_SCHEMA_VERSION, recordPortfolioTransaction } from './portfolio-session.mjs';
 
@@ -33,6 +34,7 @@ export const PORTFOLIO_COMMIT_REASONS = Object.freeze({
   notRanked: 'فقط طرحی که همین حالا رتبه دارد ثبت می‌شود',
   alreadyCommitted: 'این طرح در همین لحظه ثبت شده است',
   familyBudgetExceeded: 'سرمایهٔ لازم از بودجهٔ باقی‌ماندهٔ خانواده بیشتر است',
+  missionRiskBreached: 'این ثبت قیود ریسک مأموریت را می‌شکند',
   ledgerRejected: 'دفتر رویداد این ثبت را نپذیرفت',
 });
 
@@ -49,6 +51,7 @@ function fail(reason, detail = '', extra = {}) {
     event: null,
     positionId: '',
     budget: extra.budget ?? null,
+    breaches: extra.breaches ?? [],
   };
 }
 
@@ -110,6 +113,18 @@ export function commitPortfolioPlan(session, evidence, candidateId, { at = null 
   if (Number.isFinite(budget.remainingRial) && capitalRial > budget.remainingRial) {
     return fail('familyBudgetExceeded',
       `${capitalRial} در برابر باقی‌ماندهٔ ${budget.remainingRial}`, { budget });
+  }
+
+  // بودجهٔ خانواده تنها قید نیست: سرمایهٔ آزاد و سقف وجه تضمین هم روی کل
+  // جلسه‌اند و بدون سنجیدنشان هر ثبت تازه تا حدی کورکورانه است.
+  const room = ledgerRoomFor(session, {
+    capitalRial,
+    marginRial: Number(capital.components.marginRial || 0),
+  });
+  if (room.ok && room.breaches.length) {
+    return fail('missionRiskBreached',
+      room.breaches.map((row) => `${row.label}: ${row.wouldBePct.toFixed(1)}٪ در برابر ${row.limitPct}٪`).join(' ،'),
+      { budget, breaches: room.breaches });
   }
 
   // سند: هرچه لازم است تا فردا بشود همین طرح را بازساخت، بدون اینکه به
