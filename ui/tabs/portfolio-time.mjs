@@ -15,6 +15,9 @@ import {
 import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
 import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
 import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
+import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
+import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
+import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
   createPortfolioOutlookDraft, createPortfolioRiskDraft,
@@ -249,6 +252,16 @@ export async function mount(root, { state, api }) {
               <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
               <tbody id="pt-eligibility-body"></tbody>
             </table>
+          </section>
+
+          <section class="pt-clock" id="pt-clock" aria-labelledby="pt-clock-title" hidden>
+            <div class="pt-clock-head">
+              <div><p class="eyebrow">ساعت جلسه</p><h3 id="pt-clock-title">لحظه‌ای که جلسه روی آن ایستاده</h3></div>
+              <b class="pt-clock-now" id="pt-clock-now">—</b>
+            </div>
+            <div class="pt-clock-steps" id="pt-clock-steps" role="group" aria-label="پله‌های زمانی"></div>
+            <p class="pt-save-state" id="pt-clock-state" role="status" aria-live="polite">جلسه روی لحظهٔ شروع ایستاده است.</p>
+            <p class="pt-field-error" id="pt-clock-warn" hidden></p>
           </section>
 
           <section class="pt-ledger" id="pt-ledger" aria-labelledby="pt-ledger-title" hidden>
@@ -861,6 +874,32 @@ export async function mount(root, { state, api }) {
   // نوار سرمایه پیش از پیشنهادها رسم می‌شود، چون همان چیزی است که
   // می‌گوید آیا ثبت بعدی اصلاً جا دارد. هیچ عددی اینجا حساب نمی‌شود؛ هر
   // رقم از مدل نمایش می‌آید.
+  // ساعت بالای همهٔ بخش‌ها می‌نشیند، چون همهٔ آن‌ها به لحظهٔ جاری بند
+  // هستند. هیچ گامی اینجا برداشته نمی‌شود؛ فقط نشان داده می‌شود چه
+  // ممکن است.
+  function paintClock(session) {
+    const section = $('pt-clock');
+    if (!session?.now?.date) { section.hidden = true; return; }
+    section.hidden = false;
+    const view = portfolioClockView(session, { days: dates, expiryDate: expiryOf(session) });
+    $('pt-clock-now').textContent = view.nowText;
+    $('pt-clock-steps').innerHTML = view.steps.map((step) => `<button type="button"
+      class="ghost" data-pt-step="${esc(step.key)}"${step.enabled ? '' : ' disabled'}
+      title="${esc(step.enabled ? step.toText : step.why)}">${esc(step.label)}</button>`).join('');
+    // وقتی هیچ پله‌ای ممکن نیست، سکوت یعنی کاربر فکر می‌کند رابط خراب
+    // است.
+    $('pt-clock-warn').hidden = view.anyEnabled;
+    $('pt-clock-warn').textContent = view.anyEnabled ? '' : view.blockedWhy;
+  }
+
+  /** نزدیک‌ترین سررسیدِ موقعیت‌های باز، برای پلهٔ «تا سررسید». */
+  function expiryOf(session) {
+    const expiries = (session?.events || [])
+      .flatMap((event) => event?.data?.legs || [])
+      .map((leg) => Number(leg?.expiry)).filter((value) => value > 0);
+    return expiries.length ? Math.min(...expiries) : 0;
+  }
+
   function paintLedger(session) {
     const section = $('pt-ledger');
     const view = portfolioLedgerView(session);
@@ -949,6 +988,7 @@ export async function mount(root, { state, api }) {
     // یک نقطهٔ فراخوانی: نوار سرمایه و پیشنهادها همیشه از یک جلسه ساخته
     // می‌شوند. دو فراخوانی جدا یعنی روزی یکی جا می‌ماند و کاربر وضعیت یک
     // جلسه را کنار پیشنهاد جلسهٔ دیگر می‌بیند.
+    paintClock(session);
     paintLedger(session);
     paintPositions(session);
     const section = $('pt-proposals');
@@ -995,7 +1035,8 @@ export async function mount(root, { state, api }) {
     root.dataset.missionActive = 'true';
     root.querySelectorAll('input, select, textarea, button').forEach((control) => {
       if (!control.closest('#pt-eligibility') && !control.closest('#pt-proposals')
-        && !control.closest('#pt-ledger') && !control.closest('#pt-positions')) control.disabled = true;
+        && !control.closest('#pt-ledger') && !control.closest('#pt-positions')
+        && !control.closest('#pt-clock')) control.disabled = true;
     });
   }
 
@@ -1408,6 +1449,73 @@ export async function mount(root, { state, api }) {
     const remaining = done.budget.remainingRial;
     $('pt-proposals-state').textContent = `ثبت شد — موقعیت ${faDigits(done.positionId)}`
       + `${Number.isFinite(remaining) ? ` · باقی‌ماندهٔ خانواده ${fmt.int(remaining / 10)} تومان` : ''}`;
+  };
+
+  /**
+   * قراردادهای عکسِ جاری، دوباره قیمت‌گذاری‌شده در لحظهٔ تازه.
+   *
+   * هویتِ قراردادها از عکسِ جاری می‌آید و **قیمتشان** از دفتر سفارشِ
+   * لحظهٔ تازه. قراردادی که برای آن لحظه دفتری ندارد، بی‌قیمت می‌ماند و
+   * `portfolioMomentSnapshot` خودش «فاقد داده» علامتش می‌زند — اینجا با
+   * قیمتِ لحظهٔ قبل پر نمی‌شود.
+   */
+  async function repriceAt(session, at) {
+    const known = (session.momentSnapshot ?? session.startSnapshot)?.contracts || [];
+    if (!known.length) return { rows: [], spot: null };
+    const loaders = gateLoaders();
+    const gate = createTimeGate({
+      sessionId: session.id, now: at, days: dates,
+      load: {
+        dailies: async (...args) => { try { return await loaders.dailies(...args); } catch { return []; } },
+        trades: async (...args) => { try { return await loaders.trades(...args); } catch { return []; } },
+        book: async (...args) => { try { return await loaders.book(...args); } catch { return []; } },
+      },
+    });
+    const rows = await Promise.all(known.map(async (contract) => {
+      const point = await gate.snapshot(contract.ins).catch(() => null);
+      return {
+        ins: contract.ins, kind: contract.kind, strike: contract.strike,
+        expiry: contract.expiry, size: contract.size,
+        book: point?.quote?.book ?? null,
+        close: point?.trade?.close ?? null,
+      };
+    }));
+    const base = await gate.snapshot(session.baseIns).catch(() => null);
+    return { rows, spot: base?.trade?.close ?? null };
+  }
+
+  $('pt-clock').onclick = async (event) => {
+    const button = event.target.closest('[data-pt-step]');
+    if (!button || button.disabled || !proposalSession) return;
+    const stepped = stepPortfolioSession(proposalSession, button.dataset.ptStep,
+      { days: dates, expiryDate: expiryOf(proposalSession) });
+    if (!stepped.ok) {
+      // «تقویم تمام شد» و «از پایان جلسه رد می‌شود» دو چیزند و متن
+      // خودشان را دارند.
+      $('pt-clock-state').textContent = stepResultText(stepped);
+      return;
+    }
+    $('pt-clock-state').textContent = 'در حال بریدن خوراک‌ها در لحظهٔ تازه…';
+    const { rows, spot } = await repriceAt(stepped.session, stepped.to);
+    const built = portfolioMomentSnapshot(stepped.session, stepped.to, { spot, rows });
+    if (!built.ok) {
+      $('pt-clock-state').textContent = built.why;
+      return;
+    }
+    const next = { ...stepped.session, momentSnapshot: built.snapshot };
+    // هر چهار بخش از همین یک نقطه دوباره رسم می‌شوند.
+    paintEligibility(next);
+    paintProposals(next);
+    $('pt-clock-state').textContent = stepResultText(stepped);
+    // جدولِ خالی به‌خاطر نبودِ داده، شبیه «هیچ فرصتی نیست» دیده می‌شود.
+    // این تفاوت باید صریح گفته شود، نه از روی جدول حدس زده.
+    const short = built.snapshot.quality?.sufficient === false;
+    $('pt-clock-warn').hidden = !short;
+    $('pt-clock-warn').textContent = short
+      ? `عکسِ این لحظه ناکافی است — ${faDigits(String(built.missing.count))} قرارداد بدون داده`
+        + `${built.missing.spot ? ' و قیمت پایه ناموجود' : ''}؛`
+        + ' جدول‌های زیر کمتر از واقعیت‌اند.'
+      : '';
   };
 
   $('pt-positions').onclick = (event) => {

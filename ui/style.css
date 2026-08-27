@@ -773,10 +773,13 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-snapshot[data-quality="missing"] .pt-snapshot-grid article:first-child b,
 .pt-snapshot[data-quality="estimated"] .pt-snapshot-grid article:first-child b { color: var(--warn); }
 .pt-snapshot ul { display: grid; gap: 6px; margin: 0; padding: 0 20px 0 0; color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-normal); }
-.pt-eligibility, .pt-proposals, .pt-ledger, .pt-positions { min-width: 0; display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--panel-2); }
-.pt-eligibility[hidden], .pt-proposals[hidden], .pt-ledger[hidden], .pt-positions[hidden] { display: none; }
-.pt-eligibility-head, .pt-proposals-head, .pt-ledger-head, .pt-positions-head { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); }
-.pt-eligibility-head h3, .pt-proposals-head h3, .pt-ledger-head h3, .pt-positions-head h3 { margin: 0; }
+.pt-eligibility, .pt-proposals, .pt-ledger, .pt-positions, .pt-clock { min-width: 0; display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: var(--panel-2); }
+.pt-eligibility[hidden], .pt-proposals[hidden], .pt-ledger[hidden], .pt-positions[hidden],
+.pt-clock[hidden] { display: none; }
+.pt-eligibility-head, .pt-proposals-head, .pt-ledger-head, .pt-positions-head,
+.pt-clock-head { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); }
+.pt-eligibility-head h3, .pt-proposals-head h3, .pt-ledger-head h3, .pt-positions-head h3,
+.pt-clock-head h3 { margin: 0; }
 .pt-eligibility-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .pt-eligibility-filters button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
 .pt-eligibility-table, .pt-proposals-table { width: 100%; table-layout: fixed; border-collapse: collapse; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
@@ -832,6 +835,9 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-positions-table th:nth-child(9) { width: 6%; }
 .pt-positions-table td.gain { color: var(--gain); }
 .pt-positions-table td.loss { color: var(--loss); }
+.pt-clock-now { font-family: var(--mono); font-size: var(--fs-lg); color: var(--accent-ink); direction: ltr; }
+.pt-clock-steps { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.pt-clock-steps button[disabled] { opacity: .45; cursor: not-allowed; }
 .pt-table-scroll { min-width: 0; overflow-x: auto; }
 .pt-positions-total { margin: 0; color: var(--ink-2); font-size: var(--fs-xs); }
 .pt-positions-total.gain { color: var(--gain); }
@@ -899,7 +905,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .pt-allocation-row .pt-remove-allocation { justify-self: start; }
   .pt-stage-actions { grid-template-columns: 1fr; }
   .pt-eligibility-head, .pt-proposals-head, .pt-ledger-head,
-  .pt-positions-head { align-items: stretch; flex-direction: column; }
+  .pt-positions-head, .pt-clock-head { align-items: stretch; flex-direction: column; }
   .pt-eligibility-table, .pt-eligibility-table tbody,
   .pt-proposals-table, .pt-proposals-table tbody,
   .pt-ledger-table, .pt-ledger-table tbody,
