@@ -113,7 +113,48 @@ function toRow(row) {
     qualityLabel: quality.label,
     qualityReason: quality.reason,
     qualityEstimated: Boolean(quality.estimated),
+    // فقط موقعیت باز بسته می‌شود؛ دکمه روی ردیف بسته یعنی کاری که
+    // شکست می‌خورد.
+    closable: row.status === 'open',
   };
+}
+
+/**
+ * متن شکستِ بستن.
+ *
+ * وقتی دفتر سفارش کم‌عمق است، موتور عددِ ممکن را برمی‌گرداند — و همان
+ * چیزی است که کاربر باید ببیند، نه یک «نشد». بدون این عدد، تنها راهش
+ * حدس‌زدن است.
+ *
+ * متن خام موتور اینجا استفاده نمی‌شود چون عددهایش رقم لاتین‌اند؛
+ * قالب‌بندی کار لایهٔ نمایش است.
+ */
+export function closeFailureText(result) {
+  if (!result || result.ok) return '';
+  const base = faDigits(text(result.why).replace(/\s—\s.*$/, ''));
+  if (result.reason === 'insufficientBook') {
+    return `${base} — بیشترین حجم ممکن ${count(result.executableQty)}`
+      + ` در برابر ${count(result.requestedQty)} خواسته‌شده`;
+  }
+  if (result.reason === 'qtyTooLarge') {
+    return `${base} — حجم باز ${count(result.requestedQty)} نیست`;
+  }
+  return base;
+}
+
+/**
+ * خبرِ بستنِ موفق.
+ *
+ * نقد و کارمزد با علامتِ خودشان می‌آیند: نقدِ مثبت یعنی پول وارد شد.
+ * عوض‌کردن علامت در لایهٔ نمایش یعنی ساختن عددی که موتور نگفته.
+ */
+export function closeDoneText(result) {
+  if (!result?.ok) return '';
+  const what = result.kind === 'close' ? 'موقعیت بسته شد' : 'حجم کم شد';
+  return `${what} — ${count(result.qty)} قرارداد`
+    + ` · نقد خروج ${toman(result.exitCashRial)} تومان`
+    + ` · کارمزد ${toman(result.feeRial)} تومان`
+    + (result.status === 'open' ? ` · باقی‌مانده ${count(result.remainingQty)}` : '');
 }
 
 /**

@@ -9,8 +9,11 @@ import { createTimeGate } from '../../core/time-gate.mjs';
 import { GROUPS as STRATEGY_FAMILIES } from '../../strategies/catalog.mjs';
 import { portfolioSessionProposals } from '../portfolio-proposals.mjs';
 import { breachText, portfolioLedgerView } from '../portfolio-ledger-view.mjs';
-import { portfolioSessionPositionsView } from '../portfolio-positions-view.mjs';
+import {
+  closeDoneText, closeFailureText, portfolioSessionPositionsView,
+} from '../portfolio-positions-view.mjs';
 import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
+import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
   createPortfolioOutlookDraft, createPortfolioRiskDraft,
@@ -267,7 +270,7 @@ export async function mount(root, { state, api }) {
             </div>
             <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
             <table class="pt-positions-table">
-              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>پاها</th><th>کیفیت</th></tr></thead>
+              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>پاها</th><th>کیفیت</th><th>بستن</th></tr></thead>
               <tbody id="pt-positions-body"></tbody>
             </table>
             <p class="pt-field-error" id="pt-positions-undocumented" hidden></p>
@@ -901,7 +904,7 @@ export async function mount(root, { state, api }) {
     if (!view.ok) {
       section.hidden = view.reason === 'noSession';
       $('pt-positions-state').textContent = view.why;
-      $('pt-positions-body').innerHTML = '<tr class="pt-positions-empty"><td colspan="6">—</td></tr>';
+      $('pt-positions-body').innerHTML = '<tr class="pt-positions-empty"><td colspan="7">—</td></tr>';
       warn.hidden = true;
       return;
     }
@@ -917,7 +920,10 @@ export async function mount(root, { state, api }) {
         ? row.legTexts.map((leg) => `<div>${esc(leg)}</div>`).join('')
         : `<span class="pt-positions-why">${esc(row.why || '—')}</span>`}</td>
       <td data-label="کیفیت">${esc(row.qualityLabel)}${row.qualityReason ? `<br><small>${esc(row.qualityReason)}</small>` : ''}</td>
-    </tr>`).join('') : '<tr class="pt-positions-empty"><td colspan="6">—</td></tr>';
+      <td data-label="بستن">${row.closable
+        ? `<button type="button" class="ghost" data-pt-close="${esc(row.id)}">بستن کامل</button>`
+        : '—'}</td>
+    </tr>`).join('') : '<tr class="pt-positions-empty"><td colspan="7">—</td></tr>';
     warn.hidden = !view.undocumentedText;
     warn.textContent = view.undocumentedText;
   }
@@ -1386,6 +1392,23 @@ export async function mount(root, { state, api }) {
     const remaining = done.budget.remainingRial;
     $('pt-proposals-state').textContent = `ثبت شد — موقعیت ${faDigits(done.positionId)}`
       + `${Number.isFinite(remaining) ? ` · باقی‌ماندهٔ خانواده ${fmt.int(remaining / 10)} تومان` : ''}`;
+  };
+
+  $('pt-positions').onclick = (event) => {
+    const button = event.target.closest('[data-pt-close]');
+    if (!button || !proposalSession) return;
+    const evidence = portfolioSessionEligibility(proposalSession);
+    const done = closePortfolioPosition(proposalSession, evidence, button.dataset.ptClose);
+    if (!done.ok) {
+      // شکست بستن هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود — و وقتی دفتر
+      // سفارش کم‌عمق است، عددِ ممکن بخشی از همان خبر است.
+      $('pt-positions-state').textContent = closeFailureText(done);
+      return;
+    }
+    // یک فراخوانی: جدول موقعیت‌ها و نوار سرمایه هر دو با جلسهٔ تازه
+    // دوباره رسم می‌شوند. سرمایهٔ آزاد پس از بستن عوض شده است.
+    paintProposals(done.session);
+    $('pt-positions-state').textContent = closeDoneText(done);
   };
 
   $('pt-eligibility').onclick = (event) => {
