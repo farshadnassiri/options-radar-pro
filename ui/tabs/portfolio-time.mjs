@@ -36,6 +36,7 @@ import {
   filterPortfolioEligibilityRows, portfolioSessionEligibility,
 } from '../portfolio-eligibility.mjs';
 import { listMissionSaves, loadMissionSave, saveMissionDraft } from '../portfolio-mission-data.mjs';
+import { persistDossierView } from '../portfolio-dossier-data.mjs';
 import { missionSaveLabel, resumeMissionRecord } from '../portfolio-mission-resume.mjs';
 import { mountDateWheel } from '../datewheel.mjs';
 import { fmt, faDigits } from '../fmt.mjs';
@@ -946,6 +947,7 @@ export async function mount(root, { state, api }) {
   // پروندهٔ پایان. تا وقتی جلسه بسته نشده، فقط دکمه و هشدارِ پیش از
   // بستن دیده می‌شود.
   let closeoutArmed = false;
+  let closeoutSaving = false;
   function paintCloseout(session) {
     const section = $('pt-closeout');
     if (!session || session.state === 'draft') { section.hidden = true; return; }
@@ -992,9 +994,10 @@ export async function mount(root, { state, api }) {
     }
   }
 
-  $('pt-closeout').onclick = () => {
+  $('pt-closeout').onclick = async () => {
     const button = $('pt-closeout-do');
     if (!proposalSession || proposalSession.state === 'closed') return;
+    if (closeoutSaving) return;
     const pre = closeoutPreflight(proposalSession);
     // بستنِ زودهنگام یا با تعهدِ باز، یک کلیک نیست.
     if (pre.ok && pre.needsConfirm && !closeoutArmed) {
@@ -1007,11 +1010,26 @@ export async function mount(root, { state, api }) {
       { force: true });
     closeoutArmed = false;
     if (!view.ok) { $('pt-closeout-state').textContent = view.why; return; }
+    // بستن در موتور خالص است، اما وضعیت محلی فقط پس از مدرک ثبت سرور
+    // عوض می‌شود. تا آن لحظه `proposalSession` همان جلسه فعال می‌ماند.
+    closeoutSaving = true;
+    button.disabled = true;
+    button.textContent = 'در حال ذخیره…';
+    $('pt-closeout-state').textContent = 'در حال ذخیره پرونده روی سرور…';
+    const persisted = await persistDossierView(view);
+    closeoutSaving = false;
+    if (!persisted.ok) {
+      button.disabled = false;
+      closeoutArmed = pre.ok && pre.needsConfirm;
+      paintCloseout(proposalSession);
+      $('pt-closeout-state').textContent = `پرونده روی سرور ثبت نشد: ${persisted.why}`;
+      return;
+    }
     // پس از بستن، هیچ‌کدام از دکمه‌های معامله و گام نباید کار کنند —
     // جلسه دیگر فعال نیست و موتورها هم ردشان می‌کنند.
-    proposalSession = view.session;
-    paintProposals(view.session);
-    paintDossier(view);
+    proposalSession = persisted.session;
+    paintProposals(persisted.session);
+    paintDossier(persisted.view);
     root.querySelectorAll('[data-pt-commit], [data-pt-close], [data-pt-step]')
       .forEach((control) => { control.disabled = true; });
     button.hidden = true;

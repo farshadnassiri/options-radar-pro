@@ -92,6 +92,9 @@ export function closeoutView(session, evidence, { at, force = false } = {}) {
     why: '',
     reason: null,
     session: out.session,
+    // سند خام موتور برای ذخیره است. مدل نمایشی پایین جایگزین سند نیست؛
+    // متن‌های تومان و رقم فارسی را نمی‌شود فردا به حسابداری خام برگرداند.
+    dossier: d,
     headlineText: d.early
       ? 'جلسه زودتر از پایانش بسته شد'
       : 'جلسه در پایان بازه بسته شد',

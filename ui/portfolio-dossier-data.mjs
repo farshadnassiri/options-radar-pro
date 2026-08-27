@@ -61,3 +61,31 @@ export async function saveDossier(session, dossier, { fetchImpl } = {}) {
   }
   return { ok: true, why: '', conflict: false, savedAt, id };
 }
+
+/**
+ * دروازهٔ اعلام موفقیت بستن جلسه.
+ *
+ * `closeoutView` جلسه را به‌صورت خالص می‌بندد، اما تب نباید آن جلسه را
+ * مصرف کند تا سرور ثبتش را تأیید کرده باشد. در شکست، عمداً `view` و
+ * `session` پس داده نمی‌شوند تا یک دستگیره نتواند اشتباهی حالت بسته را
+ * به رابط نشت دهد.
+ */
+export async function persistDossierView(view, { saveImpl = saveDossier } = {}) {
+  if (!view?.ok || view.session?.state !== 'closed' || !view.dossier) {
+    return {
+      ok: false, why: 'پرونده بسته‌شده معتبر و آماده ذخیره نیست',
+      conflict: false, savedAt: null, view: null, session: null,
+    };
+  }
+  const saved = await saveImpl(view.session, view.dossier);
+  if (!saved?.ok) {
+    return {
+      ok: false, why: saved?.why || 'پرونده روی سرور ثبت نشد',
+      conflict: !!saved?.conflict, savedAt: null, view: null, session: null,
+    };
+  }
+  return {
+    ok: true, why: '', conflict: false, savedAt: saved.savedAt,
+    view, session: view.session,
+  };
+}
