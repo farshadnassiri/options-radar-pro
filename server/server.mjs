@@ -59,6 +59,11 @@ const MAX_BODY = 1024 * 1024;
 // endpoint است و سقف محدود ۱۶ مگابایتی جلوی رشد نامحدود حافظه را می‌گیرد.
 const PORTFOLIO_DOSSIER_MAX_BODY = 16 * 1024 * 1024;
 
+// مأموریت فعال همان عکس تاریخی قابل حسابرسی را حمل می‌کند و ممکن است از
+// سقف عمومی بگذرد. این حد فقط برای PUT جلسه سفر زمانی است؛ بزرگ‌بودن بدنه
+// هیچ‌کدام از اعتبارسنجی‌های نسخه، مرحله یا snapshot را دور نمی‌زند.
+const PORTFOLIO_MISSION_MAX_BODY = 16 * 1024 * 1024;
+
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
   Accept: 'application/json, text/plain, */*',
@@ -941,7 +946,7 @@ async function handle(req, res) {
         return sendJson(res, 200, loaded.record);
       }
       if (req.method === 'PUT') {
-        const body = JSON.parse(await readBody(req, MAX_BODY) || 'null');
+        const body = JSON.parse(await readBody(req, PORTFOLIO_MISSION_MAX_BODY) || 'null');
         if (!body || typeof body !== 'object' || Array.isArray(body)) {
           return sendJson(res, 400, { error: 'بدنه ذخیره مأموریت لازم است' });
         }
