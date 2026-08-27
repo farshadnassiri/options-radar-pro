@@ -28,6 +28,7 @@ import { portfolioWatchView } from '../portfolio-watch-view.mjs';
 import { portfolioDossierAnalysisView } from '../portfolio-dossier-analysis-view.mjs';
 import { portfolioDossierWeaknessView } from '../portfolio-dossier-weakness-view.mjs';
 import { portfolioDossierComparisonView } from '../portfolio-dossier-compare-view.mjs';
+import { downloadPortfolioDossier } from '../portfolio-dossier-export.mjs';
 import {
   closeoutPreflight, closeoutView, dossierRecordView,
 } from '../portfolio-closeout-view.mjs';
@@ -294,6 +295,10 @@ export async function mount(root, { state, api }) {
                 </div>
                 <div class="pt-dossier-weakness-rows" id="pt-dossier-weakness-rows"></div>
               </section>
+              <div class="pt-dossier-export" id="pt-dossier-export">
+                <button type="button" class="ghost" id="pt-dossier-export-do" aria-describedby="pt-dossier-export-state" disabled>دانلود Excel پرونده</button>
+                <p id="pt-dossier-export-state" role="status" aria-live="polite">پرونده‌ای برای خروجی آماده نیست.</p>
+              </div>
               <section class="pt-dossier-compare" id="pt-dossier-compare" aria-labelledby="pt-dossier-compare-title">
                 <div class="pt-dossier-compare-head">
                   <h4 id="pt-dossier-compare-title">مقایسه با نزدیک‌ترین پرونده قدیمی‌تر</h4>
@@ -418,6 +423,7 @@ export async function mount(root, { state, api }) {
   let missionDraft = null, draft = null;
   let eligibilityRows = [], eligibilityFilter = 'all';
   let dossierSummaries = [], dossierCompareToken = 0;
+  let dossierExportView = null, dossierExportBusy = false;
   let allocationRowId = 0;
   // شناسه دیگر ثابت نیست: ادامه‌دادن یک جلسه یعنی همان شناسه سرور را
   // برداشتن، وگرنه هر بار یک جلسه تازه ساخته می‌شد و «ادامه» معنایی
@@ -990,6 +996,9 @@ export async function mount(root, { state, api }) {
     const closed = session.state === 'closed';
     $('pt-closeout-do').hidden = closed;
     if (closed) return;
+    dossierExportView = null;
+    $('pt-dossier-export-do').disabled = true;
+    $('pt-dossier-export-state').textContent = 'پرونده‌ای برای خروجی آماده نیست.';
     // تصمیم پیش از عمل گرفته می‌شود: اگر پس از بستن بگوییم «راستی، سه
     // موقعیت باز بود»، دیگر کاری نمی‌شود کرد.
     const pre = closeoutPreflight(session);
@@ -1002,6 +1011,10 @@ export async function mount(root, { state, api }) {
   function paintDossier(view) {
     const box = $('pt-closeout-dossier');
     box.hidden = false;
+    dossierExportView = view;
+    dossierExportBusy = false;
+    $('pt-dossier-export-do').disabled = false;
+    $('pt-dossier-export-state').textContent = 'خروجی نسخه‌دار پرونده آماده است.';
     $('pt-closeout-state').textContent = `${view.headlineText} · ${view.positionsText}`;
     // تحقق‌یافته و تحقق‌نیافته دو جای جدا: کنارِ هم نشستنشان یعنی
     // خواننده جمعشان می‌کند، و آن جمع هیچ‌کدام نیست.
@@ -1066,6 +1079,28 @@ export async function mount(root, { state, api }) {
     // پرونده فعلی را که همین حالا کامل رسم شده، پس بزند.
     void paintPreviousDossierComparison(view);
   }
+
+  $('pt-dossier-export-do').onclick = async () => {
+    if (!dossierExportView || dossierExportBusy) return;
+    const view = dossierExportView;
+    const button = $('pt-dossier-export-do'), status = $('pt-dossier-export-state');
+    dossierExportBusy = true;
+    button.disabled = true;
+    button.textContent = 'در حال ساخت Excel…';
+    status.removeAttribute('data-error');
+    status.textContent = 'در حال ساخت فایل از سند همین پرونده…';
+    const result = await downloadPortfolioDossier(view.session, view.dossier);
+    if (view !== dossierExportView) return;
+    dossierExportBusy = false;
+    button.disabled = false;
+    button.textContent = 'دانلود Excel پرونده';
+    if (!result.ok) {
+      status.dataset.error = 'true';
+      status.textContent = `خروجی ساخته نشد — ${result.why}`;
+      return;
+    }
+    status.textContent = `فایل ${faDigits(result.name)}.xlsx ساخته شد.`;
+  };
 
   async function paintPreviousDossierComparison(current) {
     const token = ++dossierCompareToken;

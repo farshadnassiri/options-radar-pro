@@ -7,7 +7,7 @@
 import { portfolioDossierAnalysis } from '../core/portfolio-dossier-analysis.mjs';
 import { portfolioDossierWeaknesses } from '../core/portfolio-dossier-weakness.mjs';
 import { portfolioDossierView } from './portfolio-closeout-view.mjs';
-import { sheet, sheetParts } from './xlsx.mjs';
+import { downloadXlsx, sheet, sheetParts } from './xlsx.mjs';
 
 export const PORTFOLIO_DOSSIER_EXPORT_VERSION = 1;
 
@@ -176,4 +176,40 @@ export function portfolioDossierWorkbook(session, dossier, { generatedAt = Date.
       ...sheetParts('یافته‌ها', ['کد پایدار', 'شدت', 'عنوان', 'شرح', 'شاهد JSON'], findingRows),
     ],
   };
+}
+
+const safeFilePart = (value, fallback) => {
+  const cleaned = text(value).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
+  return cleaned || fallback;
+};
+
+/** نام پایدار و امن فایل؛ شناسه جلسه عمداً وارد مسیر نمی‌شود. */
+export function portfolioDossierFilename(session, dossier) {
+  const base = safeFilePart(session?.baseIns, 'base');
+  const date = Number(dossier?.closedAt?.date);
+  return `portfolio-dossier-${base}-${Number.isInteger(date) && date > 0 ? date : 'unknown-date'}`;
+}
+
+/** ساخت قرارداد و تحویل آن به نویسنده xlsx موجود. */
+export async function downloadPortfolioDossier(session, dossier, {
+  generatedAt = Date.now(), downloadImpl = downloadXlsx,
+} = {}) {
+  const workbook = portfolioDossierWorkbook(session, dossier, { generatedAt });
+  if (!workbook.ok) return { ok: false, why: workbook.why, name: '', bytes: null };
+  const name = portfolioDossierFilename(session, dossier);
+  try {
+    const bytes = await downloadImpl(name, workbook.sheets);
+    if (!Number.isFinite(bytes) || bytes < 0) {
+      return { ok: false, why: 'نویسنده Excel اندازه فایل معتبر برنگرداند', name, bytes: null };
+    }
+    return { ok: true, why: '', name, bytes };
+  } catch (error) {
+    return {
+      ok: false,
+      why: `فایل Excel ساخته نشد: ${error?.message || 'خطای نامعلوم'}`,
+      name,
+      bytes: null,
+    };
+  }
 }

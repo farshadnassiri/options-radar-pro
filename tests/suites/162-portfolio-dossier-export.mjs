@@ -116,8 +116,9 @@ group('۱۶۲. قرارداد نسخه‌دار دادهٔ Excel پرونده');
     && source162.includes("from './xlsx.mjs'")
     && /portfolioDossierAnalysis\(session, dossier\)/.test(source162)
     && /portfolioDossierWeaknesses\(session, dossier\)/.test(source162));
-  check('برش خالص است و شبکه، DOM یا دانلود ندارد',
-    !/fetch\(|document\.|querySelector|downloadXlsx|Blob\(|URL\.createObjectURL/.test(source162));
+  const builderSource162 = source162.slice(0, source162.indexOf('const safeFilePart'));
+  check('سازنده برگ‌ها خالص است و شبکه، DOM یا دانلود ندارد',
+    !/fetch\(|document\.|querySelector|await downloadImpl|Blob\(|URL\.createObjectURL/.test(builderSource162));
   check('نامعلوم به NaN می‌رود و صفر جایگزین نمی‌شود',
     /Number\.isFinite\(value\) \? value : NaN/.test(source162)
     && !/\?\s*value\s*:\s*0/.test(source162));

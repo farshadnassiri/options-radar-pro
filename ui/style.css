@@ -904,6 +904,10 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .pt-dossier-weakness-rows dl > div { min-width: 0; display: flex; justify-content: space-between; gap: var(--space-2); }
 .pt-dossier-weakness-rows dt { color: var(--muted); font-size: var(--fs-xs); }
 .pt-dossier-weakness-rows dd { margin: 0; color: var(--ink-2); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.pt-dossier-export { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
+.pt-dossier-export button { flex: 0 0 auto; max-width: 100%; }
+.pt-dossier-export p { min-width: 0; margin: 0; color: var(--muted); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.pt-dossier-export p[data-error] { color: var(--loss); }
 .pt-dossier-compare { min-width: 0; display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-2); }
 .pt-dossier-compare-head { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
 .pt-dossier-compare-head h4 { margin: 0; color: var(--ink); font-size: var(--fs-sm); }
@@ -1007,6 +1011,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .pt-dossier-analysis-figures { grid-template-columns: minmax(0, 1fr); }
   .pt-dossier-weakness-head { align-items: stretch; flex-direction: column; }
   .pt-dossier-weakness-rows { grid-template-columns: minmax(0, 1fr); }
+  .pt-dossier-export { align-items: stretch; flex-direction: column; }
+  .pt-dossier-export button { width: 100%; }
   .pt-dossier-compare-head { align-items: stretch; flex-direction: column; }
   .pt-dossier-compare-identities, .pt-dossier-compare-metrics,
   .pt-dossier-compare-findings { grid-template-columns: minmax(0, 1fr); }
