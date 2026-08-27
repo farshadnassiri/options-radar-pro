@@ -495,9 +495,48 @@ group('۹. بودجهٔ خواندنِ اجباری از سقف نگذشته');
   check('هیچ دستهٔ آزمونی از ۴۰ کیلوبایت نگذشته', big.length === 0, big.join(' ،') || 'همه کوچک');
 
   // ابزارهایی که پروتکل به آن‌ها ارجاع می‌دهد باید واقعاً باشند.
-  for (const f of ['NEXT.md', 'PROTOCOL.md', 'BACKLOG.md', 'tools/next.mjs', 'tools/check.mjs', 'tools/progress.mjs', 'tests/harness.mjs']) {
+  for (const f of ['NEXT.md', 'PROTOCOL.md', 'BACKLOG.md', 'tools/next.mjs', 'tools/check.mjs', 'tools/progress.mjs', 'tools/ci.mjs', 'tests/harness.mjs']) {
     check(`${f} موجود است`, fs.existsSync(path.join(ROOT, f)));
   }
+}
+
+
+// ۱۰ ─────────────────────────────────────────────────────────────────
+//
+// چیدمان آزمون سبد یک بار نوشته می‌شود، نه به‌ازای هر دسته.
+//
+// چرا: دسته‌های ۱۲۸ و ۱۲۹ و ۱۳۰ هر سه یک چیدمان را کپی کرده بودند —
+// همان جلسه، همان قراردادها، همان دفتر، همان مأموریت. هر تغییری در شکل
+// جلسه باید سه جا انجام می‌شد، و اولین باری که یکی جا می‌ماند دو دسته دو
+// چیز متفاوت می‌سنجیدند و **هیچ‌کدام قرمز نمی‌شد**. آزمونی که بی‌صدا چیز
+// دیگری بسنجد، از نبودنش بدتر است.
+//
+// نشانهٔ کپی: دسته‌ای که هم مأموریت می‌سازد و هم نامزد. این دو با هم فقط
+// در چیدمان لازم‌اند؛ دسته باید چیدمان آماده را از `tests/fixtures/`
+// بگیرد.
+group('۱۰. چیدمان آزمون سبد کپی نمی‌شود');
+{
+  const suiteDir = path.join(ROOT, 'tests/suites');
+  const fixture = path.join(ROOT, 'tests/fixtures/portfolio.mjs');
+  check('چیدمان مشترک سبد سر جایش است', fs.existsSync(fixture));
+
+  const copies = [];
+  for (const file of fs.readdirSync(suiteDir).filter((f) => f.endsWith('.mjs'))) {
+    const src = fs.readFileSync(path.join(suiteDir, file), 'utf8');
+    if (/createPortfolioMission/.test(src) && /portfolioCandidates/.test(src)) copies.push(file);
+  }
+  check('هیچ دسته‌ای چیدمان سبد را دوباره نمی‌سازد — از tests/fixtures/portfolio.mjs بگیرید',
+    copies.length === 0, copies.join(' ،') || 'هیچ‌کدام');
+
+  // بارگذار فقط دسته‌ها را می‌خواند؛ چیدمان دسته نیست و نباید اجرا شود.
+  const runSrc = fs.readFileSync(path.join(ROOT, 'tests/run.mjs'), 'utf8');
+  check('بارگذار فقط tests/suites را می‌خواند، نه tests/fixtures',
+    /suites/.test(runSrc) && !/fixtures/.test(runSrc));
+
+  // انبار داده در harness نمی‌نشیند: harness ابزار ادعاست.
+  const guardHarnessSrc = fs.readFileSync(path.join(ROOT, 'tests/harness.mjs'), 'utf8');
+  check('harness ابزار ادعا مانده، نه انبار چیدمان',
+    !/portfolioFixture|createPortfolioMission/.test(guardHarnessSrc));
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

@@ -7,6 +7,8 @@ import {
 } from '../../core/portfolio-mission.mjs';
 import { createTimeGate } from '../../core/time-gate.mjs';
 import { GROUPS as STRATEGY_FAMILIES } from '../../strategies/catalog.mjs';
+import { portfolioSessionProposals } from '../portfolio-proposals.mjs';
+import { commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
   createPortfolioOutlookDraft, createPortfolioRiskDraft,
@@ -240,6 +242,22 @@ export async function mount(root, { state, api }) {
             <table class="pt-eligibility-table">
               <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
               <tbody id="pt-eligibility-body"></tbody>
+            </table>
+          </section>
+
+          <section class="pt-proposals" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
+            <div class="pt-proposals-head">
+              <div><p class="eyebrow">پیشنهاد اجراپذیر</p><h3 id="pt-proposals-title">طرح‌های در دسترس با این مأموریت</h3></div>
+            </div>
+            <p class="pt-save-state" id="pt-proposals-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، طرح‌های در دسترس اینجا می‌آیند.</p>
+            <table class="pt-proposals-table">
+              <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم (تومان)</th><th>بیشترین سود (تومان)</th><th>بیشترین زیان (تومان)</th><th>چرا این جایگاه</th><th>کیفیت</th><th>انتخاب</th></tr></thead>
+              <tbody id="pt-proposals-body"></tbody>
+            </table>
+            <p class="eyebrow" id="pt-proposals-aside-title" hidden>کنار گذاشته‌شده‌ها و نامعلوم‌ها</p>
+            <table class="pt-proposals-table pt-proposals-aside-table" id="pt-proposals-aside" hidden>
+              <thead><tr><th>استراتژی</th><th>وضعیت</th><th>علت</th><th>کیفیت</th></tr></thead>
+              <tbody id="pt-proposals-aside-body"></tbody>
             </table>
           </section>
 
@@ -797,10 +815,60 @@ export async function mount(root, { state, api }) {
     paintEligibilityRows();
   }
 
+  // پیشنهادها از همان مدرکی ساخته می‌شوند که بالا رسم شد؛ اینجا دوباره
+  // ساخته نمی‌شود و هیچ عددی هم اینجا حساب نمی‌شود.
+  // جلسه‌ای که پیشنهادها از رویش ساخته شده. ثبت، جلسهٔ تازه برمی‌گرداند و
+  // همین‌جا جایگزین می‌شود تا بودجهٔ باقی‌مانده و «ثبت‌شده»ها در رسم بعدی
+  // درست دربیایند.
+  let proposalSession = null;
+  const committedIds = new Set();
+
+  function paintProposals(session) {
+    proposalSession = session;
+    const section = $('pt-proposals');
+    const evidence = portfolioSessionEligibility(session);
+    const view = portfolioSessionProposals(session, evidence);
+    const asideTable = $('pt-proposals-aside');
+    const asideTitle = $('pt-proposals-aside-title');
+    if (!view.ok) {
+      // جدول خالی چیزی نمی‌گوید؛ علت می‌گوید.
+      section.hidden = view.reason === 'inactiveSession';
+      $('pt-proposals-state').textContent = view.why;
+      $('pt-proposals-body').innerHTML = '<tr class="pt-proposals-empty"><td colspan="9">—</td></tr>';
+      asideTable.hidden = true;
+      asideTitle.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    $('pt-proposals-state').textContent = view.countsText;
+    $('pt-proposals-body').innerHTML = view.shortlist.length ? view.shortlist.map((row) => `<tr>
+      <td data-label="رتبه">${esc(row.rankText)}</td>
+      <td data-label="استراتژی">${esc(row.defLabel)}<br><small>${esc(row.familyLabel)}</small></td>
+      <td data-label="امتیاز"><b>${esc(row.scoreText)}</b></td>
+      <td data-label="سرمایه لازم">${esc(row.capitalTomanText)}</td>
+      <td data-label="بیشترین سود">${esc(row.maxProfitTomanText)}</td>
+      <td data-label="بیشترین زیان">${esc(row.maxLossTomanText)}</td>
+      <td data-label="چرا این جایگاه">${esc(row.liftedText)}${row.draggedText === '—' ? '' : `<br><small>کاهنده: ${esc(row.draggedText)}</small>`}</td>
+      <td data-label="کیفیت">${esc(row.qualityLabel)}${row.qualityReason ? `<br><small>${esc(row.qualityReason)}</small>` : ''}</td>
+      <td data-label="انتخاب">${committedIds.has(row.candidateId)
+        ? '<b class="pt-committed">ثبت شد</b>'
+        : `<button type="button" class="ghost" data-pt-commit="${esc(row.candidateId)}">انتخاب و ثبت</button>`}</td>
+    </tr>`).join('') : '<tr class="pt-proposals-empty"><td colspan="9">هیچ طرحی با این مأموریت رتبه نگرفت.</td></tr>';
+
+    asideTable.hidden = view.setAside.length === 0;
+    asideTitle.hidden = view.setAside.length === 0;
+    $('pt-proposals-aside-body').innerHTML = view.setAside.map((row) => `<tr class="pt-proposals-aside" data-kind="${esc(row.kind)}">
+      <td data-label="استراتژی">${esc(row.defLabel)}</td>
+      <td data-label="وضعیت"><b>${esc(row.kindLabel)}</b></td>
+      <td data-label="علت">${esc(row.why)}${row.unknownText ? `<br><small>${esc(row.unknownText)}</small>` : ''}</td>
+      <td data-label="کیفیت">${esc(row.qualityLabel)}</td>
+    </tr>`).join('');
+  }
+
   function lockMissionEditor() {
     root.dataset.missionActive = 'true';
     root.querySelectorAll('input, select, textarea, button').forEach((control) => {
-      if (!control.closest('#pt-eligibility')) control.disabled = true;
+      if (!control.closest('#pt-eligibility') && !control.closest('#pt-proposals')) control.disabled = true;
     });
   }
 
@@ -1037,6 +1105,7 @@ export async function mount(root, { state, api }) {
         paintSnapshot(record.session.startSnapshot);
       }
       paintEligibility(record.session);
+      paintProposals(record.session);
       paintProgress(record.stage);
       return { ok: true, why: '' };
     } finally {
@@ -1188,6 +1257,24 @@ export async function mount(root, { state, api }) {
     })[button.dataset.ptEdit];
     target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  $('pt-proposals').onclick = (event) => {
+    const button = event.target.closest('[data-pt-commit]');
+    if (!button || !proposalSession) return;
+    const candidateId = button.dataset.ptCommit;
+    const evidence = portfolioSessionEligibility(proposalSession);
+    const done = commitPortfolioPlan(proposalSession, evidence, candidateId);
+    if (!done.ok) {
+      // شکست ثبت هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود.
+      $('pt-proposals-state').textContent = done.why;
+      return;
+    }
+    committedIds.add(candidateId);
+    paintProposals(done.session);
+    const remaining = done.budget.remainingRial;
+    $('pt-proposals-state').textContent = `ثبت شد — موقعیت ${faDigits(done.positionId)}`
+      + `${Number.isFinite(remaining) ? ` · باقی‌ماندهٔ خانواده ${fmt.int(remaining / 10)} تومان` : ''}`;
+  };
+
   $('pt-eligibility').onclick = (event) => {
     const button = event.target.closest('[data-pt-eligibility-filter]');
     if (!button) return;
@@ -1212,6 +1299,7 @@ export async function mount(root, { state, api }) {
       draft = active.draft;
       paintSnapshot(active.draft.snapshot);
       paintEligibility(active.draft.session);
+      paintProposals(active.draft.session);
       paintProgress('active');
       $('pt-mission-state').textContent = active.draft.snapshot.quality.sufficient
         ? 'مأموریت و عکس شروع قفل شدند؛ هنوز هیچ پیشنهاد یا معامله‌ای ساخته نشده است.'

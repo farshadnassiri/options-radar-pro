@@ -2,7 +2,7 @@
 //
 // دستهٔ مستقل آزمون. اجرا با کل مجموعه:  node tests/run.mjs
 
-import { check, group } from '../harness.mjs';
+import { check, group, near } from '../harness.mjs';
 import { evaluate } from '../../core/evaluate.mjs';
 import { passesFilters } from '../../core/scan.mjs';
 import { defaults } from '../../core/settings.mjs';
@@ -28,11 +28,23 @@ group('۶۰. مهار بازده نامتعارف');
       underlying: 'نمونه', sigmaHist: 0.6 } });
 
   const row = mk({ ...s, feeOption: 0 });
-  check('مخرجِ اسپرد بدهکارِ ناچیز، دیگر خودِ بدهکاری نیست',
-    row.capitalKind === 'DEBIT_BLOCKED' && row.capital > -row.netCash,
+  // ——— اصلاح ۱۴۰۵/۰۶/۰۵ ———
+  // اینجا دو ادعا بود که می‌گفتند مخرج از خودِ بدهکاری بزرگ‌تر می‌شود و
+  // بازده به مرتبهٔ هزار می‌رسد. هر دو **عارضهٔ یک اشتباه در موتور** را پین
+  // کرده بودند، نه رفتار درست را: موتور هر اختیارِ در سود را حتماً
+  // اعمال‌شده فرض می‌کرد، پس برای پوتِ ۱۰۰٬۰۰۰ حتی در قیمت ۹۹٬۹۹۹ کارمزد
+  // اعمال و خرید سهم روی کل ارزش اسمی می‌گرفت. آن کارمزدِ خیالی
+  // `maxLoss` را باد می‌کرد و `capitalBase` همان را مخرج می‌گذاشت.
+  //
+  // بیشترین زیانِ یک اسپرد بدهکار، دقیقاً همان بدهکار خالص است. حالا که
+  // موتور درست شده، مخرج هم همان است و مهارِ بازده نامتعارف باید از جایی
+  // بیاید که این دسته از اول گفته بود: نشان‌دار کردن ردیف و کف سرمایهٔ
+  // کاربر — نه از عددی که تصادفی بزرگ شده بود.
+  check('بیشترین زیان اسپرد بدهکار همان بدهکار خالص است، پس مخرج هم همان',
+    row.capitalKind === 'DEBIT' && near(row.capital, -row.netCash, 1e-9),
     `${Math.round(row.capital).toLocaleString()} در برابر ${Math.round(-row.netCash).toLocaleString()}`);
-  check('و بازده ماهانه از مرتبهٔ صدهزار درصد به مرتبهٔ هزار رسید',
-    row.retMonthPct < 5000, `${row.retMonthPct.toFixed(2)}٪`);
+  check('و بازدهِ این مظنهٔ غیرواقعی همچنان نامتعارف می‌ماند — مدل پنهانش نمی‌کند',
+    row.retMonthPct > 5000, `${row.retMonthPct.toFixed(2)}٪`);
   check('ولی هنوز نامتعارف است و برچسبش را می‌گیرد',
     row.warn.includes('بازده نامتعارف'), row.warn.join('، '));
   check('آستانهٔ صفر، هشدار را خاموش می‌کند — قاعده سلیقهٔ کاربر است',
