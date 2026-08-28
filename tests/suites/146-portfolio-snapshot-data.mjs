@@ -29,7 +29,11 @@ group('۱۴۶. قراردادهای یک لحظه از سرور');
   const fakeGate = (opts = {}) => ({
     snapshot: async (ins) => (opts.blind ? null : {
       quote: { book: bookFor(ins) },
-      trade: { close: ins === '900001' ? 10_200 : 70 },
+      trade: {
+        price: ins === '900001' ? 10_200 : 70,
+        second: at146.second - 1,
+        value: ins === '900001' ? 500_000_000 : 50_000_000,
+      },
     }),
   });
   const load = (extra = {}, gateOpts = {}) => loadMomentContracts(session146, at146, {
@@ -45,6 +49,9 @@ group('۱۴۶. قراردادهای یک لحظه از سرور');
   check('هر ردیف هویت کامل دارد',
     out146.rows.every((row) => row.ins && (row.kind === 'call' || row.kind === 'put')
       && row.strike > 0 && row.expiry === 20260620 && row.size === 1000));
+  check('قیمت لحظه‌ای از میدان واقعی markAt خوانده می‌شود، نه close روزانه',
+    out146.spot === 10_200
+    && out146.rows.every((row) => row.close === 70 && row.trade?.price === 70));
 
   // ── بند ۳: مستقیم به سازندهٔ عکس ────────────────────────────────────
   // شکل دوم یعنی هر مصرف‌کننده باید هر دو را بشناسد.
@@ -137,6 +144,6 @@ group('۱۴۶. قراردادهای یک لحظه از سرور');
     /priced\.warnings\.length\) failures\.push\(\.\.\.priced\.warnings\)/.test(tabSrc146));
   // شکل قرارداد باید همان شکلی باشد که موتورها می‌خوانند.
   check('شکل قرارداد در عکس همان شکل مصرفیِ موتورهاست',
-    /quote: \{ book: row\.book, close: row\.close, quality: point\.bookQuality \}/
-      .test(tabSrc146));
+    /optionDailyValueRial: Number\(row\.trade\?\.value\)/.test(tabSrc146)
+    && /quote: row\.quote/.test(tabSrc146));
 }

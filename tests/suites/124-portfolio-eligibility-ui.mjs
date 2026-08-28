@@ -158,6 +158,61 @@ group('۱۲۴. مدرک اجراپذیری جلسهٔ فعال در رابط');
     archivedEvidence.rows.every((row) => row.executableQty === null)
     && archivedEvidence.rows.every((row) => row.reasons.some((why) => why.code === 'underlyingValueMissing')));
 
+  const historicalSnapshot124 = {
+    at: at124,
+    underlyingDailyValueRial: 200_000_000,
+    contracts: [{
+      ins: 'hist-opt', name: 'اختیار تاریخی اهرم', kind: 'call',
+      strike: 100_000, expiry: 20260620, size: 1000,
+      underlyingDailyValueRial: 200_000_000,
+      optionDailyValueRial: 20_000_000, openInterest: 200,
+      quality: feed, asOf: at124,
+      quote: { bid: 99, ask: 105, book, complete: true, quality: bookQuality, asOf: at124 },
+    }],
+    // دیده‌بان امروز عمداً نامرتبط است؛ قرارداد قیمت‌گذاری‌شدهٔ همان لحظه
+    // باید بر آن مقدم باشد تا futureData ساختگی نسازد.
+    universe: { rows: mixedArchivedRows, quality: universeQuality },
+  };
+  const historicalCandidates124 = portfolioEligibilityCandidates(historicalSnapshot124,
+    { baseIns: '900001' });
+  const historicalEvidence124 = portfolioSessionEligibility({
+    ...active, baseIns: '900001', startSnapshot: historicalSnapshot124,
+  });
+  check('قراردادهای قیمت‌گذاری‌شدهٔ همان لحظه بر دیده‌بان امروز مقدم‌اند',
+    historicalCandidates124.length === 2
+    && historicalCandidates124.every((row) => row.candidate.id.startsWith('hist-opt:'))
+    && historicalEvidence124.rows.length === 2
+    && historicalEvidence124.rows.every((row) => row.accepted));
+
+  const zeroLiquidityMission124 = {
+    ...made124.mission,
+    liquidity: {
+      ...made124.mission.liquidity,
+      minUnderlyingDailyValueRial: 0,
+      minOptionDailyValueRial: 0,
+      minOpenInterest: 0,
+    },
+  };
+  const missingMetricsSnapshot124 = {
+    ...historicalSnapshot124,
+    underlyingDailyValueRial: null,
+    contracts: historicalSnapshot124.contracts.map((row) => ({
+      ...row,
+      underlyingDailyValueRial: null,
+      optionDailyValueRial: null,
+      openInterest: null,
+    })),
+  };
+  const zeroThresholdEvidence124 = portfolioSessionEligibility({
+    ...active,
+    baseIns: '900001',
+    lockedMission: zeroLiquidityMission124,
+    startSnapshot: missingMetricsSnapshot124,
+  });
+  check('آستانهٔ صفر فیلترِ فاقد داده را واقعاً غیرفعال می‌کند',
+    zeroThresholdEvidence124.rows.length === 2
+    && zeroThresholdEvidence124.rows.every((row) => row.accepted));
+
   const adapter = readSrc('../ui/portfolio-eligibility.mjs');
   const tab = readSrc('../ui/tabs/portfolio-time.mjs');
   const css = readSrc('../ui/style.css');
@@ -170,6 +225,8 @@ group('۱۲۴. مدرک اجراپذیری جلسهٔ فعال در رابط');
       .every((id) => tab.includes(`id="${id}"`))
     && ['all', 'accepted', 'rejected']
       .every((mode) => tab.includes(`data-pt-eligibility-filter="${mode}"`)));
+  check('رابط معنای صفر برای فیلترهای اختیاری را صریح می‌گوید',
+    tab.includes('برای تاریخی که آرشیو موقعیت باز ندارد، صفر وارد کن'));
   check('نمای موبایل جدول را کارت تک‌ستونه می‌کند و اسکرول افقی نمی‌سازد',
     css.includes('.pt-eligibility-table')
     && css.includes('.pt-eligibility-table td::before')

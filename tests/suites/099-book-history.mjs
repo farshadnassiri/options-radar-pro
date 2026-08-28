@@ -31,6 +31,9 @@ group('۹۸. دفتر سفارش تاریخی');
   ];
   const events = normalizeBookEvents(raw);
 
+  check('نرمال‌سازی روی خروجی ازپیش‌نرمال‌شده همانی است و دفتر را خالی نمی‌کند',
+    JSON.stringify(normalizeBookEvents(events)) === JSON.stringify(events));
+
   check('رویدادها به ثانیه و بعد refID مرتب می‌شوند',
     events.map((e) => e.refId).join(',') === '1,2,3,4,5,20,30');
   check('ثانیه از HHMMSS درست درمی‌آید', events[0].second === 9 * 3600 && events[5].second === 9 * 3600 + 35 * 60 + 10);

@@ -65,6 +65,7 @@ function identitiesFrom(rows, baseIns) {
         if (!text(quote?.ins)) continue;
         contracts.push({
           ins: text(quote.ins),
+          name: text(quote.name),
           kind: side,
           strike: strike.strike,
           expiry: expiry.endDate || null,
@@ -77,6 +78,27 @@ function identitiesFrom(rows, baseIns) {
   }
   const spot = num(ua.close) > 0 ? num(ua.close) : (num(ua.last) > 0 ? num(ua.last) : null);
   return { spot, contracts };
+}
+
+function tradePrice(trade) {
+  const price = num(trade?.price);
+  if (Number.isFinite(price) && price > 0) return price;
+  // سازگاری با آداپترهای قدیمی و fixtureهایی که ردیف روزانه می‌دهند.
+  const close = num(trade?.close);
+  return Number.isFinite(close) && close > 0 ? close : null;
+}
+
+function historicalQuote(point, at) {
+  if (!point?.quote) return null;
+  const second = Number(point.quote.asOf);
+  return {
+    ...point.quote,
+    asOf: {
+      date: Number(at?.date) || 0,
+      second: Number.isFinite(second) ? second : Number(at?.second) || 0,
+    },
+    quality: point.bookQuality ?? point.quote.quality ?? null,
+  };
 }
 
 /**
@@ -150,15 +172,19 @@ export async function loadMomentContracts(session, at, {
   let priced = 0;
   const rows = await Promise.all(bounded.kept.map(async (contract) => {
     const point = await gate.snapshot(contract.ins).catch(() => null);
-    const book = point?.quote?.book ?? null;
-    const close = point?.trade?.close ?? null;
+    const quote = historicalQuote(point, at);
+    const book = quote?.book ?? null;
+    const close = tradePrice(point?.trade);
     if (book || close) priced += 1;
     return {
-      ins: contract.ins, kind: contract.kind, strike: contract.strike,
+      ins: contract.ins, name: contract.name, kind: contract.kind, strike: contract.strike,
       expiry: contract.expiry, size: contract.size,
       // نبودِ داده اینجا پر نمی‌شود؛ سازندهٔ عکس خودش «فاقد داده»
       // علامتش می‌زند.
-      book, close,
+      book, close, quote,
+      trade: point?.trade ?? null,
+      quality: point?.tradeQuality ?? null,
+      bookQuality: point?.bookQuality ?? null,
     };
   }));
   if (rows.length && priced === 0) {
@@ -166,7 +192,7 @@ export async function loadMomentContracts(session, at, {
   }
 
   const basePoint = await gate.snapshot(baseIns).catch(() => null);
-  const momentSpot = basePoint?.trade?.close ?? null;
+  const momentSpot = tradePrice(basePoint?.trade);
   if (!(num(momentSpot) > 0)) warnings.push('قیمت پایه برای این لحظه از دروازهٔ زمان نیامد');
 
   return {
@@ -176,6 +202,10 @@ export async function loadMomentContracts(session, at, {
     why: rows.length ? '' : 'برای این لحظه هیچ قراردادی به دست نیامد',
     rows,
     spot: num(momentSpot) > 0 ? num(momentSpot) : null,
+    baseTrade: basePoint?.trade ?? null,
+    baseTradeQuality: basePoint?.tradeQuality ?? null,
+    baseQuote: historicalQuote(basePoint, at),
+    baseBookQuality: basePoint?.bookQuality ?? null,
     archived,
     dropped: bounded.dropped,
     limit,

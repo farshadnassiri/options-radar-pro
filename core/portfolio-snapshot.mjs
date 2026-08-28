@@ -103,15 +103,24 @@ function contractAt(row, at) {
 
   return {
     ins,
+    name: text(row?.name),
     kind: row?.kind,
     strike: Number.isFinite(num(row?.strike)) ? num(row.strike) : null,
     expiry: row?.expiry ?? null,
     size: Number.isFinite(num(row?.size)) ? num(row.size) : null,
+    underlyingDailyValueRial: Number.isFinite(num(row?.underlyingDailyValueRial))
+      ? num(row.underlyingDailyValueRial) : null,
+    optionDailyValueRial: Number.isFinite(num(row?.optionDailyValueRial))
+      ? num(row.optionDailyValueRial) : null,
+    openInterest: Number.isFinite(num(row?.openInterest)) ? num(row.openInterest) : null,
+    quality,
+    asOf: copy(row?.asOf ?? quality?.asOf),
     quote: {
       // نبودِ عدد `null` می‌ماند، نه صفر و نه قیمتِ لحظهٔ قبل.
       book: book ? copy(book) : null,
       close: hasClose ? close : null,
       quality,
+      asOf: copy(row?.quote?.asOf ?? quality?.asOf),
     },
   };
 }
@@ -197,6 +206,8 @@ export function portfolioMomentSnapshot(session, at, { spot, rows = [], universe
     snapshot: {
       at: moment,
       spot: hasSpot ? spotValue : null,
+      underlyingDailyValueRial: Number.isFinite(num(rows?.[0]?.underlyingDailyValueRial))
+        ? num(rows[0].underlyingDailyValueRial) : null,
       contracts,
       ...(universe ? { universe: copy(universe) } : {}),
       // همان ورودی‌های قفل‌شده، نه رونوشتی که روزی واگرا شود.

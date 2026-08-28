@@ -92,6 +92,32 @@ function watchContracts(row, universeQuality) {
   return out;
 }
 
+function momentContracts(snapshot) {
+  const out = [];
+  const underlyingValue = own(snapshot, 'underlyingDailyValueRial');
+  for (const row of Array.isArray(snapshot?.contracts) ? snapshot.contracts : []) {
+    const ins = text(row?.ins);
+    if (!ins) continue;
+    for (const side of ['buy', 'sell']) {
+      out.push({
+        meta: { name: text(row?.name) || ins, kind: text(row?.kind), side },
+        candidate: {
+          id: `${ins}:${side}`,
+          side,
+          underlyingDailyValueRial: own(row, 'underlyingDailyValueRial') ?? underlyingValue,
+          optionDailyValueRial: own(row, 'optionDailyValueRial'),
+          openInterest: own(row, 'openInterest'),
+          quality: own(row, 'quality') ?? row?.quote?.quality,
+          listedAt: own(row, 'listedAt'),
+          asOf: own(row, 'asOf'),
+          quote: own(row, 'quote'),
+        },
+      });
+    }
+  }
+  return out;
+}
+
 function belongsToBase(row, baseIns) {
   const wanted = text(baseIns);
   if (!wanted) return true;
@@ -108,6 +134,8 @@ function belongsToBase(row, baseIns) {
 
 /** عکس universe را بدون افزودن داده مالی به نامزدهای موتور تبدیل می‌کند. */
 export function portfolioEligibilityCandidates(snapshot, { baseIns = '' } = {}) {
+  const historical = momentContracts(snapshot);
+  if (historical.length) return historical;
   const universe = snapshot?.universe;
   if (!universe || !Array.isArray(universe.rows)) return [];
   return universe.rows.filter((row) => belongsToBase(row, baseIns)).flatMap((row) => (
