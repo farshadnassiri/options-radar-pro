@@ -4,6 +4,7 @@ import { check, group, near, readSrc } from '../harness.mjs';
 import { BULLISH_OUTLOOK, WIDE_RISK, portfolioFixture } from '../fixtures/portfolio.mjs';
 import { portfolioRankedPlans } from '../../core/portfolio-plans.mjs';
 import { commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
+import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
 import {
   PORTFOLIO_LEDGER_VERSION, ledgerRoomFor, portfolioCapitalLedger,
 } from '../../core/portfolio-ledger.mjs';
@@ -60,6 +61,20 @@ group('۱۳۳. دفتر سرمایهٔ جلسه');
   check('سرمایهٔ آزاد از مبنای جلسه کم می‌شود، نه از جای دیگر',
     after133.free.rial === 10_000_000 - parts133.totalRial
     && near(after133.free.pct, (after133.free.rial / 10_000_000) * 100, 1e-9));
+
+  const reduced133 = closePortfolioPosition(done133.session, fx133.evidence,
+    done133.positionId, { qty: 10 });
+  const reducedLedger133 = portfolioCapitalLedger(reduced133.session);
+  check('کاهش FIFO سرمایه همان lot را به نسبت حجم آزاد می‌کند',
+    reduced133.ok
+    && near(reducedLedger133.committed.totalRial, parts133.totalRial * 0.75, 1e-9)
+    && near(reducedLedger133.free.rial, 10_000_000 - parts133.totalRial * 0.75, 1e-9));
+  const closedLedger133 = portfolioCapitalLedger(
+    closePortfolioPosition(reduced133.session, fx133.evidence, done133.positionId).session,
+  );
+  check('آفست کامل همه سرمایه lot را آزاد می‌کند',
+    closedLedger133.ok && closedLedger133.committed.totalRial === 0
+    && closedLedger133.free.rial === 10_000_000 && closedLedger133.committed.count === 0);
 
   // ── بند ۳: هر دو قید، با عدد جاری و حد ──────────────────────────────
   const minFree133 = after133.risk.minFreeCapital;

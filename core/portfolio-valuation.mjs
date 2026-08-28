@@ -17,10 +17,9 @@
 // پرداخت شده و نادیده‌گرفتنش سود را دقیقاً به اندازهٔ خودش بزرگ‌تر نشان
 // می‌دهد.
 //
-// **مبنا با حجمِ باز هم‌تراز می‌شود.** سند، نقد و کارمزد ورود را برای
-// حجمِ **اولیه** نوشته است. اگر بخشی از موقعیت بسته شده باشد، سنجیدنِ
-// ارزشِ حجمِ باقی‌مانده در برابر هزینهٔ حجمِ اولیه یک زیانِ ساختگی
-// می‌سازد. تناسب دقیق است نه تقریبی، چون هر دو خطی در حجم‌اند.
+// **مبنا از lotهای باز می‌آید.** ورود اولیه و هر افزایش ممکن است قیمت
+// متفاوت داشته باشند؛ کاهش هم FIFO است. میانگین‌گیری از حجم اولیه یک
+// زیان ساختگی می‌سازد، پس نقد و کارمزد فقط از سهم lotهای باقی‌مانده است.
 //
 // **نبودِ عدد با عدد جایگزین نمی‌شود.** مدرکِ کهنه یا پای بی‌حکم یعنی
 // `null` با علت — نه قیمت پایانی، نه صفر.
@@ -122,15 +121,15 @@ function valuePosition(position, verdicts, fees) {
   // `num()` اینجا به‌کار نمی‌رود: `Number(null)` صفر است و از
   // `Number.isFinite` رد می‌شود، یعنی نقدِ نبوده صفر حساب می‌شد و سودی
   // به اندازهٔ کل ارزش می‌ساخت. مقدارِ خام سنجیده می‌شود.
-  const docEntryCash = position.entryCashRial;
-  const docEntryFee = position.capital?.components?.feeRial;
+  const docEntryCash = position.openEntryCashRial;
+  const docEntryFee = position.openEntryFeeRial;
   if (!Number.isFinite(docEntryCash) || !Number.isFinite(docEntryFee)) {
     return { reason: 'unknownEntryCash' };
   }
-  // سند برای حجمِ اولیه نوشته شده؛ اینجا با حجمِ باز هم‌تراز می‌شود.
-  const share = position.initialQty > 0 ? position.openQty / position.initialQty : 0;
-  const entryCashRial = docEntryCash * share;
-  const entryFeeRial = docEntryFee * share;
+  // مبنا از lotهای باز آمده است؛ هم کاهش FIFO را می‌شناسد، هم افزایشی
+  // را که در قیمت دیگری انجام شده است.
+  const entryCashRial = docEntryCash;
+  const entryFeeRial = docEntryFee;
 
   // ارزش جاری = نقدی که بستنِ همین موقعیت همین حالا می‌دهد.
   const qty = position.openQty;

@@ -107,6 +107,24 @@ group('۱۳۲. ثبت طرح انتخاب‌شده در دفتر رویداد');
     [0, 1.5, source132.entry.executableQty + 1].every((quantity) =>
       commitPortfolioPlan(wide132, fx132.evidence, topId132, { quantity }).reason === 'invalidQuantity'));
 
+  const increased132 = commitPortfolioPlan(done132.session, fx132.evidence, topId132, {
+    quantity: 1, positionId: done132.positionId, operationId: 'increase-132-1',
+  });
+  check('افزایش حجم همان موقعیت را با lot و اجرای تازه ثبت می‌کند',
+    increased132.ok && increased132.kind === 'increase'
+    && increased132.positionId === done132.positionId
+    && increased132.lotId !== done132.event.lotId
+    && increased132.event.transactionKind === 'increase'
+    && increased132.event.executions.every((row) => row.id), increased132.why);
+  check('شناسه عملیات، تکرار همان درخواست را به رویداد دوم تبدیل نمی‌کند',
+    commitPortfolioPlan(increased132.session, fx132.evidence, topId132, {
+      quantity: 1, positionId: done132.positionId, operationId: 'increase-132-1',
+    }).reason === 'repeatedOperation');
+  check('پیشنهاد دیگر روی موقعیت موجود به‌عنوان افزایش جا زده نمی‌شود',
+    commitPortfolioPlan(done132.session, fx132.evidence,
+      plans132.ranking.ranked.find((row) => row.candidateId !== topId132).candidateId,
+      { quantity: 1, positionId: done132.positionId }).reason === 'mismatchedPosition');
+
   // ── بند ۳: تکرار رد، دو طرح مختلف مجاز ──────────────────────────────
   check('همان نامزد در همان لحظه دوبار ثبت نمی‌شود',
     commitPortfolioPlan(done132.session, fx132.evidence, topId132)

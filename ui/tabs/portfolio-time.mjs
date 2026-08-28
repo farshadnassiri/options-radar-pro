@@ -387,7 +387,7 @@ export async function mount(root, { state, api }) {
             <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
             <div class="pt-table-scroll">
             <table class="pt-positions-table">
-              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>بستن</th></tr></thead>
+              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>سود تحقق‌یافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>مدیریت حجم</th></tr></thead>
               <tbody id="pt-positions-body"></tbody>
             </table>
             </div>
@@ -1471,11 +1471,14 @@ export async function mount(root, { state, api }) {
     // می‌مانند و علتش بالای جدول می‌آید.
     const valuation = portfolioSessionValuation(session, portfolioSessionEligibility(session));
     const view = portfolioSessionPositionsView(session, valuation);
+    const candidateByPosition = new Map((session?.events || [])
+      .filter((event) => event?.type === 'transaction' && event?.data?.candidateId)
+      .map((event) => [String(event.positionId), String(event.data.candidateId)]));
     const warn = $('pt-positions-undocumented');
     if (!view.ok) {
       section.hidden = view.reason === 'noSession';
       $('pt-positions-state').textContent = view.why;
-      $('pt-positions-body').innerHTML = '<tr class="pt-positions-empty"><td colspan="9">—</td></tr>';
+      $('pt-positions-body').innerHTML = '<tr class="pt-positions-empty"><td colspan="10">—</td></tr>';
       $('pt-positions-total').textContent = '';
       warn.hidden = true;
       return;
@@ -1491,14 +1494,22 @@ export async function mount(root, { state, api }) {
       <td data-label="ارزش جاری">${esc(row.valueTomanText)}${row.valuedWhy
         ? `<br><small>${esc(row.valuedWhy)}</small>` : ''}</td>
       <td data-label="سود تحقق‌نیافته" class="${esc(row.unrealizedTone)}">${esc(row.unrealizedTomanText)}</td>
+      <td data-label="سود تحقق‌یافته" class="${esc(row.realizedTone)}">${esc(row.realizedTomanText)}${row.realizedWhy
+        ? `<br><small>${esc(row.realizedWhy)}</small>` : ''}</td>
       <td data-label="پاها">${row.legTexts.length
         ? row.legTexts.map((leg) => `<div>${esc(leg)}</div>`).join('')
         : `<span class="pt-positions-why">${esc(row.why || '—')}</span>`}</td>
       <td data-label="کیفیت">${esc(row.qualityLabel)}${row.qualityReason ? `<br><small>${esc(row.qualityReason)}</small>` : ''}</td>
-      <td data-label="بستن">${row.closable
-        ? `<button type="button" class="ghost" data-pt-close="${esc(row.id)}">بستن کامل</button>`
+      <td data-label="مدیریت حجم">${row.closable
+        ? `<div class="pt-position-manage"><label><span>حجم</span><input type="text" inputmode="numeric"
+            data-pt-adjust-qty="${esc(row.id)}" aria-label="حجم تغییر ${esc(row.idText)}"
+            placeholder="تا ${esc(row.openQtyText)}"></label>
+          <div><button type="button" class="ghost" data-pt-increase="${esc(row.id)}"
+            data-pt-candidate="${esc(candidateByPosition.get(row.id) || '')}">افزایش</button>
+          <button type="button" class="ghost" data-pt-reduce="${esc(row.id)}">کاهش</button>
+          <button type="button" class="ghost" data-pt-close="${esc(row.id)}">آفست کامل</button></div></div>`
         : '—'}</td>
-    </tr>`).join('') : '<tr class="pt-positions-empty"><td colspan="9">—</td></tr>';
+    </tr>`).join('') : '<tr class="pt-positions-empty"><td colspan="10">—</td></tr>';
     // جمعِ کل فقط وقتی نوشته می‌شود که کامل باشد؛ وگرنه علتش.
     const total = $('pt-positions-total');
     total.textContent = view.valuationText || view.valuationWhy;
@@ -2188,15 +2199,26 @@ export async function mount(root, { state, api }) {
       $('pt-clock-state').textContent = stepResultText(stepped);
       return;
     }
+    root.querySelectorAll('[data-pt-step]').forEach((control) => { control.disabled = true; });
     $('pt-clock-state').textContent = 'در حال بریدن خوراک‌ها در لحظهٔ تازه…';
     const { rows, spot } = await repriceAt(stepped.session, stepped.to);
     const built = portfolioMomentSnapshot(stepped.session, stepped.to, { spot, rows });
     if (!built.ok) {
       $('pt-clock-state').textContent = built.why;
+      paintClock(proposalSession);
       return;
     }
     const next = { ...stepped.session, momentSnapshot: built.snapshot };
-    // هر چهار بخش از همین یک نقطه دوباره رسم می‌شوند.
+    const nextDraft = draft?.step === 'active'
+      ? { ...draft, session: next, snapshot: next.startSnapshot } : null;
+    const saved = nextDraft ? await persist(nextDraft) : null;
+    if (!saved?.ok) {
+      paintClock(proposalSession);
+      $('pt-clock-state').textContent = `حرکت زمان نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
+      return;
+    }
+    draft = nextDraft;
+    // هر چهار بخش فقط پس از تأیید سرور از همین یک نقطه دوباره رسم می‌شوند.
     paintEligibility(next);
     paintProposals(next);
     $('pt-clock-state').textContent = stepResultText(stepped);
@@ -2211,21 +2233,50 @@ export async function mount(root, { state, api }) {
       : '';
   };
 
-  $('pt-positions').onclick = (event) => {
-    const button = event.target.closest('[data-pt-close]');
+  $('pt-positions').onclick = async (event) => {
+    const button = event.target.closest('[data-pt-increase], [data-pt-reduce], [data-pt-close]');
     if (!button || !proposalSession) return;
+    const positionId = button.dataset.ptIncrease || button.dataset.ptReduce || button.dataset.ptClose;
+    const input = $('pt-positions').querySelector(`[data-pt-adjust-qty="${CSS.escape(positionId)}"]`);
+    const needsQty = Boolean(button.dataset.ptIncrease || button.dataset.ptReduce);
+    const quantity = needsQty ? parseIntegerInput(input?.value) : undefined;
+    if (needsQty && (!Number.isSafeInteger(quantity) || quantity <= 0)) {
+      $('pt-positions-state').textContent = 'حجم تغییر را به‌صورت عدد صحیح مثبت وارد کن.';
+      input?.setAttribute('aria-invalid', 'true');
+      return;
+    }
+    input?.removeAttribute('aria-invalid');
+    const rowControls = button.closest('.pt-position-manage')?.querySelectorAll('button, input') || [];
+    rowControls.forEach((control) => { control.disabled = true; });
     const evidence = portfolioSessionEligibility(proposalSession);
-    const done = closePortfolioPosition(proposalSession, evidence, button.dataset.ptClose);
+    const operationId = `adjust-${proposalSession.id}-${positionId}-${proposalSession.events.length + 1}`;
+    const done = button.dataset.ptIncrease
+      ? commitPortfolioPlan(proposalSession, evidence, button.dataset.ptCandidate, {
+        quantity, positionId, operationId,
+      })
+      : closePortfolioPosition(proposalSession, evidence, positionId,
+        button.dataset.ptReduce ? { qty: quantity } : {});
     if (!done.ok) {
       // شکست بستن هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود — و وقتی دفتر
       // سفارش کم‌عمق است، عددِ ممکن بخشی از همان خبر است.
-      $('pt-positions-state').textContent = closeFailureText(done);
+      $('pt-positions-state').textContent = button.dataset.ptIncrease ? done.why : closeFailureText(done);
+      rowControls.forEach((control) => { control.disabled = false; });
       return;
     }
-    // یک فراخوانی: جدول موقعیت‌ها و نوار سرمایه هر دو با جلسهٔ تازه
-    // دوباره رسم می‌شوند. سرمایهٔ آزاد پس از بستن عوض شده است.
+    const nextDraft = draft?.step === 'active'
+      ? { ...draft, session: done.session, snapshot: done.session.startSnapshot } : null;
+    const saved = nextDraft ? await persist(nextDraft) : null;
+    if (!saved?.ok) {
+      $('pt-positions-state').textContent = `تغییر حجم نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
+      rowControls.forEach((control) => { control.disabled = false; });
+      return;
+    }
+    draft = nextDraft;
+    // جدول موقعیت‌ها و نوار سرمایه فقط پس از تأیید سرور با جلسه تازه رسم می‌شوند.
     paintProposals(done.session);
-    $('pt-positions-state').textContent = closeDoneText(done);
+    $('pt-positions-state').textContent = button.dataset.ptIncrease
+      ? `حجم افزایش یافت — ${fmt.int(quantity)} قرارداد · lot ${faDigits(done.lotId)}`
+      : closeDoneText(done);
   };
 
   $('pt-eligibility').onclick = (event) => {

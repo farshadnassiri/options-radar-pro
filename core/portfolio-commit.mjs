@@ -28,7 +28,9 @@ import { portfolioEntryPlan } from './portfolio-entry.mjs';
 import { portfolioCapitalRequirement } from './portfolio-capital.mjs';
 import { portfolioPlanEvaluation } from './portfolio-evaluation.mjs';
 import { portfolioPlanScore } from './portfolio-score.mjs';
-import { PORTFOLIO_SCHEMA_VERSION, recordPortfolioTransaction } from './portfolio-session.mjs';
+import {
+  PORTFOLIO_SCHEMA_VERSION, recordPortfolioTransaction, replayPortfolioSession,
+} from './portfolio-session.mjs';
 
 export const PORTFOLIO_COMMIT_VERSION = 1;
 
@@ -37,6 +39,9 @@ export const PORTFOLIO_COMMIT_REASONS = Object.freeze({
   unknownCandidate: 'این نامزد در طرح‌های همین لحظه نیست',
   notRanked: 'فقط طرحی که همین حالا رتبه دارد ثبت می‌شود',
   alreadyCommitted: 'این طرح در همین لحظه ثبت شده است',
+  unknownPosition: 'موقعیت باز برای افزایش حجم پیدا نشد',
+  mismatchedPosition: 'این پیشنهاد با ساختار موقعیت انتخاب‌شده یکی نیست',
+  repeatedOperation: 'این درخواست تغییر حجم قبلاً ثبت شده است',
   invalidQuantity: 'حجم انتخابی با ظرفیت و داده همین لحظه سازگار نیست',
   familyBudgetExceeded: 'سرمایهٔ لازم از بودجهٔ باقی‌ماندهٔ خانواده بیشتر است',
   missionRiskBreached: 'این ثبت قیود ریسک مأموریت را می‌شکند',
@@ -73,9 +78,18 @@ function committedPlans(session) {
  * با دفتر اختلاف پیدا می‌کند و آن‌وقت هیچ‌کدام سند نیستند.
  */
 export function familyBudgetState(session, familyId, targetRial) {
+  const replay = replayPortfolioSession(session);
+  const remainingByLot = new Map((replay.ok ? replay.positions : [])
+    .flatMap((position) => position.lots || [])
+    .map((lot) => [text(lot.id), Number(lot.remainingQty)]));
   const spentRial = committedPlans(session)
-    .filter((event) => text(event.familyId) === text(familyId))
-    .reduce((sum, event) => sum + Number(event.data.capitalRial || 0), 0);
+    .filter((event) => text(event.familyId) === text(familyId) && event.lotId)
+    .reduce((sum, event) => {
+      const remainingQty = remainingByLot.get(text(event.lotId));
+      const eventQty = Number(event.qty);
+      if (!(remainingQty > 0) || !(eventQty > 0)) return sum;
+      return sum + Number(event.data.capitalRial || 0) * (remainingQty / eventQty);
+    }, 0);
   const target = Number(targetRial);
   return {
     familyId: text(familyId),
@@ -91,7 +105,9 @@ export function familyBudgetState(session, familyId, targetRial) {
  * `evidence` همان مدرک اجراپذیری هم‌لحظه است. رتبه از زنجیرهٔ تازه
  * بازساخته می‌شود تا «رتبه‌دار بودن» ادعای فراخوان نباشد.
  */
-export function commitPortfolioPlan(session, evidence, candidateId, { at = null, quantity = null } = {}) {
+export function commitPortfolioPlan(session, evidence, candidateId, {
+  at = null, quantity = null, positionId = '', operationId = '',
+} = {}) {
   const wanted = text(candidateId);
   const plans = portfolioRankedPlans(session, evidence);
   if (!plans.ok) return fail('noPlans', plans.why);
@@ -104,6 +120,28 @@ export function commitPortfolioPlan(session, evidence, candidateId, { at = null,
   }
 
   let source = plans.sources.get(wanted);
+  const targetPositionId = text(positionId);
+  let target = null;
+  if (targetPositionId) {
+    const replay = replayPortfolioSession(session);
+    target = replay.ok
+      ? replay.positions.find((row) => row.id === targetPositionId && row.status === 'open')
+      : null;
+    if (!target) return fail('unknownPosition', targetPositionId);
+    const opening = (session.events || []).find((event) => event?.type === 'transaction'
+      && text(event.positionId) === targetPositionId);
+    if (text(opening?.data?.candidateId) !== wanted
+      || text(opening?.familyId) !== text(source?.entry?.family)
+      || text(opening?.strategyId) !== text(source?.defId)) {
+      return fail('mismatchedPosition', targetPositionId);
+    }
+  }
+
+  const requestId = text(operationId);
+  if (requestId && committedPlans(session).some((event) => text(event.data?.operationId) === requestId)) {
+    return fail('repeatedOperation', requestId);
+  }
+
   if (quantity !== null && quantity !== undefined) {
     const entry = portfolioEntryPlan(session, plans.set, evidence, wanted, { quantity });
     if (!entry.ok) return fail('invalidQuantity', entry.why);
@@ -118,7 +156,7 @@ export function commitPortfolioPlan(session, evidence, candidateId, { at = null,
   const { entry, capital, evaluation, score } = source;
 
   const moment = at ?? session.now ?? session.startSnapshot?.at ?? session.start;
-  if (committedPlans(session).some((event) => text(event.data.candidateId) === wanted
+  if (!target && committedPlans(session).some((event) => text(event.data.candidateId) === wanted
     && event.at?.date === moment?.date && event.at?.second === moment?.second)) {
     return fail('alreadyCommitted', wanted);
   }
@@ -177,11 +215,13 @@ export function commitPortfolioPlan(session, evidence, candidateId, { at = null,
     // نبرد، فردا شبیه دادهٔ قطعی خوانده می‌شود.
     quality: copy(evaluation.quality),
     evaluationVersion: evaluation.version,
+    operationId: requestId,
   };
 
   const recorded = recordPortfolioTransaction(session, {
-    kind: 'open',
+    kind: target ? 'increase' : 'open',
     at: moment,
+    positionId: targetPositionId,
     strategyId: text(source.defId),
     familyId,
     qty: entry.executableQty,
@@ -206,6 +246,9 @@ export function commitPortfolioPlan(session, evidence, candidateId, { at = null,
     transactionId: recorded.transactionId,
     candidateId: wanted,
     rank: ranked.rank,
+    kind: target ? 'increase' : 'open',
+    lotId: recorded.lotId,
+    executionIds: recorded.executionIds,
     budget: nextBudget,
   };
 }

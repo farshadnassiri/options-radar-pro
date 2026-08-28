@@ -103,19 +103,21 @@ group('۱۳۸. بستن موقعیت در تب');
     .match(/<th>/g) || []).length;
   const emptySpans138 = [...tabSrc138.matchAll(/pt-positions-empty"><td colspan="(\d+)"/g)]
     .map((hit) => Number(hit[1]));
-  check('ستون بستن در سرستون جدول هست',
-    tabSrc138.includes('<th>بستن</th>') && tabSrc138.includes('data-label="بستن"'));
+  check('ستون مدیریت حجم در سرستون جدول هست',
+    tabSrc138.includes('<th>مدیریت حجم</th>')
+    && tabSrc138.includes('data-label="مدیریت حجم"'));
   check('و colspan هر ردیف خالی با شمار سرستون‌ها می‌خواند',
     headCells138 > 0 && emptySpans138.length > 0
     && emptySpans138.every((span) => span === headCells138),
     `${emptySpans138.join(' ،')} در برابر ${headCells138}`);
-  check('دکمه فقط برای ردیف بستنی ساخته می‌شود',
-    /row\.closable[\s\S]{0,120}?data-pt-close=/.test(tabSrc138));
+  check('کنترل‌های تغییر حجم فقط برای ردیف بستنی ساخته می‌شوند',
+    /row\.closable[\s\S]{0,900}?data-pt-increase=[\s\S]{0,500}?data-pt-reduce=[\s\S]{0,300}?data-pt-close=/.test(tabSrc138));
   // بند ۲: پس از بستن، سرمایهٔ آزاد عوض شده است؛ رسم‌کردن فقط جدول
   // موقعیت‌ها یعنی نوار سرمایه عددِ کهنه نشان می‌دهد.
   const handler138 = tabSrc138.slice(tabSrc138.indexOf("$('pt-positions').onclick"));
-  check('پس از بستن، هر سه بخش با جلسهٔ تازه دوباره رسم می‌شوند',
-    /paintProposals\(done\.session\);/.test(handler138.slice(0, 900)));
+  check('پس از بستن، فقط بعد از تأیید سرور با جلسهٔ تازه دوباره رسم می‌شود',
+    handler138.indexOf('await persist(nextDraft)') >= 0
+    && handler138.indexOf('await persist(nextDraft)') < handler138.indexOf('paintProposals(done.session)'));
   check('و شکست هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود',
     /if \(!done\.ok\)[\s\S]{0,260}?closeFailureText\(done\)[\s\S]{0,80}?return;/
       .test(handler138));

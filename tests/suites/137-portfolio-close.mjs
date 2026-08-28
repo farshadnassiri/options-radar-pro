@@ -70,6 +70,16 @@ group('۱۳۷. بستن موقعیت');
   check('کارمزد روی ارزش اسمیِ خروج نشسته، نه صفر',
     near(full137.feeRial, full137.exitCashRial * fx137.capitalInputs.fees.option, 1e-9),
     `${full137.feeRial}`);
+  check('سود تحقق‌یافته با نقد ورود و هر دو کارمزد ثبت می‌شود',
+    Number.isFinite(full137.realizedRial)
+    && near(full137.realizedRial,
+      full137.exitCashRial + full137.entryCashRial
+        - full137.feeRial - full137.entryFeeRial, 1e-9),
+    `${full137.realizedRial}`);
+  check('و مبنای lotهای FIFO داخل سند خروج قابل حسابرسی می‌ماند',
+    doc137.entryLots.length === 1
+    && doc137.entryLots[0].lotId === opened137.events[0].lotId
+    && doc137.entryLots[0].qty === 40);
 
   // ── بند ۳: خروج جزئی ────────────────────────────────────────────────
   const part137 = closePortfolioPosition(opened137, fx137.evidence, posId137, { qty: 10 });
@@ -80,6 +90,9 @@ group('۱۳۷. بستن موقعیت');
   check('نقد خروج جزئی به نسبت حجم است',
     near(part137.exitCashRial, full137.exitCashRial / 4, 1e-9),
     `${part137.exitCashRial} در برابر ${full137.exitCashRial}`);
+  check('سود تحقق‌یافته خروج جزئی نیز فقط سهم مصرف‌شده را می‌سنجد',
+    near(part137.realizedRial, full137.realizedRial / 4, 1e-9),
+    `${part137.realizedRial} در برابر ${full137.realizedRial}`);
   // بستنِ دوباره روی جلسهٔ به‌روزشده باید از حجم باقی‌مانده حساب کند.
   const rest137 = closePortfolioPosition(part137.session, fx137.evidence, posId137);
   check('بستن باقی‌مانده، از حجم باز جدید حساب می‌کند',
@@ -93,7 +106,7 @@ group('۱۳۷. بستن موقعیت');
     && tooBig137.session === null, tooBig137.why);
   check('و هر دو عدد در علت گفته می‌شوند',
     tooBig137.why.includes('41') && tooBig137.why.includes('40'), tooBig137.why);
-  for (const bad of [0, -5, 'سه']) {
+  for (const bad of [0, -5, 1.5, 'سه']) {
     check(`حجم نامعتبر (${bad}) رد می‌شود`,
       closePortfolioPosition(opened137, fx137.evidence, posId137, { qty: bad })
         .reason === 'invalidQty');
@@ -154,16 +167,18 @@ group('۱۳۷. بستن موقعیت');
   check('نبودِ نرخ کارمزد، خروج بی‌کارمزد نمی‌سازد',
     closePortfolioPosition(feeless137, fx137.evidence, posId137).reason === 'missingFees');
 
-  // ── بند ۶: هیچ سود و زیانی ──────────────────────────────────────────
+  // ── بند ۶: سود فقط از سند lot و اجرای خروج ─────────────────────────
   const code137 = readSrc('../core/portfolio-close.mjs')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  check('ماژول سود و زیان حساب نمی‌کند',
-    !/\bpnl\b/i.test(code137) && !/profit|realized|entryCashRial/i.test(code137));
-  check('و خروجی‌اش هیچ میدان سود و زیان ندارد',
-    !Object.keys(full137).some((key) => /pnl|profit|realized/i.test(key))
-    && !Object.keys(doc137).some((key) => /pnl|profit|realized/i.test(key)),
-    Object.keys(doc137).filter((k) => /pnl|profit|realized/i.test(k)).join('، ') || 'هیچ');
-  check('و به سند ورود برای عدد نگاه نمی‌کند',
+  check('ماژول برای سود تحقق‌یافته سراغ قیمت پایانی یا مدل نمی‌رود',
+    !/closePrice|lastPrice|markPrice|pnlAtExpiry|analyzePayoff/.test(code137));
+  check('نبود مبنای ورود سود صفر یا ساختگی نمی‌سازد', (() => {
+    const broken = JSON.parse(JSON.stringify(opened137));
+    delete broken.events[0].data.entryCashRial;
+    const result = closePortfolioPosition(broken, fx137.evidence, posId137, { qty: 1 });
+    return result.ok && result.realizedRial === null && result.realizedWhy;
+  })());
+  check('نسخه سند را با وابستگی دوری به ماژول ثبت دوباره تعریف نمی‌کند',
     !/PORTFOLIO_COMMIT_VERSION|portfolio-commit/.test(code137));
 
   // ── سالم‌ماندن جلسهٔ ورودی ──────────────────────────────────────────
