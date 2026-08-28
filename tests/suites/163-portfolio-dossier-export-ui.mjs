@@ -88,6 +88,9 @@ group('۱۶۳. دانلود XLSX پرونده از کارت پایان');
   check('شکست دانلود پیام مستقل می‌دهد و پرونده را پاک نمی‌کند',
     /if \(!result\.ok\) \{[\s\S]*?status\.dataset\.error[\s\S]*?return;/.test(tab163)
     && !/if \(!result\.ok\)[\s\S]{0,220}(?:box\.hidden|dossierExportView\s*=\s*null)/.test(tab163));
+  check('خطای غیرمنتظره یا تغییر پرونده قفل دانلود را برای همیشه باز نمی‌گذارد',
+    /try \{[\s\S]*?downloadPortfolioDossier\(view\.session, view\.dossier[\s\S]*?\} catch \(error\)[\s\S]*?\} finally \{[\s\S]*?dossierExportBusy = false;[\s\S]*?button\.disabled = false;/.test(tab163)
+    && /if \(view !== dossierExportView\) return;/.test(tab163));
   const exportHandler163 = tab163.slice(
     tab163.indexOf("$('pt-dossier-export-do').onclick"),
     tab163.indexOf('async function paintPreviousDossierComparison'),
