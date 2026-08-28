@@ -92,11 +92,25 @@ function watchContracts(row, universeQuality) {
   return out;
 }
 
+function belongsToBase(row, baseIns) {
+  const wanted = text(baseIns);
+  if (!wanted) return true;
+
+  // ردیف مستقیم ممکن است از fixture یا آداپتر دیگری آمده باشد. فقط وقتی
+  // هویت پایه را صریح دارد آن را می‌سنجیم؛ اما ردیف خام دیده‌بان بدون
+  // `uaInsCode` قابل انتساب به جلسه نیست و نباید وارد حکم مالی شود.
+  if (text(row?.id)) {
+    const explicit = text(row?.baseIns ?? row?.underlyingIns ?? row?.uaInsCode);
+    return !explicit || explicit === wanted;
+  }
+  return text(row?.uaInsCode) === wanted;
+}
+
 /** عکس universe را بدون افزودن داده مالی به نامزدهای موتور تبدیل می‌کند. */
-export function portfolioEligibilityCandidates(snapshot) {
+export function portfolioEligibilityCandidates(snapshot, { baseIns = '' } = {}) {
   const universe = snapshot?.universe;
   if (!universe || !Array.isArray(universe.rows)) return [];
-  return universe.rows.flatMap((row) => (
+  return universe.rows.filter((row) => belongsToBase(row, baseIns)).flatMap((row) => (
     text(row?.id) ? directCandidate(row, universe.quality) : watchContracts(row, universe.quality)
   ));
 }
@@ -114,7 +128,8 @@ export function portfolioSessionEligibility(session, { snapshot: explicitSnapsho
   if (!session.lockedMission) {
     return { ok: false, why: 'مأموریت قفل‌شده برای سنجش لازم است', now: snapshot.at, rows: [] };
   }
-  const entries = portfolioEligibilityCandidates(snapshot);
+  const baseIns = text(session.baseIns ?? session.lockedMission?.context?.baseIns);
+  const entries = portfolioEligibilityCandidates(snapshot, { baseIns });
   const judged = portfolioEligibility(
     session.lockedMission,
     entries.map((entry) => entry.candidate),

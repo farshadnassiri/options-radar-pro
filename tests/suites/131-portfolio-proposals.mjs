@@ -128,6 +128,18 @@ group('۱۳۱. مدل نمایش پیشنهادهای سبد');
       const out = portfolioSessionProposals(wide131, { ok: true, now: fx131.at, rows: [] });
       return out.ok === false && out.reason === 'noCandidates' && out.counts === null;
     })());
+  check('ردشدن همه حکم‌های همان نماد علت نبود پیشنهاد را صریح می‌گوید',
+    (() => {
+      const out = portfolioSessionProposals(wide131, {
+        ok: true, now: fx131.at,
+        rows: [{ accepted: false, reasons: [{ label: 'دفتر سفارش موجود نیست' }] },
+          { accepted: false, reasons: [{ label: 'دفتر سفارش موجود نیست' }] }],
+      });
+      return out.ok === false && out.reason === 'noCandidates'
+        && out.why.includes('۲ حکم متعلق به نماد پایه')
+        && out.why.includes('علت غالب: دفتر سفارش موجود نیست')
+        && !/[0-9]/.test(out.why);
+    })());
   check('سقف کوتاه‌فهرست رعایت می‌شود',
     portfolioSessionProposals(wide131, fx131.evidence, { limit: 2 }).shortlist.length === 2
     && view131.limit === 3);

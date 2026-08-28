@@ -62,10 +62,10 @@ function qualityText(quality) {
   };
 }
 
-function fail(reason, now = null) {
+function fail(reason, now = null, why = '') {
   return {
     ok: false,
-    why: PROPOSALS_REASONS[reason],
+    why: why || PROPOSALS_REASONS[reason],
     reason,
     now,
     shortlist: [],
@@ -73,6 +73,21 @@ function fail(reason, now = null) {
     counts: null,
     limit: 0,
   };
+}
+
+function rejectedEvidenceWhy(evidence) {
+  const rows = Array.isArray(evidence?.rows) ? evidence.rows : [];
+  if (!rows.length || rows.some((row) => row?.accepted === true)) return '';
+  const reasons = new Map();
+  for (const row of rows) {
+    for (const reason of Array.isArray(row?.reasons) ? row.reasons : []) {
+      const label = text(reason?.label);
+      if (label) reasons.set(label, (reasons.get(label) || 0) + 1);
+    }
+  }
+  const primary = [...reasons.entries()].sort((a, b) => (b[1] - a[1])
+    || (a[0] < b[0] ? -1 : 1))[0]?.[0] || 'مدرک اجراپذیری کافی نیست';
+  return `پیشنهادی ساخته نشد: ${faDigits(String(rows.length))} حکم متعلق به نماد پایه بررسی شد و همه رد شدند. علت غالب: ${faDigits(primary)}`;
 }
 
 /**
@@ -85,7 +100,10 @@ export function portfolioSessionProposals(session, evidence, { limit = 3 } = {})
   const now = session?.startSnapshot?.at ?? null;
 
   const plans = portfolioRankedPlans(session, evidence, { limit });
-  if (!plans.ok) return fail(plans.reason, now);
+  if (!plans.ok) {
+    const detail = plans.reason === 'noCandidates' ? rejectedEvidenceWhy(evidence) : '';
+    return fail(plans.reason, now, detail);
+  }
   const ranked = plans.ranking;
 
   const byCandidate = plans.sources;
