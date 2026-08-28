@@ -14,6 +14,7 @@
 
 const ROW_H = 27;
 const OVER = 12;
+let tableA11ySeq = 0;
 
 // قالب‌بندی یک‌جا در ui/fmt.mjs است تا عدد فارسی همه‌جا یک‌شکل باشد. اینجا
 // دوباره صادر می‌شود چون تب‌ها از قدیم آن را از همین‌جا می‌گیرند.
@@ -156,6 +157,7 @@ export function makeTable(host, cols, opts = {}) {
   const all = opts.all && opts.all.length ? opts.all : cols;
   const byKey = new Map(all.map((c) => [c.key, c]));
   const baseKeys = cols.map((c) => c.key);
+  const columnPanelId = `table-columns-${++tableA11ySeq}`;
 
   // انتخاب ذخیره‌شده فقط تا جایی معتبر است که ستون‌هایش هنوز وجود داشته باشند
   const saved = loadPick(opts.storeKey)?.filter((k) => byKey.has(k));
@@ -167,7 +169,7 @@ export function makeTable(host, cols, opts = {}) {
   host.innerHTML = `
     <div class="tbl-wrap">
       <div class="tbl-tools">
-        <button type="button" class="ghost tbl-cols-btn" ${all === cols ? 'hidden' : ''}>
+        <button type="button" class="ghost tbl-cols-btn" aria-expanded="false" aria-controls="${columnPanelId}" ${all === cols ? 'hidden' : ''}>
           ستون‌ها <b class="tbl-cols-n"></b>
         </button>
         <button type="button" class="ghost tbl-export-btn">خروجی اکسل</button>
@@ -176,7 +178,7 @@ export function makeTable(host, cols, opts = {}) {
         <span class="sp"></span>
         <span class="tbl-count"></span>
       </div>
-      <div class="col-panel" hidden></div>
+      <div class="col-panel" id="${columnPanelId}" hidden></div>
       <div class="tbl-body" tabindex="0"><table class="data"><thead><tr></tr></thead><tbody></tbody></table></div>
     </div>`;
 
@@ -397,7 +399,7 @@ export function makeTable(host, cols, opts = {}) {
   function togglePanel() {
     const open = panel.hasAttribute('hidden');
     panel.toggleAttribute('hidden', !open);
-    colsBtn?.setAttribute('aria-pressed', open ? 'true' : 'false');
+    colsBtn?.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
       document.addEventListener('mousedown', closeOnOutside);
       document.addEventListener('keydown', closeOnEscape);

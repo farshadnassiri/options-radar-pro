@@ -91,11 +91,13 @@ export async function mount(root, { state, api }) {
   const field = (key, label, kind, extra = '') => {
     const w = document.createElement('div');
     w.className = 'field';
-    if (kind === 'select') w.innerHTML = `<label>${label}</label><select id="f-${key}">${extra}</select>`;
-    else if (kind === 'wheel') w.innerHTML = `<label>${label}</label><div id="f-${key}"></div>`;
-    else w.innerHTML = `<label>${label}</label><input type="${kind}" id="f-${key}" ${extra}>`;
+    const controlId = `f-${key}`;
+    const labelId = `${controlId}-label`;
+    if (kind === 'select') w.innerHTML = `<label for="${controlId}">${label}</label><select id="${controlId}">${extra}</select>`;
+    else if (kind === 'wheel') w.innerHTML = `<span class="field-label" id="${labelId}">${label}</span><div id="${controlId}" role="group" aria-labelledby="${labelId}"></div>`;
+    else w.innerHTML = `<label for="${controlId}">${label}</label><input type="${kind}" id="${controlId}" ${extra}>`;
     form.appendChild(w);
-    F[key] = w.querySelector(`#f-${key}`);
+    F[key] = w.querySelector(`#${controlId}`);
     return F[key];
   };
 
@@ -485,11 +487,11 @@ export async function mount(root, { state, api }) {
         ${!m.entryRiskAvailable ? `
           <div class="note" id="entry-risk-fix" style="margin-top:12px">
             <p>${m.entryRiskReason}. برای محاسبه بازده، داده تاریخی واقعی را ثبت کن.</p>
-            <label>قیمت پایانی پایه در ورود</label>
+            <label for="entry-risk-spot">قیمت پایانی پایه در ورود</label>
             <input type="number" id="entry-risk-spot" value="${Number(p.entrySpot) > 0 ? Number(p.entrySpot) : ''}">
             ${p.legs.map((l, i) => l.side === 'sell' && l.kind !== 'underlying' ? `
-              <label>قیمت پایانی ${l.kind === 'call' ? 'کال' : 'پوت'} ${fmt.money(l.strike)} در ورود</label>
-              <input type="number" data-entry-close="${i}" value="${Number(l.entryClose) > 0 ? Number(l.entryClose) : ''}">` : '').join('')}
+              <label for="entry-risk-close-${i}">قیمت پایانی ${l.kind === 'call' ? 'کال' : 'پوت'} ${fmt.money(l.strike)} در ورود</label>
+              <input type="number" id="entry-risk-close-${i}" data-entry-close="${i}" value="${Number(l.entryClose) > 0 ? Number(l.entryClose) : ''}">` : '').join('')}
             <button class="btn" id="entry-risk-save" style="margin-top:8px">ثبت مبنای ورود</button>
           </div>` : `
           <p class="note" style="margin-top:10px">بازده = سود و زیان جاری ÷ سرمایه ثابت روز ورود. وجه تضمین امروز فقط برای نیاز نقدینگی نمایش داده می‌شود و مخرج بازده را تغییر نمی‌دهد.</p>`}
