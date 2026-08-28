@@ -299,6 +299,11 @@ export async function mount(root, { state, api }) {
                 <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
                 <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
               </section>
+              <section class="pt-dossier-analysis" id="pt-final-ranking" aria-labelledby="pt-final-ranking-title">
+                <h4 id="pt-final-ranking-title">رتبه انتخاب‌ها در پایان بازی</h4>
+                <dl class="pt-dossier-analysis-figures" id="pt-final-ranking-figures"></dl>
+                <p class="pt-dossier-analysis-state" id="pt-final-ranking-state"></p>
+              </section>
               <section class="pt-capital-continuity" id="pt-capital-continuity" aria-labelledby="pt-capital-continuity-title">
                 <div class="pt-capital-continuity-head">
                   <div><p class="eyebrow">سفر بعدی</p><h4 id="pt-capital-continuity-title">ادامه زنجیره سرمایه</h4></div>
@@ -1090,6 +1095,20 @@ export async function mount(root, { state, api }) {
     issues.hidden = !analyzed.ok || analyzed.issues.length === 0;
     issues.innerHTML = analyzed.ok ? analyzed.issues.map((row) => `<li>${esc(row.label)}`
       + `${row.detail ? ` — ${esc(row.detail)}` : ''}</li>`).join('') : '';
+    const ranking = view.ranking;
+    const rankRows = ranking.available ? [
+      ...(ranking.best ? [['بهترین استراتژی', `${ranking.best.defText} · رتبه ${ranking.best.rankText} · ${ranking.best.returnText}`, ranking.best.tone]] : []),
+      ...(ranking.worst ? [['بدترین استراتژی', `${ranking.worst.defText} · رتبه ${ranking.worst.rankText} · ${ranking.worst.returnText}`, ranking.worst.tone]] : []),
+      ...ranking.selected.map((row) => [
+        'انتخاب کاربر', `${row.defText} · رتبه ${row.rankText} · صدک ${row.percentileText} · ${row.returnText}`,
+        row.tone,
+      ]),
+    ] : [];
+    $('pt-final-ranking-figures').innerHTML = rankRows.map(([label, value, tone]) =>
+      `<div><dt>${esc(label)}</dt><dd class="${esc(tone)}">${esc(value)}</dd></div>`).join('');
+    $('pt-final-ranking-state').textContent = ranking.available
+      ? `${ranking.countsText}${ranking.withoutRankText ? ` · ${ranking.withoutRankText}` : ''}`
+      : ranking.why;
     dossierContinuity = view.capitalContinuity
       ? portfolioCapitalContinuityView(view.session, view.dossier, {
         previous: view.capitalContinuity,
@@ -1317,8 +1336,11 @@ export async function mount(root, { state, api }) {
       $('pt-closeout-state').textContent = 'برای بستن، دوباره بزن.';
       return;
     }
+    const startEvidence = portfolioSessionEligibility(proposalSession, {
+      snapshot: proposalSession.startSnapshot, at: proposalSession.start,
+    });
     const view = closeoutView(proposalSession, portfolioSessionEligibility(proposalSession),
-      { force: true });
+      { force: true, startEvidence });
     closeoutArmed = false;
     if (!view.ok) { $('pt-closeout-state').textContent = view.why; return; }
     // بستن در موتور خالص است، اما وضعیت محلی فقط پس از مدرک ثبت سرور
@@ -1343,7 +1365,7 @@ export async function mount(root, { state, api }) {
     proposalSession = persisted.session;
     paintProposals(persisted.session);
     paintDossier(persisted.view);
-    root.querySelectorAll('[data-pt-commit], [data-pt-close], [data-pt-step]')
+    root.querySelectorAll('[data-pt-commit], [data-pt-increase], [data-pt-reduce], [data-pt-close], [data-pt-step], [data-pt-adjust-qty]')
       .forEach((control) => { control.disabled = true; });
     button.hidden = true;
   };
@@ -2158,34 +2180,14 @@ export async function mount(root, { state, api }) {
   /**
    * قراردادهای عکسِ جاری، دوباره قیمت‌گذاری‌شده در لحظهٔ تازه.
    *
-   * هویتِ قراردادها از عکسِ جاری می‌آید و **قیمتشان** از دفتر سفارشِ
-   * لحظهٔ تازه. قراردادی که برای آن لحظه دفتری ندارد، بی‌قیمت می‌ماند و
+   * هویتِ قراردادها از بایگانی همان تاریخ می‌آید و **قیمتشان** از دفتر
+   * سفارشِ لحظهٔ تازه. قراردادی که برای آن لحظه دفتری ندارد، بی‌قیمت می‌ماند و
    * `portfolioMomentSnapshot` خودش «فاقد داده» علامتش می‌زند — اینجا با
    * قیمتِ لحظهٔ قبل پر نمی‌شود.
    */
   async function repriceAt(session, at) {
-    const known = (session.momentSnapshot ?? session.startSnapshot)?.contracts || [];
-    if (!known.length) return { rows: [], spot: null };
-    const loaders = gateLoaders();
-    const gate = createTimeGate({
-      sessionId: session.id, now: at, days: dates,
-      load: {
-        dailies: async (...args) => { try { return await loaders.dailies(...args); } catch { return []; } },
-        trades: async (...args) => { try { return await loaders.trades(...args); } catch { return []; } },
-        book: async (...args) => { try { return await loaders.book(...args); } catch { return []; } },
-      },
-    });
-    const rows = await Promise.all(known.map(async (contract) => {
-      const point = await gate.snapshot(contract.ins).catch(() => null);
-      return {
-        ins: contract.ins, kind: contract.kind, strike: contract.strike,
-        expiry: contract.expiry, size: contract.size,
-        book: point?.quote?.book ?? null,
-        close: point?.trade?.close ?? null,
-      };
-    }));
-    const base = await gate.snapshot(session.baseIns).catch(() => null);
-    return { rows, spot: base?.trade?.close ?? null };
+    const priced = await loadMomentContracts(session, at, { days: dates });
+    return { rows: priced.rows, spot: priced.spot, universe: priced.universe };
   }
 
   $('pt-clock').onclick = async (event) => {
@@ -2201,8 +2203,8 @@ export async function mount(root, { state, api }) {
     }
     root.querySelectorAll('[data-pt-step]').forEach((control) => { control.disabled = true; });
     $('pt-clock-state').textContent = 'در حال بریدن خوراک‌ها در لحظهٔ تازه…';
-    const { rows, spot } = await repriceAt(stepped.session, stepped.to);
-    const built = portfolioMomentSnapshot(stepped.session, stepped.to, { spot, rows });
+    const { rows, spot, universe } = await repriceAt(stepped.session, stepped.to);
+    const built = portfolioMomentSnapshot(stepped.session, stepped.to, { spot, rows, universe });
     if (!built.ok) {
       $('pt-clock-state').textContent = built.why;
       paintClock(proposalSession);

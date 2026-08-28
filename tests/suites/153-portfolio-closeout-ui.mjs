@@ -86,8 +86,8 @@ group('۱۵۳. پروندهٔ پایان در تب');
     && view153.realized.rows[0].exitCashText.includes('تومان'));
   // جمعِ نامعلوم عدد نمی‌گیرد.
   const blind153 = JSON.parse(JSON.stringify(shut153.session));
-  delete blind153.events.find((e) => e?.data?.commitVersion !== undefined)
-    .data.entryCashRial;
+  delete blind153.events.find((e) => e?.data?.closeVersion !== undefined)
+    .data.realizedRial;
   const blindView153 = closeoutView(blind153, fx153.evidence, { force: true });
   check('جمعِ نامعلوم «—» می‌شود نه صفر',
     blindView153.realized.totalText === '—' && blindView153.realized.tone === ''

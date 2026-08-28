@@ -88,12 +88,13 @@ group('۱۵۲. پروندهٔ پایان جلسه');
     && !/totalPnl|netPnl/i.test(code152));
   // جمعِ نصفه بدتر از نبودِ عدد است.
   const blind152 = JSON.parse(JSON.stringify(shut152.session));
-  delete blind152.events.find((e) => e?.data?.commitVersion !== undefined)
-    .data.entryCashRial;
+  delete blind152.events.find((e) => e?.data?.closeVersion !== undefined)
+    .data.realizedRial;
   const blindOut152 = closeoutPortfolioSession(blind152, fx152.evidence, { force: true });
   check('نقدِ ورودِ نبوده، جمعِ تحقق‌یافته را null می‌کند نه صفر',
     blindOut152.dossier.realized.totalRial === null
-    && blindOut152.dossier.realized.unknown.length === 1, blindOut152.why);
+    && blindOut152.dossier.realized.unknown.length === 1,
+    JSON.stringify(blindOut152.dossier.realized));
 
   // ── بند ۳: موقعیتِ بازِ باقی‌مانده ──────────────────────────────────
   // جلسه‌ای که با موقعیت باز بسته شود، تعهدِ باز دارد.

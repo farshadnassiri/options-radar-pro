@@ -113,6 +113,7 @@ export async function loadMomentContracts(session, at, {
       version: SNAPSHOT_DATA_VERSION, ok: false,
       why: 'نماد پایهٔ جلسه معلوم نیست', rows: [], spot: null,
       warnings: ['نماد پایهٔ جلسه معلوم نیست'], dropped: 0, archived: false,
+      universe: null,
     };
   }
 
@@ -179,5 +180,10 @@ export async function loadMomentContracts(session, at, {
     dropped: bounded.dropped,
     limit,
     warnings,
+    universe: payload ? {
+      rows: Array.isArray(payload.rows) ? payload.rows : [],
+      quality: payload.quality ?? null,
+      archived,
+    } : null,
   };
 }

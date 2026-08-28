@@ -66,7 +66,7 @@ group('۱۲۴. مدرک اجراپذیری جلسهٔ فعال در رابط');
     },
   };
   const active = {
-    state: 'active', start: at124, lockedMission: made124.mission,
+    state: 'active', start: at124, now: at124, lockedMission: made124.mission,
     startSnapshot: snapshot,
   };
   const evidence = portfolioSessionEligibility(active);
@@ -84,11 +84,41 @@ group('۱۲۴. مدرک اجراپذیری جلسهٔ فعال در رابط');
   check('پیش‌نویس حتی با universe موجود حکم ساخته‌شده نمی‌گیرد',
     !portfolioSessionEligibility({ ...active, state: 'draft' }).ok
     && portfolioSessionEligibility({ ...active, state: 'draft' }).rows.length === 0);
-  check('عکس تازه یا ناهم‌لحظه به‌جای عکس شروع پذیرفته نمی‌شود',
+  check('عکس ناهم‌لحظه با ساعت جاری پذیرفته نمی‌شود',
     !portfolioSessionEligibility({
       ...active,
       startSnapshot: { ...snapshot, at: { date: at124.date, second: at124.second + 1 } },
     }).ok);
+
+  const later124 = { date: at124.date, second: at124.second + 15 * 60 };
+  const laterFeed124 = makeDataQuality({
+    kind: 'observed', source: 'candidate-feed', asOf: later124, sufficient: true,
+  });
+  const laterBook124 = makeDataQuality({
+    kind: 'executable', source: 'best-limits-history', asOf: later124, sufficient: true,
+    details: { levelsKnown: 5, levelsTotal: 5 },
+  });
+  const currentSnapshot124 = {
+    at: later124,
+    universe: {
+      quality: laterFeed124,
+      rows: [{
+        ...snapshot.universe.rows[0], asOf: later124, quality: laterFeed124,
+        quote: {
+          ...snapshot.universe.rows[0].quote,
+          book: book.map((level) => ({ ...level, second: later124.second })),
+          quality: laterBook124,
+        },
+      }],
+    },
+  };
+  const movedEvidence124 = portfolioSessionEligibility({
+    ...active, now: later124, momentSnapshot: currentSnapshot124,
+  });
+  check('پس از حرکت، حکم از Snapshot جاری ساخته می‌شود نه عکس شروع',
+    movedEvidence124.ok && movedEvidence124.now.second === later124.second
+    && movedEvidence124.rows.length === 1 && movedEvidence124.rows[0].accepted,
+    movedEvidence124.why);
 
   const before = JSON.stringify(evidence.rows);
   const accepted = filterPortfolioEligibilityRows(evidence.rows, 'accepted');
