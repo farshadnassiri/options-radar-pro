@@ -516,7 +516,7 @@ export async function mount(root, { tab, state, api }) {
       const rows2 = tm.map((x) => `
         <tr><td>${jalaliFromDEven(x.date)}</td><td class="n">${fmt.money(x.S)}</td>
           <td class="n">${fmt.int(x.daysLeft)}</td>
-          <td class="n" style="color:${x.pnl >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(x.pnl)}</td></tr>`).join('');
+          ${pnlCell(x.pnl)}</tr>`).join('');
       out.innerHTML = `
         <p class="note" style="color:var(--warn)">شبیه‌سازی بلک-شولز با تلاطم امروز (${fmt.num(r.sigmaUse)})
           روی قیمت پایانی تاریخی پایه — نه قیمت واقعی اختیار در آن روز. دیده‌بان تاریخچه مظنه ذخیره نمی‌کند،
