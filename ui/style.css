@@ -586,7 +586,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .portfolio-bar > strong { font-family: var(--mono); text-align: left; }
 .portfolio-small-table { min-width: 660px; }
 .portfolio-timeline-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: var(--space-4, 16px); margin: 14px 0; }
-.portfolio-viz-scroll { max-width: 100%; overflow: auto; scrollbar-gutter: stable; }
+.portfolio-timeline-grid > .card, #pb-heatmap, #pb-rank-chart { min-width: 0; }
+.portfolio-viz-scroll { width: 100%; max-width: 100%; min-width: 0; overflow: auto; scrollbar-gutter: stable; }
 .portfolio-heatmap { display: grid; width: max-content; min-width: 100%; gap: 3px; padding-bottom: 4px; }
 .portfolio-heat-row { display: grid; grid-template-columns: minmax(145px, 180px) repeat(var(--days), 34px); gap: 3px; align-items: center; }
 .portfolio-heat-row > b { position: sticky; z-index: 2; right: 0; overflow: hidden; padding: 5px 8px; background: var(--panel); text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); }
@@ -609,10 +610,11 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .portfolio-rank-chart line { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 5; }
 .portfolio-rank-chart text { fill: var(--muted); font-family: inherit; font-size: var(--fs-chart); }
 .portfolio-rank-chart g { cursor: pointer; outline: none; }
-.portfolio-rank-chart path { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .2; vector-effect: non-scaling-stroke; transition: opacity var(--transition-fast), stroke-width var(--transition-fast); }
+.portfolio-rank-chart .portfolio-rank-hit { fill: none; stroke: transparent; stroke-width: 14; opacity: 1; pointer-events: stroke; vector-effect: non-scaling-stroke; }
+.portfolio-rank-chart .portfolio-rank-line { fill: none; stroke: var(--muted); stroke-width: 1.8; opacity: .35; pointer-events: none; vector-effect: non-scaling-stroke; transition: opacity var(--transition-fast), stroke-width var(--transition-fast); }
 .portfolio-rank-chart circle { fill: var(--muted); opacity: .35; }
-.portfolio-rank-chart g:hover path, .portfolio-rank-chart g:focus path,
-.portfolio-rank-chart g.selected path { stroke: var(--accent); stroke-width: 3; opacity: 1; }
+.portfolio-rank-chart g:hover .portfolio-rank-line, .portfolio-rank-chart g:focus .portfolio-rank-line,
+.portfolio-rank-chart g.selected .portfolio-rank-line { stroke: var(--accent); stroke-width: 3; opacity: 1; }
 .portfolio-rank-chart g:hover circle, .portfolio-rank-chart g:focus circle,
 .portfolio-rank-chart g.selected circle { fill: var(--accent); opacity: 1; }
 .portfolio-rank-chart g:hover text, .portfolio-rank-chart g:focus text,

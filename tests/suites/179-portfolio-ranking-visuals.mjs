@@ -24,6 +24,12 @@ group('۱۷۹. نمای بهترین تا بدترین استراتژی‌ها �
     ui179.includes('function rankBumpChart(')
     && ui179.includes("rankBumpChart($('pb-rank-chart'), report.timeline, selectStrategy)")
     && ui179.includes("index === previousIndex + 1 ? 'L' : 'M'"));
+  check('خط رتبه هدف لمسی پهن و خط نمایشی مستقل دارد',
+    ui179.includes('class="portfolio-rank-hit"')
+    && ui179.includes('class="portfolio-rank-line"')
+    && style179.includes('.portfolio-rank-chart .portfolio-rank-hit')
+    && style179.includes('stroke-width: 14')
+    && style179.includes('pointer-events: stroke'));
   check('میله بهترین تا بدترین محور صفر میانی و دو جهت سود و زیان دارد',
     ui179.includes('portfolio-bar-track')
     && style179.includes('.portfolio-bar-track::after')
@@ -31,5 +37,8 @@ group('۱۷۹. نمای بهترین تا بدترین استراتژی‌ها �
     && style179.includes('.portfolio-bar-fill.loss'));
   check('Heatmap و رتبه در عرض کوچک داخل ظرف خود پیمایش می‌شوند',
     style179.includes('.portfolio-viz-scroll')
+    && style179.includes('.portfolio-timeline-grid > .card')
+    && style179.includes('#pb-heatmap, #pb-rank-chart { min-width: 0; }')
+    && style179.includes('.portfolio-viz-scroll { width: 100%; max-width: 100%; min-width: 0; overflow: auto;')
     && style179.includes('.portfolio-timeline-grid { grid-template-columns: 1fr; }'));
 }

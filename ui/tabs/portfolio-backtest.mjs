@@ -143,7 +143,7 @@ function rankBumpChart(host, timeline, onPick) {
         previousIndex = index;
         return `${command} ${x(point.date)} ${y(point.rank)}`;
       }).join(' ');
-      return `<g tabindex="0" role="button" data-strategy="${esc(row.strategyId)}"><path d="${path}"/><circle cx="${x(last.date)}" cy="${y(last.rank)}" r="4"/><text x="${W - R + 10}" y="${y(last.rank) + 4}">${esc(row.strategyName)} · ${fmt.int(last.rank)}</text><title>${esc(row.strategyName)} · میانه رتبه ${fmt.num(row.medianRank)} · ${fmt.int(row.topDays)} روز رتبه نخست</title></g>`;
+      return `<g tabindex="0" role="button" data-strategy="${esc(row.strategyId)}"><path class="portfolio-rank-hit" d="${path}"/><path class="portfolio-rank-line" d="${path}"/><circle cx="${x(last.date)}" cy="${y(last.rank)}" r="5"/><text x="${W - R + 10}" y="${y(last.rank) + 4}">${esc(row.strategyName)} · ${fmt.int(last.rank)}</text><title>${esc(row.strategyName)} · میانه رتبه ${fmt.num(row.medianRank)} · ${fmt.int(row.topDays)} روز رتبه نخست</title></g>`;
     }).join('')}
   </svg></div><p class="portfolio-note">خط رو به بالا یعنی بهترشدن رتبه؛ کلیک روی هر خط همان استراتژی و ترکیب‌هایش را انتخاب می‌کند.</p>`;
   const pick = (event) => {
