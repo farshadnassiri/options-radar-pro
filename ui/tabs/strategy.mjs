@@ -328,9 +328,13 @@ export async function mount(root, { tab, state, api }) {
       <tr><td>${l.what}</td><td class="n">${fmt.int(l.max)}</td>
       <td>${l.what === r.binding ? '<span class="tag warn">مقیدکننده</span>' : ''}</td></tr>`).join('');
 
+    // قالب سود و زیان باید هم در سناریوی قطعی و هم تصویر احتمالاتی یکی باشد.
+    // `signTone` برای NaN/∞ کلاس خالی می‌دهد؛ پس «—» به دروغ قرمز یا سبز
+    // نمی‌شود و هیچ سود و زیانی هم برای کامل‌کردن سلول ساخته نمی‌کنیم.
+    const pnlCell = (pnl) => `<td class="n ${signTone(pnl)}">${fmt.money(pnl)}</td>`;
     const scenRows = grid.map((g) => `
       <tr><td class="n">${faNum(g.pct.toFixed(0))}٪</td><td class="n">${fmt.money(g.S)}</td>
-      <td class="n" style="color:${g.pnl >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(g.pnl)}</td></tr>`).join('');
+      ${pnlCell(g.pnl)}</tr>`).join('');
 
     // تصویر آینده — ریسک و ریوارد بر اساس صدک‌های محتمل قیمت پایه (قلم
     // الف-۱، سؤال ۳). همان مدل لگاریتم-نرمال با روند صفر که popPct هم
@@ -342,7 +346,7 @@ export async function mount(root, { tab, state, api }) {
     }).filter((x) => Number.isFinite(x.level));
     const riskTableRows = riskRows.map((x) => `
       <tr><td class="n">${faNum(x.pct)}٪</td><td class="n">${fmt.money(x.level)}</td>
-      <td class="n" style="color:${x.pnl >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(x.pnl)}</td></tr>`).join('');
+      ${pnlCell(x.pnl)}</tr>`).join('');
 
     root.querySelector('#detail').innerHTML = `
       <div>
