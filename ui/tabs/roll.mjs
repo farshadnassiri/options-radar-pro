@@ -43,16 +43,16 @@ export async function mount(root, { state, api }) {
     <div class="split">
       <section class="card">
         <h3>موقعیت فعلی</h3>
-        <div class="field"><label>انتخاب موقعیت</label><select id="pos"></select></div>
-        <div class="field"><label>پایی که بسته می‌شود</label><select id="leg"></select></div>
+        <div class="field"><label for="pos">انتخاب موقعیت</label><select id="pos"></select></div>
+        <div class="field"><label for="leg">پایی که بسته می‌شود</label><select id="leg"></select></div>
         <dl class="kv" id="cur" style="margin-top:10px"></dl>
       </section>
       <section class="card">
         <h3>پای تازه</h3>
-        <div class="field"><label>سررسید</label><select id="exp"></select></div>
-        <div class="field"><label>قرارداد تازه</label><select id="new"></select></div>
+        <div class="field"><label for="exp">سررسید</label><select id="exp"></select></div>
+        <div class="field"><label for="new">قرارداد تازه</label><select id="new"></select></div>
         <p class="note" id="newnote"></p>
-        <div class="field"><label>هم‌زمان مقایسه با سررسید دیگر <span class="unit">اختیاری</span></label><select id="exp2"></select></div>
+        <div class="field"><label for="exp2">هم‌زمان مقایسه با سررسید دیگر <span class="unit">اختیاری</span></label><select id="exp2"></select></div>
         <p class="note">نامزدهای این سررسید هم به جدول و نمودار زیر اضافه می‌شوند. چون آن‌وقت موقعیت پس از رول
           دیگر یک سررسید ندارد، تفاضل با تقریب بلک-شولز روی افق «امروز» سنجیده می‌شود، نه جبر دقیق سررسید.</p>
       </section>

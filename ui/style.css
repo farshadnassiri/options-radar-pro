@@ -1838,7 +1838,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .grid { display: grid; gap: 12px 18px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 
 .field { display: flex; flex-direction: column; gap: var(--space-1, 4px); }
-.field label { font-size: var(--fs-md); color: var(--ink-2); font-weight: 700; }
+.field label, .field .field-label { font-size: var(--fs-md); color: var(--ink-2); font-weight: 700; }
 .field .hint { font-size: var(--fs-xs); color: var(--muted); line-height: var(--lh-normal); margin-top: 2px; }
 /* ورودی سفید است و کادر آبی دارد، نه خاکستریِ پرشده.
    پیش از این ورودی با زمینهٔ `--panel-2` ساخته می‌شد — یعنی همان رنگی که
