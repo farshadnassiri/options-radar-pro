@@ -107,6 +107,10 @@ self.onmessage = (event) => {
             },
             path: {
               validDays: replay.summary.validDays,
+              daily: replay.rows.filter((row) => row.status === 'ok'
+                && Number.isFinite(row.netPnl) && Number.isFinite(row.returnPct)).map((row) => ({
+                date: row.date, netPnl: row.netPnl, returnPct: row.returnPct,
+              })),
               firstProfit: replay.summary.firstProfit ? {
                 date: replay.summary.firstProfit.date,
                 holdingDays: replay.summary.firstProfit.holdingDays,
@@ -130,9 +134,11 @@ self.onmessage = (event) => {
           strategyName: def.name, results: rows.length,
         });
       }
+      const report = summarizePortfolio(rows);
+      for (const row of rows) delete row.path.daily;
       self.postMessage({
         type: 'portfolio', id: m.id, rows,
-        report: summarizePortfolio(rows), generatedByStrategy,
+        report, generatedByStrategy,
         excluded: { invalidAtEnd, replayErrors },
       });
       return;

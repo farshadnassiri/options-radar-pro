@@ -578,12 +578,45 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 .portfolio-bars { display: grid; gap: 8px; max-height: 420px; overflow: auto; }
 .portfolio-bar { display: grid; grid-template-columns: minmax(145px, .8fr) minmax(120px, 1.4fr) 70px; gap: 9px; align-items: center; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--radius-md); background: transparent; color: var(--ink); text-align: right; cursor: pointer; transition: background var(--transition-fast), border-color var(--transition-fast); }
 .portfolio-bar:hover, .portfolio-bar.selected { border-color: var(--line); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
-.portfolio-bar > i { display: block; height: 9px; overflow: hidden; border-radius: var(--radius-pill); background: var(--panel-2); }
-.portfolio-bar > i b { display: block; width: var(--bar); height: 100%; border-radius: inherit; background: var(--muted); }
-.portfolio-bar > i b.gain { background: var(--gain); }
-.portfolio-bar > i b.loss { background: var(--loss); }
+.portfolio-bar-track { position: relative; display: block; height: 11px; overflow: hidden; border-radius: var(--radius-pill); background: var(--panel-2); }
+.portfolio-bar-track::after { content: ''; position: absolute; inset-block: 0; left: 50%; width: 1px; background: var(--line); }
+.portfolio-bar-fill { position: absolute; inset-block: 0; width: var(--bar); border-radius: inherit; background: var(--muted); }
+.portfolio-bar-fill.gain { left: 50%; background: var(--gain); }
+.portfolio-bar-fill.loss { right: 50%; background: var(--loss); }
 .portfolio-bar > strong { font-family: var(--mono); text-align: left; }
 .portfolio-small-table { min-width: 660px; }
+.portfolio-timeline-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: var(--space-4, 16px); margin: 14px 0; }
+.portfolio-viz-scroll { max-width: 100%; overflow: auto; scrollbar-gutter: stable; }
+.portfolio-heatmap { display: grid; width: max-content; min-width: 100%; gap: 3px; padding-bottom: 4px; }
+.portfolio-heat-row { display: grid; grid-template-columns: minmax(145px, 180px) repeat(var(--days), 34px); gap: 3px; align-items: center; }
+.portfolio-heat-row > b { position: sticky; z-index: 2; right: 0; overflow: hidden; padding: 5px 8px; background: var(--panel); text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); }
+.portfolio-heat-row > button, .portfolio-heat-row > i { display: grid; place-items: center; width: 34px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 5px; background: var(--panel-2); color: var(--ink); font: inherit; cursor: pointer; }
+.portfolio-heat-row > button:hover, .portfolio-heat-row > button:focus-visible, .portfolio-heat-row > button.selected { position: relative; z-index: 1; border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
+.portfolio-heat-row > button span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.portfolio-heat-row > .gain.heat-1 { background: color-mix(in srgb, var(--gain) 14%, var(--panel)); }
+.portfolio-heat-row > .gain.heat-2 { background: color-mix(in srgb, var(--gain) 28%, var(--panel)); }
+.portfolio-heat-row > .gain.heat-3 { background: color-mix(in srgb, var(--gain) 44%, var(--panel)); }
+.portfolio-heat-row > .gain.heat-4 { background: color-mix(in srgb, var(--gain) 62%, var(--panel)); }
+.portfolio-heat-row > .loss.heat-1 { background: color-mix(in srgb, var(--loss) 14%, var(--panel)); }
+.portfolio-heat-row > .loss.heat-2 { background: color-mix(in srgb, var(--loss) 28%, var(--panel)); }
+.portfolio-heat-row > .loss.heat-3 { background: color-mix(in srgb, var(--loss) 44%, var(--panel)); }
+.portfolio-heat-row > .loss.heat-4 { background: color-mix(in srgb, var(--loss) 62%, var(--panel)); }
+.portfolio-heat-row > .flat { background: color-mix(in srgb, var(--muted) 18%, var(--panel)); }
+.portfolio-heat-row > .missing { cursor: default; opacity: .36; }
+.portfolio-heat-head { position: sticky; z-index: 3; top: 0; background: var(--panel); }
+.portfolio-heat-head span { overflow: hidden; color: var(--muted); font-size: var(--fs-3xs); text-align: center; text-overflow: ellipsis; white-space: nowrap; writing-mode: vertical-rl; }
+.portfolio-rank-chart { display: block; width: 100%; min-width: 720px; height: auto; }
+.portfolio-rank-chart line { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 5; }
+.portfolio-rank-chart text { fill: var(--muted); font-family: inherit; font-size: var(--fs-chart); }
+.portfolio-rank-chart g { cursor: pointer; outline: none; }
+.portfolio-rank-chart path { fill: none; stroke: var(--muted); stroke-width: 1.4; opacity: .2; vector-effect: non-scaling-stroke; transition: opacity var(--transition-fast), stroke-width var(--transition-fast); }
+.portfolio-rank-chart circle { fill: var(--muted); opacity: .35; }
+.portfolio-rank-chart g:hover path, .portfolio-rank-chart g:focus path,
+.portfolio-rank-chart g.selected path { stroke: var(--accent); stroke-width: 3; opacity: 1; }
+.portfolio-rank-chart g:hover circle, .portfolio-rank-chart g:focus circle,
+.portfolio-rank-chart g.selected circle { fill: var(--accent); opacity: 1; }
+.portfolio-rank-chart g:hover text, .portfolio-rank-chart g:focus text,
+.portfolio-rank-chart g.selected text { fill: var(--accent); font-weight: 800; }
 .portfolio-detail { display: grid; gap: var(--space-4, 16px); margin-top: 14px; scroll-margin-top: 12px; }
 .portfolio-detail-kpis { display: grid; grid-template-columns: repeat(4, minmax(125px, 1fr)); gap: 8px; margin: 12px 0; }
 .portfolio-detail-kpis article { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); box-shadow: var(--shadow-2xs); }
@@ -1023,6 +1056,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   .portfolio-form { grid-template-columns: repeat(3, minmax(145px, 1fr)); }
   .portfolio-manual { grid-template-columns: repeat(2, minmax(155px, 1fr)); }
   .portfolio-sensitivity-grid { grid-template-columns: 1fr; }
+  .portfolio-timeline-grid { grid-template-columns: 1fr; }
   .pt-layout { grid-template-columns: 1fr; }
   .pt-review { position: static; }
 }
