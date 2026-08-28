@@ -12,7 +12,9 @@ import { breachText, portfolioLedgerView } from '../portfolio-ledger-view.mjs';
 import {
   closeDoneText, closeFailureText, portfolioSessionPositionsView,
 } from '../portfolio-positions-view.mjs';
-import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
+import {
+  PORTFOLIO_COMMIT_REASONS, PORTFOLIO_COMMIT_VERSION, commitPortfolioPlan,
+} from '../../core/portfolio-commit.mjs';
 import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
 import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
 import { portfolioDossierAnalysis } from '../../core/portfolio-dossier-analysis.mjs';
@@ -1516,6 +1518,14 @@ export async function mount(root, { state, api }) {
     paintLedger(session);
     paintPositions(session);
     paintPayoff(session);
+    // این مجموعه کشِ رابط نیست؛ هر بار از دفتر immutable جلسه ساخته
+    // می‌شود تا refresh طرح مصرف‌شده را دوباره قابل ثبت نشان ندهد.
+    committedIds.clear();
+    for (const event of session?.events || []) {
+      if (event?.type === 'transaction'
+        && event?.data?.commitVersion === PORTFOLIO_COMMIT_VERSION
+        && event?.data?.candidateId) committedIds.add(String(event.data.candidateId));
+    }
     const section = $('pt-proposals');
     const evidence = portfolioSessionEligibility(session);
     const view = portfolioSessionProposals(session, evidence);
@@ -1543,7 +1553,10 @@ export async function mount(root, { state, api }) {
       <td data-label="کیفیت">${esc(row.qualityLabel)}${row.qualityReason ? `<br><small>${esc(row.qualityReason)}</small>` : ''}</td>
       <td data-label="انتخاب">${committedIds.has(row.candidateId)
         ? '<b class="pt-committed">ثبت شد</b>'
-        : `<button type="button" class="ghost" data-pt-commit="${esc(row.candidateId)}">انتخاب و ثبت</button>`}</td>
+        : `<div class="pt-proposal-commit"><label><span>حجم</span><input type="text" inputmode="numeric"
+            data-pt-quantity="${esc(row.candidateId)}" aria-label="حجم ${esc(row.defLabel)}"
+            placeholder="تا ${esc(row.executableQtyText)}"></label>
+          <button type="button" class="ghost" data-pt-commit="${esc(row.candidateId)}">انتخاب و ثبت</button></div>`}</td>
     </tr>`).join('') : '<tr class="pt-proposals-empty"><td colspan="9">هیچ طرحی با این مأموریت رتبه نگرفت.</td></tr>';
 
     asideTable.hidden = view.setAside.length === 0;
@@ -2083,12 +2096,22 @@ export async function mount(root, { state, api }) {
     })[button.dataset.ptEdit];
     target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
-  $('pt-proposals').onclick = (event) => {
+  $('pt-proposals').onclick = async (event) => {
     const button = event.target.closest('[data-pt-commit]');
     if (!button || !proposalSession) return;
     const candidateId = button.dataset.ptCommit;
+    const quantityInput = $('pt-proposals').querySelector(`[data-pt-quantity="${CSS.escape(candidateId)}"]`);
+    const quantity = parseIntegerInput(quantityInput?.value);
+    if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+      $('pt-proposals-state').textContent = 'حجم انتخابی را به‌صورت عدد صحیح مثبت وارد کن.';
+      quantityInput?.setAttribute('aria-invalid', 'true');
+      return;
+    }
+    quantityInput?.removeAttribute('aria-invalid');
+    button.disabled = true;
+    if (quantityInput) quantityInput.disabled = true;
     const evidence = portfolioSessionEligibility(proposalSession);
-    const done = commitPortfolioPlan(proposalSession, evidence, candidateId);
+    const done = commitPortfolioPlan(proposalSession, evidence, candidateId, { quantity });
     if (!done.ok) {
       // شکست ثبت هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود — و «کدام قید و
       // چقدر عبور» بخشی از همان خبر است، نه چیزی که کاربر باید حدس بزند.
@@ -2100,12 +2123,24 @@ export async function mount(root, { state, api }) {
       $('pt-proposals-state').textContent = detail
         ? `${PORTFOLIO_COMMIT_REASONS[done.reason]} — ${detail}`
         : done.why;
+      button.disabled = false;
+      if (quantityInput) quantityInput.disabled = false;
       return;
     }
-    committedIds.add(candidateId);
+    const nextDraft = draft?.step === 'active'
+      ? { ...draft, session: done.session, snapshot: done.session.startSnapshot }
+      : null;
+    const saved = nextDraft ? await persist(nextDraft) : null;
+    if (!saved?.ok) {
+      $('pt-proposals-state').textContent = `موقعیت نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
+      button.disabled = false;
+      if (quantityInput) quantityInput.disabled = false;
+      return;
+    }
+    draft = nextDraft;
     paintProposals(done.session);
     const remaining = done.budget.remainingRial;
-    $('pt-proposals-state').textContent = `ثبت شد — موقعیت ${faDigits(done.positionId)}`
+    $('pt-proposals-state').textContent = `ثبت شد — حجم ${fmt.int(quantity)} · موقعیت ${faDigits(done.positionId)}`
       + `${Number.isFinite(remaining) ? ` · باقی‌ماندهٔ خانواده ${fmt.int(remaining / 10)} تومان` : ''}`;
   };
 

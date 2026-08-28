@@ -101,6 +101,9 @@ export function portfolioSessionProposals(session, evidence, { limit = 3 } = {})
       ...planLabel(row.candidateId, source?.defId),
       score: row.score,
       scoreText: fmt.num(row.score),
+      executableQty: source?.entry?.executableQty ?? null,
+      executableQtyText: Number.isSafeInteger(source?.entry?.executableQty)
+        ? fmt.int(source.entry.executableQty) : '—',
       liftedText: driverText(row.lifted),
       draggedText: driverText(row.dragged),
       capitalTomanText: toman(row.basis?.capitalRial),

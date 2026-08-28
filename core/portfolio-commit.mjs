@@ -24,6 +24,10 @@
 
 import { ledgerRoomFor } from './portfolio-ledger.mjs';
 import { portfolioRankedPlans } from './portfolio-plans.mjs';
+import { portfolioEntryPlan } from './portfolio-entry.mjs';
+import { portfolioCapitalRequirement } from './portfolio-capital.mjs';
+import { portfolioPlanEvaluation } from './portfolio-evaluation.mjs';
+import { portfolioPlanScore } from './portfolio-score.mjs';
 import { PORTFOLIO_SCHEMA_VERSION, recordPortfolioTransaction } from './portfolio-session.mjs';
 
 export const PORTFOLIO_COMMIT_VERSION = 1;
@@ -33,6 +37,7 @@ export const PORTFOLIO_COMMIT_REASONS = Object.freeze({
   unknownCandidate: 'این نامزد در طرح‌های همین لحظه نیست',
   notRanked: 'فقط طرحی که همین حالا رتبه دارد ثبت می‌شود',
   alreadyCommitted: 'این طرح در همین لحظه ثبت شده است',
+  invalidQuantity: 'حجم انتخابی با ظرفیت و داده همین لحظه سازگار نیست',
   familyBudgetExceeded: 'سرمایهٔ لازم از بودجهٔ باقی‌ماندهٔ خانواده بیشتر است',
   missionRiskBreached: 'این ثبت قیود ریسک مأموریت را می‌شکند',
   ledgerRejected: 'دفتر رویداد این ثبت را نپذیرفت',
@@ -86,7 +91,7 @@ export function familyBudgetState(session, familyId, targetRial) {
  * `evidence` همان مدرک اجراپذیری هم‌لحظه است. رتبه از زنجیرهٔ تازه
  * بازساخته می‌شود تا «رتبه‌دار بودن» ادعای فراخوان نباشد.
  */
-export function commitPortfolioPlan(session, evidence, candidateId, { at = null } = {}) {
+export function commitPortfolioPlan(session, evidence, candidateId, { at = null, quantity = null } = {}) {
   const wanted = text(candidateId);
   const plans = portfolioRankedPlans(session, evidence);
   if (!plans.ok) return fail('noPlans', plans.why);
@@ -98,7 +103,18 @@ export function commitPortfolioPlan(session, evidence, candidateId, { at = null 
     return fail('unknownCandidate', wanted);
   }
 
-  const source = plans.sources.get(wanted);
+  let source = plans.sources.get(wanted);
+  if (quantity !== null && quantity !== undefined) {
+    const entry = portfolioEntryPlan(session, plans.set, evidence, wanted, { quantity });
+    if (!entry.ok) return fail('invalidQuantity', entry.why);
+    const capital = portfolioCapitalRequirement(session, plans.set, evidence, entry);
+    if (!capital.ok) return fail('invalidQuantity', capital.why);
+    const evaluation = portfolioPlanEvaluation(session, plans.set, evidence, entry, capital);
+    if (!evaluation.ok) return fail('invalidQuantity', evaluation.why);
+    const score = portfolioPlanScore(session, plans.set, evidence, entry, capital, evaluation);
+    if (!score.ok) return fail('invalidQuantity', score.why);
+    source = { ...source, entry, capital, evaluation, score };
+  }
   const { entry, capital, evaluation, score } = source;
 
   const moment = at ?? session.now ?? session.startSnapshot?.at ?? session.start;

@@ -215,7 +215,9 @@ export function portfolioCapitalRequirement(session, candidateSet, evidence, ent
     return fail('invalidEntry', session, entry);
   }
 
-  const canonical = portfolioEntryPlan(session, candidateSet, evidence, entry.candidateId);
+  const canonical = portfolioEntryPlan(session, candidateSet, evidence, entry.candidateId, {
+    quantity: entry.executableQty,
+  });
   if (!canonical.ok || !sameJson(canonical, entry)) return fail('invalidEntry', session, entry);
   const allocation = allocationOf(session, entry);
   if (!allocation) return fail('invalidBudget', session, entry);
