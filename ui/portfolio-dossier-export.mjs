@@ -7,10 +7,12 @@
 import { portfolioDossierAnalysis } from '../core/portfolio-dossier-analysis.mjs';
 import { portfolioCapitalGrowth } from '../core/portfolio-capital-growth.mjs';
 import { portfolioDossierWeaknesses } from '../core/portfolio-dossier-weakness.mjs';
+import { portfolioCapitalLedger } from '../core/portfolio-ledger.mjs';
+import { portfolioSessionPositions } from '../core/portfolio-positions.mjs';
 import { portfolioDossierView } from './portfolio-closeout-view.mjs';
 import { downloadXlsx, sheet, sheetParts } from './xlsx.mjs';
 
-export const PORTFOLIO_DOSSIER_EXPORT_VERSION = 1;
+export const PORTFOLIO_DOSSIER_EXPORT_VERSION = 2;
 
 const text = (value) => String(value ?? '').trim();
 const finite = (value) => (Number.isFinite(value) ? value : NaN);
@@ -69,6 +71,231 @@ function flatten(value, prefix = '', rows = []) {
 const flatSheet = (name, value) => sheet(
   name, ['مسیر فیلد', 'مقدار خام', 'نوع', 'وضعیت'], flatten(value), [250, 250, 90, 260],
 );
+
+const missing = (value, why = 'مقدار در سند ثبت نشده') => [
+  Number.isFinite(value) ? value : NaN,
+  Number.isFinite(value) ? '' : why,
+];
+
+function qualityCells(quality) {
+  return [
+    text(quality?.kind), text(quality?.source), moment(quality?.asOf),
+    quality?.sufficient === true ? 'بله' : quality?.sufficient === false ? 'خیر' : '',
+    [...(quality?.reasons || []), quality?.reason].map(text).filter(Boolean).join('؛ '),
+  ];
+}
+
+function topBook(contract) {
+  const book = contract?.quote?.book;
+  if (!Array.isArray(book) || !book.length) {
+    return [NaN, NaN, NaN, NaN, 'دفتر سفارش شروع ثبت نشده'];
+  }
+  const first = book[0] || {};
+  return [finite(first.bid), finite(first.bidQty), finite(first.ask), finite(first.askQty), ''];
+}
+
+function manifestSheet(session, dossier) {
+  const rows = [
+    ['schema', 'نسخه ساختار خروجی', PORTFOLIO_DOSSIER_EXPORT_VERSION, '', '', ''],
+    ['session-schema', 'نسخه ساختار جلسه', finite(session.schemaVersion), '', '', ''],
+    ['dossier-schema', 'نسخه ساختار پرونده', finite(dossier.version), '', '', ''],
+    ['warning', 'هشدار استفاده', 'این سند برای قضاوت آموزشی است، نه توصیه مالی', '', '', ''],
+    ['missing', 'قرارداد مقدار گمشده', 'سلول عددی خالی است و علت در ستون مجاور می‌آید', '', '', ''],
+    ['units', 'قرارداد واحد', 'پول=ریال؛ درصد=عدد خام؛ زمان=date:second', '', '', ''],
+    ['سرشناسه', 'هویت جلسه و پرونده', 'شناسه جلسه', '', 'جلسه ← همه برگ‌ها', ''],
+    ['مأموریت', 'مأموریت و ورودی‌های ریسک/نقدشوندگی', 'مسیر فیلد', '', 'جلسه', ''],
+    ['تخصیص‌ها', 'بودجه قفل‌شده خانواده‌ها', 'خانواده', 'ریال/درصد', 'جلسه', ''],
+    ['عکس شروع', 'نماد پایه، سرمایه و کیفیت شروع', 'شناسه جلسه', 'ریال', 'جلسه', ''],
+    ['قراردادهای شروع', 'شاهد فشرده بازار شروع؛ فقط سرِ دفتر', 'شناسه قرارداد', 'ریال', 'عکس شروع', ''],
+    ['موقعیت‌ها', 'هویت و نتیجه موقعیت', 'شناسه موقعیت', 'ریال', 'جلسه', ''],
+    ['تراکنش‌ها', 'دفتر immutable ورود/خروج', 'شناسه تراکنش', 'ریال', 'موقعیت‌ها', ''],
+    ['پاها', 'پاهای مستند هر تراکنش', 'شناسه تراکنش+ردیف', 'ریال', 'تراکنش‌ها', ''],
+    ['اجراها', 'اجرای واقعی ثبت‌شده', 'شناسه اجرا', 'ریال', 'تراکنش‌ها', ''],
+    ['لات‌های FIFO', 'Lot و مصرف FIFO بدون شناسه تازه', 'شناسه Lot', '', 'موقعیت‌ها/تراکنش‌ها', ''],
+    ['مسیر سرمایه', 'نقاط تغییر حجم و آفست در تایم‌فریم مأموریت', 'ترتیب رویداد', 'ریال', 'تراکنش‌ها', ''],
+    ['رتبه نهایی', 'همه گزینه‌های دارای مبنای یکسان', 'شناسه نامزد', 'ریال/درصد', 'پرونده', ''],
+    ['بدون رتبه', 'گزینه‌های فاقد عدد همراه علت', 'شناسه نامزد', '', 'پرونده', ''],
+  ];
+  return sheet('راهنمای AI', [
+    'کد', 'تعریف', 'مقدار/کلید اصلی', 'واحد', 'رابطه کلیدها', 'یادداشت',
+  ], rows, [130, 280, 330, 120, 230, 250]);
+}
+
+function fullGameSheets(session, dossier) {
+  const ranking = dossier.finalRanking;
+  if (!ranking || ranking.ok !== true) return [];
+  const positions = portfolioSessionPositions(session);
+  if (!positions.ok) return [];
+
+  const allocationRows = [...(session.lockedAllocations || [])]
+    .sort((left, right) => text(left?.familyId).localeCompare(text(right?.familyId)))
+    .map((row) => [row.familyId || '', row.label || '', finite(row.pct), finite(row.targetRial)]);
+
+  const snapshot = session.startSnapshot || {};
+  const snapshotRows = [
+    ['sessionId', 'شناسه جلسه', session.id, '', ''],
+    ['portfolioId', 'شناسه سبد', session.portfolioId, '', ''],
+    ['baseIns', 'نماد پایه', session.baseIns, '', ''],
+    ['start', 'لحظه شروع', moment(session.start), '', ''],
+    ['snapshotAt', 'لحظه عکس شروع', moment(snapshot.at), '', ''],
+    ['spotRial', 'قیمت نماد پایه در شروع', ...missing(finite(snapshot.spot)), 'ریال'],
+    ['qualityKind', 'نوع کیفیت عکس شروع', text(snapshot.quality?.kind), '', ''],
+    ['qualitySource', 'منبع عکس شروع', text(snapshot.quality?.source), '', ''],
+    ['qualityReasons', 'علت‌ها و هشدارهای کیفیت', [
+      ...(session.dataWarnings || []), ...(snapshot.quality?.reasons || []), snapshot.quality?.reason,
+    ].map(text).filter(Boolean).join('؛ '), '', ''],
+  ];
+  const contractRows = [...(snapshot.contracts || [])]
+    .sort((left, right) => text(left?.ins).localeCompare(text(right?.ins)))
+    .map((row) => [
+      row.ins || '', row.kind || '', finite(row.strike), finite(row.expiry), finite(row.size),
+      finite(row.quote?.close), ...topBook(row), ...qualityCells(row.quote?.quality),
+    ]);
+
+  const positionRows = positions.positions.map((row) => [
+    row.id, row.status, row.strategyId, row.familyId, row.candidateId,
+    moment(row.openedAt), moment(row.closedAt), finite(row.initialQty), finite(row.openQty),
+    finite(row.capitalRial), finite(row.entryCashRial), finite(row.openEntryFeeRial),
+    finite(row.realizedRial), NaN,
+    row.realizedWhy || '', 'ارزش تحقق‌نیافته موقعیت در سند پایان ثبت نشده',
+  ]);
+
+  const transactionRows = [];
+  const legRows = [];
+  const executionRows = [];
+  const consumedByLot = new Map();
+  for (const event of session.events || []) {
+    if (event?.type !== 'transaction') continue;
+    const data = event.data || {};
+    const capital = data.capital?.components || {};
+    const entryFee = data.commitVersion ? capital.feeRial : NaN;
+    const exitFee = data.closeVersion ? data.feeRial : NaN;
+    transactionRows.push([
+      event.id || '', event.transactionId || '', event.positionId || '',
+      event.transactionKind || '', event.transactionLabel || '', moment(event.at), finite(event.qty),
+      event.lotId || '', data.operationId || '', finite(data.capitalRial),
+      finite(capital.debitRial), finite(capital.creditRial), finite(capital.marginRial),
+      finite(entryFee), finite(exitFee), finite(data.entryCashRial), finite(data.exitCashRial),
+      finite(data.realizedRial), NaN, data.realizedWhy || '',
+      'ارزش تحقق‌نیافته برای تراکنش immutable ثبت نشده',
+    ]);
+    (data.legs || []).forEach((leg, index) => legRows.push([
+      event.transactionId || '', index + 1, event.positionId || '', leg.ins || '',
+      leg.kind || '', leg.side || '', leg.entrySide || '', finite(leg.ratio), finite(leg.size),
+      finite(leg.strike), finite(leg.expiry), finite(leg.vwap), finite(leg.filled),
+      finite(leg.top), finite(leg.levels),
+    ]));
+    (event.executions || []).forEach((execution) => executionRows.push([
+      execution.id || '', event.transactionId || '', event.positionId || '',
+      execution.ins || '', execution.side || '', finite(execution.qty), finite(execution.price),
+    ]));
+    for (const used of event.consumedLots || []) {
+      const row = consumedByLot.get(text(used?.lotId)) || { qty: 0, transactions: [] };
+      row.qty += Number(used?.qty) || 0;
+      row.transactions.push(event.transactionId || '');
+      consumedByLot.set(text(used?.lotId), row);
+    }
+  }
+
+  const lotRows = positions.positions.flatMap((position) => (position.lots || []).map((lot) => {
+    const used = consumedByLot.get(text(lot.id)) || { qty: 0, transactions: [] };
+    return [
+      lot.id || '', position.id, lot.transactionId || '', moment(lot.openedAt),
+      finite(lot.initialQty), finite(lot.remainingQty), used.qty,
+      used.transactions.filter(Boolean).join('|'),
+    ];
+  }));
+
+  const grain = text(session.lockedMission?.replay?.grain);
+  const pathRows = [];
+  const events = (session.events || []).filter((event) => event?.type === 'transaction');
+  for (let index = 0; index <= events.length; index += 1) {
+    const event = index ? events[index - 1] : null;
+    const partial = { ...session, events: events.slice(0, index) };
+    const ledger = portfolioCapitalLedger(partial);
+    const reason = ledger.ok && ledger.unpriced.count === 0
+      ? '' : ledger.why || `عدد ${ledger.unpriced.count} رویداد سرمایه کامل نیست`;
+    pathRows.push([
+      index, grain, moment(event?.at || session.start), event?.id || '', event?.transactionId || '',
+      event?.positionId || '', event?.transactionKind || 'start',
+      event ? (['open', 'increase', 'rollIn'].includes(event.transactionKind)
+        ? finite(event.qty) : -finite(event.qty)) : 0,
+      ledger.ok ? finite(ledger.committed.totalRial) : NaN,
+      ledger.ok ? finite(ledger.committed.debitRial) : NaN,
+      ledger.ok ? finite(ledger.committed.feeRial) : NaN,
+      ledger.ok ? finite(ledger.committed.marginRial) : NaN,
+      ledger.ok ? finite(ledger.free.rial) : NaN,
+      finite(event?.data?.realizedRial), NaN, reason,
+      'ارزش تحقق‌نیافته مسیر در دفتر immutable ثبت نشده',
+    ]);
+  }
+
+  const selectedIds = new Set((ranking.selected || []).map((row) => text(row?.candidateId)));
+  const rankingRows = (ranking.ranked || []).map((row) => [
+    row.candidateId || '', row.defId || '', finite(row.rank), finite(row.percentile),
+    finite(row.capitalRial), finite(row.entryCashRial), finite(row.entryFeeRial),
+    finite(row.exitCashRial), finite(row.exitFeeRial), finite(row.realizedRial),
+    finite(row.returnPct), selectedIds.has(text(row.candidateId)) ? 'بله' : 'خیر',
+    row.candidateId === ranking.best?.candidateId ? 'بهترین'
+      : row.candidateId === ranking.worst?.candidateId ? 'بدترین' : '',
+    moment(ranking.start), moment(ranking.end),
+  ]);
+  const withoutRankRows = (ranking.withoutRank || []).map((row) => [
+    row.candidateId || '', row.defId || '', row.why || '',
+    selectedIds.has(text(row.candidateId)) ? 'بله' : 'خیر', moment(ranking.start), moment(ranking.end),
+  ]);
+
+  return [
+    manifestSheet(session, dossier),
+    sheet('تخصیص‌ها', ['خانواده', 'عنوان', 'درصد خام', 'بودجه هدف (ریال)'], allocationRows),
+    sheet('عکس شروع', ['کد', 'عنوان', 'مقدار خام', 'علت نبود', 'واحد'], snapshotRows),
+    ...sheetParts('قراردادهای شروع', [
+      'شناسه قرارداد', 'نوع', 'اعمال (ریال)', 'سررسید', 'اندازه قرارداد',
+      'قیمت پایانی شروع (ریال)', 'بهترین خرید', 'حجم خرید', 'بهترین فروش', 'حجم فروش',
+      'علت نبود دفتر', 'نوع کیفیت', 'منبع کیفیت', 'لحظه کیفیت', 'کفایت', 'علت کیفیت',
+    ], contractRows),
+    ...sheetParts('موقعیت‌ها', [
+      'شناسه موقعیت', 'وضعیت', 'استراتژی', 'خانواده', 'شناسه نامزد', 'شروع', 'پایان',
+      'حجم اولیه', 'حجم باز', 'سرمایه ورود (ریال)', 'نقد ورود (ریال)',
+      'کارمزد مبنای باز (ریال)', 'تحقق‌یافته (ریال)', 'تحقق‌نیافته (ریال)',
+      'علت نبود تحقق‌یافته', 'علت نبود تحقق‌نیافته',
+    ], positionRows),
+    ...sheetParts('تراکنش‌ها', [
+      'شناسه رویداد', 'شناسه تراکنش', 'شناسه موقعیت', 'کد نوع', 'عنوان نوع', 'لحظه',
+      'حجم', 'شناسه Lot تازه', 'شناسه عملیات', 'سرمایه لازم (ریال)', 'بدهکار (ریال)',
+      'بستانکار (ریال)', 'وجه تضمین (ریال)', 'کارمزد ورود (ریال)', 'کارمزد خروج (ریال)',
+      'نقد ورود (ریال)', 'نقد خروج (ریال)', 'تحقق‌یافته (ریال)', 'تحقق‌نیافته (ریال)',
+      'علت نبود تحقق‌یافته', 'علت نبود تحقق‌نیافته',
+    ], transactionRows),
+    ...sheetParts('پاها', [
+      'شناسه تراکنش', 'ردیف پا', 'شناسه موقعیت', 'شناسه قرارداد', 'نوع دارایی',
+      'سمت ثبت', 'سمت ورود', 'نسبت', 'اندازه', 'اعمال', 'سررسید', 'VWAP', 'حجم پرشده',
+      'سر دفتر', 'تعداد سطح',
+    ], legRows),
+    ...sheetParts('اجراها', [
+      'شناسه اجرا', 'شناسه تراکنش', 'شناسه موقعیت', 'شناسه قرارداد', 'سمت', 'حجم', 'قیمت',
+    ], executionRows),
+    ...sheetParts('لات‌های FIFO', [
+      'شناسه Lot', 'شناسه موقعیت', 'تراکنش سازنده', 'لحظه ساخت', 'حجم اولیه',
+      'حجم باقی‌مانده', 'حجم مصرف‌شده', 'تراکنش‌های مصرف‌کننده',
+    ], lotRows),
+    ...sheetParts('مسیر سرمایه', [
+      'ترتیب', 'تایم‌فریم', 'لحظه', 'شناسه رویداد', 'شناسه تراکنش', 'شناسه موقعیت',
+      'کد تغییر', 'تغییر حجم', 'سرمایه درگیر (ریال)', 'بدهکار درگیر (ریال)',
+      'کارمزد درگیر (ریال)', 'وجه تضمین درگیر (ریال)', 'سرمایه آزاد (ریال)',
+      'تحقق‌یافته این تغییر (ریال)', 'تحقق‌نیافته (ریال)', 'علت نبود سرمایه',
+      'علت نبود تحقق‌نیافته',
+    ], pathRows),
+    ...sheetParts('رتبه نهایی', [
+      'شناسه نامزد', 'تعریف', 'رتبه', 'صدک', 'مبنای سرمایه (ریال)', 'نقد ورود (ریال)',
+      'کارمزد ورود (ریال)', 'نقد خروج (ریال)', 'کارمزد خروج (ریال)',
+      'تحقق‌یافته (ریال)', 'بازده (درصد)', 'انتخاب کاربر', 'کران', 'شروع مبنا', 'پایان مبنا',
+    ], rankingRows),
+    ...sheetParts('بدون رتبه', [
+      'شناسه نامزد', 'تعریف', 'علت', 'انتخاب کاربر', 'شروع مبنا', 'پایان مبنا',
+    ], withoutRankRows),
+  ];
+}
 
 /** جلسه بسته و پرونده خام → برگ‌های پایدار دفترکار. */
 export function portfolioDossierWorkbook(session, dossier, {
@@ -210,6 +437,7 @@ export function portfolioDossierWorkbook(session, dossier, {
         'تغییر (ریال)', 'تحقق‌نیافته (ریال)', 'علت نبود',
       ], alertRows),
       ...sheetParts('یافته‌ها', ['کد پایدار', 'شدت', 'عنوان', 'شرح', 'شاهد JSON'], findingRows),
+      ...fullGameSheets(session, dossier),
     ],
   };
 }
