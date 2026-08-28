@@ -133,17 +133,27 @@ group('۱۲۴. مدرک اجراپذیری جلسهٔ فعال در رابط');
     pMeDem_C: 0, qTitMeDem_C: 0, pMeOf_C: 0, qTitMeOf_C: 0,
     pMeDem_P: 0, qTitMeDem_P: 0, pMeOf_P: 0, qTitMeOf_P: 0,
   }];
+  const mixedArchivedRows = [...archivedRows, {
+    ...archivedRows[0], uaInsCode: 'other-base',
+    insCode_C: 'other-c', insCode_P: 'other-p',
+    lVal18AFC_C: 'کال نماد دیگر', lVal18AFC_P: 'پوت نماد دیگر',
+  }];
   const archivedCandidates = portfolioEligibilityCandidates({
-    at: at124, universe: { rows: archivedRows, quality: universeQuality },
-  });
+    at: at124, universe: { rows: mixedArchivedRows, quality: universeQuality },
+  }, { baseIns: '900001' });
   check('هر قرارداد خام برای دو سمت صریح ساخته می‌شود، نه سمت حدسی',
     archivedCandidates.length === 4
     && archivedCandidates.map((row) => row.meta.side).join(',') === 'buy,sell,buy,sell');
+  check('حکم خام فقط قراردادهای نماد پایه جلسه را می‌بیند',
+    archivedCandidates.every((row) => !row.candidate.id.startsWith('other-')));
   const archivedEvidence = portfolioSessionEligibility({
-    ...active, startSnapshot: {
-      at: at124, universe: { rows: archivedRows, quality: universeQuality },
+    ...active, baseIns: '900001', startSnapshot: {
+      at: at124, universe: { rows: mixedArchivedRows, quality: universeQuality },
     },
   });
+  check('فیلتر نماد پایه پیش از ساخت حکم روی مسیر کامل جلسه هم اعمال می‌شود',
+    archivedEvidence.rows.length === 4
+    && archivedEvidence.rows.every((row) => !row.candidateId.startsWith('other-')));
   check('صفرهای ساختاری بایگانی به عدد مالی تبدیل نمی‌شوند',
     archivedEvidence.rows.every((row) => row.executableQty === null)
     && archivedEvidence.rows.every((row) => row.reasons.some((why) => why.code === 'underlyingValueMissing')));
