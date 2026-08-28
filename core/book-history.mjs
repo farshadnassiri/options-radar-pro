@@ -48,17 +48,30 @@ export function normalizeBookEvents(rows = []) {
   const out = [];
   for (let index = 0; index < list.length; index += 1) {
     const row = list[index] || {};
-    const level = Math.trunc(num(row.number, 0));
-    const time = Math.trunc(num(row.hEven, 0));
+    // `/api/hist` رویداد را یک بار در سرور نرمال می‌کند. بارگذار مرورگر
+    // همان خروجی را به دروازه می‌دهد؛ پس این تابع باید هم شکل خام TSETMC
+    // و هم شکل نرمال‌شدهٔ خودش را بپذیرد. نرمال‌سازی دوبارهٔ نسخهٔ قبلی
+    // `level` را چون `number` نداشت صفر می‌کرد و کل دفتر تاریخی می‌ریخت.
+    const level = Math.trunc(num(row.level ?? row.number, 0));
+    const explicitSecond = num(row.second, NaN);
+    const time = Math.trunc(num(row.time ?? row.hEven,
+      Number.isFinite(explicitSecond) ? secondToHms(explicitSecond) : 0));
     if (!(level >= 1 && level <= BOOK_LEVELS) || !(time > 0)) continue;
     const refRaw = row.refID ?? row.refId;
     const refId = Number.isFinite(Number(refRaw)) ? Number(refRaw) : NaN;
+    const refIdKnown = row.refIdKnown === false ? false : Number.isFinite(refId);
     out.push({
-      level, time, second: tradeSecond(time), timeLabel: tradeTimeLabel(time),
+      level, time,
+      second: Number.isFinite(explicitSecond) ? explicitSecond : tradeSecond(time),
+      timeLabel: String(row.timeLabel || tradeTimeLabel(time)),
       refId: Number.isFinite(refId) ? refId : index,
-      refIdKnown: Number.isFinite(refId),
-      bid: num(row.pMeDem, 0), bidQty: num(row.qTitMeDem, 0), bidOrd: num(row.zOrdMeDem, 0),
-      ask: num(row.pMeOf, 0), askQty: num(row.qTitMeOf, 0), askOrd: num(row.zOrdMeOf, 0),
+      refIdKnown,
+      bid: num(row.bid ?? row.pMeDem, 0),
+      bidQty: num(row.bidQty ?? row.qTitMeDem, 0),
+      bidOrd: num(row.bidOrd ?? row.zOrdMeDem, 0),
+      ask: num(row.ask ?? row.pMeOf, 0),
+      askQty: num(row.askQty ?? row.qTitMeOf, 0),
+      askOrd: num(row.askOrd ?? row.zOrdMeOf, 0),
     });
   }
   out.sort((a, b) => a.second - b.second || a.refId - b.refId || a.level - b.level);

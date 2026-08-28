@@ -155,16 +155,22 @@ export function portfolioEligibility(mission, candidates = [], { now = null } = 
     }
 
     const underlyingValue = num(candidate?.underlyingDailyValueRial, NaN);
-    if (!Number.isFinite(underlyingValue)) addReason(reasons, 'underlyingValueMissing');
-    else if (underlyingValue < liquidity.minUnderlyingDailyValueRial) addReason(reasons, 'underlyingValueLow');
+    if (liquidity.minUnderlyingDailyValueRial > 0) {
+      if (!Number.isFinite(underlyingValue)) addReason(reasons, 'underlyingValueMissing');
+      else if (underlyingValue < liquidity.minUnderlyingDailyValueRial) addReason(reasons, 'underlyingValueLow');
+    }
 
     const optionValue = num(candidate?.optionDailyValueRial, NaN);
-    if (!Number.isFinite(optionValue)) addReason(reasons, 'optionValueMissing');
-    else if (optionValue < liquidity.minOptionDailyValueRial) addReason(reasons, 'optionValueLow');
+    if (liquidity.minOptionDailyValueRial > 0) {
+      if (!Number.isFinite(optionValue)) addReason(reasons, 'optionValueMissing');
+      else if (optionValue < liquidity.minOptionDailyValueRial) addReason(reasons, 'optionValueLow');
+    }
 
     const openInterest = num(candidate?.openInterest, NaN);
-    if (!Number.isFinite(openInterest)) addReason(reasons, 'openInterestMissing');
-    else if (openInterest < liquidity.minOpenInterest) addReason(reasons, 'openInterestLow');
+    if (liquidity.minOpenInterest > 0) {
+      if (!Number.isFinite(openInterest)) addReason(reasons, 'openInterestMissing');
+      else if (openInterest < liquidity.minOpenInterest) addReason(reasons, 'openInterestLow');
+    }
 
     const side = String(candidate?.side || '');
     if (side !== 'buy' && side !== 'sell') addReason(reasons, 'invalidSide');
@@ -229,4 +235,3 @@ export function portfolioEligibility(mission, candidates = [], { now = null } = 
     rejected: results.filter((row) => !row.accepted),
   };
 }
-
