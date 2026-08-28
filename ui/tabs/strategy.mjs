@@ -372,9 +372,9 @@ export async function mount(root, { tab, state, api }) {
           <dt>اگر همین حالا ببندی — دفتر سفارش</dt>
           <dd>${offsetCell(r)}</dd>
           <dt>اگر با آخرین معامله تسویه کنی <span class="unit">مرجع</span></dt>
-          <dd style="color:${r.settleLastPnl >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(r.settleLastPnl)}</dd>
+          <dd class="${signTone(r.settleLastPnl)}">${fmt.money(r.settleLastPnl)}</dd>
           <dt>اگر با قیمت پایانی تسویه کنی <span class="unit">مرجع</span></dt>
-          <dd style="color:${r.settleClosePnl >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(r.settleClosePnl)}</dd>
+          <dd class="${signTone(r.settleClosePnl)}">${fmt.money(r.settleClosePnl)}</dd>
           <dt>سرمایه درگیر</dt><dd>${fmt.money(r.capital)}</dd>
           <dt>مبنای سرمایه</dt><dd>${r.capitalLabel}</dd>
           <dt>وجه تضمین</dt><dd>${fmt.money(r.margin)}</dd>
