@@ -49,8 +49,8 @@ const copy = (value) => {
 };
 
 const positiveInt = (value) => {
-  const out = Math.trunc(num(value, NaN));
-  return Number.isFinite(out) && out > 0 ? out : NaN;
+  const out = num(value, NaN);
+  return Number.isSafeInteger(out) && out > 0 ? out : NaN;
 };
 
 const validMoment = (point) => Number.isFinite(momentKey(point));

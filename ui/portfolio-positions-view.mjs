@@ -143,6 +143,9 @@ function toRow(row, valued = null) {
     initialQtyText: count(row.initialQty),
     capitalTomanText: toman(row.capitalRial),
     entryCashTomanText: toman(row.entryCashRial),
+    realizedTomanText: toman(row.realizedRial),
+    realizedTone: Number.isFinite(row.realizedRial) ? signTone(row.realizedRial) : '',
+    realizedWhy: faDigits(text(row.realizedWhy)),
     // پاها هرکدام یک عبارت کامل‌اند؛ ستون‌بندی‌شان کار تب است.
     legTexts: (row.legs || []).map(legText),
     documented: row.documented,
@@ -193,6 +196,8 @@ export function closeDoneText(result) {
   return `${what} — ${count(result.qty)} قرارداد`
     + ` · نقد خروج ${toman(result.exitCashRial)} تومان`
     + ` · کارمزد ${toman(result.feeRial)} تومان`
+    + (Number.isFinite(result.realizedRial)
+      ? ` · سود تحقق‌یافته ${toman(result.realizedRial)} تومان` : '')
     + (result.status === 'open' ? ` · باقی‌مانده ${count(result.remainingQty)}` : '');
 }
 

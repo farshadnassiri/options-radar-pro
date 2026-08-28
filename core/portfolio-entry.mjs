@@ -28,6 +28,8 @@ export const PORTFOLIO_ENTRY_REASONS = Object.freeze({
   missingBook: 'دفتر سفارش لازم برای قیمت‌گذاری موجود نیست',
   missingCapacity: 'ظرفیت واقعی یکی از پاها در snapshot فاقد داده است',
   incompleteExecution: 'حجم مشترک از دفتر یکی از پاها کامل پر نشد',
+  invalidQuantity: 'حجم انتخابی باید عدد صحیح مثبت باشد',
+  quantityExceedsCapacity: 'حجم انتخابی از ظرفیت واقعی دفتر بیشتر است',
   unknownCash: 'جمع نقد ورود به‌دلیل عدد گمشده نامعلوم است',
   invalidBudget: 'بودجهٔ قفل‌شدهٔ خانواده معتبر نیست',
 });
@@ -52,6 +54,7 @@ function fail(code, session = null, candidateId = '') {
     candidateId: text(candidateId),
     now: activeSnapshot(session)?.at ? { ...activeSnapshot(session).at } : null,
     executableQty: null,
+    capacityQty: null,
     legs: [],
     unitEntryCashRial: null,
     entryCashRial: null,
@@ -170,9 +173,11 @@ function sameNumber(left, right) {
 
 /**
  * طرح ورود برای یک شناسه ترکیب موجود در خروجی `portfolioCandidates`.
- * حجم خروجی همیشه ظرفیت کامل ساختار است؛ بودجه فقط سقف جداگانه می‌دهد.
+ * بدون `quantity` حجم خروجی ظرفیت کامل ساختار است. وقتی کاربر حجم صریح
+ * می‌دهد، همان حجم دوباره از همه دفترها پیمایش می‌شود؛ عدد بزرگ‌تر از
+ * ظرفیت رد می‌شود و هیچ کوچک‌کردن پنهانی رخ نمی‌دهد.
  */
-export function portfolioEntryPlan(session, candidateSet, evidence, candidateId) {
+export function portfolioEntryPlan(session, candidateSet, evidence, candidateId, { quantity = null } = {}) {
   if (!session || session.state !== 'active') return fail('inactiveSession', session, candidateId);
   const snapshot = activeSnapshot(session);
   if (!snapshot || !snapshotWithinSession(session, snapshot)) {
@@ -244,7 +249,13 @@ export function portfolioEntryPlan(session, candidateSet, evidence, candidateId)
   if (!prepared.length || prepared.some((row) => !(row.maxQty > 0))) {
     return fail('missingCapacity', session, candidateId);
   }
-  const executableQty = Math.min(...prepared.map((row) => row.maxQty));
+  const capacityQty = Math.min(...prepared.map((row) => row.maxQty));
+  const requested = quantity === null || quantity === undefined ? capacityQty : Number(quantity);
+  if (!Number.isSafeInteger(requested) || requested <= 0) {
+    return fail('invalidQuantity', session, candidateId);
+  }
+  if (requested > capacityQty) return fail('quantityExceedsCapacity', session, candidateId);
+  const executableQty = requested;
   const priced = [];
   const legs = [];
   for (const row of prepared) {
@@ -315,6 +326,7 @@ export function portfolioEntryPlan(session, candidateSet, evidence, candidateId)
     family: text(candidate.family),
     now: { ...snapshot.at },
     executableQty,
+    capacityQty,
     legs,
     unitEntryCashRial,
     entryCashRial,

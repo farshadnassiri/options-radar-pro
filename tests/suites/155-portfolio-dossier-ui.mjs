@@ -81,7 +81,10 @@ group('۱۵۵. اتصال ذخیره پرونده به بستن جلسه');
       && tab155.includes('paintCloseout(proposalSession)')
       && tab155.includes('پرونده روی سرور ثبت نشد');
   })());
-  check('جلسه محلی و کنترل‌ها فقط پس از موفقیت عوض می‌شوند',
-    /proposalSession = persisted\.session[\s\S]{0,220}?control\.disabled = true/.test(tab155)
-    && /paintDossier\(persisted\.view\)/.test(tab155));
+  check('جلسه محلی و کنترل‌ها فقط پس از موفقیت عوض می‌شوند', (() => {
+    const assigned = tab155.indexOf('proposalSession = persisted.session');
+    const painted = tab155.indexOf('paintDossier(persisted.view)', assigned);
+    const disabled = tab155.indexOf('control.disabled = true', painted);
+    return assigned >= 0 && painted > assigned && disabled > painted;
+  })());
 }

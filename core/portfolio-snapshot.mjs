@@ -152,7 +152,7 @@ export function snapshotWithinSession(session, snapshot) {
  * چیزی واکشی نمی‌شود، تا ماژول به منبع داده گره نخورد و آزمون‌پذیر
  * بماند.
  */
-export function portfolioMomentSnapshot(session, at, { spot, rows = [] } = {}) {
+export function portfolioMomentSnapshot(session, at, { spot, rows = [], universe = null } = {}) {
   if (!session) return fail('noSession');
   const key = momentKey(at);
   if (!Number.isFinite(key)) return fail('invalidMoment');
@@ -198,6 +198,7 @@ export function portfolioMomentSnapshot(session, at, { spot, rows = [] } = {}) {
       at: moment,
       spot: hasSpot ? spotValue : null,
       contracts,
+      ...(universe ? { universe: copy(universe) } : {}),
       // همان ورودی‌های قفل‌شده، نه رونوشتی که روزی واگرا شود.
       capitalInputs,
       quality,

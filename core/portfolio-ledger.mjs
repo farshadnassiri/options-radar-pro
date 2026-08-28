@@ -7,7 +7,7 @@
 //
 // چهار مرز:
 //
-// **فقط از دفتر رویداد و مأموریت قفل‌شده.** هیچ شمارندهٔ موازی‌ای ساخته
+// **فقط از دفتر رویداد، lotهای باز و مأموریت قفل‌شده.** هیچ شمارندهٔ موازی‌ای ساخته
 // نمی‌شود. شمارندهٔ موازی روزی با دفتر اختلاف پیدا می‌کند و آن‌وقت هیچ‌کدام
 // سند نیستند.
 //
@@ -49,10 +49,11 @@ function fail(reason) {
   };
 }
 
-/** ثبت‌هایی که از `commitPortfolioPlan` آمده‌اند و عدد سرمایه دارند. */
+/** ثبت‌هایی که از `commitPortfolioPlan` آمده‌اند و lot سرمایه ساخته‌اند. */
 function commitEvents(session) {
   return (session?.events || []).filter((event) => event?.type === 'transaction'
-    && event?.data?.commitVersion === PORTFOLIO_COMMIT_VERSION);
+    && event?.data?.commitVersion === PORTFOLIO_COMMIT_VERSION
+    && event?.lotId);
 }
 
 /**
@@ -81,23 +82,32 @@ export function portfolioCapitalLedger(session) {
   let marginRial = 0;
   const families = new Map();
   const unpricedIds = [];
+  const remainingByLot = new Map(replay.positions.flatMap((position) => position.lots || [])
+    .map((lot) => [text(lot.id), Number(lot.remainingQty)]));
+  let activeCommitCount = 0;
 
   for (const event of commitEvents(session)) {
+    const remainingQty = remainingByLot.get(text(event.lotId));
+    if (!(remainingQty > 0)) continue;
+    const eventQty = Number(event.qty);
+    const share = Number.isFinite(eventQty) && eventQty > 0 ? remainingQty / eventQty : NaN;
+    activeCommitCount += 1;
     const capitalRial = money(event.data.capitalRial);
-    if (capitalRial === null) {
+    if (capitalRial === null || !Number.isFinite(share)) {
       // نه صفر، نه پاک‌کردنِ کل گزارش: شمرده و نام‌بُرده.
       unpricedIds.push(text(event.id));
       continue;
     }
     const parts = event.data.capital?.components || {};
-    totalRial += capitalRial;
-    debitRial += money(parts.debitRial) ?? 0;
-    feeRial += money(parts.feeRial) ?? 0;
-    marginRial += money(parts.marginRial) ?? 0;
+    const activeCapitalRial = capitalRial * share;
+    totalRial += activeCapitalRial;
+    debitRial += (money(parts.debitRial) ?? 0) * share;
+    feeRial += (money(parts.feeRial) ?? 0) * share;
+    marginRial += (money(parts.marginRial) ?? 0) * share;
 
     const familyId = text(event.familyId);
     const row = families.get(familyId) || { familyId, totalRial: 0, count: 0 };
-    row.totalRial += capitalRial;
+    row.totalRial += activeCapitalRial;
     row.count += 1;
     families.set(familyId, row);
   }
@@ -139,7 +149,7 @@ export function portfolioCapitalLedger(session) {
       debitRial,
       feeRial,
       marginRial,
-      count: commitEvents(session).length - unpricedIds.length,
+      count: activeCommitCount - unpricedIds.length,
       byFamily: [...families.values()].sort((a, b) => (a.familyId < b.familyId ? -1 : 1)),
     },
     free: { rial: freeRial, pct: freePct },

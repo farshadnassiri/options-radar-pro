@@ -17,6 +17,8 @@ import {
 } from '../core/portfolio-mission.mjs';
 import { validatePortfolioCapitalContinuity } from '../core/portfolio-capital-continuity.mjs';
 import { validSessionId } from './guard.mjs';
+import { momentKey } from '../core/trading-calendar.mjs';
+import { snapshotWithinSession } from '../core/portfolio-snapshot.mjs';
 
 export const PORTFOLIO_MISSION_SAVE_VERSION = 1;
 export const PORTFOLIO_MISSION_SAVE_STEPS = Object.freeze([
@@ -188,6 +190,24 @@ function canonicalActive(draft, missioned) {
   }
   const replayed = replayPortfolioSession(session);
   if (!replayed.ok) return fail(replayed.why);
+  const nowKey = momentKey(session.now);
+  const startKey = momentKey(session.start);
+  const endKey = momentKey(session.end);
+  if (!Number.isFinite(nowKey) || nowKey < startKey || nowKey > endKey) {
+    return fail('لحظه جاری جلسه فعال بیرون از بازه آن است');
+  }
+  if (momentKey(replayed.lastMoment) > nowKey) {
+    return fail('لحظه جاری جلسه از آخرین رویداد دفتر عقب‌تر است');
+  }
+  if (session.momentSnapshot !== undefined && session.momentSnapshot !== null) {
+    if (!same(session.momentSnapshot.at, session.now)
+      || !snapshotWithinSession(session, session.momentSnapshot)
+      || !isDataQuality(session.momentSnapshot.quality)) {
+      return fail('عکس لحظه جاری معتبر یا هم‌لحظه ساعت جلسه نیست');
+    }
+  } else if (nowKey > startKey) {
+    return fail('جلسه‌ای که از شروع جلو رفته باید عکس لحظه جاری داشته باشد');
+  }
   return { ok: true };
 }
 
@@ -303,6 +323,22 @@ export function validatePortfolioMissionSaveTransition(previous, next) {
   const newEvents = right.events || [];
   if (newEvents.length < oldEvents.length || !same(oldEvents, newEvents.slice(0, oldEvents.length))) {
     return fail('دفتر رویداد جلسه فعال فقط می‌تواند به انتها افزوده شود');
+  }
+  const leftNow = momentKey(left.now);
+  const rightNow = momentKey(right.now);
+  if (!Number.isFinite(leftNow) || !Number.isFinite(rightNow) || rightNow < leftNow) {
+    return fail('ساعت جلسه فعال فقط می‌تواند به جلو حرکت کند');
+  }
+  if (rightNow === leftNow) {
+    if (!same(left.momentSnapshot, right.momentSnapshot)) {
+      return fail('عکس لحظه جاری بدون حرکت ساعت قابل بازنویسی نیست');
+    }
+  } else {
+    const snapshot = right.momentSnapshot;
+    if (!isObject(snapshot) || !same(snapshot.at, right.now)
+      || !snapshotWithinSession(right, snapshot) || !isDataQuality(snapshot.quality)) {
+      return fail('حرکت ساعت باید عکس معتبر و هم‌لحظهٔ تازه را همراه داشته باشد');
+    }
   }
   return { ok: true, why: '' };
 }

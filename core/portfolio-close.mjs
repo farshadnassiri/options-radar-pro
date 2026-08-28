@@ -20,8 +20,8 @@
 // **وضعیت را بازپخش تعیین می‌کند.** اینجا «بسته» علامت زده نمی‌شود؛
 // تراکنش ثبت می‌شود و وضعیت از دفتر خوانده می‌شود.
 //
-// **اینجا سود و زیان نیست.** این ماژول نقد و کارمزدِ خروج را می‌نویسد،
-// نه اینکه معامله چقدر سود داد. مقایسه با ورود کار فاز ۵ است.
+// **سود تحقق‌یافته فقط از lot مصرف‌شده است.** نقد ورود و کارمزد هر lot
+// از سند immutable خودش می‌آید؛ اگر مبنا ناقص باشد عدد ساخته نمی‌شود.
 
 import { combineDataQuality } from './data-quality.mjs';
 import { entryFees, grossCash } from './payoff.mjs';
@@ -86,6 +86,39 @@ function verdictIndex(evidence) {
 const sameMoment = (a, b) => Boolean(a && b
   && Number(a.date) === Number(b.date) && Number(a.second) === Number(b.second));
 
+/** مبنای ورود lotهایی که این خروج با FIFO مصرف می‌کند. */
+function consumedEntryBasis(session, position, qty) {
+  const events = new Map((session?.events || [])
+    .filter((event) => event?.type === 'transaction')
+    .map((event) => [text(event.transactionId), event]));
+  let left = qty;
+  let entryCashRial = 0;
+  let entryFeeRial = 0;
+  const lots = [];
+  for (const lot of position.lots || []) {
+    if (!(left > 0) || !(lot.remainingQty > 0)) continue;
+    const take = Math.min(left, lot.remainingQty);
+    const event = events.get(text(lot.transactionId));
+    const eventQty = num(event?.qty);
+    const cash = event?.data?.entryCashRial;
+    const fee = event?.data?.capital?.components?.feeRial;
+    if (!(eventQty > 0) || !Number.isFinite(cash) || !Number.isFinite(fee)) {
+      return { known: false, entryCashRial: null, entryFeeRial: null, lots: [] };
+    }
+    const share = take / eventQty;
+    entryCashRial += cash * share;
+    entryFeeRial += fee * share;
+    lots.push({ lotId: lot.id, transactionId: lot.transactionId, qty: take });
+    left -= take;
+  }
+  return {
+    known: left === 0,
+    entryCashRial: left === 0 ? entryCashRial : null,
+    entryFeeRial: left === 0 ? entryFeeRial : null,
+    lots: left === 0 ? lots : [],
+  };
+}
+
 /**
  * بستن یک موقعیت — کامل یا جزئی.
  *
@@ -111,8 +144,8 @@ export function closePortfolioPosition(session, evidence, positionId, { qty, at 
     return fail('staleEvidence', '', { positionId: wanted });
   }
 
-  const requestedQty = qty === undefined ? position.openQty : Math.floor(num(qty));
-  if (!Number.isFinite(requestedQty) || requestedQty <= 0) {
+  const requestedQty = qty === undefined ? position.openQty : num(qty);
+  if (!Number.isSafeInteger(requestedQty) || requestedQty <= 0) {
     return fail('invalidQty', '', { positionId: wanted, requestedQty });
   }
   if (requestedQty > position.openQty) {
@@ -167,12 +200,17 @@ export function closePortfolioPosition(session, evidence, positionId, { qty, at 
     strike: row.leg.strike,
     price: row.vwap,
   }));
-  // نقد و کارمزدِ خودِ خروج — نه مقایسه با ورود. سود و زیان کار فاز ۵ است.
+  // نقد و کارمزدِ خودِ خروج؛ مقایسه با ورود پایین‌تر فقط روی lotهای FIFO
+  // مصرف‌شده انجام می‌شود، نه روی میانگین ساختگی کل موقعیت.
   const exitCashRial = grossCash(exitLegs) * requestedQty;
   const feeRial = entryFees(exitLegs, fees) * requestedQty;
   if (!Number.isFinite(exitCashRial) || !Number.isFinite(feeRial)) {
     return fail('unknownPrice', '', { positionId: wanted });
   }
+  const entryBasis = consumedEntryBasis(session, position, requestedQty);
+  const realizedRial = entryBasis.known
+    ? exitCashRial + entryBasis.entryCashRial - feeRial - entryBasis.entryFeeRial
+    : null;
 
   const quality = combineDataQuality(
     prepared.map((row) => row.verdict?.quality?.book).filter(Boolean),
@@ -191,6 +229,11 @@ export function closePortfolioPosition(session, evidence, positionId, { qty, at 
     executableQty,
     exitCashRial,
     feeRial,
+    entryCashRial: entryBasis.entryCashRial,
+    entryFeeRial: entryBasis.entryFeeRial,
+    realizedRial,
+    realizedWhy: entryBasis.known ? '' : 'مبنای ورود lotهای مصرف‌شده کامل نیست',
+    entryLots: copy(entryBasis.lots),
     legs: prepared.map((row) => ({
       ins: text(row.leg.ins),
       kind: row.leg.kind,
@@ -243,6 +286,10 @@ export function closePortfolioPosition(session, evidence, positionId, { qty, at 
     executableQty,
     exitCashRial,
     feeRial,
+    entryCashRial: entryBasis.entryCashRial,
+    entryFeeRial: entryBasis.entryFeeRial,
+    realizedRial,
+    realizedWhy: entryBasis.known ? '' : 'مبنای ورود lotهای مصرف‌شده کامل نیست',
     status: row ? row.status : null,
     remainingQty: row ? row.openQty : null,
     quality,

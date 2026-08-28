@@ -24,6 +24,7 @@ import {
 import { validatePortfolioCapitalContinuity } from '../core/portfolio-capital-continuity.mjs';
 import { portfolioSessionPositions } from '../core/portfolio-positions.mjs';
 import { DOSSIER_SAVE_VERSION } from './portfolio-dossier-data.mjs';
+import { PORTFOLIO_FINAL_RANKING_VERSION } from '../core/portfolio-final-ranking.mjs';
 
 export const CLOSEOUT_VIEW_REASONS = PORTFOLIO_CLOSEOUT_REASONS;
 
@@ -113,7 +114,29 @@ function validDossier(session, d) {
     return 'حسابداری پرونده ناقص است';
   }
   if (!Array.isArray(d.alerts)) return 'هشدارهای پرونده ناقص است';
+  if (d.finalRanking !== null && d.finalRanking !== undefined
+    && (!isObject(d.finalRanking)
+      || d.finalRanking.version !== PORTFOLIO_FINAL_RANKING_VERSION
+      || !Array.isArray(d.finalRanking.ranked)
+      || !Array.isArray(d.finalRanking.withoutRank)
+      || !Array.isArray(d.finalRanking.selected))) {
+    return 'رتبه نهایی پرونده ناقص است';
+  }
   return '';
+}
+
+function rankingRow(row) {
+  if (!row) return null;
+  return {
+    candidateId: text(row.candidateId),
+    candidateText: faDigits(text(row.candidateId)),
+    defText: faDigits(text(row.defId)) || '—',
+    rankText: Number.isInteger(row.rank) ? count(row.rank) : '—',
+    returnText: Number.isFinite(row.returnPct) ? `${fmt.pct(row.returnPct)}٪` : '—',
+    profitText: Number.isFinite(row.realizedRial) ? `${toman(row.realizedRial)} تومان` : '—',
+    percentileText: Number.isFinite(row.percentile) ? `${fmt.pct(row.percentile)}٪` : '—',
+    tone: Number.isFinite(row.realizedRial) ? signTone(row.realizedRial) : '',
+  };
 }
 
 /** مدل نمایش مشترک برای پروندهٔ زنده و پروندهٔ خوانده‌شده از سرور. */
@@ -173,6 +196,22 @@ export function portfolioDossierView(session, d) {
       state: row.state,
     })),
     alertsWhy: faDigits(text(d.alertsWhy)),
+    ranking: d.finalRanking?.ok ? {
+      available: true,
+      why: '',
+      countsText: `${count(d.finalRanking.counts.ranked)} رتبه‌دار · `
+        + `${count(d.finalRanking.counts.withoutRank)} بدون رتبه`,
+      selected: d.finalRanking.selected.map(rankingRow),
+      best: rankingRow(d.finalRanking.best),
+      worst: rankingRow(d.finalRanking.worst),
+      withoutRankText: d.finalRanking.withoutRank.length
+        ? `${count(d.finalRanking.withoutRank.length)} گزینه به‌دلیل داده ناکافی رتبه نگرفت`
+        : '',
+    } : {
+      available: false,
+      why: faDigits(text(d.finalRanking?.why || 'رتبه نهایی برای این پرونده ساخته نشده است')),
+      countsText: '', selected: [], best: null, worst: null, withoutRankText: '',
+    },
   };
 }
 
@@ -213,7 +252,7 @@ export function dossierRecordView(raw) {
  *
  * `force` را تب پس از تأیید کاربر می‌دهد، نه پیش‌فرض.
  */
-export function closeoutView(session, evidence, { at, force = false } = {}) {
-  const out = closeoutPortfolioSession(session, evidence, { at, force });
+export function closeoutView(session, evidence, { at, force = false, startEvidence = null } = {}) {
+  const out = closeoutPortfolioSession(session, evidence, { at, force, startEvidence });
   return out.ok ? portfolioDossierView(out.session, out.dossier) : fail(out.reason, out.why);
 }

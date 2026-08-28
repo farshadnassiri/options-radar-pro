@@ -12,7 +12,9 @@ import { breachText, portfolioLedgerView } from '../portfolio-ledger-view.mjs';
 import {
   closeDoneText, closeFailureText, portfolioSessionPositionsView,
 } from '../portfolio-positions-view.mjs';
-import { PORTFOLIO_COMMIT_REASONS, commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
+import {
+  PORTFOLIO_COMMIT_REASONS, PORTFOLIO_COMMIT_VERSION, commitPortfolioPlan,
+} from '../../core/portfolio-commit.mjs';
 import { closePortfolioPosition } from '../../core/portfolio-close.mjs';
 import { portfolioSessionValuation } from '../../core/portfolio-valuation.mjs';
 import { portfolioDossierAnalysis } from '../../core/portfolio-dossier-analysis.mjs';
@@ -297,6 +299,11 @@ export async function mount(root, { state, api }) {
                 <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
                 <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
               </section>
+              <section class="pt-dossier-analysis" id="pt-final-ranking" aria-labelledby="pt-final-ranking-title">
+                <h4 id="pt-final-ranking-title">رتبه انتخاب‌ها در پایان بازی</h4>
+                <dl class="pt-dossier-analysis-figures" id="pt-final-ranking-figures"></dl>
+                <p class="pt-dossier-analysis-state" id="pt-final-ranking-state"></p>
+              </section>
               <section class="pt-capital-continuity" id="pt-capital-continuity" aria-labelledby="pt-capital-continuity-title">
                 <div class="pt-capital-continuity-head">
                   <div><p class="eyebrow">سفر بعدی</p><h4 id="pt-capital-continuity-title">ادامه زنجیره سرمایه</h4></div>
@@ -385,7 +392,7 @@ export async function mount(root, { state, api }) {
             <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
             <div class="pt-table-scroll">
             <table class="pt-positions-table">
-              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>بستن</th></tr></thead>
+              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>سود تحقق‌یافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>مدیریت حجم</th></tr></thead>
               <tbody id="pt-positions-body"></tbody>
             </table>
             </div>
@@ -1088,6 +1095,20 @@ export async function mount(root, { state, api }) {
     issues.hidden = !analyzed.ok || analyzed.issues.length === 0;
     issues.innerHTML = analyzed.ok ? analyzed.issues.map((row) => `<li>${esc(row.label)}`
       + `${row.detail ? ` — ${esc(row.detail)}` : ''}</li>`).join('') : '';
+    const ranking = view.ranking;
+    const rankRows = ranking.available ? [
+      ...(ranking.best ? [['بهترین استراتژی', `${ranking.best.defText} · رتبه ${ranking.best.rankText} · ${ranking.best.returnText}`, ranking.best.tone]] : []),
+      ...(ranking.worst ? [['بدترین استراتژی', `${ranking.worst.defText} · رتبه ${ranking.worst.rankText} · ${ranking.worst.returnText}`, ranking.worst.tone]] : []),
+      ...ranking.selected.map((row) => [
+        'انتخاب کاربر', `${row.defText} · رتبه ${row.rankText} · صدک ${row.percentileText} · ${row.returnText}`,
+        row.tone,
+      ]),
+    ] : [];
+    $('pt-final-ranking-figures').innerHTML = rankRows.map(([label, value, tone]) =>
+      `<div><dt>${esc(label)}</dt><dd class="${esc(tone)}">${esc(value)}</dd></div>`).join('');
+    $('pt-final-ranking-state').textContent = ranking.available
+      ? `${ranking.countsText}${ranking.withoutRankText ? ` · ${ranking.withoutRankText}` : ''}`
+      : ranking.why;
     dossierContinuity = view.capitalContinuity
       ? portfolioCapitalContinuityView(view.session, view.dossier, {
         previous: view.capitalContinuity,
@@ -1315,8 +1336,11 @@ export async function mount(root, { state, api }) {
       $('pt-closeout-state').textContent = 'برای بستن، دوباره بزن.';
       return;
     }
+    const startEvidence = portfolioSessionEligibility(proposalSession, {
+      snapshot: proposalSession.startSnapshot, at: proposalSession.start,
+    });
     const view = closeoutView(proposalSession, portfolioSessionEligibility(proposalSession),
-      { force: true });
+      { force: true, startEvidence });
     closeoutArmed = false;
     if (!view.ok) { $('pt-closeout-state').textContent = view.why; return; }
     // بستن در موتور خالص است، اما وضعیت محلی فقط پس از مدرک ثبت سرور
@@ -1341,7 +1365,7 @@ export async function mount(root, { state, api }) {
     proposalSession = persisted.session;
     paintProposals(persisted.session);
     paintDossier(persisted.view);
-    root.querySelectorAll('[data-pt-commit], [data-pt-close], [data-pt-step]')
+    root.querySelectorAll('[data-pt-commit], [data-pt-increase], [data-pt-reduce], [data-pt-close], [data-pt-step], [data-pt-adjust-qty]')
       .forEach((control) => { control.disabled = true; });
     button.hidden = true;
   };
@@ -1469,11 +1493,14 @@ export async function mount(root, { state, api }) {
     // می‌مانند و علتش بالای جدول می‌آید.
     const valuation = portfolioSessionValuation(session, portfolioSessionEligibility(session));
     const view = portfolioSessionPositionsView(session, valuation);
+    const candidateByPosition = new Map((session?.events || [])
+      .filter((event) => event?.type === 'transaction' && event?.data?.candidateId)
+      .map((event) => [String(event.positionId), String(event.data.candidateId)]));
     const warn = $('pt-positions-undocumented');
     if (!view.ok) {
       section.hidden = view.reason === 'noSession';
       $('pt-positions-state').textContent = view.why;
-      $('pt-positions-body').innerHTML = '<tr class="pt-positions-empty"><td colspan="9">—</td></tr>';
+      $('pt-positions-body').innerHTML = '<tr class="pt-positions-empty"><td colspan="10">—</td></tr>';
       $('pt-positions-total').textContent = '';
       warn.hidden = true;
       return;
@@ -1489,14 +1516,22 @@ export async function mount(root, { state, api }) {
       <td data-label="ارزش جاری">${esc(row.valueTomanText)}${row.valuedWhy
         ? `<br><small>${esc(row.valuedWhy)}</small>` : ''}</td>
       <td data-label="سود تحقق‌نیافته" class="${esc(row.unrealizedTone)}">${esc(row.unrealizedTomanText)}</td>
+      <td data-label="سود تحقق‌یافته" class="${esc(row.realizedTone)}">${esc(row.realizedTomanText)}${row.realizedWhy
+        ? `<br><small>${esc(row.realizedWhy)}</small>` : ''}</td>
       <td data-label="پاها">${row.legTexts.length
         ? row.legTexts.map((leg) => `<div>${esc(leg)}</div>`).join('')
         : `<span class="pt-positions-why">${esc(row.why || '—')}</span>`}</td>
       <td data-label="کیفیت">${esc(row.qualityLabel)}${row.qualityReason ? `<br><small>${esc(row.qualityReason)}</small>` : ''}</td>
-      <td data-label="بستن">${row.closable
-        ? `<button type="button" class="ghost" data-pt-close="${esc(row.id)}">بستن کامل</button>`
+      <td data-label="مدیریت حجم">${row.closable
+        ? `<div class="pt-position-manage"><label><span>حجم</span><input type="text" inputmode="numeric"
+            data-pt-adjust-qty="${esc(row.id)}" aria-label="حجم تغییر ${esc(row.idText)}"
+            placeholder="تا ${esc(row.openQtyText)}"></label>
+          <div><button type="button" class="ghost" data-pt-increase="${esc(row.id)}"
+            data-pt-candidate="${esc(candidateByPosition.get(row.id) || '')}">افزایش</button>
+          <button type="button" class="ghost" data-pt-reduce="${esc(row.id)}">کاهش</button>
+          <button type="button" class="ghost" data-pt-close="${esc(row.id)}">آفست کامل</button></div></div>`
         : '—'}</td>
-    </tr>`).join('') : '<tr class="pt-positions-empty"><td colspan="9">—</td></tr>';
+    </tr>`).join('') : '<tr class="pt-positions-empty"><td colspan="10">—</td></tr>';
     // جمعِ کل فقط وقتی نوشته می‌شود که کامل باشد؛ وگرنه علتش.
     const total = $('pt-positions-total');
     total.textContent = view.valuationText || view.valuationWhy;
@@ -1516,6 +1551,14 @@ export async function mount(root, { state, api }) {
     paintLedger(session);
     paintPositions(session);
     paintPayoff(session);
+    // این مجموعه کشِ رابط نیست؛ هر بار از دفتر immutable جلسه ساخته
+    // می‌شود تا refresh طرح مصرف‌شده را دوباره قابل ثبت نشان ندهد.
+    committedIds.clear();
+    for (const event of session?.events || []) {
+      if (event?.type === 'transaction'
+        && event?.data?.commitVersion === PORTFOLIO_COMMIT_VERSION
+        && event?.data?.candidateId) committedIds.add(String(event.data.candidateId));
+    }
     const section = $('pt-proposals');
     const evidence = portfolioSessionEligibility(session);
     const view = portfolioSessionProposals(session, evidence);
@@ -1543,7 +1586,10 @@ export async function mount(root, { state, api }) {
       <td data-label="کیفیت">${esc(row.qualityLabel)}${row.qualityReason ? `<br><small>${esc(row.qualityReason)}</small>` : ''}</td>
       <td data-label="انتخاب">${committedIds.has(row.candidateId)
         ? '<b class="pt-committed">ثبت شد</b>'
-        : `<button type="button" class="ghost" data-pt-commit="${esc(row.candidateId)}">انتخاب و ثبت</button>`}</td>
+        : `<div class="pt-proposal-commit"><label><span>حجم</span><input type="text" inputmode="numeric"
+            data-pt-quantity="${esc(row.candidateId)}" aria-label="حجم ${esc(row.defLabel)}"
+            placeholder="تا ${esc(row.executableQtyText)}"></label>
+          <button type="button" class="ghost" data-pt-commit="${esc(row.candidateId)}">انتخاب و ثبت</button></div>`}</td>
     </tr>`).join('') : '<tr class="pt-proposals-empty"><td colspan="9">هیچ طرحی با این مأموریت رتبه نگرفت.</td></tr>';
 
     asideTable.hidden = view.setAside.length === 0;
@@ -2083,12 +2129,22 @@ export async function mount(root, { state, api }) {
     })[button.dataset.ptEdit];
     target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
-  $('pt-proposals').onclick = (event) => {
+  $('pt-proposals').onclick = async (event) => {
     const button = event.target.closest('[data-pt-commit]');
     if (!button || !proposalSession) return;
     const candidateId = button.dataset.ptCommit;
+    const quantityInput = $('pt-proposals').querySelector(`[data-pt-quantity="${CSS.escape(candidateId)}"]`);
+    const quantity = parseIntegerInput(quantityInput?.value);
+    if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+      $('pt-proposals-state').textContent = 'حجم انتخابی را به‌صورت عدد صحیح مثبت وارد کن.';
+      quantityInput?.setAttribute('aria-invalid', 'true');
+      return;
+    }
+    quantityInput?.removeAttribute('aria-invalid');
+    button.disabled = true;
+    if (quantityInput) quantityInput.disabled = true;
     const evidence = portfolioSessionEligibility(proposalSession);
-    const done = commitPortfolioPlan(proposalSession, evidence, candidateId);
+    const done = commitPortfolioPlan(proposalSession, evidence, candidateId, { quantity });
     if (!done.ok) {
       // شکست ثبت هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود — و «کدام قید و
       // چقدر عبور» بخشی از همان خبر است، نه چیزی که کاربر باید حدس بزند.
@@ -2100,46 +2156,38 @@ export async function mount(root, { state, api }) {
       $('pt-proposals-state').textContent = detail
         ? `${PORTFOLIO_COMMIT_REASONS[done.reason]} — ${detail}`
         : done.why;
+      button.disabled = false;
+      if (quantityInput) quantityInput.disabled = false;
       return;
     }
-    committedIds.add(candidateId);
+    const nextDraft = draft?.step === 'active'
+      ? { ...draft, session: done.session, snapshot: done.session.startSnapshot }
+      : null;
+    const saved = nextDraft ? await persist(nextDraft) : null;
+    if (!saved?.ok) {
+      $('pt-proposals-state').textContent = `موقعیت نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
+      button.disabled = false;
+      if (quantityInput) quantityInput.disabled = false;
+      return;
+    }
+    draft = nextDraft;
     paintProposals(done.session);
     const remaining = done.budget.remainingRial;
-    $('pt-proposals-state').textContent = `ثبت شد — موقعیت ${faDigits(done.positionId)}`
+    $('pt-proposals-state').textContent = `ثبت شد — حجم ${fmt.int(quantity)} · موقعیت ${faDigits(done.positionId)}`
       + `${Number.isFinite(remaining) ? ` · باقی‌ماندهٔ خانواده ${fmt.int(remaining / 10)} تومان` : ''}`;
   };
 
   /**
    * قراردادهای عکسِ جاری، دوباره قیمت‌گذاری‌شده در لحظهٔ تازه.
    *
-   * هویتِ قراردادها از عکسِ جاری می‌آید و **قیمتشان** از دفتر سفارشِ
-   * لحظهٔ تازه. قراردادی که برای آن لحظه دفتری ندارد، بی‌قیمت می‌ماند و
+   * هویتِ قراردادها از بایگانی همان تاریخ می‌آید و **قیمتشان** از دفتر
+   * سفارشِ لحظهٔ تازه. قراردادی که برای آن لحظه دفتری ندارد، بی‌قیمت می‌ماند و
    * `portfolioMomentSnapshot` خودش «فاقد داده» علامتش می‌زند — اینجا با
    * قیمتِ لحظهٔ قبل پر نمی‌شود.
    */
   async function repriceAt(session, at) {
-    const known = (session.momentSnapshot ?? session.startSnapshot)?.contracts || [];
-    if (!known.length) return { rows: [], spot: null };
-    const loaders = gateLoaders();
-    const gate = createTimeGate({
-      sessionId: session.id, now: at, days: dates,
-      load: {
-        dailies: async (...args) => { try { return await loaders.dailies(...args); } catch { return []; } },
-        trades: async (...args) => { try { return await loaders.trades(...args); } catch { return []; } },
-        book: async (...args) => { try { return await loaders.book(...args); } catch { return []; } },
-      },
-    });
-    const rows = await Promise.all(known.map(async (contract) => {
-      const point = await gate.snapshot(contract.ins).catch(() => null);
-      return {
-        ins: contract.ins, kind: contract.kind, strike: contract.strike,
-        expiry: contract.expiry, size: contract.size,
-        book: point?.quote?.book ?? null,
-        close: point?.trade?.close ?? null,
-      };
-    }));
-    const base = await gate.snapshot(session.baseIns).catch(() => null);
-    return { rows, spot: base?.trade?.close ?? null };
+    const priced = await loadMomentContracts(session, at, { days: dates });
+    return { rows: priced.rows, spot: priced.spot, universe: priced.universe };
   }
 
   $('pt-clock').onclick = async (event) => {
@@ -2153,15 +2201,26 @@ export async function mount(root, { state, api }) {
       $('pt-clock-state').textContent = stepResultText(stepped);
       return;
     }
+    root.querySelectorAll('[data-pt-step]').forEach((control) => { control.disabled = true; });
     $('pt-clock-state').textContent = 'در حال بریدن خوراک‌ها در لحظهٔ تازه…';
-    const { rows, spot } = await repriceAt(stepped.session, stepped.to);
-    const built = portfolioMomentSnapshot(stepped.session, stepped.to, { spot, rows });
+    const { rows, spot, universe } = await repriceAt(stepped.session, stepped.to);
+    const built = portfolioMomentSnapshot(stepped.session, stepped.to, { spot, rows, universe });
     if (!built.ok) {
       $('pt-clock-state').textContent = built.why;
+      paintClock(proposalSession);
       return;
     }
     const next = { ...stepped.session, momentSnapshot: built.snapshot };
-    // هر چهار بخش از همین یک نقطه دوباره رسم می‌شوند.
+    const nextDraft = draft?.step === 'active'
+      ? { ...draft, session: next, snapshot: next.startSnapshot } : null;
+    const saved = nextDraft ? await persist(nextDraft) : null;
+    if (!saved?.ok) {
+      paintClock(proposalSession);
+      $('pt-clock-state').textContent = `حرکت زمان نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
+      return;
+    }
+    draft = nextDraft;
+    // هر چهار بخش فقط پس از تأیید سرور از همین یک نقطه دوباره رسم می‌شوند.
     paintEligibility(next);
     paintProposals(next);
     $('pt-clock-state').textContent = stepResultText(stepped);
@@ -2176,21 +2235,50 @@ export async function mount(root, { state, api }) {
       : '';
   };
 
-  $('pt-positions').onclick = (event) => {
-    const button = event.target.closest('[data-pt-close]');
+  $('pt-positions').onclick = async (event) => {
+    const button = event.target.closest('[data-pt-increase], [data-pt-reduce], [data-pt-close]');
     if (!button || !proposalSession) return;
+    const positionId = button.dataset.ptIncrease || button.dataset.ptReduce || button.dataset.ptClose;
+    const input = $('pt-positions').querySelector(`[data-pt-adjust-qty="${CSS.escape(positionId)}"]`);
+    const needsQty = Boolean(button.dataset.ptIncrease || button.dataset.ptReduce);
+    const quantity = needsQty ? parseIntegerInput(input?.value) : undefined;
+    if (needsQty && (!Number.isSafeInteger(quantity) || quantity <= 0)) {
+      $('pt-positions-state').textContent = 'حجم تغییر را به‌صورت عدد صحیح مثبت وارد کن.';
+      input?.setAttribute('aria-invalid', 'true');
+      return;
+    }
+    input?.removeAttribute('aria-invalid');
+    const rowControls = button.closest('.pt-position-manage')?.querySelectorAll('button, input') || [];
+    rowControls.forEach((control) => { control.disabled = true; });
     const evidence = portfolioSessionEligibility(proposalSession);
-    const done = closePortfolioPosition(proposalSession, evidence, button.dataset.ptClose);
+    const operationId = `adjust-${proposalSession.id}-${positionId}-${proposalSession.events.length + 1}`;
+    const done = button.dataset.ptIncrease
+      ? commitPortfolioPlan(proposalSession, evidence, button.dataset.ptCandidate, {
+        quantity, positionId, operationId,
+      })
+      : closePortfolioPosition(proposalSession, evidence, positionId,
+        button.dataset.ptReduce ? { qty: quantity } : {});
     if (!done.ok) {
       // شکست بستن هیچ‌وقت شبیه موفقیت نشان داده نمی‌شود — و وقتی دفتر
       // سفارش کم‌عمق است، عددِ ممکن بخشی از همان خبر است.
-      $('pt-positions-state').textContent = closeFailureText(done);
+      $('pt-positions-state').textContent = button.dataset.ptIncrease ? done.why : closeFailureText(done);
+      rowControls.forEach((control) => { control.disabled = false; });
       return;
     }
-    // یک فراخوانی: جدول موقعیت‌ها و نوار سرمایه هر دو با جلسهٔ تازه
-    // دوباره رسم می‌شوند. سرمایهٔ آزاد پس از بستن عوض شده است.
+    const nextDraft = draft?.step === 'active'
+      ? { ...draft, session: done.session, snapshot: done.session.startSnapshot } : null;
+    const saved = nextDraft ? await persist(nextDraft) : null;
+    if (!saved?.ok) {
+      $('pt-positions-state').textContent = `تغییر حجم نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
+      rowControls.forEach((control) => { control.disabled = false; });
+      return;
+    }
+    draft = nextDraft;
+    // جدول موقعیت‌ها و نوار سرمایه فقط پس از تأیید سرور با جلسه تازه رسم می‌شوند.
     paintProposals(done.session);
-    $('pt-positions-state').textContent = closeDoneText(done);
+    $('pt-positions-state').textContent = button.dataset.ptIncrease
+      ? `حجم افزایش یافت — ${fmt.int(quantity)} قرارداد · lot ${faDigits(done.lotId)}`
+      : closeDoneText(done);
   };
 
   $('pt-eligibility').onclick = (event) => {

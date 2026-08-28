@@ -126,9 +126,11 @@ group('۱۴۵. گام زمانی در تب');
     && /ناکافی/.test(handler145) && /کمتر از واقعیت/.test(handler145));
   check('و شمارِ قراردادهای بی‌داده در همان پیام می‌آید',
     /built\.missing\.count/.test(handler145) && /faDigits/.test(handler145));
+  const snapshotData145 = readSrc('../ui/portfolio-snapshot-data.mjs');
   check('قیمت با لحظهٔ قبل پر نمی‌شود',
-    /book: point\?\.quote\?\.book \?\? null/.test(tabSrc145)
-    && /close: point\?\.trade\?\.close \?\? null/.test(tabSrc145));
+    /loadMomentContracts\(session, at/.test(tabSrc145)
+    && /book = point\?\.quote\?\.book \?\? null/.test(snapshotData145)
+    && /close = point\?\.trade\?\.close \?\? null/.test(snapshotData145));
   check('قفل ویرایشگر مأموریت، بخش ساعت را غیرفعال نمی‌کند',
     /!control\.closest\('#pt-clock'\)/.test(tabSrc145));
   check('شناسه و نام تابع این بخش یکتا هستند',

@@ -95,11 +95,34 @@ export function portfolioSessionPositions(session) {
   if (!replay.ok) return fail('brokenLedger', replay.why);
 
   const undocumentedIds = [];
+  const eventsByTransaction = new Map((session.events || [])
+    .filter((event) => event?.type === 'transaction' && text(event.transactionId))
+    .map((event) => [text(event.transactionId), event]));
   const positions = replay.positions.map((row) => {
     const id = text(row.id);
     const event = openingEvent(session, id);
     const { document, reason } = documentFor(event);
     if (!document) undocumentedIds.push(id);
+    const openLotBasis = (row.lots || []).filter((lot) => lot.remainingQty > 0).map((lot) => {
+      const sourceEvent = eventsByTransaction.get(text(lot.transactionId));
+      const source = documentFor(sourceEvent).document;
+      const qty = Number(sourceEvent?.qty);
+      const share = qty > 0 ? Number(lot.remainingQty) / qty : NaN;
+      const entryCashRial = source?.entryCashRial;
+      const entryFeeRial = source?.capital?.components?.feeRial;
+      const capitalRial = source?.capitalRial;
+      const known = Number.isFinite(share) && Number.isFinite(entryCashRial)
+        && Number.isFinite(entryFeeRial) && Number.isFinite(capitalRial);
+      return { known, share, entryCashRial, entryFeeRial, capitalRial };
+    });
+    const openBasisKnown = openLotBasis.every((basis) => basis.known);
+    const basisSum = (key) => openBasisKnown
+      ? openLotBasis.reduce((sum, basis) => sum + basis[key] * basis.share, 0) : null;
+    const exitEvents = (session.events || []).filter((item) => item?.type === 'transaction'
+      && text(item.positionId) === id
+      && ['reduce', 'close', 'rollOut', 'settlement', 'exercise']
+        .includes(text(item.transactionKind)));
+    const realizedKnown = exitEvents.every((item) => Number.isFinite(item?.data?.realizedRial));
 
     return {
       id,
@@ -128,6 +151,16 @@ export function portfolioSessionPositions(session) {
       capitalRial: document ? money(document.capitalRial) : null,
       entryCashRial: document ? money(document.entryCashRial) : null,
       capital: document ? copy(document.capital) ?? null : null,
+      // مبنای حجم باز از lotهای باقی‌مانده می‌آید. پس افزایش در قیمت
+      // تازه و کاهش FIFO، هزینهٔ ورود را به نسبتِ اولیه حدس نمی‌زنند.
+      openBasisKnown,
+      openEntryCashRial: basisSum('entryCashRial'),
+      openEntryFeeRial: basisSum('entryFeeRial'),
+      openCapitalRial: basisSum('capitalRial'),
+      realizedKnown,
+      realizedRial: realizedKnown
+        ? exitEvents.reduce((sum, item) => sum + Number(item.data.realizedRial), 0) : null,
+      realizedWhy: realizedKnown ? '' : 'مبنای سود یکی از خروج‌ها کامل نیست',
       // پاها همان‌اند که ثبت شدند — نه بازخواندن از دفتر سفارشِ امروز.
       legs: document ? (document.legs || []).map((leg) => ({
         ins: text(leg.ins),

@@ -30,6 +30,7 @@ import { portfolioSessionPositions } from './portfolio-positions.mjs';
 import { portfolioSessionSummary } from './portfolio-summary.mjs';
 import { portfolioRiskWatch } from './portfolio-watch.mjs';
 import { momentKey } from './trading-calendar.mjs';
+import { portfolioFinalRanking } from './portfolio-final-ranking.mjs';
 
 export const PORTFOLIO_CLOSEOUT_VERSION = 1;
 
@@ -62,42 +63,46 @@ function fail(reason, why = '') {
  * تقریبی، چون نقد و کارمزد هر دو خطی در حجم‌اند.
  */
 function realizedFrom(session, positions) {
+  const positionById = new Map(positions.map((position) => [position.id, position]));
   const exitsBy = new Map();
   for (const event of session?.events || []) {
     if (event?.data?.closeVersion !== PORTFOLIO_CLOSE_VERSION) continue;
     const id = String(event.positionId || '');
-    const row = exitsBy.get(id) || { cashRial: 0, feeRial: 0, qty: 0, known: true };
+    const row = exitsBy.get(id) || {
+      cashRial: 0, feeRial: 0, entryCashRial: 0, entryFeeRial: 0,
+      realizedRial: 0, qty: 0, known: true,
+    };
     const cash = event.data.exitCashRial;
     const fee = event.data.feeRial;
-    if (!Number.isFinite(cash) || !Number.isFinite(fee)) row.known = false;
-    else { row.cashRial += cash; row.feeRial += fee; row.qty += num(event.data.qty) || 0; }
+    const entryCash = event.data.entryCashRial;
+    const entryFee = event.data.entryFeeRial;
+    const realized = event.data.realizedRial;
+    row.qty += num(event.data.qty) || 0;
+    if (![cash, fee, entryCash, entryFee, realized].every(Number.isFinite)) row.known = false;
+    else {
+      row.cashRial += cash; row.feeRial += fee;
+      row.entryCashRial += entryCash; row.entryFeeRial += entryFee;
+      row.realizedRial += realized;
+    }
     exitsBy.set(id, row);
   }
 
   let totalRial = 0;
   const unknown = [];
   const rows = [];
-  for (const position of positions) {
-    const exits = exitsBy.get(position.id);
+  for (const [id, exits] of exitsBy) {
     if (!exits || exits.qty === 0) continue;
-    const initial = num(position.initialQty);
-    // مقدارِ خام سنجیده می‌شود، نه `Number(...)`: `Number(null)` صفر است
-    // و نبودِ عدد را بی‌صدا صفر می‌کند.
-    const entryCash = position.entryCashRial;
-    const entryFee = position.capital?.components?.feeRial;
-    if (!exits.known || !Number.isFinite(entryCash) || !Number.isFinite(entryFee)
-      || !(initial > 0)) {
-      unknown.push(position.id);
+    const position = positionById.get(id);
+    if (!exits.known) {
+      unknown.push(id);
       continue;
     }
-    const share = exits.qty / initial;
-    const value = exits.cashRial - exits.feeRial + (entryCash * share) - (entryFee * share);
-    totalRial += value;
+    totalRial += exits.realizedRial;
     rows.push({
-      id: position.id, defId: position.defId, familyId: position.familyId,
+      id, defId: position?.defId || '', familyId: position?.familyId || '',
       closedQty: exits.qty, exitCashRial: exits.cashRial, exitFeeRial: exits.feeRial,
-      entryShareRial: entryCash * share, entryFeeShareRial: entryFee * share,
-      realizedRial: value,
+      entryShareRial: exits.entryCashRial, entryFeeShareRial: exits.entryFeeRial,
+      realizedRial: exits.realizedRial,
     });
   }
   return {
@@ -113,7 +118,9 @@ function realizedFrom(session, positions) {
  *
  * `force` برای بستنِ زودهنگام است — خواستِ صریح، نه پیش‌فرض.
  */
-export function closeoutPortfolioSession(session, evidence, { at, force = false } = {}) {
+export function closeoutPortfolioSession(session, evidence, {
+  at, force = false, startEvidence = null,
+} = {}) {
   if (!session) return fail('noSession');
   if (session.state === 'closed') return fail('alreadyClosed');
   if (session.state !== 'active') return fail('notActive', session.state || '');
@@ -129,6 +136,7 @@ export function closeoutPortfolioSession(session, evidence, { at, force = false 
   const summary = portfolioSessionSummary(session);
   const watch = portfolioRiskWatch(session, evidence);
   const realized = realizedFrom(session, state.positions);
+  const finalRanking = startEvidence ? portfolioFinalRanking(session, startEvidence) : null;
   const open = state.positions.filter((row) => row.status === 'open' && row.openQty > 0);
 
   const closed = {
@@ -160,6 +168,7 @@ export function closeoutPortfolioSession(session, evidence, { at, force = false 
       } : null,
       accountingWhy: summary.ok ? '' : summary.why,
       realized,
+      finalRanking,
       positions: {
         total: state.counts.total,
         open: state.counts.open,

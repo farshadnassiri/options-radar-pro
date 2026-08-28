@@ -4,6 +4,7 @@
 // گمشده را پر نمی‌کند؛ حکم مالی همچنان فقط در موتور مشترک ساخته می‌شود.
 
 import { portfolioEligibility } from '../core/portfolio-eligible.mjs';
+import { activeSnapshot } from '../core/portfolio-snapshot.mjs';
 
 export const PORTFOLIO_ELIGIBILITY_FILTERS = Object.freeze(['all', 'accepted', 'rejected']);
 
@@ -100,14 +101,15 @@ export function portfolioEligibilityCandidates(snapshot) {
   ));
 }
 
-/** فقط جلسه فعال و عکس دقیقاً قفل‌شده در لحظه شروع قابل سنجش است. */
-export function portfolioSessionEligibility(session) {
+/** فقط جلسه فعال و عکس دقیقاً هم‌لحظه ساعت جاری قابل سنجش است. */
+export function portfolioSessionEligibility(session, { snapshot: explicitSnapshot = null, at = null } = {}) {
   if (!session || session.state !== 'active') {
     return { ok: false, why: 'حکم اجراپذیری فقط برای جلسهٔ فعال ساخته می‌شود', now: null, rows: [] };
   }
-  const snapshot = session.startSnapshot;
-  if (!snapshot || !sameMoment(snapshot.at, session.start)) {
-    return { ok: false, why: 'عکس قفل‌شدهٔ لحظه شروع برای سنجش لازم است', now: null, rows: [] };
+  const snapshot = explicitSnapshot ?? activeSnapshot(session);
+  const expected = at ?? session.now;
+  if (!snapshot || !sameMoment(snapshot.at, expected)) {
+    return { ok: false, why: 'عکس هم‌لحظهٔ ساعت جاری برای سنجش لازم است', now: null, rows: [] };
   }
   if (!session.lockedMission) {
     return { ok: false, why: 'مأموریت قفل‌شده برای سنجش لازم است', now: snapshot.at, rows: [] };
