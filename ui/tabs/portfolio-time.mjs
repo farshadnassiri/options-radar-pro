@@ -1197,19 +1197,31 @@ export async function mount(root, { state, api }) {
     button.textContent = 'در حال ساخت Excel…';
     status.removeAttribute('data-error');
     status.textContent = 'در حال ساخت فایل از سند همین پرونده…';
-    const result = await downloadPortfolioDossier(view.session, view.dossier, {
-      capitalContinuity: dossierContinuity?.continuity,
-    });
-    if (view !== dossierExportView) return;
-    dossierExportBusy = false;
-    button.disabled = false;
-    button.textContent = 'دانلود Excel پرونده';
-    if (!result.ok) {
+    try {
+      const result = await downloadPortfolioDossier(view.session, view.dossier, {
+        capitalContinuity: dossierContinuity?.continuity,
+      });
+      // اگر در فاصلهٔ ساخت، پروندهٔ دیگری روی کارت نشست، نتیجهٔ قدیمی نباید
+      // متن یا حالت کارت تازه را بازنویسی کند؛ finally پایین فقط در همان
+      // حالت، قفل را باز می‌کند.
+      if (view !== dossierExportView) return;
+      if (!result.ok) {
+        status.dataset.error = 'true';
+        status.textContent = `خروجی ساخته نشد — ${result.why}`;
+        return;
+      }
+      status.textContent = `فایل ${faDigits(result.name)}.xlsx ساخته شد.`;
+    } catch (error) {
+      if (view !== dossierExportView) return;
       status.dataset.error = 'true';
-      status.textContent = `خروجی ساخته نشد — ${result.why}`;
-      return;
+      status.textContent = `خروجی ساخته نشد — ${error?.message || 'خطای نامعلوم'}`;
+    } finally {
+      if (view === dossierExportView) {
+        dossierExportBusy = false;
+        button.disabled = false;
+        button.textContent = 'دانلود Excel پرونده';
+      }
     }
-    status.textContent = `فایل ${faDigits(result.name)}.xlsx ساخته شد.`;
   };
 
   function beginNextSessionFromDossier(view) {
