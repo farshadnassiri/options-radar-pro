@@ -113,7 +113,9 @@ group('۱۴۵. گام زمانی در تب');
   check('پلهٔ ناممکن در نشانه‌گذاری هم غیرفعال می‌شود',
     /step\.enabled \? '' : ' disabled'/.test(tabSrc145));
   // ── بند ۳: پس از گام، همه‌چیز دوباره رسم شود ────────────────────────
-  const handler145 = tabSrc145.slice(tabSrc145.indexOf("$('pt-clock').onclick"));
+  // گام زمانی حالا یک مسیر مشترک دارد — `advanceClock` — که هم دکمهٔ
+  // دستی و هم پخش خودکار از آن رد می‌شوند. ادعا همان است؛ جای کد عوض شده.
+  const handler145 = tabSrc145.slice(tabSrc145.indexOf('async function advanceClock('));
   check('پس از گام، حکم اجراپذیری و پیشنهادها با جلسهٔ تازه رسم می‌شوند',
     /paintEligibility\(next\);[\s\S]{0,80}?paintProposals\(next\);/.test(handler145));
   check('و چون paintProposals تنها نقطهٔ فراخوانی است، بقیه هم می‌آیند',

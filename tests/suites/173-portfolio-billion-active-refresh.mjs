@@ -205,5 +205,5 @@ group('۱۷۳. سفر یک‌میلیاردی — رفت‌وبرگشت کامل
   check('ادامه active ساعت، دفتر سرمایه و پیشنهادها را از همان session بازسازی می‌کند',
     /if \(record\.readOnly\)[\s\S]{0,220}paintSnapshot\(record\.session\.startSnapshot\)/.test(tabSrc)
     && /paintEligibility\(record\.session\);\s*paintProposals\(record\.session\)/.test(tabSrc)
-    && /paintProposals[\s\S]{0,420}paintClock\(session\);\s*paintLedger\(session\)/.test(tabSrc));
+    && /paintProposals[\s\S]{0,420}paintClock\(session\);[\s\S]{0,80}?paintLedger\(session\)/.test(tabSrc));
 }

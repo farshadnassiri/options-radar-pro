@@ -23,6 +23,11 @@ import { portfolioDossierComparison } from '../../core/portfolio-dossier-compare
 import { portfolioCapitalGrowth } from '../../core/portfolio-capital-growth.mjs';
 import { momentKey } from '../../core/trading-calendar.mjs';
 import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
+import {
+  PLAYBACK_SPEEDS, PLAYBACK_SPEED_BY_KEY, playbackStep, portfolioPlaybackHalt,
+} from '../../core/portfolio-playback.mjs';
+import { portfolioRiskWatch } from '../../core/portfolio-watch.mjs';
+import { portfolioTimeline } from '../../core/portfolio-timeline.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { mountSubtabs } from '../subtabs.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
@@ -296,6 +301,13 @@ export async function mount(root, { state, api }) {
             <b class="pt-clock-now" id="pt-clock-now">—</b>
             </div>
             <div class="pt-clock-steps" id="pt-clock-steps" role="group" aria-label="پله‌های زمانی"></div>
+            <div class="pt-play" id="pt-play" role="group" aria-label="پخش خودکار">
+            <button type="button" class="primary" id="pt-play-toggle">پخش خودکار</button>
+            <label class="field pt-play-speed"><span>سرعت</span><select id="pt-play-speed"></select></label>
+            <b class="pt-play-step" id="pt-play-step">—</b>
+            </div>
+            <p class="pt-save-state" id="pt-play-state" role="status" aria-live="polite">پخش خودکار روی رویدادِ مهم خودش می‌ایستد.</p>
+            <ul class="pt-play-halt" id="pt-play-halt" hidden></ul>
             <p class="pt-save-state" id="pt-clock-state" role="status" aria-live="polite">جلسه روی لحظهٔ شروع ایستاده است.</p>
             <p class="pt-field-error" id="pt-clock-warn" hidden></p>
             </section>
@@ -1643,6 +1655,7 @@ export async function mount(root, { state, api }) {
     paintWatch(session);
     paintCloseout(session);
     paintClock(session);
+    paintPlayback();
     paintLedger(session);
     paintPositions(session);
     paintPayoff(session);
@@ -2294,16 +2307,112 @@ export async function mount(root, { state, api }) {
     return { rows: priced.rows, spot: priced.spot, universe: priced.universe };
   }
 
-  $('pt-clock').onclick = async (event) => {
-    const button = event.target.closest('[data-pt-step]');
-    if (!button || button.disabled || !proposalSession) return;
-    const stepped = stepPortfolioSession(proposalSession, button.dataset.ptStep,
+  // ── پخش خودکار ──────────────────────────────────────────────────────
+  //
+  // حلقهٔ خودزمان‌بند، نه `setInterval`: هر گام یک واکشی و یک ذخیرهٔ سرور
+  // دارد و ممکن است از فاصلهٔ انتخابی بلندتر شود. با `setInterval` گام‌ها
+  // روی هم می‌افتادند و جلسه دو بار از یک لحظه رد می‌شد.
+  let playing = false;
+  let playTimer = null;
+  let playSpeed = 'normal';
+
+  /**
+   * وضعیت ایست در **لحظهٔ جاری**.
+   *
+   * پیش از هر گام سنجیده می‌شود، نه بعدش: اگر بعد از گام بسنجیم، پخش یک
+   * پله از رویداد رد می‌شود و ساعت جلسه به عقب برنمی‌گردد — یعنی همان
+   * لحظه‌ای که کاربر باید می‌دید، برای همیشه رفته است.
+   */
+  function haltNow(session) {
+    const evidence = portfolioSessionEligibility(session);
+    const watch = portfolioRiskWatch(session, evidence);
+    // سود و زیانِ همین یک لحظه، از همان موتور سری زمانی — تا عددِ ایست با
+    // عددِ جدول یکی باشد.
+    const series = portfolioTimeline(session, [{ at: session.now, evidence }], { mode: 'strict' });
+    const pnlRial = series.ok ? series.steps[0].totalPnlRial : null;
+    const clock = portfolioClockView(session, { days: dates, expiryDate: expiryOf(session) });
+    return portfolioPlaybackHalt(session, { watch, pnlRial, clock });
+  }
+
+  function paintPlayback(halt = null) {
+    const toggle = $('pt-play-toggle');
+    const step = playbackStep(proposalSession);
+    toggle.textContent = playing ? 'توقف پخش' : 'پخش خودکار';
+    toggle.disabled = !proposalSession || proposalSession.state !== 'active' || !step;
+    $('pt-play-step').textContent = step ? `هر گام: ${step.label}` : '—';
+    const list = $('pt-play-halt');
+    const reasons = halt?.reasons || [];
+    list.hidden = reasons.length === 0;
+    list.innerHTML = reasons.map((row) => `<li>${esc(row.why)}${row.detail
+      ? ` — ${esc(faDigits(String(row.detail)))}` : ''}</li>`).join('');
+  }
+
+  function stopPlayback(why = '') {
+    playing = false;
+    if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+    if (why) $('pt-play-state').textContent = why;
+    paintPlayback();
+  }
+
+  async function playTick() {
+    if (!playing || !proposalSession) return;
+    const halt = haltNow(proposalSession);
+    if (halt.halt) {
+      playing = false;
+      playTimer = null;
+      // توقفِ بی‌توضیح از نایستادن بدتر است: کاربر فکر می‌کند رابط خراب شده.
+      $('pt-play-state').textContent = `پخش ایستاد — ${halt.reasons.map((row) => row.why).join('؛ ')}`;
+      paintPlayback(halt);
+      return;
+    }
+    const step = playbackStep(proposalSession);
+    if (!step) { stopPlayback('تایم‌فریم بازپخش این جلسه معلوم نیست'); return; }
+    $('pt-play-state').textContent = `در حال پخش — گام ${step.label}`;
+    const moved = await advanceClock(step);
+    if (!moved.ok) { stopPlayback(`پخش ایستاد — ${moved.why}`); return; }
+    if (!playing) return;
+    playTimer = setTimeout(playTick, PLAYBACK_SPEED_BY_KEY[playSpeed].ms);
+  }
+
+  $('pt-play-speed').innerHTML = PLAYBACK_SPEEDS
+    .map((row) => `<option value="${esc(row.key)}"${row.key === playSpeed ? ' selected' : ''}>${esc(row.label)}</option>`).join('');
+  $('pt-play-speed').onchange = (event) => { playSpeed = event.target.value; };
+
+  $('pt-play-toggle').onclick = () => {
+    if (playing) { stopPlayback('پخش را متوقف کردی'); return; }
+    // دکمه تا پیش از قفل مأموریت غیرفعال است، ولی نگهبانِ دوم لازم است:
+    // دکمهٔ غیرفعالی که کلیکش بی‌صدا هیچ نکند، `playing` را روشن می‌گذارد
+    // و دفعهٔ بعد کاربر باید دو بار بزند تا چیزی شروع شود.
+    if (!proposalSession || proposalSession.state !== 'active') {
+      $('pt-play-state').textContent = 'تا قفل‌شدن مأموریت، لحظه‌ای برای پخش نیست.';
+      return;
+    }
+    playing = true;
+    paintPlayback();
+    playTick();
+  };
+
+  // وضعیت آغازین دکمه: تا اینجا هیچ جلسه‌ای نیست، پس پخش هم نیست.
+  // `paintPlayback` فقط از مسیر بازنقاشیِ زنده صدا زده می‌شود و آن مسیر
+  // پیش از فعال‌شدن جلسه اصلاً اجرا نمی‌شود.
+  paintPlayback();
+
+  /**
+   * یک گام زمانی — چه دستی و چه در پخش خودکار.
+   *
+   * یک مسیر، نه دو: اگر پخش خودکار مسیر خودش را داشت، روزی یکی از دو
+   * مسیر ذخیره روی سرور یا بازنقاشی را جا می‌انداخت و جلسه‌ای جلو می‌رفت
+   * که سرور از آن خبر نداشت.
+   */
+  async function advanceClock(step) {
+    if (!proposalSession) return { ok: false, why: 'جلسه‌ای در کار نیست' };
+    const stepped = stepPortfolioSession(proposalSession, step,
       { days: dates, expiryDate: expiryOf(proposalSession) });
     if (!stepped.ok) {
       // «تقویم تمام شد» و «از پایان جلسه رد می‌شود» دو چیزند و متن
       // خودشان را دارند.
       $('pt-clock-state').textContent = stepResultText(stepped);
-      return;
+      return { ok: false, why: stepResultText(stepped) };
     }
     root.querySelectorAll('[data-pt-step]').forEach((control) => { control.disabled = true; });
     $('pt-clock-state').textContent = 'در حال بریدن خوراک‌ها در لحظهٔ تازه…';
@@ -2312,7 +2421,7 @@ export async function mount(root, { state, api }) {
     if (!built.ok) {
       $('pt-clock-state').textContent = built.why;
       paintClock(proposalSession);
-      return;
+      return { ok: false, why: built.why };
     }
     const next = { ...stepped.session, momentSnapshot: built.snapshot };
     const nextDraft = draft?.step === 'active'
@@ -2320,8 +2429,9 @@ export async function mount(root, { state, api }) {
     const saved = nextDraft ? await persist(nextDraft) : null;
     if (!saved?.ok) {
       paintClock(proposalSession);
-      $('pt-clock-state').textContent = `حرکت زمان نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
-      return;
+      const why = `حرکت زمان نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
+      $('pt-clock-state').textContent = why;
+      return { ok: false, why };
     }
     draft = nextDraft;
     // هر چهار بخش فقط پس از تأیید سرور از همین یک نقطه دوباره رسم می‌شوند.
@@ -2337,6 +2447,15 @@ export async function mount(root, { state, api }) {
         + `${built.missing.spot ? ' و قیمت پایه ناموجود' : ''}؛`
         + ' جدول‌های زیر کمتر از واقعیت‌اند.'
       : '';
+    return { ok: true, why: '', session: next };
+  }
+
+  $('pt-clock').onclick = async (event) => {
+    const button = event.target.closest('[data-pt-step]');
+    if (!button || button.disabled || !proposalSession) return;
+    // گام دستی وسط پخش، یعنی کاربر خودش هدایت را پس گرفته.
+    if (playing) stopPlayback('پخش با گام دستی متوقف شد');
+    await advanceClock(button.dataset.ptStep);
   };
 
   $('pt-positions').onclick = async (event) => {
@@ -2441,6 +2560,9 @@ export async function mount(root, { state, api }) {
     if (feed.note !== feedNote) { feedNote = feed.note || ''; paintSymbols(state.watch); }
   });
   return () => {
+    // پخشی که پس از بستن تب زنده بماند، جلسه را در پس‌زمینه جلو می‌برد و
+    // کاربر لحظه‌ای را از دست می‌دهد که هیچ‌وقت ندیده.
+    stopPlayback();
     historyRequests.invalidate();
     unwatch?.(); unfeed?.(); setupDraft = null; outlookDraft = null; riskDraft = null;
     allocationDraft = null; missionDraft = null; draft = null;
