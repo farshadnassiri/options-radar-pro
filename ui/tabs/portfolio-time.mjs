@@ -135,7 +135,7 @@ export async function mount(root, { state, api }) {
         <section class="card pt-card" data-pt-setup>
           <div class="section-head"><div><p class="eyebrow">مرحله نخست · بخش دو</p><h2>کدام نماد، در کدام لحظه؟</h2></div><b id="pt-feed-status" role="status" aria-live="polite">در حال دریافت فهرست نمادها…</b></div>
           <div class="pt-symbol-row">
-            <label class="field" id="pt-base-field"><span>نماد پایه</span><select id="pt-base"><option value="">در حال دریافت…</option></select><small class="hint">نام و تاریخ واقعی پنهان نمی‌شود.</small><small class="pt-field-error" id="pt-base-error" hidden></small></label>
+            <label class="field" id="pt-base-field"><span>نماد پایه</span><select id="pt-base"><option value="">در حال دریافت…</option></select><small class="hint">نام و تاریخ واقعی پنهان نمی‌شود.</small><small class="hint" id="pt-base-source" hidden></small><small class="pt-field-error" id="pt-base-error" hidden></small></label>
             <button type="button" class="ghost" id="pt-retry" hidden>تلاش دوباره</button>
           </div>
           <div class="pt-date-grid" id="pt-dates" hidden>
@@ -1737,6 +1737,11 @@ export async function mount(root, { state, api }) {
     }
   }
 
+  // برچسب منبعِ فهرست نماد. وقتی تابلوی زنده نرسیده و فهرست از بایگانی آمده،
+  // این جمله کنار شمارش نمادها می‌نشیند تا «سفر در زمان» با فهرستِ روزِ دیگری
+  // بی‌خبر شروع نشود.
+  let feedNote = '';
+
   function paintSymbols(watch) {
     const keep = base.value;
     chain = buildChain(watch?.rows || []);
@@ -1750,6 +1755,10 @@ export async function mount(root, { state, api }) {
     $('pt-review-base').textContent = base.selectedOptions[0]?.textContent || 'انتخاب نشده';
     $('pt-feed-status').textContent = symbols.length ? `${fmt.int(symbols.length)} نماد پایه آماده است` : 'فهرست نمادها خالی است';
     if (symbols.length) $('pt-feed-status').removeAttribute('data-error');
+    // خانهٔ جدا، چون خط وضعیت بعداً با «روزهای معاملاتی» بازنویسی می‌شود و
+    // برچسبِ منبع نباید با آن پاک شود.
+    $('pt-base-source').textContent = feedNote;
+    $('pt-base-source').hidden = !feedNote;
     $('pt-retry').hidden = symbols.length > 0;
     if (base.value) loadDates();
   }
@@ -2350,7 +2359,9 @@ export async function mount(root, { state, api }) {
     if (feed.status === 'failed') {
       $('pt-feed-status').textContent = feed.error || 'دریافت فهرست نمادها ناموفق بود';
       $('pt-feed-status').dataset.error = 'true'; $('pt-retry').hidden = false;
+      return;
     }
+    if (feed.note !== feedNote) { feedNote = feed.note || ''; paintSymbols(state.watch); }
   });
   return () => {
     historyRequests.invalidate();
