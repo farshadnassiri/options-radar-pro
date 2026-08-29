@@ -202,6 +202,17 @@ group('۱۸۸. سری زمانی سود و زیان');
     portfolioTimeline(brokenExit188, [{ at: exitAt188, evidence: evidenceAt(exitAt188) }],
       { mode: 'strict' }).steps[0].rows[0].reason === 'unknownRealized');
 
+  // سرمایهٔ ثبت‌نشده صفر نیست. اگر صفر خوانده شود، مبنای درصد صفر می‌شود
+  // و جدول «سرمایهٔ درگیر: ۰» نشان می‌دهد — عددی که هیچ‌کس ثبت نکرده.
+  const noCapital188 = portfolioTimeline(withEvent((event) => ({
+    ...event, data: { ...event.data, capitalRial: null },
+  })), [steps188[0]], { mode: 'strict' });
+  check('سرمایهٔ ثبت‌نشده `null` می‌ماند، صفر نمی‌شود',
+    noCapital188.steps[0].capitalBaseRial === null
+    && noCapital188.steps[0].rows[0].capitalBaseRial === null
+    && noCapital188.steps[0].totalPnlPct === null,
+    String(noCapital188.steps[0].capitalBaseRial));
+
   // ── بند ۹: ورودی‌های نامعتبر ────────────────────────────────────────
   check('جلسهٔ نبوده علت خودش را دارد',
     portfolioTimeline(null, steps188).reason === 'noSession');

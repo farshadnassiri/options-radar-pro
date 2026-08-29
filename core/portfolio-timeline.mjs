@@ -49,7 +49,18 @@ const OPPOSITE = Object.freeze({ buy: 'sell', sell: 'buy' });
 
 const num = (value) => Number(value);
 const text = (value) => String(value ?? '').trim();
-const finite = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+/**
+ * عدد، یا `null` اگر نبود.
+ *
+ * `Number(null)` صفر است، و صفر یک **مشاهده** است نه نبودِ داده. اگر
+ * سرمایهٔ ثبت‌نشدهٔ یک رویداد صفر خوانده شود، مبنای درصد صفر می‌شود و
+ * جمعِ ناقص «کامل» به نظر می‌رسد.
+ */
+const finite = (value) => {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
+  const out = Number(value);
+  return Number.isFinite(out) ? out : null;
+};
 const momentKey = (point) => {
   const date = Number(point?.date);
   const second = Number(point?.second);
