@@ -202,8 +202,8 @@ export async function mount(root, { state, api }) {
 
           <div class="section-head pt-subhead"><div><p class="eyebrow">دروازه اجرای واقعی</p><h3>حداقل کیفیت نقدشوندگی</h3></div></div>
           <div class="pt-liquidity-grid">
-            <label class="field"><span>حداقل ارزش روزانه نماد پایه</span><input id="pt-underlying-value" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-underlying-value-hint pt-underlying-value-error"><small class="hint" id="pt-underlying-value-hint">صفر یعنی این فیلتر غیرفعال است.</small><small class="pt-field-error" id="pt-underlying-value-error" hidden></small></label>
-            <label class="field"><span>حداقل ارزش روزانه اختیار</span><input id="pt-option-value" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-option-value-hint pt-option-value-error"><small class="hint" id="pt-option-value-hint">صفر یعنی این فیلتر غیرفعال است.</small><small class="pt-field-error" id="pt-option-value-error" hidden></small></label>
+            <label class="field"><span>حداقل ارزش معامله‌شدهٔ نماد پایه تا لحظهٔ شروع</span><input id="pt-underlying-value" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-underlying-value-hint pt-underlying-value-error"><small class="hint" id="pt-underlying-value-hint">ارزش از ابتدای جلسه تا همان لحظهٔ شروع جمع می‌شود، نه کل روز — عدد پایان روز نقدشوندگی ساعت ۱۰ را بیش‌برآورد می‌کند. برای شروعِ زودهنگام، کف را کوچک‌تر بگیر. صفر یعنی این فیلتر غیرفعال است.</small><small class="pt-field-error" id="pt-underlying-value-error" hidden></small></label>
+            <label class="field"><span>حداقل ارزش معامله‌شدهٔ اختیار تا لحظهٔ شروع</span><input id="pt-option-value" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-option-value-hint pt-option-value-error"><small class="hint" id="pt-option-value-hint">ارزش از ابتدای جلسه تا همان لحظهٔ شروع جمع می‌شود، نه کل روز — عدد پایان روز نقدشوندگی ساعت ۱۰ را بیش‌برآورد می‌کند. برای شروعِ زودهنگام، کف را کوچک‌تر بگیر. صفر یعنی این فیلتر غیرفعال است.</small><small class="pt-field-error" id="pt-option-value-error" hidden></small></label>
             <label class="field"><span>حداقل موقعیت باز</span><input id="pt-open-interest" type="text" inputmode="numeric" placeholder="تعداد" aria-describedby="pt-open-interest-hint pt-open-interest-error"><small class="hint" id="pt-open-interest-hint">برای تاریخی که آرشیو موقعیت باز ندارد، صفر وارد کن تا فقط دفتر واقعی سنجیده شود.</small><small class="pt-field-error" id="pt-open-interest-error" hidden></small></label>
             <label class="field"><span>حداکثر اسپرد خرید/فروش</span><input id="pt-max-spread" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-max-spread-error"><small class="pt-field-error" id="pt-max-spread-error" hidden></small></label>
             <label class="field"><span>حداکثر مصرف عمق دفتر</span><input id="pt-book-take" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-book-take-error"><small class="pt-field-error" id="pt-book-take-error" hidden></small></label>
@@ -908,12 +908,17 @@ export async function mount(root, { state, api }) {
       // شکلی که موتورهای سبد مصرف می‌کنند. تا پیش از این ساخته نمی‌شد و
       // حکم و ترکیب و پیشنهاد در برنامهٔ زنده هیچ‌وقت داده نمی‌دیدند.
       spot: priced.spot ?? (Number(point.trade?.price) > 0 ? Number(point.trade.price) : null),
-      underlyingDailyValueRial: Number(priced.baseTrade?.value ?? point.trade?.value) || null,
+      // `|| null` اینجا اشتباه بود: ارزشِ صفر یک **مشاهده** است، نه نبودِ
+      // داده. قراردادی که آن لحظه اصلاً معامله نشده، ارزشش صفرِ واقعی است و
+      // باید «کمتر از کف مأموریت» خوانده شود، نه «موجود نیست» — وگرنه کاربر
+      // دنبال خرابیِ خوراک می‌گردد در حالی که خوراک درست جواب داده است.
+      // خط `openInterest` پایین‌تر از اول همین‌طور درست بود.
+      underlyingDailyValueRial: valueRial(priced.baseTrade?.value ?? point.trade?.value),
       contracts: priced.rows.map((row) => ({
         ins: row.ins, name: row.name, kind: row.kind, strike: row.strike,
         expiry: row.expiry, size: row.size,
-        underlyingDailyValueRial: Number(priced.baseTrade?.value ?? point.trade?.value) || null,
-        optionDailyValueRial: Number(row.trade?.value) || null,
+        underlyingDailyValueRial: valueRial(priced.baseTrade?.value ?? point.trade?.value),
+        optionDailyValueRial: valueRial(row.trade?.value),
         openInterest: Number.isFinite(Number(row.openInterest)) ? Number(row.openInterest) : null,
         quality: row.quality,
         asOf: row.quality?.asOf ?? null,
@@ -968,6 +973,9 @@ export async function mount(root, { state, api }) {
     }
     $('pt-snapshot').dataset.quality = quality?.kind || 'missing';
   }
+
+  // ارزشِ ریالی مشاهده‌شده. فقط نبودِ عدد `null` است؛ صفر خودش یک عدد است.
+  const valueRial = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
 
   function eligibilityQuality(row) {
     const candidate = row?.quality?.candidate?.label || 'فاقد مدرک نامزد';
