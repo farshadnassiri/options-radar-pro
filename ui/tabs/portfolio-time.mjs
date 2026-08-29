@@ -342,7 +342,9 @@ export async function mount(root, { state, api }) {
             <section class="pt-proposals pt-live" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
             <div class="pt-proposals-head">
             <div><p class="eyebrow">پیشنهاد اجراپذیر</p><h3 id="pt-proposals-title">طرح‌های در دسترس با این مأموریت</h3></div>
+            <label class="field pt-family-pick"><span>کدام خانواده؟</span><select id="pt-proposals-family" aria-describedby="pt-proposals-family-note"></select></label>
             </div>
+            <p class="hint" id="pt-proposals-family-note" hidden></p>
             <p class="pt-save-state" id="pt-proposals-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، طرح‌های در دسترس اینجا می‌آیند.</p>
             <table class="pt-proposals-table">
             <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم (تومان)</th><th>بیشترین سود (تومان)</th><th>بیشترین زیان (تومان)</th><th>چرا این جایگاه</th><th>کیفیت</th><th>انتخاب</th></tr></thead>
@@ -1671,6 +1673,40 @@ export async function mount(root, { state, api }) {
     tabsApi = mountSubtabs(host, PT_TABS, { root, initial: 'timeline' });
   }
 
+  // ── انتخاب دومرحله‌ای خانواده ───────────────────────────────────────
+  //
+  // «همه» گزینهٔ نخست می‌ماند: مقایسهٔ بین خانواده‌ها همان چیزی است که
+  // رتبه‌بندی برایش ساخته شده، و برداشتنش یعنی کاربر مجبور باشد پیش از
+  // دیدن هر چیزی یکی را حدس بزند.
+  let proposalFamily = '';
+
+  function paintFamilyPicker(view) {
+    const pick = $('pt-proposals-family');
+    const note = $('pt-proposals-family-note');
+    const families = view.ok ? view.families : [];
+    // فقط خانواده‌هایی که در **این لحظه** طرح رتبه‌دار دارند. فهرست کاملِ
+    // کاتالوگ یعنی کاربر خانواده‌ای را انتخاب کند و جدولِ خالی بگیرد.
+    const key = families.map((row) => `${row.id}:${row.count}`).join('|');
+    if (pick.dataset.key !== key) {
+      pick.innerHTML = `<option value="">همه خانواده‌ها</option>${families
+        .map((row) => `<option value="${esc(row.id)}">${esc(row.label)} — ${esc(faDigits(String(row.count)))} طرح</option>`).join('')}`;
+      pick.dataset.key = key;
+      pick.value = families.some((row) => row.id === proposalFamily) ? proposalFamily : '';
+    }
+    // اگر خانوادهٔ انتخابی طرحش را از دست داده، انتخاب بی‌صدا نمی‌ماند.
+    if (view.ok && proposalFamily && view.familyId !== proposalFamily) {
+      proposalFamily = view.familyId;
+      pick.value = proposalFamily;
+    }
+    note.hidden = !view.ok || !view.familyNote;
+    note.textContent = view.ok ? view.familyNote : '';
+  }
+
+  $('pt-proposals-family').onchange = (event) => {
+    proposalFamily = String(event.target.value || '');
+    if (proposalSession) paintProposals(proposalSession);
+  };
+
   function paintProposals(session) {
     proposalSession = session;
     paintTabs(session);
@@ -1696,7 +1732,8 @@ export async function mount(root, { state, api }) {
     }
     const section = $('pt-proposals');
     const evidence = portfolioSessionEligibility(session);
-    const view = portfolioSessionProposals(session, evidence);
+    const view = portfolioSessionProposals(session, evidence, { familyId: proposalFamily });
+    paintFamilyPicker(view);
     const asideTable = $('pt-proposals-aside');
     const asideTitle = $('pt-proposals-aside-title');
     if (!view.ok) {
