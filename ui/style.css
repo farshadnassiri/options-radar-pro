@@ -3027,3 +3027,18 @@ td.gain, dd.gain { color: var(--gain); }
   .pb-weight { grid-template-columns: 1fr 90px 30px; }
   .pb-lens { position: static; }
 }
+
+/* سرخط‌ها — هر کارت یک سؤال با جوابش و دلیلش. کلیک‌شونده، چون هر سرخط
+   دروازهٔ همان استراتژی است. */
+.pb-highlights { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.pb-highlight { display: flex; flex-direction: column; gap: 3px; align-items: stretch; text-align: start;
+  padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--panel); cursor: pointer; }
+.pb-highlight:hover { border-color: var(--accent); background: var(--accent-soft); }
+.pb-highlight:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pb-highlight-label { font-size: var(--fs-3xs); font-weight: 700; color: var(--accent-ink);
+  text-transform: none; letter-spacing: normal; }
+.pb-highlight b { font-size: var(--fs-sm); color: var(--ink); }
+.pb-highlight-value { font-size: var(--fs-2xs); color: var(--muted); }
+.pb-highlight-value em { font-style: normal; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.pb-highlight small { font-size: var(--fs-3xs); color: var(--muted); line-height: 1.5; }

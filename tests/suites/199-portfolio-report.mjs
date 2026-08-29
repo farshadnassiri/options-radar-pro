@@ -171,3 +171,72 @@ group('۱۹۹. گزارش آزمون همه استراتژی‌ها');
   check('حالت نامعتبر نقشه به پیش‌فرض برمی‌گردد', normalizeHeatmapMode('چرند') === 'cumulative');
   check('برچسب حالت نقشه از خود ماژول می‌آید', heatmapMeta('step').label === 'بازده همان روز');
 }
+
+// ═══ سرخط‌ها: پایداری، تندی حرکت، پرتعدادی ═══
+group('۱۹۹-ب. سرخط‌ها');
+{
+  const entry199b = { marginGross: 1000, netCash: 0, marginNet: 1000, capital: 1000, notional: 5000, legValue: 100, legValueComplete: true };
+  const mk199b = (strategyId, pnls, legValue = 100) => pnls.map((series, index) => ({
+    id: `${strategyId}:${index}`, strategyId, strategyName: `استراتژی ${strategyId}`,
+    groupId: 'g', groupName: 'دسته', feasible: true,
+    entry: { ...entry199b, legValue },
+    path: { daily: series.map((value, day) => ({ date: 20260801 + day, netPnl: value })) },
+  }));
+  // آرام: هر روز کمی جلو. تند: بالا و پایین با دامنهٔ بزرگ ولی همان مقصد.
+  const calm199 = mk199b('CALM', [[10, 20, 30, 40]]);
+  const wild199 = mk199b('WILD', [[10, 300, -200, 40]]);
+  const many199 = mk199b('MANY', [[5, 6, 7, 8], [6, 7, 8, 9], [7, 8, 9, 10]], 900);
+  const rows199b = [...calm199, ...wild199, ...many199];
+  const mx199b = buildPnlMatrix(rows199b);
+  mx199b.baseSeries = mx199b.dates.map(() => 0);
+  const out199b = analyzePortfolio({ rows: rows199b, matrix: mx199b });
+  const by199 = (id) => out199b.strategies.find((row) => row.strategyId === id);
+
+  // ── تندی حرکت روی قدر مطلق است، نه روی خود تغییر ──────────────────
+  // مسیری که یک روز ۱۰ بالا و روز بعد ۱۰ پایین می‌رود، میانگین تغییرش صفر
+  // است ولی هیچ‌کس آن را «آرام» نمی‌نامد.
+  check('تندی حرکت مسیر پرتکان را بزرگ‌تر از مسیر یکنواخت می‌بیند',
+    by199('WILD').metrics.pace > by199('CALM').metrics.pace * 5,
+    `${by199('WILD').metrics.pace} در برابر ${by199('CALM').metrics.pace}`);
+  check('مسیر یکنواخت با گام برابر، تندی همان گام است',
+    near(by199('CALM').metrics.pace, 1, 1e-9), String(by199('CALM').metrics.pace));
+  check('تندترین سرخط، پرتکان‌ترین مسیر است', 
+    out199b.highlights.find((row) => row.id === 'fast').row.strategyId === 'WILD');
+  // ادعا روی خودِ تعریف بسته می‌شود نه روی نام چیدمان: آرام‌ترین یعنی
+  // کم‌ترین میانگین قدر مطلق تغییر روزانه، هر که باشد.
+  check('آرام‌ترین سرخط، کم‌ترین تندیِ همان اجراست',
+    out199b.highlights.find((row) => row.id === 'calm').row.metrics.pace
+      === Math.min(...out199b.strategies.map((row) => row.metrics.pace)),
+    out199b.highlights.find((row) => row.id === 'calm').row.strategyId);
+  check('تندترین و آرام‌ترین یکی نیستند',
+    out199b.highlights.find((row) => row.id === 'fast').row.strategyId
+      !== out199b.highlights.find((row) => row.id === 'calm').row.strategyId);
+
+  check('نوسان رتبه با کمتر از دو مشاهده، صفر جعل نمی‌کند',
+    analyzePortfolio({
+      rows: mk199b('ONE', [[5]]),
+      matrix: (() => { const b = buildPnlMatrix(mk199b('ONE', [[5]])); b.baseSeries = [0]; return b; })(),
+    }).strategies[0].metrics.rankSwing === null);
+
+  check('پرتعدادترین، استراتژی با بیشترین ترکیب معتبر است',
+    out199b.highlights.find((row) => row.id === 'many').row.strategyId === 'MANY');
+  check('شمار ترکیب، خودش یک سنجهٔ دیدنی است',
+    by199('MANY').metrics.samples === 3 && by199('CALM').metrics.samples === 1);
+  check('پرمعامله‌ترین از جمع ارزش معاملهٔ ورود می‌آید',
+    out199b.highlights.find((row) => row.id === 'liquid').row.strategyId === 'MANY'
+    && by199('MANY').metrics.tradeValue === 2700, String(by199('MANY').metrics.tradeValue));
+  check('ارزش معاملهٔ ناقصِ یک ترکیب، جمعِ استراتژی را نامعلوم می‌کند',
+    analyzePortfolio({
+      rows: [{ ...mk199b('X', [[5, 6]])[0], entry: { ...entry199b, legValueComplete: false } }],
+      matrix: (() => { const b = buildPnlMatrix(mk199b('X', [[5, 6]])); b.baseSeries = [0, 0]; return b; })(),
+    }).strategies[0].metrics.tradeValue === null);
+
+  // ── سرخط‌ها از سنجه می‌آیند، نه از نمرهٔ ترکیبی ────────────────────
+  check('هر سرخط سنجهٔ خودش را نام می‌برد',
+    out199b.highlights.every((row) => row.id && row.label && row.hint && row.metric && row.row));
+  check('پایدارترین با بهترین یکی گرفته نمی‌شود',
+    out199b.highlights.find((row) => row.id === 'steady').metric === 'rankSwing');
+  check('سرخط بدون دادهٔ معتبر ساخته نمی‌شود',
+    !analyzePortfolio({}).highlights.length);
+  check('چهارده سنجه تعریف شده', METRICS.length === 14, String(METRICS.length));
+}

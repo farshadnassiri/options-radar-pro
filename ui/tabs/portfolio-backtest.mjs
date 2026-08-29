@@ -143,6 +143,7 @@ export async function mount(root, { state }) {
 
   <div class="pb-panel" data-panel="overview" hidden>
     <div class="backtest-kpis" id="pb-kpis"></div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">سرخط‌ها</p><h2>ده سؤالی که آدم واقعاً می‌پرسد</h2></div><span>روی هر کارت کلیک کن تا همان استراتژی انتخاب شود</span></div><div id="pb-highlights" class="pb-highlights"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">از کل به جزء</p><h2>کدام خانواده وزن دارد و کدام سود داد؟</h2></div><span id="pb-treemap-note">اندازه از شمار ترکیب، رنگ از بازده</span></div><div id="pb-treemap" class="pb-chart pb-chart-lg"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">گزارش خانواده‌ها</p><h2>بهترین و بدترین عضو هر خانواده</h2></div></div><div id="pb-groups" class="history-table-wrap"></div></section>
   </div>
@@ -460,9 +461,39 @@ export async function mount(root, { state }) {
       ['مسیر خودِ نماد پایه', pctCell(analysis.baseFinal), signTone(analysis.baseFinal)],
     ];
     $('pb-kpis').innerHTML = cards.map(([label, value, tone]) => `<article class="${tone}"><span>${esc(label)}</span><b>${value}</b></article>`).join('');
+    paintHighlights();
     charts.set('treemap', $('pb-treemap'), (echarts, tokens) => treemapOption(analysis, tokens));
     $('pb-groups').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>خانواده</th><th>استراتژی</th><th>ترکیب</th><th>سودده</th><th>بازده (${esc(analysis.statisticLabel)})</th><th>بهترین عضو</th><th>بدترین عضو</th></tr></thead><tbody>${
       analysis.groups.map((row) => `<tr><td>${esc(row.groupName)}</td><td>${fmt.int(row.strategies)}</td><td>${fmt.int(row.samples)}</td><td>${fmt.int(row.wins)} · ${pctCell(row.winPct)}</td><td class="${signTone(row.returnStat)}">${pctCell(row.returnStat)}</td><td>${esc(row.bestStrategy?.strategyName || '—')}</td><td>${esc(row.worstStrategy?.strategyName || '—')}</td></tr>`).join('')}</tbody></table>`;
+  }
+
+  /**
+   * سرخط‌ها — هر کدام یک سؤال تک‌جمله‌ای با یک جواب و دلیلش.
+   *
+   * عمداً جدا از نمرهٔ ترکیبی‌اند: «پایدارترین» با «بهترین» یکی نیست و
+   * قاطی‌کردنشان همان چیزی است که گزارش را گنگ می‌کند.
+   */
+  function paintHighlights() {
+    const unitOf = (metric) => METRICS.find((row) => row.id === metric);
+    $('pb-highlights').innerHTML = (analysis.highlights || []).map((item) => {
+      const meta = unitOf(item.metric);
+      const raw = item.metric === 'score' ? item.row.score : item.row.metrics[item.metric];
+      const text = !meta ? numCellOf(raw)
+        : meta.unit === 'pct' ? pctCell(raw)
+          : meta.unit === 'money' ? fmt.money(raw)
+            : meta.unit === 'int' ? fmt.int(raw)
+              : numCellOf(raw);
+      return `<button type="button" class="pb-highlight" data-strategy="${esc(item.row.strategyId)}" title="${esc(item.hint)}">
+        <span class="pb-highlight-label">${esc(item.label)}</span>
+        <b>${esc(item.row.strategyName)}</b>
+        <span class="pb-highlight-value">${esc(meta?.label || 'نمره')}: <em>${text}</em></span>
+        <small>${esc(item.hint)}</small>
+      </button>`;
+    }).join('') || '<p class="empty-note">سرخطی ساخته نشد؛ نتیجهٔ معتبری در این بازه نیست.</p>';
+    $('pb-highlights').onclick = (event) => {
+      const card = event.target.closest('[data-strategy]');
+      if (card) selectStrategy(card.dataset.strategy);
+    };
   }
 
   // ═══════════════════ رتبه‌بندی ═══════════════════

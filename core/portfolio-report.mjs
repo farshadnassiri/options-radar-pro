@@ -15,7 +15,7 @@ import { RETURN_BASES, DEFAULT_RETURN_BASIS, basisMeta, normalizeBasis } from '.
 import { columnsInRange, matrixRow } from './portfolio-matrix.mjs';
 import { comboSeries, comboWeight } from './portfolio-series.mjs';
 import {
-  DEFAULT_STATISTIC, DEFAULT_WEIGHTING, medianOf,
+  DEFAULT_STATISTIC, DEFAULT_WEIGHTING, meanOf, medianOf,
   normalizeStatistic, normalizeWeighting, statOf, statisticMeta, weightingMeta,
 } from './portfolio-stats.mjs';
 
@@ -75,6 +75,22 @@ export const METRICS = [
     id: 'worst', label: 'بدترین ترکیب', unit: 'pct', better: 'high', weight: 0,
     hint: 'بازده بدترین ترکیب این استراتژی؛ دُمِ زیان',
   },
+  {
+    id: 'rankSwing', label: 'نوسان رتبه', unit: 'rank', better: 'low', weight: 0,
+    hint: 'انحراف معیار جایگاه روزانه؛ کم بودنش یعنی استراتژی سرِ جایش می‌ماند و با هر روز بالا و پایین نمی‌پرد',
+  },
+  {
+    id: 'pace', label: 'تندی حرکت', unit: 'pct', better: 'low', weight: 0,
+    hint: 'میانگین قدر مطلق تغییر روزانهٔ بازده؛ زیاد بودنش یعنی مسیر پرتکان است، حتی اگر مقصدش خوب باشد',
+  },
+  {
+    id: 'tradeValue', label: 'ارزش معاملهٔ ورود', unit: 'money', better: 'high', weight: 0,
+    hint: 'جمع ارزش معاملهٔ پاهای روز ورود؛ کم بودنش یعنی اجرای واقعی این استراتژی سخت است',
+  },
+  {
+    id: 'samples', label: 'شمار ترکیب معتبر', unit: 'int', better: 'high', weight: 0,
+    hint: 'چند ترکیب از این استراتژی داده‌اش کامل بود؛ کم بودنش یعنی نتیجه به چند ترکیب وابسته است',
+  },
 ];
 
 const METRIC_BY_ID = new Map(METRICS.map((row) => [row.id, row]));
@@ -92,6 +108,14 @@ const HEAT_BY_ID = new Map(HEATMAP_MODES.map((row) => [row.id, row]));
 export const DEFAULT_HEATMAP_MODE = 'cumulative';
 export const normalizeHeatmapMode = (id) => (HEAT_BY_ID.has(String(id ?? '')) ? String(id) : DEFAULT_HEATMAP_MODE);
 export const heatmapMeta = (id) => HEAT_BY_ID.get(String(id ?? '')) || null;
+
+/** انحراف معیار نمونه‌ای؛ کمتر از دو مشاهده، انحراف ندارد نه اینکه صفر باشد. */
+function stdDevOf(values) {
+  const list = (Array.isArray(values) ? values : []).map(finite).filter((value) => value !== null);
+  if (list.length < 2) return null;
+  const mean = list.reduce((sum, value) => sum + value, 0) / list.length;
+  return Math.sqrt(list.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (list.length - 1));
+}
 
 /** رتبهٔ درصدی یک عدد بین هم‌گروه‌هایش: صفر بدترین، صد بهترین. */
 function percentileScores(values, better) {
@@ -234,6 +258,16 @@ export function analyzePortfolio({
         speed,
         spread: p25 !== null && p75 !== null ? p75 - p25 : null,
         worst: worstPct,
+        rankSwing: stdDevOf(path.rank),
+        // تندی حرکت روی **قدر مطلق** تغییر روزانه ساخته می‌شود، نه روی خود
+        // تغییر: مسیری که یک روز ۱۰ بالا و روز بعد ۱۰ پایین می‌رود، میانگین
+        // تغییرش صفر است ولی هیچ‌کس آن را «آرام» نمی‌نامد.
+        pace: meanOf(members.flatMap((combo) => combo.series.stepPct
+          .filter((value) => value !== null)
+          .map((value) => Math.abs(value)))),
+        tradeValue: members.every((combo) => combo.weight !== null)
+          ? members.reduce((sum, combo) => sum + combo.weight, 0) : null,
+        samples: members.length,
       },
       best: bestPct, worst: worstPct, p25, p75,
       returnNote: returnStat.why,
@@ -299,8 +333,35 @@ export function analyzePortfolio({
     };
   }).sort((a, b) => (b.score ?? -Infinity) - (a.score ?? -Infinity));
 
+  // ═══ سرخط‌ها ═══
+  //
+  // هر سرخط یک سؤالِ تک‌جمله‌ای است که کاربر واقعاً می‌پرسد. عمداً از خودِ
+  // سنجه‌ها ساخته می‌شوند نه از نمرهٔ ترکیبی: «پایدارترین» با «بهترین» یکی
+  // نیست، و قاطی‌کردنشان همان چیزی است که گزارش را گنگ می‌کند.
+  const pickBy = (key, direction) => {
+    const known = ranked.filter((row) => finite(row.metrics[key]) !== null);
+    if (!known.length) return null;
+    return known.reduce((best, row) => {
+      const a = row.metrics[key], b = best.metrics[key];
+      return direction === 'low' ? (a < b ? row : best) : (a > b ? row : best);
+    });
+  };
+  const highlights = [
+    { id: 'best', label: 'بهترین', hint: 'بالاترین نمرهٔ ترکیبی با وزن‌های فعلی', metric: 'score', row: ranked[0] || null },
+    { id: 'worst', label: 'بدترین', hint: 'پایین‌ترین نمرهٔ ترکیبی', metric: 'score', row: ranked.filter((row) => row.score !== null).at(-1) || null },
+    { id: 'steady', label: 'پایدارترین', hint: 'کم‌نوسان‌ترین جایگاه روزانه؛ هر روز تقریباً همان‌جاست', metric: 'rankSwing', row: pickBy('rankSwing', 'low') },
+    { id: 'fast', label: 'تندترین حرکت', hint: 'بیشترین تغییر روزانهٔ بازده؛ پرتکان، حتی اگر مقصدش خوب باشد', metric: 'pace', row: pickBy('pace', 'high') },
+    { id: 'calm', label: 'آرام‌ترین حرکت', hint: 'کمترین تغییر روزانهٔ بازده؛ مسیر بی‌سروصدا', metric: 'pace', row: pickBy('pace', 'low') },
+    { id: 'many', label: 'پرتعدادترین', hint: 'بیشترین ترکیب با دادهٔ کامل؛ نتیجه‌اش به چند ترکیب وابسته نیست', metric: 'samples', row: pickBy('samples', 'high') },
+    { id: 'liquid', label: 'پرمعامله‌ترین', hint: 'بیشترین ارزش معاملهٔ روز ورود؛ اجرای واقعی‌اش آسان‌تر است', metric: 'tradeValue', row: pickBy('tradeValue', 'high') },
+    { id: 'painless', label: 'کم‌دردترین', hint: 'کم‌ترین افت از سقف مسیر', metric: 'drawdown', row: pickBy('drawdown', 'high') },
+    { id: 'quick', label: 'زودبازده‌ترین', hint: 'کم‌ترین روز تا نخستین سود', metric: 'speed', row: pickBy('speed', 'low') },
+    { id: 'reliable', label: 'پرتکرارترین برد', hint: 'بالاترین نرخ برد میان ترکیب‌ها', metric: 'winPct', row: pickBy('winPct', 'high') },
+  ].filter((row) => row.row);
+
   return {
     version: PORTFOLIO_REPORT_VERSION,
+    highlights,
     basis: basisMeta(basis), basisId: basis, bases: RETURN_BASES,
     statistic: stat, statisticLabel: statisticMeta(stat)?.label || '',
     weighting: mode, weightingLabel: weightingMeta(mode)?.label || '',

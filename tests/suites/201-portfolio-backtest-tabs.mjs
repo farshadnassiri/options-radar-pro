@@ -122,3 +122,19 @@ group('۲۰۱-ج. عدسی جمع‌شونده');
     style201.includes('.pb-lens { position: sticky; top: 0; z-index: 3; padding: 0; overflow: hidden; }')
     && style201.includes('.pb-lens-toggle { display: flex;'));
 }
+
+// ═══ سرخط‌ها در نمای کل ═══
+group('۲۰۱-د. سرخط‌ها در رابط');
+{
+  check('نوار سرخط‌ها در نمای کل هست', tab201.includes('id="pb-highlights"'));
+  check('هر سرخط با واحد سنجهٔ خودش نوشته می‌شود',
+    tab201.includes("meta.unit === 'pct' ? pctCell(raw)")
+    && tab201.includes("meta.unit === 'money' ? fmt.money(raw)")
+    && tab201.includes("meta.unit === 'int' ? fmt.int(raw)"));
+  check('دلیل هر سرخط کنارش نوشته می‌شود، نه فقط در راهنمای شناور',
+    tab201.includes('<small>${esc(item.hint)}</small>'));
+  check('کلیک روی سرخط، همان استراتژی را انتخاب می‌کند',
+    /paintHighlights[\s\S]{0,1800}\$\('pb-highlights'\)\.onclick[\s\S]{0,140}selectStrategy\(card\.dataset\.strategy\)/.test(tab201));
+  check('نبود سرخط، جدول خالیِ بی‌توضیح نمی‌سازد',
+    tab201.includes('سرخطی ساخته نشد؛ نتیجهٔ معتبری در این بازه نیست.'));
+}
