@@ -82,10 +82,77 @@ function lineChart(host, rows, { xLabel, yLabel } = {}) {
 function strategyBars(host, strategies, onPick) {
   if (!strategies.length) { host.innerHTML = '<p class="empty-note">استراتژی معتبری برای نمودار نیست.</p>'; return; }
   const bound = Math.max(1, ...strategies.map((row) => Math.abs(row.medianReturn)));
-  host.innerHTML = strategies.map((row, index) => `<button type="button" class="portfolio-bar" data-strategy="${row.strategyId}"><span>${faDigits(index + 1)} · ${esc(row.strategyName)}</span><i><b class="${signTone(row.medianReturn)}" style="--bar:${Math.max(2, Math.abs(row.medianReturn) / bound * 100)}%"></b></i><strong class="${signTone(row.medianReturn)}">${fmt.pct(row.medianReturn)}٪</strong></button>`).join('');
+  host.innerHTML = strategies.map((row, index) => `<button type="button" class="portfolio-bar" data-strategy="${row.strategyId}"><span>${faDigits(index + 1)} · ${esc(row.strategyName)}</span><i class="portfolio-bar-track"><b class="portfolio-bar-fill ${signTone(row.medianReturn)}" style="--bar:${Math.max(2, Math.abs(row.medianReturn) / bound * 50)}%"></b></i><strong class="${signTone(row.medianReturn)}">${fmt.pct(row.medianReturn)}٪</strong></button>`).join('');
   host.onclick = (event) => {
     const button = event.target.closest('[data-strategy]');
     if (button) onPick(button.dataset.strategy);
+  };
+}
+
+const heatLevel = (value, bound) => Math.max(1, Math.min(4,
+  Math.ceil((Math.abs(value) / Math.max(bound, 1e-9)) * 4)));
+
+function timelineHeatmap(host, timeline, onPick) {
+  if (!timeline?.dates?.length || !timeline?.strategies?.length) {
+    host.innerHTML = '<p class="empty-note">برای نقشه زمانی، روز معتبر کافی وجود ندارد.</p>';
+    return;
+  }
+  const rows = [...timeline.strategies].sort((a, b) => (a.medianRank - b.medianRank)
+    || (b.medianReturn - a.medianReturn));
+  const values = rows.flatMap((row) => row.points.map((point) => point.medianReturn)).filter(Number.isFinite);
+  const bound = Math.max(1e-9, ...values.map(Math.abs));
+  const columns = `style="--days:${timeline.dates.length}"`;
+  host.innerHTML = `<div class="portfolio-viz-scroll"><div class="portfolio-heatmap">
+    <div class="portfolio-heat-row portfolio-heat-head" ${columns}><b>استراتژی</b>${timeline.dates.map((date) => `<span>${dateLabel(date)}</span>`).join('')}</div>
+    ${rows.map((row) => {
+      const points = new Map(row.points.map((point) => [point.date, point]));
+      return `<div class="portfolio-heat-row" data-strategy="${esc(row.strategyId)}" ${columns}><b>${esc(row.strategyName)}</b>${timeline.dates.map((date) => {
+        const point = points.get(date);
+        if (!point) return '<i class="missing" aria-label="فاقد داده معتبر"></i>';
+        const tone = point.medianReturn > 0 ? 'gain' : point.medianReturn < 0 ? 'loss' : 'flat';
+        const label = `${row.strategyName}، ${dateLabel(date)}، رتبه ${fmt.int(point.rank)}، بازده ${fmt.pct(point.medianReturn)} درصد، ${fmt.int(point.samples)} ترکیب`;
+        return `<button type="button" class="${tone} heat-${heatLevel(point.medianReturn, bound)}" data-strategy="${esc(row.strategyId)}" title="${esc(label)}" aria-label="${esc(label)}"><span>${fmt.pct(point.medianReturn)}</span></button>`;
+      }).join('')}</div>`;
+    }).join('')}
+  </div></div><p class="portfolio-note">هر خانه میانه بازده ترکیب‌های معتبر از روز ورود تا همان روز است؛ خانه خالی یعنی داده معتبر کافی وجود نداشته است.</p>`;
+  host.onclick = (event) => {
+    const cell = event.target.closest('button[data-strategy]');
+    if (cell) onPick(cell.dataset.strategy);
+  };
+}
+
+function rankBumpChart(host, timeline, onPick) {
+  if (!timeline?.dates?.length || timeline.dates.length < 2 || !timeline?.strategies?.length) {
+    host.innerHTML = '<p class="empty-note">برای نمایش تغییر رتبه، دست‌کم دو روز معتبر لازم است.</p>';
+    return;
+  }
+  const W = 960, H = Math.max(360, timeline.strategies.length * 18), L = 76, R = 175, T = 32, B = 40;
+  const maxRank = Math.max(1, ...timeline.strategies.flatMap((row) => row.points.map((point) => point.rank)));
+  const x = (date) => L + (timeline.dates.indexOf(date) / Math.max(1, timeline.dates.length - 1)) * (W - L - R);
+  const y = (rank) => T + ((rank - 1) / Math.max(1, maxRank - 1)) * (H - T - B);
+  const ticks = [1, Math.max(1, Math.round(maxRank / 2)), maxRank]
+    .filter((value, index, all) => all.indexOf(value) === index);
+  host.innerHTML = `<div class="portfolio-viz-scroll"><svg class="portfolio-rank-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="تغییر رتبه استراتژی‌ها در طول بازه">
+    ${ticks.map((rank) => `<line x1="${L}" x2="${W - R}" y1="${y(rank)}" y2="${y(rank)}"/><text x="${L - 12}" y="${y(rank) + 4}" text-anchor="end">رتبه ${fmt.int(rank)}</text>`).join('')}
+    ${timeline.strategies.map((row) => {
+      const last = row.points.at(-1);
+      let previousIndex = -2;
+      const path = row.points.map((point) => {
+        const index = timeline.dates.indexOf(point.date);
+        const command = index === previousIndex + 1 ? 'L' : 'M';
+        previousIndex = index;
+        return `${command} ${x(point.date)} ${y(point.rank)}`;
+      }).join(' ');
+      return `<g tabindex="0" role="button" data-strategy="${esc(row.strategyId)}"><path class="portfolio-rank-hit" d="${path}"/><path class="portfolio-rank-line" d="${path}"/><circle cx="${x(last.date)}" cy="${y(last.rank)}" r="5"/><text x="${W - R + 10}" y="${y(last.rank) + 4}">${esc(row.strategyName)} · ${fmt.int(last.rank)}</text><title>${esc(row.strategyName)} · میانه رتبه ${fmt.num(row.medianRank)} · ${fmt.int(row.topDays)} روز رتبه نخست</title></g>`;
+    }).join('')}
+  </svg></div><p class="portfolio-note">خط رو به بالا یعنی بهترشدن رتبه؛ کلیک روی هر خط همان استراتژی و ترکیب‌هایش را انتخاب می‌کند.</p>`;
+  const pick = (event) => {
+    const line = event.target.closest('[data-strategy]');
+    if (line) onPick(line.dataset.strategy);
+  };
+  host.onclick = pick;
+  host.onkeydown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); pick(event); }
   };
 }
 
@@ -115,6 +182,7 @@ export async function mount(root, { state }) {
   <section id="pb-report" hidden>
     <div class="backtest-kpis" id="pb-kpis"></div>
     <div class="portfolio-report-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">رتبه‌بندی مقاوم</p><h2>میانه بازده هر استراتژی</h2></div><span>برای فیلتر جزئیات کلیک کن</span></div><div id="pb-bars" class="portfolio-bars"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">گزارش دسته‌ها</p><h2>نوع استراتژی چه نتیجه‌ای داشت؟</h2></div></div><div id="pb-groups" class="history-table-wrap"></div></section></div>
+    <div class="portfolio-timeline-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">تمام روزهای بازه</p><h2>نقشه حرارتی بهترین تا بدترین</h2></div><span id="pb-heat-audit">—</span></div><div id="pb-heatmap"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">پایداری رتبه</p><h2>تغییر جایگاه استراتژی‌ها</h2></div><span>برای انتخاب روی خط کلیک کن</span></div><div id="pb-rank-chart"></div></section></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">برنده و بازنده</p><h2>نتیجه همه استراتژی‌ها</h2></div><span id="pb-audit">—</span></div><div id="pb-strategies" class="history-table-wrap"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">ترکیب‌های واقعی</p><h2 id="pb-combo-title">برای مشاهده جزئیات یک استراتژی را انتخاب کن</h2></div><span>هر ردیف یک ترکیب قرارداد</span></div><div id="pb-combos" class="history-table-wrap"></div></section>
     <section id="pb-detail" class="portfolio-detail" hidden></section>
@@ -242,11 +310,18 @@ export async function mount(root, { state }) {
     const cards = [
       ['ترکیب معتبر', fmt.int(report.total), ''], ['سودده', `${fmt.int(report.wins)} · ${fmt.pct(report.winPct)}٪`, 'gain'],
       ['زیان‌ده', `${fmt.int(report.losses)} · ${fmt.pct(report.lossPct)}٪`, 'loss'], ['خنثی', fmt.int(report.flat), ''],
-      ['استراتژی برنده', report.bestStrategy ? `${report.bestStrategy.strategyName} · ${fmt.pct(report.bestStrategy.medianReturn)}٪` : '—', 'gain'],
-      ['استراتژی بازنده', report.worstStrategy ? `${report.worstStrategy.strategyName} · ${fmt.pct(report.worstStrategy.medianReturn)}٪` : '—', 'loss'],
+      ['بهترین در پایان بازه', report.bestStrategy ? `${report.bestStrategy.strategyName} · ${fmt.pct(report.bestStrategy.medianReturn)}٪` : '—', 'gain'],
+      ['بدترین در پایان بازه', report.worstStrategy ? `${report.worstStrategy.strategyName} · ${fmt.pct(report.worstStrategy.medianReturn)}٪` : '—', 'loss'],
+      ['پایدارترین در بازه', report.timeline.best ? `${report.timeline.best.strategyName} · میانه رتبه ${fmt.num(report.timeline.best.medianRank)}` : '—', 'gain'],
+      ['ضعیف‌ترین در بازه', report.timeline.worst ? `${report.timeline.worst.strategyName} · میانه رتبه ${fmt.num(report.timeline.worst.medianRank)}` : '—', 'loss'],
     ];
     $('pb-kpis').innerHTML = cards.map(([label, value, tone]) => `<article class="${tone}"><span>${label}</span><b>${value}</b></article>`).join('');
     strategyBars($('pb-bars'), report.strategies, selectStrategy);
+    timelineHeatmap($('pb-heatmap'), report.timeline, selectStrategy);
+    rankBumpChart($('pb-rank-chart'), report.timeline, selectStrategy);
+    $('pb-heat-audit').textContent = report.timeline.dates.length
+      ? `${fmt.int(report.timeline.dates.length)} روز معتبر · ${fmt.int(report.timeline.strategies.length)} استراتژی`
+      : 'داده زمانی کافی نیست';
     $('pb-groups').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>دسته</th><th>ترکیب</th><th>سودده</th><th>میانه بازده</th><th>مجموع سود/زیان</th></tr></thead><tbody>${report.groups.map((row) => `<tr><td>${esc(row.groupName)}</td><td>${fmt.int(row.samples)}</td><td>${fmt.int(row.wins)} · ${fmt.pct(row.winPct)}٪</td><td class="${signTone(row.medianReturn)}">${fmt.pct(row.medianReturn)}٪</td><td class="${signTone(row.totalPnl)}">${fmt.money(row.totalPnl)}</td></tr>`).join('')}</tbody></table>`;
     $('pb-strategies').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>رتبه</th><th>استراتژی</th><th>نوع / جهت</th><th>تعداد</th><th>سودده / زیان‌ده</th><th>میانه بازده</th><th>میانگین سود</th><th>بهترین / بدترین</th></tr></thead><tbody>${report.strategies.map((row, index) => `<tr data-strategy="${row.strategyId}" tabindex="0"><td>${fmt.int(index + 1)}</td><td><b>${esc(row.strategyName)}</b>${row.feasible ? '' : '<small>ساختاری؛ غیرقابل اجرا در تابلو</small>'}</td><td>${esc(row.groupName)} · ${esc(row.direction || '—')}</td><td>${fmt.int(row.samples)}</td><td>${fmt.int(row.wins)} / ${fmt.int(row.losses)} · ${fmt.pct(row.winPct)}٪</td><td class="${signTone(row.medianReturn)}">${fmt.pct(row.medianReturn)}٪</td><td class="${signTone(row.meanPnl)}">${fmt.money(row.meanPnl)}</td><td><span class="gain">${fmt.pct(row.best?.final?.returnPct)}٪</span> / <span class="loss">${fmt.pct(row.worst?.final?.returnPct)}٪</span></td></tr>`).join('')}</tbody></table>`;
     const capped = generated.filter((row) => row.capped).length;
