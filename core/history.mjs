@@ -8,6 +8,7 @@ import { num, ok, EPS } from './num.mjs';
 import { grossCash, entryFees, analyzePayoff } from './payoff.mjs';
 import { analyzeMixed, isSingleExpiry } from './mixed.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
+import { notionalOf } from './portfolio-basis.mjs';
 import { marginParamsOf } from './settings.mjs';
 import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
 import {
@@ -383,6 +384,9 @@ export function replayHistory({
   const entry = {
     gross, fee, netCash, cashReceived, cashPaid, cashNetGross: gross,
     ...risk, baseMarket: startBaseMarket,
+    // `priced` تعداد واحد را از پیش در `ratio` دارد، پس ضریب واحد اینجا یک
+    // است؛ وگرنه ارزش اسمی دو بار در تعداد ضرب می‌شد.
+    spot, notional: notionalOf(priced, spot, 1),
   };
   const dates = [...baseIndex.keys()].filter((d) => d >= start && d <= end).sort((a, b) => a - b);
   const rows = [];
