@@ -1,8 +1,9 @@
 // محاسبات سنگین تحلیل تاریخی بیرون از نخ رابط کاربری.
 
 import { CATALOG, GROUPS, byId } from '../strategies/catalog.mjs';
-import { generateHistoricalCombos, replayHistory, rollingEntryMatrix } from '../core/history.mjs';
+import { generateHistoricalCombos, historyPrice, normalizeHistoryDate, replayHistory, rollingEntryMatrix } from '../core/history.mjs';
 import { summarizePortfolio } from '../core/portfolio.mjs';
+import { buildPnlMatrix } from '../core/portfolio-matrix.mjs';
 
 self.onmessage = (event) => {
   const m = event.data;
@@ -99,6 +100,18 @@ self.onmessage = (event) => {
               gross: replay.entry.gross, fee: replay.entry.fee, netCash: replay.entry.netCash,
               capital: replay.entry.capital?.value, capitalLabel: replay.entry.capital?.label,
               margin: replay.entry.margin?.marginNet,
+              // اجزای مخرج، خام و جدا. رابط با همین‌ها هر مبنای بازدهی را
+              // بدون اجرای دوباره بازمی‌سازد؛ اگر فقط درصدِ یک مبنا حمل
+              // می‌شد، عوض‌کردن مبنا یعنی چند دقیقه اجرای دوباره.
+              marginGross: replay.entry.margin?.margin,
+              marginNet: replay.entry.margin?.marginNet,
+              notional: replay.entry.notional, spot: replay.entry.spot,
+              maxLoss: Number.isFinite(replay.entry.payoff?.maxLoss) ? replay.entry.payoff.maxLoss : null,
+              maxProfit: Number.isFinite(replay.entry.payoff?.maxProfit) ? replay.entry.payoff.maxProfit : null,
+              // ارزش معاملهٔ روز ورودِ پاها — پایهٔ وزن‌دهی بر ارزش معامله.
+              legValue: replay.priced.reduce((sum, leg) => sum
+                + (Number.isFinite(leg.entryValue) ? leg.entryValue : 0), 0),
+              legValueComplete: replay.priced.every((leg) => Number.isFinite(leg.entryValue)),
             },
             final: {
               date: final.date, netPnl: final.netPnl, grossPnl: final.grossPnl,
@@ -135,12 +148,28 @@ self.onmessage = (event) => {
         });
       }
       const report = summarizePortfolio(rows);
+      // ماتریس پیش از پاک‌کردن فهرست روزانه ساخته می‌شود. از این به بعد
+      // رابط با همین ماتریس کار می‌کند: مبنا، آماره، بازه و وزن، همه
+      // لحظه‌ای و بدون اجرای دوباره.
+      const matrix = buildPnlMatrix(rows);
+      // مسیر خودِ نماد پایه روی همان ستون‌ها، تا نمودار روند بتواند «این
+      // استراتژی نسبت به نگه‌داشتن خود سهم چه کرد» را نشان دهد. روزی که
+      // قیمت پایانی ندارد `null` می‌ماند.
+      const baseRows = new Map((m.seriesByIns?.[String(m.ua?.ins)] || [])
+        .map((row) => [normalizeHistoryDate(row.date), row]));
+      const startClose = historyPrice(baseRows.get(Number(m.startDate)), 'CLOSE');
+      const baseSeries = matrix.dates.map((date) => {
+        const close = historyPrice(baseRows.get(date), 'CLOSE');
+        return Number.isFinite(close) && close > 0 && Number.isFinite(startClose) && startClose > 0
+          ? ((close / startClose) - 1) * 100 : null;
+      });
       for (const row of rows) delete row.path.daily;
       self.postMessage({
         type: 'portfolio', id: m.id, rows,
         report, generatedByStrategy,
+        matrix: { dates: matrix.dates, pnl: matrix.pnl, rowCount: matrix.rowCount, baseSeries },
         excluded: { invalidAtEnd, replayErrors },
-      });
+      }, [matrix.pnl.buffer]);
       return;
     }
   } catch (error) {
