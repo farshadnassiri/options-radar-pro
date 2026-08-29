@@ -35,6 +35,9 @@ group('۱۸۵. جایگزینی بایگانی هنگام نبود تابلوی 
   check('وقتی روزِ خواسته‌شده همان روزِ بایگانی است، ادعای سوگیری ساخته نمی‌شود',
     !archiveBoardDownNote({ fallbackDate: 20260828, count: 13, wanted: 20260828 }).includes('سوگیری بقا'));
 
+  check('شکست کامل با جملهٔ فارسی گزارش می‌شود، نه با متن خام خطا',
+    app185.includes('فهرست نمادها نه از تابلوی زنده آمد نه از بایگانی — ${detail}'));
+
   check('برچسب منبع از سرور تا وضعیت مشترک رابط حمل می‌شود',
     app185.includes("feed: { status: 'idle', error: '', note: '', asOf: 0 },")
     && app185.includes('note: payload.boardUnavailable ? String(payload.note || \'\') : \'\','));

@@ -129,7 +129,11 @@ function seedWatch() {
       setLink('snapshot');
       for (const fn of state.subscribers) { try { fn(state.watch); } catch (err) { logError('پخش عکس پشتیبان', err); } }
     } catch (err) {
-      setFeed('failed', err?.message ? String(err.message) : String(err));
+      // جملهٔ فارسی اول می‌آید و جزئیات فنی پشتش می‌ماند. پیش از این تنها
+      // چیزی که کاربر می‌دید `Error: HTTP 403` بود؛ نه می‌گفت چه نرسیده، نه
+      // اینکه با دکمهٔ تلاش دوباره چه باید کرد.
+      const detail = err?.message ? String(err.message) : String(err);
+      setFeed('failed', `فهرست نمادها نه از تابلوی زنده آمد نه از بایگانی — ${detail}`);
       logError('گرفتن عکس پشتیبان', err);
     } finally { seeding = null; }
   })();
