@@ -3053,3 +3053,26 @@ td.gain, dd.gain { color: var(--gain); }
   border-radius: var(--radius-md); background: var(--panel); }
 .pb-workbook[hidden] { display: none !important; }
 .pb-workbook p { flex: 1; min-width: 240px; margin: 0; }
+
+/* اجرای درون‌روزی — هزینه‌اش پیش از دکمه نوشته می‌شود، نه بعدش. */
+.pb-grain-run { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line-soft); }
+.pb-grain-run[hidden] { display: none !important; }
+.pb-grain-run p { flex: 1; min-width: 240px; margin: 0; }
+
+/* کشوی جزئیات — از هر تبی باز می‌شود و جای کاربر را در همان تب نگه می‌دارد.
+   پریدن به تب دیگر برای دیدن یک عدد، رشتهٔ فکر را پاره می‌کند. */
+.pb-drawer { position: fixed; inset-inline: 0; bottom: 0; z-index: 20; max-height: 62vh;
+  display: flex; flex-direction: column; background: var(--panel);
+  border-top: 1px solid var(--line); box-shadow: var(--shadow-lg); }
+.pb-drawer[hidden] { display: none !important; }
+.pb-drawer-head { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line-soft); }
+.pb-drawer-head b { font-size: var(--fs-sm); color: var(--ink); }
+.pb-drawer-tabs { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
+.pb-drawer-tabs button { padding: 3px 10px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--muted); border-radius: var(--radius-pill); font-size: var(--fs-2xs); font-weight: 600; cursor: pointer; }
+.pb-drawer-tabs button[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.pb-drawer-tabs button:focus-visible, .pb-drawer-head button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pb-drawer-body { overflow: auto; padding: var(--space-3) var(--space-4) var(--space-4); }
+@media (max-width: 900px) { .pb-drawer { max-height: 74vh; } }

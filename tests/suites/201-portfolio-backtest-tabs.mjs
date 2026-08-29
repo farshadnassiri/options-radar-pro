@@ -189,3 +189,43 @@ group('۲۰۱-ه. کل به جزء و توضیح ساده');
   check('رادار می‌گوید محورها نگاشته شده‌اند',
     flowSrc.includes('هر محور به صفر تا صد نگاشته می‌شود') && tab201.includes('هر محور به صفر تا صد نگاشته شده'));
 }
+
+// ═══ کشوی جزئیات و دانه‌بندی درون‌روزی ═══
+group('۲۰۱-و. کشوی جزئیات و دانه‌بندی');
+{
+  // سیزده نمودار با سیزده رفتارِ کلیک یعنی کاربر باید یاد بگیرد کدام‌شان
+  // چه می‌کند. یک مسیر، نه سیزده تا.
+  check('کشوی جزئیات بیرون از پنل‌هاست تا از هر تبی دیده شود',
+    tab201.indexOf('id="pb-drawer"') < tab201.indexOf('data-panel="setup"'));
+  check('هر انتخاب استراتژی، کشو را هم پر می‌کند',
+    tab201.includes('if (analysis.strategies.some((row) => row.strategyId === strategyId)) openDetail(strategyId);'));
+  check('کشو سه نما دارد: سنجه، ترکیب، مسیر',
+    tab201.includes("{ id: 'metrics', label: 'سنجه‌ها' }")
+    && tab201.includes("{ id: 'combos', label: 'ترکیب‌ها' }")
+    && tab201.includes("{ id: 'path', label: 'مسیر گام‌به‌گام' }"));
+  check('نمای سنجه، وزن و سهم هر سنجه در نمره را نشان می‌دهد',
+    tab201.includes('<th>وزن در نمره</th><th>سهم از نمره</th>')
+    && tab201.includes('این سنجه را ندارد'));
+  check('کلیک روی ترکیب در کشو، به پنل جزئیات کامل می‌برد',
+    tab201.includes("dirty.delete('drill'); tabsApi?.show('drill'); showDetail(rawRow(combo));"));
+
+  // ── دانه‌بندی ───────────────────────────────────────────────────────
+  check('دانه‌بندی در عدسی هست', tab201.includes('id="pb-grain"'));
+  // عددی که بعد از فشردن دکمه معلوم شود، هشدار نیست؛ عذرخواهی است.
+  check('هزینهٔ اجرای درون‌روزی پیش از دکمه نوشته می‌شود',
+    tab201.includes('function paintGrainNote()') && tab201.includes('intradayCost({ instruments: Object.keys(seriesByIns).length, grain })'));
+  check('محدودیت «فقط روز سنجش» صریح گفته می‌شود',
+    tab201.includes('فقط **روز سنجش** ریز می‌شود؛ بقیهٔ بازه همان‌طور می‌ماند'));
+  check('لحظهٔ بی‌معامله، قیمت لحظهٔ قبل را نمی‌گیرد',
+    tab201.includes('قیمت لحظهٔ قبل جایش نمی‌نشیند'));
+  // برچسبِ چهارده‌رقمیِ کلیدِ لحظه در تقویم جلالی «—» می‌داد.
+  check('برچسب ستون در حالت درون‌روزی، ساعت را نشان می‌دهد',
+    tab201.includes('const columnLabel = (value) => (isIntradayGrain(grain)')
+    && tab201.includes('`<option value="${date}"${Number(selected) === date ? \' selected\' : \'\'}>${esc(columnLabel(date))}</option>`'));
+  check('بازگشت به روزانه، اجرای دوباره نمی‌خواهد',
+    tab201.includes('if (!isIntradayGrain(grain) && dailyMatrix) {') && tab201.includes('payloadMatrix = dailyMatrix;'));
+  check('کتابخانهٔ اجرا برای سبد چندنمادی نگه داشته می‌شود',
+    tab201.includes('function basketSources()') && tab201.includes('sources: basketSources()'));
+  check('هر اجرای کتابخانه با عدسی جاری تحلیل می‌شود، نه با مبنای روزِ خودش',
+    /basketSources\(\)[\s\S]{0,700}basisId: lens\.basisId, statistic: lens\.statistic/.test(tab201));
+}

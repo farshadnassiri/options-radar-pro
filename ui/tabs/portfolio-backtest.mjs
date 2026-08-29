@@ -29,6 +29,10 @@ import {
 } from '/core/portfolio-report.mjs';
 import { HEAT_PALETTES, HEAT_SORTS } from '/ui/portfolio-analysis-view.mjs';
 import { allocatePortfolio } from '/core/portfolio-allocation.mjs';
+import {
+  DEFAULT_GRAIN, MOMENT_GRAINS, grainMeta, intradayCost, isIntradayGrain,
+  momentDate, momentLabel, momentSecond, momentsFor, normalizeGrain,
+} from '/core/intraday-grid.mjs';
 import { downloadPortfolioBacktest } from '/ui/portfolio-backtest-export.mjs';
 import {
   correlationHeatOption, correlationOf, familyBarOption, funnelOption, paretoOption,
@@ -124,14 +128,27 @@ export async function mount(root, { state }) {
       <label>مبنای بازده<select id="pb-basis">${RETURN_BASES.map((row) => `<option value="${row.id}"${row.id === DEFAULT_RETURN_BASIS ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
       <label>آمارهٔ دسته<select id="pb-stat">${STATISTICS.map((row) => `<option value="${row.id}"${row.id === DEFAULT_STATISTIC ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
       <label>وزن‌دهی<select id="pb-weighting">${WEIGHTINGS.map((row) => `<option value="${row.id}"${row.id === DEFAULT_WEIGHTING ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
+      <label>دانه‌بندی زمان<select id="pb-grain">${MOMENT_GRAINS.map((row) => `<option value="${row.id}" title="${esc(row.hint)}"${row.id === DEFAULT_GRAIN ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
       <label>از روز<select id="pb-from"></select></label>
       <label>تا روز<select id="pb-to"></select></label>
       <button type="button" class="ghost" id="pb-lens-reset">بازگشت به بازهٔ کامل</button>
     </div>
     <p class="portfolio-note" id="pb-lens-note"></p>
+    <div class="pb-grain-run" id="pb-grain-run" hidden>
+      <button type="button" class="primary" id="pb-grain-go">اجرای درون‌روزی</button>
+      <p class="portfolio-note" id="pb-grain-note"></p>
+    </div>
     </div>
   </section>
 
+  <aside class="pb-drawer" id="pb-drawer" hidden aria-live="polite">
+    <div class="pb-drawer-head">
+      <b id="pb-drawer-title">جزئیات</b>
+      <div class="pb-drawer-tabs" id="pb-drawer-tabs"></div>
+      <button type="button" class="ghost" id="pb-drawer-close" title="بستن">بستن</button>
+    </div>
+    <div class="pb-drawer-body" id="pb-drawer-body"></div>
+  </aside>
   <div class="pb-panel" data-panel="setup">
     <section class="card portfolio-controls"><div class="section-head"><div><p class="eyebrow">مرحله اول</p><h2>نماد، نقدشوندگی و دامنه آزمون</h2></div><b id="pb-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
     <div class="portfolio-form"><label>نماد پایه<select id="pb-base"><option value="">در حال دریافت…</option></select></label><label>دامنه استراتژی<select id="pb-scope"><option value="feasible">فقط استراتژی‌های قابل اجرا</option><option value="all">همه ساختاری، با برچسب غیرقابل اجرا</option></select></label><label>دامنهٔ داده<select id="pb-data-scope">${scopeOptionsMarkup()}</select></label><label>تعداد واحد<input id="pb-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><label>سقف ترکیب هر استراتژی<input id="pb-cap" type="number" min="10" max="1000" step="10" value="120"></label>
@@ -368,6 +385,10 @@ export async function mount(root, { state }) {
     weighting: DEFAULT_WEIGHTING, from: null, to: null,
   };
   let heatMode = DEFAULT_HEATMAP_MODE, heatSort = 'score', heatPalette = 'signed';
+  // دانه‌بندی انتخابی، و ماتریسِ روزانهٔ اصلی که با بازگشت به «روزانه»
+  // دوباره سر جایش می‌نشیند. بدون نگه‌داشتنش، برگشتن از حالت درون‌روزی
+  // یعنی اجرای دوباره.
+  let grain = DEFAULT_GRAIN, dailyMatrix = null, dailyRows = [];
   let metricWeights = Object.fromEntries(METRICS.map((row) => [row.id, row.weight]));
   let trendPick = [], basketPicks = [], calendarPick = '', bandPick = '';
   /**
@@ -396,7 +417,16 @@ export async function mount(root, { state }) {
     { id: 'basket', label: 'سبد فرضی', hint: 'تخصیص سرمایه' },
   ];
 
-  const labelsOf = () => (analysis?.dates || []).map(dateLabel);
+  /**
+   * برچسب یک ستون — روز یا لحظه.
+   *
+   * در حالت درون‌روزی، ستون‌ها کلیدِ «تاریخ و ثانیه»‌اند. نمایش‌دادنشان
+   * به‌شکل تاریخ، عددی چهارده‌رقمی می‌داد که هیچ‌کس نمی‌خواندش.
+   */
+  const columnLabel = (value) => (isIntradayGrain(grain)
+    ? `${dateLabel(momentDate(value))} ${momentLabel(momentSecond(value))}`
+    : dateLabel(value));
+  const labelsOf = () => (analysis?.dates || []).map(columnLabel);
   const pctCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
   const numCellOf = (value) => (Number.isFinite(value) ? fmt.num(value) : '—');
 
@@ -501,7 +531,10 @@ export async function mount(root, { state }) {
       activeWorker.onmessage = (event) => {
         const payload = event.data;
         if (payload.id !== message.id) return;
-        if (payload.type === 'portfolio-progress') {
+        if (payload.type === 'portfolio-intraday-progress') {
+          setStatus(`قیمت‌گذاری لحظه‌ها: ${fmt.int(payload.done)} از ${fmt.int(payload.total)} · ${fmt.int(payload.priced)} قیمت معتبر`);
+        } else if (payload.type === 'portfolio-intraday') resolve(payload);
+        else if (payload.type === 'portfolio-progress') {
           setStatus(`${payload.strategyName}: ${fmt.int(payload.done)} از ${fmt.int(payload.total)} استراتژی · ${fmt.int(payload.results)} نتیجه معتبر`);
         } else if (payload.type === 'portfolio') resolve(payload);
         else if (payload.type === 'error') reject(new Error(payload.error));
@@ -515,8 +548,10 @@ export async function mount(root, { state }) {
 
   function paintLensOptions() {
     const dates = payloadMatrix?.dates || [];
+    // برچسب از `columnLabel` می‌آید نه `dateLabel`: کلیدِ لحظه چهارده‌رقمی
+    // است و تقویم جلالی رویش «—» می‌دهد، پس فهرست بازه بی‌برچسب می‌شد.
     const options = (selected) => dates
-      .map((date) => `<option value="${date}"${Number(selected) === date ? ' selected' : ''}>${esc(dateLabel(date))}</option>`)
+      .map((date) => `<option value="${date}"${Number(selected) === date ? ' selected' : ''}>${esc(columnLabel(date))}</option>`)
       .join('');
     $('pb-from').innerHTML = options(lens.from ?? dates[0]);
     $('pb-to').innerHTML = options(lens.to ?? dates.at(-1));
@@ -531,13 +566,12 @@ export async function mount(root, { state }) {
    */
   function lensSummary() {
     if (!analysis) return 'هنوز اجرایی انجام نشده';
-    const grain = analysis.range.days;
     return [
       analysis.basis.short,
       analysis.statisticLabel,
       analysis.weighting === 'equal' ? 'هم‌وزن' : 'وزن ارزش',
-      `${fmt.int(grain)} روز`,
-      analysis.range.from ? `${dateLabel(analysis.range.from)} تا ${dateLabel(analysis.range.to)}` : '',
+      isIntradayGrain(grain) ? `${fmt.int(analysis.range.days)} لحظه` : `${fmt.int(analysis.range.days)} روز`,
+      analysis.range.from ? `${columnLabel(analysis.range.from)} تا ${columnLabel(analysis.range.to)}` : '',
     ].filter(Boolean).join(' · ');
   }
 
@@ -562,7 +596,7 @@ export async function mount(root, { state }) {
     const parts = [
       `بازده روی «${analysis.basis.label}» — ${analysis.basis.hint}.`,
       `آمارهٔ دسته‌ها «${analysis.statisticLabel}» و وزن‌دهی «${analysis.weightingLabel}» است.`,
-      `${fmt.int(analysis.range.days)} روز معتبر، ${fmt.int(analysis.usable)} ترکیب.`,
+      `${fmt.int(analysis.range.days)} ${isIntradayGrain(grain) ? 'لحظهٔ' : 'روز'} معتبر، ${fmt.int(analysis.usable)} ترکیب.`,
     ];
     if (analysis.unusable) parts.push(`${fmt.int(analysis.unusable)} ترکیب مخرج یا پایان معتبر نداشت و وارد رتبه‌بندی نشد.`);
     if (beyond) {
@@ -613,6 +647,90 @@ export async function mount(root, { state }) {
     else if (id === 'drill') paintDrill();
     else if (id === 'basket') paintBasket();
   }
+
+  // ═══════════════════ کشوی جزئیات ═══════════════════
+  //
+  // یک مسیر برای همهٔ نمودارها. سیزده نمودار با سیزده رفتارِ کلیک، یعنی
+  // کاربر باید یاد بگیرد کدام‌شان چه می‌کند — و همان چیزی است که صفحهٔ پر
+  // از نمودار را ترسناک می‌کند.
+  //
+  // کشو پایین صفحه می‌نشیند و جای کاربر را در تبِ خودش نگه می‌دارد؛
+  // پریدن به تب دیگر برای دیدن یک عدد، رشتهٔ فکر را پاره می‌کند.
+
+  const DRAWER_VIEWS = [
+    { id: 'metrics', label: 'سنجه‌ها' },
+    { id: 'combos', label: 'ترکیب‌ها' },
+    { id: 'path', label: 'مسیر گام‌به‌گام' },
+  ];
+  let drawerStrategy = '', drawerView = 'metrics';
+
+  function openDetail(strategyId) {
+    if (!analysis) return;
+    const row = analysis.strategies.find((item) => item.strategyId === strategyId);
+    if (!row) return;
+    drawerStrategy = strategyId;
+    selectedStrategyId = strategyId;
+    root.querySelectorAll('[data-strategy]').forEach((node) => node.classList.toggle('selected', node.dataset.strategy === strategyId));
+    $('pb-drawer').hidden = false;
+    $('pb-drawer-title').textContent = `${row.strategyName} · ${row.groupName} · رتبه ${fmt.int(row.rank)}`;
+    $('pb-drawer-tabs').innerHTML = DRAWER_VIEWS.map((view) => `<button type="button" data-drawer-view="${view.id}" aria-selected="${view.id === drawerView}">${esc(view.label)}</button>`).join('');
+    paintDrawerBody(row);
+  }
+
+  function paintDrawerBody(row) {
+    const host = $('pb-drawer-body');
+    if (drawerView === 'combos') {
+      const combos = analysis.combos
+        .filter((combo) => combo.strategyId === row.strategyId && combo.series.ok)
+        .sort((a, b) => (b.series.finalPct ?? -Infinity) - (a.series.finalPct ?? -Infinity));
+      const bound = heatScale(combos.map((combo) => combo.series.finalPct));
+      host.innerHTML = combos.length
+        ? `<div class="history-table-wrap"><table class="history-table portfolio-small-table"><thead><tr><th>رتبه</th><th>ترکیب</th><th>مخرج</th><th>سود/زیان</th><th>بازده</th><th>بیشترین افت</th><th>گام تا نخستین سود</th></tr></thead><tbody>${
+          combos.map((combo, index) => {
+            const band = heatLevel(combo.series.finalPct, bound);
+            return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}" data-result="${esc(combo.id)}" tabindex="0"><td>${fmt.int(index + 1)}</td><td>${esc(comboName(combo))}</td><td>${fmt.money(combo.series.denominator)}</td><td class="${signTone(combo.series.finalPnl)}">${fmt.money(combo.series.finalPnl)}</td><td class="${signTone(combo.series.finalPct)}">${pctCell(combo.series.finalPct)}</td><td class="${signTone(combo.series.maxDrawdownPct)}">${pctCell(combo.series.maxDrawdownPct)}</td><td>${combo.series.firstProfitIndex === null ? 'رخ نداد' : fmt.int(combo.series.firstProfitIndex)}</td></tr>`;
+          }).join('')}</tbody></table></div>`
+        : '<p class="empty-note">هیچ ترکیبی از این استراتژی روی مبنای انتخابی معتبر نیست.</p>';
+      host.onclick = (event) => {
+        const line = event.target.closest('[data-result]');
+        if (!line) return;
+        const combo = analysis.combos.find((item) => item.id === line.dataset.result);
+        if (combo) { dirty.delete('drill'); tabsApi?.show('drill'); showDetail(rawRow(combo)); }
+      };
+      return;
+    }
+    if (drawerView === 'path') {
+      const bound = heatScale(row.path.cumulative);
+      host.innerHTML = `<div class="history-table-wrap"><table class="history-table portfolio-small-table"><thead><tr><th>گام</th><th>زمان</th><th>بازده تجمعی</th><th>تغییر همان گام</th><th>افت از سقف</th><th>نرخ برد</th><th>رتبه</th><th>نمونه</th></tr></thead><tbody>${
+        analysis.dates.map((date, column) => {
+          const band = heatLevel(row.path.cumulative[column], bound);
+          return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}"><td>${fmt.int(column)}</td><td>${esc(columnLabel(date))}</td><td class="${signTone(row.path.cumulative[column])}">${pctCell(row.path.cumulative[column])}</td><td class="${signTone(row.path.step[column])}">${pctCell(row.path.step[column])}</td><td class="${signTone(row.path.drawdown[column])}">${pctCell(row.path.drawdown[column])}</td><td>${pctCell(row.path.winPct[column])}</td><td>${row.path.rank[column] === null ? '—' : fmt.int(row.path.rank[column])}</td><td>${fmt.int(row.path.samples[column])}</td></tr>`;
+        }).join('')}</tbody></table></div>`;
+      host.onclick = null;
+      return;
+    }
+    host.innerHTML = `<div class="history-table-wrap"><table class="history-table portfolio-small-table"><thead><tr><th>سنجه</th><th>مقدار</th><th>جهت</th><th>وزن در نمره</th><th>سهم از نمره</th><th>یعنی چه</th></tr></thead><tbody>${
+      METRICS.map((metric) => {
+        const value = row.metrics[metric.id];
+        const part = (row.scoreParts || []).find((item) => item.id === metric.id);
+        const text = metric.unit === 'pct' ? pctCell(value)
+          : metric.unit === 'money' ? (Number.isFinite(value) ? fmt.money(value) : '—')
+            : metric.unit === 'int' ? (Number.isFinite(value) ? fmt.int(value) : '—')
+              : numCellOf(value);
+        return `<tr><td><b>${esc(metric.label)}</b></td><td class="${metric.unit === 'pct' && metric.better === 'high' ? signTone(value) : ''}">${text}</td><td>${metric.better === 'high' ? 'بالاتر بهتر' : 'پایین‌تر بهتر'}</td><td>${fmt.int(metricWeights[metric.id])}</td><td>${part ? numCellOf(part.score) : '<span class="loss">این سنجه را ندارد</span>'}</td><td>${esc(metric.hint)}</td></tr>`;
+      }).join('')}</tbody></table></div><p class="portfolio-note">نمرهٔ نهایی <b>${numCellOf(row.score)}</b> از میانگین وزنیِ ستون «سهم از نمره» می‌آید. سنجه‌ای که این استراتژی ندارد، صفر نمی‌گیرد — از مخرج بیرون می‌رود، و پوشش نمره ${pctCell(row.scoreCoverage)} است.</p>`;
+    host.onclick = null;
+  }
+
+  $('pb-drawer-tabs').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-drawer-view]');
+    if (!button) return;
+    drawerView = button.dataset.drawerView;
+    $('pb-drawer-tabs').querySelectorAll('[data-drawer-view]').forEach((node) => node.setAttribute('aria-selected', String(node.dataset.drawerView === drawerView)));
+    const row = analysis?.strategies.find((item) => item.strategyId === drawerStrategy);
+    if (row) paintDrawerBody(row);
+  });
+  $('pb-drawer-close').addEventListener('click', () => { $('pb-drawer').hidden = true; });
 
   // ═══════════════════ نمای کل ═══════════════════
 
@@ -764,7 +882,7 @@ export async function mount(root, { state }) {
     $('pb-holding').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>روز نگهداری</th><th>تاریخ خروج</th><th>ترکیب معتبر</th><th>میانهٔ بازده</th><th>نرخ برد</th><th>بهترین</th><th>بدترین</th></tr></thead><tbody>${
       rows.map((row) => {
         const band = heatLevel(row.median, bound);
-        return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}"><td>${fmt.int(row.column)}</td><td>${esc(dateLabel(row.date))}</td><td>${fmt.int(row.samples)}</td><td class="${signTone(row.median)}">${pctCell(row.median)}</td><td>${pctCell(row.winPct)}</td><td class="gain">${pctCell(row.best)}</td><td class="loss">${pctCell(row.worst)}</td></tr>`;
+        return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}"><td>${fmt.int(row.column)}</td><td>${esc(columnLabel(row.date))}</td><td>${fmt.int(row.samples)}</td><td class="${signTone(row.median)}">${pctCell(row.median)}</td><td>${pctCell(row.winPct)}</td><td class="gain">${pctCell(row.best)}</td><td class="loss">${pctCell(row.worst)}</td></tr>`;
       }).join('')}</tbody></table>`;
   }
 
@@ -1009,7 +1127,7 @@ export async function mount(root, { state }) {
       ['سود یا زیان پایان دوره', fmt.money(summary.finalPnlRial), signTone(summary.finalPnlRial)],
       ['بازده روی سرمایهٔ اول دوره', pctCell(summary.finalReturnPct), signTone(summary.finalReturnPct)],
       ['بیشترین افت سبد', `${fmt.money(summary.maxDrawdownRial)} · ${pctCell(summary.maxDrawdownPct)}`, 'loss'],
-      ['نخستین روز سود', summary.firstProfitIndex === null ? 'رخ نداد' : esc(dateLabel(analysis.dates[summary.firstProfitIndex])), ''],
+      ['نخستین گام سود', summary.firstProfitIndex === null ? 'رخ نداد' : esc(columnLabel(analysis.dates[summary.firstProfitIndex])), ''],
       ['روز معلوم از کل', `${fmt.int(summary.knownDays)} از ${fmt.int(summary.totalDays)}`, summary.knownDays < summary.totalDays ? 'loss' : ''],
     ].map(([label, value, tone]) => `<article class="${tone}"><span>${esc(label)}</span><b>${value}</b></article>`).join('');
 
@@ -1039,6 +1157,10 @@ export async function mount(root, { state }) {
       ? { ...payload.matrix, pnl: payload.matrix.pnl instanceof Float64Array ? payload.matrix.pnl : Float64Array.from(payload.matrix.pnl || []) }
       : null;
     generated = payload.generatedByStrategy;
+    dailyMatrix = payloadMatrix;
+    dailyRows = payloadRows;
+    grain = DEFAULT_GRAIN;
+    $('pb-grain').value = DEFAULT_GRAIN;
     lens = { ...lens, from: null, to: null };
     trendPick = []; basketPicks = []; calendarPick = ''; bandPick = ''; selectedStrategyId = '';
     if (!payloadMatrix) { setStatus('این اجرا ماتریس روزانه نساخت.', true); return; }
@@ -1046,6 +1168,7 @@ export async function mount(root, { state }) {
     $('pb-lens').hidden = false;
     $('pb-workbook').hidden = false;
     setLensOpen(lensWasOpen());
+    paintGrainNote();
     $('pb-tabs').hidden = false;
     tabsApi = mountSubtabs($('pb-tabs'), PB_TABS, {
       root,
@@ -1069,6 +1192,8 @@ export async function mount(root, { state }) {
 
   function selectStrategy(strategyId, { jump = true } = {}) {
     if (!analysis) return;
+    // هر انتخابی کشو را هم پر می‌کند: یک مسیر، نه دو تا.
+    if (analysis.strategies.some((row) => row.strategyId === strategyId)) openDetail(strategyId);
     const strategy = analysis.strategies.find((row) => row.strategyId === strategyId);
     if (!strategy) return;
     selectedStrategyId = strategyId;
@@ -1079,7 +1204,7 @@ export async function mount(root, { state }) {
     $('pb-combo-title').textContent = `${strategy.strategyName} · ${fmt.int(rows.length)} ترکیب`;
     $('pb-combos').innerHTML = rows.length
       ? `<table class="history-table"><thead><tr><th>رتبه</th><th>ترکیب قرارداد</th><th>سررسید</th><th>مخرج (${esc(analysis.basis.short)})</th><th>سود/زیان</th><th>بازده</th><th>بیشترین افت</th><th>اولین سود</th><th>ارزش معاملهٔ ورود</th></tr></thead><tbody>${
-        rows.map((item, index) => `<tr data-result="${esc(item.id)}" tabindex="0"><td>${fmt.int(index + 1)}</td><td>${esc(comboName(item))}</td><td>${(item.expiries || []).map(dateLabel).join(' / ')}</td><td>${fmt.money(item.series.denominator)}</td><td class="${signTone(item.series.finalPnl)}">${fmt.money(item.series.finalPnl)}</td><td class="${signTone(item.series.finalPct)}">${pctCell(item.series.finalPct)}${item.series.beyondBasis ? ' <small>از مبنا رد شده</small>' : ''}</td><td class="${signTone(item.series.maxDrawdownPct)}">${pctCell(item.series.maxDrawdownPct)}</td><td>${item.series.firstProfitIndex === null ? 'رخ نداد' : `${esc(dateLabel(analysis.dates[item.series.firstProfitIndex]))} · ${fmt.int(item.series.firstProfitIndex)} روز`}</td><td>${item.entry?.legValueComplete ? fmt.money(item.entry.legValue) : 'ناقص'}</td></tr>`).join('')}</tbody></table>`
+        rows.map((item, index) => `<tr data-result="${esc(item.id)}" tabindex="0"><td>${fmt.int(index + 1)}</td><td>${esc(comboName(item))}</td><td>${(item.expiries || []).map(dateLabel).join(' / ')}</td><td>${fmt.money(item.series.denominator)}</td><td class="${signTone(item.series.finalPnl)}">${fmt.money(item.series.finalPnl)}</td><td class="${signTone(item.series.finalPct)}">${pctCell(item.series.finalPct)}${item.series.beyondBasis ? ' <small>از مبنا رد شده</small>' : ''}</td><td class="${signTone(item.series.maxDrawdownPct)}">${pctCell(item.series.maxDrawdownPct)}</td><td>${item.series.firstProfitIndex === null ? 'رخ نداد' : `${esc(columnLabel(analysis.dates[item.series.firstProfitIndex]))} · ${fmt.int(item.series.firstProfitIndex)} گام`}</td><td>${item.entry?.legValueComplete ? fmt.money(item.entry.legValue) : 'ناقص'}</td></tr>`).join('')}</tbody></table>`
       : '<p class="empty-note">هیچ ترکیبی از این استراتژی روی مبنای انتخابی، مخرج و پایان معتبر ندارد.</p>';
     const pick = (id) => { const item = rows.find((row) => row.id === id); if (item) showDetail(rawRow(item)); };
     $('pb-combos').onclick = (event) => { const row = event.target.closest('[data-result]'); if (row) pick(row.dataset.result); };
@@ -1435,6 +1560,76 @@ export async function mount(root, { state }) {
       setTimeout(() => { note.textContent = before; }, 6000);
     } finally { button.disabled = false; }
   });
+
+  /** یادداشت هزینه — پیش از فشردن دکمه، نه بعدش. */
+  function paintGrainNote() {
+    const meta = grainMeta(grain);
+    const intraday = isIntradayGrain(grain);
+    $('pb-grain-run').hidden = !intraday;
+    if (!intraday) { $('pb-grain-note').textContent = ''; return; }
+    const cost = intradayCost({ instruments: Object.keys(seriesByIns).length, grain });
+    $('pb-grain-note').textContent = `${meta.hint}. برای این کار ریزمعاملهٔ ${fmt.int(cost.requests)} ابزار در روز سنجش گرفته می‌شود و ${fmt.int(cost.moments)} لحظه قیمت‌گذاری می‌شود. فقط **روز سنجش** ریز می‌شود؛ بقیهٔ بازه همان‌طور می‌ماند. لحظه‌ای که هیچ ابزاری تا آن ثانیه معامله نشده باشد، ستون خالی می‌ماند — قیمت لحظهٔ قبل جایش نمی‌نشیند.`;
+  }
+
+  /**
+   * اجرای درون‌روزی — همان ترکیب‌ها، لحظه‌به‌لحظه.
+   *
+   * ماتریس روزانه کنار گذاشته نمی‌شود؛ نگه داشته می‌شود تا بازگشت به
+   * «روزانه» اجرای دوباره نخواهد.
+   */
+  async function runIntraday() {
+    if (!analysis || !payloadRows.length) return;
+    const endDate = Number($('pb-exit-date').dataset.value);
+    const button = $('pb-grain-go');
+    button.disabled = true;
+    try {
+      setStatus('دریافت ریزمعاملهٔ روز سنجش…');
+      const { tape, failed, total } = await fetchTape(endDate);
+      const combos = payloadRows.map((row) => ({ id: row.id, legs: row.legs }));
+      const payload = await runWorker({
+        id: `intraday-${Date.now()}`, type: 'portfolio-intraday',
+        ua, seriesByIns: runSeriesByIns, tape, grain,
+        startDate: Number($('pb-entry-date').dataset.value), endDate,
+        entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST',
+        units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
+        fees: feesOf(state.settings), settings: state.settings, liquidity: liquidity(), combos,
+      });
+      const live = payload.columns.filter((column) => column.marked);
+      if (!live.length) throw new Error('در هیچ لحظه‌ای از روز سنجش، ابزاری معامله نشده بود');
+      // ماتریس تازه: ستون‌ها لحظه‌اند، سطرها همان ترکیب‌های اجرای روزانه.
+      const dates = live.map((column) => column.key);
+      const columnOf = new Map(dates.map((key, index) => [key, index]));
+      const rowOf = new Map(payloadRows.map((row, index) => [row.id, index]));
+      const pnl = new Float64Array(payloadRows.length * dates.length).fill(NaN);
+      for (const row of payload.rows) {
+        const y = rowOf.get(row.comboId), x = columnOf.get(row.key);
+        if (y === undefined || x === undefined) continue;
+        pnl[(y * dates.length) + x] = row.netPnl;
+      }
+      payloadMatrix = { dates, pnl, rowCount: payloadRows.length, baseSeries: dates.map(() => null) };
+      lens = { ...lens, from: null, to: null };
+      paintLensOptions();
+      recompute();
+      setStatus(`${fmt.int(live.length)} لحظه از ${fmt.int(payload.moments)} لحظه قیمت داشت${failed ? ` · ریزمعاملهٔ ${fmt.int(failed)} از ${fmt.int(total)} ابزار دریافت نشد` : ''}.`);
+    } catch (error) {
+      setStatus(errorText(error, 'اجرای درون‌روزی کامل نشد.'), true);
+    } finally { button.disabled = false; }
+  }
+
+  $('pb-grain').addEventListener('change', (event) => {
+    grain = normalizeGrain(event.target.value);
+    paintGrainNote();
+    // بازگشت به روزانه، ماتریس نگه‌داشته‌شده را برمی‌گرداند — بی‌اجرای دوباره.
+    if (!isIntradayGrain(grain) && dailyMatrix) {
+      payloadMatrix = dailyMatrix;
+      payloadRows = dailyRows;
+      lens = { ...lens, from: null, to: null };
+      paintLensOptions();
+      recompute();
+      setStatus('بازگشت به دانه‌بندی روزانه.');
+    }
+  });
+  $('pb-grain-go').addEventListener('click', runIntraday);
 
   $('pb-lens-toggle').addEventListener('click', () => {
     setLensOpen($('pb-lens').dataset.open !== 'true');
