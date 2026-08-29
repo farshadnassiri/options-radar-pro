@@ -3046,3 +3046,10 @@ td.gain, dd.gain { color: var(--gain); }
 /* توضیح یک‌خطیِ هر کارت — «این نمودار چه می‌گوید». بدون این، نمودارِ
    خوش‌ظاهر هم گنگ می‌ماند. */
 .pb-hint { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-xs); line-height: 1.7; }
+
+/* دکمهٔ دفترچهٔ کامل — بالای عدسی، چون خروجیِ کلِ گزارش است نه یک جدول. */
+.pb-workbook { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4); border: 1px solid var(--line);
+  border-radius: var(--radius-md); background: var(--panel); }
+.pb-workbook[hidden] { display: none !important; }
+.pb-workbook p { flex: 1; min-width: 240px; margin: 0; }

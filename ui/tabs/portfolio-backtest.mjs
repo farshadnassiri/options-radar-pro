@@ -29,6 +29,7 @@ import {
 } from '/core/portfolio-report.mjs';
 import { HEAT_PALETTES, HEAT_SORTS } from '/ui/portfolio-analysis-view.mjs';
 import { allocatePortfolio } from '/core/portfolio-allocation.mjs';
+import { downloadPortfolioBacktest } from '/ui/portfolio-backtest-export.mjs';
 import {
   correlationHeatOption, correlationOf, familyBarOption, funnelOption, paretoOption,
   roseOption, shareDonutOption, similarityGraphOption, sunburstOption,
@@ -109,6 +110,10 @@ function lineChart(host, rows, { xLabel, yLabel } = {}) {
 export async function mount(root, { state }) {
   root.innerHTML = `<section class="portfolio-hero"><div><p class="eyebrow">غربال تاریخی همه استراتژی‌ها</p><h1>در این بازه، بهترین و بدترین کدام بود؟</h1><p>همه استراتژی‌ها و ترکیب‌های معتبر یک نماد در روز ورود ساخته و در یک بازهٔ یکسان سنجیده می‌شوند؛ بدون پرکردن قیمت گمشده و بدون انتخاب پس‌نگر یک برنده.</p></div><span id="pb-hero-verdict">هنوز اجرایی انجام نشده</span></section>
   <div id="pb-tabs" hidden></div>
+  <div class="pb-workbook" id="pb-workbook" hidden>
+    <button type="button" class="primary" id="pb-workbook-run">دفترچهٔ کامل اکسل</button>
+    <p class="portfolio-note" id="pb-workbook-note">یازده برگ در یک فایل: سرشناسه و عدسی، سرخط‌ها، چهارده سنجهٔ هر استراتژی، خانواده‌ها، همهٔ ترکیب‌ها با اجزای مخرج، مسیر روزانه برای PivotTable، افق نگهداری، توزیع، همبستگی، سبد فرضی، و برگ محدودیت‌های داده. خانهٔ خالی یعنی داده نبود؛ صفر یعنی سر به سر.</p>
+  </div>
   <section class="card pb-lens" id="pb-lens" hidden data-open="false">
     <button type="button" class="pb-lens-toggle" id="pb-lens-toggle" aria-expanded="false" aria-controls="pb-lens-body" title="عدسی گزارش">
       <span class="pb-lens-chip">عدسی</span><b id="pb-lens-summary">—</b><i aria-hidden="true"></i>
@@ -1005,6 +1010,7 @@ export async function mount(root, { state }) {
     if (!payloadMatrix) { setStatus('این اجرا ماتریس روزانه نساخت.', true); return; }
     paintLensOptions();
     $('pb-lens').hidden = false;
+    $('pb-workbook').hidden = false;
     setLensOpen(lensWasOpen());
     $('pb-tabs').hidden = false;
     tabsApi = mountSubtabs($('pb-tabs'), PB_TABS, {
@@ -1341,6 +1347,7 @@ export async function mount(root, { state }) {
     analysis = null; payloadMatrix = null; payloadRows = [];
     $('pb-tabs').hidden = true;
     $('pb-lens').hidden = true;
+    $('pb-workbook').hidden = true;
     $('pb-detail').hidden = true;
     for (const panel of root.querySelectorAll('.pb-panel')) panel.hidden = panel.dataset.panel !== 'setup';
     $('pb-hero-verdict').textContent = 'هنوز اجرایی انجام نشده';
@@ -1353,6 +1360,42 @@ export async function mount(root, { state }) {
   $('pb-weighting').addEventListener('change', (event) => relens({ weighting: event.target.value }));
   $('pb-from').addEventListener('change', (event) => relens({ from: Number(event.target.value) || null }));
   $('pb-to').addEventListener('change', (event) => relens({ to: Number(event.target.value) || null }));
+  /**
+   * دفترچهٔ کامل — یک فایل، همان تحلیلی که روی صفحه است.
+   *
+   * سبد فرضی هم اگر ساخته شده باشد داخلش می‌آید، ولی از نو ساخته می‌شود تا
+   * برگ اکسل با آنچه روی صفحه است یکی باشد، نه با یک محاسبهٔ قدیمی‌تر.
+   */
+  $('pb-workbook-run').addEventListener('click', async () => {
+    if (!analysis) return;
+    const button = $('pb-workbook-run');
+    button.disabled = true;
+    const note = $('pb-workbook-note');
+    const before = note.textContent;
+    try {
+      const capital = Math.max(0, safeNum($('pb-basket-capital').value, 0)) * 1e6;
+      const basket = basketPicks.length
+        ? allocatePortfolio({ capitalRial: capital, picks: basketPicks, analysis, basisId: lens.basisId })
+        : null;
+      await downloadPortfolioBacktest(analysis, {
+        basket, generated, dateLabel,
+        context: {
+          baseName: nameOf(ua, 'نماد پایه'), baseIns: String(ua?.ins ?? ''),
+          entryDate: Number($('pb-entry-date').dataset.value) || null,
+          exitDate: Number($('pb-exit-date').dataset.value) || null,
+          markLabel: $('pb-mark-state').textContent,
+          entryBasis: HISTORY_BASES.find(([key]) => key === (entryRail.dataset.value || 'LAST'))?.[1] || '',
+          exitBasis: HISTORY_BASES.find(([key]) => key === (exitRail.dataset.value || 'LAST'))?.[1] || '',
+          units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
+          cap: Math.max(10, Math.trunc(safeNum($('pb-cap').value, 120))),
+        },
+      });
+    } catch (error) {
+      note.textContent = errorText(error, 'ساخت دفترچه کامل نشد.');
+      setTimeout(() => { note.textContent = before; }, 6000);
+    } finally { button.disabled = false; }
+  });
+
   $('pb-lens-toggle').addEventListener('click', () => {
     setLensOpen($('pb-lens').dataset.open !== 'true');
   });
