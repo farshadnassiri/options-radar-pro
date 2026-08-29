@@ -62,8 +62,10 @@ group('۵۶. فهرست خالی، با دلیل');
   const app56 = readSrc('../ui/app.mjs');
   check('عکس پشتیبانِ خالی، خاموش رد نمی‌شود',
     app56.includes("if (!rows.length) { setFeed('empty'); return; }"));
+  // ادعا عوض نشده؛ فقط متن پیام فارسی شد و جزئیات فنی پشتش رفت.
   check('شکست عکس پشتیبان، در وضعیت خوراک می‌نشیند',
-    app56.includes("setFeed('failed', err?.message"));
+    app56.includes("const detail = err?.message ? String(err.message) : String(err);")
+    && /setFeed\('failed', `[^`]*\$\{detail\}`\)/.test(app56));
   check('تلاش دوباره بدون بستن و باز کردن تب ممکن است',
     app56.includes('export function retryFeed()'));
   check('تب‌ها به onFeed دسترسی دارند', app56.includes('subscribeWatch, onFeed, retryFeed }'));

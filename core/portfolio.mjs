@@ -55,6 +55,70 @@ function groupRows(rows, keyOf, identityOf) {
   return [...groups.entries()].map(([key, list]) => summarizeGroup(list, identityOf(list[0], key)));
 }
 
+// یک نقطهٔ روزانه فقط وقتی شمرده می‌شود که تاریخ، سود و بازدهش هر سه عددِ
+// واقعی باشند. `Number(null)` صفر است؛ پس تاریخ نیز با همان سخت‌گیریِ عدد
+// سنجیده می‌شود تا نبودِ تاریخ به «روز صفر» جعلی تبدیل نشود.
+const validPoint = (point) => finite(point?.date)
+  && finite(point?.netPnl) && finite(point?.returnPct);
+
+function summarizeTimeline(rows, strategies) {
+  const dates = [...new Set(rows.flatMap((row) => (row?.path?.daily || [])
+    .filter(validPoint)
+    .map((point) => point.date)))].sort((a, b) => a - b);
+  if (!dates.length) return { dates: [], strategies: [], best: null, worst: null };
+
+  const identity = new Map(strategies.map((row) => [row.strategyId, row]));
+  const pointsByStrategy = new Map(strategies.map((row) => [row.strategyId, []]));
+  const bucketsByDate = new Map(dates.map((date) => [date, new Map()]));
+  for (const row of rows) {
+    for (const point of row?.path?.daily || []) {
+      if (!validPoint(point) || !bucketsByDate.has(point.date)) continue;
+      const date = point.date;
+      const buckets = bucketsByDate.get(date);
+      if (!buckets.has(row.strategyId)) buckets.set(row.strategyId, []);
+      buckets.get(row.strategyId).push(point);
+    }
+  }
+  for (const date of dates) {
+    const buckets = bucketsByDate.get(date);
+    const ranked = [...buckets.entries()].map(([strategyId, points]) => ({
+      strategyId,
+      date,
+      samples: points.length,
+      medianReturn: median(points.map((point) => point.returnPct)),
+      medianPnl: median(points.map((point) => point.netPnl)),
+    })).sort((a, b) => (b.medianReturn - a.medianReturn)
+      || (b.samples - a.samples)
+      || String(identity.get(a.strategyId)?.strategyName || a.strategyId)
+        .localeCompare(String(identity.get(b.strategyId)?.strategyName || b.strategyId), 'fa'));
+    ranked.forEach((point, index) => pointsByStrategy.get(point.strategyId)?.push({ ...point, rank: index + 1 }));
+  }
+
+  const timelineStrategies = strategies.map((strategy) => {
+    const points = pointsByStrategy.get(strategy.strategyId) || [];
+    return {
+      strategyId: strategy.strategyId,
+      strategyName: strategy.strategyName,
+      groupName: strategy.groupName,
+      points,
+      observedDays: points.length,
+      medianRank: median(points.map((point) => point.rank)),
+      medianReturn: median(points.map((point) => point.medianReturn)),
+      topDays: points.filter((point) => point.rank === 1).length,
+    };
+  }).filter((strategy) => strategy.points.length);
+  const comparable = timelineStrategies.filter((strategy) => strategy.observedDays === dates.length);
+  const ordered = [...(comparable.length ? comparable : timelineStrategies)].sort((a, b) => (a.medianRank - b.medianRank)
+    || (b.medianReturn - a.medianReturn)
+    || (b.observedDays - a.observedDays));
+  return {
+    dates,
+    strategies: timelineStrategies,
+    best: ordered[0] || null,
+    worst: ordered.at(-1) || null,
+  };
+}
+
 /**
  * خلاصه قابل گزارش از نتیجه همه ترکیب‌ها. معیار رتبه‌بندی استراتژی، میانه
  * بازده است؛ بهترین تک‌ترکیب جداگانه گزارش می‌شود تا پرت‌ها پنهان نمانند.
@@ -77,6 +141,7 @@ export function summarizePortfolio(rows = []) {
     groupName: row.groupName,
   })).sort((a, b) => (b.medianReturn - a.medianReturn) || (b.winPct - a.winPct));
   const { best, worst } = extremes(valid);
+  const timeline = summarizeTimeline(valid, strategies);
   return {
     total: valid.length,
     excluded: Math.max(0, rows.length - valid.length),
@@ -93,5 +158,6 @@ export function summarizePortfolio(rows = []) {
     worstStrategy: strategies.at(-1) || null,
     strategies,
     groups,
+    timeline,
   };
 }

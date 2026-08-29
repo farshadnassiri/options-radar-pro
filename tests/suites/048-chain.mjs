@@ -56,15 +56,16 @@ group('۴۷. نوار سقف سررسید، وقتی زنجیره نیست');
   const serverSrc47 = readSrc('../server/server.mjs');
   check('چرا `watch` مناسب نبود: حلقه دیده‌بان پشت ساعت بازار می‌ایستد',
     /if \(!gate\.open\) return true;/.test(serverSrc47));
-  // پنجره از ۷۰۰ به ۳۰۰۰ رفت چون شاخهٔ «نسخهٔ آن تاریخ» بالای همین بلوک
-  // نشست. ادعا عوض نشده: وقتی عکس لحظه‌ای خالی است، همین نقطه خودش از
-  // بالادست می‌گیرد.
+  // ادعا عوض نشده، فقط شکل کد: شاخهٔ جایگزینیِ بایگانی که زیرش نشست،
+  // ترکیب سه‌تایی را به `if/else` باز کرد. وقتی عکس لحظه‌ای خالی است، همین
+  // نقطه هنوز خودش از بالادست می‌گیرد.
   check('`history/universe` وقتی عکس لحظه‌ای خالی است خودش از بالادست می‌گیرد',
-    /history\/universe[\s\S]{0,3000}fromWatch = watch\.rows\.length > 0[\s\S]{0,200}fromWatch \? watch\.rows : firstList/.test(serverSrc47));
+    /history\/universe[\s\S]{0,3000}fromWatch = watch\.rows\.length > 0[\s\S]{0,600}rows = firstList\(await get\(upstream/.test(serverSrc47));
   check('نسخهٔ تاریخ‌دار فهرست، پیش از بازگشت به عکس امروز امتحان می‌شود',
     /history\/universe[\s\S]{0,1200}readArchive\(wanted\)[\s\S]{0,600}source: 'archive'/.test(serverSrc47));
   check('نبودن بایگانی برای آن تاریخ، بی‌صدا به عکس امروز برنمی‌گردد',
-    /archived: false[\s\S]{0,200}archiveNote\(/.test(serverSrc47));
+    /wanted \? archiveNote\(\{ wanted: Number\(wanted\), found: false, firstDate \}\) : ''/.test(serverSrc47)
+    && /archived: false,[\s\S]{0,200}note,/.test(serverSrc47));
   // زنجیره خالی نباید کش شود، وگرنه یک بارِ ناموفق تا بارگذاری دوباره صفحه
   // ادامه پیدا می‌کند و باز کردن دوباره هیچ تلاشی نمی‌کند.
   check('زنجیره خالی کش نمی‌شود', src47.includes('if (chain?.size && !force) return;'));

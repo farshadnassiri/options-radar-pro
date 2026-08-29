@@ -26,7 +26,7 @@ export const state = {
   // نیامد و دلیلش این بود، یا آمد و خودِ تابلو چیزی نداشت. تا وقتی این سه
   // یک شکل دیده می‌شدند، کاربر هیچ راهی نداشت بفهمد باید صبر کند، دوباره
   // بزند، یا اصلاً منتظر نماند.
-  feed: { status: 'idle', error: '' },
+  feed: { status: 'idle', error: '', note: '', asOf: 0 },
   feedSubs: new Set(),
   // تحویل بین تب‌ها. تبی که تب دیگری را باز می‌کند، آنچه را کاربر همین حالا
   // انتخاب کرده اینجا می‌گذارد و تب مقصد سر جای خودش برش می‌دارد و پاک
@@ -77,10 +77,16 @@ const rowKey = (r) => `${r.insCode_C ?? ''}|${r.insCode_P ?? ''}`;
  */
 let seeding = null;
 /** وضعیت خوراک را می‌نشاند و همه شنونده‌ها را خبر می‌کند. */
-function setFeed(status, error = '') {
-  if (state.feed.status === status && state.feed.error === error) return;
+function setFeed(status, error = '', { note = '', asOf = 0 } = {}) {
+  if (state.feed.status === status && state.feed.error === error
+    && state.feed.note === note && state.feed.asOf === asOf) return;
   state.feed.status = status;
   state.feed.error = error;
+  // برچسبِ منبع همراه وضعیت می‌رود. سرور وقتی تابلوی زنده نرسیده و از
+  // بایگانی جواب داده، همین را در `note` می‌گوید؛ اگر اینجا دور ریخته شود
+  // کاربر فهرست روزِ دیگری را به‌جای امروز می‌بیند و نمی‌فهمد.
+  state.feed.note = note;
+  state.feed.asOf = asOf;
   for (const fn of state.feedSubs) { try { fn(state.feed); } catch (err) { console.error(err); } }
   paintLink();
 }
@@ -116,11 +122,18 @@ function seedWatch() {
       state.watch.at = payload.at || null;
       state.watch.changed = null;
       state.watch.stale = true;                 // زنده نیست
-      setFeed('ok');
+      setFeed('ok', '', {
+        note: payload.boardUnavailable ? String(payload.note || '') : '',
+        asOf: payload.boardUnavailable ? Number(payload.asOf) || 0 : 0,
+      });
       setLink('snapshot');
       for (const fn of state.subscribers) { try { fn(state.watch); } catch (err) { logError('پخش عکس پشتیبان', err); } }
     } catch (err) {
-      setFeed('failed', err?.message ? String(err.message) : String(err));
+      // جملهٔ فارسی اول می‌آید و جزئیات فنی پشتش می‌ماند. پیش از این تنها
+      // چیزی که کاربر می‌دید `Error: HTTP 403` بود؛ نه می‌گفت چه نرسیده، نه
+      // اینکه با دکمهٔ تلاش دوباره چه باید کرد.
+      const detail = err?.message ? String(err.message) : String(err);
+      setFeed('failed', `فهرست نمادها نه از تابلوی زنده آمد نه از بایگانی — ${detail}`);
       logError('گرفتن عکس پشتیبان', err);
     } finally { seeding = null; }
   })();

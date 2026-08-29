@@ -21,7 +21,7 @@ import { defaults, sanitize } from '../core/settings.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
 import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
-  makeArchive, chainRowsFrom, archiveNote, archiveQuality, archiveName, validArchiveDate,
+  makeArchive, chainRowsFrom, archiveNote, archiveBoardDownNote, archiveQuality, archiveName, validArchiveDate,
 } from '../core/watch-archive.mjs';
 import { tehranDateNumber } from '../core/live-day.mjs';
 import {
@@ -445,6 +445,15 @@ async function archiveFirstDate() {
   } catch { return 0; }
 }
 
+/** تازه‌ترین روزی که بایگانی دارد. صفر یعنی هنوز هیچ. */
+async function archiveLastDate() {
+  try {
+    const names = (await fs.readdir(ARCHIVE_DIR)).filter((name) => /^\d{8}\.json$/.test(name));
+    if (!names.length) return 0;
+    return Math.max(...names.map((name) => Number(name.slice(0, 8))));
+  } catch { return 0; }
+}
+
 async function readArchive(date) {
   const name = archiveName(String(date));
   if (!name) return null;
@@ -656,16 +665,41 @@ async function handle(req, res) {
       // کش می‌آید که ساعت خودش را دارد.
       const upstream = '/Instrument/GetInstrumentOptionMarketWatch/0';
       const fromWatch = watch.rows.length > 0;
-      const rows = fromWatch ? watch.rows : firstList(await get(upstream, Math.max(60, S.ttlMetaSec), 4));
       const firstDate = await archiveFirstDate();
-      const note = wanted ? archiveNote({ wanted: Number(wanted), found: false, firstDate }) : '';
-      const source = fromWatch ? 'watch' : 'snapshot';
-      const at = fromWatch ? watch.at : cachedAt(upstream);
+      let rows, source, at, fallbackDate = 0;
+      if (fromWatch) {
+        rows = watch.rows; source = 'watch'; at = watch.at;
+      } else {
+        try {
+          rows = firstList(await get(upstream, Math.max(60, S.ttlMetaSec), 4));
+          source = 'snapshot'; at = cachedAt(upstream);
+        } catch (boardError) {
+          // ——— تابلوی زنده نرسید ———
+          //
+          // پیش از این، همین‌جا کل درخواست می‌مرد و استودیوی سفر زمانی حتی
+          // فهرست نماد پایه هم نداشت: بازارِ بسته یا شبکهٔ قطع، یعنی ابزارِ
+          // «گذشته» کاملاً بی‌استفاده. بایگانی روی دیسک همان موقع هم هست.
+          //
+          // پس تازه‌ترین روزِ بایگانی سرو می‌شود — ولی هرگز بی‌برچسب. اگر
+          // بی‌صدا جای تابلو می‌نشست، کاربر فهرست روزِ دیگری را به‌جای امروز
+          // می‌دید و نمی‌فهمید. نبودِ بایگانی هم با عدد ساختگی پر نمی‌شود:
+          // همان خطای اصلی بالا می‌رود.
+          const last = await archiveLastDate();
+          const archive = last ? await readArchive(String(last)) : null;
+          if (!archive) throw boardError;
+          rows = chainRowsFrom(archive);
+          source = 'watch-archive'; at = archive.at; fallbackDate = archive.date;
+        }
+      }
+      const note = fallbackDate
+        ? archiveBoardDownNote({ fallbackDate, count: rows.length, wanted: Number(wanted) || 0 })
+        : (wanted ? archiveNote({ wanted: Number(wanted), found: false, firstDate }) : '');
       return sendJson(res, 200, {
         at,
         source,
-        archived: false, asOf: 0, archiveFirstDate: firstDate,
-        note: wanted ? archiveNote({ wanted: Number(wanted), found: false, firstDate }) : note,
+        archived: false, asOf: fallbackDate, archiveFirstDate: firstDate,
+        boardUnavailable: fallbackDate > 0,
+        note,
         quality: archiveQuality({
           wanted: Number(wanted) || 0, found: false, rows, firstDate,
           source, asOf: at, note,
