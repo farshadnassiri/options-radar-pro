@@ -160,12 +160,29 @@ export async function loadMomentContracts(session, at, {
   }
 
   const loaders = gateLoaders();
+  // ——— شکستِ واکشی با «داده نبود» یکی نیست ———
+  //
+  // پیش از این هر سه لودر خطا را می‌بلعیدند و `[]` می‌دادند. نتیجه‌اش این
+  // بود که یک واکشیِ شکست‌خورده دقیقاً شبیه «آن لحظه معامله‌ای نشده» دیده
+  // می‌شد و حکم «خوراک نامزد فاقد داده است» می‌گرفت. کاربر بعد دنبال
+  // قراردادِ بی‌معامله می‌گشت، در حالی که مشکل نرسیدنِ پاسخ بود.
+  //
+  // حالا `[]` سرِ جایش می‌ماند (تا عددِ ساختگی ساخته نشود) ولی علتِ واقعی
+  // یک بار ثبت و در هشدارها گزارش می‌شود.
+  const loadFailures = new Map();
+  const noteFailure = (kind, error) => {
+    const why = String(error?.message || error || 'دلیل نامعلوم');
+    if (!loadFailures.has(kind)) loadFailures.set(kind, why);
+  };
+  const guarded = (kind, fn) => async (...args) => {
+    try { return await fn(...args); } catch (error) { noteFailure(kind, error); return []; }
+  };
   const gate = (makeGate || createTimeGate)({
     sessionId: text(session?.id), now: at, days,
     load: {
-      dailies: async (...args) => { try { return await loaders.dailies(...args); } catch { return []; } },
-      trades: async (...args) => { try { return await loaders.trades(...args); } catch { return []; } },
-      book: async (...args) => { try { return await loaders.book(...args); } catch { return []; } },
+      dailies: guarded('روزانه', loaders.dailies),
+      trades: guarded('ریزمعامله', loaders.trades),
+      book: guarded('دفتر سفارش', loaders.book),
     },
   });
 
@@ -194,6 +211,9 @@ export async function loadMomentContracts(session, at, {
   const basePoint = await gate.snapshot(baseIns).catch(() => null);
   const momentSpot = tradePrice(basePoint?.trade);
   if (!(num(momentSpot) > 0)) warnings.push('قیمت پایه برای این لحظه از دروازهٔ زمان نیامد');
+  for (const [kind, why] of loadFailures) {
+    warnings.push(`واکشی ${kind} ناموفق بود، پس نبودِ داده در این عکس لزوماً یعنی «نرسید»، نه «نبود» — ${why}`);
+  }
 
   return {
     version: SNAPSHOT_DATA_VERSION,

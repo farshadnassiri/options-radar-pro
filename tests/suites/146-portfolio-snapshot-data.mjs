@@ -144,6 +144,6 @@ group('۱۴۶. قراردادهای یک لحظه از سرور');
     /priced\.warnings\.length\) failures\.push\(\.\.\.priced\.warnings\)/.test(tabSrc146));
   // شکل قرارداد باید همان شکلی باشد که موتورها می‌خوانند.
   check('شکل قرارداد در عکس همان شکل مصرفیِ موتورهاست',
-    /optionDailyValueRial: Number\(row\.trade\?\.value\)/.test(tabSrc146)
+    /optionDailyValueRial: valueRial\(row\.trade\?\.value\)/.test(tabSrc146)
     && /quote: row\.quote/.test(tabSrc146));
 }
