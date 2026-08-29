@@ -98,3 +98,27 @@ group('۲۰۱-ب. تایم‌فریم پایین');
     && tab201.includes('پا با قیمت'));
   check('رنگ ردیف ساعت به عدد حساس است', intraday201.includes('heatLevel(row.pct, bound)'));
 }
+
+// ═══ عدسی جمع‌شونده ═══
+group('۲۰۱-ج. عدسی جمع‌شونده');
+{
+  check('عدسی به‌طور پیش‌فرض جمع است',
+    tab201.includes('data-open="false"') && tab201.includes('<div class="pb-lens-body" id="pb-lens-body" hidden>'));
+  check('دکمهٔ باز و بسته وضعیتش را به کمک‌فناوری هم می‌گوید',
+    tab201.includes('aria-expanded="false" aria-controls="pb-lens-body"')
+    && tab201.includes("$('pb-lens-toggle').setAttribute('aria-expanded', String(open));"));
+  // نوارِ بسته و بی‌برچسب، بدتر از نوارِ بزرگ است: جا نمی‌گیرد ولی عدد را
+  // هم بی‌قید می‌کند.
+  check('نوارِ بسته، مبنا و آماره و بازه را خلاصه نشان می‌دهد',
+    tab201.includes('function lensSummary()')
+    && tab201.includes("$('pb-lens-summary').textContent = lensSummary();"));
+  check('حالت باز یا بسته میان اجراها می‌ماند',
+    tab201.includes("localStorage.setItem(LENS_KEY, open ? '1' : '0')")
+    && tab201.includes('setLensOpen(lensWasOpen());'));
+  check('نبود حافظهٔ مرورگر صفحه را نمی‌شکند',
+    /localStorage\.setItem\(LENS_KEY[\s\S]{0,80}catch/.test(tab201)
+    && /localStorage\.getItem\(LENS_KEY[\s\S]{0,60}catch \{ return false; \}/.test(tab201));
+  check('نوارِ جمع‌شده ارتفاع یک ردیف دارد، نه یک کارت',
+    style201.includes('.pb-lens { position: sticky; top: 0; z-index: 3; padding: 0; overflow: hidden; }')
+    && style201.includes('.pb-lens-toggle { display: flex;'));
+}

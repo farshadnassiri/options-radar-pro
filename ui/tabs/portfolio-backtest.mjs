@@ -99,8 +99,12 @@ function lineChart(host, rows, { xLabel, yLabel } = {}) {
 export async function mount(root, { state }) {
   root.innerHTML = `<section class="portfolio-hero"><div><p class="eyebrow">غربال تاریخی همه استراتژی‌ها</p><h1>در این بازه، بهترین و بدترین کدام بود؟</h1><p>همه استراتژی‌ها و ترکیب‌های معتبر یک نماد در روز ورود ساخته و در یک بازهٔ یکسان سنجیده می‌شوند؛ بدون پرکردن قیمت گمشده و بدون انتخاب پس‌نگر یک برنده.</p></div><span id="pb-hero-verdict">هنوز اجرایی انجام نشده</span></section>
   <div id="pb-tabs" hidden></div>
-  <section class="card pb-lens" id="pb-lens" hidden>
-    <div class="pb-lens-head"><p class="eyebrow">عدسی گزارش</p><h2>هر جدول و نمودارِ این صفحه از همین چهار انتخاب می‌آید</h2></div>
+  <section class="card pb-lens" id="pb-lens" hidden data-open="false">
+    <button type="button" class="pb-lens-toggle" id="pb-lens-toggle" aria-expanded="false" aria-controls="pb-lens-body" title="عدسی گزارش">
+      <span class="pb-lens-chip">عدسی</span><b id="pb-lens-summary">—</b><i aria-hidden="true"></i>
+    </button>
+    <div class="pb-lens-body" id="pb-lens-body" hidden>
+    <p class="portfolio-note pb-lens-why">هر جدول و نمودارِ این صفحه از همین انتخاب‌ها می‌آید.</p>
     <div class="pb-lens-grid">
       <label>مبنای بازده<select id="pb-basis">${RETURN_BASES.map((row) => `<option value="${row.id}"${row.id === DEFAULT_RETURN_BASIS ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
       <label>آمارهٔ دسته<select id="pb-stat">${STATISTICS.map((row) => `<option value="${row.id}"${row.id === DEFAULT_STATISTIC ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
@@ -110,6 +114,7 @@ export async function mount(root, { state }) {
       <button type="button" class="ghost" id="pb-lens-reset">بازگشت به بازهٔ کامل</button>
     </div>
     <p class="portfolio-note" id="pb-lens-note"></p>
+    </div>
   </section>
 
   <div class="pb-panel" data-panel="setup">
@@ -354,7 +359,41 @@ export async function mount(root, { state }) {
     $('pb-to').innerHTML = options(lens.to ?? dates.at(-1));
   }
 
+  /**
+   * خلاصهٔ یک‌خطیِ عدسی برای حالت بسته.
+   *
+   * وقتی نوار جمع است، کاربر باید بدون بازکردنش بداند عددهایی که می‌بیند
+   * روی چه مبنا و چه بازه‌ای ساخته شده‌اند. نوارِ بسته و بی‌برچسب، بدتر از
+   * نوارِ بزرگ است: جا نمی‌گیرد ولی عدد را هم بی‌قید می‌کند.
+   */
+  function lensSummary() {
+    if (!analysis) return 'هنوز اجرایی انجام نشده';
+    const grain = analysis.range.days;
+    return [
+      analysis.basis.short,
+      analysis.statisticLabel,
+      analysis.weighting === 'equal' ? 'هم‌وزن' : 'وزن ارزش',
+      `${fmt.int(grain)} روز`,
+      analysis.range.from ? `${dateLabel(analysis.range.from)} تا ${dateLabel(analysis.range.to)}` : '',
+    ].filter(Boolean).join(' · ');
+  }
+
+  const LENS_KEY = 'pb-lens-open';
+  function setLensOpen(open) {
+    const card = $('pb-lens');
+    card.dataset.open = String(open);
+    $('pb-lens-body').hidden = !open;
+    $('pb-lens-toggle').setAttribute('aria-expanded', String(open));
+    // ماندگاری فقط یک راحتی است؛ اگر حافظهٔ مرورگر نبود، صفحه باید همان‌طور
+    // کار کند. پس هر خواندن و نوشتنی داخل try است.
+    try { localStorage.setItem(LENS_KEY, open ? '1' : '0'); } catch { /* حافظهٔ مرورگر در دسترس نیست */ }
+  }
+  const lensWasOpen = () => {
+    try { return localStorage.getItem(LENS_KEY) === '1'; } catch { return false; }
+  };
+
   function paintLensNote() {
+    $('pb-lens-summary').textContent = lensSummary();
     if (!analysis) { $('pb-lens-note').textContent = ''; return; }
     const beyond = analysis.beyondBasis;
     const parts = [
@@ -636,6 +675,7 @@ export async function mount(root, { state }) {
     if (!payloadMatrix) { setStatus('این اجرا ماتریس روزانه نساخت.', true); return; }
     paintLensOptions();
     $('pb-lens').hidden = false;
+    setLensOpen(lensWasOpen());
     $('pb-tabs').hidden = false;
     tabsApi = mountSubtabs($('pb-tabs'), PB_TABS, {
       root,
@@ -983,6 +1023,9 @@ export async function mount(root, { state }) {
   $('pb-weighting').addEventListener('change', (event) => relens({ weighting: event.target.value }));
   $('pb-from').addEventListener('change', (event) => relens({ from: Number(event.target.value) || null }));
   $('pb-to').addEventListener('change', (event) => relens({ to: Number(event.target.value) || null }));
+  $('pb-lens-toggle').addEventListener('click', () => {
+    setLensOpen($('pb-lens').dataset.open !== 'true');
+  });
   $('pb-lens-reset').addEventListener('click', () => {
     lens = { ...lens, from: null, to: null };
     paintLensOptions();
