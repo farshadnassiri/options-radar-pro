@@ -36,7 +36,31 @@ export const ALLOCATION_REASONS = {
   noDenominator: 'سرمایهٔ لازم برای این ترکیب معلوم نیست',
   tooExpensive: 'سهم این استراتژی برای حتی یک دست کافی نیست',
   noPath: 'برای این ترکیب مسیر معتبری ثبت نشده است',
+  sourceMissing: 'اجرای انتخابی برای این سهم موجود نیست',
 };
+
+/**
+ * تقویم مشترک چند اجرا.
+ *
+ * وقتی سبد از دو نماد ساخته می‌شود، دو اجرا دو فهرست روز دارند که ممکن است
+ * کاملاً یکی نباشند — یک نماد متوقف بوده، دیگری نه. اجتماعِ مرتبِ روزها
+ * مبناست، و روزی که یک جزء در آن مشاهده ندارد، ارزش کل سبد را **نامعلوم**
+ * می‌کند نه اینکه آن جزء را صفر بگیرد.
+ *
+ * اشتراک‌گرفتن به‌جای اجتماع، وسوسه‌انگیز است و غلط: روزهایی را که یک نماد
+ * داشته و دیگری نه بی‌صدا حذف می‌کند و مسیر سبد کوتاه‌تر و صاف‌تر از واقع
+ * درمی‌آید.
+ */
+export function unionCalendar(sources = []) {
+  const seen = new Set();
+  for (const source of sources) {
+    for (const date of source?.analysis?.dates || []) {
+      const value = finite(date);
+      if (value !== null) seen.add(value);
+    }
+  }
+  return [...seen].sort((a, b) => a - b);
+}
 
 /**
  * تخصیص سرمایه و بازپخش سبد.
@@ -44,10 +68,20 @@ export const ALLOCATION_REASONS = {
  * `picks` فهرست `{ strategyId, comboId, pct }` است. `analysis` خروجی
  * `analyzePortfolio` با همان مبنایی که کاربر انتخاب کرده.
  */
-export function allocatePortfolio({ capitalRial = null, picks = [], analysis = null, basisId = null } = {}) {
+export function allocatePortfolio({
+  capitalRial = null, picks = [], analysis = null, basisId = null, sources = null,
+} = {}) {
   const capital = finite(capitalRial);
-  const basis = normalizeBasis(basisId ?? analysis?.basisId);
-  const dates = analysis?.dates || [];
+  // یک اجرا یا چند اجرا، یک مسیر کد. اجرای تکی همان حالتِ «یک منبع» است،
+  // پس رفتار قبلی دقیقاً می‌ماند و شاخهٔ دومی برای نگه‌داشتن نیست.
+  const pool = Array.isArray(sources) && sources.length
+    ? sources
+    : (analysis ? [{ id: '', label: '', analysis }] : []);
+  const byId = new Map(pool.map((row) => [String(row.id ?? ''), row]));
+  const primary = pool[0]?.analysis ?? null;
+  const basis = normalizeBasis(basisId ?? primary?.basisId);
+  const dates = pool.length > 1 ? unionCalendar(pool) : (primary?.dates || []);
+  const columnOf = new Map(dates.map((date, index) => [date, index]));
   const list = Array.isArray(picks) ? picks : [];
 
   if (capital === null || !(capital > 0)) {
@@ -62,19 +96,22 @@ export function allocatePortfolio({ capitalRial = null, picks = [], analysis = n
     return { ok: false, why: ALLOCATION_REASONS.overAllocated, legs: [], dates, path: [], summary: null, totalPct };
   }
 
-  const byCombo = new Map((analysis?.combos || []).map((combo) => [String(combo.id), combo]));
   const legs = wanted.map((pick) => {
     const pct = finite(pick.pct);
     const targetRial = (capital * pct) / 100;
-    const combo = byCombo.get(String(pick.comboId ?? ''));
+    const source = byId.get(String(pick.sourceId ?? '')) ?? (pool.length === 1 ? pool[0] : null);
+    if (!source) {
+      return { ...pick, pct, targetRial, ok: false, why: ALLOCATION_REASONS.sourceMissing, lots: 0, deployedRial: 0, idleRial: targetRial };
+    }
+    const combo = (source.analysis?.combos || []).find((row) => String(row.id) === String(pick.comboId ?? ''));
     if (!combo) {
-      return { ...pick, pct, targetRial, ok: false, why: ALLOCATION_REASONS.comboMissing, lots: 0, deployedRial: 0, idleRial: targetRial };
+      return { ...pick, pct, targetRial, ok: false, why: ALLOCATION_REASONS.comboMissing, sourceLabel: source.label, lots: 0, deployedRial: 0, idleRial: targetRial };
     }
     const den = basisDenominator(combo.entry, basis);
     if (!den.ok) {
       return {
         ...pick, pct, targetRial, ok: false, why: ALLOCATION_REASONS.noDenominator,
-        strategyName: combo.strategyName, comboId: combo.id,
+        strategyName: combo.strategyName, comboId: combo.id, sourceLabel: source.label,
         lots: 0, deployedRial: 0, idleRial: targetRial,
       };
     }
@@ -82,25 +119,37 @@ export function allocatePortfolio({ capitalRial = null, picks = [], analysis = n
     if (lots < 1) {
       return {
         ...pick, pct, targetRial, ok: false, why: ALLOCATION_REASONS.tooExpensive,
-        strategyName: combo.strategyName, comboId: combo.id, unitCostRial: den.value,
+        strategyName: combo.strategyName, comboId: combo.id, unitCostRial: den.value, sourceLabel: source.label,
         lots: 0, deployedRial: 0, idleRial: targetRial,
       };
     }
     if (!combo.series?.ok || combo.series.finalIndex === null) {
       return {
         ...pick, pct, targetRial, ok: false, why: ALLOCATION_REASONS.noPath,
-        strategyName: combo.strategyName, comboId: combo.id, unitCostRial: den.value,
+        strategyName: combo.strategyName, comboId: combo.id, unitCostRial: den.value, sourceLabel: source.label,
         lots: 0, deployedRial: 0, idleRial: targetRial,
       };
     }
     const deployedRial = lots * den.value;
+    // مسیر هر جزء روی **تقویم مشترک** نشانده می‌شود، نه روی تقویم خودش.
+    // روزی که این نماد در آن مشاهده ندارد، خانه‌اش null می‌ماند — و همان
+    // ارزش کل سبد را آن روز نامعلوم می‌کند.
+    const own = source.analysis?.dates || [];
+    const pnl = dates.map(() => null);
+    for (let index = 0; index < own.length; index++) {
+      const column = columnOf.get(own[index]);
+      if (column === undefined) continue;
+      const value = combo.series.pnl[index];
+      pnl[column] = value === null ? null : value * lots;
+    }
     return {
       ...pick, pct, targetRial, ok: true, why: '',
+      sourceId: String(pick.sourceId ?? source.id ?? ''), sourceLabel: source.label,
       strategyId: combo.strategyId, strategyName: combo.strategyName,
       groupId: combo.groupId, groupName: combo.groupName,
       comboId: combo.id, unitCostRial: den.value,
       lots, deployedRial, idleRial: targetRial - deployedRial,
-      pnl: combo.series.pnl.map((value) => (value === null ? null : value * lots)),
+      pnl,
       finalPnlRial: combo.series.finalPnl === null ? null : combo.series.finalPnl * lots,
     };
   });
@@ -168,6 +217,7 @@ export function allocatePortfolio({ capitalRial = null, picks = [], analysis = n
     ok: funded.length > 0,
     why: funded.length ? '' : (legs[0]?.why || ALLOCATION_REASONS.noPicks),
     basisId: basis,
+    sources: pool.map((row) => ({ id: String(row.id ?? ''), label: row.label ?? '' })),
     capitalRial: capital, deployedRial, idleRial,
     deployedPct: (deployedRial / capital) * 100,
     totalPct,

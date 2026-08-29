@@ -161,6 +161,14 @@ export function chartGroup() {
     },
     get: (key) => handles.get(key) || null,
     resizeAll() { for (const handle of handles.values()) handle.resize(); },
+    /**
+     * انیمیشنِ همهٔ نمودارها را می‌خواباند.
+     *
+     * ECharts با پنهان‌شدن ظرف چیزی را متوقف نمی‌کند. نموداری که انیمیشنش
+     * تمام‌نشدنی است، در پنلی بسته هم نخِ اصلی را می‌چرخاند و بقیهٔ صفحه
+     * کند می‌شود بی‌آنکه چیزی خراب به نظر برسد.
+     */
+    stopAll() { for (const handle of handles.values()) handle.instance.stopAnimation?.(); },
     disposeAll() {
       for (const handle of handles.values()) handle.dispose();
       handles.clear();

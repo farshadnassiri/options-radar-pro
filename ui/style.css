@@ -2999,7 +2999,7 @@ td.gain, dd.gain { color: var(--gain); }
 
 .pb-basket-rows { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-4) 0; }
 .pb-basket-row { display: grid; gap: var(--space-3); align-items: end;
-  grid-template-columns: minmax(140px, 1fr) minmax(200px, 2fr) 120px auto; }
+  grid-template-columns: minmax(150px, 1fr) minmax(140px, 1fr) minmax(200px, 2fr) 110px auto; }
 .pb-basket-row label { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); color: var(--muted); font-weight: 600; }
 .pb-basket-row select, .pb-basket-row input { height: var(--control-h-sm); }
 .pb-basket-row button { height: var(--control-h-sm); }

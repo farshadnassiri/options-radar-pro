@@ -1,7 +1,7 @@
 // ۲۰۰. سبد فرضی — قرارداد شکسته نمی‌شود، پول گم نمی‌شود
 
 import { check, group, near } from '../harness.mjs';
-import { ALLOCATION_REASONS, allocatePortfolio } from '../../core/portfolio-allocation.mjs';
+import { ALLOCATION_REASONS, allocatePortfolio, unionCalendar } from '../../core/portfolio-allocation.mjs';
 import { analyzePortfolio } from '../../core/portfolio-report.mjs';
 import { buildPnlMatrix } from '../../core/portfolio-matrix.mjs';
 
@@ -115,4 +115,81 @@ group('۲۰۰. سبد فرضی');
     allocatePortfolio({ capitalRial: 100000, analysis: an200, picks: [] }).why === ALLOCATION_REASONS.noPicks);
   check('درصد صفر یا منفی انتخاب شمرده نمی‌شود',
     allocatePortfolio({ capitalRial: 100000, analysis: an200, picks: [{ comboId: 'a', pct: 0 }] }).why === ALLOCATION_REASONS.noPicks);
+}
+
+// ═══ سبد چندنمادی ═══
+group('۲۰۰-ب. سبد از چند نماد');
+{
+  const entry200b = {
+    marginGross: 1000, netCash: 0, marginNet: 1000, capital: 1000, notional: 5000,
+    legValue: 100, legValueComplete: true,
+  };
+  const combo200b = (id, strategyId, pnls, dates) => ({
+    id, strategyId, strategyName: `استراتژی ${strategyId}`,
+    groupId: 'g', groupName: 'دسته', feasible: true, entry: entry200b,
+    path: { daily: pnls.map((value, index) => ({ date: dates[index], netPnl: value })) },
+  });
+  const build200b = (rows) => {
+    const matrix = buildPnlMatrix(rows);
+    matrix.baseSeries = matrix.dates.map(() => 0);
+    return analyzePortfolio({ rows, matrix });
+  };
+  // دو نماد با تقویم‌های ناهم‌پوشان: نماد دوم روز اول را ندارد و نماد اول
+  // روز چهارم را. اشتراک‌گرفتن، هر دو را حذف می‌کرد و مسیر را کوتاه و صاف
+  // نشان می‌داد.
+  const alpha200 = build200b([combo200b('a', 'A', [10, 20, 30], [20260801, 20260802, 20260803])]);
+  const beta200 = build200b([combo200b('b', 'B', [5, 5, 5], [20260802, 20260803, 20260804])]);
+  const sources200 = [
+    { id: 'alpha', label: 'نماد الف', analysis: alpha200 },
+    { id: 'beta', label: 'نماد ب', analysis: beta200 },
+  ];
+
+  check('تقویم مشترک، اجتماع روزهاست نه اشتراکشان',
+    JSON.stringify(unionCalendar(sources200)) === JSON.stringify([20260801, 20260802, 20260803, 20260804]),
+    JSON.stringify(unionCalendar(sources200)));
+
+  const multi200 = allocatePortfolio({
+    capitalRial: 100000, sources: sources200,
+    picks: [
+      { sourceId: 'alpha', comboId: 'a', pct: 30 },
+      { sourceId: 'beta', comboId: 'b', pct: 50 },
+    ],
+  });
+  check('هر دو نماد در یک سبد تأمین می‌شوند', multi200.ok && multi200.funded === 2, multi200.why);
+  check('برچسب اجرا روی هر جزء می‌ماند',
+    multi200.legs[0].sourceLabel === 'نماد الف' && multi200.legs[1].sourceLabel === 'نماد ب');
+  check('مسیر سبد روی تقویم مشترک ساخته می‌شود', multi200.path.length === 4, String(multi200.path.length));
+  // دسترسی امن: ادعایی که زیر جهش می‌ترکد، کل اجرای آزمون را می‌کشد و
+  // به‌جای یک ردِ خوانا، یک ردیف خطا می‌دهد.
+  const at200 = (index, key) => multi200.path[index]?.[key] ?? null;
+  check('روزی که یک نماد مشاهده ندارد، ارزش کل نامعلوم می‌ماند',
+    at200(0, 'totalPnlRial') === null && at200(3, 'totalPnlRial') === null && multi200.path.length === 4,
+    JSON.stringify(multi200.path.map((row) => row.totalPnlRial)));
+  check('سود شناخته‌شدهٔ همان روز جدا گزارش می‌شود',
+    at200(0, 'knownPnlRial') === 300, String(at200(0, 'knownPnlRial')));
+  check('جزء بی‌داده نام برده می‌شود',
+    JSON.stringify(at200(0, 'unknown')) === JSON.stringify(['b'])
+    && JSON.stringify(at200(3, 'unknown')) === JSON.stringify(['a']),
+    JSON.stringify([at200(0, 'unknown'), at200(3, 'unknown')]));
+  check('روزهای مشترک، ارزش کامل می‌گیرند',
+    at200(1, 'totalPnlRial') === 850 && at200(2, 'totalPnlRial') === 1150,
+    JSON.stringify([at200(1, 'totalPnlRial'), at200(2, 'totalPnlRial')]));
+  check('فهرست اجراها در خروجی می‌آید',
+    multi200.sources.length === 2 && multi200.sources[0].label === 'نماد الف');
+  check('سهم با اجرای ناموجود، دلیلش گفته می‌شود',
+    allocatePortfolio({
+      capitalRial: 100000, sources: sources200,
+      picks: [{ sourceId: 'ندارد', comboId: 'a', pct: 30 }],
+    }).legs[0].why === ALLOCATION_REASONS.sourceMissing);
+  check('ترکیبِ نمادِ دیگر، در این اجرا پیدا نمی‌شود',
+    allocatePortfolio({
+      capitalRial: 100000, sources: sources200,
+      picks: [{ sourceId: 'alpha', comboId: 'b', pct: 30 }],
+    }).legs[0].why === ALLOCATION_REASONS.comboMissing);
+
+  // رفتار تک‌اجرایی نباید عوض شده باشد.
+  check('سبد تک‌نمادی مثل قبل کار می‌کند',
+    allocatePortfolio({ capitalRial: 100000, analysis: alpha200, picks: [{ comboId: 'a', pct: 30 }] }).funded === 1);
+  check('تقویم تک‌اجرا همان تقویم خودش می‌ماند',
+    allocatePortfolio({ capitalRial: 100000, analysis: alpha200, picks: [{ comboId: 'a', pct: 30 }] }).path.length === 3);
 }

@@ -225,7 +225,11 @@ export function similarityGraphOption(analysis, tokens, { threshold = 0.75 } = {
     },
     series: [{
       type: 'graph', layout: 'force', roam: true, draggable: true,
-      force: { repulsion: 220, edgeLength: [60, 160], gravity: 0.08 },
+      // `layoutAnimation: false` یعنی چیدمان یک‌بار حساب می‌شود و می‌ایستد.
+      // با انیمیشن، نیرو هیچ‌وقت آرام نمی‌گیرد و حلقهٔ رسم تا ابد می‌چرخد —
+      // حتی وقتی پنلش پنهان است. نتیجه‌اش نخِ اصلیِ اشغال‌شده بود: صفحه
+      // ظاهراً سالم، ولی هر کار بعدی دقیقه‌ها طول می‌کشید.
+      force: { repulsion: 220, edgeLength: [60, 160], gravity: 0.08, layoutAnimation: false },
       emphasis: { focus: 'adjacency', lineStyle: { opacity: 0.9 } },
       label: { show: true, position: 'right', color: tokens.ink, formatter: (params) => faDigits(params.data.name) },
       lineStyle: { color: tokens.accent, curveness: 0.12 },

@@ -370,6 +370,14 @@ export async function mount(root, { state }) {
   let heatMode = DEFAULT_HEATMAP_MODE, heatSort = 'score', heatPalette = 'signed';
   let metricWeights = Object.fromEntries(METRICS.map((row) => [row.id, row.weight]));
   let trendPick = [], basketPicks = [], calendarPick = '', bandPick = '';
+  /**
+   * کتابخانهٔ اجرا — هر اجرای کامل‌شده اینجا می‌ماند.
+   *
+   * سبد فرضی از همین می‌خواند، پس می‌شود روی یک نماد اسپرد عمودی گذاشت و
+   * روی نماد دیگر خفه‌کن. تحلیل هر اجرا با **عدسی جاری** بازساخته می‌شود تا
+   * همهٔ اجزای سبد روی یک مبنا سنجیده شوند، نه هر کدام با مبنای روزِ خودش.
+   */
+  let runs = [];
   let tabsApi = null;
   // هر پنل وقتی دیده می‌شود رسم می‌شود، نه زودتر: نمودار روی ظرف پنهان
   // عرض صفر می‌گیرد و بی‌صدا خالی درمی‌آید.
@@ -590,6 +598,9 @@ export async function mount(root, { state }) {
 
   /** پنل دیده‌شده را رسم می‌کند؛ بقیه تا دیده‌نشدن دست‌نخورده می‌مانند. */
   function paintPanel(id) {
+    // پیش از هر تعویض پنل، انیمیشن‌های در جریان می‌خوابند: نمودار پنهان
+    // نباید نخِ اصلی را نگه دارد.
+    charts.stopAll();
     if (!analysis || !dirty.has(id)) { charts.resizeAll(); return; }
     dirty.delete(id);
     if (id === 'overview') paintOverview();
@@ -933,9 +944,12 @@ export async function mount(root, { state }) {
   // ═══════════════════ سبد فرضی ═══════════════════
 
   function basketRowMarkup(pick, index) {
-    const strategies = analysis?.strategies || [];
-    const combos = (analysis?.combos || []).filter((combo) => combo.strategyId === pick.strategyId && combo.series.ok);
+    const sources = basketSources();
+    const source = sources.find((row) => row.id === pick.sourceId) || sources[0] || null;
+    const strategies = source?.analysis?.strategies || [];
+    const combos = (source?.analysis?.combos || []).filter((combo) => combo.strategyId === pick.strategyId && combo.series.ok);
     return `<div class="pb-basket-row" data-basket-row="${index}">
+      <label>اجرا<select data-basket="sourceId" data-index="${index}">${sources.map((row) => `<option value="${esc(row.id)}"${row.id === (source?.id ?? '') ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
       <label>استراتژی<select data-basket="strategyId" data-index="${index}">${strategies.map((row) => `<option value="${esc(row.strategyId)}"${row.strategyId === pick.strategyId ? ' selected' : ''}>${esc(row.strategyName)}</option>`).join('')}</select></label>
       <label>ترکیب<select data-basket="comboId" data-index="${index}">${combos.length ? combos.map((combo) => `<option value="${esc(combo.id)}"${combo.id === pick.comboId ? ' selected' : ''}>${esc(comboName(combo))} · ${pctCell(combo.series.finalPct)}</option>`).join('') : '<option value="">ترکیب معتبری ندارد</option>'}</select></label>
       <label>سهم (درصد)<input type="number" min="1" max="100" step="1" data-basket="pct" data-index="${index}" value="${pick.pct}"></label>
@@ -946,19 +960,39 @@ export async function mount(root, { state }) {
   function paintBasketForm() {
     if (!analysis) return;
     if (!basketPicks.length && analysis.strategies.length) {
+      const here = currentRunId();
       basketPicks = analysis.strategies.slice(0, 3).map((row, index) => {
         const combo = analysis.combos.find((item) => item.strategyId === row.strategyId && item.series.ok);
-        return { strategyId: row.strategyId, comboId: combo?.id || '', pct: [40, 35, 25][index] ?? 20 };
+        return { sourceId: here, strategyId: row.strategyId, comboId: combo?.id || '', pct: [40, 35, 25][index] ?? 20 };
       });
     }
     $('pb-basket-rows').innerHTML = basketPicks.map(basketRowMarkup).join('');
   }
 
+  /**
+   * هر اجرای کتابخانه، با عدسی **جاری** تحلیل می‌شود.
+   *
+   * اگر هر اجرا با مبنای زمان اجرای خودش می‌ماند، دو جزء سبد روی دو مخرج
+   * متفاوت جمع می‌شدند و عددِ کل هیچ معنایی نداشت.
+   */
+  function basketSources() {
+    return runs.map((run) => ({
+      id: run.id, label: run.label,
+      analysis: run.id === currentRunId() ? analysis : analyzePortfolio({
+        rows: run.rows, matrix: run.matrix,
+        basisId: lens.basisId, statistic: lens.statistic, weighting: lens.weighting,
+        weights: metricWeights,
+      }),
+    }));
+  }
+  const currentRunId = () => `${String(ua?.ins ?? '')}:${$('pb-entry-date').dataset.value}:${$('pb-exit-date').dataset.value}`;
+  const sourceOf = (id) => basketSources().find((row) => row.id === id) || null;
+
   function paintBasket() {
     paintBasketForm();
     const capital = Math.max(0, safeNum($('pb-basket-capital').value, 0)) * 1e6;
     const basket = allocatePortfolio({
-      capitalRial: capital, picks: basketPicks, analysis, basisId: lens.basisId,
+      capitalRial: capital, picks: basketPicks, sources: basketSources(), basisId: lens.basisId,
     });
     if (!basket.ok) {
       $('pb-basket-kpis').innerHTML = `<article class="loss"><span>سبد ساخته نشد</span><b>${esc(basket.why)}</b></article>`;
@@ -990,10 +1024,10 @@ export async function mount(root, { state }) {
       : '';
 
     const unfunded = basket.legs.filter((leg) => !leg.ok);
-    $('pb-basket-table').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>استراتژی</th><th>ترکیب</th><th>دست</th><th>پول درگیر</th><th>نقد مانده</th><th>سود/زیان</th><th>بازده جزء</th><th>سهم از سود کل</th></tr></thead><tbody>${
+    $('pb-basket-table').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>اجرا</th><th>استراتژی</th><th>ترکیب</th><th>دست</th><th>پول درگیر</th><th>نقد مانده</th><th>سود/زیان</th><th>بازده جزء</th><th>سهم از سود کل</th></tr></thead><tbody>${
       basket.legs.map((leg) => (leg.ok
-        ? `<tr><td>${esc(leg.strategyName)}</td><td>${esc(leg.comboId)}</td><td>${fmt.int(leg.lots)}</td><td>${fmt.money(leg.deployedRial)}</td><td>${fmt.money(leg.idleRial)}</td><td class="${signTone(leg.finalPnlRial)}">${fmt.money(leg.finalPnlRial)}</td><td class="${signTone(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}">${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}</td><td>${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.sharePct)}</td></tr>`
-        : `<tr><td>${esc(leg.strategyName || '—')}</td><td colspan="7"><span class="loss">${esc(leg.why)}</span> — ${fmt.money(leg.targetRial)} نقد ماند${leg.unitCostRial ? `؛ بهای هر دست ${fmt.money(leg.unitCostRial)}` : ''}</td></tr>`)).join('')}</tbody></table>${
+        ? `<tr><td>${esc(leg.sourceLabel || '—')}</td><td>${esc(leg.strategyName)}</td><td>${esc(leg.comboId)}</td><td>${fmt.int(leg.lots)}</td><td>${fmt.money(leg.deployedRial)}</td><td>${fmt.money(leg.idleRial)}</td><td class="${signTone(leg.finalPnlRial)}">${fmt.money(leg.finalPnlRial)}</td><td class="${signTone(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}">${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}</td><td>${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.sharePct)}</td></tr>`
+        : `<tr><td>${esc(leg.sourceLabel || '—')}</td><td>${esc(leg.strategyName || '—')}</td><td colspan="7"><span class="loss">${esc(leg.why)}</span> — ${fmt.money(leg.targetRial)} نقد ماند${leg.unitCostRial ? `؛ بهای هر دست ${fmt.money(leg.unitCostRial)}` : ''}</td></tr>`)).join('')}</tbody></table>${
       unfunded.length ? `<p class="portfolio-note">${fmt.int(unfunded.length)} سهم تأمین نشد و پولش نقد ماند. بازده سبد روی کل سرمایهٔ اول دوره حساب شده، نه فقط روی پول درگیر — پس نقدِ بی‌کار، بازده را رقیق می‌کند، همان‌طور که در واقعیت می‌کند.</p>` : ''}`;
   }
 
@@ -1021,6 +1055,12 @@ export async function mount(root, { state }) {
         paintPanel(id);
       },
     });
+    const label = `${nameOf(ua, 'نماد')} · ${dateLabel(Number($('pb-entry-date').dataset.value))} تا ${dateLabel(Number($('pb-exit-date').dataset.value))}`;
+    const runId = `${String(ua?.ins ?? '')}:${$('pb-entry-date').dataset.value}:${$('pb-exit-date').dataset.value}`;
+    runs = [
+      ...runs.filter((row) => row.id !== runId),
+      { id: runId, label, baseIns: String(ua?.ins ?? ''), rows: payloadRows, matrix: payloadMatrix },
+    ].slice(-6);
     const capped = generated.filter((row) => row.capped).length;
     $('pb-audit').textContent = `${fmt.int(generated.length)} استراتژی بررسی شد · ${fmt.int(payload.excluded.invalidAtEnd)} ترکیب فاقد داده معتبر روز سنجش · ${fmt.int(capped)} استراتژی سقف‌خورده`;
     recompute();
@@ -1456,10 +1496,11 @@ export async function mount(root, { state }) {
 
   // ═══ سبد فرضی ═══
   $('pb-basket-add').addEventListener('click', () => {
-    const next = (analysis?.strategies || []).find((row) => !basketPicks.some((pick) => pick.strategyId === row.strategyId));
+    const next = (analysis?.strategies || []).find((row) => !basketPicks.some((pick) => pick.strategyId === row.strategyId))
+      || (analysis?.strategies || [])[0];
     if (!next) return;
     const combo = analysis.combos.find((item) => item.strategyId === next.strategyId && item.series.ok);
-    basketPicks = [...basketPicks, { strategyId: next.strategyId, comboId: combo?.id || '', pct: 10 }];
+    basketPicks = [...basketPicks, { sourceId: currentRunId(), strategyId: next.strategyId, comboId: combo?.id || '', pct: 10 }];
     paintBasket();
   });
   $('pb-basket-rows').addEventListener('change', (event) => {
@@ -1470,11 +1511,18 @@ export async function mount(root, { state }) {
     const value = key === 'pct' ? Math.max(0, safeNum(field.value, 0)) : field.value;
     basketPicks = basketPicks.map((pick, at) => {
       if (at !== index) return pick;
-      if (key !== 'strategyId') return { ...pick, [key]: value };
-      // عوض‌شدن استراتژی یعنی ترکیب قبلی دیگر عضو این استراتژی نیست؛
-      // نگه‌داشتنش یعنی سبدی که کاربر فکر می‌کند چیده با آنچه ساخته می‌شود
-      // فرق دارد.
-      const combo = analysis.combos.find((item) => item.strategyId === value && item.series.ok);
+      if (key === 'pct') return { ...pick, pct: value };
+      // عوض‌شدن اجرا یا استراتژی، انتخاب‌های پایین‌دستی را بی‌اعتبار می‌کند:
+      // ترکیبِ نماد قبلی در اجرای تازه اصلاً وجود ندارد. نگه‌داشتنشان یعنی
+      // سبدی که کاربر فکر می‌کند چیده با آنچه ساخته می‌شود فرق دارد.
+      if (key === 'sourceId') {
+        const source = sourceOf(value);
+        const strategy = source?.analysis?.strategies?.[0];
+        const combo = (source?.analysis?.combos || []).find((item) => item.strategyId === strategy?.strategyId && item.series.ok);
+        return { ...pick, sourceId: value, strategyId: strategy?.strategyId || '', comboId: combo?.id || '' };
+      }
+      const source = sourceOf(pick.sourceId) || basketSources()[0];
+      const combo = (source?.analysis?.combos || []).find((item) => item.strategyId === value && item.series.ok);
       return { ...pick, strategyId: value, comboId: combo?.id || '' };
     });
     paintBasket();
