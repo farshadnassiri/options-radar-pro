@@ -24,6 +24,7 @@ import { portfolioCapitalGrowth } from '../../core/portfolio-capital-growth.mjs'
 import { momentKey } from '../../core/trading-calendar.mjs';
 import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
+import { mountSubtabs } from '../subtabs.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
 import { createPortfolioHistoryRequestGate } from '../portfolio-history-request.mjs';
@@ -110,8 +111,22 @@ export async function mount(root, { state, api }) {
       <div id="pt-progress-review"><b>۵</b><span>مرور و شروع</span><small>قفل</small></div>
     </nav>
 
+    <section class="pt-watch pt-live" id="pt-watch" aria-labelledby="pt-watch-title" hidden>
+    <div class="pt-watch-head">
+    <div><p class="eyebrow">پایش قیود ریسک</p><h3 id="pt-watch-title">آنچه از لحظهٔ ثبت عوض شده</h3></div>
+    <b class="pt-watch-headline" id="pt-watch-headline">—</b>
+    </div>
+    <table class="pt-watch-table" id="pt-watch-table" hidden>
+    <thead><tr><th>قید</th><th>حکم</th><th>اکنون</th><th>حد</th><th>فاصله</th><th>تغییر</th></tr></thead>
+    <tbody id="pt-watch-body"></tbody>
+    </table>
+    </section>
+
+    <div id="pt-tabs" hidden></div>
+
     <section class="pt-layout">
       <div class="pt-main">
+        <div class="pt-panel" data-panel="setup">
         <section class="card pt-card" data-pt-setup>
           <div class="section-head"><div><p class="eyebrow">مرحله نخست · بخش یک</p><h2>سرمایه‌ای که با خودت به گذشته می‌بری</h2></div><span>واحد ورود: تومان</span></div>
           <div class="pt-form-grid pt-money-grid">
@@ -268,165 +283,164 @@ export async function mount(root, { state, api }) {
             <ul id="pt-snapshot-reasons"><li>پس از قفل مأموریت، دادهٔ روزانه، ریزمعامله، دفتر سفارش و فهرست قراردادهای همان تاریخ بررسی می‌شوند.</li></ul>
           </section>
 
-          <section class="pt-eligibility pt-live" id="pt-eligibility" aria-labelledby="pt-eligibility-title" hidden>
-            <div class="pt-eligibility-head">
-              <div><p class="eyebrow">مدرک خام اجراپذیری</p><h3 id="pt-eligibility-title">حکم قراردادها در لحظه شروع</h3></div>
-              <div class="pt-eligibility-filters" aria-label="فیلتر حکم قراردادها">
-                <button type="button" class="ghost" data-pt-eligibility-filter="all" aria-pressed="true">همه</button>
-                <button type="button" class="ghost" data-pt-eligibility-filter="accepted" aria-pressed="false">پذیرفته</button>
-                <button type="button" class="ghost" data-pt-eligibility-filter="rejected" aria-pressed="false">ردشده</button>
-              </div>
-            </div>
-            <p class="pt-save-state" id="pt-eligibility-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، حکم‌های عکس قفل‌شده اینجا می‌آیند.</p>
-            <table class="pt-eligibility-table">
-              <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
-              <tbody id="pt-eligibility-body"></tbody>
-            </table>
-          </section>
-
-          <section class="pt-closeout pt-live" id="pt-closeout" aria-labelledby="pt-closeout-title" hidden>
-            <div class="pt-closeout-head">
-              <div><p class="eyebrow">پایان جلسه</p><h3 id="pt-closeout-title">بستن جلسه و پروندهٔ پایان</h3></div>
-              <button type="button" class="ghost" id="pt-closeout-do" data-pt-keep-enabled="true">بستن جلسه</button>
-            </div>
-            <p class="pt-field-error" id="pt-closeout-warn" hidden></p>
-            <p class="pt-save-state" id="pt-closeout-state" role="status" aria-live="polite"></p>
-            <div class="pt-closeout-dossier" id="pt-closeout-dossier" hidden>
-              <dl class="pt-closeout-figures" id="pt-closeout-figures"></dl>
-              <section class="pt-dossier-analysis" id="pt-dossier-analysis" aria-labelledby="pt-dossier-analysis-title">
-                <h4 id="pt-dossier-analysis-title">سرمایه نهایی و فاصله از هدف</h4>
-                <dl class="pt-dossier-analysis-figures" id="pt-dossier-analysis-figures"></dl>
-                <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
-                <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
-              </section>
-              <section class="pt-dossier-analysis" id="pt-final-ranking" aria-labelledby="pt-final-ranking-title">
-                <h4 id="pt-final-ranking-title">رتبه انتخاب‌ها در پایان بازی</h4>
-                <dl class="pt-dossier-analysis-figures" id="pt-final-ranking-figures"></dl>
-                <p class="pt-dossier-analysis-state" id="pt-final-ranking-state"></p>
-              </section>
-              <section class="pt-capital-continuity" id="pt-capital-continuity" aria-labelledby="pt-capital-continuity-title">
-                <div class="pt-capital-continuity-head">
-                  <div><p class="eyebrow">سفر بعدی</p><h4 id="pt-capital-continuity-title">ادامه زنجیره سرمایه</h4></div>
-                  <b id="pt-capital-continuity-amount">—</b>
-                </div>
-                <dl class="pt-capital-continuity-source" id="pt-capital-continuity-source"></dl>
-                <section class="pt-capital-growth" id="pt-capital-growth" aria-labelledby="pt-capital-growth-title">
-                  <div class="pt-capital-growth-head">
-                    <h5 id="pt-capital-growth-title">روند قطعی سرمایه</h5>
-                    <b id="pt-capital-growth-summary">—</b>
-                  </div>
-                  <p id="pt-capital-growth-state" role="status">روند پس از اعتبارسنجی زنجیره آماده می‌شود.</p>
-                  <div class="pt-capital-growth-rows" id="pt-capital-growth-rows"></div>
-                </section>
-                <p id="pt-capital-continuity-state" role="status" aria-live="polite"></p>
-                <button type="button" class="primary" id="pt-capital-continuity-do" aria-describedby="pt-capital-continuity-state" disabled>جلسه بعد با این سرمایه</button>
-              </section>
-              <section class="pt-dossier-weakness" id="pt-dossier-weakness" aria-labelledby="pt-dossier-weakness-title">
-                <div class="pt-dossier-weakness-head">
-                  <h4 id="pt-dossier-weakness-title">یافته‌های مستند پرونده</h4>
-                  <b id="pt-dossier-weakness-summary"></b>
-                </div>
-                <div class="pt-dossier-weakness-rows" id="pt-dossier-weakness-rows"></div>
-              </section>
-              <div class="pt-dossier-export" id="pt-dossier-export">
-                <button type="button" class="ghost" id="pt-dossier-export-do" aria-describedby="pt-dossier-export-state" disabled>دانلود Excel پرونده</button>
-                <p id="pt-dossier-export-state" role="status" aria-live="polite">پرونده‌ای برای خروجی آماده نیست.</p>
-              </div>
-              <section class="pt-dossier-compare" id="pt-dossier-compare" aria-labelledby="pt-dossier-compare-title">
-                <div class="pt-dossier-compare-head">
-                  <h4 id="pt-dossier-compare-title">مقایسه با نزدیک‌ترین پرونده قدیمی‌تر</h4>
-                  <b id="pt-dossier-compare-base"></b>
-                </div>
-                <p class="pt-dossier-compare-state" id="pt-dossier-compare-state" role="status" aria-live="polite"></p>
-                <div class="pt-dossier-compare-identities" id="pt-dossier-compare-identities" hidden></div>
-                <div class="pt-dossier-compare-metrics" id="pt-dossier-compare-metrics"></div>
-                <div class="pt-dossier-compare-findings" id="pt-dossier-compare-findings"></div>
-              </section>
-              <p class="pt-closeout-open" id="pt-closeout-open" hidden></p>
-              <table class="pt-closeout-table" id="pt-closeout-table" hidden>
-                <thead><tr><th>موقعیت</th><th>حجم بسته‌شده</th><th>نقد خروج</th><th>تحقق‌یافته</th></tr></thead>
-                <tbody id="pt-closeout-body"></tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="pt-watch pt-live" id="pt-watch" aria-labelledby="pt-watch-title" hidden>
-            <div class="pt-watch-head">
-              <div><p class="eyebrow">پایش قیود ریسک</p><h3 id="pt-watch-title">آنچه از لحظهٔ ثبت عوض شده</h3></div>
-              <b class="pt-watch-headline" id="pt-watch-headline">—</b>
-            </div>
-            <table class="pt-watch-table" id="pt-watch-table" hidden>
-              <thead><tr><th>قید</th><th>حکم</th><th>اکنون</th><th>حد</th><th>فاصله</th><th>تغییر</th></tr></thead>
-              <tbody id="pt-watch-body"></tbody>
-            </table>
-          </section>
-
-          <section class="pt-clock pt-live" id="pt-clock" aria-labelledby="pt-clock-title" hidden>
-            <div class="pt-clock-head">
-              <div><p class="eyebrow">ساعت جلسه</p><h3 id="pt-clock-title">لحظه‌ای که جلسه روی آن ایستاده</h3></div>
-              <b class="pt-clock-now" id="pt-clock-now">—</b>
-            </div>
-            <div class="pt-clock-steps" id="pt-clock-steps" role="group" aria-label="پله‌های زمانی"></div>
-            <p class="pt-save-state" id="pt-clock-state" role="status" aria-live="polite">جلسه روی لحظهٔ شروع ایستاده است.</p>
-            <p class="pt-field-error" id="pt-clock-warn" hidden></p>
-          </section>
-
-          <section class="pt-ledger pt-live" id="pt-ledger" aria-labelledby="pt-ledger-title" hidden>
-            <div class="pt-ledger-head">
-              <div><p class="eyebrow">دفتر سرمایه</p><h3 id="pt-ledger-title">چقدر درگیر شده و چقدر جا مانده</h3></div>
-            </div>
-            <p class="pt-save-state" id="pt-ledger-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، وضعیت سرمایه اینجا می‌آید.</p>
-            <dl class="pt-ledger-figures" id="pt-ledger-figures"></dl>
-            <table class="pt-ledger-table">
-              <thead><tr><th>قید ریسک</th><th>اکنون</th><th>حد مأموریت</th><th>فاصله</th><th>حکم</th></tr></thead>
-              <tbody id="pt-ledger-risk"></tbody>
-            </table>
-            <p class="pt-ledger-families" id="pt-ledger-families"></p>
-            <p class="pt-field-error" id="pt-ledger-unpriced" hidden></p>
-          </section>
-
-          <section class="pt-positions pt-live" id="pt-positions" aria-labelledby="pt-positions-title" hidden>
-            <div class="pt-positions-head">
-              <div><p class="eyebrow">موقعیت‌های جلسه</p><h3 id="pt-positions-title">چه چیزی در دست است</h3></div>
-            </div>
-            <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
-            <div class="pt-table-scroll">
-            <table class="pt-positions-table">
-              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>سود تحقق‌یافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>مدیریت حجم</th></tr></thead>
-              <tbody id="pt-positions-body"></tbody>
-            </table>
-            </div>
-            <p class="pt-positions-total" id="pt-positions-total"></p>
-            <div class="pt-payoff" id="pt-payoff">
-              <div class="pt-payoff-head">
-                <p class="eyebrow">منحنی بازده سبد در سررسید</p>
-                <b id="pt-payoff-summary">—</b>
-              </div>
-              <div class="pt-payoff-chart" id="pt-payoff-chart"></div>
-              <p class="pt-save-state" id="pt-payoff-state" role="status" aria-live="polite"></p>
-            </div>
-            <p class="pt-field-error" id="pt-positions-undocumented" hidden></p>
-          </section>
-
-          <section class="pt-proposals pt-live" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
-            <div class="pt-proposals-head">
-              <div><p class="eyebrow">پیشنهاد اجراپذیر</p><h3 id="pt-proposals-title">طرح‌های در دسترس با این مأموریت</h3></div>
-            </div>
-            <p class="pt-save-state" id="pt-proposals-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، طرح‌های در دسترس اینجا می‌آیند.</p>
-            <table class="pt-proposals-table">
-              <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم (تومان)</th><th>بیشترین سود (تومان)</th><th>بیشترین زیان (تومان)</th><th>چرا این جایگاه</th><th>کیفیت</th><th>انتخاب</th></tr></thead>
-              <tbody id="pt-proposals-body"></tbody>
-            </table>
-            <p class="eyebrow" id="pt-proposals-aside-title" hidden>کنار گذاشته‌شده‌ها و نامعلوم‌ها</p>
-            <table class="pt-proposals-table pt-proposals-aside-table" id="pt-proposals-aside" hidden>
-              <thead><tr><th>استراتژی</th><th>وضعیت</th><th>علت</th><th>کیفیت</th></tr></thead>
-              <tbody id="pt-proposals-aside-body"></tbody>
-            </table>
-          </section>
 
           <div class="pt-stage-actions"><button type="button" class="primary" id="pt-start-mission">قفل مأموریت و عکس شروع</button><p class="pt-save-state" id="pt-mission-state" role="status" aria-live="polite">هدف، مبنای بازده، درصد هدف و افق نگهداری را صریح وارد کن.</p></div>
           <small class="pt-field-error" id="pt-mission-error" hidden></small>
         </section>
+        </div>
+
+          <div class="pt-panel" data-panel="timeline" hidden>
+            <section class="pt-clock pt-live" id="pt-clock" aria-labelledby="pt-clock-title" hidden>
+            <div class="pt-clock-head">
+            <div><p class="eyebrow">ساعت جلسه</p><h3 id="pt-clock-title">لحظه‌ای که جلسه روی آن ایستاده</h3></div>
+            <b class="pt-clock-now" id="pt-clock-now">—</b>
+            </div>
+            <div class="pt-clock-steps" id="pt-clock-steps" role="group" aria-label="پله‌های زمانی"></div>
+            <p class="pt-save-state" id="pt-clock-state" role="status" aria-live="polite">جلسه روی لحظهٔ شروع ایستاده است.</p>
+            <p class="pt-field-error" id="pt-clock-warn" hidden></p>
+            </section>
+          </div>
+
+          <div class="pt-panel" data-panel="strategies" hidden>
+            <section class="pt-proposals pt-live" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
+            <div class="pt-proposals-head">
+            <div><p class="eyebrow">پیشنهاد اجراپذیر</p><h3 id="pt-proposals-title">طرح‌های در دسترس با این مأموریت</h3></div>
+            </div>
+            <p class="pt-save-state" id="pt-proposals-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، طرح‌های در دسترس اینجا می‌آیند.</p>
+            <table class="pt-proposals-table">
+            <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم (تومان)</th><th>بیشترین سود (تومان)</th><th>بیشترین زیان (تومان)</th><th>چرا این جایگاه</th><th>کیفیت</th><th>انتخاب</th></tr></thead>
+            <tbody id="pt-proposals-body"></tbody>
+            </table>
+            <p class="eyebrow" id="pt-proposals-aside-title" hidden>کنار گذاشته‌شده‌ها و نامعلوم‌ها</p>
+            <table class="pt-proposals-table pt-proposals-aside-table" id="pt-proposals-aside" hidden>
+            <thead><tr><th>استراتژی</th><th>وضعیت</th><th>علت</th><th>کیفیت</th></tr></thead>
+            <tbody id="pt-proposals-aside-body"></tbody>
+            </table>
+            </section>
+            <section class="pt-eligibility pt-live" id="pt-eligibility" aria-labelledby="pt-eligibility-title" hidden>
+            <div class="pt-eligibility-head">
+            <div><p class="eyebrow">مدرک خام اجراپذیری</p><h3 id="pt-eligibility-title">حکم قراردادها در لحظه شروع</h3></div>
+            <div class="pt-eligibility-filters" aria-label="فیلتر حکم قراردادها">
+            <button type="button" class="ghost" data-pt-eligibility-filter="all" aria-pressed="true">همه</button>
+            <button type="button" class="ghost" data-pt-eligibility-filter="accepted" aria-pressed="false">پذیرفته</button>
+            <button type="button" class="ghost" data-pt-eligibility-filter="rejected" aria-pressed="false">ردشده</button>
+            </div>
+            </div>
+            <p class="pt-save-state" id="pt-eligibility-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، حکم‌های عکس قفل‌شده اینجا می‌آیند.</p>
+            <table class="pt-eligibility-table">
+            <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
+            <tbody id="pt-eligibility-body"></tbody>
+            </table>
+            </section>
+          </div>
+
+          <div class="pt-panel" data-panel="basket" hidden>
+            <section class="pt-ledger pt-live" id="pt-ledger" aria-labelledby="pt-ledger-title" hidden>
+            <div class="pt-ledger-head">
+            <div><p class="eyebrow">دفتر سرمایه</p><h3 id="pt-ledger-title">چقدر درگیر شده و چقدر جا مانده</h3></div>
+            </div>
+            <p class="pt-save-state" id="pt-ledger-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، وضعیت سرمایه اینجا می‌آید.</p>
+            <dl class="pt-ledger-figures" id="pt-ledger-figures"></dl>
+            <table class="pt-ledger-table">
+            <thead><tr><th>قید ریسک</th><th>اکنون</th><th>حد مأموریت</th><th>فاصله</th><th>حکم</th></tr></thead>
+            <tbody id="pt-ledger-risk"></tbody>
+            </table>
+            <p class="pt-ledger-families" id="pt-ledger-families"></p>
+            <p class="pt-field-error" id="pt-ledger-unpriced" hidden></p>
+            </section>
+
+            <section class="pt-positions pt-live" id="pt-positions" aria-labelledby="pt-positions-title" hidden>
+            <div class="pt-positions-head">
+            <div><p class="eyebrow">موقعیت‌های جلسه</p><h3 id="pt-positions-title">چه چیزی در دست است</h3></div>
+            </div>
+            <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
+            <div class="pt-table-scroll">
+            <table class="pt-positions-table">
+            <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>سود تحقق‌یافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>مدیریت حجم</th></tr></thead>
+            <tbody id="pt-positions-body"></tbody>
+            </table>
+            </div>
+            <p class="pt-positions-total" id="pt-positions-total"></p>
+            <div class="pt-payoff" id="pt-payoff">
+            <div class="pt-payoff-head">
+            <p class="eyebrow">منحنی بازده سبد در سررسید</p>
+            <b id="pt-payoff-summary">—</b>
+            </div>
+            <div class="pt-payoff-chart" id="pt-payoff-chart"></div>
+            <p class="pt-save-state" id="pt-payoff-state" role="status" aria-live="polite"></p>
+            </div>
+            <p class="pt-field-error" id="pt-positions-undocumented" hidden></p>
+            </section>
+          </div>
+
+          <div class="pt-panel" data-panel="dossier" hidden>
+            <section class="pt-closeout pt-live" id="pt-closeout" aria-labelledby="pt-closeout-title" hidden>
+            <div class="pt-closeout-head">
+            <div><p class="eyebrow">پایان جلسه</p><h3 id="pt-closeout-title">بستن جلسه و پروندهٔ پایان</h3></div>
+            <button type="button" class="ghost" id="pt-closeout-do" data-pt-keep-enabled="true">بستن جلسه</button>
+            </div>
+            <p class="pt-field-error" id="pt-closeout-warn" hidden></p>
+            <p class="pt-save-state" id="pt-closeout-state" role="status" aria-live="polite"></p>
+            <div class="pt-closeout-dossier" id="pt-closeout-dossier" hidden>
+            <dl class="pt-closeout-figures" id="pt-closeout-figures"></dl>
+            <section class="pt-dossier-analysis" id="pt-dossier-analysis" aria-labelledby="pt-dossier-analysis-title">
+            <h4 id="pt-dossier-analysis-title">سرمایه نهایی و فاصله از هدف</h4>
+            <dl class="pt-dossier-analysis-figures" id="pt-dossier-analysis-figures"></dl>
+            <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
+            <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
+            </section>
+            <section class="pt-dossier-analysis" id="pt-final-ranking" aria-labelledby="pt-final-ranking-title">
+            <h4 id="pt-final-ranking-title">رتبه انتخاب‌ها در پایان بازی</h4>
+            <dl class="pt-dossier-analysis-figures" id="pt-final-ranking-figures"></dl>
+            <p class="pt-dossier-analysis-state" id="pt-final-ranking-state"></p>
+            </section>
+            <section class="pt-capital-continuity" id="pt-capital-continuity" aria-labelledby="pt-capital-continuity-title">
+            <div class="pt-capital-continuity-head">
+            <div><p class="eyebrow">سفر بعدی</p><h4 id="pt-capital-continuity-title">ادامه زنجیره سرمایه</h4></div>
+            <b id="pt-capital-continuity-amount">—</b>
+            </div>
+            <dl class="pt-capital-continuity-source" id="pt-capital-continuity-source"></dl>
+            <section class="pt-capital-growth" id="pt-capital-growth" aria-labelledby="pt-capital-growth-title">
+            <div class="pt-capital-growth-head">
+            <h5 id="pt-capital-growth-title">روند قطعی سرمایه</h5>
+            <b id="pt-capital-growth-summary">—</b>
+            </div>
+            <p id="pt-capital-growth-state" role="status">روند پس از اعتبارسنجی زنجیره آماده می‌شود.</p>
+            <div class="pt-capital-growth-rows" id="pt-capital-growth-rows"></div>
+            </section>
+            <p id="pt-capital-continuity-state" role="status" aria-live="polite"></p>
+            <button type="button" class="primary" id="pt-capital-continuity-do" aria-describedby="pt-capital-continuity-state" disabled>جلسه بعد با این سرمایه</button>
+            </section>
+            <section class="pt-dossier-weakness" id="pt-dossier-weakness" aria-labelledby="pt-dossier-weakness-title">
+            <div class="pt-dossier-weakness-head">
+            <h4 id="pt-dossier-weakness-title">یافته‌های مستند پرونده</h4>
+            <b id="pt-dossier-weakness-summary"></b>
+            </div>
+            <div class="pt-dossier-weakness-rows" id="pt-dossier-weakness-rows"></div>
+            </section>
+            <div class="pt-dossier-export" id="pt-dossier-export">
+            <button type="button" class="ghost" id="pt-dossier-export-do" aria-describedby="pt-dossier-export-state" disabled>دانلود Excel پرونده</button>
+            <p id="pt-dossier-export-state" role="status" aria-live="polite">پرونده‌ای برای خروجی آماده نیست.</p>
+            </div>
+            <section class="pt-dossier-compare" id="pt-dossier-compare" aria-labelledby="pt-dossier-compare-title">
+            <div class="pt-dossier-compare-head">
+            <h4 id="pt-dossier-compare-title">مقایسه با نزدیک‌ترین پرونده قدیمی‌تر</h4>
+            <b id="pt-dossier-compare-base"></b>
+            </div>
+            <p class="pt-dossier-compare-state" id="pt-dossier-compare-state" role="status" aria-live="polite"></p>
+            <div class="pt-dossier-compare-identities" id="pt-dossier-compare-identities" hidden></div>
+            <div class="pt-dossier-compare-metrics" id="pt-dossier-compare-metrics"></div>
+            <div class="pt-dossier-compare-findings" id="pt-dossier-compare-findings"></div>
+            </section>
+            <p class="pt-closeout-open" id="pt-closeout-open" hidden></p>
+            <table class="pt-closeout-table" id="pt-closeout-table" hidden>
+            <thead><tr><th>موقعیت</th><th>حجم بسته‌شده</th><th>نقد خروج</th><th>تحقق‌یافته</th></tr></thead>
+            <tbody id="pt-closeout-body"></tbody>
+            </table>
+            </div>
+            </section>
+          </div>
+
       </div>
 
       <aside class="card pt-review">
@@ -447,6 +461,17 @@ export async function mount(root, { state, api }) {
   </div>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
+
+  // ترتیب همان ترتیبِ کارِ کاربر است: مأموریت را می‌بندد، در زمان حرکت
+  // می‌کند، استراتژی می‌سنجد، سبد را می‌بیند، و در پایان پرونده می‌گیرد.
+  const PT_TABS = [
+    { id: 'setup', label: 'راه‌اندازی', hint: 'سرمایه، نماد، بازه و قفل مأموریت' },
+    { id: 'timeline', label: 'تایم‌لاین', hint: 'حرکت در بازه و سود و زیان هر لحظه' },
+    { id: 'strategies', label: 'استراتژی‌ها', hint: 'پیشنهادهای اجراپذیر و حکم هر قرارداد' },
+    { id: 'basket', label: 'سبد', hint: 'موقعیت‌ها، دفتر سرمایه و پایش قیود' },
+    { id: 'dossier', label: 'پرونده', hint: 'بستن جلسه، تحلیل ضعف و خروجی' },
+  ];
+  let tabsApi = null;
   const capital = $('pt-capital'), reserve = $('pt-reserve'), base = $('pt-base');
   const outlookStep = $('pt-outlook-step'), riskStep = $('pt-risk-step');
   const allocationStep = $('pt-allocation-step'), allocationRowsRoot = $('pt-allocation-rows');
@@ -1580,8 +1605,38 @@ export async function mount(root, { state, api }) {
     warn.textContent = view.undocumentedText;
   }
 
+  /**
+   * پنج تب استودیو.
+   *
+   * تا پیش از قفل مأموریت، پشت چهار تبِ زنده هیچ‌چیز نیست؛ تبی که به
+   * صفحهٔ خالی می‌رسد بدتر از نبودِ تب است، پس نوار تا آن لحظه نمی‌آید و
+   * فقط پنل راه‌اندازی دیده می‌شود.
+   *
+   * `mountSubtabs` نوارِ بی‌تغییر را دوباره نمی‌سازد، پس تبی که کاربر
+   * انتخاب کرده با هر بازنقاشیِ زنده سرِ جایش می‌ماند. پنل‌ها هم از سند
+   * بیرون نمی‌روند و فقط `hidden` می‌شوند، پس هر `$('pt-…')` در همین فایل
+   * مثل قبل کار می‌کند.
+   */
+  function paintTabs(session) {
+    const host = $('pt-tabs');
+    const live = session?.state === 'active' || session?.state === 'closed';
+    host.hidden = !live;
+    if (!live) {
+      for (const tab of PT_TABS) {
+        const panel = root.querySelector(`[data-panel="${tab.id}"]`);
+        if (panel) panel.hidden = tab.id !== 'setup';
+      }
+      tabsApi = null;
+      return;
+    }
+    // بار اول روی «تایم‌لاین» می‌نشیند: کاربر تازه مأموریت را قفل کرده و
+    // کارِ بعدی‌اش حرکت در زمان است، نه بازخواندن فرم.
+    tabsApi = mountSubtabs(host, PT_TABS, { root, initial: 'timeline' });
+  }
+
   function paintProposals(session) {
     proposalSession = session;
+    paintTabs(session);
     // یک نقطهٔ فراخوانی: نوار سرمایه و پیشنهادها همیشه از یک جلسه ساخته
     // می‌شوند. دو فراخوانی جدا یعنی روزی یکی جا می‌ماند و کاربر وضعیت یک
     // جلسه را کنار پیشنهاد جلسهٔ دیگر می‌بیند.

@@ -684,6 +684,13 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 
 .pt-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, .32fr); gap: var(--space-4); align-items: start; }
 .pt-main { display: grid; gap: var(--space-4); min-width: 0; }
+/* ── پنل‌های پنج‌تبی استودیو ──
+   هر پنل یک خانهٔ `.pt-main` است، پس فاصلهٔ میان بخش‌هایش باید خودش را
+   داشته باشد؛ وگرنه با تب‌دارشدن، کارت‌های داخل یک تب به هم می‌چسبند.
+   `[hidden]` بعد از `display` می‌آید تا بر آن غالب باشد. */
+.pt-panel { display: grid; gap: var(--space-4); min-width: 0; }
+.pt-panel[hidden] { display: none; }
+.pt-panel:focus { outline: none; }
 .pt-card { margin: 0; }
 .pt-card .section-head b[role="status"] { color: var(--muted); font-size: var(--fs-sm); }
 .pt-card .section-head b[data-error] { color: var(--loss); }

@@ -201,9 +201,17 @@ group('۱۳۴. دفتر سرمایه در تب');
       .every((id) => tabSrc134.includes(`id="${id}"`)));
   // نوار سرمایه بالای پیشنهادها می‌نشیند: کاربر پیش از انتخاب طرح باید
   // بداند اصلاً چقدر جا مانده.
-  check('نوار سرمایه پیش از جدول پیشنهادها رسم می‌شود',
-    tabSrc134.indexOf('id="pt-ledger"') < tabSrc134.indexOf('id="pt-proposals"')
+  // ادعا همان است، ساختار عوض شده: پیشنهادها حالا تب خودشان را دارند، پس
+  // «پیش از پیشنهادها» دیگر ترتیبِ یک صفحهٔ بلند نیست. چیزی که هنوز
+  // معنی دارد این است که در تب سبد، اول «چقدر جا مانده» بیاید و بعد «چه
+  // چیزی در دست است».
+  check('نوار سرمایه در تب سبد پیش از موقعیت‌ها رسم می‌شود',
+    tabSrc134.indexOf('data-panel="basket"') < tabSrc134.indexOf('id="pt-ledger"')
+    && tabSrc134.indexOf('id="pt-ledger"') < tabSrc134.indexOf('id="pt-positions"')
     && tabSrc134.indexOf('id="pt-ledger"') > 0);
+  check('و جدول پیشنهادها تب جدای خودش را دارد',
+    tabSrc134.indexOf('data-panel="strategies"') < tabSrc134.indexOf('id="pt-proposals"')
+    && tabSrc134.indexOf('id="pt-proposals"') < tabSrc134.indexOf('data-panel="basket"'));
   // یک نقطهٔ فراخوانی یعنی هیچ‌وقت نوار یک جلسه کنار پیشنهاد جلسهٔ دیگر
   // دیده نمی‌شود — همان درسی که شمردنِ فراخوانی‌ها در دستهٔ ۱۳۱ داد.
   const paintBody134 = tabSrc134.slice(tabSrc134.indexOf('function paintProposals'));
