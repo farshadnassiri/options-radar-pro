@@ -23,7 +23,15 @@ import { portfolioDossierComparison } from '../../core/portfolio-dossier-compare
 import { portfolioCapitalGrowth } from '../../core/portfolio-capital-growth.mjs';
 import { momentKey } from '../../core/trading-calendar.mjs';
 import { stepPortfolioSession } from '../../core/portfolio-clock.mjs';
+import {
+  PLAYBACK_SPEEDS, PLAYBACK_SPEED_BY_KEY, playbackStep, portfolioPlaybackHalt,
+} from '../../core/portfolio-playback.mjs';
+import { portfolioRiskWatch } from '../../core/portfolio-watch.mjs';
+import { portfolioTimeline, slimTimelineEvidence } from '../../core/portfolio-timeline.mjs';
+import { portfolioTimelineView } from '../portfolio-timeline-view.mjs';
+import { chart as trackChart } from '../track-chart.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
+import { mountSubtabs } from '../subtabs.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
 import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
 import { createPortfolioHistoryRequestGate } from '../portfolio-history-request.mjs';
@@ -110,8 +118,22 @@ export async function mount(root, { state, api }) {
       <div id="pt-progress-review"><b>۵</b><span>مرور و شروع</span><small>قفل</small></div>
     </nav>
 
+    <section class="pt-watch pt-live" id="pt-watch" aria-labelledby="pt-watch-title" hidden>
+    <div class="pt-watch-head">
+    <div><p class="eyebrow">پایش قیود ریسک</p><h3 id="pt-watch-title">آنچه از لحظهٔ ثبت عوض شده</h3></div>
+    <b class="pt-watch-headline" id="pt-watch-headline">—</b>
+    </div>
+    <table class="pt-watch-table" id="pt-watch-table" hidden>
+    <thead><tr><th>قید</th><th>حکم</th><th>اکنون</th><th>حد</th><th>فاصله</th><th>تغییر</th></tr></thead>
+    <tbody id="pt-watch-body"></tbody>
+    </table>
+    </section>
+
+    <div id="pt-tabs" hidden></div>
+
     <section class="pt-layout">
       <div class="pt-main">
+        <div class="pt-panel" data-panel="setup">
         <section class="card pt-card" data-pt-setup>
           <div class="section-head"><div><p class="eyebrow">مرحله نخست · بخش یک</p><h2>سرمایه‌ای که با خودت به گذشته می‌بری</h2></div><span>واحد ورود: تومان</span></div>
           <div class="pt-form-grid pt-money-grid">
@@ -268,165 +290,196 @@ export async function mount(root, { state, api }) {
             <ul id="pt-snapshot-reasons"><li>پس از قفل مأموریت، دادهٔ روزانه، ریزمعامله، دفتر سفارش و فهرست قراردادهای همان تاریخ بررسی می‌شوند.</li></ul>
           </section>
 
-          <section class="pt-eligibility pt-live" id="pt-eligibility" aria-labelledby="pt-eligibility-title" hidden>
-            <div class="pt-eligibility-head">
-              <div><p class="eyebrow">مدرک خام اجراپذیری</p><h3 id="pt-eligibility-title">حکم قراردادها در لحظه شروع</h3></div>
-              <div class="pt-eligibility-filters" aria-label="فیلتر حکم قراردادها">
-                <button type="button" class="ghost" data-pt-eligibility-filter="all" aria-pressed="true">همه</button>
-                <button type="button" class="ghost" data-pt-eligibility-filter="accepted" aria-pressed="false">پذیرفته</button>
-                <button type="button" class="ghost" data-pt-eligibility-filter="rejected" aria-pressed="false">ردشده</button>
-              </div>
-            </div>
-            <p class="pt-save-state" id="pt-eligibility-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، حکم‌های عکس قفل‌شده اینجا می‌آیند.</p>
-            <table class="pt-eligibility-table">
-              <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
-              <tbody id="pt-eligibility-body"></tbody>
-            </table>
-          </section>
-
-          <section class="pt-closeout pt-live" id="pt-closeout" aria-labelledby="pt-closeout-title" hidden>
-            <div class="pt-closeout-head">
-              <div><p class="eyebrow">پایان جلسه</p><h3 id="pt-closeout-title">بستن جلسه و پروندهٔ پایان</h3></div>
-              <button type="button" class="ghost" id="pt-closeout-do" data-pt-keep-enabled="true">بستن جلسه</button>
-            </div>
-            <p class="pt-field-error" id="pt-closeout-warn" hidden></p>
-            <p class="pt-save-state" id="pt-closeout-state" role="status" aria-live="polite"></p>
-            <div class="pt-closeout-dossier" id="pt-closeout-dossier" hidden>
-              <dl class="pt-closeout-figures" id="pt-closeout-figures"></dl>
-              <section class="pt-dossier-analysis" id="pt-dossier-analysis" aria-labelledby="pt-dossier-analysis-title">
-                <h4 id="pt-dossier-analysis-title">سرمایه نهایی و فاصله از هدف</h4>
-                <dl class="pt-dossier-analysis-figures" id="pt-dossier-analysis-figures"></dl>
-                <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
-                <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
-              </section>
-              <section class="pt-dossier-analysis" id="pt-final-ranking" aria-labelledby="pt-final-ranking-title">
-                <h4 id="pt-final-ranking-title">رتبه انتخاب‌ها در پایان بازی</h4>
-                <dl class="pt-dossier-analysis-figures" id="pt-final-ranking-figures"></dl>
-                <p class="pt-dossier-analysis-state" id="pt-final-ranking-state"></p>
-              </section>
-              <section class="pt-capital-continuity" id="pt-capital-continuity" aria-labelledby="pt-capital-continuity-title">
-                <div class="pt-capital-continuity-head">
-                  <div><p class="eyebrow">سفر بعدی</p><h4 id="pt-capital-continuity-title">ادامه زنجیره سرمایه</h4></div>
-                  <b id="pt-capital-continuity-amount">—</b>
-                </div>
-                <dl class="pt-capital-continuity-source" id="pt-capital-continuity-source"></dl>
-                <section class="pt-capital-growth" id="pt-capital-growth" aria-labelledby="pt-capital-growth-title">
-                  <div class="pt-capital-growth-head">
-                    <h5 id="pt-capital-growth-title">روند قطعی سرمایه</h5>
-                    <b id="pt-capital-growth-summary">—</b>
-                  </div>
-                  <p id="pt-capital-growth-state" role="status">روند پس از اعتبارسنجی زنجیره آماده می‌شود.</p>
-                  <div class="pt-capital-growth-rows" id="pt-capital-growth-rows"></div>
-                </section>
-                <p id="pt-capital-continuity-state" role="status" aria-live="polite"></p>
-                <button type="button" class="primary" id="pt-capital-continuity-do" aria-describedby="pt-capital-continuity-state" disabled>جلسه بعد با این سرمایه</button>
-              </section>
-              <section class="pt-dossier-weakness" id="pt-dossier-weakness" aria-labelledby="pt-dossier-weakness-title">
-                <div class="pt-dossier-weakness-head">
-                  <h4 id="pt-dossier-weakness-title">یافته‌های مستند پرونده</h4>
-                  <b id="pt-dossier-weakness-summary"></b>
-                </div>
-                <div class="pt-dossier-weakness-rows" id="pt-dossier-weakness-rows"></div>
-              </section>
-              <div class="pt-dossier-export" id="pt-dossier-export">
-                <button type="button" class="ghost" id="pt-dossier-export-do" aria-describedby="pt-dossier-export-state" disabled>دانلود Excel پرونده</button>
-                <p id="pt-dossier-export-state" role="status" aria-live="polite">پرونده‌ای برای خروجی آماده نیست.</p>
-              </div>
-              <section class="pt-dossier-compare" id="pt-dossier-compare" aria-labelledby="pt-dossier-compare-title">
-                <div class="pt-dossier-compare-head">
-                  <h4 id="pt-dossier-compare-title">مقایسه با نزدیک‌ترین پرونده قدیمی‌تر</h4>
-                  <b id="pt-dossier-compare-base"></b>
-                </div>
-                <p class="pt-dossier-compare-state" id="pt-dossier-compare-state" role="status" aria-live="polite"></p>
-                <div class="pt-dossier-compare-identities" id="pt-dossier-compare-identities" hidden></div>
-                <div class="pt-dossier-compare-metrics" id="pt-dossier-compare-metrics"></div>
-                <div class="pt-dossier-compare-findings" id="pt-dossier-compare-findings"></div>
-              </section>
-              <p class="pt-closeout-open" id="pt-closeout-open" hidden></p>
-              <table class="pt-closeout-table" id="pt-closeout-table" hidden>
-                <thead><tr><th>موقعیت</th><th>حجم بسته‌شده</th><th>نقد خروج</th><th>تحقق‌یافته</th></tr></thead>
-                <tbody id="pt-closeout-body"></tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="pt-watch pt-live" id="pt-watch" aria-labelledby="pt-watch-title" hidden>
-            <div class="pt-watch-head">
-              <div><p class="eyebrow">پایش قیود ریسک</p><h3 id="pt-watch-title">آنچه از لحظهٔ ثبت عوض شده</h3></div>
-              <b class="pt-watch-headline" id="pt-watch-headline">—</b>
-            </div>
-            <table class="pt-watch-table" id="pt-watch-table" hidden>
-              <thead><tr><th>قید</th><th>حکم</th><th>اکنون</th><th>حد</th><th>فاصله</th><th>تغییر</th></tr></thead>
-              <tbody id="pt-watch-body"></tbody>
-            </table>
-          </section>
-
-          <section class="pt-clock pt-live" id="pt-clock" aria-labelledby="pt-clock-title" hidden>
-            <div class="pt-clock-head">
-              <div><p class="eyebrow">ساعت جلسه</p><h3 id="pt-clock-title">لحظه‌ای که جلسه روی آن ایستاده</h3></div>
-              <b class="pt-clock-now" id="pt-clock-now">—</b>
-            </div>
-            <div class="pt-clock-steps" id="pt-clock-steps" role="group" aria-label="پله‌های زمانی"></div>
-            <p class="pt-save-state" id="pt-clock-state" role="status" aria-live="polite">جلسه روی لحظهٔ شروع ایستاده است.</p>
-            <p class="pt-field-error" id="pt-clock-warn" hidden></p>
-          </section>
-
-          <section class="pt-ledger pt-live" id="pt-ledger" aria-labelledby="pt-ledger-title" hidden>
-            <div class="pt-ledger-head">
-              <div><p class="eyebrow">دفتر سرمایه</p><h3 id="pt-ledger-title">چقدر درگیر شده و چقدر جا مانده</h3></div>
-            </div>
-            <p class="pt-save-state" id="pt-ledger-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، وضعیت سرمایه اینجا می‌آید.</p>
-            <dl class="pt-ledger-figures" id="pt-ledger-figures"></dl>
-            <table class="pt-ledger-table">
-              <thead><tr><th>قید ریسک</th><th>اکنون</th><th>حد مأموریت</th><th>فاصله</th><th>حکم</th></tr></thead>
-              <tbody id="pt-ledger-risk"></tbody>
-            </table>
-            <p class="pt-ledger-families" id="pt-ledger-families"></p>
-            <p class="pt-field-error" id="pt-ledger-unpriced" hidden></p>
-          </section>
-
-          <section class="pt-positions pt-live" id="pt-positions" aria-labelledby="pt-positions-title" hidden>
-            <div class="pt-positions-head">
-              <div><p class="eyebrow">موقعیت‌های جلسه</p><h3 id="pt-positions-title">چه چیزی در دست است</h3></div>
-            </div>
-            <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
-            <div class="pt-table-scroll">
-            <table class="pt-positions-table">
-              <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>سود تحقق‌یافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>مدیریت حجم</th></tr></thead>
-              <tbody id="pt-positions-body"></tbody>
-            </table>
-            </div>
-            <p class="pt-positions-total" id="pt-positions-total"></p>
-            <div class="pt-payoff" id="pt-payoff">
-              <div class="pt-payoff-head">
-                <p class="eyebrow">منحنی بازده سبد در سررسید</p>
-                <b id="pt-payoff-summary">—</b>
-              </div>
-              <div class="pt-payoff-chart" id="pt-payoff-chart"></div>
-              <p class="pt-save-state" id="pt-payoff-state" role="status" aria-live="polite"></p>
-            </div>
-            <p class="pt-field-error" id="pt-positions-undocumented" hidden></p>
-          </section>
-
-          <section class="pt-proposals pt-live" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
-            <div class="pt-proposals-head">
-              <div><p class="eyebrow">پیشنهاد اجراپذیر</p><h3 id="pt-proposals-title">طرح‌های در دسترس با این مأموریت</h3></div>
-            </div>
-            <p class="pt-save-state" id="pt-proposals-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، طرح‌های در دسترس اینجا می‌آیند.</p>
-            <table class="pt-proposals-table">
-              <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم (تومان)</th><th>بیشترین سود (تومان)</th><th>بیشترین زیان (تومان)</th><th>چرا این جایگاه</th><th>کیفیت</th><th>انتخاب</th></tr></thead>
-              <tbody id="pt-proposals-body"></tbody>
-            </table>
-            <p class="eyebrow" id="pt-proposals-aside-title" hidden>کنار گذاشته‌شده‌ها و نامعلوم‌ها</p>
-            <table class="pt-proposals-table pt-proposals-aside-table" id="pt-proposals-aside" hidden>
-              <thead><tr><th>استراتژی</th><th>وضعیت</th><th>علت</th><th>کیفیت</th></tr></thead>
-              <tbody id="pt-proposals-aside-body"></tbody>
-            </table>
-          </section>
 
           <div class="pt-stage-actions"><button type="button" class="primary" id="pt-start-mission">قفل مأموریت و عکس شروع</button><p class="pt-save-state" id="pt-mission-state" role="status" aria-live="polite">هدف، مبنای بازده، درصد هدف و افق نگهداری را صریح وارد کن.</p></div>
           <small class="pt-field-error" id="pt-mission-error" hidden></small>
         </section>
+        </div>
+
+          <div class="pt-panel" data-panel="timeline" hidden>
+            <section class="pt-clock pt-live" id="pt-clock" aria-labelledby="pt-clock-title" hidden>
+            <div class="pt-clock-head">
+            <div><p class="eyebrow">ساعت جلسه</p><h3 id="pt-clock-title">لحظه‌ای که جلسه روی آن ایستاده</h3></div>
+            <b class="pt-clock-now" id="pt-clock-now">—</b>
+            </div>
+            <div class="pt-clock-steps" id="pt-clock-steps" role="group" aria-label="پله‌های زمانی"></div>
+            <div class="pt-play" id="pt-play" role="group" aria-label="پخش خودکار">
+            <button type="button" class="primary" id="pt-play-toggle">پخش خودکار</button>
+            <label class="field pt-play-speed"><span>سرعت</span><select id="pt-play-speed"></select></label>
+            <b class="pt-play-step" id="pt-play-step">—</b>
+            </div>
+            <p class="pt-save-state" id="pt-play-state" role="status" aria-live="polite">پخش خودکار روی رویدادِ مهم خودش می‌ایستد.</p>
+            <ul class="pt-play-halt" id="pt-play-halt" hidden></ul>
+            <p class="pt-save-state" id="pt-clock-state" role="status" aria-live="polite">جلسه روی لحظهٔ شروع ایستاده است.</p>
+            <p class="pt-field-error" id="pt-clock-warn" hidden></p>
+            </section>
+
+            <section class="pt-series pt-live" id="pt-series" aria-labelledby="pt-series-title" hidden>
+            <div class="section-head">
+            <div><p class="eyebrow">سود و زیان در مسیر</p><h3 id="pt-series-title">هر لحظه‌ای که از آن رد شدی</h3></div>
+            <label class="pt-series-mode"><input type="checkbox" id="pt-series-carry"><span>پیوسته‌سازی با آخرین قیمت معلوم</span></label>
+            </div>
+            <p class="pt-save-state" id="pt-series-state" role="status" aria-live="polite">با هر گام زمانی، یک نقطه به این مسیر افزوده می‌شود.</p>
+            <p class="pt-field-error" id="pt-series-estimated" hidden></p>
+            <div class="pt-series-chart" id="pt-series-chart"></div>
+            <small class="hint" id="pt-series-scale"></small>
+            <table class="pt-series-table">
+            <thead><tr><th>لحظه</th><th>سود و زیان کل (تومان)</th><th>بازده روی سرمایه</th><th>محقق‌شده</th><th>تحقق‌نیافته</th><th>موقعیت باز</th></tr></thead>
+            <tbody id="pt-series-body"></tbody>
+            </table>
+            <div class="pt-series-head">
+            <p class="eyebrow">به تفکیک استراتژی</p>
+            <label class="field pt-series-pick"><span>لحظه</span><select id="pt-series-pick"></select></label>
+            </div>
+            <table class="pt-series-table">
+            <thead><tr><th>استراتژی</th><th>خانواده</th><th>حجم باز</th><th>سود و زیان (تومان)</th><th>بازده روی سرمایهٔ خودش</th><th>محقق‌شده</th><th>تحقق‌نیافته</th><th>وضعیت داده</th></tr></thead>
+            <tbody id="pt-series-strategies"></tbody>
+            </table>
+            </section>
+          </div>
+
+          <div class="pt-panel" data-panel="strategies" hidden>
+            <section class="pt-proposals pt-live" id="pt-proposals" aria-labelledby="pt-proposals-title" hidden>
+            <div class="pt-proposals-head">
+            <div><p class="eyebrow">پیشنهاد اجراپذیر</p><h3 id="pt-proposals-title">طرح‌های در دسترس با این مأموریت</h3></div>
+            <label class="field pt-family-pick"><span>کدام خانواده؟</span><select id="pt-proposals-family" aria-describedby="pt-proposals-family-note"></select></label>
+            </div>
+            <p class="hint" id="pt-proposals-family-note" hidden></p>
+            <p class="pt-save-state" id="pt-proposals-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، طرح‌های در دسترس اینجا می‌آیند.</p>
+            <table class="pt-proposals-table">
+            <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم (تومان)</th><th>بیشترین سود (تومان)</th><th>بیشترین زیان (تومان)</th><th>چرا این جایگاه</th><th>کیفیت</th><th>انتخاب</th></tr></thead>
+            <tbody id="pt-proposals-body"></tbody>
+            </table>
+            <p class="eyebrow" id="pt-proposals-aside-title" hidden>کنار گذاشته‌شده‌ها و نامعلوم‌ها</p>
+            <table class="pt-proposals-table pt-proposals-aside-table" id="pt-proposals-aside" hidden>
+            <thead><tr><th>استراتژی</th><th>وضعیت</th><th>علت</th><th>کیفیت</th></tr></thead>
+            <tbody id="pt-proposals-aside-body"></tbody>
+            </table>
+            </section>
+            <section class="pt-eligibility pt-live" id="pt-eligibility" aria-labelledby="pt-eligibility-title" hidden>
+            <div class="pt-eligibility-head">
+            <div><p class="eyebrow">مدرک خام اجراپذیری</p><h3 id="pt-eligibility-title">حکم قراردادها در لحظه شروع</h3></div>
+            <div class="pt-eligibility-filters" aria-label="فیلتر حکم قراردادها">
+            <button type="button" class="ghost" data-pt-eligibility-filter="all" aria-pressed="true">همه</button>
+            <button type="button" class="ghost" data-pt-eligibility-filter="accepted" aria-pressed="false">پذیرفته</button>
+            <button type="button" class="ghost" data-pt-eligibility-filter="rejected" aria-pressed="false">ردشده</button>
+            </div>
+            </div>
+            <p class="pt-save-state" id="pt-eligibility-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، حکم‌های عکس قفل‌شده اینجا می‌آیند.</p>
+            <table class="pt-eligibility-table">
+            <thead><tr><th>قرارداد</th><th>سمت</th><th>حکم</th><th>علت‌های رد</th><th>کیفیت</th><th>سقف اجرا</th></tr></thead>
+            <tbody id="pt-eligibility-body"></tbody>
+            </table>
+            </section>
+          </div>
+
+          <div class="pt-panel" data-panel="basket" hidden>
+            <section class="pt-ledger pt-live" id="pt-ledger" aria-labelledby="pt-ledger-title" hidden>
+            <div class="pt-ledger-head">
+            <div><p class="eyebrow">دفتر سرمایه</p><h3 id="pt-ledger-title">چقدر درگیر شده و چقدر جا مانده</h3></div>
+            </div>
+            <p class="pt-save-state" id="pt-ledger-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، وضعیت سرمایه اینجا می‌آید.</p>
+            <dl class="pt-ledger-figures" id="pt-ledger-figures"></dl>
+            <table class="pt-ledger-table">
+            <thead><tr><th>قید ریسک</th><th>اکنون</th><th>حد مأموریت</th><th>فاصله</th><th>حکم</th></tr></thead>
+            <tbody id="pt-ledger-risk"></tbody>
+            </table>
+            <p class="pt-ledger-families" id="pt-ledger-families"></p>
+            <p class="pt-field-error" id="pt-ledger-unpriced" hidden></p>
+            </section>
+
+            <section class="pt-positions pt-live" id="pt-positions" aria-labelledby="pt-positions-title" hidden>
+            <div class="pt-positions-head">
+            <div><p class="eyebrow">موقعیت‌های جلسه</p><h3 id="pt-positions-title">چه چیزی در دست است</h3></div>
+            </div>
+            <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
+            <div class="pt-table-scroll">
+            <table class="pt-positions-table">
+            <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>سود تحقق‌یافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>مدیریت حجم</th></tr></thead>
+            <tbody id="pt-positions-body"></tbody>
+            </table>
+            </div>
+            <p class="pt-positions-total" id="pt-positions-total"></p>
+            <div class="pt-payoff" id="pt-payoff">
+            <div class="pt-payoff-head">
+            <p class="eyebrow">منحنی بازده سبد در سررسید</p>
+            <b id="pt-payoff-summary">—</b>
+            </div>
+            <div class="pt-payoff-chart" id="pt-payoff-chart"></div>
+            <p class="pt-save-state" id="pt-payoff-state" role="status" aria-live="polite"></p>
+            </div>
+            <p class="pt-field-error" id="pt-positions-undocumented" hidden></p>
+            </section>
+          </div>
+
+          <div class="pt-panel" data-panel="dossier" hidden>
+            <section class="pt-closeout pt-live" id="pt-closeout" aria-labelledby="pt-closeout-title" hidden>
+            <div class="pt-closeout-head">
+            <div><p class="eyebrow">پایان جلسه</p><h3 id="pt-closeout-title">بستن جلسه و پروندهٔ پایان</h3></div>
+            <button type="button" class="ghost" id="pt-closeout-do" data-pt-keep-enabled="true">بستن جلسه</button>
+            </div>
+            <p class="pt-field-error" id="pt-closeout-warn" hidden></p>
+            <p class="pt-save-state" id="pt-closeout-state" role="status" aria-live="polite"></p>
+            <div class="pt-closeout-dossier" id="pt-closeout-dossier" hidden>
+            <dl class="pt-closeout-figures" id="pt-closeout-figures"></dl>
+            <section class="pt-dossier-analysis" id="pt-dossier-analysis" aria-labelledby="pt-dossier-analysis-title">
+            <h4 id="pt-dossier-analysis-title">سرمایه نهایی و فاصله از هدف</h4>
+            <dl class="pt-dossier-analysis-figures" id="pt-dossier-analysis-figures"></dl>
+            <p class="pt-dossier-analysis-state" id="pt-dossier-analysis-state"></p>
+            <ul class="pt-dossier-analysis-issues" id="pt-dossier-analysis-issues" hidden></ul>
+            </section>
+            <section class="pt-dossier-analysis" id="pt-final-ranking" aria-labelledby="pt-final-ranking-title">
+            <h4 id="pt-final-ranking-title">رتبه انتخاب‌ها در پایان بازی</h4>
+            <dl class="pt-dossier-analysis-figures" id="pt-final-ranking-figures"></dl>
+            <p class="pt-dossier-analysis-state" id="pt-final-ranking-state"></p>
+            </section>
+            <section class="pt-capital-continuity" id="pt-capital-continuity" aria-labelledby="pt-capital-continuity-title">
+            <div class="pt-capital-continuity-head">
+            <div><p class="eyebrow">سفر بعدی</p><h4 id="pt-capital-continuity-title">ادامه زنجیره سرمایه</h4></div>
+            <b id="pt-capital-continuity-amount">—</b>
+            </div>
+            <dl class="pt-capital-continuity-source" id="pt-capital-continuity-source"></dl>
+            <section class="pt-capital-growth" id="pt-capital-growth" aria-labelledby="pt-capital-growth-title">
+            <div class="pt-capital-growth-head">
+            <h5 id="pt-capital-growth-title">روند قطعی سرمایه</h5>
+            <b id="pt-capital-growth-summary">—</b>
+            </div>
+            <p id="pt-capital-growth-state" role="status">روند پس از اعتبارسنجی زنجیره آماده می‌شود.</p>
+            <div class="pt-capital-growth-rows" id="pt-capital-growth-rows"></div>
+            </section>
+            <p id="pt-capital-continuity-state" role="status" aria-live="polite"></p>
+            <button type="button" class="primary" id="pt-capital-continuity-do" aria-describedby="pt-capital-continuity-state" disabled>جلسه بعد با این سرمایه</button>
+            </section>
+            <section class="pt-dossier-weakness" id="pt-dossier-weakness" aria-labelledby="pt-dossier-weakness-title">
+            <div class="pt-dossier-weakness-head">
+            <h4 id="pt-dossier-weakness-title">یافته‌های مستند پرونده</h4>
+            <b id="pt-dossier-weakness-summary"></b>
+            </div>
+            <div class="pt-dossier-weakness-rows" id="pt-dossier-weakness-rows"></div>
+            </section>
+            <div class="pt-dossier-export" id="pt-dossier-export">
+            <button type="button" class="ghost" id="pt-dossier-export-do" aria-describedby="pt-dossier-export-state" disabled>دانلود Excel پرونده</button>
+            <p id="pt-dossier-export-state" role="status" aria-live="polite">پرونده‌ای برای خروجی آماده نیست.</p>
+            </div>
+            <section class="pt-dossier-compare" id="pt-dossier-compare" aria-labelledby="pt-dossier-compare-title">
+            <div class="pt-dossier-compare-head">
+            <h4 id="pt-dossier-compare-title">مقایسه با نزدیک‌ترین پرونده قدیمی‌تر</h4>
+            <b id="pt-dossier-compare-base"></b>
+            </div>
+            <p class="pt-dossier-compare-state" id="pt-dossier-compare-state" role="status" aria-live="polite"></p>
+            <div class="pt-dossier-compare-identities" id="pt-dossier-compare-identities" hidden></div>
+            <div class="pt-dossier-compare-metrics" id="pt-dossier-compare-metrics"></div>
+            <div class="pt-dossier-compare-findings" id="pt-dossier-compare-findings"></div>
+            </section>
+            <p class="pt-closeout-open" id="pt-closeout-open" hidden></p>
+            <table class="pt-closeout-table" id="pt-closeout-table" hidden>
+            <thead><tr><th>موقعیت</th><th>حجم بسته‌شده</th><th>نقد خروج</th><th>تحقق‌یافته</th></tr></thead>
+            <tbody id="pt-closeout-body"></tbody>
+            </table>
+            </div>
+            </section>
+          </div>
+
       </div>
 
       <aside class="card pt-review">
@@ -447,6 +500,17 @@ export async function mount(root, { state, api }) {
   </div>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
+
+  // ترتیب همان ترتیبِ کارِ کاربر است: مأموریت را می‌بندد، در زمان حرکت
+  // می‌کند، استراتژی می‌سنجد، سبد را می‌بیند، و در پایان پرونده می‌گیرد.
+  const PT_TABS = [
+    { id: 'setup', label: 'راه‌اندازی', hint: 'سرمایه، نماد، بازه و قفل مأموریت' },
+    { id: 'timeline', label: 'تایم‌لاین', hint: 'حرکت در بازه و سود و زیان هر لحظه' },
+    { id: 'strategies', label: 'استراتژی‌ها', hint: 'پیشنهادهای اجراپذیر و حکم هر قرارداد' },
+    { id: 'basket', label: 'سبد', hint: 'موقعیت‌ها، دفتر سرمایه و پایش قیود' },
+    { id: 'dossier', label: 'پرونده', hint: 'بستن جلسه، تحلیل ضعف و خروجی' },
+  ];
+  let tabsApi = null;
   const capital = $('pt-capital'), reserve = $('pt-reserve'), base = $('pt-base');
   const outlookStep = $('pt-outlook-step'), riskStep = $('pt-risk-step');
   const allocationStep = $('pt-allocation-step'), allocationRowsRoot = $('pt-allocation-rows');
@@ -914,6 +978,10 @@ export async function mount(root, { state, api }) {
       // دنبال خرابیِ خوراک می‌گردد در حالی که خوراک درست جواب داده است.
       // خط `openInterest` پایین‌تر از اول همین‌طور درست بود.
       underlyingDailyValueRial: valueRial(priced.baseTrade?.value ?? point.trade?.value),
+      // سند باید نماد پایه را با نام بشناساند، نه فقط با کد هفده‌رقمی.
+      // نام از زنجیرهٔ همان تاریخ می‌آید؛ اگر نیامد `null` می‌ماند و سند
+      // «ثبت نشده» می‌نویسد، نه یک نامِ حدسی.
+      baseName: priced.baseName ?? null,
       contracts: priced.rows.map((row) => ({
         ins: row.ins, name: row.name, kind: row.kind, strike: row.strike,
         expiry: row.expiry, size: row.size,
@@ -1576,14 +1644,81 @@ export async function mount(root, { state, api }) {
     warn.textContent = view.undocumentedText;
   }
 
+  /**
+   * پنج تب استودیو.
+   *
+   * تا پیش از قفل مأموریت، پشت چهار تبِ زنده هیچ‌چیز نیست؛ تبی که به
+   * صفحهٔ خالی می‌رسد بدتر از نبودِ تب است، پس نوار تا آن لحظه نمی‌آید و
+   * فقط پنل راه‌اندازی دیده می‌شود.
+   *
+   * `mountSubtabs` نوارِ بی‌تغییر را دوباره نمی‌سازد، پس تبی که کاربر
+   * انتخاب کرده با هر بازنقاشیِ زنده سرِ جایش می‌ماند. پنل‌ها هم از سند
+   * بیرون نمی‌روند و فقط `hidden` می‌شوند، پس هر `$('pt-…')` در همین فایل
+   * مثل قبل کار می‌کند.
+   */
+  function paintTabs(session) {
+    const host = $('pt-tabs');
+    const live = session?.state === 'active' || session?.state === 'closed';
+    host.hidden = !live;
+    if (!live) {
+      for (const tab of PT_TABS) {
+        const panel = root.querySelector(`[data-panel="${tab.id}"]`);
+        if (panel) panel.hidden = tab.id !== 'setup';
+      }
+      tabsApi = null;
+      return;
+    }
+    // بار اول روی «تایم‌لاین» می‌نشیند: کاربر تازه مأموریت را قفل کرده و
+    // کارِ بعدی‌اش حرکت در زمان است، نه بازخواندن فرم.
+    tabsApi = mountSubtabs(host, PT_TABS, { root, initial: 'timeline' });
+  }
+
+  // ── انتخاب دومرحله‌ای خانواده ───────────────────────────────────────
+  //
+  // «همه» گزینهٔ نخست می‌ماند: مقایسهٔ بین خانواده‌ها همان چیزی است که
+  // رتبه‌بندی برایش ساخته شده، و برداشتنش یعنی کاربر مجبور باشد پیش از
+  // دیدن هر چیزی یکی را حدس بزند.
+  let proposalFamily = '';
+
+  function paintFamilyPicker(view) {
+    const pick = $('pt-proposals-family');
+    const note = $('pt-proposals-family-note');
+    const families = view.ok ? view.families : [];
+    // فقط خانواده‌هایی که در **این لحظه** طرح رتبه‌دار دارند. فهرست کاملِ
+    // کاتالوگ یعنی کاربر خانواده‌ای را انتخاب کند و جدولِ خالی بگیرد.
+    const key = families.map((row) => `${row.id}:${row.count}`).join('|');
+    if (pick.dataset.key !== key) {
+      pick.innerHTML = `<option value="">همه خانواده‌ها</option>${families
+        .map((row) => `<option value="${esc(row.id)}">${esc(row.label)} — ${esc(faDigits(String(row.count)))} طرح</option>`).join('')}`;
+      pick.dataset.key = key;
+      pick.value = families.some((row) => row.id === proposalFamily) ? proposalFamily : '';
+    }
+    // اگر خانوادهٔ انتخابی طرحش را از دست داده، انتخاب بی‌صدا نمی‌ماند.
+    if (view.ok && proposalFamily && view.familyId !== proposalFamily) {
+      proposalFamily = view.familyId;
+      pick.value = proposalFamily;
+    }
+    note.hidden = !view.ok || !view.familyNote;
+    note.textContent = view.ok ? view.familyNote : '';
+  }
+
+  $('pt-proposals-family').onchange = (event) => {
+    proposalFamily = String(event.target.value || '');
+    if (proposalSession) paintProposals(proposalSession);
+  };
+
   function paintProposals(session) {
     proposalSession = session;
+    paintTabs(session);
     // یک نقطهٔ فراخوانی: نوار سرمایه و پیشنهادها همیشه از یک جلسه ساخته
     // می‌شوند. دو فراخوانی جدا یعنی روزی یکی جا می‌ماند و کاربر وضعیت یک
     // جلسه را کنار پیشنهاد جلسهٔ دیگر می‌بیند.
     paintWatch(session);
     paintCloseout(session);
     paintClock(session);
+    paintPlayback();
+    captureSeriesPoint(session);
+    paintSeries(session);
     paintLedger(session);
     paintPositions(session);
     paintPayoff(session);
@@ -1597,7 +1732,8 @@ export async function mount(root, { state, api }) {
     }
     const section = $('pt-proposals');
     const evidence = portfolioSessionEligibility(session);
-    const view = portfolioSessionProposals(session, evidence);
+    const view = portfolioSessionProposals(session, evidence, { familyId: proposalFamily });
+    paintFamilyPicker(view);
     const asideTable = $('pt-proposals-aside');
     const asideTitle = $('pt-proposals-aside-title');
     if (!view.ok) {
@@ -2235,16 +2371,225 @@ export async function mount(root, { state, api }) {
     return { rows: priced.rows, spot: priced.spot, universe: priced.universe };
   }
 
-  $('pt-clock').onclick = async (event) => {
-    const button = event.target.closest('[data-pt-step]');
-    if (!button || button.disabled || !proposalSession) return;
-    const stepped = stepPortfolioSession(proposalSession, button.dataset.ptStep,
+  // ── مسیر سود و زیان ────────────────────────────────────────────────
+  //
+  // نقطه‌ها همان‌جا که از آن‌ها رد می‌شویم برداشته می‌شوند، نه با بازخوانیِ
+  // بعدیِ کل بازه. دلیلش داده است، نه سرعت: مدرک اجراپذیریِ یک لحظهٔ گذشته
+  // فقط وقتی در دست است که جلسه روی همان لحظه ایستاده باشد. ساختنِ بعدیِ
+  // آن یعنی برای هر پله یک عکس تازه بگیریم — و عکسی که آن موقع گرفته نشد،
+  // امروز همان چیزی نیست که کاربر آن لحظه دید.
+  //
+  // پیامدش صریح گفته می‌شود: این مسیر، لحظه‌هایی است که در **همین اجرا** از
+  // آن‌ها رد شدی. بارگذاری دوباره، مسیر را از لحظهٔ جاری از نو شروع می‌کند.
+  let seriesSteps = [];
+  let seriesCarry = false;
+
+  /** لحظهٔ جاری را به مسیر اضافه می‌کند — تکراری و عقب‌رفته نه. */
+  function captureSeriesPoint(session) {
+    const at = session?.now;
+    const key = momentKey(at);
+    if (!Number.isFinite(key)) return;
+    const last = seriesSteps[seriesSteps.length - 1];
+    if (last && momentKey(last.at) >= key) return;
+    seriesSteps.push({
+      at: { ...at },
+      evidence: slimTimelineEvidence(portfolioSessionEligibility(session)),
+    });
+  }
+
+  function paintSeries(session) {
+    const section = $('pt-series');
+    const live = session?.state === 'active' || session?.state === 'closed';
+    section.hidden = !live;
+    if (!live) return;
+    const view = portfolioTimelineView(portfolioTimeline(session, seriesSteps,
+      { mode: seriesCarry ? 'carry' : 'strict' }));
+    const body = $('pt-series-body');
+    if (!view.ok) {
+      // نمودارِ خالی شبیه «هیچ سودی نبود» دیده می‌شود؛ علت گفته می‌شود.
+      $('pt-series-state').textContent = view.why || 'هنوز نقطه‌ای در مسیر نیست.';
+      $('pt-series-chart').innerHTML = '';
+      $('pt-series-scale').textContent = '';
+      $('pt-series-estimated').hidden = true;
+      body.innerHTML = '<tr class="pt-series-empty"><td colspan="6">—</td></tr>';
+      paintSeriesStrategies(view);
+      return;
+    }
+    $('pt-series-state').textContent = `${view.headlineText} · مسیرِ همین اجرا`;
+    $('pt-series-estimated').hidden = !view.estimatedNote;
+    $('pt-series-estimated').textContent = view.estimatedNote;
+    // مقیاسِ رنگ گفته می‌شود، وگرنه «پررنگ» معنایی ندارد.
+    $('pt-series-scale').textContent = view.scaleText === '—'
+      ? 'هیچ پلهٔ معلومی در مسیر نیست، پس رنگ مقیاسی ندارد.'
+      : `شدت رنگ نسبت به بزرگ‌ترین سود یا زیانِ این مسیر است: ${view.scaleText} تومان.`;
+    trackChart($('pt-series-chart'), view.chartPoints, view.chartSeries,
+      { money: true, timeScale: true, xLabel: 'ساعت جلسه', yLabel: 'سود و زیان (تومان)' });
+    body.innerHTML = view.steps.map((step) => `<tr data-tone="${esc(step.totalTone)}" data-level="${esc(String(step.totalLevel))}">
+      <td data-label="لحظه">${esc(step.atText)}${step.estimated ? '<br><small>تخمینی</small>' : ''}</td>
+      <td data-label="سود و زیان کل" class="n"><b>${esc(step.totalText)}</b>${step.partial
+        ? `<br><small>${esc(step.partialText)}</small>` : ''}</td>
+      <td data-label="بازده روی سرمایه" class="n">${esc(step.returnPctText)}</td>
+      <td data-label="محقق‌شده" class="n">${esc(step.realizedText)}</td>
+      <td data-label="تحقق‌نیافته" class="n">${esc(step.unrealizedText)}</td>
+      <td data-label="موقعیت باز">${esc(step.openText)}</td>
+    </tr>`).join('') || '<tr class="pt-series-empty"><td colspan="6">—</td></tr>';
+    paintSeriesStrategies(view);
+  }
+
+  /**
+   * جدولِ یک لحظه، به تفکیک استراتژی.
+   *
+   * لحظه انتخابی است نه همیشه آخری: کاربر روی نمودار یک قله می‌بیند و
+   * می‌خواهد بداند کدام استراتژی آن را ساخته. نشان‌دادن همیشگیِ آخرین
+   * لحظه یعنی آن سؤال بی‌جواب می‌ماند.
+   */
+  function paintSeriesStrategies(view) {
+    const pick = $('pt-series-pick');
+    const body = $('pt-series-strategies');
+    const keys = view.ok ? view.steps.map((step) => step.atText) : [];
+    // فهرست فقط وقتی از نو ساخته می‌شود که واقعاً عوض شده باشد؛ وگرنه
+    // انتخابِ کاربر با هر گام به آخرین لحظه برمی‌گشت.
+    if (pick.dataset.keys !== keys.join('|')) {
+      const keep = pick.value;
+      pick.innerHTML = keys.map((label, index) => `<option value="${index}">${esc(label)}</option>`).join('');
+      pick.dataset.keys = keys.join('|');
+      pick.value = keys.length && Number(keep) < keys.length && keep !== ''
+        ? keep : String(Math.max(0, keys.length - 1));
+    }
+    const step = view.ok ? view.steps[Number(pick.value) || 0] : null;
+    if (!step || !step.rows.length) {
+      body.innerHTML = '<tr class="pt-series-empty"><td colspan="8">در این لحظه استراتژی‌ای در سبد نبود.</td></tr>';
+      return;
+    }
+    body.innerHTML = step.rows.map((row) => `<tr data-tone="${esc(row.tone)}" data-level="${esc(String(row.level))}">
+      <td data-label="استراتژی">${esc(row.label)}</td>
+      <td data-label="خانواده">${esc(row.familyText)}</td>
+      <td data-label="حجم باز">${esc(row.openQtyText)} · ${esc(row.statusText)}</td>
+      <td data-label="سود و زیان" class="n"><b>${esc(row.pnlText)}</b></td>
+      <td data-label="بازده روی سرمایهٔ خودش" class="n">${esc(row.pnlPctText)}</td>
+      <td data-label="محقق‌شده" class="n">${esc(row.realizedText)}</td>
+      <td data-label="تحقق‌نیافته" class="n">${esc(row.unrealizedText)}</td>
+      <td data-label="وضعیت داده">${row.known
+        ? (row.estimated ? `<b>تخمینی</b><br><small>${esc(row.estimatedText)}</small>` : 'مشاهده‌شده')
+        : `<b>نامعلوم</b><br><small>${esc(row.why)}</small>`}</td>
+    </tr>`).join('');
+  }
+
+  $('pt-series-pick').onchange = () => {
+    if (proposalSession) paintSeries(proposalSession);
+  };
+
+  $('pt-series-carry').onchange = (event) => {
+    seriesCarry = event.target.checked === true;
+    if (proposalSession) paintSeries(proposalSession);
+  };
+
+  // ── پخش خودکار ──────────────────────────────────────────────────────
+  //
+  // حلقهٔ خودزمان‌بند، نه `setInterval`: هر گام یک واکشی و یک ذخیرهٔ سرور
+  // دارد و ممکن است از فاصلهٔ انتخابی بلندتر شود. با `setInterval` گام‌ها
+  // روی هم می‌افتادند و جلسه دو بار از یک لحظه رد می‌شد.
+  let playing = false;
+  let playTimer = null;
+  let playSpeed = 'normal';
+
+  /**
+   * وضعیت ایست در **لحظهٔ جاری**.
+   *
+   * پیش از هر گام سنجیده می‌شود، نه بعدش: اگر بعد از گام بسنجیم، پخش یک
+   * پله از رویداد رد می‌شود و ساعت جلسه به عقب برنمی‌گردد — یعنی همان
+   * لحظه‌ای که کاربر باید می‌دید، برای همیشه رفته است.
+   */
+  function haltNow(session) {
+    const evidence = portfolioSessionEligibility(session);
+    const watch = portfolioRiskWatch(session, evidence);
+    // سود و زیانِ همین یک لحظه، از همان موتور سری زمانی — تا عددِ ایست با
+    // عددِ جدول یکی باشد.
+    const series = portfolioTimeline(session, [{ at: session.now, evidence }], { mode: 'strict' });
+    const pnlRial = series.ok ? series.steps[0].totalPnlRial : null;
+    const clock = portfolioClockView(session, { days: dates, expiryDate: expiryOf(session) });
+    return portfolioPlaybackHalt(session, { watch, pnlRial, clock });
+  }
+
+  function paintPlayback(halt = null) {
+    const toggle = $('pt-play-toggle');
+    const step = playbackStep(proposalSession);
+    toggle.textContent = playing ? 'توقف پخش' : 'پخش خودکار';
+    toggle.disabled = !proposalSession || proposalSession.state !== 'active' || !step;
+    $('pt-play-step').textContent = step ? `هر گام: ${step.label}` : '—';
+    const list = $('pt-play-halt');
+    const reasons = halt?.reasons || [];
+    list.hidden = reasons.length === 0;
+    list.innerHTML = reasons.map((row) => `<li>${esc(row.why)}${row.detail
+      ? ` — ${esc(faDigits(String(row.detail)))}` : ''}</li>`).join('');
+  }
+
+  function stopPlayback(why = '') {
+    playing = false;
+    if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+    if (why) $('pt-play-state').textContent = why;
+    paintPlayback();
+  }
+
+  async function playTick() {
+    if (!playing || !proposalSession) return;
+    const halt = haltNow(proposalSession);
+    if (halt.halt) {
+      playing = false;
+      playTimer = null;
+      // توقفِ بی‌توضیح از نایستادن بدتر است: کاربر فکر می‌کند رابط خراب شده.
+      $('pt-play-state').textContent = `پخش ایستاد — ${halt.reasons.map((row) => row.why).join('؛ ')}`;
+      paintPlayback(halt);
+      return;
+    }
+    const step = playbackStep(proposalSession);
+    if (!step) { stopPlayback('تایم‌فریم بازپخش این جلسه معلوم نیست'); return; }
+    $('pt-play-state').textContent = `در حال پخش — گام ${step.label}`;
+    const moved = await advanceClock(step);
+    if (!moved.ok) { stopPlayback(`پخش ایستاد — ${moved.why}`); return; }
+    if (!playing) return;
+    playTimer = setTimeout(playTick, PLAYBACK_SPEED_BY_KEY[playSpeed].ms);
+  }
+
+  $('pt-play-speed').innerHTML = PLAYBACK_SPEEDS
+    .map((row) => `<option value="${esc(row.key)}"${row.key === playSpeed ? ' selected' : ''}>${esc(row.label)}</option>`).join('');
+  $('pt-play-speed').onchange = (event) => { playSpeed = event.target.value; };
+
+  $('pt-play-toggle').onclick = () => {
+    if (playing) { stopPlayback('پخش را متوقف کردی'); return; }
+    // دکمه تا پیش از قفل مأموریت غیرفعال است، ولی نگهبانِ دوم لازم است:
+    // دکمهٔ غیرفعالی که کلیکش بی‌صدا هیچ نکند، `playing` را روشن می‌گذارد
+    // و دفعهٔ بعد کاربر باید دو بار بزند تا چیزی شروع شود.
+    if (!proposalSession || proposalSession.state !== 'active') {
+      $('pt-play-state').textContent = 'تا قفل‌شدن مأموریت، لحظه‌ای برای پخش نیست.';
+      return;
+    }
+    playing = true;
+    paintPlayback();
+    playTick();
+  };
+
+  // وضعیت آغازین دکمه: تا اینجا هیچ جلسه‌ای نیست، پس پخش هم نیست.
+  // `paintPlayback` فقط از مسیر بازنقاشیِ زنده صدا زده می‌شود و آن مسیر
+  // پیش از فعال‌شدن جلسه اصلاً اجرا نمی‌شود.
+  paintPlayback();
+
+  /**
+   * یک گام زمانی — چه دستی و چه در پخش خودکار.
+   *
+   * یک مسیر، نه دو: اگر پخش خودکار مسیر خودش را داشت، روزی یکی از دو
+   * مسیر ذخیره روی سرور یا بازنقاشی را جا می‌انداخت و جلسه‌ای جلو می‌رفت
+   * که سرور از آن خبر نداشت.
+   */
+  async function advanceClock(step) {
+    if (!proposalSession) return { ok: false, why: 'جلسه‌ای در کار نیست' };
+    const stepped = stepPortfolioSession(proposalSession, step,
       { days: dates, expiryDate: expiryOf(proposalSession) });
     if (!stepped.ok) {
       // «تقویم تمام شد» و «از پایان جلسه رد می‌شود» دو چیزند و متن
       // خودشان را دارند.
       $('pt-clock-state').textContent = stepResultText(stepped);
-      return;
+      return { ok: false, why: stepResultText(stepped) };
     }
     root.querySelectorAll('[data-pt-step]').forEach((control) => { control.disabled = true; });
     $('pt-clock-state').textContent = 'در حال بریدن خوراک‌ها در لحظهٔ تازه…';
@@ -2253,7 +2598,7 @@ export async function mount(root, { state, api }) {
     if (!built.ok) {
       $('pt-clock-state').textContent = built.why;
       paintClock(proposalSession);
-      return;
+      return { ok: false, why: built.why };
     }
     const next = { ...stepped.session, momentSnapshot: built.snapshot };
     const nextDraft = draft?.step === 'active'
@@ -2261,8 +2606,9 @@ export async function mount(root, { state, api }) {
     const saved = nextDraft ? await persist(nextDraft) : null;
     if (!saved?.ok) {
       paintClock(proposalSession);
-      $('pt-clock-state').textContent = `حرکت زمان نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
-      return;
+      const why = `حرکت زمان نهایی نشد — ${saved?.why || 'جلسه فعال قابل ذخیره نبود'}`;
+      $('pt-clock-state').textContent = why;
+      return { ok: false, why };
     }
     draft = nextDraft;
     // هر چهار بخش فقط پس از تأیید سرور از همین یک نقطه دوباره رسم می‌شوند.
@@ -2278,6 +2624,15 @@ export async function mount(root, { state, api }) {
         + `${built.missing.spot ? ' و قیمت پایه ناموجود' : ''}؛`
         + ' جدول‌های زیر کمتر از واقعیت‌اند.'
       : '';
+    return { ok: true, why: '', session: next };
+  }
+
+  $('pt-clock').onclick = async (event) => {
+    const button = event.target.closest('[data-pt-step]');
+    if (!button || button.disabled || !proposalSession) return;
+    // گام دستی وسط پخش، یعنی کاربر خودش هدایت را پس گرفته.
+    if (playing) stopPlayback('پخش با گام دستی متوقف شد');
+    await advanceClock(button.dataset.ptStep);
   };
 
   $('pt-positions').onclick = async (event) => {
@@ -2382,6 +2737,9 @@ export async function mount(root, { state, api }) {
     if (feed.note !== feedNote) { feedNote = feed.note || ''; paintSymbols(state.watch); }
   });
   return () => {
+    // پخشی که پس از بستن تب زنده بماند، جلسه را در پس‌زمینه جلو می‌برد و
+    // کاربر لحظه‌ای را از دست می‌دهد که هیچ‌وقت ندیده.
+    stopPlayback();
     historyRequests.invalidate();
     unwatch?.(); unfeed?.(); setupDraft = null; outlookDraft = null; riskDraft = null;
     allocationDraft = null; missionDraft = null; draft = null;

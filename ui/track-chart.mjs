@@ -43,11 +43,37 @@ export function axisTitles(xLabel, yLabel, geo) {
     ${yLabel ? `<text class="axis-title" x="${16}" y="${cy}" text-anchor="middle" transform="rotate(-90 16 ${cy})">${yLabel}</text>` : ''}`;
 }
 
+/**
+ * عددِ یک میدان، یا `NaN` اگر نبود.
+ *
+ * `Number(null)` صفر است — و صفر روی نمودار یک نقطهٔ واقعی است، نه شکاف.
+ * پس نبودِ داده با `Number.isFinite(Number(x))` سنجیده نمی‌شود، وگرنه
+ * «سود این لحظه نامعلوم است» به «سود این لحظه صفر بود» تبدیل می‌شود و
+ * کاربر از شکل نمودار نتیجه می‌گیرد.
+ */
+const cell = (row, key) => {
+  const raw = row?.[key];
+  if (raw === null || raw === undefined || raw === '' || typeof raw === 'boolean') return NaN;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : NaN;
+};
+
 export function chart(host, points, series, { money = false, count = false, timeScale = false, step = false, xLabel, yLabel } = {}) {
-  const rows = points.filter((point) => series.some((item) => Number.isFinite(Number(point[item.key]))));
-  if (rows.length < 2) { host.innerHTML = '<p class="empty-note">برای نمودار دست‌کم دو نقطه معتبر لازم است.</p>'; return; }
+  // ── ردیفِ بی‌داده حذف نمی‌شود، فقط از دو سر بریده می‌شود ────────────
+  //
+  // پیش از این هر ردیفِ بی‌عدد از فهرست بیرون می‌رفت. نتیجه‌اش دو خطا با
+  // هم بود: شکافِ میانی اصلاً دیده نمی‌شد، و در مقیاس اندیسی نقطه‌های
+  // بعدی به چپ می‌لغزیدند، پس محور زمان دروغ می‌گفت. حالا فقط ردیف‌های
+  // بی‌دادهٔ ابتدا و انتها بریده می‌شوند — آن‌ها فضای مرده‌اند، نه شکاف —
+  // و هر شکافِ میانی سرِ جایش می‌ماند.
+  const filled = points.map((point) => series.some((item) => Number.isFinite(cell(point, item.key))));
+  const firstFilled = filled.indexOf(true);
+  const rows = firstFilled === -1 ? [] : points.slice(firstFilled, filled.lastIndexOf(true) + 1);
+  if (rows.filter((_, index) => filled[firstFilled + index]).length < 2) {
+    host.innerHTML = '<p class="empty-note">برای نمودار دست‌کم دو نقطه معتبر لازم است.</p>'; return;
+  }
   const W = 900, H = 348, L = 104, R = 28, T = 28, B = 68;
-  const values = rows.flatMap((row) => series.map((item) => Number(row[item.key])).filter(Number.isFinite));
+  const values = rows.flatMap((row) => series.map((item) => cell(row, item.key)).filter(Number.isFinite));
   let lo = Math.min(0, ...values), hi = Math.max(0, ...values);
   if (Math.abs(hi - lo) < 1e-9) { lo -= 1; hi += 1; }
   const pad = (hi - lo) * 0.08; lo = count ? 0 : lo - pad; hi += pad;
@@ -71,13 +97,32 @@ export function chart(host, points, series, { money = false, count = false, time
   const seriesLabel = (item) => esc(item.label);
 
   const timeTicks = timeScale ? [9 * 3600, 10 * 3600, 11 * 3600, 12 * 3600, INTRADAY_END_SECOND] : [];
-  const seriesShape = (item) => {
-    const values = rows.map((row, index) => Number.isFinite(Number(row[item.key])) ? { x: x(row, index), y: y(Number(row[item.key])) } : null).filter(Boolean);
-    if (!values.length) return '';
+  // ── شکافِ داده با خط پر نمی‌شود ─────────────────────────────────────
+  //
+  // پیش از این همهٔ نقاطِ معتبر یک سری، بی‌توجه به فاصله‌شان، به یک چندخطی
+  // وصل می‌شدند؛ یعنی نقطه‌ای که داده نداشت با یک خط مستقیم پُر می‌شد.
+  // آن خط، دادهٔ ساختگی است: کاربر مسیری می‌بیند که هیچ‌وقت مشاهده نشده و
+  // از شکلش نتیجه می‌گیرد. حالا هر بازهٔ پیوسته خطِ خودش را دارد و شکاف،
+  // شکاف می‌ماند.
+  const runsOf = (item) => {
+    const runs = [];
+    let run = [];
+    rows.forEach((row, index) => {
+      const value = cell(row, item.key);
+      if (Number.isFinite(value)) run.push({ x: x(row, index), y: y(value) });
+      else if (run.length) { runs.push(run); run = []; }
+    });
+    if (run.length) runs.push(run);
+    return runs;
+  };
+  const seriesShape = (item) => runsOf(item).map((values) => {
+    // نقطهٔ تنها میان دو شکاف خط نمی‌شود؛ بدون دایره اصلاً دیده نمی‌شد و
+    // «داده نبود» با «داده بود ولی نکشیدیمش» یکی به نظر می‌رسید.
+    if (values.length === 1) return `<circle cx="${values[0].x}" cy="${values[0].y}" r="3" fill="${item.color}"/>`;
     if (!step) return `<polyline fill="none" stroke="${item.color}" points="${values.map((point) => `${point.x},${point.y}`).join(' ')}"/>`;
     const d = values.slice(1).reduce((path, point) => `${path} H ${point.x} V ${point.y}`, `M ${values[0].x} ${values[0].y}`);
     return `<path fill="none" stroke="${item.color}" d="${d}"/>`;
-  };
+  }).join('');
 
   host.innerHTML = `<div class="backtest-chart-legend">${legend.map((item) => `<span style="--series:${item.color}"><i></i>${seriesLabel(item)}</span>`).join('')}</div><div class="backtest-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار تعاملی بک‌تست">
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="backtest-grid"/><text x="${L - 10}" y="${y(value) + 4}" text-anchor="end">${label(value)}</text>`).join('')}
@@ -96,14 +141,14 @@ export function chart(host, points, series, { money = false, count = false, time
     const row = rows[index], px = x(row, index);
     cursor.hidden = false;
     cursor.querySelector('line').setAttribute('x1', px); cursor.querySelector('line').setAttribute('x2', px);
-    cursor.querySelector('g').innerHTML = series.map((item) => Number.isFinite(Number(row[item.key])) ? `<circle cx="${px}" cy="${y(Number(row[item.key]))}" r="4" fill="${item.color}"/>` : '').join('');
+    cursor.querySelector('g').innerHTML = series.map((item) => Number.isFinite(cell(row, item.key)) ? `<circle cx="${px}" cy="${y(cell(row, item.key))}" r="4" fill="${item.color}"/>` : '').join('');
     // تاریخ نقطه، از خودِ نقطه. اگر نقطه تاریخ نداشته باشد، «—» درست‌تر از
     // «NaN/NaN/NaN» است و درست‌تر از تاریخی که از جای دیگری قرض گرفته شده.
     const stamp = Number.isFinite(Number(row.date)) ? dateLabel(row.date) : '—';
     const when = row.granularity === 'trade'
       ? `${stamp} · ${faDigits(row.timeLabel ?? '')}`
       : faDigits(row.dateLabel || (Number.isFinite(Number(row.date)) ? historyDateLabel(row.date) : '—'));
-    tip.innerHTML = `<b>${when}</b>${series.map((item) => Number.isFinite(Number(row[item.key])) ? `<span style="--series:${item.color}"><i></i>${seriesLabel(item)}: <strong class="${signTone(row[item.key])}">${tipLabel(row[item.key])}</strong></span>` : '').join('')}`;
+    tip.innerHTML = `<b>${when}</b>${series.map((item) => Number.isFinite(cell(row, item.key)) ? `<span style="--series:${item.color}"><i></i>${seriesLabel(item)}: <strong class="${signTone(cell(row, item.key))}">${tipLabel(cell(row, item.key))}</strong></span>` : '').join('')}`;
     tip.hidden = false;
     const box = host.getBoundingClientRect();
     tip.style.left = `${Math.max(8, Math.min(box.width - 190, clientX - box.left + 12))}px`;

@@ -55,8 +55,14 @@ group('۱۵۰. هشدارهای مسیر در تب');
       < near150.rows.findIndex((row) => row.state === 'clear'));
   const tabSrc150 = readSrc('../ui/tabs/portfolio-time.mjs');
   // نوار بالای همه‌چیز است، حتی بالای ساعت.
-  check('نوار هشدار بالای ساعت و همهٔ بخش‌ها می‌نشیند',
+  // با تب‌دارشدن استودیو، «بالای همه» دیگر کافی نیست: هشداری که پشت تبِ
+  // غیرفعال بماند، وقتی کاربر در تایم‌لاین جلو می‌رود اصلاً دیده نمی‌شود.
+  // پس نوار هشدار بیرون از پنل‌ها و بالای خودِ نوار تب می‌نشیند و در هر
+  // تبی دیده می‌شود.
+  check('نوار هشدار بالای نوار تب و بیرون از پنل‌ها می‌نشیند',
     tabSrc150.indexOf('id="pt-watch"') > 0
+    && tabSrc150.indexOf('id="pt-watch"') < tabSrc150.indexOf('id="pt-tabs"')
+    && tabSrc150.indexOf('id="pt-watch"') < tabSrc150.indexOf('data-panel="setup"')
     && tabSrc150.indexOf('id="pt-watch"') < tabSrc150.indexOf('id="pt-clock"')
     && tabSrc150.indexOf('id="pt-watch"') < tabSrc150.indexOf('id="pt-ledger"'));
   check('و اول از همه رسم می‌شود',

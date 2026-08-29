@@ -144,9 +144,10 @@ group('۱۳۶. موقعیت‌های جلسه در تب');
       .every((id) => tabSrc136.includes(`id="${id}"`)));
   // ترتیب: اول چقدر جا مانده، بعد چه چیزی در دست است، بعد چه می‌شود ثبت
   // کرد.
-  check('موقعیت‌ها زیر نوار سرمایه و بالای پیشنهادها می‌نشینند',
-    tabSrc136.indexOf('id="pt-ledger"') < tabSrc136.indexOf('id="pt-positions"')
-    && tabSrc136.indexOf('id="pt-positions"') < tabSrc136.indexOf('id="pt-proposals"')
+  check('موقعیت‌ها زیر نوار سرمایه، هر دو در تب سبد',
+    tabSrc136.indexOf('data-panel="basket"') < tabSrc136.indexOf('id="pt-ledger"')
+    && tabSrc136.indexOf('id="pt-ledger"') < tabSrc136.indexOf('id="pt-positions"')
+    && tabSrc136.indexOf('id="pt-positions"') < tabSrc136.indexOf('data-panel="dossier"')
     && tabSrc136.indexOf('id="pt-ledger"') > 0);
   check('هر سه بخش از یک جلسه رسم می‌شوند',
     /function paintProposals\(session\)\s*\{[\s\S]{0,500}?paintLedger\(session\);[\s\S]{0,120}?paintPositions\(session\);/

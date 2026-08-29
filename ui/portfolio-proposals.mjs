@@ -72,6 +72,10 @@ function fail(reason, now = null, why = '') {
     setAside: [],
     counts: null,
     limit: 0,
+    families: [],
+    familyId: '',
+    familyLabel: '',
+    familyNote: '',
   };
 }
 
@@ -96,7 +100,7 @@ function rejectedEvidenceWhy(evidence) {
  * `evidence` همان مدرک اجراپذیریِ هم‌لحظه است — تب از قبل دارد و اینجا
  * دوباره ساخته نمی‌شود.
  */
-export function portfolioSessionProposals(session, evidence, { limit = 3 } = {}) {
+export function portfolioSessionProposals(session, evidence, { limit = 3, familyId = '' } = {}) {
   const now = session?.startSnapshot?.at ?? null;
 
   const plans = portfolioRankedPlans(session, evidence, { limit });
@@ -108,7 +112,39 @@ export function portfolioSessionProposals(session, evidence, { limit = 3 } = {})
 
   const byCandidate = plans.sources;
 
-  const shortlist = ranked.shortlist.map((row) => {
+  // ── انتخاب دومرحله‌ای خانواده ───────────────────────────────────────
+  //
+  // صافیِ خانواده **پیش از** بریدنِ سقف اعمال می‌شود. اگر بعدش بود، سقفِ
+  // سه‌تایی از میان همهٔ خانواده‌ها برداشته می‌شد و خانواده‌ای که بهترین
+  // طرحش رتبهٔ چهارم است، خالی به نظر می‌رسید — در حالی که طرح دارد.
+  //
+  // رتبه‌ها همان رتبهٔ سراسری می‌مانند و از نو شماره نمی‌خورند: «رتبهٔ ۱»
+  // در فهرستِ فیلترشده یعنی بهترین طرحِ کل، نه بهترین طرحِ همین خانواده.
+  const familyOf = (candidateId) => {
+    const def = byCandidate.get(candidateId)?.defId;
+    return text(def ? byId(def)?.group : '');
+  };
+  const families = [];
+  const seenFamily = new Map();
+  for (const row of ranked.ranked) {
+    const id = familyOf(row.candidateId);
+    if (!id) continue;
+    if (!seenFamily.has(id)) {
+      seenFamily.set(id, { id, label: STRATEGY_FAMILIES[id] || id, count: 0 });
+      families.push(seenFamily.get(id));
+    }
+    seenFamily.get(id).count += 1;
+  }
+  const wanted = text(familyId);
+  // خانواده‌ای که در این لحظه طرحی ندارد، صافیِ معتبری نیست: انتخابش یعنی
+  // جدولِ خالیِ بی‌توضیح. «همه» جایش می‌نشیند و علتش گفته می‌شود.
+  const activeFamily = wanted && seenFamily.has(wanted) ? wanted : '';
+  const chosen = activeFamily
+    ? ranked.ranked.filter((row) => familyOf(row.candidateId) === activeFamily)
+    : ranked.ranked;
+  const visible = chosen.slice(0, ranked.limit);
+
+  const shortlist = visible.map((row) => {
     const source = byCandidate.get(row.candidateId);
     const payoff = source?.evaluation?.payoff ?? null;
     const quality = qualityText(source?.evaluation?.quality);
@@ -160,6 +196,14 @@ export function portfolioSessionProposals(session, evidence, { limit = 3 } = {})
     limit: ranked.limit,
     shortlist,
     setAside,
+    families,
+    familyId: activeFamily,
+    familyLabel: activeFamily ? seenFamily.get(activeFamily).label : 'همه خانواده‌ها',
+    familyNote: wanted && !activeFamily
+      ? `خانوادهٔ خواسته‌شده در این لحظه طرح رتبه‌داری ندارد، پس فهرست همهٔ خانواده‌ها نشان داده می‌شود`
+      : (activeFamily && chosen.length > visible.length
+        ? `${faDigits(String(chosen.length))} طرح در این خانواده رتبه گرفت؛ ${faDigits(String(visible.length))} تای نخست نشان داده می‌شود`
+        : ''),
     counts: ranked.counts,
     countsText: `${faDigits(String(ranked.counts.total))} ترکیب · `
       + `${faDigits(String(ranked.counts.ranked))} رتبه‌دار · `

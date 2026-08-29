@@ -239,7 +239,9 @@ group('۱۷۵. حرکت مسیر، تغییر حجم، آفست و ماندگا�
     await fs.access(dir175).then(() => false, () => true));
 
   const tab175 = readSrc('../ui/tabs/portfolio-time.mjs');
-  const clock175 = tab175.slice(tab175.indexOf("$('pt-clock').onclick"),
+  // مسیر گام زمانی از دکمه بیرون آمد و `advanceClock` شد تا پخش خودکار
+  // همان مسیر را برود؛ ترتیبِ «اول سرور، بعد رسم» همان‌جاست.
+  const clock175 = tab175.slice(tab175.indexOf('async function advanceClock('),
     tab175.indexOf("$('pt-positions').onclick"));
   const adjust175 = tab175.slice(tab175.indexOf("$('pt-positions').onclick"),
     tab175.indexOf("$('pt-eligibility').onclick"));

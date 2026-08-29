@@ -684,6 +684,40 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 
 .pt-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, .32fr); gap: var(--space-4); align-items: start; }
 .pt-main { display: grid; gap: var(--space-4); min-width: 0; }
+/* ── پنل‌های پنج‌تبی استودیو ──
+   هر پنل یک خانهٔ `.pt-main` است، پس فاصلهٔ میان بخش‌هایش باید خودش را
+   داشته باشد؛ وگرنه با تب‌دارشدن، کارت‌های داخل یک تب به هم می‌چسبند.
+   `[hidden]` بعد از `display` می‌آید تا بر آن غالب باشد. */
+/* ── مسیر سود و زیان ──
+   رنگِ ردیف از بزرگیِ خودِ عدد می‌آید (سه پله در هر سمت)، نه از نوبت ردیف.
+   `data-tone` جهت را می‌گوید و `data-level` شدت را؛ مقیاسش کنار جدول
+   نوشته می‌شود تا «پررنگ» معنی داشته باشد. */
+.pt-series-mode { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 700; }
+.pt-series-chart { margin: var(--space-3) 0; min-height: 120px; }
+.pt-series-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.pt-series-table th, .pt-series-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: start; }
+.pt-series-table td.n { font-variant-numeric: tabular-nums; }
+.pt-series-table tr[data-tone="gain"][data-level="1"] { background: color-mix(in srgb, var(--gain) 6%, transparent); }
+.pt-series-table tr[data-tone="gain"][data-level="2"] { background: color-mix(in srgb, var(--gain) 14%, transparent); }
+.pt-series-table tr[data-tone="gain"][data-level="3"] { background: color-mix(in srgb, var(--gain) 24%, transparent); }
+.pt-series-table tr[data-tone="loss"][data-level="1"] { background: color-mix(in srgb, var(--loss) 6%, transparent); }
+.pt-series-table tr[data-tone="loss"][data-level="2"] { background: color-mix(in srgb, var(--loss) 14%, transparent); }
+.pt-series-table tr[data-tone="loss"][data-level="3"] { background: color-mix(in srgb, var(--loss) 24%, transparent); }
+/* صفر پلهٔ خودش را دارد: نه سبزِ کم‌رنگ، نه قرمزِ کم‌رنگ. */
+.pt-series-table tr[data-tone="flat"] { background: var(--panel-2); }
+.pt-series-empty td { color: var(--muted); text-align: center; }
+.pt-series-head { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-4); }
+.pt-series-pick { min-width: 200px; }
+
+/* ── کنترل پخش خودکار تایم‌لاین ── */
+.pt-play { display: flex; align-items: end; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-3); }
+.pt-play-speed { min-width: 120px; }
+.pt-play-step { color: var(--muted); font-size: var(--fs-sm); font-weight: 800; }
+.pt-play-halt { margin: var(--space-2) 0 0; padding-inline-start: 1.2em; color: var(--loss); font-size: var(--fs-sm); }
+.pt-play-halt li { margin: 2px 0; }
+.pt-panel { display: grid; gap: var(--space-4); min-width: 0; }
+.pt-panel[hidden] { display: none; }
+.pt-panel:focus { outline: none; }
 .pt-card { margin: 0; }
 .pt-card .section-head b[role="status"] { color: var(--muted); font-size: var(--fs-sm); }
 .pt-card .section-head b[data-error] { color: var(--loss); }

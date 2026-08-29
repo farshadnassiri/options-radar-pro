@@ -61,5 +61,5 @@ group('۱۷۲. هویت تاریخچه هنگام تغییر سریع نماد �
   check('نماد تغییرنکرده درخواست تاریخ تکراری نمی‌سازد',
     /if \(!ins \|\| ins === loadedIns\) return;/.test(tab172));
   check('بستن تب پاسخ‌های در راه را باطل می‌کند',
-    /return \(\) => \{\s*historyRequests\.invalidate\(\);/.test(tab172));
+    /return \(\) => \{[\s\S]{0,320}?historyRequests\.invalidate\(\);/.test(tab172));
 }

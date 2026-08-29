@@ -201,15 +201,28 @@ group('۱۳۴. دفتر سرمایه در تب');
       .every((id) => tabSrc134.includes(`id="${id}"`)));
   // نوار سرمایه بالای پیشنهادها می‌نشیند: کاربر پیش از انتخاب طرح باید
   // بداند اصلاً چقدر جا مانده.
-  check('نوار سرمایه پیش از جدول پیشنهادها رسم می‌شود',
-    tabSrc134.indexOf('id="pt-ledger"') < tabSrc134.indexOf('id="pt-proposals"')
+  // ادعا همان است، ساختار عوض شده: پیشنهادها حالا تب خودشان را دارند، پس
+  // «پیش از پیشنهادها» دیگر ترتیبِ یک صفحهٔ بلند نیست. چیزی که هنوز
+  // معنی دارد این است که در تب سبد، اول «چقدر جا مانده» بیاید و بعد «چه
+  // چیزی در دست است».
+  check('نوار سرمایه در تب سبد پیش از موقعیت‌ها رسم می‌شود',
+    tabSrc134.indexOf('data-panel="basket"') < tabSrc134.indexOf('id="pt-ledger"')
+    && tabSrc134.indexOf('id="pt-ledger"') < tabSrc134.indexOf('id="pt-positions"')
     && tabSrc134.indexOf('id="pt-ledger"') > 0);
+  check('و جدول پیشنهادها تب جدای خودش را دارد',
+    tabSrc134.indexOf('data-panel="strategies"') < tabSrc134.indexOf('id="pt-proposals"')
+    && tabSrc134.indexOf('id="pt-proposals"') < tabSrc134.indexOf('data-panel="basket"'));
   // یک نقطهٔ فراخوانی یعنی هیچ‌وقت نوار یک جلسه کنار پیشنهاد جلسهٔ دیگر
   // دیده نمی‌شود — همان درسی که شمردنِ فراخوانی‌ها در دستهٔ ۱۳۱ داد.
+  // پیش‌درآمدِ `paintProposals` — از سرِ تابع تا جایی که خودش سراغ جدول
+  // پیشنهادها می‌رود. پنجرهٔ کاراکتری اینجا بود و با هر بخشِ تازه باید
+  // بزرگ‌تر می‌شد؛ پنجره‌ای که مدام بزرگ می‌شود دیگر چیزی را قفل نمی‌کند.
   const paintBody134 = tabSrc134.slice(tabSrc134.indexOf('function paintProposals'));
+  const prologue134 = paintBody134.slice(0, paintBody134.indexOf('committedIds.clear()'));
   check('پیشنهادها و نوار سرمایه همیشه از یک جلسه ساخته می‌شوند',
-    /function paintProposals\(session\)\s*\{[\s\S]{0,400}?paintLedger\(session\);/
-      .test(paintBody134));
+    /function paintProposals\(session\)/.test(prologue134)
+    && prologue134.includes('paintLedger(session);')
+    && (prologue134.match(/paintLedger\(session\);/g) || []).length === 1);
   check('شناسه‌های بخش دفتر با پیش‌نمایش سرمایهٔ اولیه تصادم ندارند',
     !tabSrc134.includes('id="pt-ledger-error"')
     && (tabSrc134.match(/id="pt-capital"/g) || []).length === 1
