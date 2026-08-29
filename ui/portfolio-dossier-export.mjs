@@ -77,6 +77,17 @@ const missing = (value, why = 'مقدار در سند ثبت نشده') => [
   Number.isFinite(value) ? '' : why,
 ];
 
+/**
+ * نامِ نماد پایه، همان‌طور که در عکس شروع ثبت شده.
+ *
+ * پرونده‌های پیش از ثبتِ نام این میدان را ندارند؛ آن‌ها `null` می‌گیرند و
+ * سند «ثبت نشده» می‌نویسد. نامی از فهرست امروز جایش گذاشته نمی‌شود، چون
+ * نمادها تغییر نام می‌دهند و آن، نامِ آن روز نیست.
+ */
+function baseNameOf(session) {
+  return text(session?.startSnapshot?.baseName);
+}
+
 function qualityCells(quality) {
   return [
     text(quality?.kind), text(quality?.source), moment(quality?.asOf),
@@ -136,6 +147,8 @@ function fullGameSheets(session, dossier) {
     ['sessionId', 'شناسه جلسه', session.id, '', ''],
     ['portfolioId', 'شناسه سبد', session.portfolioId, '', ''],
     ['baseIns', 'نماد پایه', session.baseIns, '', ''],
+    ['baseName', 'نام نماد پایه در آن تاریخ', baseNameOf(session),
+      baseNameOf(session) ? '' : 'نام در زنجیرهٔ آن تاریخ نبود', ''],
     ['start', 'لحظه شروع', moment(session.start), '', ''],
     ['snapshotAt', 'لحظه عکس شروع', moment(snapshot.at), '', ''],
     ['spotRial', 'قیمت نماد پایه در شروع', ...missing(finite(snapshot.spot)), 'ریال'],
@@ -410,6 +423,7 @@ export function portfolioDossierWorkbook(session, dossier, {
         ['شناسه جلسه', session.id],
         ['شناسه سبد', session.portfolioId],
         ['نماد پایه', session.baseIns],
+        ['نام نماد پایه', baseNameOf(session) || 'نامعلوم — نام در پرونده ثبت نشده'],
         ['شروع', moment(session.start)],
         ['پایان برنامه', moment(session.end)],
         ['لحظه بستن', moment(session.closedAt)],

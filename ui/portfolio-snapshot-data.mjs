@@ -53,6 +53,21 @@ async function defaultUniverse(date) {
  *
  * قیمت اینجا خوانده نمی‌شود؛ فقط «چه قراردادهایی وجود داشتند».
  */
+/**
+ * نامِ خواندنیِ نماد پایه، یا `null`.
+ *
+ * `buildChain` وقتی تابلو نامی نداده، رشتهٔ جانشینِ «دارایی پایه بدون نام»
+ * می‌گذارد تا منوها خالی نمانند. آن رشته یک برچسبِ رابط است، نه نامِ نماد؛
+ * اگر در سند ثبت شود، خواننده‌ای که ماه‌ها بعد پرونده را باز می‌کند فکر
+ * می‌کند نام واقعاً همین بوده. پس اینجا به `null` تبدیل می‌شود تا نبودِ نام،
+ * نبود بماند.
+ */
+function readableName(name, baseIns) {
+  const label = text(name);
+  if (!label || label === text(baseIns)) return null;
+  return label === 'دارایی پایه بدون نام' ? null : label;
+}
+
 function identitiesFrom(rows, baseIns) {
   const chain = buildChain(rows || []);
   const ua = chain.get(text(baseIns));
@@ -77,7 +92,7 @@ function identitiesFrom(rows, baseIns) {
     }
   }
   const spot = num(ua.close) > 0 ? num(ua.close) : (num(ua.last) > 0 ? num(ua.last) : null);
-  return { spot, contracts };
+  return { spot, spotName: readableName(ua.name, baseIns), contracts };
 }
 
 function tradePrice(trade) {
@@ -133,7 +148,7 @@ export async function loadMomentContracts(session, at, {
   if (!baseIns) {
     return {
       version: SNAPSHOT_DATA_VERSION, ok: false,
-      why: 'نماد پایهٔ جلسه معلوم نیست', rows: [], spot: null,
+      why: 'نماد پایهٔ جلسه معلوم نیست', rows: [], spot: null, baseName: null,
       warnings: ['نماد پایهٔ جلسه معلوم نیست'], dropped: 0, archived: false,
       universe: null,
     };
@@ -152,7 +167,7 @@ export async function loadMomentContracts(session, at, {
     warnings.push('فهرست قراردادها از بایگانی آن تاریخ نیست؛ قرارداد سررسیدشده ممکن است جا افتاده باشد');
   }
 
-  const { spot, contracts } = identitiesFrom(payload?.rows, baseIns);
+  const { spot, spotName, contracts } = identitiesFrom(payload?.rows, baseIns);
   if (!contracts.length) warnings.push('برای این تاریخ قراردادی در فهرست نبود');
   const bounded = boundTo(contracts, spot, Math.max(1, Math.trunc(num(limit)) || 1));
   if (bounded.dropped > 0) {
@@ -222,6 +237,10 @@ export async function loadMomentContracts(session, at, {
     why: rows.length ? '' : 'برای این لحظه هیچ قراردادی به دست نیامد',
     rows,
     spot: num(momentSpot) > 0 ? num(momentSpot) : null,
+    // نامِ نماد پایه از زنجیرهٔ **همان تاریخ** می‌آید، نه از فهرست امروز؛
+    // نماد ممکن است بعداً تغییر نام داده باشد و سند باید نامِ آن روز را
+    // نگه دارد. نیامدنش `null` است و جایش چیزی ساخته نمی‌شود.
+    baseName: spotName,
     baseTrade: basePoint?.trade ?? null,
     baseTradeQuality: basePoint?.tradeQuality ?? null,
     baseQuote: historicalQuote(basePoint, at),

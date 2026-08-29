@@ -914,6 +914,10 @@ export async function mount(root, { state, api }) {
       // دنبال خرابیِ خوراک می‌گردد در حالی که خوراک درست جواب داده است.
       // خط `openInterest` پایین‌تر از اول همین‌طور درست بود.
       underlyingDailyValueRial: valueRial(priced.baseTrade?.value ?? point.trade?.value),
+      // سند باید نماد پایه را با نام بشناساند، نه فقط با کد هفده‌رقمی.
+      // نام از زنجیرهٔ همان تاریخ می‌آید؛ اگر نیامد `null` می‌ماند و سند
+      // «ثبت نشده» می‌نویسد، نه یک نامِ حدسی.
+      baseName: priced.baseName ?? null,
       contracts: priced.rows.map((row) => ({
         ins: row.ins, name: row.name, kind: row.kind, strike: row.strike,
         expiry: row.expiry, size: row.size,
