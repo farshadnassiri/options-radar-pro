@@ -22,7 +22,7 @@ import {
   histogramOption, parallelOption, raceOption, sankeyOption, scatterOption, treeOption,
   treemapOption, trendOption,
 } from '/ui/portfolio-analysis-view.mjs';
-import { RETURN_BASES, DEFAULT_RETURN_BASIS } from '/core/portfolio-basis.mjs';
+import { RETURN_BASES, DEFAULT_RETURN_BASIS, returnOnBasis } from '/core/portfolio-basis.mjs';
 import { STATISTICS, WEIGHTINGS, DEFAULT_STATISTIC, DEFAULT_WEIGHTING } from '/core/portfolio-stats.mjs';
 import {
   DEFAULT_HEATMAP_MODE, HEATMAP_MODES, METRICS, analyzePortfolio,
@@ -753,6 +753,70 @@ export async function mount(root, { state }) {
         gk(row.changePp), ivCell(row.min), ivCell(row.max)])).join('')}</tbody></table>`;
   }
 
+  /**
+   * همان ترکیب، در ساعت‌های مختلف روز سنجش.
+   *
+   * این «تایم‌فریم پایین» است: پنجرهٔ نگهداری همان است ولی لحظهٔ خروج ریزتر
+   * می‌شود. ریزمعامله فقط برای پاهای همین ترکیب و نماد پایه گرفته می‌شود —
+   * کل تابلو چند صد درخواست است و برای یک ترکیب لازم نیست.
+   *
+   * ساعتی که یکی از پاها تا آن لحظه معامله نشده باشد ردیف نمی‌سازد. این
+   * همان قاعدهٔ همیشگی است: نبودِ قیمت با قیمتِ دیروز پر نمی‌شود.
+   */
+  async function renderIntraday(item) {
+    const host = root.querySelector('#pb-intraday');
+    const note = root.querySelector('#pb-intraday-note');
+    const button = root.querySelector('#pb-intraday-run');
+    const endDate = Number($('pb-exit-date').dataset.value);
+    if (!endDate || !ua) { host.innerHTML = '<p class="empty-note">روز سنجش انتخاب نشده است.</p>'; return; }
+    button.disabled = true;
+    host.innerHTML = '<p class="empty-note">در حال دریافت ریزمعاملهٔ پاهای همین ترکیب…</p>';
+    try {
+      const codes = [...new Set([String(ua.ins), ...item.legs.map((leg) => String(leg.ins))])];
+      const settled = await Promise.allSettled(codes.map(async (ins) => {
+        const response = await fetch(`/api/trades?ins=${encodeURIComponent(ins)}&date=${endDate}`);
+        const payload = await response.json();
+        if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
+        return [ins, payload.rows || []];
+      }));
+      const tape = Object.fromEntries(settled.filter((row) => row.status === 'fulfilled').map((row) => row.value));
+      const failed = settled.filter((row) => row.status === 'rejected').length;
+      const rows = [];
+      for (const [second, label] of MARK_MOMENTS) {
+        const marked = applyIntradayMark(seriesByIns, marksAt(tape, second), { date: endDate, second });
+        if (!marked.marked) { rows.push({ label, ok: false, why: 'تا این ساعت هیچ پایی معامله نشده بود' }); continue; }
+        const replay = replayHistory({ ...replayArgs(item), seriesByIns: marked.series });
+        const final = replay.ok ? replay.rows.find((row) => row.date === endDate && row.status === 'ok') : null;
+        if (!final) { rows.push({ label, ok: false, why: 'یکی از پاها تا این ساعت قیمت نداشت' }); continue; }
+        rows.push({
+          label, ok: true, netPnl: final.netPnl,
+          pct: returnOnBasis(final.netPnl, {
+            marginGross: replay.entry.margin?.margin, marginNet: replay.entry.margin?.marginNet,
+            netCash: replay.entry.netCash, capital: replay.entry.capital?.value, notional: replay.entry.notional,
+          }, lens.basisId).pct,
+          // `marked.dropped` اینجا معنا ندارد: ریزمعامله عمداً فقط برای
+          // پاهای همین ترکیب گرفته شده، پس هر ابزار دیگری «افتاده» شمرده
+          // می‌شود در حالی که اصلاً پرسیده نشده. گزارشش، دروغِ آماری بود.
+          legs: final.perLeg.length,
+          exitAt: final.perLeg.map((leg) => leg.exitPrice),
+        });
+      }
+      const known = rows.filter((row) => row.ok);
+      const bound = heatScale(known.map((row) => row.pct));
+      host.innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>ساعت روز سنجش</th><th>سود/زیان</th><th>بازده (${esc(analysis?.basis?.short || '')})</th><th>قیمت خروج هر پا در این ساعت</th></tr></thead><tbody>${
+        rows.map((row) => {
+          if (!row.ok) return `<tr><td>${esc(row.label)}</td><td>—</td><td>—</td><td class="loss">${esc(row.why)}</td></tr>`;
+          const band = heatLevel(row.pct, bound);
+          return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}"><td>${esc(row.label)}</td><td class="${signTone(row.netPnl)}">${fmt.money(row.netPnl)}</td><td class="${signTone(row.pct)}">${pctCell(row.pct)}</td><td>${fmt.int(row.legs)} پا با قیمت ${row.exitAt.map((price) => fmt.money(price)).join(' / ')}</td></tr>`;
+        }).join('')}</tbody></table>`;
+      note.textContent = known.length
+        ? `${fmt.int(known.length)} ساعت از ${fmt.int(MARK_MOMENTS.length)} ساعت، برای همهٔ پاهای این ترکیب قیمت داشت. عددها میان‌روزی‌اند و پایانِ روز نیستند.${failed ? ` ریزمعاملهٔ ${fmt.int(failed)} ابزار دریافت نشد.` : ''}`
+        : 'در هیچ‌کدام از ساعت‌های جلسه، همهٔ پاهای این ترکیب قیمت نداشتند.';
+    } catch (error) {
+      host.innerHTML = `<p class="empty-note">${esc(errorText(error, 'ریزمعاملهٔ روز سنجش دریافت نشد.'))}</p>`;
+    } finally { button.disabled = false; }
+  }
+
   function showDetail(item) {
     root.querySelectorAll('[data-result]').forEach((row) => row.classList.toggle('selected', row.dataset.result === item.id));
     const detail = $('pb-detail'); detail.hidden = false;
@@ -761,6 +825,7 @@ export async function mount(root, { state }) {
     detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">ادامه در آزمایشگاه آپشن</button><button type="button" class="ghost" id="pb-live-watch">رصد زنده با معاملات امروز</button><button type="button" class="ghost" id="pb-greeks-watch">رصد یونانی و تلاطم</button></div></div><div id="pb-detail-result"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">قیمت دستی واقعی برای هر قرارداد</p><h2>بازمحاسبه بدون دست‌کاری قیمت سایر پاها</h2></div><button type="button" class="primary" id="pb-manual-run">بازمحاسبه دستی</button></div><div class="portfolio-manual">${replay.priced.map((leg, index) => `<label>${fmt.int(index + 1)} · ${esc(nameOf(leg, 'پایه'))}<input type="number" min="0" step="1" data-manual="${index}" value="${leg.price}"></label>`).join('')}</div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">حساسیت، در کنار سود</p><h2>یونانی‌ها و تلاطم این ترکیب</h2></div><span id="pb-greeks-state">—</span></div><p class="portfolio-note" id="pb-greeks-note"></p><div class="backtest-kpis" id="pb-greeks-kpis"></div><div class="history-analysis-grid"><div><div class="section-head"><h3>خلاصهٔ یونانی موقعیت</h3></div><div id="pb-greeks-summary" class="history-table-wrap"></div></div><div><div class="section-head"><h3>خلاصهٔ تلاطم</h3></div><div id="pb-vol-summary" class="history-table-wrap"></div></div></div></section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">تایم‌فریم پایین</p><h2>همین ترکیب، ساعت‌به‌ساعت روز سنجش</h2></div><button type="button" class="ghost" id="pb-intraday-run">سنجش ساعت‌به‌ساعت</button></div><p class="portfolio-note" id="pb-intraday-note">فقط ریزمعاملهٔ پاهای همین ترکیب و نماد پایه گرفته می‌شود، نه کل تابلو. ساعتی که هر سه پا تا آن لحظه معامله نشده باشند، ردیف نمی‌سازد — قیمت پایانی روز یا قیمت دیروز جایش نمی‌نشیند.</p><div id="pb-intraday" class="history-table-wrap"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">تحلیل حساسیت پویا</p><h2>اگر قیمت ورود یا مبنای خروج فرق می‌کرد</h2></div><div class="portfolio-shock-controls"><label>دامنه شوک<input id="pb-shock-range" type="number" min="1" max="50" step="1" value="10"></label><label>گام<input id="pb-shock-step" type="number" min="1" max="25" step="1" value="5"></label></div></div><div id="pb-sensitivity"></div></section>`;
     renderReplay(item, replay);
     renderGreeks(replay);
@@ -779,6 +844,7 @@ export async function mount(root, { state }) {
       const plan = handoffPlanFor(item, false);
       goHandoff(state, { ...plan, to: 'greeks-watch' }, 'greeks-watch');
     };
+    detail.querySelector('#pb-intraday-run').onclick = () => renderIntraday(item);
     const updateSensitivity = () => renderSensitivity(item, replayArgs(item));
     detail.querySelector('#pb-shock-range').oninput = updateSensitivity;
     detail.querySelector('#pb-shock-step').oninput = updateSensitivity;

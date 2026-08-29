@@ -69,3 +69,32 @@ group('۲۰۱. صفحهٔ تب‌بندی‌شدهٔ آزمون همه استر�
   check('نمودار با تغییر اندازهٔ ظرف بزرگ می‌شود',
     host201.includes('new ResizeObserver(() => instance.resize())'));
 }
+
+// ═══ تایم‌فریم پایین: همان ترکیب، ساعت‌به‌ساعت ═══
+group('۲۰۱-ب. تایم‌فریم پایین');
+{
+  check('ریزمعامله فقط برای پاهای همین ترکیب و نماد پایه گرفته می‌شود',
+    tab201.includes('const codes = [...new Set([String(ua.ins), ...item.legs.map((leg) => String(leg.ins))])];')
+    && tab201.slice(tab201.indexOf('async function renderIntraday(')).includes('/api/trades?ins='));
+  check('هر لحظهٔ جلسه یک ردیف می‌شود',
+    tab201.includes('for (const [second, label] of MARK_MOMENTS)'));
+  check('ساعتی که پایی قیمت نداشته، عدد جعل نمی‌کند',
+    tab201.includes("rows.push({ label, ok: false, why: 'تا این ساعت هیچ پایی معامله نشده بود' })")
+    && tab201.includes("rows.push({ label, ok: false, why: 'یکی از پاها تا این ساعت قیمت نداشت' })"));
+  // برشِ دقیقِ همان تابع، نه پنجرهٔ نویسه‌ای: پنجره با هر خط تازه‌ای که
+  // بالایش اضافه شود بی‌صدا از دست می‌رود.
+  const intraday201 = tab201.slice(tab201.indexOf('async function renderIntraday('),
+    tab201.indexOf('function showDetail(item) {'));
+  check('بازده ساعت‌به‌ساعت روی همان مبنای عدسی حساب می‌شود',
+    intraday201.includes('returnOnBasis(final.netPnl, {') && intraday201.includes('}, lens.basisId).pct,'));
+  // شمار «ابزارِ افتاده» اینجا دروغِ آماری بود: ریزمعامله عمداً فقط برای
+  // پاهای همین ترکیب گرفته می‌شود، پس هر ابزار دیگری «افتاده» شمرده می‌شد
+  // در حالی که اصلاً پرسیده نشده بود.
+  check('شمار ابزارِ افتاده گزارش نمی‌شود، چون پرسیده نشده بود',
+    !tab201.includes('dropped: marked.dropped,')
+    && !tab201.includes('ابزار دیگر تا این ساعت معامله نشده بود'));
+  check('به‌جایش قیمت واقعی هر پا در همان ساعت نشان داده می‌شود',
+    tab201.includes('exitAt: final.perLeg.map((leg) => leg.exitPrice),')
+    && tab201.includes('پا با قیمت'));
+  check('رنگ ردیف ساعت به عدد حساس است', intraday201.includes('heatLevel(row.pct, bound)'));
+}
