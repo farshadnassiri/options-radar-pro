@@ -4,6 +4,8 @@ import { CATALOG, GROUPS, byId } from '../strategies/catalog.mjs';
 import { generateHistoricalCombos, historyPrice, normalizeHistoryDate, replayHistory, rollingEntryMatrix } from '../core/history.mjs';
 import { summarizePortfolio } from '../core/portfolio.mjs';
 import { buildPnlMatrix } from '../core/portfolio-matrix.mjs';
+import { applyIntradayMark, marksAt } from '../core/intraday-mark.mjs';
+import { momentKey, momentsFor } from '../core/intraday-grid.mjs';
 
 self.onmessage = (event) => {
   const m = event.data;
@@ -55,6 +57,48 @@ self.onmessage = (event) => {
     if (m.type === 'rolling') {
       const result = rollingEntryMatrix(m.args);
       self.postMessage({ type: 'rolling', id: m.id, result });
+      return;
+    }
+
+    /**
+     * همان ترکیب‌های پذیرفته‌شده، ولی لحظه‌به‌لحظهٔ روز سنجش.
+     *
+     * ترکیب‌ها از نو ساخته نمی‌شوند — همان‌هایی‌اند که اجرای روزانه پذیرفت.
+     * دلیلش صرفاً سرعت نیست: اگر در هر لحظه از نو غربال می‌شد، فهرست
+     * استراتژی‌ها بین دو ستون فرق می‌کرد و نقشهٔ حرارتی ستون‌هایی با
+     * جمعیت‌های متفاوت نشان می‌داد — چیزی که هیچ‌کس نمی‌تواند بخواند.
+     *
+     * روزهای پیش از روز سنجش دست‌نخورده‌اند؛ فقط قیمت خروج عوض می‌شود.
+     */
+    if (m.type === 'portfolio-intraday') {
+      const moments = momentsFor(m.grain);
+      const rows = [];
+      const columns = [];
+      let priced = 0;
+      for (let index = 0; index < moments.length; index++) {
+        const second = moments[index];
+        const marked = applyIntradayMark(m.seriesByIns, marksAt(m.tape, second), { date: m.endDate, second });
+        columns.push({ key: momentKey(m.endDate, second), second, marked: marked.marked, dropped: marked.dropped });
+        if (!marked.marked) {
+          self.postMessage({ type: 'portfolio-intraday-progress', id: m.id, done: index + 1, total: moments.length, priced });
+          continue;
+        }
+        for (const combo of m.combos) {
+          const replay = replayHistory({
+            legs: combo.legs, seriesByIns: marked.series, baseIns: String(m.ua.ins),
+            startDate: m.startDate, endDate: m.endDate,
+            entryBasis: m.entryBasis, exitBasis: m.exitBasis,
+            units: m.units, fees: m.fees, settings: m.settings, liquidity: m.liquidity,
+          });
+          if (!replay.ok) continue;
+          const final = replay.rows.find((row) => row.date === Number(m.endDate));
+          if (!final || final.status !== 'ok' || !Number.isFinite(final.netPnl)) continue;
+          rows.push({ comboId: combo.id, key: momentKey(m.endDate, second), netPnl: final.netPnl });
+          priced += 1;
+        }
+        self.postMessage({ type: 'portfolio-intraday-progress', id: m.id, done: index + 1, total: moments.length, priced });
+      }
+      self.postMessage({ type: 'portfolio-intraday', id: m.id, columns, rows, moments: moments.length });
       return;
     }
 

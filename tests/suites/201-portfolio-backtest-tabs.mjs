@@ -67,7 +67,17 @@ group('۲۰۱. صفحهٔ تب‌بندی‌شدهٔ آزمون همه استر�
   check('سری کم‌شده روی نمودار نمی‌ماند',
     host201.includes('{ notMerge: true }'));
   check('نمودار با تغییر اندازهٔ ظرف بزرگ می‌شود',
-    host201.includes('new ResizeObserver(() => instance.resize())'));
+    host201.includes('new ResizeObserver((entries) =>') && host201.includes('instance.resize();'));
+  // `resize()` خودش بوم را عوض می‌کند؛ اگر ناظر روی هر شلیک کار کند، حلقه
+  // بسته می‌شود و نخِ اصلی می‌ایستد.
+  check('ناظر اندازه فقط روی تغییر واقعی کار می‌کند',
+    host201.includes('if (width === lastWidth && height === lastHeight) return;'));
+  check('ظرف پنهان اندازه‌گیری نمی‌شود',
+    host201.includes('if (width < 2 || height < 2) return;')
+    && host201.includes('if (box.width < 2 || box.height < 2) return;'));
+  check('انیمیشن نمودارها با تعویض پنل می‌خوابد',
+    host201.includes('stopAll() { for (const handle of handles.values()) handle.instance.stopAnimation?.(); }')
+    && tab201.includes('charts.stopAll();'));
 }
 
 // ═══ تایم‌فریم پایین: همان ترکیب، ساعت‌به‌ساعت ═══
