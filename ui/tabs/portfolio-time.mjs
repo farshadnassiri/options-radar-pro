@@ -327,6 +327,14 @@ export async function mount(root, { state, api }) {
             <thead><tr><th>لحظه</th><th>سود و زیان کل (تومان)</th><th>بازده روی سرمایه</th><th>محقق‌شده</th><th>تحقق‌نیافته</th><th>موقعیت باز</th></tr></thead>
             <tbody id="pt-series-body"></tbody>
             </table>
+            <div class="pt-series-head">
+            <p class="eyebrow">به تفکیک استراتژی</p>
+            <label class="field pt-series-pick"><span>لحظه</span><select id="pt-series-pick"></select></label>
+            </div>
+            <table class="pt-series-table">
+            <thead><tr><th>استراتژی</th><th>خانواده</th><th>حجم باز</th><th>سود و زیان (تومان)</th><th>بازده روی سرمایهٔ خودش</th><th>محقق‌شده</th><th>تحقق‌نیافته</th><th>وضعیت داده</th></tr></thead>
+            <tbody id="pt-series-strategies"></tbody>
+            </table>
             </section>
           </div>
 
@@ -2367,6 +2375,7 @@ export async function mount(root, { state, api }) {
       $('pt-series-scale').textContent = '';
       $('pt-series-estimated').hidden = true;
       body.innerHTML = '<tr class="pt-series-empty"><td colspan="6">—</td></tr>';
+      paintSeriesStrategies(view);
       return;
     }
     $('pt-series-state').textContent = `${view.headlineText} · مسیرِ همین اجرا`;
@@ -2387,7 +2396,51 @@ export async function mount(root, { state, api }) {
       <td data-label="تحقق‌نیافته" class="n">${esc(step.unrealizedText)}</td>
       <td data-label="موقعیت باز">${esc(step.openText)}</td>
     </tr>`).join('') || '<tr class="pt-series-empty"><td colspan="6">—</td></tr>';
+    paintSeriesStrategies(view);
   }
+
+  /**
+   * جدولِ یک لحظه، به تفکیک استراتژی.
+   *
+   * لحظه انتخابی است نه همیشه آخری: کاربر روی نمودار یک قله می‌بیند و
+   * می‌خواهد بداند کدام استراتژی آن را ساخته. نشان‌دادن همیشگیِ آخرین
+   * لحظه یعنی آن سؤال بی‌جواب می‌ماند.
+   */
+  function paintSeriesStrategies(view) {
+    const pick = $('pt-series-pick');
+    const body = $('pt-series-strategies');
+    const keys = view.ok ? view.steps.map((step) => step.atText) : [];
+    // فهرست فقط وقتی از نو ساخته می‌شود که واقعاً عوض شده باشد؛ وگرنه
+    // انتخابِ کاربر با هر گام به آخرین لحظه برمی‌گشت.
+    if (pick.dataset.keys !== keys.join('|')) {
+      const keep = pick.value;
+      pick.innerHTML = keys.map((label, index) => `<option value="${index}">${esc(label)}</option>`).join('');
+      pick.dataset.keys = keys.join('|');
+      pick.value = keys.length && Number(keep) < keys.length && keep !== ''
+        ? keep : String(Math.max(0, keys.length - 1));
+    }
+    const step = view.ok ? view.steps[Number(pick.value) || 0] : null;
+    if (!step || !step.rows.length) {
+      body.innerHTML = '<tr class="pt-series-empty"><td colspan="8">در این لحظه استراتژی‌ای در سبد نبود.</td></tr>';
+      return;
+    }
+    body.innerHTML = step.rows.map((row) => `<tr data-tone="${esc(row.tone)}" data-level="${esc(String(row.level))}">
+      <td data-label="استراتژی">${esc(row.label)}</td>
+      <td data-label="خانواده">${esc(row.familyText)}</td>
+      <td data-label="حجم باز">${esc(row.openQtyText)} · ${esc(row.statusText)}</td>
+      <td data-label="سود و زیان" class="n"><b>${esc(row.pnlText)}</b></td>
+      <td data-label="بازده روی سرمایهٔ خودش" class="n">${esc(row.pnlPctText)}</td>
+      <td data-label="محقق‌شده" class="n">${esc(row.realizedText)}</td>
+      <td data-label="تحقق‌نیافته" class="n">${esc(row.unrealizedText)}</td>
+      <td data-label="وضعیت داده">${row.known
+        ? (row.estimated ? `<b>تخمینی</b><br><small>${esc(row.estimatedText)}</small>` : 'مشاهده‌شده')
+        : `<b>نامعلوم</b><br><small>${esc(row.why)}</small>`}</td>
+    </tr>`).join('');
+  }
+
+  $('pt-series-pick').onchange = () => {
+    if (proposalSession) paintSeries(proposalSession);
+  };
 
   $('pt-series-carry').onchange = (event) => {
     seriesCarry = event.target.checked === true;

@@ -64,3 +64,45 @@ group('۱۹۳. مسیر سود و زیان در تب');
     /شدت رنگ نسبت به بزرگ‌ترین سود یا زیانِ این مسیر است/.test(tab193)
     && /هیچ پلهٔ معلومی در مسیر نیست، پس رنگ مقیاسی ندارد/.test(tab193));
 }
+
+group('۱۹۳ب. تفکیک استراتژی در مسیر');
+{
+  check('جدول تفکیک استراتژی و انتخابگر لحظه هستند',
+    ['pt-series-strategies', 'pt-series-pick'].every((id) => tab193.includes(`id="${id}"`))
+    && at('id="pt-series-strategies"') > at('id="pt-series-body"')
+    && at('id="pt-series-strategies"') < at('data-panel="strategies"'));
+
+  // ── لحظه انتخابی است، نه همیشه آخری ────────────────────────────────
+  // کاربر روی نمودار یک قله می‌بیند و می‌خواهد بداند کدام استراتژی آن را
+  // ساخته؛ نشان‌دادن همیشگیِ آخرین لحظه یعنی آن سؤال بی‌جواب می‌ماند.
+  check('لحظهٔ جدول تفکیک از انتخابگر خوانده می‌شود',
+    /const step = view\.ok \? view\.steps\[Number\(pick\.value\) \|\| 0\] : null;/.test(tab193)
+    && /\$\('pt-series-pick'\)\.onchange/.test(tab193));
+  check('و انتخابِ کاربر با هر گام به آخر برنمی‌گردد',
+    /if \(pick\.dataset\.keys !== keys\.join\('\|'\)\) \{/.test(tab193)
+    && /const keep = pick\.value;/.test(tab193));
+
+  // ── هر ستون از نما می‌آید ──────────────────────────────────────────
+  const rows193 = tab193.slice(at('function paintSeriesStrategies'),
+    at("$('pt-series-pick').onchange"));
+  check('ستون‌ها همه از مدل نمایش می‌آیند، نه حساب تازه در تب',
+    ['row.label', 'row.familyText', 'row.openQtyText', 'row.pnlText',
+      'row.pnlPctText', 'row.realizedText', 'row.unrealizedText'].every((key) => rows193.includes(key))
+    && !/[+\-*/]\s*10\b/.test(rows193));
+  check('درصد هر استراتژی مبنایش را در سرستون می‌گوید',
+    tab193.includes('<th>بازده روی سرمایهٔ خودش</th>'));
+
+  // ── سه وضعیت داده، سه متن ──────────────────────────────────────────
+  check('نامعلوم، تخمینی و مشاهده‌شده سه متن جدا دارند',
+    rows193.includes('نامعلوم') && rows193.includes('تخمینی')
+    && rows193.includes('مشاهده‌شده'));
+  check('نامعلوم علتش را می‌برد و تخمینی لحظهٔ منبعش را',
+    /<b>نامعلوم<\/b><br><small>\$\{esc\(row\.why\)\}/.test(rows193)
+    && /<b>تخمینی<\/b><br><small>\$\{esc\(row\.estimatedText\)\}/.test(rows193));
+  check('لحظهٔ بی‌استراتژی جمله می‌گیرد، نه جدول خالی',
+    /در این لحظه استراتژی‌ای در سبد نبود/.test(rows193));
+  check('و ردیف هر استراتژی هم رنگِ عددِ خودش را می‌گیرد',
+    /data-tone="\$\{esc\(row\.tone\)\}" data-level="\$\{esc\(String\(row\.level\)\)\}"/.test(rows193));
+  check('جدول تفکیک در هر دو مسیرِ موفق و ناموفق رسم می‌شود',
+    (tab193.match(/paintSeriesStrategies\(view\);/g) || []).length === 2);
+}

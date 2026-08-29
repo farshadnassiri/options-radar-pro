@@ -706,6 +706,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
 /* صفر پلهٔ خودش را دارد: نه سبزِ کم‌رنگ، نه قرمزِ کم‌رنگ. */
 .pt-series-table tr[data-tone="flat"] { background: var(--panel-2); }
 .pt-series-empty td { color: var(--muted); text-align: center; }
+.pt-series-head { display: flex; align-items: end; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-4); }
+.pt-series-pick { min-width: 200px; }
 
 /* ── کنترل پخش خودکار تایم‌لاین ── */
 .pt-play { display: flex; align-items: end; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-3); }
