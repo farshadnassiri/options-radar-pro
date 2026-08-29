@@ -27,7 +27,9 @@ import {
   PLAYBACK_SPEEDS, PLAYBACK_SPEED_BY_KEY, playbackStep, portfolioPlaybackHalt,
 } from '../../core/portfolio-playback.mjs';
 import { portfolioRiskWatch } from '../../core/portfolio-watch.mjs';
-import { portfolioTimeline } from '../../core/portfolio-timeline.mjs';
+import { portfolioTimeline, slimTimelineEvidence } from '../../core/portfolio-timeline.mjs';
+import { portfolioTimelineView } from '../portfolio-timeline-view.mjs';
+import { chart as trackChart } from '../track-chart.mjs';
 import { portfolioMomentSnapshot } from '../../core/portfolio-snapshot.mjs';
 import { mountSubtabs } from '../subtabs.mjs';
 import { portfolioClockView, stepResultText } from '../portfolio-clock-view.mjs';
@@ -310,6 +312,21 @@ export async function mount(root, { state, api }) {
             <ul class="pt-play-halt" id="pt-play-halt" hidden></ul>
             <p class="pt-save-state" id="pt-clock-state" role="status" aria-live="polite">جلسه روی لحظهٔ شروع ایستاده است.</p>
             <p class="pt-field-error" id="pt-clock-warn" hidden></p>
+            </section>
+
+            <section class="pt-series pt-live" id="pt-series" aria-labelledby="pt-series-title" hidden>
+            <div class="section-head">
+            <div><p class="eyebrow">سود و زیان در مسیر</p><h3 id="pt-series-title">هر لحظه‌ای که از آن رد شدی</h3></div>
+            <label class="pt-series-mode"><input type="checkbox" id="pt-series-carry"><span>پیوسته‌سازی با آخرین قیمت معلوم</span></label>
+            </div>
+            <p class="pt-save-state" id="pt-series-state" role="status" aria-live="polite">با هر گام زمانی، یک نقطه به این مسیر افزوده می‌شود.</p>
+            <p class="pt-field-error" id="pt-series-estimated" hidden></p>
+            <div class="pt-series-chart" id="pt-series-chart"></div>
+            <small class="hint" id="pt-series-scale"></small>
+            <table class="pt-series-table">
+            <thead><tr><th>لحظه</th><th>سود و زیان کل (تومان)</th><th>بازده روی سرمایه</th><th>محقق‌شده</th><th>تحقق‌نیافته</th><th>موقعیت باز</th></tr></thead>
+            <tbody id="pt-series-body"></tbody>
+            </table>
             </section>
           </div>
 
@@ -1656,6 +1673,8 @@ export async function mount(root, { state, api }) {
     paintCloseout(session);
     paintClock(session);
     paintPlayback();
+    captureSeriesPoint(session);
+    paintSeries(session);
     paintLedger(session);
     paintPositions(session);
     paintPayoff(session);
@@ -2306,6 +2325,74 @@ export async function mount(root, { state, api }) {
     const priced = await loadMomentContracts(session, at, { days: dates });
     return { rows: priced.rows, spot: priced.spot, universe: priced.universe };
   }
+
+  // ── مسیر سود و زیان ────────────────────────────────────────────────
+  //
+  // نقطه‌ها همان‌جا که از آن‌ها رد می‌شویم برداشته می‌شوند، نه با بازخوانیِ
+  // بعدیِ کل بازه. دلیلش داده است، نه سرعت: مدرک اجراپذیریِ یک لحظهٔ گذشته
+  // فقط وقتی در دست است که جلسه روی همان لحظه ایستاده باشد. ساختنِ بعدیِ
+  // آن یعنی برای هر پله یک عکس تازه بگیریم — و عکسی که آن موقع گرفته نشد،
+  // امروز همان چیزی نیست که کاربر آن لحظه دید.
+  //
+  // پیامدش صریح گفته می‌شود: این مسیر، لحظه‌هایی است که در **همین اجرا** از
+  // آن‌ها رد شدی. بارگذاری دوباره، مسیر را از لحظهٔ جاری از نو شروع می‌کند.
+  let seriesSteps = [];
+  let seriesCarry = false;
+
+  /** لحظهٔ جاری را به مسیر اضافه می‌کند — تکراری و عقب‌رفته نه. */
+  function captureSeriesPoint(session) {
+    const at = session?.now;
+    const key = momentKey(at);
+    if (!Number.isFinite(key)) return;
+    const last = seriesSteps[seriesSteps.length - 1];
+    if (last && momentKey(last.at) >= key) return;
+    seriesSteps.push({
+      at: { ...at },
+      evidence: slimTimelineEvidence(portfolioSessionEligibility(session)),
+    });
+  }
+
+  function paintSeries(session) {
+    const section = $('pt-series');
+    const live = session?.state === 'active' || session?.state === 'closed';
+    section.hidden = !live;
+    if (!live) return;
+    const view = portfolioTimelineView(portfolioTimeline(session, seriesSteps,
+      { mode: seriesCarry ? 'carry' : 'strict' }));
+    const body = $('pt-series-body');
+    if (!view.ok) {
+      // نمودارِ خالی شبیه «هیچ سودی نبود» دیده می‌شود؛ علت گفته می‌شود.
+      $('pt-series-state').textContent = view.why || 'هنوز نقطه‌ای در مسیر نیست.';
+      $('pt-series-chart').innerHTML = '';
+      $('pt-series-scale').textContent = '';
+      $('pt-series-estimated').hidden = true;
+      body.innerHTML = '<tr class="pt-series-empty"><td colspan="6">—</td></tr>';
+      return;
+    }
+    $('pt-series-state').textContent = `${view.headlineText} · مسیرِ همین اجرا`;
+    $('pt-series-estimated').hidden = !view.estimatedNote;
+    $('pt-series-estimated').textContent = view.estimatedNote;
+    // مقیاسِ رنگ گفته می‌شود، وگرنه «پررنگ» معنایی ندارد.
+    $('pt-series-scale').textContent = view.scaleText === '—'
+      ? 'هیچ پلهٔ معلومی در مسیر نیست، پس رنگ مقیاسی ندارد.'
+      : `شدت رنگ نسبت به بزرگ‌ترین سود یا زیانِ این مسیر است: ${view.scaleText} تومان.`;
+    trackChart($('pt-series-chart'), view.chartPoints, view.chartSeries,
+      { money: true, timeScale: true, xLabel: 'ساعت جلسه', yLabel: 'سود و زیان (تومان)' });
+    body.innerHTML = view.steps.map((step) => `<tr data-tone="${esc(step.totalTone)}" data-level="${esc(String(step.totalLevel))}">
+      <td data-label="لحظه">${esc(step.atText)}${step.estimated ? '<br><small>تخمینی</small>' : ''}</td>
+      <td data-label="سود و زیان کل" class="n"><b>${esc(step.totalText)}</b>${step.partial
+        ? `<br><small>${esc(step.partialText)}</small>` : ''}</td>
+      <td data-label="بازده روی سرمایه" class="n">${esc(step.returnPctText)}</td>
+      <td data-label="محقق‌شده" class="n">${esc(step.realizedText)}</td>
+      <td data-label="تحقق‌نیافته" class="n">${esc(step.unrealizedText)}</td>
+      <td data-label="موقعیت باز">${esc(step.openText)}</td>
+    </tr>`).join('') || '<tr class="pt-series-empty"><td colspan="6">—</td></tr>';
+  }
+
+  $('pt-series-carry').onchange = (event) => {
+    seriesCarry = event.target.checked === true;
+    if (proposalSession) paintSeries(proposalSession);
+  };
 
   // ── پخش خودکار ──────────────────────────────────────────────────────
   //

@@ -221,7 +221,10 @@ export function portfolioTimelineView(series) {
       { key: 'total', label: 'کل سبد', color: 'var(--accent)' },
       ...strategies.map((item) => ({ key: item.key, label: item.label, color: item.color })),
     ],
-    headlineText: `${faDigits(String(stepViews.length))} پله · آخرین سود و زیان ${last.totalText} تومان${last.pctText === '—' ? '' : ` · ${last.pctText}`}`,
+    // دو درصد در کارند و شبیه هم‌اند: یکی روی سرمایهٔ درگیر، یکی روی
+    // سرمایهٔ شروع جلسه. عددِ بی‌مبنا در سرخط، خواننده را به مقایسهٔ اشتباه
+    // با ستون جدول می‌کشاند.
+    headlineText: `${faDigits(String(stepViews.length))} پله · آخرین سود و زیان ${last.totalText} تومان${last.pctText === '—' ? '' : ` · ${last.pctText} روی سرمایهٔ درگیر`}`,
   };
 }
 

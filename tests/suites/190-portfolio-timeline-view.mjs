@@ -112,6 +112,13 @@ group('۱۹۰. نمای سری زمانی');
     carry190.estimatedCount === 1 && carry190.estimatedNote.length > 0
     && view190.estimatedNote === '', carry190.estimatedNote);
 
+  check('درصدِ سرخط مبنایش را می‌گوید',
+    carry190.headlineText.includes(`${carry190.steps.at(-1).pctText} روی سرمایهٔ درگیر`),
+    carry190.headlineText);
+  check('و وقتی آخرین پله نامعلوم است، درصدی ساخته نمی‌شود',
+    view190.steps.at(-1).pctText === '—'
+    && !view190.headlineText.includes('٪'), view190.headlineText);
+
   // ── بند ۵: برچسب‌های خوانا ─────────────────────────────────────────
   check('استراتژی با نام خوانا می‌آید، نه شناسهٔ خام',
     view190.strategies[0].label !== live190.events[0].strategyId
@@ -125,6 +132,8 @@ group('۱۹۰. نمای سری زمانی');
     && new Set(view190.chartSeries.map((row) => row.key)).size === view190.chartSeries.length);
   check('لحظهٔ هر پله با تاریخ و ساعت خوانا نوشته می‌شود',
     /ساعت \d|ساعت [۰-۹]/.test(view190.steps[0].atText), view190.steps[0].atText);
+  // دو درصد در کارند — روی سرمایهٔ درگیر و روی سرمایهٔ شروع — و شبیه هم‌اند.
+  // درصدِ بی‌مبنا در سرخط، خواننده را به مقایسهٔ اشتباه با ستون جدول می‌برد.
 
   // ── بند ۶: جمعِ ناقص ───────────────────────────────────────────────
   // وقتی یکی از دو استراتژی معلوم است و دیگری نه، «جمع کل» ساخته نمی‌شود

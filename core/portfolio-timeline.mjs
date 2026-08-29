@@ -81,6 +81,30 @@ function fail(reason, detail = '') {
   };
 }
 
+/**
+ * کوچک‌ترین بخشی از مدرک اجراپذیری که سری زمانی لازم دارد.
+ *
+ * نگه‌داشتن مدرک کاملِ هر پله یعنی برای هر لحظه صدها ردیف با دفتر و کیفیت
+ * و علت در حافظه بماند؛ پس از چند ده گام، تب سنگین می‌شود. این تابع همان
+ * سه میدانی را برمی‌دارد که `portfolioTimeline` می‌خواند — و چون کنار
+ * خواننده‌اش زندگی می‌کند، اگر روزی میدان چهارمی لازم شود، هر دو با هم
+ * عوض می‌شوند.
+ */
+export function slimTimelineEvidence(evidence) {
+  if (!evidence?.ok) return { ok: false, rows: [] };
+  return {
+    ok: true,
+    now: evidence.now ? { ...evidence.now } : null,
+    rows: (Array.isArray(evidence.rows) ? evidence.rows : [])
+      .filter((row) => row?.accepted)
+      .map((row) => ({
+        candidateId: text(row.candidateId),
+        accepted: true,
+        execution: { vwap: Number(row.execution?.vwap) },
+      })),
+  };
+}
+
 /** حکم‌های یک لحظه، کلیدخورده به همان شکلی که مسیر بستن می‌خواند. */
 function verdictIndex(evidence) {
   const out = new Map();
