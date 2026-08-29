@@ -68,9 +68,85 @@ export function heatCell(path, column, mode) {
  * خانه با اختلاف کم، دو رنگ نزدیک می‌گیرند. پلهٔ گسسته این تفاوت را از بین
  * می‌برد و همان چیزی بود که کاربر خواست حساس‌تر شود.
  */
-export function heatmapOption(analysis, mode, dateLabels, tokens) {
+export const HEAT_SORTS = [
+  { id: 'score', label: 'نمرهٔ ترکیبی', hint: 'همان ترتیب جدول رتبه‌بندی' },
+  { id: 'return', label: 'بازده', hint: 'پرسودترین بالا' },
+  { id: 'swing', label: 'پایداری رتبه', hint: 'کم‌نوسان‌ترین بالا؛ برای دیدن اینکه چه کسی سرِ جایش می‌ماند' },
+  { id: 'similar', label: 'خوشهٔ شباهت', hint: 'استراتژی‌های هم‌مسیر کنار هم می‌نشینند؛ نوارهای هم‌رنگ یعنی تنوع دروغین' },
+  { id: 'name', label: 'نام', hint: 'برای پیداکردن یک استراتژی مشخص' },
+];
+const SORT_IDS = new Set(HEAT_SORTS.map((row) => row.id));
+export const normalizeHeatSort = (id) => (SORT_IDS.has(String(id ?? '')) ? String(id) : 'score');
+
+export const HEAT_PALETTES = [
+  { id: 'signed', label: 'سود و زیان', hint: 'سبز و قرمز؛ صفر در وسط' },
+  { id: 'cool', label: 'سرد و گرم', hint: 'آبی تا نارنجی — برای کسی که سبز و قرمز را سخت تشخیص می‌دهد' },
+  { id: 'mono', label: 'تک‌رنگ', hint: 'فقط شدت؛ علامت از خودِ عدد خوانده می‌شود' },
+];
+const PALETTE_IDS = new Set(HEAT_PALETTES.map((row) => row.id));
+export const normalizeHeatPalette = (id) => (PALETTE_IDS.has(String(id ?? '')) ? String(id) : 'signed');
+
+const paletteRange = (palette, tokens, reversed = false) => {
+  const base = palette === 'cool' ? [tokens.series[2], tokens.panel2, tokens.series[1]]
+    : palette === 'mono' ? [tokens.panel, tokens.panel2, tokens.accent]
+      : [tokens.loss, tokens.panel2, tokens.gain];
+  return reversed ? [...base].reverse() : base;
+};
+
+/**
+ * ترتیب سطرهای نقشه.
+ *
+ * «خوشهٔ شباهت» ساده و صریح است: از بهترین شروع می‌کنیم و هر بار شبیه‌ترین
+ * استراتژیِ باقی‌مانده را کنارش می‌گذاریم. خوشه‌بندی کاملِ سلسله‌مراتبی
+ * دقیق‌تر است ولی برای بیست سطر، این کار را می‌کند و می‌شود در یک جمله
+ * توضیحش داد — که خودش یک ویژگی است.
+ */
+export function sortStrategies(strategies, sort) {
+  const rows = [...(strategies || [])];
+  const mode = normalizeHeatSort(sort);
+  if (mode === 'return') return rows.sort((a, b) => (b.metrics.return ?? -Infinity) - (a.metrics.return ?? -Infinity));
+  if (mode === 'swing') return rows.sort((a, b) => (a.metrics.rankSwing ?? Infinity) - (b.metrics.rankSwing ?? Infinity));
+  if (mode === 'name') return rows.sort((a, b) => String(a.strategyName).localeCompare(String(b.strategyName), 'fa'));
+  if (mode !== 'similar') return rows.sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity));
+  const pool = rows.filter((row) => (row.path?.cumulative || []).some((value) => value !== null));
+  const rest = rows.filter((row) => !pool.includes(row));
+  if (pool.length < 3) return [...pool, ...rest];
+  const ordered = [pool.shift()];
+  while (pool.length) {
+    const last = ordered.at(-1);
+    let bestIndex = 0, bestScore = -Infinity;
+    for (let index = 0; index < pool.length; index++) {
+      const value = pearson(last.path.cumulative, pool[index].path.cumulative);
+      const score = value === null ? -Infinity : value;
+      if (score > bestScore) { bestScore = score; bestIndex = index; }
+    }
+    ordered.push(pool.splice(bestIndex, 1)[0]);
+  }
+  return [...ordered, ...rest];
+}
+
+/** همبستگی پیرسون روی نقطه‌های هم‌زمان. نقطهٔ ناقص شمرده نمی‌شود. */
+function pearson(a = [], b = []) {
+  const pairs = [];
+  for (let index = 0; index < Math.min(a.length, b.length); index++) {
+    const left = finite(a[index]), right = finite(b[index]);
+    if (left !== null && right !== null) pairs.push([left, right]);
+  }
+  if (pairs.length < 3) return null;
+  const meanA = pairs.reduce((sum, row) => sum + row[0], 0) / pairs.length;
+  const meanB = pairs.reduce((sum, row) => sum + row[1], 0) / pairs.length;
+  let top = 0, da = 0, db = 0;
+  for (const [left, right] of pairs) {
+    top += (left - meanA) * (right - meanB);
+    da += (left - meanA) ** 2; db += (right - meanB) ** 2;
+  }
+  const bottom = Math.sqrt(da) * Math.sqrt(db);
+  return bottom > 1e-12 ? top / bottom : null;
+}
+
+export function heatmapOption(analysis, mode, dateLabels, tokens, { sort = 'score', palette = 'signed' } = {}) {
   const meta = heatmapMeta(mode);
-  const strategies = analysis?.strategies || [];
+  const strategies = sortStrategies(analysis?.strategies || [], sort);
   const columns = analysis?.dates?.length || 0;
   if (!strategies.length || !columns) return null;
 
@@ -90,8 +166,8 @@ export function heatmapOption(analysis, mode, dateLabels, tokens) {
   const bound = heatScale(values);
   const low = signed ? -(bound ?? 1) : Math.min(...values);
   const high = signed ? (bound ?? 1) : Math.max(...values);
-  // رتبه وارونه است: عدد کوچک‌تر بهتر، پس رنگ سبز باید سمت کوچک بنشیند.
-  const range = mode === 'rank' ? [tokens.gain, tokens.panel2, tokens.loss] : [tokens.loss, tokens.panel2, tokens.gain];
+  // رتبه وارونه است: عدد کوچک‌تر بهتر، پس رنگ «خوب» باید سمت کوچک بنشیند.
+  const range = paletteRange(normalizeHeatPalette(palette), tokens, mode === 'rank');
 
   return {
     grid: { left: 8, right: 24, top: 12, bottom: 72, containLabel: true },
@@ -699,5 +775,63 @@ export function equityOption(basket, dateLabels, tokens) {
         areaStyle: { opacity: 0.16, color: tokens.loss },
       },
     ],
+  };
+}
+
+/**
+ * نقشهٔ افق × استراتژی: «اگر بعد از n روز می‌بستیم، هر استراتژی کجا بود؟»
+ *
+ * چون همهٔ ترکیب‌ها یک روز ورود دارند، «نگهداری n روز» دقیقاً همان ستون n
+ * است — پس این نقشه از همان ماتریس درمی‌آید و بازپخش تازه نمی‌خواهد.
+ *
+ * ستونی که سرتاسر سبز است یعنی آن افق برای همه خوب بوده، نه فقط برای یکی؛
+ * و آن، حرفی است که نقشهٔ روزانه نمی‌زند.
+ */
+export function horizonHeatOption(analysis, tokens, { sort = 'score', palette = 'signed' } = {}) {
+  const strategies = sortStrategies(analysis?.strategies || [], sort);
+  const columns = analysis?.dates?.length || 0;
+  if (!strategies.length || columns < 2) return null;
+  const cells = [];
+  const values = [];
+  strategies.forEach((row, y) => {
+    for (let x = 0; x < columns; x++) {
+      const value = finite(row.path?.cumulative?.[x]);
+      if (value === null) continue;
+      cells.push([x, y, value]);
+      values.push(value);
+    }
+  });
+  if (!cells.length) return null;
+  const bound = heatScale(values) ?? 1;
+  return {
+    grid: { left: 8, right: 24, top: 12, bottom: 76, containLabel: true },
+    tooltip: {
+      formatter: (params) => {
+        const [x, y, value] = params.value;
+        return `<b>${faDigits(strategies[y]?.strategyName || '')}</b>`
+          + `<br>نگهداری ${fmt.int(x)} روز — تا ${faDigits(String(analysis.dates[x] ?? ''))}`
+          + `<br>بازده: <b>${pctText(value)}</b>`;
+      },
+    },
+    xAxis: {
+      type: 'category', data: Array.from({ length: columns }, (_, index) => fmt.int(index)),
+      name: 'روز نگهداری', nameLocation: 'middle', nameGap: 30, nameTextStyle: { color: tokens.muted },
+      axisLabel: { color: tokens.muted, hideOverlap: true }, axisLine: { lineStyle: { color: tokens.line } },
+    },
+    yAxis: {
+      type: 'category', data: strategies.map((row) => faDigits(row.strategyName)), inverse: true,
+      axisLabel: { color: tokens.muted, width: 150, overflow: 'truncate' },
+      axisLine: { lineStyle: { color: tokens.line } },
+    },
+    visualMap: {
+      min: -bound, max: bound, calculable: true, orient: 'horizontal', left: 'center', bottom: 6,
+      itemWidth: 12, itemHeight: 150, textStyle: { color: tokens.muted }, formatter: chartFormat.pct,
+      inRange: { color: paletteRange(normalizeHeatPalette(palette), tokens) },
+    },
+    series: [{
+      type: 'heatmap', data: cells, progressive: 2000,
+      itemStyle: { borderColor: tokens.panel, borderWidth: 1 },
+      emphasis: { itemStyle: { borderColor: tokens.ink, borderWidth: 1.5 } },
+    }],
   };
 }

@@ -138,3 +138,44 @@ group('۲۰۱-د. سرخط‌ها در رابط');
   check('نبود سرخط، جدول خالیِ بی‌توضیح نمی‌سازد',
     tab201.includes('سرخطی ساخته نشد؛ نتیجهٔ معتبری در این بازه نیست.'));
 }
+
+// ═══ تب کل به جزء و کارت‌های توضیح‌دار ═══
+group('۲۰۱-ه. کل به جزء و توضیح ساده');
+{
+  const partsSrc = readSrc('../ui/portfolio-charts-parts.mjs');
+  const flowSrc = readSrc('../ui/portfolio-charts-flow.mjs');
+
+  check('تب کل به جزء در نوار هست', tab201.includes("{ id: 'parts', label: 'کل به جزء'"));
+  const partsPanel = tab201.slice(tab201.indexOf('data-panel="parts"'), tab201.indexOf('data-panel="drill"'));
+  const wanted201 = ['pb-funnel', 'pb-sunburst', 'pb-donut', 'pb-family-bar', 'pb-treemap',
+    'pb-rose', 'pb-pareto', 'pb-graph', 'pb-corr', 'pb-tree'];
+  for (const id of wanted201) check(`نمودار ${id} در تب کل به جزء هست`, partsPanel.includes(`id="${id}"`), id);
+  check('سه جدول عددی کنار نمودارها هست',
+    ['pb-parts-groups', 'pb-parts-pairs', 'pb-parts-pareto'].every((id) => partsPanel.includes(`id="${id}"`)));
+
+  // نمودارِ بی‌توضیح، تصمیم نمی‌سازد. هر کارت باید بگوید چه می‌گوید.
+  const hints201 = (tab201.match(/class="pb-hint"/g) || []).length;
+  check('دست‌کم بیست کارت توضیح ساده دارند', hints201 >= 20, `${hints201} توضیح`);
+
+  check('درصد سهم در راهنمای شناور می‌آید',
+    partsSrc.includes('export function shareOf(') && partsSrc.includes('export const shareLine')
+    && (partsSrc.match(/shareLine\(/g) || []).length >= 5);
+  check('کلِ صفر یا نامعلوم، سهم نمی‌سازد',
+    partsSrc.includes("if (part === null || whole === null || Math.abs(whole) < 1e-12) return null;"));
+
+  check('هجده سازندهٔ نمودار تازه ساخته شد',
+    (partsSrc.match(/^export function \w+Option\(/gm) || []).length
+    + (flowSrc.match(/^export function \w+Option\(/gm) || []).length >= 17,
+    String((partsSrc.match(/^export function \w+Option\(/gm) || []).length
+      + (flowSrc.match(/^export function \w+Option\(/gm) || []).length));
+  check('هیچ رنگ سخت‌کدشده‌ای در کتابخانهٔ نمودار نیست',
+    !/#[0-9a-fA-F]{3,8}\b|rgba?\s*\(/.test(partsSrc) && !/#[0-9a-fA-F]{3,8}\b|rgba?\s*\(/.test(flowSrc));
+
+  // رودخانه پهنای منفی نمی‌کشد؛ نگفتنش یعنی نصفِ ماجرا را کل ماجرا نشان دادن.
+  check('رودخانه می‌گوید فقط سود مثبت را نشان می‌دهد',
+    flowSrc.includes('رودخانه پهنای منفی نمی‌کشد') && tab201.includes('فقط سود مثبت وارد می‌شود'));
+  check('گل رز عدد واقعی را در راهنما نگه می‌دارد، نه در شعاع',
+    partsSrc.includes('value: (row.metrics.return - floor) + 0.01') && partsSrc.includes('metric: row.metrics.return'));
+  check('رادار می‌گوید محورها نگاشته شده‌اند',
+    flowSrc.includes('هر محور به صفر تا صد نگاشته می‌شود') && tab201.includes('هر محور به صفر تا صد نگاشته شده'));
+}

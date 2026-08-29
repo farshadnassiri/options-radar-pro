@@ -27,8 +27,17 @@ group('۱۷۹. نمای بهترین تا بدترین استراتژی‌ها �
 
   // ── نقشهٔ حرارتی ────────────────────────────────────────────────────
   check('نقشه حرارتی از همان تحلیل مشترک ساخته می‌شود',
-    ui179.includes('heatmapOption(analysis, heatMode, labels, tokens)')
+    ui179.includes('heatmapOption(analysis, heatMode, labels, tokens, {')
     && view179.includes('export function heatmapOption('));
+  check('ترتیب سطرها و طیف رنگ انتخابی‌اند',
+    ui179.includes("sort: heatSort, palette: heatPalette,")
+    && view179.includes('export const HEAT_SORTS') && view179.includes('export const HEAT_PALETTES'));
+  // نوارهای هم‌رنگِ کنار هم، همان «تنوع دروغین» است — و تا سطرها بر شباهت
+  // مرتب نشوند، دیده نمی‌شود.
+  check('خوشهٔ شباهت، استراتژی‌های هم‌مسیر را کنار هم می‌گذارد',
+    view179.includes("if (mode !== 'similar') return rows.sort") && view179.includes('pearson(last.path.cumulative'));
+  check('نقشهٔ افق در برابر استراتژی هم هست',
+    view179.includes('export function horizonHeatOption(') && ui179.includes("charts.set('horizon'"));
   check('رنگ نقشه پیوسته است، نه چهار پلهٔ گسسته',
     view179.includes('visualMap:') && view179.includes('inRange: { color: range }')
     && !view179.includes('heat-${heatLevel('));
