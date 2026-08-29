@@ -76,4 +76,31 @@ group('۱۸۶. صفرِ مشاهده‌شده در برابر نبودِ داد�
     && !tab186.includes('حداقل ارزش روزانه اختیار'));
   check('راهنما می‌گوید عدد تجمعی است و برای شروع زودهنگام کف باید کوچک‌تر باشد',
     tab186.includes('ارزش از ابتدای جلسه تا همان لحظهٔ شروع جمع می‌شود، نه کل روز'));
+
+  // موقعیت باز برای لحظهٔ گذشته اصلاً ضبط نمی‌شود، پس هر کف بزرگ‌تر از صفر
+  // قیدی است که هیچ نامزدی نمی‌تواند پاس کند.
+  const perfect = {
+    id: 'c', side: 'buy', quality: quality('observed'),
+    underlyingDailyValueRial: 9e12, optionDailyValueRial: 9e12,
+    quote: {
+      quality: { ...quality('executable'), details: { levelsKnown: 5 } },
+      bid: 1000, ask: 1001,
+      book: [1, 2, 3, 4, 5].map(() => ({ bid: 1000, bidQty: 1000, ask: 1001, askQty: 1000 })),
+    },
+  };
+  const withOpenInterest = (minOpenInterest) => portfolioEligibility({
+    version: 1, id: 'm', context: {},
+    liquidity: {
+      minUnderlyingDailyValueRial: 1000000000, minOptionDailyValueRial: 1000000000,
+      minOpenInterest, maxSpreadPct: 4, maxBookTakePct: 7, requireFullBook: true,
+    },
+  }, [perfect], { now: { date: 20260818, second: 39600 } }).results[0];
+  check('کف موقعیت باز، نامزدِ بی‌نقص را هم تنها به همان علت رد می‌کند',
+    !withOpenInterest(1).accepted
+    && withOpenInterest(1).reasons.map((row) => row.code).join(',') === 'openInterestMissing');
+  check('با صفرشدن همان کف، نامزدِ بی‌نقص پذیرفته می‌شود',
+    withOpenInterest(0).accepted === true);
+  check('عکس شروع این قیدِ پاس‌نشدنی را پیش از ساخت حکم اعلام می‌کند',
+    tab186.includes('Number(liquidity?.minOpenInterest) > 0')
+    && tab186.includes('با این قید همهٔ حکم‌ها رد می‌شوند'));
 }

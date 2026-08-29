@@ -936,6 +936,16 @@ export async function mount(root, { state, api }) {
         },
       },
     };
+    // ——— قیدی که در سفر تاریخی هرگز پاس نمی‌شود ———
+    //
+    // موقعیت باز برای یک لحظهٔ گذشته اصلاً ضبط نمی‌شود؛ هیچ قراردادی این
+    // میدان را ندارد. پس هر کف بزرگ‌تر از صفر یعنی «همهٔ حکم‌ها ردشده»،
+    // بدون اینکه ربطی به نقدشوندگی واقعی داشته باشد. پیش از این کاربر فقط
+    // صد و بیست ردِ بی‌توضیح می‌دید و دنبال خرابیِ داده می‌گشت.
+    const liquidity = session.lockedMission?.liquidity ?? session.mission?.liquidity ?? null;
+    if (Number(liquidity?.minOpenInterest) > 0) {
+      failures.push('کف موقعیت باز بزرگ‌تر از صفر است، ولی موقعیت باز برای لحظهٔ گذشته ضبط نمی‌شود؛ با این قید همهٔ حکم‌ها رد می‌شوند. برای سفر تاریخی صفر بگذار.');
+    }
     if (failures.length) {
       snapshot.quality = makeDataQuality({
         kind: 'missing', source: 'portfolio-start-feed', asOf: at, reasons: failures,
