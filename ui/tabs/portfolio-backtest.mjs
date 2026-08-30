@@ -29,6 +29,7 @@ import {
 } from '/core/portfolio-report.mjs';
 import { HEAT_PALETTES, HEAT_SORTS } from '/ui/portfolio-analysis-view.mjs';
 import { allocatePortfolio } from '/core/portfolio-allocation.mjs';
+import { applyBasketEdit, firstComboId, normalizeBasketPicks } from '/core/basket-picks.mjs';
 import {
   DEFAULT_GRAIN, MOMENT_GRAINS, grainMeta, intradayCost, isIntradayGrain,
   momentDate, momentLabel, momentSecond, momentsFor, normalizeGrain,
@@ -112,7 +113,10 @@ function lineChart(host, rows, { xLabel, yLabel } = {}) {
 // چهار پله، و برچسب پایانی و کانونی‌شدن سری به‌جای عنوان کناری.
 
 export async function mount(root, { state }) {
-  root.innerHTML = `<section class="portfolio-hero"><div><p class="eyebrow">غربال تاریخی همه استراتژی‌ها</p><h1>در این بازه، بهترین و بدترین کدام بود؟</h1><p>همه استراتژی‌ها و ترکیب‌های معتبر یک نماد در روز ورود ساخته و در یک بازهٔ یکسان سنجیده می‌شوند؛ بدون پرکردن قیمت گمشده و بدون انتخاب پس‌نگر یک برنده.</p></div><span id="pb-hero-verdict">هنوز اجرایی انجام نشده</span></section>
+  // پوستهٔ این صفحه در `.pb-skin` بسته می‌شود، نه در کنترل‌های سراسری:
+  // دکمه و ورودیِ همین تب عوض می‌شود و بقیهٔ برنامه دست نمی‌خورد.
+  root.classList.add('pb-skin');
+  root.innerHTML = `<section class="portfolio-hero pb-hero"><div><p class="eyebrow">غربال تاریخی همه استراتژی‌ها</p><h1>در این بازه، بهترین و بدترین کدام بود؟</h1><p>همه استراتژی‌ها و ترکیب‌های معتبر یک نماد در روز ورود ساخته و در یک بازهٔ یکسان سنجیده می‌شوند؛ بدون پرکردن قیمت گمشده و بدون انتخاب پس‌نگر یک برنده.</p></div><span id="pb-hero-verdict">هنوز اجرایی انجام نشده</span></section>
   <div id="pb-tabs" hidden></div>
   <div class="pb-workbook" id="pb-workbook" hidden>
     <button type="button" class="primary" id="pb-workbook-run">دفترچهٔ کامل اکسل</button>
@@ -1066,10 +1070,20 @@ export async function mount(root, { state }) {
     const source = sources.find((row) => row.id === pick.sourceId) || sources[0] || null;
     const strategies = source?.analysis?.strategies || [];
     const combos = (source?.analysis?.combos || []).filter((combo) => combo.strategyId === pick.strategyId && combo.series.ok);
-    return `<div class="pb-basket-row" data-basket-row="${index}">
-      <label>اجرا<select data-basket="sourceId" data-index="${index}">${sources.map((row) => `<option value="${esc(row.id)}"${row.id === (source?.id ?? '') ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
-      <label>استراتژی<select data-basket="strategyId" data-index="${index}">${strategies.map((row) => `<option value="${esc(row.strategyId)}"${row.strategyId === pick.strategyId ? ' selected' : ''}>${esc(row.strategyName)}</option>`).join('')}</select></label>
-      <label>ترکیب<select data-basket="comboId" data-index="${index}">${combos.length ? combos.map((combo) => `<option value="${esc(combo.id)}"${combo.id === pick.comboId ? ' selected' : ''}>${esc(comboName(combo))} · ${pctCell(combo.series.finalPct)}</option>`).join('') : '<option value="">ترکیب معتبری ندارد</option>'}</select></label>
+    // ستون «اجرا» تا وقتی کتابخانه یک اجرا بیشتر ندارد، ستونی است که
+    // همیشه یک مقدار دارد — یعنی جای خالیِ گران. پهنایش به نام استراتژی
+    // و ترکیب می‌رسد که واقعاً بلندند.
+    const many = sources.length > 1;
+    const runField = many
+      ? `<label>اجرا<select data-basket="sourceId" data-index="${index}">${sources.map((row) => `<option value="${esc(row.id)}"${row.id === (source?.id ?? '') ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>`
+      : '';
+    // نامِ بلند در `select` با سه‌نقطه بریده می‌شود؛ `title` همان متن کامل
+    // را برمی‌گرداند تا چیزی از دسترس بیرون نرود.
+    const comboLabel = (combo) => `${comboName(combo)} · ${pctCell(combo.series.finalPct)}`;
+    return `<div class="pb-basket-row" data-basket-row="${index}"${many ? '' : ' data-single-run'}>
+      ${runField}
+      <label>استراتژی<select data-basket="strategyId" data-index="${index}" title="${esc(strategies.find((row) => row.strategyId === pick.strategyId)?.strategyName || '')}">${strategies.map((row) => `<option value="${esc(row.strategyId)}"${row.strategyId === pick.strategyId ? ' selected' : ''}>${esc(row.strategyName)}</option>`).join('')}</select></label>
+      <label>ترکیب<select data-basket="comboId" data-index="${index}" title="${esc(combos.find((combo) => combo.id === pick.comboId) ? comboLabel(combos.find((combo) => combo.id === pick.comboId)) : '')}">${combos.length ? combos.map((combo) => `<option value="${esc(combo.id)}"${combo.id === pick.comboId ? ' selected' : ''}>${esc(comboLabel(combo))}</option>`).join('') : '<option value="">ترکیب معتبری ندارد</option>'}</select></label>
       <label>سهم (درصد)<input type="number" min="1" max="100" step="1" data-basket="pct" data-index="${index}" value="${pick.pct}"></label>
       <button type="button" class="ghost" data-basket-remove="${index}">حذف</button>
     </div>`;
@@ -1080,10 +1094,11 @@ export async function mount(root, { state }) {
     if (!basketPicks.length && analysis.strategies.length) {
       const here = currentRunId();
       basketPicks = analysis.strategies.slice(0, 3).map((row, index) => {
-        const combo = analysis.combos.find((item) => item.strategyId === row.strategyId && item.series.ok);
-        return { sourceId: here, strategyId: row.strategyId, comboId: combo?.id || '', pct: [40, 35, 25][index] ?? 20 };
+        return { sourceId: here, strategyId: row.strategyId, comboId: firstComboId({ analysis }, row.strategyId), pct: [40, 35, 25][index] ?? 20 };
       });
     }
+    // آنچه در فرم دیده می‌شود باید همانی باشد که ساخته می‌شود.
+    basketPicks = normalizeBasketPicks(basketPicks, basketSources());
     $('pb-basket-rows').innerHTML = basketPicks.map(basketRowMarkup).join('');
   }
 
@@ -1694,31 +1709,20 @@ export async function mount(root, { state }) {
     const next = (analysis?.strategies || []).find((row) => !basketPicks.some((pick) => pick.strategyId === row.strategyId))
       || (analysis?.strategies || [])[0];
     if (!next) return;
-    const combo = analysis.combos.find((item) => item.strategyId === next.strategyId && item.series.ok);
-    basketPicks = [...basketPicks, { sourceId: currentRunId(), strategyId: next.strategyId, comboId: combo?.id || '', pct: 10 }];
+    const here = currentRunId();
+    const comboId = firstComboId(sourceOf(here) || { analysis }, next.strategyId);
+    basketPicks = [...basketPicks, { sourceId: here, strategyId: next.strategyId, comboId, pct: 10 }];
     paintBasket();
   });
   $('pb-basket-rows').addEventListener('change', (event) => {
     const field = event.target.closest('[data-basket]');
     if (!field) return;
-    const index = Number(field.dataset.index);
-    const key = field.dataset.basket;
-    const value = key === 'pct' ? Math.max(0, safeNum(field.value, 0)) : field.value;
-    basketPicks = basketPicks.map((pick, at) => {
-      if (at !== index) return pick;
-      if (key === 'pct') return { ...pick, pct: value };
-      // عوض‌شدن اجرا یا استراتژی، انتخاب‌های پایین‌دستی را بی‌اعتبار می‌کند:
-      // ترکیبِ نماد قبلی در اجرای تازه اصلاً وجود ندارد. نگه‌داشتنشان یعنی
-      // سبدی که کاربر فکر می‌کند چیده با آنچه ساخته می‌شود فرق دارد.
-      if (key === 'sourceId') {
-        const source = sourceOf(value);
-        const strategy = source?.analysis?.strategies?.[0];
-        const combo = (source?.analysis?.combos || []).find((item) => item.strategyId === strategy?.strategyId && item.series.ok);
-        return { ...pick, sourceId: value, strategyId: strategy?.strategyId || '', comboId: combo?.id || '' };
-      }
-      const source = sourceOf(pick.sourceId) || basketSources()[0];
-      const combo = (source?.analysis?.combos || []).find((item) => item.strategyId === value && item.series.ok);
-      return { ...pick, strategyId: value, comboId: combo?.id || '' };
+    basketPicks = applyBasketEdit({
+      picks: basketPicks,
+      index: Number(field.dataset.index),
+      key: field.dataset.basket,
+      value: field.dataset.basket === 'pct' ? Math.max(0, safeNum(field.value, 0)) : field.value,
+      sources: basketSources(),
     });
     paintBasket();
   });

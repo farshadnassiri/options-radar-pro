@@ -75,7 +75,15 @@ group('۵۴. خروجی اکسل و عنوان محور');
     btSrc54.includes("money ? 'ریال' : count ? 'تعداد' : 'درصد'")
     && btSrc54.includes("timeScale ? 'ساعت جلسه"));
   const css54 = readSrc('../ui/style.css');
-  check('عنوان محور از برچسب عددی درشت‌تر است',
-    /--fs-axis: 15\.5px;/.test(css54) && /--fs-chart: 15px;/.test(css54));
-  check('اعداد نمودار درشت‌تر شدند', /--fs-chart-sm: 13px;/.test(css54) && /--fs-chart-lg: 17px;/.test(css54));
+  // این دو ادعا زمانی عددِ دقیقِ هر توکن را قفل کرده بودند و با نخستین
+  // تغییرِ مقیاسِ قلم رد شدند — بی‌آنکه چیزی خراب شده باشد. آنچه واقعاً
+  // اهمیت دارد نسبت است، نه عدد: عنوان محور باید از برچسب عددی درشت‌تر
+  // باشد و کفِ متن نمودار زیر خوانایی نرود.
+  const fs54 = (name) => Number(css54.match(new RegExp(`--fs-${name}:\\s*([0-9.]+)px`))?.[1]);
+  const axis54 = fs54('axis'), tick54 = fs54('chart');
+  check('عنوان محور از برچسب عددی درشت‌تر است', axis54 > tick54, `${axis54}px > ${tick54}px`);
+  const small54 = fs54('chart-sm'), large54 = fs54('chart-lg');
+  check('مقیاس متن نمودار صعودی است و کفش زیر خوانایی نیست',
+    small54 >= 13 && small54 < tick54 && tick54 < large54,
+    `${small54} < ${tick54} < ${large54}`);
 }
