@@ -125,23 +125,27 @@
   --sans: Vazirmatn, "Vazirmatn RD", "IRANSansX", "IRANSans", Sahel, Shabnam,
           Tahoma, "Segoe UI", system-ui, sans-serif;
 
-  /* ——— مقیاس اندازه قلم ——— */
-  --fs-3xs: 11px;
-  --fs-2xs: 11.5px;
-  --fs-xs: 12px;
-  --fs-sm: 13px;
-  --fs-small: 13px;
-  --fs-md: 14px;
-  --fs-lg: 15px;
-  --fs-xl: 16px;
-  --fs-2xl: 18px;
-  --fs-3xl: 21px;
-  --fs-4xl: 26px;
-  --fs-hero: clamp(24px, 3.2vw, 36px);
-  --fs-chart-sm: 13px;
-  --fs-chart: 15px;
-  --fs-chart-lg: 17px;
-  --fs-axis: 15.5px;
+  /* ——— مقیاس اندازه قلم ———
+     یک پله بزرگ‌تر از نسخهٔ پیشین. دلیلش گزارش خوانایی بود، نه سلیقه:
+     متن فارسی در همان اندازه‌ای که لاتین راحت خوانده می‌شود سخت‌تر است،
+     چون نقطه‌ها و سرکش‌ها بار معنایی دارند و اول از همه له می‌شوند.
+     چون همهٔ شیوه‌نامه از همین توکن‌ها می‌خواند، تغییر مقیاس یک‌جاست. */
+  --fs-3xs: 12px;
+  --fs-2xs: 12.5px;
+  --fs-xs: 13.5px;
+  --fs-sm: 14.5px;
+  --fs-small: 14.5px;
+  --fs-md: 15.5px;
+  --fs-lg: 17px;
+  --fs-xl: 18px;
+  --fs-2xl: 20.5px;
+  --fs-3xl: 24px;
+  --fs-4xl: 29px;
+  --fs-hero: clamp(27px, 3.4vw, 40px);
+  --fs-chart-sm: 14px;
+  --fs-chart: 16px;
+  --fs-chart-lg: 18.5px;
+  --fs-axis: 17px;
 
   --lh-tight: 1.5;
   --lh-normal: 1.75;
@@ -3076,3 +3080,248 @@ td.gain, dd.gain { color: var(--gain); }
 .pb-drawer-tabs button:focus-visible, .pb-drawer-head button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .pb-drawer-body { overflow: auto; padding: var(--space-3) var(--space-4) var(--space-4); }
 @media (max-width: 900px) { .pb-drawer { max-height: 74vh; } }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   پوستهٔ «آزمون همه استراتژی‌ها» — تابلوی ابزار
+
+   چرا یک پوستهٔ جداگانه و نه دست‌بردن در کنترل‌های سراسری: این صفحه
+   چگالی‌اش با بقیهٔ برنامه فرق دارد — ده تب، سی نمودار و جدول‌های بلند
+   در یک جا. آنچه اینجا لازم است (سطح‌های تخت، مرز مویی، عدد تک‌عرض،
+   کنترل‌های قطعه‌ای) اگر سراسری شود، صفحه‌های ساده‌تر را شلوغ می‌کند.
+   `.pb-skin` روی ریشهٔ همین تب می‌نشیند، پس ویژگی‌اش یک پله بالاتر از
+   قاعده‌های پایه است و بی‌نیاز از `!important` بر آن‌ها می‌چربد.
+
+   هیچ رنگ خامی اینجا نیست؛ همه از توکن می‌آید تا پوستهٔ روشن و تیره
+   هر دو با یک تعریف کار کنند.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.pb-skin {
+  --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */
+  --pb-hair: 1px solid var(--line-soft);            /* مرز مویی مشترک */
+  --pb-tile: color-mix(in srgb, var(--panel-2) 60%, var(--panel));
+  --pb-sunk: color-mix(in srgb, var(--ground) 55%, var(--panel));
+}
+
+/* ─── سرصفحه ─────────────────────────────────────────────────────── */
+.pb-skin .pb-hero {
+  position: relative; padding-inline-start: var(--space-5);
+  border-radius: var(--radius-lg); background: var(--pb-tile);
+  border: var(--pb-hair); box-shadow: none;
+}
+.pb-skin .pb-hero::before {
+  content: ""; position: absolute; inset-block: var(--space-4); inset-inline-start: 0;
+  width: var(--pb-rail); border-radius: var(--radius-pill);
+  background: linear-gradient(to bottom, var(--accent), var(--accent-2));
+}
+.pb-skin .pb-hero h1 { font-size: var(--fs-3xl); line-height: var(--lh-tight); }
+.pb-skin .pb-hero > span { font-variant-numeric: tabular-nums; }
+
+/* ─── کارت‌ها ────────────────────────────────────────────────────── */
+.pb-skin .card {
+  border: var(--pb-hair); border-radius: var(--radius-lg);
+  background: var(--panel); box-shadow: var(--shadow-2xs);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.pb-skin .card:hover { border-color: var(--line); box-shadow: var(--shadow-xs); }
+.pb-skin .section-head {
+  align-items: flex-start; gap: var(--space-3);
+  padding-bottom: var(--space-3); margin-bottom: var(--space-4);
+  border-bottom: var(--pb-hair);
+}
+/* «ابرو» نشانه‌دار می‌شود تا در صفحه‌ای با ده کارت، سرِ هر کارت با یک
+   نگاه پیدا شود و لازم نباشد عنوان را خواند. */
+.pb-skin .section-head .eyebrow {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--accent-ink); font-size: var(--fs-3xs); font-weight: 700;
+}
+.pb-skin .section-head .eyebrow::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent); flex: none;
+}
+.pb-skin .section-head h2 { font-size: var(--fs-lg); line-height: var(--lh-tight); }
+
+/* ─── دکمه‌ها ────────────────────────────────────────────────────── */
+.pb-skin .primary, .pb-skin .ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: var(--control-h-sm); padding: 0 var(--space-4);
+  border-radius: var(--radius-pill); font-size: var(--fs-sm); font-weight: 700;
+  letter-spacing: normal; white-space: nowrap; cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+              color var(--transition-fast), transform var(--transition-fast);
+}
+.pb-skin .primary {
+  border: 1px solid var(--accent); background: var(--accent);
+  color: var(--on-accent); box-shadow: var(--shadow-2xs);
+}
+.pb-skin .primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+/* فرورفتن در فشار، تنها بازخوردی است که پیش از رسیدنِ پاسخ دیده می‌شود. */
+.pb-skin .primary:active { background: var(--accent-active); border-color: var(--accent-active); transform: translateY(1px); }
+.pb-skin .ghost {
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink-2); box-shadow: none;
+}
+.pb-skin .ghost:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
+.pb-skin .ghost:active { transform: translateY(1px); }
+.pb-skin .ghost[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.pb-skin .primary:focus-visible, .pb-skin .ghost:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pb-skin .primary:disabled, .pb-skin .ghost:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+/* ─── ورودی‌ها ───────────────────────────────────────────────────── */
+.pb-skin label { font-size: var(--fs-xs); font-weight: 600; color: var(--muted); }
+.pb-skin select,
+.pb-skin input[type="text"], .pb-skin input[type="search"],
+.pb-skin input[type="number"], .pb-skin input[type="date"] {
+  min-height: var(--control-h-sm);
+  padding-block: 6px; padding-inline: var(--space-3);
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  background-color: var(--pb-sunk); color: var(--ink);
+  font: inherit; font-size: var(--fs-sm); font-weight: 600;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+/* فلشِ `select` روی زمینه کشیده می‌شود، پس جای خودش را از `padding`
+   می‌گیرد. با `padding` کوتاه‌نویس، آن جا پاک می‌شد و نام بلندِ ترکیب
+   می‌رفت زیر فلش. سه‌نقطه هم لازم است: متنی که در قاب نمی‌گنجد باید
+   بریده به نظر برسد، نه اینکه بی‌صدا زیر فلش گم شود. */
+.pb-skin select {
+  padding-inline-start: 34px; padding-inline-end: var(--space-3);
+  text-overflow: ellipsis;
+}
+/* عدد در ورودی هم باید تک‌عرض باشد؛ وگرنه «۱۱۱» و «۹۹۹» دو پهنا دارند و
+   موقع تایپ، قاب می‌لرزد. */
+.pb-skin input[type="number"] { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; text-align: end; }
+.pb-skin select:hover,
+.pb-skin input[type="text"]:hover, .pb-skin input[type="number"]:hover { border-color: var(--line-input); }
+.pb-skin select:focus,
+.pb-skin input[type="text"]:focus, .pb-skin input[type="search"]:focus,
+.pb-skin input[type="number"]:focus, .pb-skin input[type="date"]:focus {
+  outline: none; border-color: var(--accent); background-color: var(--panel); box-shadow: var(--focus-ring);
+}
+.pb-skin select:disabled, .pb-skin input:disabled { opacity: .5; cursor: not-allowed; }
+.pb-skin input[type="range"] { accent-color: var(--accent); }
+
+/* پنج ستونِ ثابتِ ۱۴۵ پیکسلی برای مقیاسِ قلمِ پیشین بسته شده بود. با
+   قلم بزرگ‌تر و جای فلش، «فقط استراتژی‌های قابل اجرا» در آن پهنا جا
+   نمی‌شد. حالا شبکه خودش می‌شکند تا هر فیلد پهنای خواندنی داشته باشد. */
+.pb-skin .portfolio-form {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+.pb-skin .portfolio-form label { font-size: var(--fs-xs); font-weight: 600; }
+.pb-skin .pb-basket-row { grid-template-columns: minmax(160px, 1fr) minmax(190px, 1.2fr) minmax(240px, 2.2fr) 100px auto; }
+.pb-skin .pb-basket-row[data-single-run] { grid-template-columns: minmax(210px, 1.2fr) minmax(280px, 2.4fr) 100px auto; }
+
+/* ─── نوار تب ────────────────────────────────────────────────────── */
+.pb-skin #pb-tabs {
+  position: sticky; top: 0; z-index: 4;
+  gap: 2px; padding: 4px; border: var(--pb-hair);
+  border-radius: var(--radius-pill); background: var(--pb-tile);
+  box-shadow: var(--shadow-2xs); overflow-x: auto; scrollbar-width: thin;
+}
+.pb-skin #pb-tabs button {
+  min-height: var(--control-h-sm); padding: 0 var(--space-4);
+  border: 1px solid transparent; border-radius: var(--radius-pill);
+  background: transparent; color: var(--muted);
+  font-size: var(--fs-sm); font-weight: 700; white-space: nowrap; cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.pb-skin #pb-tabs button:hover { background: var(--panel); color: var(--ink); }
+.pb-skin #pb-tabs button[aria-selected="true"] {
+  background: var(--accent); border-color: var(--accent);
+  color: var(--on-accent); box-shadow: var(--shadow-2xs);
+}
+.pb-skin #pb-tabs button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ─── عدسی ──────────────────────────────────────────────────────── */
+.pb-skin .pb-lens { border-radius: var(--radius-lg); background: var(--pb-tile); }
+.pb-skin .pb-lens[data-open="true"] { border-color: var(--accent); }
+.pb-skin .pb-lens-toggle { padding: var(--space-2) var(--space-4); }
+.pb-skin .pb-lens-chip {
+  border: 1px solid var(--accent); color: var(--accent-ink);
+  font-size: var(--fs-3xs); font-weight: 700;
+}
+.pb-skin .pb-lens-toggle b { font-size: var(--fs-xs); font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pb-skin .pb-lens-grid { gap: var(--space-3) var(--space-4); }
+.pb-skin .pb-lens-grid label { gap: 5px; }
+
+/* ─── تراشه‌ها ───────────────────────────────────────────────────── */
+.pb-skin .pb-chip {
+  min-height: 28px; padding: 0 var(--space-3);
+  border-radius: var(--radius-pill); background: var(--pb-sunk);
+  font-size: var(--fs-xs); font-weight: 600;
+}
+.pb-skin .pb-chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+
+/* ─── جدول‌ها ────────────────────────────────────────────────────── */
+.pb-skin .history-table-wrap { border: var(--pb-hair); border-radius: var(--radius-md); overflow: auto; }
+.pb-skin .history-table { font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.pb-skin .history-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  background: var(--pb-tile); color: var(--muted);
+  font-size: var(--fs-xs); font-weight: 700; white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+.pb-skin .history-table td { padding: var(--space-2) var(--space-3); border-bottom: var(--pb-hair); }
+.pb-skin .history-table tbody tr:last-child td { border-bottom: 0; }
+.pb-skin .history-table tbody tr { transition: background var(--transition-fast); }
+.pb-skin .history-table tbody tr:hover { background: var(--accent-soft); }
+/* ستون نخست لنگرِ چشم است؛ باقی سطر عدد است و باید سبک‌تر بخواند. */
+.pb-skin .history-table tbody td:first-child { font-weight: 700; color: var(--ink); }
+
+/* ─── کارت‌های عدد ──────────────────────────────────────────────── */
+.pb-skin .backtest-kpis { gap: var(--space-3); }
+.pb-skin .backtest-kpis article {
+  padding: var(--space-3) var(--space-4);
+  border: var(--pb-hair); border-radius: var(--radius-md);
+  background: var(--pb-tile); box-shadow: none;
+}
+.pb-skin .backtest-kpis span { margin-bottom: 4px; font-size: var(--fs-2xs); font-weight: 600; }
+.pb-skin .backtest-kpis b {
+  font-family: var(--mono); font-size: var(--fs-xl); font-weight: 700;
+  font-variant-numeric: tabular-nums; direction: ltr; display: block; text-align: start;
+}
+.pb-skin .backtest-kpis article.gain { border-inline-start: var(--pb-rail) solid var(--gain); }
+.pb-skin .backtest-kpis article.loss { border-inline-start: var(--pb-rail) solid var(--loss); }
+
+/* ─── سرخط‌ها ────────────────────────────────────────────────────── */
+.pb-skin .pb-highlight {
+  padding: var(--space-3); border: var(--pb-hair); border-radius: var(--radius-md);
+  background: var(--panel); transition: border-color var(--transition-fast),
+    background var(--transition-fast), transform var(--transition-fast);
+}
+.pb-skin .pb-highlight:hover { transform: translateY(-2px); border-color: var(--accent); }
+.pb-skin .pb-highlight b { font-size: var(--fs-md); }
+.pb-skin .pb-highlight-value em { font-family: var(--mono); direction: ltr; }
+
+/* ─── سطرهای سبد ────────────────────────────────────────────────── */
+.pb-skin .pb-basket-row {
+  padding: var(--space-3); border: var(--pb-hair);
+  border-radius: var(--radius-md); background: var(--pb-tile);
+}
+.pb-skin .pb-basket-row:focus-within { border-color: var(--accent); }
+.pb-skin .pb-weight {
+  padding: var(--space-3); border: var(--pb-hair);
+  border-radius: var(--radius-md); background: var(--pb-tile);
+}
+.pb-skin .pb-weight b { font-family: var(--mono); }
+
+/* ─── نمودارها و یادداشت‌ها ─────────────────────────────────────── */
+.pb-skin .pb-chart { border: var(--pb-hair); border-radius: var(--radius-md); background: var(--panel); }
+.pb-skin .pb-hint, .pb-skin .portfolio-note {
+  font-size: var(--fs-xs); line-height: 1.85; color: var(--muted);
+}
+.pb-skin .pb-workbook, .pb-skin .pb-grain-run {
+  padding: var(--space-3) var(--space-4); border: var(--pb-hair);
+  border-radius: var(--radius-md); background: var(--pb-tile); margin-top: 0;
+}
+
+/* ─── کشوی جزئیات ───────────────────────────────────────────────── */
+.pb-skin .pb-drawer { border-start-start-radius: var(--radius-lg); border-start-end-radius: var(--radius-lg); }
+.pb-skin .pb-drawer-head { padding: var(--space-3) var(--space-4); }
+.pb-skin .pb-drawer-head b { font-size: var(--fs-md); }
+.pb-skin .pb-drawer-tabs button { min-height: 28px; padding: 0 var(--space-3); font-size: var(--fs-xs); background: var(--pb-sunk); }
+.pb-skin .pb-drawer-tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+@media (max-width: 560px) {
+  .pb-skin #pb-tabs { border-radius: var(--radius-md); }
+  .pb-skin .pb-hero { padding-inline-start: var(--space-4); }
+}

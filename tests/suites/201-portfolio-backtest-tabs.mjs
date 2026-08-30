@@ -228,4 +228,67 @@ group('۲۰۱-و. کشوی جزئیات و دانه‌بندی');
     tab201.includes('function basketSources()') && tab201.includes('sources: basketSources()'));
   check('هر اجرای کتابخانه با عدسی جاری تحلیل می‌شود، نه با مبنای روزِ خودش',
     /basketSources\(\)[\s\S]{0,700}basisId: lens\.basisId, statistic: lens\.statistic/.test(tab201));
+  // شاخهٔ «ترکیب» یک بار در همین شنونده جا افتاد. منطق حالا بیرون است و
+  // آزمون مستقیم دارد (دستهٔ ۲۰۴)؛ این ادعا نمی‌گذارد دوباره تو کشیده شود.
+  check('ویرایش سطرهای سبد از تابع خالص مشترک می‌آید، نه از شنونده',
+    tab201.includes('basketPicks = applyBasketEdit({')
+    && tab201.includes("import { applyBasketEdit, firstComboId, normalizeBasketPicks } from '/core/basket-picks.mjs';")
+    && !/addEventListener\('change'[\s\S]{0,400}key === 'sourceId'/.test(tab201));
+  check('فرم سبد پیش از رسم با اجراهای موجود آشتی داده می‌شود',
+    tab201.includes('basketPicks = normalizeBasketPicks(basketPicks, basketSources());'));
+  check('ستون «اجرا» تا وقتی کتابخانه یک اجرا دارد، جا اشغال نمی‌کند',
+    tab201.includes('const many = sources.length > 1;')
+    && tab201.includes("${many ? '' : ' data-single-run'}")
+    && style201.includes('.pb-skin .pb-basket-row[data-single-run] { grid-template-columns:'));
+  check('نامِ بریده‌شده در select با title کامل برمی‌گردد',
+    /data-basket="strategyId"[^`]*title="/.test(tab201)
+    && /data-basket="comboId"[^`]*title="/.test(tab201));
+
+  // ── پوستهٔ صفحه ─────────────────────────────────────────────────────
+  //
+  // پوسته روی ریشهٔ همین تب بسته می‌شود. اگر کسی فردا همین قاعده‌ها را
+  // سراسری کند، صفحه‌های ساده‌ترِ برنامه هم چگالیِ این یکی را می‌گیرند.
+  check('پوسته روی ریشهٔ همین تب می‌نشیند، نه روی کنترل‌های سراسری',
+    tab201.includes("root.classList.add('pb-skin');")
+    && style201.includes('.pb-skin {'));
+  const skin201 = style201.slice(style201.indexOf('.pb-skin {'));
+  check('هر قاعدهٔ پوسته زیر .pb-skin است',
+    (skin201.match(/^\.(?!pb-skin)[a-z]/gm) || []).length === 0);
+  const skinTokens201 = ['--pb-rail', '--pb-hair', '--pb-tile', '--pb-sunk'];
+  check('پوسته توکن‌های خودش را یک جا تعریف می‌کند',
+    skinTokens201.every((token) => skin201.includes(`${token}:`)));
+  /**
+   * تنِ یک قاعدهٔ CSS — فقط میان `{` و نخستین `}` پس از آن.
+   *
+   * لازم است، نه تزیین: با الگوی `selector \{[\s\S]*?prop` جست‌وجو از
+   * قاعده بیرون می‌زند و به `prop` قاعدهٔ بعدی می‌رسد. آزمون آن‌وقت
+   * سبز می‌ماند حتی وقتی خاصیت را از قاعدهٔ درست برداشته باشی — دو
+   * جهش دقیقاً همین‌طور زنده ماندند.
+   */
+  const ruleBody201 = (selector) => {
+    const at = skin201.indexOf(`${selector} {`);
+    if (at < 0) return '';
+    const from = skin201.indexOf('{', at);
+    const to = skin201.indexOf('}', from);
+    return to < 0 ? '' : skin201.slice(from + 1, to);
+  };
+  const buttons201 = ruleBody201('.pb-skin .primary, .pb-skin .ghost');
+  check('دکمهٔ اصلی و شبح یک ارتفاع و یک شعاع دارند',
+    buttons201.includes('min-height: var(--control-h-sm)')
+    && buttons201.includes('border-radius: var(--radius-pill)'));
+  check('نوار تب چسبان است تا در صفحهٔ بلند گم نشود',
+    ruleBody201('.pb-skin #pb-tabs').includes('position: sticky'));
+  // فلش `select` روی زمینه کشیده می‌شود و جایش را از padding می‌گیرد؛
+  // کوتاه‌نویسِ `padding` آن را پاک می‌کرد و متن می‌رفت زیر فلش.
+  const select201 = ruleBody201('.pb-skin select');
+  check('فلش select جای رزروشده دارد و متن بلند سه‌نقطه می‌خورد',
+    select201.includes('padding-inline-start: 34px')
+    && select201.includes('text-overflow: ellipsis')
+    && !/\n  padding: /.test(ruleBody201('.pb-skin select,')));
+  check('عدد در ورودی و کارت و جدول، تک‌عرض است',
+    ruleBody201('.pb-skin input[type="number"]').includes('font-family: var(--mono)')
+    && ruleBody201('.pb-skin .backtest-kpis b').includes('font-family: var(--mono)')
+    && ruleBody201('.pb-skin .history-table').includes('font-variant-numeric: tabular-nums'));
+  check('سر جدول هنگام پیمایش سر جایش می‌ماند',
+    ruleBody201('.pb-skin .history-table thead th').includes('position: sticky'));
 }
