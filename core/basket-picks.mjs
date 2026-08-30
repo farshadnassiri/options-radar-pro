@@ -47,6 +47,7 @@ export function applyBasketEdit({ picks, index, key, value, sources }) {
       const source = sourceOf(pick.sourceId) || runs[0] || null;
       return { ...pick, strategyId: value, comboId: firstComboId(source, value) };
     }
+    if (key === 'on') return { ...pick, on: value !== false };
     if (key === 'comboId') {
       // انتخاب دستیِ ترکیب، بالادست را نگه می‌دارد. اگر مقدار به این
       // استراتژی نخورد (فهرست کهنه)، خالی می‌ماند — نه اینکه ترکیبِ
@@ -134,9 +135,23 @@ export function minPctFor(capitalRial, lotCost) {
   return Math.ceil((cost / capital) * 100 * 100) / 100;
 }
 
-/** مجموع درصدهای تخصیص‌یافته — می‌تواند از صد بیشتر باشد. */
+/**
+ * آیا این سطر در سبد شرکت می‌کند؟
+ *
+ * `on` نبودن یعنی «هست» — سطرهای پیشین این کلید را ندارند و نباید یک‌شبه
+ * خاموش شوند. فقط `false` صریح خاموش است.
+ */
+export const pickOn = (pick) => pick?.on !== false;
+
+/**
+ * مجموع درصدهای تخصیص‌یافته — می‌تواند از صد بیشتر باشد.
+ *
+ * سطر خاموش شمرده نمی‌شود: تیک‌برداشتن یعنی «این را کنار بگذار»، و اگر
+ * سهمش همچنان جا اشغال کند، کنارگذاشتن نیمه‌کاره است.
+ */
 export function usedPct(picks) {
   const total = (Array.isArray(picks) ? picks : [])
+    .filter(pickOn)
     .reduce((sum, pick) => sum + (num(pick?.pct) ?? 0), 0);
   return Math.round(total * 100) / 100;
 }
@@ -178,10 +193,11 @@ export function suggestPct({ picks = [], capitalRial = null, lotCost = null, fal
  */
 export function pickWarning({ pick = null, source = null, capitalRial = null, basisId = null, picks = [] } = {}) {
   if (!pick) return null;
+  if (!pickOn(pick)) return { kind: 'off', text: 'خاموش است؛ در سبد شمرده نمی‌شود' };
   const pct = num(pick.pct);
   if (pct === null || pct <= 0) return { kind: 'zero', text: 'سهم صفر است؛ این سطر در سبد نمی‌آید' };
   if (!pick.comboId) return { kind: 'noCombo', text: 'ترکیبی انتخاب نشده است' };
-  const total = (Array.isArray(picks) ? picks : []).reduce((sum, row) => sum + (num(row?.pct) ?? 0), 0);
+  const total = usedPct(picks);
   if (total > 100 + 1e-9) {
     return { kind: 'over', total, text: `مجموع درصدها ${Math.round(total * 100) / 100} است؛ سبد ساخته نمی‌شود` };
   }
@@ -222,21 +238,29 @@ export function addPick({ picks = [], pick = null, capitalRial = null, lotCost =
     return { picks: [...list, { ...pick, pct: want }], rebalanced: false, pct: want };
   }
 
-  const used = list.reduce((sum, row) => sum + (num(row?.pct) ?? 0), 0);
+  const used = usedPct(list);
   if (!(used > 0)) {
     const only = round2(Math.min(100, want));
     return { picks: [...list, { ...pick, pct: only }], rebalanced: false, pct: only };
   }
-  const share = round2(100 / (list.length + 1));
+  const live = list.filter(pickOn).length;
+  const share = round2(100 / (live + 1));
   const scale = (100 - share) / used;
-  const scaled = list.map((row) => ({ ...row, pct: round2((num(row.pct) ?? 0) * scale) }));
+  // سطر خاموش سهمش را نگه می‌دارد: اگر بعداً روشنش کنی، عددی که خودت
+  // گذاشته بودی برمی‌گردد، نه عددی که در نبودش کوچک شده.
+  const scaled = list.map((row) => (pickOn(row)
+    ? { ...row, pct: round2((num(row.pct) ?? 0) * scale) }
+    : row));
   // گردکردن دو رقمی چند صدم درز می‌اندازد؛ باقی‌مانده به بزرگ‌ترین سهم
   // برمی‌گردد تا مجموع دقیقاً صد بماند و سبد سرِ یک صدم رد نشود.
-  const drift = round2(100 - share - scaled.reduce((sum, row) => sum + row.pct, 0));
+  const drift = round2(100 - share - usedPct(scaled));
   if (Math.abs(drift) >= 0.01) {
-    let at = 0;
-    for (let index = 1; index < scaled.length; index++) if (scaled[index].pct > scaled[at].pct) at = index;
-    scaled[at] = { ...scaled[at], pct: round2(scaled[at].pct + drift) };
+    let at = -1;
+    for (let index = 0; index < scaled.length; index++) {
+      if (!pickOn(scaled[index])) continue;
+      if (at < 0 || scaled[index].pct > scaled[at].pct) at = index;
+    }
+    if (at >= 0) scaled[at] = { ...scaled[at], pct: round2(scaled[at].pct + drift) };
   }
   return { picks: [...scaled, { ...pick, pct: share }], rebalanced: true, pct: share };
 }

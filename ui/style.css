@@ -2979,6 +2979,10 @@ td.gain, dd.gain { color: var(--gain); }
 /* ظرف نمودار: ارتفاع صریح لازم است — ECharts از ظرفِ بی‌ارتفاع، بومِ صفر
    می‌سازد و بی‌صدا خالی درمی‌آید. */
 .pb-chart { width: 100%; min-width: 0; height: 320px; }
+/* دستهٔ درونیِ پنل سبد — همان چیدمان پنل، یک پله تودرتو. */
+.pb-sub { display: flex; flex-direction: column; gap: var(--space-5); }
+.pb-sub[hidden] { display: none !important; }
+.pb-chart-none { display: none; }
 .pb-chart-lg { height: 420px; }
 .pb-chart-xl { height: 560px; }
 
@@ -3009,6 +3013,11 @@ td.gain, dd.gain { color: var(--gain); }
 .pb-basket-row button { height: var(--control-h-sm); }
 
 /* هشدارِ سطر و مجموع درصدها — پیش از فشردن دکمه، نه بعدش. */
+/* تیک روشن/خاموشِ هر سطر سبد. */
+.pb-basket-on { flex-direction: row !important; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
+.pb-basket-on input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; flex: none; }
+.pb-basket-row[data-off] { opacity: .55; }
+.pb-basket-row[data-off] .pb-basket-on { opacity: 1; }
 .pb-basket-warn { grid-column: 1 / -1; margin: 0; font-size: var(--fs-2xs); font-weight: 600; color: var(--warn); }
 .pb-basket-warn[data-kind="over"], .pb-basket-warn[data-kind="zero"] { color: var(--loss); }
 .pb-basket-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
@@ -3216,8 +3225,8 @@ td.gain, dd.gain { color: var(--gain); }
   gap: var(--space-3) var(--space-4);
 }
 .pb-skin .portfolio-form label { font-size: var(--fs-xs); font-weight: 600; }
-.pb-skin .pb-basket-row { grid-template-columns: minmax(160px, 1fr) minmax(190px, 1.2fr) minmax(240px, 2.2fr) 100px auto; }
-.pb-skin .pb-basket-row[data-single-run] { grid-template-columns: minmax(210px, 1.2fr) minmax(280px, 2.4fr) 100px auto; }
+.pb-skin .pb-basket-row { grid-template-columns: auto minmax(150px, 1fr) minmax(180px, 1.2fr) minmax(230px, 2.2fr) 96px auto; }
+.pb-skin .pb-basket-row[data-single-run] { grid-template-columns: auto minmax(200px, 1.2fr) minmax(270px, 2.4fr) 96px auto; }
 
 /* ─── نوار تب ────────────────────────────────────────────────────── */
 .pb-skin #pb-tabs {

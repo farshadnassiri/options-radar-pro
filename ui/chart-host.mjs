@@ -14,7 +14,7 @@
 // اگر ماژول بار نشود، نمودار پیام روشن می‌دهد و بقیهٔ صفحه سر جایش می‌ماند.
 // جدول‌ها همان داده را دارند؛ نبود نمودار نباید صفحه را از کار بیندازد.
 
-import { faDigits, fmt } from '/ui/fmt.mjs';
+import { faDigits, fmt } from './fmt.mjs';
 
 let modulePromise = null;
 let moduleFailed = '';
@@ -57,6 +57,14 @@ export function chartTokens() {
     gain: cssVar(style, '--gain'),
     loss: cssVar(style, '--loss'),
     warn: cssVar(style, '--warn'),
+    // نسخهٔ کم‌رنگ هر تُن: برای سایه، ناحیه و میلهٔ پس‌زمینه لازم است و
+    // بی آن، هر نمودار خودش با `opacity` سرِ هم می‌کند و تُن‌ها یکدست
+    // نمی‌مانند.
+    gainSoft: cssVar(style, '--gain-soft'),
+    lossSoft: cssVar(style, '--loss-soft'),
+    warnSoft: cssVar(style, '--warn-soft'),
+    accentSoft: cssVar(style, '--accent-soft'),
+    accentInk: cssVar(style, '--accent-ink'),
     font: cssVar(style, '--font'),
     shadow: cssVar(style, '--shadow-md'),
     series: [1, 2, 3, 4, 5, 6].map((index) => cssVar(style, `--series-${index}`)),
@@ -118,16 +126,20 @@ export async function mountChart(host, build, { onClick = null, empty = 'داد�
   const paint = () => {
     const tokens = chartTokens();
     const option = build(echarts, tokens);
-    if (!option) {
-      host.innerHTML = `<p class="empty-note">${faDigits(empty)}</p>`;
-      return false;
-    }
+    if (!option) return false;
     // `notMerge` لازم است: وقتی سری‌ها کم می‌شوند، ادغام، سری قدیمی را
     // روی نمودار نگه می‌دارد و کاربر دادهٔ اجرای قبلی را می‌بیند.
     instance.setOption({ ...chartBase(tokens), ...option }, { notMerge: true });
     return true;
   };
-  if (!paint()) { instance.dispose(); return null; }
+  // ترتیب مهم است: `dispose` ظرف را پاک می‌کند. یادداشت اگر پیش از آن
+  // نوشته شود، پاک می‌شود و کاربر یک قاب کاملاً خالی می‌بیند — بی‌آنکه
+  // بداند داده نبوده یا نمودار خراب شده.
+  if (!paint()) {
+    instance.dispose();
+    host.innerHTML = `<p class="empty-note">${faDigits(empty)}</p>`;
+    return null;
+  }
   if (onClick) instance.on('click', onClick);
 
   // ناظرِ اندازه باید **فقط** روی تغییر واقعی کار کند.
