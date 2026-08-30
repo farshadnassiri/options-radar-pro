@@ -87,7 +87,10 @@ export function allocatePortfolio({
   if (capital === null || !(capital > 0)) {
     return { ok: false, why: ALLOCATION_REASONS.noCapital, legs: [], dates, path: [], summary: null };
   }
-  const wanted = list.filter((pick) => finite(pick?.pct) !== null && finite(pick.pct) > 0);
+  // سطر خاموش، سطری است که کاربر تیکش را برداشته. نه بودجه می‌گیرد و نه
+  // در هیچ نمودار و جدولی می‌آید — ولی در فرم می‌ماند تا دوباره روشن شود.
+  const wanted = list.filter((pick) => pick?.on !== false
+    && finite(pick?.pct) !== null && finite(pick.pct) > 0);
   if (!wanted.length) {
     return { ok: false, why: ALLOCATION_REASONS.noPicks, legs: [], dates, path: [], summary: null };
   }
