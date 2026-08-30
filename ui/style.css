@@ -3008,6 +3008,16 @@ td.gain, dd.gain { color: var(--gain); }
 .pb-basket-row select, .pb-basket-row input { height: var(--control-h-sm); }
 .pb-basket-row button { height: var(--control-h-sm); }
 
+/* هشدارِ سطر و مجموع درصدها — پیش از فشردن دکمه، نه بعدش. */
+.pb-basket-warn { grid-column: 1 / -1; margin: 0; font-size: var(--fs-2xs); font-weight: 600; color: var(--warn); }
+.pb-basket-warn[data-kind="over"], .pb-basket-warn[data-kind="zero"] { color: var(--loss); }
+.pb-basket-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.pb-basket-tally { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2);
+  margin: 0; font-size: var(--fs-xs); color: var(--muted); }
+.pb-basket-tally b { font-variant-numeric: tabular-nums; color: var(--ink); }
+.pb-basket-tally[data-tone="over"] b { color: var(--loss); }
+.pb-basket-tally em { flex-basis: 100%; font-style: normal; color: var(--accent-ink); }
+
 /* شش پله در هر جهت — رنگِ ردیف به عدد حساس است، نه فقط به علامتش. */
 .pb-panel tr[data-tone="gain"][data-level="1"] { background: color-mix(in srgb, var(--gain) 4%, transparent); }
 .pb-panel tr[data-tone="gain"][data-level="2"] { background: color-mix(in srgb, var(--gain) 8%, transparent); }
@@ -3298,6 +3308,7 @@ td.gain, dd.gain { color: var(--gain); }
   border-radius: var(--radius-md); background: var(--pb-tile);
 }
 .pb-skin .pb-basket-row:focus-within { border-color: var(--accent); }
+.pb-skin .pb-basket-row[data-warn] { border-color: var(--warn); background: var(--warn-soft); }
 .pb-skin .pb-weight {
   padding: var(--space-3); border: var(--pb-hair);
   border-radius: var(--radius-md); background: var(--pb-tile);

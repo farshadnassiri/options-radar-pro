@@ -5,7 +5,10 @@
 // استراتژی می‌نشست، هیچ ترکیبی زیر آن پیدا نمی‌شد، و سبد ساخته نمی‌شد.
 
 import { check, group } from '../harness.mjs';
-import { applyBasketEdit, comboBelongs, firstComboId, normalizeBasketPicks } from '../../core/basket-picks.mjs';
+import {
+  addPick, applyBasketEdit, comboBelongs, firstComboId, freePct, lotCostRial,
+  minPctFor, normalizeBasketPicks, pickWarning, suggestPct, usedPct,
+} from '../../core/basket-picks.mjs';
 
 const combo204 = (id, strategyId, ok = true) => ({ id, strategyId, series: { ok } });
 const run204 = (id, strategies, combos) => ({ id, label: id, analysis: { strategies, combos } });
@@ -94,4 +97,116 @@ group('۲۰۴. ویرایش سطرهای سبد فرضی');
     kept[0] === same[0] && kept[1] === same[1]);
   check('بدون هیچ اجرایی، فهرست دست‌نخورده می‌ماند',
     normalizeBasketPicks(same, [])[0] === same[0]);
+
+  // ═══════ سهمِ سطر تازه ═══════
+  //
+  // نقصی که این بخش را ساخت: دکمهٔ «افزودن» سهم ثابت ۱۰٪ می‌گذاشت.
+  // سه سطر پیش‌فرض ۴۰+۳۵+۲۵ دقیقاً صد است، پس یک افزودن مجموع را ۱۱۰
+  // می‌کرد و `allocatePortfolio` **کل** سبد را رد می‌کرد — کاربر یک
+  // استراتژی اضافه می‌کرد و کل سبدش ناپدید می‌شد.
+
+  const costly = { id: 'گران', label: 'گران', analysis: { basisId: 'gross',
+    strategies: [{ strategyId: 'long-call', strategyName: 'Long Call' }],
+    combos: [
+      { id: 'lc-big', strategyId: 'long-call', series: { ok: true },
+        entry: { marginGross: 0, netCash: -3_600_000_000 } },
+      { id: 'lc-small', strategyId: 'long-call', series: { ok: true },
+        entry: { marginGross: 0, netCash: -50_000_000 } },
+      { id: 'lc-blind', strategyId: 'long-call', series: { ok: true }, entry: { marginGross: null, netCash: null } },
+    ] } };
+
+  const full204 = [{ pct: 40 }, { pct: 35 }, { pct: 25 }];
+  check('درصد آزاد، سه سطر پیش‌فرض را صفر می‌بیند', freePct(full204) === 0, String(freePct(full204)));
+  check('درصد آزاد هرگز منفی نمی‌شود', freePct([{ pct: 80 }, { pct: 50 }]) === 0);
+  // کفِ صفرِ `freePct` برای «چقدر جا مانده» درست است و برای «مجموع چقدر
+  // شد» غلط: `100 - freePct` هر تخصیصِ بیش از صد را دقیقاً صد نشان می‌داد.
+  check('مجموع تخصیص، بیش از صد را صد نشان نمی‌دهد',
+    usedPct([{ pct: 90 }, { pct: 85 }]) === 175, String(usedPct([{ pct: 90 }, { pct: 85 }])));
+  check('مجموع تخصیص، سهم بی‌عدد را نادیده می‌گیرد',
+    usedPct([{ pct: 30 }, { pct: null }]) === 30);
+  check('درصد آزاد، سهم بی‌عدد را نادیده می‌گیرد',
+    freePct([{ pct: 30 }, { pct: null }, { pct: '' }]) === 70, String(freePct([{ pct: 30 }, { pct: null }])));
+
+  const added = suggestPct({ picks: full204, capitalRial: 1e10, lotCost: 1e8 });
+  check('روی سبد پرِ صد درصد، سهم تازه صفر است — نه ۱۰ که کل سبد را رد کند',
+    added === 0, String(added));
+  check('سهم پیشنهادی هرگز مجموع را از صد رد نمی‌کند',
+    [[{ pct: 95 }], [{ pct: 40 }], [{ pct: 99.5 }], []].every((picks) =>
+      freePct(picks) - suggestPct({ picks, capitalRial: 1e10, lotCost: 1e8 }) >= -1e-9));
+  check('وقتی جا هست، سهم پیش‌فرض ۱۰ می‌ماند',
+    suggestPct({ picks: [{ pct: 40 }], capitalRial: 1e10, lotCost: 1e8 }) === 10);
+  // ۱۰٪ از ده میلیارد یک میلیارد است و یک دستِ ۳٫۶ میلیاردی نمی‌خرد.
+  check('سهم تا اندازهٔ یک دست بالا می‌رود، نه ۱۰ ثابت',
+    suggestPct({ picks: [{ pct: 40 }], capitalRial: 1e10, lotCost: 3_600_000_000 }) === 36,
+    String(suggestPct({ picks: [{ pct: 40 }], capitalRial: 1e10, lotCost: 3_600_000_000 })));
+  check('اگر جای آزاد به یک دست نرسد، همان جای آزاد داده می‌شود',
+    suggestPct({ picks: [{ pct: 80 }], capitalRial: 1e10, lotCost: 3_600_000_000 }) === 20);
+  check('بهای نامعلومِ دست، سهم پیش‌فرض می‌گیرد نه صفر',
+    suggestPct({ picks: [{ pct: 40 }], capitalRial: 1e10, lotCost: null }) === 10);
+
+  check('کمینهٔ درصد به بالا گرد می‌شود تا یک ریال کم نیاورد',
+    minPctFor(3e9, 1e9) === 33.34, String(minPctFor(3e9, 1e9)));
+  check('کمینهٔ درصد بی‌سرمایه یا بی‌بها، نامعلوم است',
+    minPctFor(0, 1e9) === null && minPctFor(1e9, null) === null && minPctFor(1e9, 0) === null);
+  // مبنای «ناخالص» بدهکار پرداختی را سرمایهٔ درگیر می‌شمارد.
+  check('بهای یک دست از مبنای جاری می‌آید',
+    lotCostRial(costly, 'lc-big', 'gross') === 3_600_000_000, String(lotCostRial(costly, 'lc-big', 'gross')));
+  check('بهای دستِ بی‌مخرج، نامعلوم است نه صفر',
+    lotCostRial(costly, 'lc-blind', 'gross') === null,
+    String(lotCostRial(costly, 'lc-blind', 'gross')));
+  check('ترکیبِ ناموجود بها ندارد', lotCostRial(costly, 'نیست', 'gross') === null);
+
+  // ═══════ هشدارِ پیش از ساخت ═══════
+  const warnOf = (pct, comboId, picks) => pickWarning({
+    pick: { strategyId: 'long-call', comboId, pct }, source: costly,
+    capitalRial: 1e10, basisId: 'gross', picks: picks || [{ pct }],
+  });
+  check('سهمی که یک دست نمی‌خرد، پیش از ساخت هشدار می‌گیرد',
+    warnOf(10, 'lc-big')?.kind === 'tooSmall', String(warnOf(10, 'lc-big')?.kind));
+  check('هشدار، کمینهٔ لازم را می‌گوید نه فقط «کم است»',
+    warnOf(10, 'lc-big')?.need === 36, String(warnOf(10, 'lc-big')?.need));
+  check('سهمی که یک دست می‌خرد هشدار ندارد', warnOf(40, 'lc-big') === null);
+  check('سهم صفر، صریح گفته می‌شود', warnOf(0, 'lc-big')?.kind === 'zero');
+  check('نبودِ ترکیب، صریح گفته می‌شود', warnOf(10, '')?.kind === 'noCombo');
+  check('مجموعِ بیش از صد، روی سطر هشدار می‌دهد',
+    warnOf(10, 'lc-small', [{ pct: 95 }, { pct: 10 }])?.kind === 'over');
+  // بهای نامعلوم یعنی نمی‌دانیم؛ ادعای «کم است» ساختن داده است.
+  check('بهای نامعلومِ دست، هشدارِ ساختگی نمی‌سازد', warnOf(1, 'lc-blind') === null);
+  check('سهم کوچکِ ترکیب ارزان هشدار ندارد', warnOf(1, 'lc-small') === null);
+
+  // ═══════ افزودن با جا بازکردن ═══════
+  //
+  // سهم صفر یعنی سطری که ساخته می‌شود ولی در هیچ محاسبه‌ای نمی‌آید —
+  // یعنی دکمه‌ای که کار نمی‌کند. وقتی کاربر می‌گوید «این را هم اضافه
+  // کن»، منظورش این است که در سبد باشد.
+  const sum204 = (rows) => Math.round(rows.reduce((s, r) => s + r.pct, 0) * 100) / 100;
+
+  const grown = addPick({ picks: full204.map((r) => ({ ...r })), pick: { strategyId: 'x' }, capitalRial: 1e10, lotCost: 1e8 });
+  check('روی سبد پرِ صد درصد، سطر تازه سهم واقعی می‌گیرد نه صفر',
+    grown.pct > 0, String(grown.pct));
+  check('سطر تازه سهم برابر می‌گیرد', grown.pct === 25, String(grown.pct));
+  check('مجموع پس از افزودن دقیقاً صد می‌ماند', sum204(grown.picks) === 100, String(sum204(grown.picks)));
+  check('نسبت سهم‌های پیشین حفظ می‌شود',
+    Math.abs(grown.picks[0].pct / grown.picks[1].pct - 40 / 35) < 1e-6,
+    grown.picks.map((r) => r.pct).join('/'));
+  check('عوض‌شدن سهم‌های کاربر گزارش می‌شود، نه بی‌صدا', grown.rebalanced === true);
+
+  const roomy = addPick({ picks: [{ pct: 40 }], pick: { strategyId: 'x' }, capitalRial: 1e10, lotCost: 1e8 });
+  check('وقتی جا هست، سهم‌های پیشین دست نمی‌خورند',
+    roomy.rebalanced === false && roomy.picks[0].pct === 40 && roomy.pct === 10);
+  check('وقتی جا هست، سهم تازه به اندازهٔ یک دست بالا می‌رود',
+    addPick({ picks: [{ pct: 40 }], pick: { strategyId: 'x' }, capitalRial: 1e10, lotCost: 3_600_000_000 }).pct === 36);
+  const first = addPick({ picks: [], pick: { strategyId: 'x' }, capitalRial: 1e10, lotCost: 1e8 });
+  check('نخستین سطرِ سبد خالی، بدون بازچینش ساخته می‌شود',
+    first.picks.length === 1 && first.picks[0].pct === 10 && first.rebalanced === false);
+  check('بدون سطرِ ورودی، فهرست دست‌نخورده برمی‌گردد',
+    addPick({ picks: full204, pick: null }).picks.length === 3);
+  // گردکردن دو رقمی چند صدم درز می‌اندازد و مجموعِ ۱۰۰٫۰۱ کل سبد را رد می‌کند.
+  const odd = addPick({ picks: [{ pct: 33.33 }, { pct: 33.33 }, { pct: 33.34 }], pick: { strategyId: 'x' } });
+  check('درزِ گردکردن جمع نمی‌شود و مجموع از صد رد نمی‌کند',
+    sum204(odd.picks) === 100, String(sum204(odd.picks)));
+  const seven = [20, 20, 20, 15, 15, 10].map((pct) => ({ pct }));
+  check('با هفت سطر هم مجموع دقیقاً صد می‌ماند',
+    sum204(addPick({ picks: seven, pick: { strategyId: 'x' } }).picks) === 100,
+    String(sum204(addPick({ picks: seven, pick: { strategyId: 'x' } }).picks)));
 }

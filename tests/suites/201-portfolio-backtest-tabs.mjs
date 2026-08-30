@@ -232,7 +232,8 @@ group('۲۰۱-و. کشوی جزئیات و دانه‌بندی');
   // آزمون مستقیم دارد (دستهٔ ۲۰۴)؛ این ادعا نمی‌گذارد دوباره تو کشیده شود.
   check('ویرایش سطرهای سبد از تابع خالص مشترک می‌آید، نه از شنونده',
     tab201.includes('basketPicks = applyBasketEdit({')
-    && tab201.includes("import { applyBasketEdit, firstComboId, normalizeBasketPicks } from '/core/basket-picks.mjs';")
+    && ['applyBasketEdit', 'firstComboId', 'normalizeBasketPicks']
+      .every((name) => new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from '/core/basket-picks\\.mjs'`, 's').test(tab201))
     && !/addEventListener\('change'[\s\S]{0,400}key === 'sourceId'/.test(tab201));
   check('فرم سبد پیش از رسم با اجراهای موجود آشتی داده می‌شود',
     tab201.includes('basketPicks = normalizeBasketPicks(basketPicks, basketSources());'));
@@ -240,6 +241,24 @@ group('۲۰۱-و. کشوی جزئیات و دانه‌بندی');
     tab201.includes('const many = sources.length > 1;')
     && tab201.includes("${many ? '' : ' data-single-run'}")
     && style201.includes('.pb-skin .pb-basket-row[data-single-run] { grid-template-columns:'));
+  // دکمهٔ «افزودن» سهم ثابت ۱۰٪ می‌گذاشت: سه سطر پیش‌فرض دقیقاً صد است،
+  // پس یک افزودن مجموع را ۱۱۰ می‌کرد و کل سبد رد می‌شد.
+  check('افزودن استراتژی، سهم ثابت نمی‌گذارد',
+    tab201.includes('const added = addPick({') && !/pb-basket-add[\s\S]{0,600}pct: 10 \}/.test(tab201));
+  check('مجموع درصدها زنده نشان داده می‌شود',
+    tab201.includes('function paintBasketTally()') && tab201.includes('id="pb-basket-tally"'));
+  // `100 - freePct` هر تخصیصِ بیش از صد را دقیقاً صد نشان می‌داد.
+  check('مجموع از usedPct می‌آید، نه از مکملِ کف‌دار',
+    tab201.includes('const used = usedPct(basketPicks);')
+    && !tab201.includes('const used = Math.round((100 - freePct('));
+  check('چرایی ننشستنِ یک سطر پیش از ساخت گفته می‌شود',
+    tab201.includes('const warn = pickWarning({') && tab201.includes('class="pb-basket-warn"'));
+  check('بازچینشِ سهم‌های کاربر بی‌صدا نمی‌ماند',
+    tab201.includes('basketRebalanced = added.rebalanced;')
+    && tab201.includes('سهم‌های پیشین به نسبت خودشان کوچک شدند'));
+  // خبرِ بازچینش اگر پاک نشود، در هر رسم بعدی تکرار می‌شود.
+  check('خبر بازچینش به همان افزودن می‌ماند',
+    (tab201.match(/basketRebalanced = false;/g) || []).length >= 4);
   check('نامِ بریده‌شده در select با title کامل برمی‌گردد',
     /data-basket="strategyId"[^`]*title="/.test(tab201)
     && /data-basket="comboId"[^`]*title="/.test(tab201));
