@@ -369,7 +369,7 @@ export async function mount(root, { state }) {
         <button type="button" class="ghost" id="pb-basket-add">افزودن استراتژی به سبد</button>
         <p class="pb-basket-tally" id="pb-basket-tally" data-tone="ok"></p>
       </div>
-      <p class="portfolio-note" id="pb-basket-note">درصدها روی هم نباید از صد بیشتر شوند. باقی‌ماندهٔ هر سهم که به یک دست کامل نرسد، نقد می‌ماند و در ارزش سبد شمرده می‌شود.</p>
+      <p class="portfolio-note" id="pb-basket-note">این تب فقط از همین مبلغ کار می‌کند: سهم هر استراتژی را می‌گیرد و خودش می‌شمارد چند قرارداد می‌خرد. «تعداد واحد» تب راه‌اندازی در این شمارش دخالت ندارد. باقی‌ماندهٔ هر سهم که به یک قرارداد کامل نرسد نقد می‌ماند و در ارزش سبد شمرده می‌شود.</p>
     </section>
     <div class="backtest-kpis" id="pb-basket-kpis"></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">مسیر ارزش سبد</p><h2>از سرمایهٔ اول دوره تا پایان، با افت مسیر</h2></div></div><div id="pb-basket-equity" class="pb-chart pb-chart-lg"></div></section>
@@ -1095,7 +1095,7 @@ export async function mount(root, { state }) {
       <label>ترکیب<select data-basket="comboId" data-index="${index}" title="${esc(combos.find((combo) => combo.id === pick.comboId) ? comboLabel(combos.find((combo) => combo.id === pick.comboId)) : '')}">${combos.length ? combos.map((combo) => `<option value="${esc(combo.id)}"${combo.id === pick.comboId ? ' selected' : ''}>${esc(comboLabel(combo))}</option>`).join('') : '<option value="">ترکیب معتبری ندارد</option>'}</select></label>
       <label>سهم (درصد)<input type="number" min="0" max="100" step="1" data-basket="pct" data-index="${index}" value="${pick.pct}"></label>
       <button type="button" class="ghost" data-basket-remove="${index}">حذف</button>
-      ${warn ? `<p class="pb-basket-warn" data-kind="${esc(warn.kind)}">${esc(warn.text)}${cost === null ? '' : ` · بهای هر دست ${fmt.money(cost)}`}</p>` : ''}
+      ${warn ? `<p class="pb-basket-warn" data-kind="${esc(warn.kind)}">${esc(warn.text)}${cost === null ? '' : ` · بهای هر قرارداد ${fmt.money(cost)}`}</p>` : ''}
     </div>`;
   }
 
@@ -1197,10 +1197,10 @@ export async function mount(root, { state }) {
       : '';
 
     const unfunded = basket.legs.filter((leg) => !leg.ok);
-    $('pb-basket-table').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>اجرا</th><th>استراتژی</th><th>ترکیب</th><th>دست</th><th>پول درگیر</th><th>نقد مانده</th><th>سود/زیان</th><th>بازده جزء</th><th>سهم از سود کل</th></tr></thead><tbody>${
+    $('pb-basket-table').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>اجرا</th><th>استراتژی</th><th>ترکیب</th><th>قرارداد</th><th>بهای هر قرارداد</th><th>پول درگیر</th><th>نقد مانده</th><th>سود/زیان</th><th>بازده جزء</th><th>سهم از سود کل</th></tr></thead><tbody>${
       basket.legs.map((leg) => (leg.ok
-        ? `<tr><td>${esc(leg.sourceLabel || '—')}</td><td>${esc(leg.strategyName)}</td><td>${esc(leg.comboId)}</td><td>${fmt.int(leg.lots)}</td><td>${fmt.money(leg.deployedRial)}</td><td>${fmt.money(leg.idleRial)}</td><td class="${signTone(leg.finalPnlRial)}">${fmt.money(leg.finalPnlRial)}</td><td class="${signTone(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}">${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}</td><td>${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.sharePct)}</td></tr>`
-        : `<tr><td>${esc(leg.sourceLabel || '—')}</td><td>${esc(leg.strategyName || '—')}</td><td colspan="7"><span class="loss">${esc(leg.why)}</span> — ${fmt.money(leg.targetRial)} نقد ماند${leg.unitCostRial ? `؛ بهای هر دست ${fmt.money(leg.unitCostRial)}` : ''}</td></tr>`)).join('')}</tbody></table>${
+        ? `<tr><td>${esc(leg.sourceLabel || '—')}</td><td>${esc(leg.strategyName)}</td><td>${esc(leg.comboId)}</td><td>${fmt.int(leg.contracts)}</td><td>${fmt.money(leg.unitCostRial)}</td><td>${fmt.money(leg.deployedRial)}</td><td>${fmt.money(leg.idleRial)}</td><td class="${signTone(leg.finalPnlRial)}">${fmt.money(leg.finalPnlRial)}</td><td class="${signTone(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}">${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}</td><td>${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.sharePct)}</td></tr>`
+        : `<tr><td>${esc(leg.sourceLabel || '—')}</td><td>${esc(leg.strategyName || '—')}</td><td colspan="8"><span class="loss">${esc(leg.why)}</span> — ${fmt.money(leg.targetRial)} نقد ماند${leg.unitCostRial ? `؛ بهای هر قرارداد ${fmt.money(leg.unitCostRial)}` : ''}</td></tr>`)).join('')}</tbody></table>${
       unfunded.length ? `<p class="portfolio-note">${fmt.int(unfunded.length)} سهم تأمین نشد و پولش نقد ماند. بازده سبد روی کل سرمایهٔ اول دوره حساب شده، نه فقط روی پول درگیر — پس نقدِ بی‌کار، بازده را رقیق می‌کند، همان‌طور که در واقعیت می‌کند.</p>` : ''}`;
   }
 
@@ -1754,7 +1754,7 @@ export async function mount(root, { state }) {
     const comboId = firstComboId(source, next.strategyId);
     // سهم از آنچه آزاد مانده برداشته می‌شود، نه یک عدد ثابت: ۴۰+۳۵+۲۵
     // دقیقاً صد است و ۱۰٪ ثابت، مجموع را به ۱۱۰ می‌برد و کل سبد رد
-    // می‌شود. و اگر بهای یک دست معلوم باشد، سهم دست‌کم یک دست است.
+    // می‌شود. و اگر بهای یک قرارداد معلوم باشد، سهم دست‌کم یکی است.
     const added = addPick({
       picks: basketPicks, pick: { sourceId: here, strategyId: next.strategyId, comboId },
       capitalRial: basketCapital(), lotCost: lotCostRial(source, comboId, lens.basisId),
