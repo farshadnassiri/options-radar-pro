@@ -18,7 +18,7 @@ import { GREEKS, annotateReplay, monitorGreekSummary, monitorVolSummary } from '
 import { mountSubtabs } from '/ui/subtabs.mjs';
 import { chartGroup } from '/ui/chart-host.mjs';
 import {
-  boxOption, bumpOption, calendarOption, equityOption, heatLevel, heatScale, heatmapOption,
+  boxOption, bumpOption, calendarOption, equityOption, heatLevel, heatScale, heatmapOption, horizonHeatOption, sortStrategies,
   histogramOption, parallelOption, raceOption, sankeyOption, scatterOption, treeOption,
   treemapOption, trendOption,
 } from '/ui/portfolio-analysis-view.mjs';
@@ -27,7 +27,22 @@ import { STATISTICS, WEIGHTINGS, DEFAULT_STATISTIC, DEFAULT_WEIGHTING } from '/c
 import {
   DEFAULT_HEATMAP_MODE, HEATMAP_MODES, METRICS, analyzePortfolio,
 } from '/core/portfolio-report.mjs';
+import { HEAT_PALETTES, HEAT_SORTS } from '/ui/portfolio-analysis-view.mjs';
 import { allocatePortfolio } from '/core/portfolio-allocation.mjs';
+import {
+  DEFAULT_GRAIN, MOMENT_GRAINS, grainMeta, intradayCost, isIntradayGrain,
+  momentDate, momentLabel, momentSecond, momentsFor, normalizeGrain,
+} from '/core/intraday-grid.mjs';
+import { downloadPortfolioBacktest } from '/ui/portfolio-backtest-export.mjs';
+import {
+  correlationHeatOption, correlationOf, familyBarOption, funnelOption, paretoOption,
+  roseOption, shareDonutOption, similarityGraphOption, sunburstOption,
+} from '/ui/portfolio-charts-parts.mjs';
+import {
+  cumulativeDistOption, dailyWinOption, drawdownPathOption, familyRiverOption,
+  metricRadarOption, polarScoreOption, quartileBandOption, scoreGaugeOption,
+  scorePartsOption, stepHistogramOption,
+} from '/ui/portfolio-charts-flow.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -99,19 +114,41 @@ function lineChart(host, rows, { xLabel, yLabel } = {}) {
 export async function mount(root, { state }) {
   root.innerHTML = `<section class="portfolio-hero"><div><p class="eyebrow">غربال تاریخی همه استراتژی‌ها</p><h1>در این بازه، بهترین و بدترین کدام بود؟</h1><p>همه استراتژی‌ها و ترکیب‌های معتبر یک نماد در روز ورود ساخته و در یک بازهٔ یکسان سنجیده می‌شوند؛ بدون پرکردن قیمت گمشده و بدون انتخاب پس‌نگر یک برنده.</p></div><span id="pb-hero-verdict">هنوز اجرایی انجام نشده</span></section>
   <div id="pb-tabs" hidden></div>
-  <section class="card pb-lens" id="pb-lens" hidden>
-    <div class="pb-lens-head"><p class="eyebrow">عدسی گزارش</p><h2>هر جدول و نمودارِ این صفحه از همین چهار انتخاب می‌آید</h2></div>
+  <div class="pb-workbook" id="pb-workbook" hidden>
+    <button type="button" class="primary" id="pb-workbook-run">دفترچهٔ کامل اکسل</button>
+    <p class="portfolio-note" id="pb-workbook-note">یازده برگ در یک فایل: سرشناسه و عدسی، سرخط‌ها، چهارده سنجهٔ هر استراتژی، خانواده‌ها، همهٔ ترکیب‌ها با اجزای مخرج، مسیر روزانه برای PivotTable، افق نگهداری، توزیع، همبستگی، سبد فرضی، و برگ محدودیت‌های داده. خانهٔ خالی یعنی داده نبود؛ صفر یعنی سر به سر.</p>
+  </div>
+  <section class="card pb-lens" id="pb-lens" hidden data-open="false">
+    <button type="button" class="pb-lens-toggle" id="pb-lens-toggle" aria-expanded="false" aria-controls="pb-lens-body" title="عدسی گزارش">
+      <span class="pb-lens-chip">عدسی</span><b id="pb-lens-summary">—</b><i aria-hidden="true"></i>
+    </button>
+    <div class="pb-lens-body" id="pb-lens-body" hidden>
+    <p class="portfolio-note pb-lens-why">هر جدول و نمودارِ این صفحه از همین انتخاب‌ها می‌آید.</p>
     <div class="pb-lens-grid">
       <label>مبنای بازده<select id="pb-basis">${RETURN_BASES.map((row) => `<option value="${row.id}"${row.id === DEFAULT_RETURN_BASIS ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
       <label>آمارهٔ دسته<select id="pb-stat">${STATISTICS.map((row) => `<option value="${row.id}"${row.id === DEFAULT_STATISTIC ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
       <label>وزن‌دهی<select id="pb-weighting">${WEIGHTINGS.map((row) => `<option value="${row.id}"${row.id === DEFAULT_WEIGHTING ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
+      <label>دانه‌بندی زمان<select id="pb-grain">${MOMENT_GRAINS.map((row) => `<option value="${row.id}" title="${esc(row.hint)}"${row.id === DEFAULT_GRAIN ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
       <label>از روز<select id="pb-from"></select></label>
       <label>تا روز<select id="pb-to"></select></label>
       <button type="button" class="ghost" id="pb-lens-reset">بازگشت به بازهٔ کامل</button>
     </div>
     <p class="portfolio-note" id="pb-lens-note"></p>
+    <div class="pb-grain-run" id="pb-grain-run" hidden>
+      <button type="button" class="primary" id="pb-grain-go">اجرای درون‌روزی</button>
+      <p class="portfolio-note" id="pb-grain-note"></p>
+    </div>
+    </div>
   </section>
 
+  <aside class="pb-drawer" id="pb-drawer" hidden aria-live="polite">
+    <div class="pb-drawer-head">
+      <b id="pb-drawer-title">جزئیات</b>
+      <div class="pb-drawer-tabs" id="pb-drawer-tabs"></div>
+      <button type="button" class="ghost" id="pb-drawer-close" title="بستن">بستن</button>
+    </div>
+    <div class="pb-drawer-body" id="pb-drawer-body"></div>
+  </aside>
   <div class="pb-panel" data-panel="setup">
     <section class="card portfolio-controls"><div class="section-head"><div><p class="eyebrow">مرحله اول</p><h2>نماد، نقدشوندگی و دامنه آزمون</h2></div><b id="pb-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
     <div class="portfolio-form"><label>نماد پایه<select id="pb-base"><option value="">در حال دریافت…</option></select></label><label>دامنه استراتژی<select id="pb-scope"><option value="feasible">فقط استراتژی‌های قابل اجرا</option><option value="all">همه ساختاری، با برچسب غیرقابل اجرا</option></select></label><label>دامنهٔ داده<select id="pb-data-scope">${scopeOptionsMarkup()}</select></label><label>تعداد واحد<input id="pb-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><label>سقف ترکیب هر استراتژی<input id="pb-cap" type="number" min="10" max="1000" step="10" value="120"></label>
@@ -138,42 +175,181 @@ export async function mount(root, { state }) {
 
   <div class="pb-panel" data-panel="overview" hidden>
     <div class="backtest-kpis" id="pb-kpis"></div>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">از کل به جزء</p><h2>کدام خانواده وزن دارد و کدام سود داد؟</h2></div><span id="pb-treemap-note">اندازه از شمار ترکیب، رنگ از بازده</span></div><div id="pb-treemap" class="pb-chart pb-chart-lg"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">سرخط‌ها</p><h2>ده سؤالی که آدم واقعاً می‌پرسد</h2></div><span>روی هر کارت کلیک کن تا همان استراتژی انتخاب شود</span></div><div id="pb-highlights" class="pb-highlights"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">گزارش خانواده‌ها</p><h2>بهترین و بدترین عضو هر خانواده</h2></div></div><div id="pb-groups" class="history-table-wrap"></div></section>
   </div>
 
   <div class="pb-panel" data-panel="ranking" hidden>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">پایداری رتبه</p><h2>چه کسی کِی جلو افتاد</h2></div><span>روی هر خط کلیک کن تا همان استراتژی انتخاب شود</span></div><div id="pb-bump" class="pb-chart pb-chart-lg"></div></section>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">مسابقهٔ بازده</p><h2>مسیر تجمعی، از روز ورود تا پایان بازه</h2></div><button type="button" class="ghost" id="pb-race-replay">پخش دوباره</button></div><div id="pb-race" class="pb-chart pb-chart-lg"></div></section>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">برنده و بازنده</p><h2>رتبه‌بندی با نمرهٔ ترکیبی</h2></div><span id="pb-audit">—</span></div><div id="pb-strategies" class="history-table-wrap"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">جدول اصلی</p><h2>رتبه‌بندی با نمرهٔ ترکیبی</h2></div><span id="pb-audit">—</span></div>
+      <p class="pb-hint">ترتیب از نمرهٔ ترکیبی می‌آید، نه فقط از بازده. وزن سنجه‌ها را در تب «سنجه‌ها» می‌توانی عوض کنی و همین جدول همان لحظه از نو مرتب می‌شود. روی هر ردیف کلیک کن تا ترکیب‌هایش را ببینی.</p>
+      <div id="pb-strategies" class="history-table-wrap"></div>
+    </section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">مسابقهٔ بازده</p><h2>مسیر تجمعی، از روز ورود تا پایان بازه</h2></div><button type="button" class="ghost" id="pb-race-replay">پخش دوباره</button></div>
+      <p class="pb-hint">خط‌ها با هم از چپ به راست جلو می‌روند تا ببینی هر استراتژی کِی از بقیه جدا شد. با تراشه‌های تب «روند» انتخاب می‌شود کدام‌ها بیایند.</p>
+      <div id="pb-race" class="pb-chart pb-chart-lg"></div>
+    </section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">پایداری رتبه</p><h2>چه کسی کِی جلو افتاد</h2></div><span>روی هر خط کلیک کن</span></div>
+      <p class="pb-hint">محور عمودی وارونه است: بالا یعنی رتبهٔ بهتر. خطی که صاف بالا می‌ماند، هر روز جلو بوده؛ خطی که بالا و پایین می‌پرد، بردش بیشتر شانس بوده تا پایداری.</p>
+      <div id="pb-bump" class="pb-chart pb-chart-lg"></div>
+    </section>
   </div>
 
   <div class="pb-panel" data-panel="heatmap" hidden>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">همهٔ روزهای بازه</p><h2>نقشهٔ حرارتی</h2></div><label class="pb-inline-pick">حالت خانه<select id="pb-heat-mode">${HEATMAP_MODES.map((row) => `<option value="${row.id}"${row.id === DEFAULT_HEATMAP_MODE ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label></div><p class="portfolio-note" id="pb-heat-note"></p><div id="pb-heatmap" class="pb-chart pb-chart-xl"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">همهٔ روزهای بازه</p><h2>نقشهٔ حرارتی</h2></div><div class="pb-toggle-row">
+      <label class="pb-inline-pick">حالت خانه<select id="pb-heat-mode">${HEATMAP_MODES.map((row) => `<option value="${row.id}"${row.id === DEFAULT_HEATMAP_MODE ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
+      <label class="pb-inline-pick">ترتیب سطرها<select id="pb-heat-sort">${HEAT_SORTS.map((row) => `<option value="${row.id}" title="${esc(row.hint)}">${esc(row.label)}</option>`).join('')}</select></label>
+      <label class="pb-inline-pick">طیف رنگ<select id="pb-heat-palette">${HEAT_PALETTES.map((row) => `<option value="${row.id}" title="${esc(row.hint)}">${esc(row.label)}</option>`).join('')}</select></label>
+    </div></div><p class="portfolio-note" id="pb-heat-note"></p><div id="pb-heatmap" class="pb-chart pb-chart-xl"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">افق در برابر استراتژی</p><h2>کدام استراتژی در کدام افق بهتر بود؟</h2></div></div>
+      <p class="pb-hint">سطرها استراتژی‌اند و ستون‌ها «اگر بعد از n روز می‌بستیم». خانهٔ سبزِ پررنگ یعنی آن استراتژی در آن افق بهترین نتیجه را داده — و اگر یک ستون کلاً سبز باشد، آن افق برای همه خوب بوده، نه فقط برای یکی.</p>
+      <div id="pb-horizon" class="pb-chart pb-chart-lg"></div>
+    </section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">الگوی زمانی</p><h2>تقویم روزانه</h2></div><label class="pb-inline-pick">استراتژی<select id="pb-calendar-pick"></select></label></div><div id="pb-calendar" class="pb-chart pb-chart-lg"></div></section>
   </div>
 
   <div class="pb-panel" data-panel="trend" hidden>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">روند بازده</p><h2>در برابر نگه‌داشتن خودِ سهم</h2></div><div class="pb-toggle-row"><label><input type="checkbox" id="pb-trend-base" checked> نماد پایه</label><label><input type="checkbox" id="pb-trend-area"> ناحیه‌ای</label></div></div><div id="pb-trend-pick" class="pb-chip-row"></div><div id="pb-trend" class="pb-chart pb-chart-xl"></div></section>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">افق نگهداری</p><h2>اگر زودتر می‌بستیم چه می‌شد؟</h2></div><span>هر ستون، یک پنجرهٔ نگهداری کوتاه‌تر داخل همین بازه</span></div><div id="pb-holding" class="history-table-wrap"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">روند بازده</p><h2>در برابر نگه‌داشتن خودِ سهم</h2></div><div class="pb-toggle-row"><label><input type="checkbox" id="pb-trend-base" checked> نماد پایه</label><label><input type="checkbox" id="pb-trend-area"> ناحیه‌ای</label></div></div>
+      <p class="pb-hint">هر خط، مسیر بازده یک استراتژی از روز ورود است. خط خط‌چین، خودِ سهم را نشان می‌دهد: اگر خطی زیر آن بماند، آن استراتژی از نگه‌داشتن ساده سهم بدتر بوده. با تراشه‌های زیر، استراتژی‌ها را کم و زیاد کن؛ با کشیدن روی نوار پایین، بازه را بزرگ کن.</p>
+      <div id="pb-trend-pick" class="pb-chip-row"></div><div id="pb-trend" class="pb-chart pb-chart-xl"></div>
+    </section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">قطعیتِ دروغین</p><h2>میانه، با باند چارک‌ها دورش</h2></div><label class="pb-inline-pick">دامنه<select id="pb-band-pick"></select></label></div>
+      <p class="pb-hint">خط وسط می‌گوید «معمولاً چه شد» و ناحیهٔ رنگی می‌گوید «چقدر می‌توانست فرق کند». باند پهن یعنی نتیجه بیشتر به این بستگی داشت که کدام ترکیب را انتخاب کنی، نه به خود استراتژی.</p>
+      <div id="pb-band" class="pb-chart pb-chart-lg"></div>
+    </section>
+    <div class="portfolio-report-grid">
+      <section class="card"><div class="section-head"><div><p class="eyebrow">درد مسیر</p><h2>افت از سقف، روزبه‌روز</h2></div></div>
+        <p class="pb-hint">صفر یعنی همان لحظه روی بهترین نقطهٔ مسیرش بوده. هرچه خط پایین‌تر برود، از قله بیشتر عقب افتاده — همان دردی که آدم را از معامله بیرون می‌کند.</p>
+        <div id="pb-dd-path" class="pb-chart"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">نرخ برد روزانه</p><h2>هر روز چند درصد ترکیب‌ها سبز بودند</h2></div></div>
+        <p class="pb-hint">خط‌چین وسط، پنجاه درصد است. بالای آن یعنی آن روز بیشترِ ترکیب‌های آن استراتژی در سود بودند.</p>
+        <div id="pb-daily-win" class="pb-chart"></div>
+      </section>
+    </div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">رودخانهٔ خانواده‌ها</p><h2>در هر روز، سود کدام خانواده بیشتر بود</h2></div></div>
+      <p class="pb-hint">پهنای هر نوار، سود مثبت آن خانواده در آن روز است. فقط سود مثبت وارد می‌شود چون رودخانه پهنای منفی نمی‌کشد — پس این نمودار «کجا سود بود» را می‌گوید، نه «کجا زیان بود».</p>
+      <div id="pb-river" class="pb-chart pb-chart-lg"></div>
+    </section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">افق نگهداری</p><h2>اگر زودتر می‌بستیم چه می‌شد؟</h2></div><span>هر ردیف، یک پنجرهٔ نگهداری کوتاه‌تر داخل همین بازه</span></div>
+      <p class="pb-hint">چون همهٔ ترکیب‌ها یک روز ورود دارند، «نگهداری n روز» دقیقاً همان ستون n است. ردیف سبزتر یعنی آن افق، بهتر جواب داده.</p>
+      <div id="pb-holding" class="history-table-wrap"></div>
+    </section>
   </div>
 
   <div class="pb-panel" data-panel="metrics" hidden>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">قضاوت، دیدنی</p><h2>وزن هر سنجه در نمرهٔ نهایی</h2></div><button type="button" class="ghost" id="pb-weights-reset">وزن‌های پیش‌فرض</button></div><div id="pb-weights" class="pb-weights"></div></section>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">همهٔ سنجه‌ها با هم</p><h2>هر خط، یک استراتژی</h2></div><span>در همهٔ محورها، بالا یعنی بهتر</span></div><div id="pb-parallel" class="pb-chart pb-chart-lg"></div></section>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">جدول سنجه‌ها</p><h2>عدد خام هر سنجه</h2></div></div><div id="pb-metrics-table" class="history-table-wrap"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">قضاوت، دیدنی</p><h2>وزن هر سنجه در نمرهٔ نهایی</h2></div><button type="button" class="ghost" id="pb-weights-reset">وزن‌های پیش‌فرض</button></div>
+      <p class="pb-hint">«بهترین» یک عدد نیست، یک قضاوت است. اینجا می‌بینی آن قضاوت از چه ساخته شده و می‌توانی عوضش کنی: لغزنده را که بکشی، رتبه‌بندی همان لحظه از نو ساخته می‌شود. وزن صفر یعنی آن سنجه فقط نمایش داده می‌شود و در نمره نمی‌آید.</p>
+      <div id="pb-weights" class="pb-weights"></div>
+    </section>
+    <div class="portfolio-report-grid">
+      <section class="card"><div class="section-head"><div><p class="eyebrow">نمرهٔ صدر جدول</p><h2>عقربهٔ بهترین</h2></div></div>
+        <p class="pb-hint">نمره از صفر تا صد است و از <b>رتبهٔ درصدی</b> می‌آید، نه از خودِ عدد سنجه‌ها. صد یعنی در همهٔ سنجه‌های وزن‌دار، اول بوده.</p>
+        <div id="pb-gauge" class="pb-chart"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">نمرهٔ همه</p><h2>روی یک دایره</h2></div></div>
+        <p class="pb-hint">هر تیغه یک استراتژی است؛ بلندتر یعنی نمرهٔ بالاتر. رنگ از بازده می‌آید، پس تیغهٔ بلندِ قرمز یعنی «نمره‌اش خوب بود ولی بازدهش نه» — و آن، همان جایی است که باید وزن‌ها را بازبینی کنی.</p>
+        <div id="pb-polar" class="pb-chart"></div>
+      </section>
+    </div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">این نمره از کجا آمد؟</p><h2>سهم هر سنجه در نمرهٔ هر استراتژی</h2></div></div>
+      <p class="pb-hint">هر میله، نمرهٔ یک استراتژی است که به اجزایش شکسته شده. تکهٔ بزرگ‌تر یعنی آن سنجه بیشتر نمره را ساخته. اگر یک استراتژی سنجه‌ای را نداشته باشد، تکه‌اش نیست — صفر نمی‌گیرد.</p>
+      <div id="pb-score-parts" class="pb-chart pb-chart-lg"></div>
+    </section>
+    <div class="portfolio-report-grid">
+      <section class="card"><div class="section-head"><div><p class="eyebrow">مختصات موازی</p><h2>هر خط، یک استراتژی روی همهٔ محورها</h2></div></div>
+        <p class="pb-hint">در همهٔ محورها، بالا یعنی بهتر — سنجه‌هایی که «کمتر بهتر» است وارونه شده‌اند. خطی که همه‌جا بالاست، همه‌جوره خوب بوده.</p>
+        <div id="pb-parallel" class="pb-chart pb-chart-lg"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">رادار</p><h2>چند استراتژی، رودررو</h2></div></div>
+        <p class="pb-hint">هر محور به صفر تا صد نگاشته شده، وگرنه «درصد بازده» و «شمار ترکیب» روی یک شکل جمع‌شدنی نبودند. دورتر از مرکز یعنی بهتر. عدد واقعی در راهنمای شناور است.</p>
+        <div id="pb-radar" class="pb-chart pb-chart-lg"></div>
+      </section>
+    </div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">جدول سنجه‌ها</p><h2>عدد خام هر سنجه</h2></div><span>روی هر ردیف کلیک کن</span></div><div id="pb-metrics-table" class="history-table-wrap"></div></section>
   </div>
 
   <div class="pb-panel" data-panel="distribution" hidden>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">سود در برابر درد</p><h2>گوشهٔ بالا-راست همان جایی است که دنبالش می‌گردیم</h2></div></div><div id="pb-scatter" class="pb-chart pb-chart-lg"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">سود در برابر درد</p><h2>گوشهٔ بالا-راست همان جایی است که دنبالش می‌گردیم</h2></div></div>
+      <p class="pb-hint">محور افقی بیشترین افت مسیر است و محور عمودی بازده. هرچه نقطه بالاتر و راست‌تر باشد، سود بیشتری با درد کمتری داده. اندازهٔ دایره، شمار ترکیب‌های آن استراتژی است. روی هر نقطه کلیک کن تا جزئیاتش را ببینی.</p>
+      <div id="pb-scatter" class="pb-chart pb-chart-lg"></div>
+    </section>
     <div class="portfolio-report-grid">
-      <section class="card"><div class="section-head"><div><p class="eyebrow">توزیع نتیجه</p><h2>بازده همهٔ ترکیب‌ها</h2></div></div><div id="pb-histogram" class="pb-chart"></div></section>
-      <section class="card"><div class="section-head"><div><p class="eyebrow">پراکندگی درون هر استراتژی</p><h2>نتیجه به استراتژی بود یا به انتخاب ترکیب؟</h2></div></div><div id="pb-box" class="pb-chart"></div></section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">توزیع نتیجه</p><h2>بازده همهٔ ترکیب‌ها</h2></div></div>
+        <p class="pb-hint">هر میله می‌گوید چند ترکیب بازدهی در آن حدود داشتند. توده‌ای که سمت راستِ صفر جمع شده یعنی بیشتر ترکیب‌ها سود دادند.</p>
+        <div id="pb-histogram" class="pb-chart"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">توزیع تجمعی</p><h2>چند درصد ترکیب‌ها زیر یک عدد ماندند؟</h2></div></div>
+        <p class="pb-hint">جای برخورد خط با خط‌چینِ «سر به سر»، همان درصد ترکیب‌هایی است که زیان دادند. هرچه خط دیرتر بالا برود، نتیجه بهتر بوده.</p>
+        <div id="pb-cdf" class="pb-chart"></div>
+      </section>
     </div>
+    <div class="portfolio-report-grid">
+      <section class="card"><div class="section-head"><div><p class="eyebrow">پراکندگی درون هر استراتژی</p><h2>نتیجه به استراتژی بود یا به انتخاب ترکیب؟</h2></div></div>
+        <p class="pb-hint">هر جعبه یک استراتژی است: خط وسط میانه، بدنهٔ جعبه چارک پایین تا بالا، و خط‌های بیرونی کمینه و بیشینه. جعبهٔ بلند یعنی همان استراتژی با ترکیب‌های مختلف نتیجه‌های خیلی متفاوتی داد.</p>
+        <div id="pb-box" class="pb-chart"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">تندی حرکت</p><h2>توزیع تغییر روزانهٔ بازده</h2></div></div>
+        <p class="pb-hint">هر میله می‌گوید چند بار تغییر روزانه در آن حدود بوده. توزیع پهن یعنی مسیرها پرتکان‌اند؛ توزیع باریکِ دور صفر یعنی آرام.</p>
+        <div id="pb-step-hist" class="pb-chart"></div>
+      </section>
+    </div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">جدول توزیع</p><h2>چارک‌ها و دُم‌ها، به عدد</h2></div></div><div id="pb-dist-table" class="history-table-wrap"></div></section>
+  </div>
+
+  <div class="pb-panel" data-panel="parts" hidden>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">قیف غربال</p><h2>از هر چه ساخته شد تا هر چه به رتبه‌بندی رسید</h2></div></div>
+      <p class="pb-hint">جواب سؤالی که همیشه پرسیده می‌شود: چرا از این‌همه ترکیب فقط این‌قدر ماند؟ هر پله، یک شرط را می‌اندازد.</p>
+      <div id="pb-funnel" class="pb-chart"></div>
+    </section>
+    <div class="portfolio-report-grid">
+      <section class="card"><div class="section-head"><div><p class="eyebrow">سه حلقه</p><h2>خانواده ← استراتژی ← ترکیب</h2></div></div>
+        <p class="pb-hint">هر حلقه یک پله جزئی‌تر است. کمان بزرگ‌تر یعنی ترکیب بیشتر؛ سبز یعنی آن شاخه سود داد.</p>
+        <div id="pb-sunburst" class="pb-chart pb-chart-lg"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">سهم خانواده‌ها</p><h2>هر خانواده چند درصد ترکیب‌ها را دارد</h2></div></div>
+        <p class="pb-hint">درصد روی خودِ قاچ نوشته شده. اگر یک خانواده نصف نمودار را گرفته، نتیجهٔ کل بیشتر حرفِ همان خانواده است.</p>
+        <div id="pb-donut" class="pb-chart pb-chart-lg"></div>
+      </section>
+    </div>
+    <div class="portfolio-report-grid">
+      <section class="card"><div class="section-head"><div><p class="eyebrow">وزن خانواده‌ها</p><h2>شمار ترکیب هر خانواده</h2></div></div>
+        <p class="pb-hint">هر مربع کوچک یک واحد است؛ ردیف بلندتر یعنی آن خانواده انتخاب بیشتری پیش رویت می‌گذارد.</p>
+        <div id="pb-family-bar" class="pb-chart"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">درخت‌نقشه</p><h2>مساحت از شمار ترکیب، رنگ از بازده</h2></div></div>
+        <p class="pb-hint">برای دیدن اینکه پول و انتخاب کجا جمع شده، و آن جا سود داد یا نه.</p>
+        <div id="pb-treemap" class="pb-chart"></div>
+      </section>
+    </div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">گل رز</p><h2>بازده هر استراتژی، همه در یک نگاه</h2></div></div>
+      <p class="pb-hint">طول هر گلبرگ بازده آن استراتژی است. برای مقایسهٔ بیست‌وچند استراتژی، میلهٔ افقی صفحه را می‌کشد و این یکی همه را جا می‌دهد. گلبرگِ کوتاه یعنی زیان — عدد واقعی در راهنمای شناور است.</p>
+      <div id="pb-rose" class="pb-chart pb-chart-lg"></div>
+    </section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">پارتو</p><h2>چند استراتژی، چند درصد سود را ساختند؟</h2></div></div>
+      <p class="pb-hint">اگر خط نارنجی زود به هشتاد درصد برسد، یعنی نتیجه به دو سه استراتژی وابسته است — و آن، تنوعِ روی کاغذ است نه واقعی.</p>
+      <div id="pb-pareto" class="pb-chart pb-chart-lg"></div>
+    </section>
+    <div class="portfolio-report-grid">
+      <section class="card"><div class="section-head"><div><p class="eyebrow">تنوع دروغین</p><h2>کدام استراتژی‌ها یک شرط‌بندی‌اند؟</h2></div><label class="pb-inline-pick">آستانهٔ همبستگی<select id="pb-graph-threshold"><option value="0.6">۰٫۶</option><option value="0.75" selected>۰٫۷۵</option><option value="0.9">۰٫۹</option></select></label></div>
+        <p class="pb-hint">هر گره یک استراتژی است و خطی که دو گره را وصل می‌کند یعنی مسیرشان با هم می‌رود. خوشهٔ پرخط یعنی چند استراتژی که در عمل یک شرط‌بندی‌اند.</p>
+        <div id="pb-graph" class="pb-chart pb-chart-lg"></div>
+      </section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">ماتریس همبستگی</p><h2>زوج‌به‌زوج، چقدر شبیه‌اند</h2></div></div>
+        <p class="pb-hint">آبی یعنی هم‌جهت، قرمز یعنی خلاف هم. قطر همیشه آبیِ پررنگ است چون هر استراتژی با خودش کاملاً هم‌جهت است.</p>
+        <div id="pb-corr" class="pb-chart pb-chart-lg"></div>
+      </section>
+    </div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">درخت کاوش</p><h2>خانواده ← نوع ← استراتژی</h2></div><span>روی هر گره کلیک کن</span></div>
+      <div id="pb-tree" class="pb-chart pb-chart-lg"></div>
+    </section>
+    <div class="portfolio-report-grid">
+      <section class="card"><div class="section-head"><div><p class="eyebrow">جدول خانواده‌ها</p><h2>عدد خام هر خانواده</h2></div></div><div id="pb-parts-groups" class="history-table-wrap"></div></section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">جدول شباهت</p><h2>شبیه‌ترین زوج‌ها</h2></div></div><div id="pb-parts-pairs" class="history-table-wrap"></div></section>
+    </div>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">جدول سهم سود</p><h2>پارتو، به عدد</h2></div></div><div id="pb-parts-pareto" class="history-table-wrap"></div></section>
   </div>
 
   <div class="pb-panel" data-panel="drill" hidden>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">کاوش از کل به جزء</p><h2>خانواده ← نوع ← استراتژی</h2></div><span>روی هر گره کلیک کن</span></div><div id="pb-tree" class="pb-chart pb-chart-lg"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">ترکیب‌های واقعی</p><h2 id="pb-combo-title">برای مشاهده جزئیات یک استراتژی را انتخاب کن</h2></div><span>هر ردیف یک ترکیب قرارداد</span></div><div id="pb-combos" class="history-table-wrap"></div></section>
     <section id="pb-detail" class="portfolio-detail" hidden></section>
   </div>
@@ -208,9 +384,21 @@ export async function mount(root, { state }) {
     basisId: DEFAULT_RETURN_BASIS, statistic: DEFAULT_STATISTIC,
     weighting: DEFAULT_WEIGHTING, from: null, to: null,
   };
-  let heatMode = DEFAULT_HEATMAP_MODE;
+  let heatMode = DEFAULT_HEATMAP_MODE, heatSort = 'score', heatPalette = 'signed';
+  // دانه‌بندی انتخابی، و ماتریسِ روزانهٔ اصلی که با بازگشت به «روزانه»
+  // دوباره سر جایش می‌نشیند. بدون نگه‌داشتنش، برگشتن از حالت درون‌روزی
+  // یعنی اجرای دوباره.
+  let grain = DEFAULT_GRAIN, dailyMatrix = null, dailyRows = [];
   let metricWeights = Object.fromEntries(METRICS.map((row) => [row.id, row.weight]));
-  let trendPick = [], basketPicks = [], calendarPick = '';
+  let trendPick = [], basketPicks = [], calendarPick = '', bandPick = '';
+  /**
+   * کتابخانهٔ اجرا — هر اجرای کامل‌شده اینجا می‌ماند.
+   *
+   * سبد فرضی از همین می‌خواند، پس می‌شود روی یک نماد اسپرد عمودی گذاشت و
+   * روی نماد دیگر خفه‌کن. تحلیل هر اجرا با **عدسی جاری** بازساخته می‌شود تا
+   * همهٔ اجزای سبد روی یک مبنا سنجیده شوند، نه هر کدام با مبنای روزِ خودش.
+   */
+  let runs = [];
   let tabsApi = null;
   // هر پنل وقتی دیده می‌شود رسم می‌شود، نه زودتر: نمودار روی ظرف پنهان
   // عرض صفر می‌گیرد و بی‌صدا خالی درمی‌آید.
@@ -224,11 +412,21 @@ export async function mount(root, { state }) {
     { id: 'trend', label: 'روند', hint: 'مسیر بازده و افق نگهداری' },
     { id: 'metrics', label: 'سنجه‌ها', hint: 'وزن قضاوت' },
     { id: 'distribution', label: 'توزیع', hint: 'پراکندگی نتیجه' },
+    { id: 'parts', label: 'کل به جزء', hint: 'ترکیب سبد، از خانواده تا یک ترکیب' },
     { id: 'drill', label: 'کاوش', hint: 'از کل تا یک ترکیب' },
     { id: 'basket', label: 'سبد فرضی', hint: 'تخصیص سرمایه' },
   ];
 
-  const labelsOf = () => (analysis?.dates || []).map(dateLabel);
+  /**
+   * برچسب یک ستون — روز یا لحظه.
+   *
+   * در حالت درون‌روزی، ستون‌ها کلیدِ «تاریخ و ثانیه»‌اند. نمایش‌دادنشان
+   * به‌شکل تاریخ، عددی چهارده‌رقمی می‌داد که هیچ‌کس نمی‌خواندش.
+   */
+  const columnLabel = (value) => (isIntradayGrain(grain)
+    ? `${dateLabel(momentDate(value))} ${momentLabel(momentSecond(value))}`
+    : dateLabel(value));
+  const labelsOf = () => (analysis?.dates || []).map(columnLabel);
   const pctCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
   const numCellOf = (value) => (Number.isFinite(value) ? fmt.num(value) : '—');
 
@@ -333,7 +531,10 @@ export async function mount(root, { state }) {
       activeWorker.onmessage = (event) => {
         const payload = event.data;
         if (payload.id !== message.id) return;
-        if (payload.type === 'portfolio-progress') {
+        if (payload.type === 'portfolio-intraday-progress') {
+          setStatus(`قیمت‌گذاری لحظه‌ها: ${fmt.int(payload.done)} از ${fmt.int(payload.total)} · ${fmt.int(payload.priced)} قیمت معتبر`);
+        } else if (payload.type === 'portfolio-intraday') resolve(payload);
+        else if (payload.type === 'portfolio-progress') {
           setStatus(`${payload.strategyName}: ${fmt.int(payload.done)} از ${fmt.int(payload.total)} استراتژی · ${fmt.int(payload.results)} نتیجه معتبر`);
         } else if (payload.type === 'portfolio') resolve(payload);
         else if (payload.type === 'error') reject(new Error(payload.error));
@@ -347,20 +548,55 @@ export async function mount(root, { state }) {
 
   function paintLensOptions() {
     const dates = payloadMatrix?.dates || [];
+    // برچسب از `columnLabel` می‌آید نه `dateLabel`: کلیدِ لحظه چهارده‌رقمی
+    // است و تقویم جلالی رویش «—» می‌دهد، پس فهرست بازه بی‌برچسب می‌شد.
     const options = (selected) => dates
-      .map((date) => `<option value="${date}"${Number(selected) === date ? ' selected' : ''}>${esc(dateLabel(date))}</option>`)
+      .map((date) => `<option value="${date}"${Number(selected) === date ? ' selected' : ''}>${esc(columnLabel(date))}</option>`)
       .join('');
     $('pb-from').innerHTML = options(lens.from ?? dates[0]);
     $('pb-to').innerHTML = options(lens.to ?? dates.at(-1));
   }
 
+  /**
+   * خلاصهٔ یک‌خطیِ عدسی برای حالت بسته.
+   *
+   * وقتی نوار جمع است، کاربر باید بدون بازکردنش بداند عددهایی که می‌بیند
+   * روی چه مبنا و چه بازه‌ای ساخته شده‌اند. نوارِ بسته و بی‌برچسب، بدتر از
+   * نوارِ بزرگ است: جا نمی‌گیرد ولی عدد را هم بی‌قید می‌کند.
+   */
+  function lensSummary() {
+    if (!analysis) return 'هنوز اجرایی انجام نشده';
+    return [
+      analysis.basis.short,
+      analysis.statisticLabel,
+      analysis.weighting === 'equal' ? 'هم‌وزن' : 'وزن ارزش',
+      isIntradayGrain(grain) ? `${fmt.int(analysis.range.days)} لحظه` : `${fmt.int(analysis.range.days)} روز`,
+      analysis.range.from ? `${columnLabel(analysis.range.from)} تا ${columnLabel(analysis.range.to)}` : '',
+    ].filter(Boolean).join(' · ');
+  }
+
+  const LENS_KEY = 'pb-lens-open';
+  function setLensOpen(open) {
+    const card = $('pb-lens');
+    card.dataset.open = String(open);
+    $('pb-lens-body').hidden = !open;
+    $('pb-lens-toggle').setAttribute('aria-expanded', String(open));
+    // ماندگاری فقط یک راحتی است؛ اگر حافظهٔ مرورگر نبود، صفحه باید همان‌طور
+    // کار کند. پس هر خواندن و نوشتنی داخل try است.
+    try { localStorage.setItem(LENS_KEY, open ? '1' : '0'); } catch { /* حافظهٔ مرورگر در دسترس نیست */ }
+  }
+  const lensWasOpen = () => {
+    try { return localStorage.getItem(LENS_KEY) === '1'; } catch { return false; }
+  };
+
   function paintLensNote() {
+    $('pb-lens-summary').textContent = lensSummary();
     if (!analysis) { $('pb-lens-note').textContent = ''; return; }
     const beyond = analysis.beyondBasis;
     const parts = [
       `بازده روی «${analysis.basis.label}» — ${analysis.basis.hint}.`,
       `آمارهٔ دسته‌ها «${analysis.statisticLabel}» و وزن‌دهی «${analysis.weightingLabel}» است.`,
-      `${fmt.int(analysis.range.days)} روز معتبر، ${fmt.int(analysis.usable)} ترکیب.`,
+      `${fmt.int(analysis.range.days)} ${isIntradayGrain(grain) ? 'لحظهٔ' : 'روز'} معتبر، ${fmt.int(analysis.usable)} ترکیب.`,
     ];
     if (analysis.unusable) parts.push(`${fmt.int(analysis.unusable)} ترکیب مخرج یا پایان معتبر نداشت و وارد رتبه‌بندی نشد.`);
     if (beyond) {
@@ -396,6 +632,9 @@ export async function mount(root, { state }) {
 
   /** پنل دیده‌شده را رسم می‌کند؛ بقیه تا دیده‌نشدن دست‌نخورده می‌مانند. */
   function paintPanel(id) {
+    // پیش از هر تعویض پنل، انیمیشن‌های در جریان می‌خوابند: نمودار پنهان
+    // نباید نخِ اصلی را نگه دارد.
+    charts.stopAll();
     if (!analysis || !dirty.has(id)) { charts.resizeAll(); return; }
     dirty.delete(id);
     if (id === 'overview') paintOverview();
@@ -404,9 +643,94 @@ export async function mount(root, { state }) {
     else if (id === 'trend') paintTrend();
     else if (id === 'metrics') paintMetrics();
     else if (id === 'distribution') paintDistribution();
+    else if (id === 'parts') paintParts();
     else if (id === 'drill') paintDrill();
     else if (id === 'basket') paintBasket();
   }
+
+  // ═══════════════════ کشوی جزئیات ═══════════════════
+  //
+  // یک مسیر برای همهٔ نمودارها. سیزده نمودار با سیزده رفتارِ کلیک، یعنی
+  // کاربر باید یاد بگیرد کدام‌شان چه می‌کند — و همان چیزی است که صفحهٔ پر
+  // از نمودار را ترسناک می‌کند.
+  //
+  // کشو پایین صفحه می‌نشیند و جای کاربر را در تبِ خودش نگه می‌دارد؛
+  // پریدن به تب دیگر برای دیدن یک عدد، رشتهٔ فکر را پاره می‌کند.
+
+  const DRAWER_VIEWS = [
+    { id: 'metrics', label: 'سنجه‌ها' },
+    { id: 'combos', label: 'ترکیب‌ها' },
+    { id: 'path', label: 'مسیر گام‌به‌گام' },
+  ];
+  let drawerStrategy = '', drawerView = 'metrics';
+
+  function openDetail(strategyId) {
+    if (!analysis) return;
+    const row = analysis.strategies.find((item) => item.strategyId === strategyId);
+    if (!row) return;
+    drawerStrategy = strategyId;
+    selectedStrategyId = strategyId;
+    root.querySelectorAll('[data-strategy]').forEach((node) => node.classList.toggle('selected', node.dataset.strategy === strategyId));
+    $('pb-drawer').hidden = false;
+    $('pb-drawer-title').textContent = `${row.strategyName} · ${row.groupName} · رتبه ${fmt.int(row.rank)}`;
+    $('pb-drawer-tabs').innerHTML = DRAWER_VIEWS.map((view) => `<button type="button" data-drawer-view="${view.id}" aria-selected="${view.id === drawerView}">${esc(view.label)}</button>`).join('');
+    paintDrawerBody(row);
+  }
+
+  function paintDrawerBody(row) {
+    const host = $('pb-drawer-body');
+    if (drawerView === 'combos') {
+      const combos = analysis.combos
+        .filter((combo) => combo.strategyId === row.strategyId && combo.series.ok)
+        .sort((a, b) => (b.series.finalPct ?? -Infinity) - (a.series.finalPct ?? -Infinity));
+      const bound = heatScale(combos.map((combo) => combo.series.finalPct));
+      host.innerHTML = combos.length
+        ? `<div class="history-table-wrap"><table class="history-table portfolio-small-table"><thead><tr><th>رتبه</th><th>ترکیب</th><th>مخرج</th><th>سود/زیان</th><th>بازده</th><th>بیشترین افت</th><th>گام تا نخستین سود</th></tr></thead><tbody>${
+          combos.map((combo, index) => {
+            const band = heatLevel(combo.series.finalPct, bound);
+            return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}" data-result="${esc(combo.id)}" tabindex="0"><td>${fmt.int(index + 1)}</td><td>${esc(comboName(combo))}</td><td>${fmt.money(combo.series.denominator)}</td><td class="${signTone(combo.series.finalPnl)}">${fmt.money(combo.series.finalPnl)}</td><td class="${signTone(combo.series.finalPct)}">${pctCell(combo.series.finalPct)}</td><td class="${signTone(combo.series.maxDrawdownPct)}">${pctCell(combo.series.maxDrawdownPct)}</td><td>${combo.series.firstProfitIndex === null ? 'رخ نداد' : fmt.int(combo.series.firstProfitIndex)}</td></tr>`;
+          }).join('')}</tbody></table></div>`
+        : '<p class="empty-note">هیچ ترکیبی از این استراتژی روی مبنای انتخابی معتبر نیست.</p>';
+      host.onclick = (event) => {
+        const line = event.target.closest('[data-result]');
+        if (!line) return;
+        const combo = analysis.combos.find((item) => item.id === line.dataset.result);
+        if (combo) { dirty.delete('drill'); tabsApi?.show('drill'); showDetail(rawRow(combo)); }
+      };
+      return;
+    }
+    if (drawerView === 'path') {
+      const bound = heatScale(row.path.cumulative);
+      host.innerHTML = `<div class="history-table-wrap"><table class="history-table portfolio-small-table"><thead><tr><th>گام</th><th>زمان</th><th>بازده تجمعی</th><th>تغییر همان گام</th><th>افت از سقف</th><th>نرخ برد</th><th>رتبه</th><th>نمونه</th></tr></thead><tbody>${
+        analysis.dates.map((date, column) => {
+          const band = heatLevel(row.path.cumulative[column], bound);
+          return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}"><td>${fmt.int(column)}</td><td>${esc(columnLabel(date))}</td><td class="${signTone(row.path.cumulative[column])}">${pctCell(row.path.cumulative[column])}</td><td class="${signTone(row.path.step[column])}">${pctCell(row.path.step[column])}</td><td class="${signTone(row.path.drawdown[column])}">${pctCell(row.path.drawdown[column])}</td><td>${pctCell(row.path.winPct[column])}</td><td>${row.path.rank[column] === null ? '—' : fmt.int(row.path.rank[column])}</td><td>${fmt.int(row.path.samples[column])}</td></tr>`;
+        }).join('')}</tbody></table></div>`;
+      host.onclick = null;
+      return;
+    }
+    host.innerHTML = `<div class="history-table-wrap"><table class="history-table portfolio-small-table"><thead><tr><th>سنجه</th><th>مقدار</th><th>جهت</th><th>وزن در نمره</th><th>سهم از نمره</th><th>یعنی چه</th></tr></thead><tbody>${
+      METRICS.map((metric) => {
+        const value = row.metrics[metric.id];
+        const part = (row.scoreParts || []).find((item) => item.id === metric.id);
+        const text = metric.unit === 'pct' ? pctCell(value)
+          : metric.unit === 'money' ? (Number.isFinite(value) ? fmt.money(value) : '—')
+            : metric.unit === 'int' ? (Number.isFinite(value) ? fmt.int(value) : '—')
+              : numCellOf(value);
+        return `<tr><td><b>${esc(metric.label)}</b></td><td class="${metric.unit === 'pct' && metric.better === 'high' ? signTone(value) : ''}">${text}</td><td>${metric.better === 'high' ? 'بالاتر بهتر' : 'پایین‌تر بهتر'}</td><td>${fmt.int(metricWeights[metric.id])}</td><td>${part ? numCellOf(part.score) : '<span class="loss">این سنجه را ندارد</span>'}</td><td>${esc(metric.hint)}</td></tr>`;
+      }).join('')}</tbody></table></div><p class="portfolio-note">نمرهٔ نهایی <b>${numCellOf(row.score)}</b> از میانگین وزنیِ ستون «سهم از نمره» می‌آید. سنجه‌ای که این استراتژی ندارد، صفر نمی‌گیرد — از مخرج بیرون می‌رود، و پوشش نمره ${pctCell(row.scoreCoverage)} است.</p>`;
+    host.onclick = null;
+  }
+
+  $('pb-drawer-tabs').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-drawer-view]');
+    if (!button) return;
+    drawerView = button.dataset.drawerView;
+    $('pb-drawer-tabs').querySelectorAll('[data-drawer-view]').forEach((node) => node.setAttribute('aria-selected', String(node.dataset.drawerView === drawerView)));
+    const row = analysis?.strategies.find((item) => item.strategyId === drawerStrategy);
+    if (row) paintDrawerBody(row);
+  });
+  $('pb-drawer-close').addEventListener('click', () => { $('pb-drawer').hidden = true; });
 
   // ═══════════════════ نمای کل ═══════════════════
 
@@ -421,9 +745,38 @@ export async function mount(root, { state }) {
       ['مسیر خودِ نماد پایه', pctCell(analysis.baseFinal), signTone(analysis.baseFinal)],
     ];
     $('pb-kpis').innerHTML = cards.map(([label, value, tone]) => `<article class="${tone}"><span>${esc(label)}</span><b>${value}</b></article>`).join('');
-    charts.set('treemap', $('pb-treemap'), (echarts, tokens) => treemapOption(analysis, tokens));
+    paintHighlights();
     $('pb-groups').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>خانواده</th><th>استراتژی</th><th>ترکیب</th><th>سودده</th><th>بازده (${esc(analysis.statisticLabel)})</th><th>بهترین عضو</th><th>بدترین عضو</th></tr></thead><tbody>${
       analysis.groups.map((row) => `<tr><td>${esc(row.groupName)}</td><td>${fmt.int(row.strategies)}</td><td>${fmt.int(row.samples)}</td><td>${fmt.int(row.wins)} · ${pctCell(row.winPct)}</td><td class="${signTone(row.returnStat)}">${pctCell(row.returnStat)}</td><td>${esc(row.bestStrategy?.strategyName || '—')}</td><td>${esc(row.worstStrategy?.strategyName || '—')}</td></tr>`).join('')}</tbody></table>`;
+  }
+
+  /**
+   * سرخط‌ها — هر کدام یک سؤال تک‌جمله‌ای با یک جواب و دلیلش.
+   *
+   * عمداً جدا از نمرهٔ ترکیبی‌اند: «پایدارترین» با «بهترین» یکی نیست و
+   * قاطی‌کردنشان همان چیزی است که گزارش را گنگ می‌کند.
+   */
+  function paintHighlights() {
+    const unitOf = (metric) => METRICS.find((row) => row.id === metric);
+    $('pb-highlights').innerHTML = (analysis.highlights || []).map((item) => {
+      const meta = unitOf(item.metric);
+      const raw = item.metric === 'score' ? item.row.score : item.row.metrics[item.metric];
+      const text = !meta ? numCellOf(raw)
+        : meta.unit === 'pct' ? pctCell(raw)
+          : meta.unit === 'money' ? fmt.money(raw)
+            : meta.unit === 'int' ? fmt.int(raw)
+              : numCellOf(raw);
+      return `<button type="button" class="pb-highlight" data-strategy="${esc(item.row.strategyId)}" title="${esc(item.hint)}">
+        <span class="pb-highlight-label">${esc(item.label)}</span>
+        <b>${esc(item.row.strategyName)}</b>
+        <span class="pb-highlight-value">${esc(meta?.label || 'نمره')}: <em>${text}</em></span>
+        <small>${esc(item.hint)}</small>
+      </button>`;
+    }).join('') || '<p class="empty-note">سرخطی ساخته نشد؛ نتیجهٔ معتبری در این بازه نیست.</p>';
+    $('pb-highlights').onclick = (event) => {
+      const card = event.target.closest('[data-strategy]');
+      if (card) selectStrategy(card.dataset.strategy);
+    };
   }
 
   // ═══════════════════ رتبه‌بندی ═══════════════════
@@ -455,7 +808,9 @@ export async function mount(root, { state }) {
     const labels = labelsOf();
     const meta = HEATMAP_MODES.find((row) => row.id === heatMode);
     $('pb-heat-note').textContent = `${meta?.label || ''} — ${meta?.hint || ''} خانهٔ خالی یعنی آن روز برای آن استراتژی قیمت معتبری نبود؛ صفر جایش نمی‌نشیند.`;
-    charts.set('heatmap', $('pb-heatmap'), (echarts, tokens) => heatmapOption(analysis, heatMode, labels, tokens), {
+    charts.set('heatmap', $('pb-heatmap'), (echarts, tokens) => heatmapOption(analysis, heatMode, labels, tokens, {
+      sort: heatSort, palette: heatPalette,
+    }), {
       onClick: (params) => {
         const row = analysis.strategies[params?.value?.[1]];
         if (row) selectStrategy(row.strategyId);
@@ -464,6 +819,12 @@ export async function mount(root, { state }) {
     });
     $('pb-calendar-pick').innerHTML = `<option value="">میانهٔ همهٔ استراتژی‌ها</option>${
       analysis.strategies.map((row) => `<option value="${esc(row.strategyId)}"${row.strategyId === calendarPick ? ' selected' : ''}>${esc(row.strategyName)}</option>`).join('')}`;
+    charts.set('horizon', $('pb-horizon'), (echarts, tokens) => horizonHeatOption(analysis, tokens, {
+      sort: heatSort, palette: heatPalette,
+    }), { onClick: (params) => {
+      const row = sortStrategies(analysis.strategies, heatSort)[params?.value?.[1]];
+      if (row) selectStrategy(row.strategyId);
+    }, empty: 'برای نقشهٔ افق، دست‌کم دو روز معتبر لازم است.' });
     charts.set('calendar', $('pb-calendar'),
       (echarts, tokens) => calendarOption(analysis, tokens, { strategyId: calendarPick, mode: heatMode === 'cumulative' ? 'step' : heatMode }));
   }
@@ -475,7 +836,21 @@ export async function mount(root, { state }) {
     $('pb-trend-pick').innerHTML = analysis.strategies.slice(0, 18).map((row) => `<button type="button" class="pb-chip${trendPick.includes(row.strategyId) ? ' on' : ''}" data-trend="${esc(row.strategyId)}" aria-pressed="${trendPick.includes(row.strategyId)}">${esc(row.strategyName)}</button>`).join('');
     charts.set('trend', $('pb-trend'), (echarts, tokens) => trendOption(analysis, labels, tokens, {
       pick: trendPick, showBase: $('pb-trend-base').checked, area: $('pb-trend-area').checked,
-    }));
+    }), { onClick: (params) => selectStrategyByName(params?.seriesName) });
+    $('pb-band-pick').innerHTML = `<option value="">همهٔ ترکیب‌ها</option>${
+      analysis.strategies.map((row) => `<option value="${esc(row.strategyId)}"${row.strategyId === bandPick ? ' selected' : ''}>${esc(row.strategyName)}</option>`).join('')}`;
+    charts.set('band', $('pb-band'), (echarts, tokens) => quartileBandOption(analysis, labels, tokens, { strategyId: bandPick }), {
+      empty: 'برای باند چارک‌ها، دست‌کم سه ترکیب معتبر لازم است.',
+    });
+    charts.set('ddPath', $('pb-dd-path'), (echarts, tokens) => drawdownPathOption(analysis, labels, tokens, { pick: trendPick }), {
+      onClick: (params) => selectStrategyByName(params?.seriesName),
+    });
+    charts.set('dailyWin', $('pb-daily-win'), (echarts, tokens) => dailyWinOption(analysis, labels, tokens, { pick: trendPick }), {
+      onClick: (params) => selectStrategyByName(params?.seriesName),
+    });
+    charts.set('river', $('pb-river'), (echarts, tokens) => familyRiverOption(analysis, labels, tokens), {
+      empty: 'برای رودخانه، دست‌کم دو خانواده و سه روز لازم است.',
+    });
     paintHolding();
   }
 
@@ -507,7 +882,7 @@ export async function mount(root, { state }) {
     $('pb-holding').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>روز نگهداری</th><th>تاریخ خروج</th><th>ترکیب معتبر</th><th>میانهٔ بازده</th><th>نرخ برد</th><th>بهترین</th><th>بدترین</th></tr></thead><tbody>${
       rows.map((row) => {
         const band = heatLevel(row.median, bound);
-        return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}"><td>${fmt.int(row.column)}</td><td>${esc(dateLabel(row.date))}</td><td>${fmt.int(row.samples)}</td><td class="${signTone(row.median)}">${pctCell(row.median)}</td><td>${pctCell(row.winPct)}</td><td class="gain">${pctCell(row.best)}</td><td class="loss">${pctCell(row.worst)}</td></tr>`;
+        return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}"><td>${fmt.int(row.column)}</td><td>${esc(columnLabel(row.date))}</td><td>${fmt.int(row.samples)}</td><td class="${signTone(row.median)}">${pctCell(row.median)}</td><td>${pctCell(row.winPct)}</td><td class="gain">${pctCell(row.best)}</td><td class="loss">${pctCell(row.worst)}</td></tr>`;
       }).join('')}</tbody></table>`;
   }
 
@@ -515,15 +890,38 @@ export async function mount(root, { state }) {
 
   function paintMetrics() {
     $('pb-weights').innerHTML = METRICS.map((metric) => `<label class="pb-weight"><span>${esc(metric.label)}<small>${esc(metric.hint)}</small></span><input type="range" min="0" max="50" step="5" data-weight="${esc(metric.id)}" value="${metricWeights[metric.id]}"><b data-weight-out="${esc(metric.id)}">${fmt.int(metricWeights[metric.id])}</b></label>`).join('');
-    charts.set('parallel', $('pb-parallel'), (echarts, tokens) => parallelOption(analysis, METRICS.filter((metric) => metricWeights[metric.id] > 0), tokens), {
+    const active = METRICS.filter((metric) => metricWeights[metric.id] > 0);
+    charts.set('gauge', $('pb-gauge'), (echarts, tokens) => scoreGaugeOption(analysis, tokens), {
+      empty: 'نمره‌ای برای نمایش نیست.',
+    });
+    charts.set('polar', $('pb-polar'), (echarts, tokens) => polarScoreOption(analysis, tokens), {
+      onClick: (params) => { if (params?.data?.strategyId) selectStrategy(params.data.strategyId); },
+      empty: 'برای نمای دایره‌ای، دست‌کم سه استراتژی نمره‌دار لازم است.',
+    });
+    charts.set('scoreParts', $('pb-score-parts'), (echarts, tokens) => scorePartsOption(analysis, tokens), {
+      empty: 'اجزای نمره ساخته نشد؛ هیچ سنجه‌ای وزن ندارد.',
+    });
+    charts.set('parallel', $('pb-parallel'), (echarts, tokens) => parallelOption(analysis, active, tokens), {
       empty: 'برای مختصات موازی، دست‌کم دو استراتژی و دو سنجهٔ وزن‌دار لازم است.',
     });
+    charts.set('radar', $('pb-radar'), (echarts, tokens) => metricRadarOption(analysis, active, tokens, { pick: trendPick }), {
+      onClick: (params) => { if (params?.data?.strategyId) selectStrategy(params.data.strategyId); },
+      empty: 'برای رادار، دست‌کم دو استراتژی و سه سنجهٔ وزن‌دار لازم است.',
+    });
     $('pb-metrics-table').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>استراتژی</th>${METRICS.map((metric) => `<th title="${esc(metric.hint)}">${esc(metric.label)}</th>`).join('')}</tr></thead><tbody>${
-      analysis.strategies.map((row) => `<tr><td><b>${esc(row.strategyName)}</b></td>${METRICS.map((metric) => {
+      analysis.strategies.map((row) => `<tr data-strategy="${esc(row.strategyId)}" tabindex="0"><td><b>${esc(row.strategyName)}</b></td>${METRICS.map((metric) => {
         const value = row.metrics[metric.id];
-        const text = metric.unit === 'pct' ? pctCell(value) : metric.unit === 'days' || metric.unit === 'rank' ? (Number.isFinite(value) ? fmt.num(value) : '—') : numCellOf(value);
+        const text = metric.unit === 'pct' ? pctCell(value)
+          : metric.unit === 'money' ? (Number.isFinite(value) ? fmt.money(value) : '—')
+            : metric.unit === 'int' ? (Number.isFinite(value) ? fmt.int(value) : '—')
+              : metric.unit === 'days' || metric.unit === 'rank' ? (Number.isFinite(value) ? fmt.num(value) : '—')
+                : numCellOf(value);
         return `<td class="${metric.unit === 'pct' && metric.better === 'high' ? signTone(value) : ''}">${text}</td>`;
       }).join('')}</tr>`).join('')}</tbody></table>`;
+    $('pb-metrics-table').onclick = (event) => {
+      const row = event.target.closest('[data-strategy]');
+      if (row) selectStrategy(row.dataset.strategy);
+    };
   }
 
   // ═══════════════════ توزیع ═══════════════════
@@ -536,17 +934,122 @@ export async function mount(root, { state }) {
     charts.set('histogram', $('pb-histogram'), (echarts, tokens) => histogramOption(analysis, tokens), {
       empty: 'برای توزیع، دست‌کم سه ترکیب معتبر لازم است.',
     });
+    charts.set('cdf', $('pb-cdf'), (echarts, tokens) => cumulativeDistOption(analysis, tokens), {
+      empty: 'برای توزیع تجمعی، دست‌کم پنج ترکیب معتبر لازم است.',
+    });
     charts.set('box', $('pb-box'), (echarts, tokens) => boxOption(analysis, tokens), {
       empty: 'برای نمودار جعبه‌ای، هر استراتژی دست‌کم سه ترکیب معتبر لازم دارد.',
     });
+    charts.set('stepHist', $('pb-step-hist'), (echarts, tokens) => stepHistogramOption(analysis, tokens), {
+      empty: 'برای توزیع تغییر روزانه، دست‌کم ده مشاهده لازم است.',
+    });
+    paintDistributionTable();
+  }
+
+  /** چارک‌ها و دُم‌های هر استراتژی، به عدد — همان چیزی که جعبه‌ای تصویرش می‌کند. */
+  function paintDistributionTable() {
+    const rows = analysis.strategies.map((row) => ({ row, p25: row.p25, p75: row.p75 }));
+    $('pb-dist-table').innerHTML = rows.length
+      ? `<table class="history-table portfolio-small-table"><thead><tr><th>استراتژی</th><th>ترکیب</th><th>بدترین</th><th>چارک پایین</th><th>${esc(analysis.statisticLabel)}</th><th>چارک بالا</th><th>بهترین</th><th>پهنای چارک‌ها</th><th>خواندنش</th></tr></thead><tbody>${
+        rows.map(({ row, p25, p75 }) => `<tr data-strategy="${esc(row.strategyId)}" tabindex="0"><td>${esc(row.strategyName)}</td><td>${fmt.int(row.samples)}</td><td class="loss">${pctCell(row.worst)}</td><td>${pctCell(p25)}</td><td class="${signTone(row.metrics.return)}">${pctCell(row.metrics.return)}</td><td>${pctCell(p75)}</td><td class="gain">${pctCell(row.best)}</td><td>${pctCell(row.metrics.spread)}</td><td>${
+          row.metrics.spread === null ? '—'
+            : row.metrics.spread > Math.abs(row.metrics.return ?? 0) * 2 ? 'نتیجه بیشتر به انتخاب ترکیب بستگی داشت'
+              : 'نتیجه بین ترکیب‌ها یکدست بود'}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="empty-note">جدول توزیع بدون استراتژی معتبر ساخته نمی‌شود.</p>';
+    $('pb-dist-table').onclick = (event) => {
+      const row = event.target.closest('[data-strategy]');
+      if (row) selectStrategy(row.dataset.strategy);
+    };
+  }
+
+  // ═══════════════════ کل به جزء ═══════════════════
+
+  /**
+   * ده نمودار و سه جدول، همه در جواب یک سؤال: پول و نتیجه کجا جمع شده؟
+   *
+   * هر کدام چیزی می‌گویند که بقیه نمی‌گویند. اگر دو نمودار یک حرف بزنند،
+   * یکی‌شان باید برود — ده نمودارِ هم‌حرف، صفحه را شلوغ می‌کند نه گویا.
+   */
+  function paintParts() {
+    const audit = generated.reduce((sum, row) => ({
+      built: sum.built + (Number(row.built) || 0),
+      candidates: sum.candidates + (Number(row.candidates) || 0),
+    }), { built: 0, candidates: 0 });
+    const pick = (params) => {
+      const id = params?.data?.strategyId || params?.data?.id;
+      if (id) selectStrategy(id);
+    };
+    charts.set('funnel', $('pb-funnel'), (echarts, tokens) => funnelOption(analysis, audit, tokens), {
+      empty: 'برای قیف غربال، شمار ساخته‌شده‌ها ثبت نشده است.',
+    });
+    charts.set('sunburst', $('pb-sunburst'), (echarts, tokens) => sunburstOption(analysis, tokens), { onClick: pick });
+    charts.set('donut', $('pb-donut'), (echarts, tokens) => shareDonutOption(analysis, tokens));
+    charts.set('familyBar', $('pb-family-bar'), (echarts, tokens) => familyBarOption(analysis, tokens));
+    charts.set('treemap', $('pb-treemap'), (echarts, tokens) => treemapOption(analysis, tokens));
+    charts.set('rose', $('pb-rose'), (echarts, tokens) => roseOption(analysis, tokens), { onClick: pick });
+    charts.set('pareto', $('pb-pareto'), (echarts, tokens) => paretoOption(analysis, tokens), { onClick: pick });
+    charts.set('graph', $('pb-graph'), (echarts, tokens) => similarityGraphOption(analysis, tokens, {
+      threshold: Math.max(0, Math.min(1, safeNum($('pb-graph-threshold').value, 0.75))),
+    }), { onClick: pick, empty: 'برای شبکهٔ شباهت، دست‌کم سه استراتژی با مسیر معتبر لازم است.' });
+    charts.set('corr', $('pb-corr'), (echarts, tokens) => correlationHeatOption(analysis, tokens));
+    charts.set('tree', $('pb-tree'), (echarts, tokens) => treeOption(analysis, tokens), { onClick: pick });
+    paintPartsTables();
+  }
+
+  function paintPartsTables() {
+    const totalSamples = analysis.groups.reduce((sum, row) => sum + row.samples, 0);
+    $('pb-parts-groups').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>خانواده</th><th>ترکیب</th><th>سهم از کل</th><th>استراتژی</th><th>بازده</th><th>نرخ برد</th><th>بهترین عضو</th></tr></thead><tbody>${
+      analysis.groups.map((row) => `<tr data-strategy="${esc(row.bestStrategy?.strategyId || '')}" tabindex="0"><td>${esc(row.groupName)}</td><td>${fmt.int(row.samples)}</td><td>${pctCell(totalSamples ? (row.samples / totalSamples) * 100 : null)}</td><td>${fmt.int(row.strategies)}</td><td class="${signTone(row.returnStat)}">${pctCell(row.returnStat)}</td><td>${pctCell(row.winPct)}</td><td>${esc(row.bestStrategy?.strategyName || '—')}</td></tr>`).join('')}</tbody></table>`;
+
+    // شبیه‌ترین زوج‌ها — همان چیزی که شبکه نشان می‌دهد، ولی قابل خواندن و
+    // مرتب. نمودار الگو را می‌گوید و جدول عدد را.
+    const rows = analysis.strategies.filter((row) => (row.path?.cumulative || []).some((value) => value !== null));
+    const pairs = [];
+    for (let a = 0; a < rows.length; a++) {
+      for (let b = a + 1; b < rows.length; b++) {
+        const value = correlationOf(rows[a].path.cumulative, rows[b].path.cumulative);
+        if (value === null) continue;
+        pairs.push({ a: rows[a], b: rows[b], value });
+      }
+    }
+    pairs.sort((x, y) => y.value - x.value);
+    const bound = heatScale(pairs.map((row) => row.value));
+    $('pb-parts-pairs').innerHTML = pairs.length
+      ? `<table class="history-table portfolio-small-table"><thead><tr><th>استراتژی</th><th>استراتژی</th><th>همبستگی مسیر</th><th>خواندنش</th></tr></thead><tbody>${
+        pairs.slice(0, 25).map((row) => {
+          const band = heatLevel(row.value, bound);
+          return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}"><td>${esc(row.a.strategyName)}</td><td>${esc(row.b.strategyName)}</td><td>${numCellOf(row.value)}</td><td>${
+            row.value > 0.9 ? 'تقریباً یک شرط‌بندی‌اند' : row.value > 0.6 ? 'هم‌جهت‌اند' : row.value < -0.3 ? 'خلاف هم می‌روند' : 'مستقل‌اند'}</td></tr>`;
+        }).join('')}</tbody></table>`
+      : '<p class="empty-note">برای همبستگی، دست‌کم سه روز مشترک لازم است.</p>';
+
+    const profits = analysis.strategies.map((row) => ({
+      row,
+      pnl: analysis.combos
+        .filter((combo) => combo.strategyId === row.strategyId && combo.series.finalPnl !== null)
+        .reduce((sum, combo) => sum + combo.series.finalPnl, 0),
+    })).filter((item) => item.pnl > 0).sort((a, b) => b.pnl - a.pnl);
+    const totalPnl = profits.reduce((sum, item) => sum + item.pnl, 0);
+    let running = 0;
+    $('pb-parts-pareto').innerHTML = profits.length
+      ? `<table class="history-table portfolio-small-table"><thead><tr><th>رتبه</th><th>استراتژی</th><th>سود</th><th>سهم از سود کل</th><th>تا اینجا روی هم</th></tr></thead><tbody>${
+        profits.map((item, index) => {
+          running += item.pnl;
+          return `<tr data-strategy="${esc(item.row.strategyId)}" tabindex="0"><td>${fmt.int(index + 1)}</td><td>${esc(item.row.strategyName)}</td><td class="gain">${fmt.money(item.pnl)}</td><td>${pctCell((item.pnl / totalPnl) * 100)}</td><td>${pctCell((running / totalPnl) * 100)}</td></tr>`;
+        }).join('')}</tbody></table>`
+      : '<p class="empty-note">هیچ استراتژی‌ای در این بازه سود خالص مثبت نساخت.</p>';
+
+    for (const id of ['pb-parts-groups', 'pb-parts-pareto']) {
+      $(id).onclick = (event) => {
+        const row = event.target.closest('[data-strategy]');
+        if (row?.dataset.strategy) selectStrategy(row.dataset.strategy);
+      };
+    }
   }
 
   // ═══════════════════ کاوش ═══════════════════
 
   function paintDrill() {
-    charts.set('tree', $('pb-tree'), (echarts, tokens) => treeOption(analysis, tokens), {
-      onClick: (params) => { if (params?.data?.strategyId) selectStrategy(params.data.strategyId); },
-    });
     // اگر کاربر مستقیم وارد این تب شود و هنوز چیزی انتخاب نکرده باشد،
     // جدول ترکیب‌ها خالی می‌ماند و صفحه شکسته به نظر می‌رسد. پس بهترینِ
     // همین تحلیل، انتخاب پیش‌فرض است — نه جدولی خالی با یک عنوان دعوت‌کننده.
@@ -559,9 +1062,12 @@ export async function mount(root, { state }) {
   // ═══════════════════ سبد فرضی ═══════════════════
 
   function basketRowMarkup(pick, index) {
-    const strategies = analysis?.strategies || [];
-    const combos = (analysis?.combos || []).filter((combo) => combo.strategyId === pick.strategyId && combo.series.ok);
+    const sources = basketSources();
+    const source = sources.find((row) => row.id === pick.sourceId) || sources[0] || null;
+    const strategies = source?.analysis?.strategies || [];
+    const combos = (source?.analysis?.combos || []).filter((combo) => combo.strategyId === pick.strategyId && combo.series.ok);
     return `<div class="pb-basket-row" data-basket-row="${index}">
+      <label>اجرا<select data-basket="sourceId" data-index="${index}">${sources.map((row) => `<option value="${esc(row.id)}"${row.id === (source?.id ?? '') ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}</select></label>
       <label>استراتژی<select data-basket="strategyId" data-index="${index}">${strategies.map((row) => `<option value="${esc(row.strategyId)}"${row.strategyId === pick.strategyId ? ' selected' : ''}>${esc(row.strategyName)}</option>`).join('')}</select></label>
       <label>ترکیب<select data-basket="comboId" data-index="${index}">${combos.length ? combos.map((combo) => `<option value="${esc(combo.id)}"${combo.id === pick.comboId ? ' selected' : ''}>${esc(comboName(combo))} · ${pctCell(combo.series.finalPct)}</option>`).join('') : '<option value="">ترکیب معتبری ندارد</option>'}</select></label>
       <label>سهم (درصد)<input type="number" min="1" max="100" step="1" data-basket="pct" data-index="${index}" value="${pick.pct}"></label>
@@ -572,19 +1078,39 @@ export async function mount(root, { state }) {
   function paintBasketForm() {
     if (!analysis) return;
     if (!basketPicks.length && analysis.strategies.length) {
+      const here = currentRunId();
       basketPicks = analysis.strategies.slice(0, 3).map((row, index) => {
         const combo = analysis.combos.find((item) => item.strategyId === row.strategyId && item.series.ok);
-        return { strategyId: row.strategyId, comboId: combo?.id || '', pct: [40, 35, 25][index] ?? 20 };
+        return { sourceId: here, strategyId: row.strategyId, comboId: combo?.id || '', pct: [40, 35, 25][index] ?? 20 };
       });
     }
     $('pb-basket-rows').innerHTML = basketPicks.map(basketRowMarkup).join('');
   }
 
+  /**
+   * هر اجرای کتابخانه، با عدسی **جاری** تحلیل می‌شود.
+   *
+   * اگر هر اجرا با مبنای زمان اجرای خودش می‌ماند، دو جزء سبد روی دو مخرج
+   * متفاوت جمع می‌شدند و عددِ کل هیچ معنایی نداشت.
+   */
+  function basketSources() {
+    return runs.map((run) => ({
+      id: run.id, label: run.label,
+      analysis: run.id === currentRunId() ? analysis : analyzePortfolio({
+        rows: run.rows, matrix: run.matrix,
+        basisId: lens.basisId, statistic: lens.statistic, weighting: lens.weighting,
+        weights: metricWeights,
+      }),
+    }));
+  }
+  const currentRunId = () => `${String(ua?.ins ?? '')}:${$('pb-entry-date').dataset.value}:${$('pb-exit-date').dataset.value}`;
+  const sourceOf = (id) => basketSources().find((row) => row.id === id) || null;
+
   function paintBasket() {
     paintBasketForm();
     const capital = Math.max(0, safeNum($('pb-basket-capital').value, 0)) * 1e6;
     const basket = allocatePortfolio({
-      capitalRial: capital, picks: basketPicks, analysis, basisId: lens.basisId,
+      capitalRial: capital, picks: basketPicks, sources: basketSources(), basisId: lens.basisId,
     });
     if (!basket.ok) {
       $('pb-basket-kpis').innerHTML = `<article class="loss"><span>سبد ساخته نشد</span><b>${esc(basket.why)}</b></article>`;
@@ -601,7 +1127,7 @@ export async function mount(root, { state }) {
       ['سود یا زیان پایان دوره', fmt.money(summary.finalPnlRial), signTone(summary.finalPnlRial)],
       ['بازده روی سرمایهٔ اول دوره', pctCell(summary.finalReturnPct), signTone(summary.finalReturnPct)],
       ['بیشترین افت سبد', `${fmt.money(summary.maxDrawdownRial)} · ${pctCell(summary.maxDrawdownPct)}`, 'loss'],
-      ['نخستین روز سود', summary.firstProfitIndex === null ? 'رخ نداد' : esc(dateLabel(analysis.dates[summary.firstProfitIndex])), ''],
+      ['نخستین گام سود', summary.firstProfitIndex === null ? 'رخ نداد' : esc(columnLabel(analysis.dates[summary.firstProfitIndex])), ''],
       ['روز معلوم از کل', `${fmt.int(summary.knownDays)} از ${fmt.int(summary.totalDays)}`, summary.knownDays < summary.totalDays ? 'loss' : ''],
     ].map(([label, value, tone]) => `<article class="${tone}"><span>${esc(label)}</span><b>${value}</b></article>`).join('');
 
@@ -616,10 +1142,10 @@ export async function mount(root, { state }) {
       : '';
 
     const unfunded = basket.legs.filter((leg) => !leg.ok);
-    $('pb-basket-table').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>استراتژی</th><th>ترکیب</th><th>دست</th><th>پول درگیر</th><th>نقد مانده</th><th>سود/زیان</th><th>بازده جزء</th><th>سهم از سود کل</th></tr></thead><tbody>${
+    $('pb-basket-table').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>اجرا</th><th>استراتژی</th><th>ترکیب</th><th>دست</th><th>پول درگیر</th><th>نقد مانده</th><th>سود/زیان</th><th>بازده جزء</th><th>سهم از سود کل</th></tr></thead><tbody>${
       basket.legs.map((leg) => (leg.ok
-        ? `<tr><td>${esc(leg.strategyName)}</td><td>${esc(leg.comboId)}</td><td>${fmt.int(leg.lots)}</td><td>${fmt.money(leg.deployedRial)}</td><td>${fmt.money(leg.idleRial)}</td><td class="${signTone(leg.finalPnlRial)}">${fmt.money(leg.finalPnlRial)}</td><td class="${signTone(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}">${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}</td><td>${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.sharePct)}</td></tr>`
-        : `<tr><td>${esc(leg.strategyName || '—')}</td><td colspan="7"><span class="loss">${esc(leg.why)}</span> — ${fmt.money(leg.targetRial)} نقد ماند${leg.unitCostRial ? `؛ بهای هر دست ${fmt.money(leg.unitCostRial)}` : ''}</td></tr>`)).join('')}</tbody></table>${
+        ? `<tr><td>${esc(leg.sourceLabel || '—')}</td><td>${esc(leg.strategyName)}</td><td>${esc(leg.comboId)}</td><td>${fmt.int(leg.lots)}</td><td>${fmt.money(leg.deployedRial)}</td><td>${fmt.money(leg.idleRial)}</td><td class="${signTone(leg.finalPnlRial)}">${fmt.money(leg.finalPnlRial)}</td><td class="${signTone(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}">${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.returnPct)}</td><td>${pctCell(basket.contributions.find((row) => row.comboId === leg.comboId)?.sharePct)}</td></tr>`
+        : `<tr><td>${esc(leg.sourceLabel || '—')}</td><td>${esc(leg.strategyName || '—')}</td><td colspan="7"><span class="loss">${esc(leg.why)}</span> — ${fmt.money(leg.targetRial)} نقد ماند${leg.unitCostRial ? `؛ بهای هر دست ${fmt.money(leg.unitCostRial)}` : ''}</td></tr>`)).join('')}</tbody></table>${
       unfunded.length ? `<p class="portfolio-note">${fmt.int(unfunded.length)} سهم تأمین نشد و پولش نقد ماند. بازده سبد روی کل سرمایهٔ اول دوره حساب شده، نه فقط روی پول درگیر — پس نقدِ بی‌کار، بازده را رقیق می‌کند، همان‌طور که در واقعیت می‌کند.</p>` : ''}`;
   }
 
@@ -631,11 +1157,18 @@ export async function mount(root, { state }) {
       ? { ...payload.matrix, pnl: payload.matrix.pnl instanceof Float64Array ? payload.matrix.pnl : Float64Array.from(payload.matrix.pnl || []) }
       : null;
     generated = payload.generatedByStrategy;
+    dailyMatrix = payloadMatrix;
+    dailyRows = payloadRows;
+    grain = DEFAULT_GRAIN;
+    $('pb-grain').value = DEFAULT_GRAIN;
     lens = { ...lens, from: null, to: null };
-    trendPick = []; basketPicks = []; calendarPick = ''; selectedStrategyId = '';
+    trendPick = []; basketPicks = []; calendarPick = ''; bandPick = ''; selectedStrategyId = '';
     if (!payloadMatrix) { setStatus('این اجرا ماتریس روزانه نساخت.', true); return; }
     paintLensOptions();
     $('pb-lens').hidden = false;
+    $('pb-workbook').hidden = false;
+    setLensOpen(lensWasOpen());
+    paintGrainNote();
     $('pb-tabs').hidden = false;
     tabsApi = mountSubtabs($('pb-tabs'), PB_TABS, {
       root,
@@ -645,6 +1178,12 @@ export async function mount(root, { state }) {
         paintPanel(id);
       },
     });
+    const label = `${nameOf(ua, 'نماد')} · ${dateLabel(Number($('pb-entry-date').dataset.value))} تا ${dateLabel(Number($('pb-exit-date').dataset.value))}`;
+    const runId = `${String(ua?.ins ?? '')}:${$('pb-entry-date').dataset.value}:${$('pb-exit-date').dataset.value}`;
+    runs = [
+      ...runs.filter((row) => row.id !== runId),
+      { id: runId, label, baseIns: String(ua?.ins ?? ''), rows: payloadRows, matrix: payloadMatrix },
+    ].slice(-6);
     const capped = generated.filter((row) => row.capped).length;
     $('pb-audit').textContent = `${fmt.int(generated.length)} استراتژی بررسی شد · ${fmt.int(payload.excluded.invalidAtEnd)} ترکیب فاقد داده معتبر روز سنجش · ${fmt.int(capped)} استراتژی سقف‌خورده`;
     recompute();
@@ -653,6 +1192,8 @@ export async function mount(root, { state }) {
 
   function selectStrategy(strategyId, { jump = true } = {}) {
     if (!analysis) return;
+    // هر انتخابی کشو را هم پر می‌کند: یک مسیر، نه دو تا.
+    if (analysis.strategies.some((row) => row.strategyId === strategyId)) openDetail(strategyId);
     const strategy = analysis.strategies.find((row) => row.strategyId === strategyId);
     if (!strategy) return;
     selectedStrategyId = strategyId;
@@ -663,7 +1204,7 @@ export async function mount(root, { state }) {
     $('pb-combo-title').textContent = `${strategy.strategyName} · ${fmt.int(rows.length)} ترکیب`;
     $('pb-combos').innerHTML = rows.length
       ? `<table class="history-table"><thead><tr><th>رتبه</th><th>ترکیب قرارداد</th><th>سررسید</th><th>مخرج (${esc(analysis.basis.short)})</th><th>سود/زیان</th><th>بازده</th><th>بیشترین افت</th><th>اولین سود</th><th>ارزش معاملهٔ ورود</th></tr></thead><tbody>${
-        rows.map((item, index) => `<tr data-result="${esc(item.id)}" tabindex="0"><td>${fmt.int(index + 1)}</td><td>${esc(comboName(item))}</td><td>${(item.expiries || []).map(dateLabel).join(' / ')}</td><td>${fmt.money(item.series.denominator)}</td><td class="${signTone(item.series.finalPnl)}">${fmt.money(item.series.finalPnl)}</td><td class="${signTone(item.series.finalPct)}">${pctCell(item.series.finalPct)}${item.series.beyondBasis ? ' <small>از مبنا رد شده</small>' : ''}</td><td class="${signTone(item.series.maxDrawdownPct)}">${pctCell(item.series.maxDrawdownPct)}</td><td>${item.series.firstProfitIndex === null ? 'رخ نداد' : `${esc(dateLabel(analysis.dates[item.series.firstProfitIndex]))} · ${fmt.int(item.series.firstProfitIndex)} روز`}</td><td>${item.entry?.legValueComplete ? fmt.money(item.entry.legValue) : 'ناقص'}</td></tr>`).join('')}</tbody></table>`
+        rows.map((item, index) => `<tr data-result="${esc(item.id)}" tabindex="0"><td>${fmt.int(index + 1)}</td><td>${esc(comboName(item))}</td><td>${(item.expiries || []).map(dateLabel).join(' / ')}</td><td>${fmt.money(item.series.denominator)}</td><td class="${signTone(item.series.finalPnl)}">${fmt.money(item.series.finalPnl)}</td><td class="${signTone(item.series.finalPct)}">${pctCell(item.series.finalPct)}${item.series.beyondBasis ? ' <small>از مبنا رد شده</small>' : ''}</td><td class="${signTone(item.series.maxDrawdownPct)}">${pctCell(item.series.maxDrawdownPct)}</td><td>${item.series.firstProfitIndex === null ? 'رخ نداد' : `${esc(columnLabel(analysis.dates[item.series.firstProfitIndex]))} · ${fmt.int(item.series.firstProfitIndex)} گام`}</td><td>${item.entry?.legValueComplete ? fmt.money(item.entry.legValue) : 'ناقص'}</td></tr>`).join('')}</tbody></table>`
       : '<p class="empty-note">هیچ ترکیبی از این استراتژی روی مبنای انتخابی، مخرج و پایان معتبر ندارد.</p>';
     const pick = (id) => { const item = rows.find((row) => row.id === id); if (item) showDetail(rawRow(item)); };
     $('pb-combos').onclick = (event) => { const row = event.target.closest('[data-result]'); if (row) pick(row.dataset.result); };
@@ -971,6 +1512,7 @@ export async function mount(root, { state }) {
     analysis = null; payloadMatrix = null; payloadRows = [];
     $('pb-tabs').hidden = true;
     $('pb-lens').hidden = true;
+    $('pb-workbook').hidden = true;
     $('pb-detail').hidden = true;
     for (const panel of root.querySelectorAll('.pb-panel')) panel.hidden = panel.dataset.panel !== 'setup';
     $('pb-hero-verdict').textContent = 'هنوز اجرایی انجام نشده';
@@ -983,17 +1525,130 @@ export async function mount(root, { state }) {
   $('pb-weighting').addEventListener('change', (event) => relens({ weighting: event.target.value }));
   $('pb-from').addEventListener('change', (event) => relens({ from: Number(event.target.value) || null }));
   $('pb-to').addEventListener('change', (event) => relens({ to: Number(event.target.value) || null }));
+  /**
+   * دفترچهٔ کامل — یک فایل، همان تحلیلی که روی صفحه است.
+   *
+   * سبد فرضی هم اگر ساخته شده باشد داخلش می‌آید، ولی از نو ساخته می‌شود تا
+   * برگ اکسل با آنچه روی صفحه است یکی باشد، نه با یک محاسبهٔ قدیمی‌تر.
+   */
+  $('pb-workbook-run').addEventListener('click', async () => {
+    if (!analysis) return;
+    const button = $('pb-workbook-run');
+    button.disabled = true;
+    const note = $('pb-workbook-note');
+    const before = note.textContent;
+    try {
+      const capital = Math.max(0, safeNum($('pb-basket-capital').value, 0)) * 1e6;
+      const basket = basketPicks.length
+        ? allocatePortfolio({ capitalRial: capital, picks: basketPicks, analysis, basisId: lens.basisId })
+        : null;
+      await downloadPortfolioBacktest(analysis, {
+        basket, generated, dateLabel,
+        context: {
+          baseName: nameOf(ua, 'نماد پایه'), baseIns: String(ua?.ins ?? ''),
+          entryDate: Number($('pb-entry-date').dataset.value) || null,
+          exitDate: Number($('pb-exit-date').dataset.value) || null,
+          markLabel: $('pb-mark-state').textContent,
+          entryBasis: HISTORY_BASES.find(([key]) => key === (entryRail.dataset.value || 'LAST'))?.[1] || '',
+          exitBasis: HISTORY_BASES.find(([key]) => key === (exitRail.dataset.value || 'LAST'))?.[1] || '',
+          units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
+          cap: Math.max(10, Math.trunc(safeNum($('pb-cap').value, 120))),
+        },
+      });
+    } catch (error) {
+      note.textContent = errorText(error, 'ساخت دفترچه کامل نشد.');
+      setTimeout(() => { note.textContent = before; }, 6000);
+    } finally { button.disabled = false; }
+  });
+
+  /** یادداشت هزینه — پیش از فشردن دکمه، نه بعدش. */
+  function paintGrainNote() {
+    const meta = grainMeta(grain);
+    const intraday = isIntradayGrain(grain);
+    $('pb-grain-run').hidden = !intraday;
+    if (!intraday) { $('pb-grain-note').textContent = ''; return; }
+    const cost = intradayCost({ instruments: Object.keys(seriesByIns).length, grain });
+    $('pb-grain-note').textContent = `${meta.hint}. برای این کار ریزمعاملهٔ ${fmt.int(cost.requests)} ابزار در روز سنجش گرفته می‌شود و ${fmt.int(cost.moments)} لحظه قیمت‌گذاری می‌شود. فقط **روز سنجش** ریز می‌شود؛ بقیهٔ بازه همان‌طور می‌ماند. لحظه‌ای که هیچ ابزاری تا آن ثانیه معامله نشده باشد، ستون خالی می‌ماند — قیمت لحظهٔ قبل جایش نمی‌نشیند.`;
+  }
+
+  /**
+   * اجرای درون‌روزی — همان ترکیب‌ها، لحظه‌به‌لحظه.
+   *
+   * ماتریس روزانه کنار گذاشته نمی‌شود؛ نگه داشته می‌شود تا بازگشت به
+   * «روزانه» اجرای دوباره نخواهد.
+   */
+  async function runIntraday() {
+    if (!analysis || !payloadRows.length) return;
+    const endDate = Number($('pb-exit-date').dataset.value);
+    const button = $('pb-grain-go');
+    button.disabled = true;
+    try {
+      setStatus('دریافت ریزمعاملهٔ روز سنجش…');
+      const { tape, failed, total } = await fetchTape(endDate);
+      const combos = payloadRows.map((row) => ({ id: row.id, legs: row.legs }));
+      const payload = await runWorker({
+        id: `intraday-${Date.now()}`, type: 'portfolio-intraday',
+        ua, seriesByIns: runSeriesByIns, tape, grain,
+        startDate: Number($('pb-entry-date').dataset.value), endDate,
+        entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST',
+        units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
+        fees: feesOf(state.settings), settings: state.settings, liquidity: liquidity(), combos,
+      });
+      const live = payload.columns.filter((column) => column.marked);
+      if (!live.length) throw new Error('در هیچ لحظه‌ای از روز سنجش، ابزاری معامله نشده بود');
+      // ماتریس تازه: ستون‌ها لحظه‌اند، سطرها همان ترکیب‌های اجرای روزانه.
+      const dates = live.map((column) => column.key);
+      const columnOf = new Map(dates.map((key, index) => [key, index]));
+      const rowOf = new Map(payloadRows.map((row, index) => [row.id, index]));
+      const pnl = new Float64Array(payloadRows.length * dates.length).fill(NaN);
+      for (const row of payload.rows) {
+        const y = rowOf.get(row.comboId), x = columnOf.get(row.key);
+        if (y === undefined || x === undefined) continue;
+        pnl[(y * dates.length) + x] = row.netPnl;
+      }
+      payloadMatrix = { dates, pnl, rowCount: payloadRows.length, baseSeries: dates.map(() => null) };
+      lens = { ...lens, from: null, to: null };
+      paintLensOptions();
+      recompute();
+      setStatus(`${fmt.int(live.length)} لحظه از ${fmt.int(payload.moments)} لحظه قیمت داشت${failed ? ` · ریزمعاملهٔ ${fmt.int(failed)} از ${fmt.int(total)} ابزار دریافت نشد` : ''}.`);
+    } catch (error) {
+      setStatus(errorText(error, 'اجرای درون‌روزی کامل نشد.'), true);
+    } finally { button.disabled = false; }
+  }
+
+  $('pb-grain').addEventListener('change', (event) => {
+    grain = normalizeGrain(event.target.value);
+    paintGrainNote();
+    // بازگشت به روزانه، ماتریس نگه‌داشته‌شده را برمی‌گرداند — بی‌اجرای دوباره.
+    if (!isIntradayGrain(grain) && dailyMatrix) {
+      payloadMatrix = dailyMatrix;
+      payloadRows = dailyRows;
+      lens = { ...lens, from: null, to: null };
+      paintLensOptions();
+      recompute();
+      setStatus('بازگشت به دانه‌بندی روزانه.');
+    }
+  });
+  $('pb-grain-go').addEventListener('click', runIntraday);
+
+  $('pb-lens-toggle').addEventListener('click', () => {
+    setLensOpen($('pb-lens').dataset.open !== 'true');
+  });
   $('pb-lens-reset').addEventListener('click', () => {
     lens = { ...lens, from: null, to: null };
     paintLensOptions();
     recompute();
   });
 
+  $('pb-graph-threshold').addEventListener('change', () => { dirty.add('parts'); paintPanel('parts'); });
   $('pb-heat-mode').addEventListener('change', (event) => {
     heatMode = event.target.value;
     dirty.add('heatmap');
     paintPanel('heatmap');
   });
+  for (const [id, set] of [['pb-heat-sort', (value) => { heatSort = value; }], ['pb-heat-palette', (value) => { heatPalette = value; }]]) {
+    $(id).addEventListener('change', (event) => { set(event.target.value); dirty.add('heatmap'); paintPanel('heatmap'); });
+  }
   $('pb-calendar-pick').addEventListener('change', (event) => {
     calendarPick = event.target.value;
     dirty.add('heatmap');
@@ -1011,6 +1666,11 @@ export async function mount(root, { state }) {
   for (const id of ['pb-trend-base', 'pb-trend-area']) {
     $(id).addEventListener('change', () => { dirty.add('trend'); paintPanel('trend'); });
   }
+  $('pb-band-pick').addEventListener('change', (event) => {
+    bandPick = event.target.value;
+    dirty.add('trend');
+    paintPanel('trend');
+  });
   $('pb-race-replay').addEventListener('click', () => {
     dirty.add('ranking');
     paintPanel('ranking');
@@ -1031,10 +1691,11 @@ export async function mount(root, { state }) {
 
   // ═══ سبد فرضی ═══
   $('pb-basket-add').addEventListener('click', () => {
-    const next = (analysis?.strategies || []).find((row) => !basketPicks.some((pick) => pick.strategyId === row.strategyId));
+    const next = (analysis?.strategies || []).find((row) => !basketPicks.some((pick) => pick.strategyId === row.strategyId))
+      || (analysis?.strategies || [])[0];
     if (!next) return;
     const combo = analysis.combos.find((item) => item.strategyId === next.strategyId && item.series.ok);
-    basketPicks = [...basketPicks, { strategyId: next.strategyId, comboId: combo?.id || '', pct: 10 }];
+    basketPicks = [...basketPicks, { sourceId: currentRunId(), strategyId: next.strategyId, comboId: combo?.id || '', pct: 10 }];
     paintBasket();
   });
   $('pb-basket-rows').addEventListener('change', (event) => {
@@ -1045,11 +1706,18 @@ export async function mount(root, { state }) {
     const value = key === 'pct' ? Math.max(0, safeNum(field.value, 0)) : field.value;
     basketPicks = basketPicks.map((pick, at) => {
       if (at !== index) return pick;
-      if (key !== 'strategyId') return { ...pick, [key]: value };
-      // عوض‌شدن استراتژی یعنی ترکیب قبلی دیگر عضو این استراتژی نیست؛
-      // نگه‌داشتنش یعنی سبدی که کاربر فکر می‌کند چیده با آنچه ساخته می‌شود
-      // فرق دارد.
-      const combo = analysis.combos.find((item) => item.strategyId === value && item.series.ok);
+      if (key === 'pct') return { ...pick, pct: value };
+      // عوض‌شدن اجرا یا استراتژی، انتخاب‌های پایین‌دستی را بی‌اعتبار می‌کند:
+      // ترکیبِ نماد قبلی در اجرای تازه اصلاً وجود ندارد. نگه‌داشتنشان یعنی
+      // سبدی که کاربر فکر می‌کند چیده با آنچه ساخته می‌شود فرق دارد.
+      if (key === 'sourceId') {
+        const source = sourceOf(value);
+        const strategy = source?.analysis?.strategies?.[0];
+        const combo = (source?.analysis?.combos || []).find((item) => item.strategyId === strategy?.strategyId && item.series.ok);
+        return { ...pick, sourceId: value, strategyId: strategy?.strategyId || '', comboId: combo?.id || '' };
+      }
+      const source = sourceOf(pick.sourceId) || basketSources()[0];
+      const combo = (source?.analysis?.combos || []).find((item) => item.strategyId === value && item.series.ok);
       return { ...pick, strategyId: value, comboId: combo?.id || '' };
     });
     paintBasket();

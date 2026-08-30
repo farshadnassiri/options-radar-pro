@@ -2945,8 +2945,28 @@ td.gain, dd.gain { color: var(--gain); }
 .pb-panel { display: flex; flex-direction: column; gap: var(--space-5); }
 .pb-panel[hidden] { display: none !important; }
 
-.pb-lens { position: sticky; top: 0; z-index: 3; }
-.pb-lens-head { margin-bottom: var(--space-3); }
+/* عدسی جمع‌شونده: بسته که باشد یک نوار باریک است، نه یک کارت تمام‌قد.
+   خلاصه روی خودِ نوار می‌ماند تا کاربر بدون بازکردنش بداند عددها روی چه
+   مبنایی‌اند. */
+.pb-lens { position: sticky; top: 0; z-index: 3; padding: 0; overflow: hidden; }
+.pb-lens[data-open="false"] { box-shadow: var(--shadow-2xs); }
+.pb-lens-toggle { display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  padding: 6px var(--space-3); background: none; border: 0; cursor: pointer;
+  font-size: var(--fs-xs); color: var(--muted); text-align: start; }
+.pb-lens-toggle:hover { background: var(--panel-2); }
+.pb-lens-toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pb-lens-toggle b { flex: 1; font-weight: 600; color: var(--ink); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.pb-lens-chip { padding: 1px 8px; border-radius: var(--radius-pill); background: var(--accent-soft);
+  color: var(--accent-ink); font-weight: 700; font-size: var(--fs-3xs); flex: none; }
+/* پیکان کوچک — همان دکمهٔ «خیلی کوچک» که خواسته شده. */
+.pb-lens-toggle i { flex: none; width: 14px; height: 14px; border-inline-end: 2px solid var(--muted);
+  border-block-end: 2px solid var(--muted); transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .15s ease; }
+.pb-lens[data-open="true"] .pb-lens-toggle i { transform: rotate(-135deg) translate(-3px, -3px); }
+.pb-lens-body { padding: 0 var(--space-4) var(--space-4); }
+.pb-lens-body[hidden] { display: none !important; }
+.pb-lens-why { margin: 0 0 var(--space-3); }
 .pb-lens-grid { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-items: end; }
 .pb-lens-grid label { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); color: var(--muted); font-weight: 600; }
 .pb-lens-grid select { height: var(--control-h-sm); }
@@ -2979,7 +2999,7 @@ td.gain, dd.gain { color: var(--gain); }
 
 .pb-basket-rows { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-4) 0; }
 .pb-basket-row { display: grid; gap: var(--space-3); align-items: end;
-  grid-template-columns: minmax(140px, 1fr) minmax(200px, 2fr) 120px auto; }
+  grid-template-columns: minmax(150px, 1fr) minmax(140px, 1fr) minmax(200px, 2fr) 110px auto; }
 .pb-basket-row label { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); color: var(--muted); font-weight: 600; }
 .pb-basket-row select, .pb-basket-row input { height: var(--control-h-sm); }
 .pb-basket-row button { height: var(--control-h-sm); }
@@ -3007,3 +3027,52 @@ td.gain, dd.gain { color: var(--gain); }
   .pb-weight { grid-template-columns: 1fr 90px 30px; }
   .pb-lens { position: static; }
 }
+
+/* سرخط‌ها — هر کارت یک سؤال با جوابش و دلیلش. کلیک‌شونده، چون هر سرخط
+   دروازهٔ همان استراتژی است. */
+.pb-highlights { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.pb-highlight { display: flex; flex-direction: column; gap: 3px; align-items: stretch; text-align: start;
+  padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--panel); cursor: pointer; }
+.pb-highlight:hover { border-color: var(--accent); background: var(--accent-soft); }
+.pb-highlight:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pb-highlight-label { font-size: var(--fs-3xs); font-weight: 700; color: var(--accent-ink);
+  text-transform: none; letter-spacing: normal; }
+.pb-highlight b { font-size: var(--fs-sm); color: var(--ink); }
+.pb-highlight-value { font-size: var(--fs-2xs); color: var(--muted); }
+.pb-highlight-value em { font-style: normal; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.pb-highlight small { font-size: var(--fs-3xs); color: var(--muted); line-height: 1.5; }
+
+/* توضیح یک‌خطیِ هر کارت — «این نمودار چه می‌گوید». بدون این، نمودارِ
+   خوش‌ظاهر هم گنگ می‌ماند. */
+.pb-hint { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-xs); line-height: 1.7; }
+
+/* دکمهٔ دفترچهٔ کامل — بالای عدسی، چون خروجیِ کلِ گزارش است نه یک جدول. */
+.pb-workbook { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4); border: 1px solid var(--line);
+  border-radius: var(--radius-md); background: var(--panel); }
+.pb-workbook[hidden] { display: none !important; }
+.pb-workbook p { flex: 1; min-width: 240px; margin: 0; }
+
+/* اجرای درون‌روزی — هزینه‌اش پیش از دکمه نوشته می‌شود، نه بعدش. */
+.pb-grain-run { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line-soft); }
+.pb-grain-run[hidden] { display: none !important; }
+.pb-grain-run p { flex: 1; min-width: 240px; margin: 0; }
+
+/* کشوی جزئیات — از هر تبی باز می‌شود و جای کاربر را در همان تب نگه می‌دارد.
+   پریدن به تب دیگر برای دیدن یک عدد، رشتهٔ فکر را پاره می‌کند. */
+.pb-drawer { position: fixed; inset-inline: 0; bottom: 0; z-index: 20; max-height: 62vh;
+  display: flex; flex-direction: column; background: var(--panel);
+  border-top: 1px solid var(--line); box-shadow: var(--shadow-lg); }
+.pb-drawer[hidden] { display: none !important; }
+.pb-drawer-head { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--line-soft); }
+.pb-drawer-head b { font-size: var(--fs-sm); color: var(--ink); }
+.pb-drawer-tabs { display: flex; gap: 4px; flex: 1; flex-wrap: wrap; }
+.pb-drawer-tabs button { padding: 3px 10px; border: 1px solid var(--line); background: var(--panel);
+  color: var(--muted); border-radius: var(--radius-pill); font-size: var(--fs-2xs); font-weight: 600; cursor: pointer; }
+.pb-drawer-tabs button[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.pb-drawer-tabs button:focus-visible, .pb-drawer-head button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.pb-drawer-body { overflow: auto; padding: var(--space-3) var(--space-4) var(--space-4); }
+@media (max-width: 900px) { .pb-drawer { max-height: 74vh; } }

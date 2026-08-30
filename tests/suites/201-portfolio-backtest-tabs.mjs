@@ -67,7 +67,17 @@ group('۲۰۱. صفحهٔ تب‌بندی‌شدهٔ آزمون همه استر�
   check('سری کم‌شده روی نمودار نمی‌ماند',
     host201.includes('{ notMerge: true }'));
   check('نمودار با تغییر اندازهٔ ظرف بزرگ می‌شود',
-    host201.includes('new ResizeObserver(() => instance.resize())'));
+    host201.includes('new ResizeObserver((entries) =>') && host201.includes('instance.resize();'));
+  // `resize()` خودش بوم را عوض می‌کند؛ اگر ناظر روی هر شلیک کار کند، حلقه
+  // بسته می‌شود و نخِ اصلی می‌ایستد.
+  check('ناظر اندازه فقط روی تغییر واقعی کار می‌کند',
+    host201.includes('if (width === lastWidth && height === lastHeight) return;'));
+  check('ظرف پنهان اندازه‌گیری نمی‌شود',
+    host201.includes('if (width < 2 || height < 2) return;')
+    && host201.includes('if (box.width < 2 || box.height < 2) return;'));
+  check('انیمیشن نمودارها با تعویض پنل می‌خوابد',
+    host201.includes('stopAll() { for (const handle of handles.values()) handle.instance.stopAnimation?.(); }')
+    && tab201.includes('charts.stopAll();'));
 }
 
 // ═══ تایم‌فریم پایین: همان ترکیب، ساعت‌به‌ساعت ═══
@@ -97,4 +107,125 @@ group('۲۰۱-ب. تایم‌فریم پایین');
     tab201.includes('exitAt: final.perLeg.map((leg) => leg.exitPrice),')
     && tab201.includes('پا با قیمت'));
   check('رنگ ردیف ساعت به عدد حساس است', intraday201.includes('heatLevel(row.pct, bound)'));
+}
+
+// ═══ عدسی جمع‌شونده ═══
+group('۲۰۱-ج. عدسی جمع‌شونده');
+{
+  check('عدسی به‌طور پیش‌فرض جمع است',
+    tab201.includes('data-open="false"') && tab201.includes('<div class="pb-lens-body" id="pb-lens-body" hidden>'));
+  check('دکمهٔ باز و بسته وضعیتش را به کمک‌فناوری هم می‌گوید',
+    tab201.includes('aria-expanded="false" aria-controls="pb-lens-body"')
+    && tab201.includes("$('pb-lens-toggle').setAttribute('aria-expanded', String(open));"));
+  // نوارِ بسته و بی‌برچسب، بدتر از نوارِ بزرگ است: جا نمی‌گیرد ولی عدد را
+  // هم بی‌قید می‌کند.
+  check('نوارِ بسته، مبنا و آماره و بازه را خلاصه نشان می‌دهد',
+    tab201.includes('function lensSummary()')
+    && tab201.includes("$('pb-lens-summary').textContent = lensSummary();"));
+  check('حالت باز یا بسته میان اجراها می‌ماند',
+    tab201.includes("localStorage.setItem(LENS_KEY, open ? '1' : '0')")
+    && tab201.includes('setLensOpen(lensWasOpen());'));
+  check('نبود حافظهٔ مرورگر صفحه را نمی‌شکند',
+    /localStorage\.setItem\(LENS_KEY[\s\S]{0,80}catch/.test(tab201)
+    && /localStorage\.getItem\(LENS_KEY[\s\S]{0,60}catch \{ return false; \}/.test(tab201));
+  check('نوارِ جمع‌شده ارتفاع یک ردیف دارد، نه یک کارت',
+    style201.includes('.pb-lens { position: sticky; top: 0; z-index: 3; padding: 0; overflow: hidden; }')
+    && style201.includes('.pb-lens-toggle { display: flex;'));
+}
+
+// ═══ سرخط‌ها در نمای کل ═══
+group('۲۰۱-د. سرخط‌ها در رابط');
+{
+  check('نوار سرخط‌ها در نمای کل هست', tab201.includes('id="pb-highlights"'));
+  check('هر سرخط با واحد سنجهٔ خودش نوشته می‌شود',
+    tab201.includes("meta.unit === 'pct' ? pctCell(raw)")
+    && tab201.includes("meta.unit === 'money' ? fmt.money(raw)")
+    && tab201.includes("meta.unit === 'int' ? fmt.int(raw)"));
+  check('دلیل هر سرخط کنارش نوشته می‌شود، نه فقط در راهنمای شناور',
+    tab201.includes('<small>${esc(item.hint)}</small>'));
+  check('کلیک روی سرخط، همان استراتژی را انتخاب می‌کند',
+    /paintHighlights[\s\S]{0,1800}\$\('pb-highlights'\)\.onclick[\s\S]{0,140}selectStrategy\(card\.dataset\.strategy\)/.test(tab201));
+  check('نبود سرخط، جدول خالیِ بی‌توضیح نمی‌سازد',
+    tab201.includes('سرخطی ساخته نشد؛ نتیجهٔ معتبری در این بازه نیست.'));
+}
+
+// ═══ تب کل به جزء و کارت‌های توضیح‌دار ═══
+group('۲۰۱-ه. کل به جزء و توضیح ساده');
+{
+  const partsSrc = readSrc('../ui/portfolio-charts-parts.mjs');
+  const flowSrc = readSrc('../ui/portfolio-charts-flow.mjs');
+
+  check('تب کل به جزء در نوار هست', tab201.includes("{ id: 'parts', label: 'کل به جزء'"));
+  const partsPanel = tab201.slice(tab201.indexOf('data-panel="parts"'), tab201.indexOf('data-panel="drill"'));
+  const wanted201 = ['pb-funnel', 'pb-sunburst', 'pb-donut', 'pb-family-bar', 'pb-treemap',
+    'pb-rose', 'pb-pareto', 'pb-graph', 'pb-corr', 'pb-tree'];
+  for (const id of wanted201) check(`نمودار ${id} در تب کل به جزء هست`, partsPanel.includes(`id="${id}"`), id);
+  check('سه جدول عددی کنار نمودارها هست',
+    ['pb-parts-groups', 'pb-parts-pairs', 'pb-parts-pareto'].every((id) => partsPanel.includes(`id="${id}"`)));
+
+  // نمودارِ بی‌توضیح، تصمیم نمی‌سازد. هر کارت باید بگوید چه می‌گوید.
+  const hints201 = (tab201.match(/class="pb-hint"/g) || []).length;
+  check('دست‌کم بیست کارت توضیح ساده دارند', hints201 >= 20, `${hints201} توضیح`);
+
+  check('درصد سهم در راهنمای شناور می‌آید',
+    partsSrc.includes('export function shareOf(') && partsSrc.includes('export const shareLine')
+    && (partsSrc.match(/shareLine\(/g) || []).length >= 5);
+  check('کلِ صفر یا نامعلوم، سهم نمی‌سازد',
+    partsSrc.includes("if (part === null || whole === null || Math.abs(whole) < 1e-12) return null;"));
+
+  check('هجده سازندهٔ نمودار تازه ساخته شد',
+    (partsSrc.match(/^export function \w+Option\(/gm) || []).length
+    + (flowSrc.match(/^export function \w+Option\(/gm) || []).length >= 17,
+    String((partsSrc.match(/^export function \w+Option\(/gm) || []).length
+      + (flowSrc.match(/^export function \w+Option\(/gm) || []).length));
+  check('هیچ رنگ سخت‌کدشده‌ای در کتابخانهٔ نمودار نیست',
+    !/#[0-9a-fA-F]{3,8}\b|rgba?\s*\(/.test(partsSrc) && !/#[0-9a-fA-F]{3,8}\b|rgba?\s*\(/.test(flowSrc));
+
+  // رودخانه پهنای منفی نمی‌کشد؛ نگفتنش یعنی نصفِ ماجرا را کل ماجرا نشان دادن.
+  check('رودخانه می‌گوید فقط سود مثبت را نشان می‌دهد',
+    flowSrc.includes('رودخانه پهنای منفی نمی‌کشد') && tab201.includes('فقط سود مثبت وارد می‌شود'));
+  check('گل رز عدد واقعی را در راهنما نگه می‌دارد، نه در شعاع',
+    partsSrc.includes('value: (row.metrics.return - floor) + 0.01') && partsSrc.includes('metric: row.metrics.return'));
+  check('رادار می‌گوید محورها نگاشته شده‌اند',
+    flowSrc.includes('هر محور به صفر تا صد نگاشته می‌شود') && tab201.includes('هر محور به صفر تا صد نگاشته شده'));
+}
+
+// ═══ کشوی جزئیات و دانه‌بندی درون‌روزی ═══
+group('۲۰۱-و. کشوی جزئیات و دانه‌بندی');
+{
+  // سیزده نمودار با سیزده رفتارِ کلیک یعنی کاربر باید یاد بگیرد کدام‌شان
+  // چه می‌کند. یک مسیر، نه سیزده تا.
+  check('کشوی جزئیات بیرون از پنل‌هاست تا از هر تبی دیده شود',
+    tab201.indexOf('id="pb-drawer"') < tab201.indexOf('data-panel="setup"'));
+  check('هر انتخاب استراتژی، کشو را هم پر می‌کند',
+    tab201.includes('if (analysis.strategies.some((row) => row.strategyId === strategyId)) openDetail(strategyId);'));
+  check('کشو سه نما دارد: سنجه، ترکیب، مسیر',
+    tab201.includes("{ id: 'metrics', label: 'سنجه‌ها' }")
+    && tab201.includes("{ id: 'combos', label: 'ترکیب‌ها' }")
+    && tab201.includes("{ id: 'path', label: 'مسیر گام‌به‌گام' }"));
+  check('نمای سنجه، وزن و سهم هر سنجه در نمره را نشان می‌دهد',
+    tab201.includes('<th>وزن در نمره</th><th>سهم از نمره</th>')
+    && tab201.includes('این سنجه را ندارد'));
+  check('کلیک روی ترکیب در کشو، به پنل جزئیات کامل می‌برد',
+    tab201.includes("dirty.delete('drill'); tabsApi?.show('drill'); showDetail(rawRow(combo));"));
+
+  // ── دانه‌بندی ───────────────────────────────────────────────────────
+  check('دانه‌بندی در عدسی هست', tab201.includes('id="pb-grain"'));
+  // عددی که بعد از فشردن دکمه معلوم شود، هشدار نیست؛ عذرخواهی است.
+  check('هزینهٔ اجرای درون‌روزی پیش از دکمه نوشته می‌شود',
+    tab201.includes('function paintGrainNote()') && tab201.includes('intradayCost({ instruments: Object.keys(seriesByIns).length, grain })'));
+  check('محدودیت «فقط روز سنجش» صریح گفته می‌شود',
+    tab201.includes('فقط **روز سنجش** ریز می‌شود؛ بقیهٔ بازه همان‌طور می‌ماند'));
+  check('لحظهٔ بی‌معامله، قیمت لحظهٔ قبل را نمی‌گیرد',
+    tab201.includes('قیمت لحظهٔ قبل جایش نمی‌نشیند'));
+  // برچسبِ چهارده‌رقمیِ کلیدِ لحظه در تقویم جلالی «—» می‌داد.
+  check('برچسب ستون در حالت درون‌روزی، ساعت را نشان می‌دهد',
+    tab201.includes('const columnLabel = (value) => (isIntradayGrain(grain)')
+    && tab201.includes('`<option value="${date}"${Number(selected) === date ? \' selected\' : \'\'}>${esc(columnLabel(date))}</option>`'));
+  check('بازگشت به روزانه، اجرای دوباره نمی‌خواهد',
+    tab201.includes('if (!isIntradayGrain(grain) && dailyMatrix) {') && tab201.includes('payloadMatrix = dailyMatrix;'));
+  check('کتابخانهٔ اجرا برای سبد چندنمادی نگه داشته می‌شود',
+    tab201.includes('function basketSources()') && tab201.includes('sources: basketSources()'));
+  check('هر اجرای کتابخانه با عدسی جاری تحلیل می‌شود، نه با مبنای روزِ خودش',
+    /basketSources\(\)[\s\S]{0,700}basisId: lens\.basisId, statistic: lens\.statistic/.test(tab201));
 }

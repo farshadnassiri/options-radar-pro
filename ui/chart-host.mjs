@@ -130,15 +130,36 @@ export async function mountChart(host, build, { onClick = null, empty = 'داد�
   if (!paint()) { instance.dispose(); return null; }
   if (onClick) instance.on('click', onClick);
 
+  // ناظرِ اندازه باید **فقط** روی تغییر واقعی کار کند.
+  //
+  // `instance.resize()` خودش بوم را عوض می‌کند و اگر ظرف در چیدمانی باشد
+  // که اندازه‌اش به محتوا وابسته است، ناظر دوباره شلیک می‌شود و حلقه بسته
+  // می‌شود. با بیست‌وچند نمودار روی یک صفحه، همین حلقه نخِ اصلی را چنان
+  // اشغال کرد که هر فرمان بعدی بیش از نود ثانیه بی‌پاسخ ماند — و صفحه
+  // ظاهراً سالم بود.
+  let lastWidth = 0, lastHeight = 0;
   const observer = typeof ResizeObserver === 'function'
-    ? new ResizeObserver(() => instance.resize())
+    ? new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      const width = Math.round(box.width), height = Math.round(box.height);
+      // ظرفِ پنهان صفر است؛ تغییر اندازه رویش بی‌معناست و فقط کار می‌تراشد.
+      if (width < 2 || height < 2) return;
+      if (width === lastWidth && height === lastHeight) return;
+      lastWidth = width; lastHeight = height;
+      instance.resize();
+    })
     : null;
   observer?.observe(host);
 
   return {
     instance,
     update(next) { if (next) build = next; paint(); },
-    resize() { instance.resize(); },
+    resize() {
+      const box = host.getBoundingClientRect();
+      if (box.width < 2 || box.height < 2) return;
+      instance.resize();
+    },
     dispose() { observer?.disconnect(); instance.dispose(); },
   };
 }
@@ -161,6 +182,14 @@ export function chartGroup() {
     },
     get: (key) => handles.get(key) || null,
     resizeAll() { for (const handle of handles.values()) handle.resize(); },
+    /**
+     * انیمیشنِ همهٔ نمودارها را می‌خواباند.
+     *
+     * ECharts با پنهان‌شدن ظرف چیزی را متوقف نمی‌کند. نموداری که انیمیشنش
+     * تمام‌نشدنی است، در پنلی بسته هم نخِ اصلی را می‌چرخاند و بقیهٔ صفحه
+     * کند می‌شود بی‌آنکه چیزی خراب به نظر برسد.
+     */
+    stopAll() { for (const handle of handles.values()) handle.instance.stopAnimation?.(); },
     disposeAll() {
       for (const handle of handles.values()) handle.dispose();
       handles.clear();
