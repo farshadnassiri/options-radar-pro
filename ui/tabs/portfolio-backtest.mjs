@@ -29,7 +29,10 @@ import {
 } from '/core/portfolio-report.mjs';
 import { HEAT_PALETTES, HEAT_SORTS } from '/ui/portfolio-analysis-view.mjs';
 import { allocatePortfolio } from '/core/portfolio-allocation.mjs';
-import { applyBasketEdit, firstComboId, normalizeBasketPicks } from '/core/basket-picks.mjs';
+import {
+  addPick, applyBasketEdit, firstComboId, freePct, lotCostRial,
+  normalizeBasketPicks, pickWarning, usedPct,
+} from '/core/basket-picks.mjs';
 import {
   DEFAULT_GRAIN, MOMENT_GRAINS, grainMeta, intradayCost, isIntradayGrain,
   momentDate, momentLabel, momentSecond, momentsFor, normalizeGrain,
@@ -362,7 +365,10 @@ export async function mount(root, { state }) {
     <section class="card"><div class="section-head"><div><p class="eyebrow">سبد فرضی</p><h2>سرمایهٔ اول دوره را بین استراتژی‌ها تقسیم کن</h2></div><button type="button" class="primary" id="pb-basket-run">ساخت سبد</button></div>
       <div class="portfolio-form"><label>سرمایهٔ اول دوره (میلیون ریال)<input id="pb-basket-capital" type="number" min="1" step="1" value="1000"></label></div>
       <div id="pb-basket-rows" class="pb-basket-rows"></div>
-      <button type="button" class="ghost" id="pb-basket-add">افزودن استراتژی به سبد</button>
+      <div class="pb-basket-foot">
+        <button type="button" class="ghost" id="pb-basket-add">افزودن استراتژی به سبد</button>
+        <p class="pb-basket-tally" id="pb-basket-tally" data-tone="ok"></p>
+      </div>
       <p class="portfolio-note" id="pb-basket-note">درصدها روی هم نباید از صد بیشتر شوند. باقی‌ماندهٔ هر سهم که به یک دست کامل نرسد، نقد می‌ماند و در ارزش سبد شمرده می‌شود.</p>
     </section>
     <div class="backtest-kpis" id="pb-basket-kpis"></div>
@@ -1080,14 +1086,26 @@ export async function mount(root, { state }) {
     // نامِ بلند در `select` با سه‌نقطه بریده می‌شود؛ `title` همان متن کامل
     // را برمی‌گرداند تا چیزی از دسترس بیرون نرود.
     const comboLabel = (combo) => `${comboName(combo)} · ${pctCell(combo.series.finalPct)}`;
-    return `<div class="pb-basket-row" data-basket-row="${index}"${many ? '' : ' data-single-run'}>
+    // چرا این سطر در سبد نمی‌نشیند، همین‌جا گفته می‌شود — نه بعد از ساخت.
+    const cost = lotCostRial(source, pick.comboId, lens.basisId);
+    const warn = pickWarning({ pick, source, capitalRial: basketCapital(), basisId: lens.basisId, picks: basketPicks });
+    return `<div class="pb-basket-row" data-basket-row="${index}"${many ? '' : ' data-single-run'}${warn ? ' data-warn' : ''}>
       ${runField}
       <label>استراتژی<select data-basket="strategyId" data-index="${index}" title="${esc(strategies.find((row) => row.strategyId === pick.strategyId)?.strategyName || '')}">${strategies.map((row) => `<option value="${esc(row.strategyId)}"${row.strategyId === pick.strategyId ? ' selected' : ''}>${esc(row.strategyName)}</option>`).join('')}</select></label>
       <label>ترکیب<select data-basket="comboId" data-index="${index}" title="${esc(combos.find((combo) => combo.id === pick.comboId) ? comboLabel(combos.find((combo) => combo.id === pick.comboId)) : '')}">${combos.length ? combos.map((combo) => `<option value="${esc(combo.id)}"${combo.id === pick.comboId ? ' selected' : ''}>${esc(comboLabel(combo))}</option>`).join('') : '<option value="">ترکیب معتبری ندارد</option>'}</select></label>
-      <label>سهم (درصد)<input type="number" min="1" max="100" step="1" data-basket="pct" data-index="${index}" value="${pick.pct}"></label>
+      <label>سهم (درصد)<input type="number" min="0" max="100" step="1" data-basket="pct" data-index="${index}" value="${pick.pct}"></label>
       <button type="button" class="ghost" data-basket-remove="${index}">حذف</button>
+      ${warn ? `<p class="pb-basket-warn" data-kind="${esc(warn.kind)}">${esc(warn.text)}${cost === null ? '' : ` · بهای هر دست ${fmt.money(cost)}`}</p>` : ''}
     </div>`;
   }
+
+  // سرمایه در دو جا خوانده می‌شد و یک جا در میلیون ضرب می‌شد؛ سومین
+  // خواننده همان اشتباه را تکرار می‌کرد.
+  const basketCapital = () => Math.max(0, safeNum($('pb-basket-capital').value, 0)) * 1e6;
+
+  // خبرِ بازچینش فقط به همان افزودن مربوط است. اگر نماند، در هر رسمِ
+  // بعدی تکرار می‌شود و کاربر فکر می‌کند باز هم چیزی عوض شده.
+  let basketRebalanced = false;
 
   function paintBasketForm() {
     if (!analysis) return;
@@ -1100,6 +1118,28 @@ export async function mount(root, { state }) {
     // آنچه در فرم دیده می‌شود باید همانی باشد که ساخته می‌شود.
     basketPicks = normalizeBasketPicks(basketPicks, basketSources());
     $('pb-basket-rows').innerHTML = basketPicks.map(basketRowMarkup).join('');
+    paintBasketTally();
+  }
+
+  /**
+   * مجموع درصدها، زنده.
+   *
+   * مجموعِ بیش از صد، کل سبد را رد می‌کند. تا پیش از این، کاربر این را
+   * فقط با ناپدیدشدن سبد می‌فهمید — بدون اینکه بداند کدام عدد مقصر است.
+   */
+  function paintBasketTally() {
+    // از `usedPct`، نه از `100 - freePct`: کفِ صفرِ آن، ۱۷۵٪ را صد نشان می‌داد.
+    const used = usedPct(basketPicks);
+    const over = used > 100 + 1e-9;
+    const free = freePct(basketPicks);
+    $('pb-basket-tally').innerHTML = over
+      ? `<b class="loss">مجموع ${fmt.num(used)}٪ — بیش از صد</b><span>تا سبد ساخته شود باید ${fmt.num(Math.round((used - 100) * 100) / 100)}٪ کم شود.</span>`
+      : `<b>مجموع ${fmt.num(used)}٪</b><span>${free > 0 ? `${fmt.num(free)}٪ تخصیص‌نیافته نقد می‌ماند و بازده را رقیق می‌کند.` : 'همهٔ سرمایه تخصیص یافته است.'}</span>`;
+    $('pb-basket-tally').dataset.tone = over ? 'over' : 'ok';
+    if (basketRebalanced) {
+      $('pb-basket-tally').insertAdjacentHTML('beforeend',
+        '<em>جایی نمانده بود؛ سهم‌های پیشین به نسبت خودشان کوچک شدند تا سطر تازه جا بگیرد.</em>');
+    }
   }
 
   /**
@@ -1123,7 +1163,7 @@ export async function mount(root, { state }) {
 
   function paintBasket() {
     paintBasketForm();
-    const capital = Math.max(0, safeNum($('pb-basket-capital').value, 0)) * 1e6;
+    const capital = basketCapital();
     const basket = allocatePortfolio({
       capitalRial: capital, picks: basketPicks, sources: basketSources(), basisId: lens.basisId,
     });
@@ -1710,8 +1750,19 @@ export async function mount(root, { state }) {
       || (analysis?.strategies || [])[0];
     if (!next) return;
     const here = currentRunId();
-    const comboId = firstComboId(sourceOf(here) || { analysis }, next.strategyId);
-    basketPicks = [...basketPicks, { sourceId: here, strategyId: next.strategyId, comboId, pct: 10 }];
+    const source = sourceOf(here) || { analysis };
+    const comboId = firstComboId(source, next.strategyId);
+    // سهم از آنچه آزاد مانده برداشته می‌شود، نه یک عدد ثابت: ۴۰+۳۵+۲۵
+    // دقیقاً صد است و ۱۰٪ ثابت، مجموع را به ۱۱۰ می‌برد و کل سبد رد
+    // می‌شود. و اگر بهای یک دست معلوم باشد، سهم دست‌کم یک دست است.
+    const added = addPick({
+      picks: basketPicks, pick: { sourceId: here, strategyId: next.strategyId, comboId },
+      capitalRial: basketCapital(), lotCost: lotCostRial(source, comboId, lens.basisId),
+    });
+    basketPicks = added.picks;
+    // پیش از رسم، نه بعدش: خبر باید با همان چیدمانی بیاید که توصیفش
+    // می‌کند، وگرنه یک بار عقب می‌افتد.
+    basketRebalanced = added.rebalanced;
     paintBasket();
   });
   $('pb-basket-rows').addEventListener('change', (event) => {
@@ -1724,6 +1775,7 @@ export async function mount(root, { state }) {
       value: field.dataset.basket === 'pct' ? Math.max(0, safeNum(field.value, 0)) : field.value,
       sources: basketSources(),
     });
+    basketRebalanced = false;
     paintBasket();
   });
   $('pb-basket-rows').addEventListener('click', (event) => {
@@ -1731,10 +1783,11 @@ export async function mount(root, { state }) {
     if (!button) return;
     const index = Number(button.dataset.basketRemove);
     basketPicks = basketPicks.filter((pick, at) => at !== index);
+    basketRebalanced = false;
     paintBasket();
   });
-  $('pb-basket-run').addEventListener('click', () => paintBasket());
-  $('pb-basket-capital').addEventListener('change', () => paintBasket());
+  $('pb-basket-run').addEventListener('click', () => { basketRebalanced = false; paintBasket(); });
+  $('pb-basket-capital').addEventListener('change', () => { basketRebalanced = false; paintBasket(); });
 
   entryRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(entryRail, button.dataset.basis); if (ua) refreshDates(); } });
   exitRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(exitRail, button.dataset.basis); if (ua) refreshDates(); } });
