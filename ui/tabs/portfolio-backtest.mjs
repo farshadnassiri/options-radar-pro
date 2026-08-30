@@ -45,6 +45,28 @@ import {
   rollingWinOption as bkRoll, riskShareOption as bkRiskShare,
 } from '/ui/basket-charts-more.mjs';
 import {
+  scoreLollipopOption as labScore, halfDumbbellOption as labDumb, bulletOption as labBullet,
+  radialScoreOption as labRadial, countPictorialOption as labCount,
+} from '/ui/chart-lab.mjs';
+import {
+  familyWaffleOption as labWaffle, familyMekkoOption as labMekko, screenFunnelOption as labFunnel,
+  ridgelineOption as labRidge, violinOption as labViolin, comboSwarmOption as labSwarm,
+  butterflyOption as labFly, hexbinOption as labHex, regressionOption as labReg,
+  rankSlopeOption as labSlope,
+} from '/ui/chart-lab-shape.mjs';
+import {
+  horizonOption as labHorizon, riverOption as labRiver, raceOption as labRace,
+  timelineOption as labTime, outcomeSankeyOption as labSankey, chordOption as labChord,
+  treeOption as labTree, familyWaterfallOption as labFall, divergingOption as labDiv,
+  excessAreaOption as labExcess,
+} from '/ui/chart-lab-flow.mjs';
+import {
+  sunburstOption as labSun, treemapOption as labTreemap, parallelOption as labPar,
+  strategyCorrOption as labCorr, metricHeatOption as labMetric, baseCalendarOption as labCal,
+  familyEcdfOption as labEcdf, familyBoxOption as labBox, similarityGraphOption as labGraph,
+  marketGaugeOption as labGauge,
+} from '/ui/chart-lab-more.mjs';
+import {
   waffleOption as bkWaffle, contributionLollipopOption as bkLolli, captureOption as bkCapture,
   gaugeOption as bkGauge, weekdayOption as bkWeekday, slopeOption as bkSlope,
   familyBubbleOption as bkBubble,
@@ -382,6 +404,19 @@ export async function mount(root, { state }) {
     <section id="pb-detail" class="portfolio-detail" hidden></section>
   </div>
 
+
+  <div class="pb-panel" data-panel="lab" hidden>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">آزمایشگاه نمودار</p><h2>بازار از هفت زاویه</h2></div><span id="lab-count-note">—</span></div><p class="pb-hint">هفت دسته‌ای که کتابخانه‌های نموداری امروز مشترک دارند، هر کدام به سؤالی جواب می‌دهند که بقیه نمی‌دهند: <b>مقایسه</b> می‌گوید کدام بیشتر، <b>توزیع</b> می‌گوید چقدر قابل اتکا، <b>رابطه</b> می‌گوید چه با چه می‌آید، <b>زمان</b> می‌گوید کِی، <b>جریان</b> می‌گوید از کجا به کجا، و <b>انحراف</b> می‌گوید چقدر از معیار دور. روی هر بخش از هر نمودار کلیک کن تا کشوی جزئیات همان استراتژی از پایین باز شود.</p></section>
+    <div id="lab-tabs"></div>
+    <div class="pb-sub" data-panel="lab-compare" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">نمره</p><h2>لالی‌پاپ نمرهٔ ترکیبی</h2></div></div><p class="pb-hint">کوتاه‌ترین راه به «کدام بهتر». نقطه نمره است و خط، فاصله‌اش از صفر.</p><div id="lab-score" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">پایداری</p><h2>نیمهٔ دوره در برابر پایان</h2></div></div><p class="pb-hint">میلهٔ خاکستری وضعیت نیمهٔ راه است. اگر میلهٔ رنگی از آن جلو زده، استراتژی در نیمهٔ دوم قوی‌تر شده.</p><div id="lab-dumb" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">در برابر خانواده</p><h2>میلهٔ گلوله‌ای</h2></div></div><p class="pb-hint">خط عمودی، میانهٔ خانوادهٔ خودِ استراتژی است. میله‌ای که از آن رد نشده، حتی از هم‌خانواده‌هایش عقب مانده.</p><div id="lab-bullet" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">چگالی</p><h2>نمره روی محور قطبی</h2></div></div><p class="pb-hint">همان ترتیب نمره، در شکلی که استراتژی‌های بیشتری را در یک نگاه جا می‌دهد.</p><div id="lab-radial" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">شمارش</p><h2>ترکیب‌های هر خانواده</h2></div></div><p class="pb-hint">هر مستطیل یک ترکیب. خانواده‌ای با ترکیب‌های بسیار، شانس بیشتری برای برندهٔ تصادفی دارد.</p><div id="lab-count" class="pb-chart pb-chart-lg"></div></section></div>
+    <div class="pb-sub" data-panel="lab-share" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">صد خانه</p><h2>وافل سهم خانواده‌ها</h2></div></div><p class="pb-hint">هر خانه یک درصد از ترکیب‌های معتبر. برای دیدن تمرکز، نه ترتیب.</p><div id="lab-waffle" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">سهم و اثر</p><h2>ماریمکو خانواده‌ها</h2></div></div><p class="pb-hint">عرض ستون سهم خانواده از ترکیب‌هاست و ارتفاعش میانهٔ بازدهش. ستون پهن و کوتاه یعنی شلوغی بی‌حاصل.</p><div id="lab-mekko" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">غربال</p><h2>از همه تا سودده</h2></div></div><p class="pb-hint">سه پله: همهٔ ترکیب‌ها، آن‌ها که مسیر معتبر داشتند، و آن‌ها که سود دادند.</p><div id="lab-funnel" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">سه پله</p><h2>آفتاب‌نمای خانواده و استراتژی</h2></div></div><p class="pb-hint">حلقهٔ درونی خانواده است و بیرونی استراتژی. کلیک روی هر بخش همان شاخه را باز می‌کند.</p><div id="lab-sun" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">نقشهٔ سطح</p><h2>درخت‌نقشهٔ خانواده‌ها</h2></div></div><p class="pb-hint">مساحت شمار ترکیب است و رنگ، میانهٔ بازده. خانهٔ بزرگِ قرمز بدترین حالت است.</p><div id="lab-treemap" class="pb-chart pb-chart-lg"></div></section></div>
+    <div class="pb-sub" data-panel="lab-dist" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">شکل توزیع</p><h2>ریج‌لاین بازده خانواده‌ها</h2></div></div><p class="pb-hint">هر تپه توزیع بازده یک خانواده است. تپهٔ باریک یعنی نتیجهٔ قابل اتکا؛ تپهٔ پهن یعنی شانس.</p><div id="lab-ridge" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">تقارن</p><h2>ویولن خانواده‌ها</h2></div></div><p class="pb-hint">همان توزیع، آینه‌شده. شکل کج به بالا یعنی چند برندهٔ بزرگ و بقیه معمولی.</p><div id="lab-violin" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">خودِ داده</p><h2>ازدحام ترکیب‌ها</h2></div></div><p class="pb-hint">هر نقطه یک ترکیب واقعی است، نه خلاصه‌اش. نقطهٔ دورافتاده همان استثناست.</p><div id="lab-swarm" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">سود و زیان</p><h2>هیستوگرام پروانه‌ای</h2></div></div><p class="pb-hint">دو سوی محور، قدر مطلق یکسان دارند. اگر بال چپ بلندتر است، زیان‌ها بزرگ‌تر از سودها بوده‌اند.</p><div id="lab-fly" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">توزیع تجمعی</p><h2>مقایسهٔ خانواده‌ها</h2></div></div><p class="pb-hint">منحنی‌ای که زودتر بالا می‌رود یعنی آن خانواده بیشتر ترکیب ضعیف دارد.</p><div id="lab-ecdf" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">پراکندگی روزانه</p><h2>جعبه‌ای گام خانواده‌ها</h2></div></div><p class="pb-hint">جعبهٔ کوتاه یعنی روزهای یکنواخت؛ جعبهٔ بلند یعنی سواری پرتکان.</p><div id="lab-box" class="pb-chart pb-chart-lg"></div></section></div>
+    <div class="pb-sub" data-panel="lab-rel" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">چگالی</p><h2>هگزبین بازده در برابر افت</h2></div></div><p class="pb-hint">وقتی نقطه‌ها روی هم می‌افتند، خانه‌ها را می‌شماریم نه نقطه‌ها را. خانهٔ پررنگ یعنی بیشتر ترکیب‌ها همان‌جا نشسته‌اند.</p><div id="lab-hex" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">برازش</p><h2>رگرسیون بازده بر افت</h2></div></div><p class="pb-hint">خط‌چین، انتظار است. نقطهٔ بالای خط یعنی بیش از آنچه ریسکش ایجاب می‌کرد بازده داده.</p><div id="lab-reg" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">جابه‌جایی</p><h2>رتبهٔ روز اول در برابر روز آخر</h2></div></div><p class="pb-hint">خط افقی یعنی رتبه ثابت مانده. خط پرشیب یعنی نتیجه در طول دوره وارونه شده.</p><div id="lab-slope" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">هم‌حرکتی</p><h2>ماتریس همبستگی استراتژی‌ها</h2></div></div><p class="pb-hint">دو استراتژی با همبستگی نزدیک یک، در واقع یک شرط‌بندی‌اند.</p><div id="lab-corr" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">چندسنجه‌ای</p><h2>مختصات موازی</h2></div></div><p class="pb-hint">هر خط یک استراتژی است که از همهٔ سنجه‌ها می‌گذرد. خط‌هایی که با هم می‌روند، رفتار مشابه دارند.</p><div id="lab-par" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">صدک سنجه‌ها</p><h2>نقشهٔ سنجه در برابر استراتژی</h2></div></div><p class="pb-hint">رنگ، صدک است نه خودِ عدد — وگرنه سنجه‌هایی با واحد متفاوت کنار هم بی‌معنا می‌شوند.</p><div id="lab-metric" class="pb-chart pb-chart-lg"></div></section></div>
+    <div class="pb-sub" data-panel="lab-time" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">افق</p><h2>نوار زمانی همهٔ استراتژی‌ها</h2></div></div><p class="pb-hint">به‌جای سی خط روی هم، سی نوار رنگی. ستون یکدست قرمز یعنی آن روز همه با هم باختند.</p><div id="lab-horizon" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">مسابقه</p><h2>مسیر تجمعی، از ورود تا پایان</h2></div></div><p class="pb-hint">برای دیدن اینکه هر استراتژی کِی از بقیه جدا شد.</p><div id="lab-race" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">جریان</p><h2>رودخانهٔ ترکیب‌های سودده</h2></div></div><p class="pb-hint">ضخامت هر جریان، شمار ترکیب‌های سودده آن خانواده در همان روز است.</p><div id="lab-river" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">رویدادها</p><h2>بهترین و بدترین روز هر خانواده</h2></div></div><p class="pb-hint">اندازهٔ نقطه شدت آن روز است. نقاط هم‌ردیف یعنی یک تکانهٔ مشترک بازار.</p><div id="lab-timeline" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">بستر بازار</p><h2>تقویم گام نماد پایه</h2></div></div><p class="pb-hint">بازار خودش چه می‌کرد. بی این، هر قضاوتی دربارهٔ استراتژی‌ها بی‌بستر است.</p><div id="lab-cal" class="pb-chart pb-chart-lg"></div></section></div>
+    <div class="pb-sub" data-panel="lab-flow" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">نتیجه</p><h2>سنکی خانواده به نتیجه</h2></div></div><p class="pb-hint">پهنای هر نوار شمار ترکیب است. نواری که به «زیان‌ده» می‌رود هم دیده می‌شود.</p><div id="lab-sankey" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">چرخ</p><h2>هم‌حرکتی خانواده‌ها</h2></div></div><p class="pb-hint">کمانِ ضخیم میان دو خانواده یعنی با هم بالا و پایین رفته‌اند — تنوعی در کار نیست.</p><div id="lab-chord" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">شبکه</p><h2>خوشهٔ شباهت استراتژی‌ها</h2></div></div><p class="pb-hint">استراتژی‌هایی که با هم حرکت می‌کنند به هم نزدیک می‌نشینند. خوشهٔ بزرگ یعنی تنوع ظاهری.</p><div id="lab-graph" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">سلسله‌مراتب</p><h2>درخت خانواده و استراتژی</h2></div></div><p class="pb-hint">برای رفتن از کل به جزء با چشم. کلیک روی هر گره، شاخه‌اش را باز و بسته می‌کند.</p><div id="lab-tree" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">سلامت بازه</p><h2>چند درصد ترکیب‌ها سود دادند</h2></div></div><p class="pb-hint">اگر این عدد پایین است، ضعف یک استراتژی لزوماً تقصیر خودش نیست.</p><div id="lab-gauge" class="pb-chart pb-chart-lg"></div></section></div>
+    <div class="pb-sub" data-panel="lab-dev" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">سهم خانواده‌ها</p><h2>آبشار میانهٔ بازده</h2></div></div><p class="pb-hint">هر ستون یک خانواده. ستون‌های قرمز آنچه را سبزها ساخته‌اند پس می‌گیرند.</p><div id="lab-fall" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">فاصله از میانه</p><h2>میلهٔ واگرا</h2></div></div><p class="pb-hint">صفر، میانهٔ همهٔ استراتژی‌هاست. طول میله می‌گوید چقدر از متوسط بازار فاصله گرفته.</p><div id="lab-div" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">مازاد بر بازار</p><h2>فاصله از نماد پایه در طول زمان</h2></div></div><p class="pb-hint">بالای خط‌چین یعنی بهتر از خودِ سهم. استراتژی‌ای که همیشه زیر خط است، ارزش دردسرش را نداشته.</p><div id="lab-excess" class="pb-chart pb-chart-lg"></div></section></div>
+  </div>
+
   <div class="pb-panel" data-panel="basket" hidden>
     <section class="card"><div class="section-head"><div><p class="eyebrow">سبد فرضی</p><h2>سرمایهٔ اول دوره را بین استراتژی‌ها تقسیم کن</h2></div><button type="button" class="primary" id="pb-basket-run">ساخت سبد</button></div>
       <div class="portfolio-form"><label>سرمایهٔ اول دوره (میلیون ریال)<input id="pb-basket-capital" type="number" min="1" step="1" value="1000"></label></div>
@@ -450,6 +485,7 @@ export async function mount(root, { state }) {
     { id: 'parts', label: 'کل به جزء', hint: 'ترکیب سبد، از خانواده تا یک ترکیب' },
     { id: 'drill', label: 'کاوش', hint: 'از کل تا یک ترکیب' },
     { id: 'basket', label: 'سبد فرضی', hint: 'تخصیص سرمایه' },
+    { id: 'lab', label: 'آزمایشگاه نمودار', hint: 'بازار از هفت زاویه' },
   ];
 
   /**
@@ -681,6 +717,7 @@ export async function mount(root, { state }) {
     else if (id === 'parts') paintParts();
     else if (id === 'drill') paintDrill();
     else if (id === 'basket') paintBasket();
+    else if (id === 'lab') paintLab();
   }
 
   // ═══════════════════ کشوی جزئیات ═══════════════════
@@ -1187,6 +1224,103 @@ export async function mount(root, { state }) {
   }
   const currentRunId = () => `${String(ua?.ins ?? '')}:${$('pb-entry-date').dataset.value}:${$('pb-exit-date').dataset.value}`;
   const sourceOf = (id) => basketSources().find((row) => row.id === id) || null;
+
+  // ═══ آزمایشگاه نمودار ═══
+  //
+  // هفت دستهٔ نموداری، همان تقسیمی که کتابخانه‌های امروز مشترک دارند.
+  // مثل پنل سبد، فقط دستهٔ دیده‌شده رسم می‌شود.
+  const LAB_GROUPS = [
+    { id: 'lab-compare', label: 'مقایسه', hint: 'کدام بهتر بود' },
+    { id: 'lab-share', label: 'سهم از کل', hint: 'بازار از چه ساخته شده' },
+    { id: 'lab-dist', label: 'توزیع', hint: 'چقدر قابل اتکا' },
+    { id: 'lab-rel', label: 'رابطه', hint: 'چه با چه می‌آید' },
+    { id: 'lab-time', label: 'زمان', hint: 'کِی چه شد' },
+    { id: 'lab-flow', label: 'جریان و شبکه', hint: 'از کجا به کجا' },
+    { id: 'lab-dev', label: 'انحراف', hint: 'فاصله از معیار' },
+  ];
+  const LAB_CHARTS = {
+    'lab-score': ['lab-compare', (a, c, t) => labScore(a, t)],
+    'lab-dumb': ['lab-compare', (a, c, t) => labDumb(a, t)],
+    'lab-bullet': ['lab-compare', (a, c, t) => labBullet(a, t)],
+    'lab-radial': ['lab-compare', (a, c, t) => labRadial(a, t)],
+    'lab-count': ['lab-compare', (a, c, t) => labCount(a, t)],
+    'lab-waffle': ['lab-share', (a, c, t) => labWaffle(a, t)],
+    'lab-mekko': ['lab-share', (a, c, t) => labMekko(a, t)],
+    'lab-funnel': ['lab-share', (a, c, t) => labFunnel(a, t), null, 'ranking'],
+    'lab-sun': ['lab-share', (a, c, t) => labSun(a, t)],
+    'lab-treemap': ['lab-share', (a, c, t) => labTreemap(a, t)],
+    'lab-ridge': ['lab-dist', (a, c, t) => labRidge(a, t)],
+    'lab-violin': ['lab-dist', (a, c, t) => labViolin(a, t)],
+    'lab-swarm': ['lab-dist', (a, c, t) => labSwarm(a, t), null, 'distribution'],
+    'lab-fly': ['lab-dist', (a, c, t) => labFly(a, t), null, 'distribution'],
+    'lab-ecdf': ['lab-dist', (a, c, t) => labEcdf(a, t)],
+    'lab-box': ['lab-dist', (a, c, t) => labBox(a, t)],
+    'lab-hex': ['lab-rel', (a, c, t) => labHex(a, t)],
+    'lab-reg': ['lab-rel', (a, c, t) => labReg(a, t)],
+    'lab-slope': ['lab-rel', (a, c, t) => labSlope(a, t)],
+    'lab-corr': ['lab-rel', (a, c, t) => labCorr(a, t)],
+    'lab-par': ['lab-rel', (a, c, t) => labPar(a, METRICS, t)],
+    'lab-metric': ['lab-rel', (a, c, t) => labMetric(a, METRICS, t)],
+    'lab-horizon': ['lab-time', (a, c, t) => labHorizon(a, c.labels, t)],
+    'lab-race': ['lab-time', (a, c, t) => labRace(a, c.labels, t)],
+    'lab-river': ['lab-time', (a, c, t) => labRiver(a, c.labels, t)],
+    'lab-timeline': ['lab-time', (a, c, t) => labTime(a, c.labels, t)],
+    'lab-cal': ['lab-time', (a, c, t) => labCal(a, c.iso, t),
+      (c) => (c.intraday ? 'در دانه‌بندی درون‌روزی، تقویم روزانه یک خانه بیشتر ندارد.'
+        : 'مسیر نماد پایه در این اجرا ثبت نشده است.'), 'trend'],
+    'lab-sankey': ['lab-flow', (a, c, t) => labSankey(a, t)],
+    'lab-chord': ['lab-flow', (a, c, t) => labChord(a, t)],
+    'lab-graph': ['lab-flow', (a, c, t) => labGraph(a, t)],
+    'lab-tree': ['lab-flow', (a, c, t) => labTree(a, t)],
+    'lab-gauge': ['lab-flow', (a, c, t) => labGauge(a, t), null, 'ranking'],
+    'lab-fall': ['lab-dev', (a, c, t) => labFall(a, t)],
+    'lab-div': ['lab-dev', (a, c, t) => labDiv(a, t)],
+    'lab-excess': ['lab-dev', (a, c, t) => labExcess(a, c.labels, t),
+      'مسیر نماد پایه در این اجرا ثبت نشده؛ بی آن «مازاد» معنا ندارد.'],
+  };
+  let labGroup = 'lab-compare', labTabsApi = null;
+
+  function mountLabTabs() {
+    labTabsApi = mountSubtabs($('lab-tabs'), LAB_GROUPS, {
+      root: root.querySelector('[data-panel="lab"]'),
+      initial: labGroup,
+      onChange: (id) => { labGroup = id; paintLabGroup(id); },
+    }) || labTabsApi;
+  }
+
+  function paintLabGroup(id) {
+    if (!analysis) return;
+    charts.stopAll();
+    const context = basketContext();
+    for (const [host, [group, build, empty, jump]] of Object.entries(LAB_CHARTS)) {
+      if (group !== id) continue;
+      charts.set(host, $(host), (echarts, tokens) => build(analysis, context, tokens), {
+        onClick: (params) => openLabDetail(params, jump),
+        empty: typeof empty === 'function' ? empty(context) : empty,
+      });
+    }
+  }
+
+  /**
+   * کلیک روی هر بخش از هر نمودار آزمایشگاه، به جزئیات همان استراتژی
+   * می‌رود — همان چیزی که «از کل به جزء» یعنی.
+   */
+  function openLabDetail(params, jump = null) {
+    const id = params?.data?.strategyId ?? null;
+    if (id) { openDetail(id); return; }
+    // نمودارهایی که دربارهٔ یک استراتژی نیستند — غربال، سلامت بازه،
+    // پروانه — استراتژی‌ای برای باز کردن ندارند. کلیکِ بی‌اثر بدترین
+    // پاسخ است، پس به تبی می‌روند که همان موضوع را ریز می‌کند.
+    if (jump) { dirty.delete(jump); tabsApi?.show(jump); }
+  }
+
+  function paintLab() {
+    if (!analysis) return;
+    const total = Object.keys(LAB_CHARTS).length;
+    $('lab-count-note').textContent = `${fmt.int(total)} نمودار در ${fmt.int(LAB_GROUPS.length)} دسته`;
+    mountLabTabs();
+    paintLabGroup(labGroup);
+  }
 
   // ═══ نمودارهای سبد ═══
   //
