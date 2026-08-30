@@ -193,3 +193,91 @@ group('۲۰۰-ب. سبد از چند نماد');
   check('تقویم تک‌اجرا همان تقویم خودش می‌ماند',
     allocatePortfolio({ capitalRial: 100000, analysis: alpha200, picks: [{ comboId: 'a', pct: 30 }] }).path.length === 3);
 }
+
+// ۲۰۰-ج. سبد به «قرارداد» می‌شمارد، نه به بستهٔ N‌تایی
+//
+// نقصی که این دسته را ساخت: «تعداد واحد» تب راه‌اندازی، دانه‌بندی سبد را
+// تعیین می‌کرد. در یک اجرای واقعی با تعداد واحد ۳۰۰، بودجهٔ ۴ میلیاردی
+// تنها سه بستهٔ ۳۰۰تایی خرید و ۸۷۱ میلیون بی‌کار ماند؛ یک جزء با بودجهٔ
+// ۲ میلیارد اصلاً تأمین نشد چون یک بسته ۵٫۹ میلیارد بود. سبد فرضی باید
+// فقط از مبلغی که کاربر می‌دهد کار کند.
+
+import { strategyMargin } from '../../core/margin.mjs';
+import { readSrc as readSrc200 } from '../harness.mjs';
+
+group('۲۰۰-ج. شمارش به قرارداد');
+{
+  const series200c = { ok: true, finalIndex: 1, finalPnl: 1000, pnl: [0, 1000] };
+  const packed = (units) => ({
+    dates: [20260801, 20260802], basisId: 'gross',
+    combos: [{
+      id: 'ج', strategyId: 's', strategyName: 'آزمایشی', groupId: 'g', groupName: 'خانواده',
+      series: series200c,
+      // مخرج، بهای همان تعداد واحدِ اجراست: هر قرارداد یک میلیون.
+      entry: { marginGross: 1_000_000 * units, netCash: 0, units },
+    }],
+  });
+
+  const one = allocatePortfolio({ capitalRial: 10_000_000, analysis: packed(1), picks: [{ comboId: 'ج', pct: 100 }] });
+  const many = allocatePortfolio({ capitalRial: 10_000_000, analysis: packed(300), picks: [{ comboId: 'ج', pct: 100 }] });
+  check('با تعداد واحد ۱، ده قرارداد خریده می‌شود', one.legs[0].contracts === 10, String(one.legs[0].contracts));
+  check('تعداد واحدِ تب راه‌اندازی، شمارش سبد را عوض نمی‌کند',
+    many.legs[0].contracts === 10, String(many.legs[0].contracts));
+  check('پول درگیر با تعداد واحد عوض نمی‌شود',
+    one.legs[0].deployedRial === many.legs[0].deployedRial && many.legs[0].deployedRial === 10_000_000,
+    `${one.legs[0].deployedRial} / ${many.legs[0].deployedRial}`);
+  check('نقد بی‌کار با تعداد واحد بزرگ زیاد نمی‌شود',
+    many.legs[0].idleRial === 0, String(many.legs[0].idleRial));
+  check('بهای گزارش‌شده، بهای یک قرارداد است نه یک بسته',
+    many.legs[0].unitCostRial === 1_000_000 && many.legs[0].packCostRial === 300_000_000,
+    `${many.legs[0].unitCostRial} / ${many.legs[0].packCostRial}`);
+  // سری بر ۳۰۰ واحد بسته شده؛ ۱۰ قرارداد یعنی یک‌سی‌ام آن.
+  check('سود و زیان با نسبت قرارداد به تعداد واحد مقیاس می‌خورد',
+    Math.abs(many.legs[0].finalPnlRial - 1000 * (10 / 300)) < 1e-9, String(many.legs[0].finalPnlRial));
+  check('با تعداد واحد ۱، سود همان ضریب قرارداد است',
+    one.legs[0].finalPnlRial === 10_000, String(one.legs[0].finalPnlRial));
+
+  // همان چیزی که در فایل کاربر دیده شد: بسته گران‌تر از کل بودجه.
+  const wide = allocatePortfolio({
+    capitalRial: 2_000_000_000, analysis: packed(300),
+    picks: [{ comboId: 'ج', pct: 100 }],
+  });
+  check('بستهٔ گران‌تر از بودجه، دیگر جزء را بی‌تأمین نمی‌گذارد',
+    wide.legs[0].ok === true && wide.legs[0].contracts === 2000, String(wide.legs[0].contracts));
+
+  // قرارداد شکسته نمی‌شود؛ باقی‌مانده نقد می‌ماند.
+  const odd = allocatePortfolio({ capitalRial: 2_500_000, analysis: packed(300), picks: [{ comboId: 'ج', pct: 100 }] });
+  check('قرارداد شکسته نمی‌شود و باقی‌مانده نقد می‌ماند',
+    odd.legs[0].contracts === 2 && odd.legs[0].idleRial === 500_000,
+    `${odd.legs[0].contracts} قرارداد · ${odd.legs[0].idleRial} نقد`);
+  const broke = allocatePortfolio({ capitalRial: 900_000, analysis: packed(300), picks: [{ comboId: 'ج', pct: 100 }] });
+  check('سهمی که یک قرارداد هم نمی‌خرد، صریح بی‌تأمین می‌ماند',
+    broke.legs[0].ok === false && broke.legs[0].contracts === 0);
+
+  // تقسیم بر تعداد، تنها وقتی درست است که وجه تضمین خطیِ تعداد باشد.
+  // این ادعا همان فرض را روی خودِ موتور وجه تضمین می‌سنجد.
+  const legsOf = (k) => [
+    { kind: 'put', side: 'sell', strike: 9000, size: 1000, ratio: 1 * k, price: 300 },
+    { kind: 'call', side: 'sell', strike: 11000, size: 1000, ratio: 1 * k, price: 250 },
+    { kind: 'put', side: 'buy', strike: 8000, size: 1000, ratio: 2 * k, price: 90 },
+  ];
+  const perUnit = [1, 3, 5, 7, 13, 300]
+    .map((k) => strategyMargin(legsOf(k), { S: 10000, contractSize: 1000 }).margin / k);
+  check('وجه تضمین دقیقاً خطیِ تعداد است — فرضِ تقسیم بر تعداد',
+    perUnit.every((value) => Math.abs(value - perUnit[0]) < 1e-9), perUnit.join('، '));
+
+  // نبودِ `units` یعنی اجراهای قدیمی؛ رفتار پیشین باید بماند.
+  const legacy = { dates: [20260801, 20260802], basisId: 'gross',
+    combos: [{ id: 'ج', strategyId: 's', strategyName: 'آزمایشی', series: series200c,
+      entry: { marginGross: 1_000_000, netCash: 0 } }] };
+  check('اجرای بدون تعداد واحد، مثل تعداد واحد ۱ رفتار می‌کند',
+    allocatePortfolio({ capitalRial: 10_000_000, analysis: legacy, picks: [{ comboId: 'ج', pct: 100 }] })
+      .legs[0].contracts === 10);
+
+  // بی این عدد روی سطر، `entry.units` همیشه `undefined` است و تقسیم بر
+  // تعداد بی‌صدا از کار می‌افتد — سبد به بستهٔ N‌تایی برمی‌گردد بی‌آنکه
+  // هیچ ادعایی قرمز شود.
+  const worker200 = readSrc200('../worker/history-worker.mjs');
+  check('کارگر، تعداد واحدِ هر سطر را همراه مخرج می‌فرستد',
+    /units: Number\.isFinite\(m\.units\) && m\.units > 0 \? m\.units : 1,/.test(worker200));
+}

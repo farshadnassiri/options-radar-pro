@@ -152,6 +152,14 @@ self.onmessage = (event) => {
               notional: replay.entry.notional, spot: replay.entry.spot,
               maxLoss: Number.isFinite(replay.entry.payoff?.maxLoss) ? replay.entry.payoff.maxLoss : null,
               maxProfit: Number.isFinite(replay.entry.payoff?.maxProfit) ? replay.entry.payoff.maxProfit : null,
+              // شمار واحدی که این عددها بر آن بسته شده‌اند.
+              //
+              // بی این عدد، «مخرج» یک جعبهٔ بستهٔ N واحدی است و سبد فرضی
+              // فقط می‌تواند بستهٔ کامل بخرد — با ۳۰۰ واحد، ۴ میلیارد
+              // بودجه تنها سه بسته می‌خرد و ۸۷۱ میلیون بی‌کار می‌ماند.
+              // وجه تضمین در این موتور دقیقاً خطیِ تعداد است، پس بهای هر
+              // واحد از تقسیم بر همین عدد به‌دست می‌آید.
+              units: Number.isFinite(m.units) && m.units > 0 ? m.units : 1,
               // ارزش معاملهٔ روز ورودِ پاها — پایهٔ وزن‌دهی بر ارزش معامله.
               legValue: replay.priced.reduce((sum, leg) => sum
                 + (Number.isFinite(leg.entryValue) ? leg.entryValue : 0), 0),

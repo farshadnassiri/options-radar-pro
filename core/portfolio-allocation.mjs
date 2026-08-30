@@ -34,7 +34,7 @@ export const ALLOCATION_REASONS = {
   overAllocated: 'مجموع درصدها از صد بیشتر است',
   comboMissing: 'ترکیب انتخابی در نتیجهٔ این اجرا نیست',
   noDenominator: 'سرمایهٔ لازم برای این ترکیب معلوم نیست',
-  tooExpensive: 'سهم این استراتژی برای حتی یک دست کافی نیست',
+  tooExpensive: 'سهم این استراتژی برای حتی یک قرارداد کافی نیست',
   noPath: 'برای این ترکیب مسیر معتبری ثبت نشده است',
   sourceMissing: 'اجرای انتخابی برای این سهم موجود نیست',
 };
@@ -115,22 +115,41 @@ export function allocatePortfolio({
         lots: 0, deployedRial: 0, idleRial: targetRial,
       };
     }
-    const lots = Math.floor(targetRial / den.value);
-    if (lots < 1) {
+    // ═══ اندازه‌گیری به «قرارداد»، نه به بستهٔ N‌تایی ═══
+    //
+    // `den.value` بهای همان تعداد واحدی است که اجرا با آن انجام شده — با
+    // «تعداد واحد ۳۰۰» در تب راه‌اندازی، بهای یک بستهٔ ۳۰۰تایی. اگر سبد
+    // فقط بستهٔ کامل بخرد، دانه‌بندی‌اش را عددی از تب دیگر تعیین می‌کند و
+    // پول زیادی بی‌کار می‌ماند: در یک اجرای واقعی، ۴ میلیارد بودجه تنها
+    // سه بسته خرید و ۸۷۱ میلیون ماند، و یک جزء اصلاً تأمین نشد.
+    //
+    // وجه تضمین در این موتور دقیقاً خطیِ تعداد است (آزمون ۲۰۰-ج)، پس
+    // بهای هر قرارداد از تقسیم بر همان تعداد به‌دست می‌آید و سبد به
+    // ریزترین دانه‌بندیِ ممکن می‌رسد.
+    const units = finite(combo.entry?.units);
+    const perUnit = units !== null && units > 0 ? den.value / units : den.value;
+    const contracts = Math.floor(targetRial / perUnit);
+    if (contracts < 1) {
       return {
         ...pick, pct, targetRial, ok: false, why: ALLOCATION_REASONS.tooExpensive,
-        strategyName: combo.strategyName, comboId: combo.id, unitCostRial: den.value, sourceLabel: source.label,
-        lots: 0, deployedRial: 0, idleRial: targetRial,
+        strategyName: combo.strategyName, comboId: combo.id,
+        unitCostRial: perUnit, packCostRial: den.value, packUnits: units,
+        sourceLabel: source.label, contracts: 0, lots: 0, deployedRial: 0, idleRial: targetRial,
       };
     }
     if (!combo.series?.ok || combo.series.finalIndex === null) {
       return {
         ...pick, pct, targetRial, ok: false, why: ALLOCATION_REASONS.noPath,
-        strategyName: combo.strategyName, comboId: combo.id, unitCostRial: den.value, sourceLabel: source.label,
-        lots: 0, deployedRial: 0, idleRial: targetRial,
+        strategyName: combo.strategyName, comboId: combo.id,
+        unitCostRial: perUnit, packCostRial: den.value, packUnits: units,
+        sourceLabel: source.label, contracts: 0, lots: 0, deployedRial: 0, idleRial: targetRial,
       };
     }
-    const deployedRial = lots * den.value;
+    const deployedRial = contracts * perUnit;
+    // سری بر همان تعداد واحدِ اجرا بسته شده؛ ضریب، نسبت قرارداد خریداری‌شده
+    // به همان تعداد است — و کسری بودنش درست است: موقعیتی با ۱٬۱۵۰ قرارداد
+    // از سریِ ۳۰۰تایی، ۳٫۸۳ برابر آن است.
+    const scale = units !== null && units > 0 ? contracts / units : contracts;
     // مسیر هر جزء روی **تقویم مشترک** نشانده می‌شود، نه روی تقویم خودش.
     // روزی که این نماد در آن مشاهده ندارد، خانه‌اش null می‌ماند — و همان
     // ارزش کل سبد را آن روز نامعلوم می‌کند.
@@ -140,17 +159,18 @@ export function allocatePortfolio({
       const column = columnOf.get(own[index]);
       if (column === undefined) continue;
       const value = combo.series.pnl[index];
-      pnl[column] = value === null ? null : value * lots;
+      pnl[column] = value === null ? null : value * scale;
     }
     return {
       ...pick, pct, targetRial, ok: true, why: '',
       sourceId: String(pick.sourceId ?? source.id ?? ''), sourceLabel: source.label,
       strategyId: combo.strategyId, strategyName: combo.strategyName,
       groupId: combo.groupId, groupName: combo.groupName,
-      comboId: combo.id, unitCostRial: den.value,
-      lots, deployedRial, idleRial: targetRial - deployedRial,
+      comboId: combo.id,
+      unitCostRial: perUnit, packCostRial: den.value, packUnits: units,
+      contracts, lots: contracts, deployedRial, idleRial: targetRial - deployedRial,
       pnl,
-      finalPnlRial: combo.series.finalPnl === null ? null : combo.series.finalPnl * lots,
+      finalPnlRial: combo.series.finalPnl === null ? null : combo.series.finalPnl * scale,
     };
   });
 

@@ -92,11 +92,11 @@ export function normalizeBasketPicks(picks, sources) {
 //   افزودن یعنی ۱۱۰ و `allocatePortfolio` **کل** سبد را رد می‌کرد. یعنی
 //   کاربر یک استراتژی اضافه می‌کرد و کل سبدش ناپدید می‌شد.
 //
-//   ۱۰٪ اغلب حتی یک دست نمی‌خرید. قرارداد شکسته نمی‌شود، پس آن سهم
+//   ۱۰٪ اغلب حتی یک قرارداد نمی‌خرید. قرارداد شکسته نمی‌شود، پس آن سهم
 //   تخصیص‌نیافته می‌ماند و سطر تازه در هیچ نمودار و جدولی نمی‌آمد.
 //
-// درمان: سهم از آنچه **واقعاً آزاد است** برداشته شود، و اگر بهای یک دست
-// معلوم است، دست‌کم به اندازهٔ یک دست باشد.
+// درمان: سهم از آنچه **واقعاً آزاد است** برداشته شود، و اگر بهای یک
+// قرارداد معلوم است، دست‌کم به اندازهٔ یک قرارداد باشد.
 
 import { basisDenominator, normalizeBasis } from './portfolio-basis.mjs';
 
@@ -106,16 +106,24 @@ const num = (value) => {
   return Number.isFinite(out) ? out : null;
 };
 
-/** بهای یک دست از این ترکیب روی مبنای جاری؛ اگر معلوم نیست، `null`. */
+/**
+ * بهای **یک قرارداد** از این ترکیب روی مبنای جاری؛ اگر معلوم نیست، `null`.
+ *
+ * `basisDenominator` بهای همان تعداد واحدی را می‌دهد که اجرا با آن انجام
+ * شده. تقسیم بر `entry.units` آن را به یک قرارداد برمی‌گرداند — همان
+ * دانه‌بندی‌ای که سبد با آن می‌خرد.
+ */
 export function lotCostRial(source, comboId, basisId = null) {
   const combo = (source?.analysis?.combos || []).find((row) => String(row.id) === String(comboId ?? ''));
   if (!combo) return null;
   const den = basisDenominator(combo.entry, normalizeBasis(basisId ?? source?.analysis?.basisId));
-  return den.ok && num(den.value) !== null && den.value > 0 ? den.value : null;
+  if (!den.ok || num(den.value) === null || !(den.value > 0)) return null;
+  const units = num(combo.entry?.units);
+  return units !== null && units > 0 ? den.value / units : den.value;
 }
 
 /**
- * کمینهٔ درصدی که یک دست را می‌خرد.
+ * کمینهٔ درصدی که یک قرارداد را می‌خرد.
  *
  * به بالا گرد می‌شود، نه پایین: درصدی که دقیقاً سر به سر است، با کوچک‌ترین
  * خطای ممیز شناور یک ریال کم می‌آورد و `Math.floor` صفر دست می‌دهد.
@@ -181,7 +189,7 @@ export function pickWarning({ pick = null, source = null, capitalRial = null, ba
   if (cost === null) return null;                    // بهای دست معلوم نیست؛ ادعایی نمی‌کنیم
   const need = minPctFor(capitalRial, cost);
   if (need === null || pct >= need) return null;
-  return { kind: 'tooSmall', need, cost, text: `برای یک دست دست‌کم ${need}٪ لازم است` };
+  return { kind: 'tooSmall', need, cost, text: `برای یک قرارداد دست‌کم ${need}٪ لازم است` };
 }
 
 const round2 = (value) => Math.round(value * 100) / 100;
