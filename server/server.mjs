@@ -1345,16 +1345,53 @@ async function handle(req, res) {
     }
 
     // تاریخچه دسته‌ای همه پاهای یک زنجیره. n=0 یعنی از اولین روز موجود.
+    //
+    // ═══ چرا یک منبعِ دوم لازم شد ═══
+    //
+    // `GetClosingPriceDailyList` برای ابزاری که از تابلو **حذف شده** خالی
+    // برمی‌گردد. قرارداد اختیار پس از سررسید حذف می‌شود، پس هر بک‌تستِ
+    // گذشته دقیقاً همان قراردادهایی را از دست می‌داد که موضوعش بودند —
+    // همان سوگیری بقا، این‌بار یک لایه پایین‌تر از شناسایی.
+    //
+    // در فایل صاحب پروژه: از ۷۴ قراردادِ سه سررسیدِ گذشته، ۵۱ تا خالی
+    // برگشتند؛ از سه سررسید زنده، فقط ۲۷ تا (و آن‌ها واقعاً معامله نشده
+    // بودند).
+    //
+    // `GetClosingPriceHistory/{ins}/{date}` همان داده را دارد. مسیر
+    // تاریخ‌دار است، پس فقط برای روزِ تکمیل‌شده — که برای بک‌تست همیشه
+    // همین است.
+    //
+    // `asOf` اختیاری است: بی آن رفتار دقیقاً مثل قبل می‌ماند و هیچ
+    // درخواست اضافه‌ای نمی‌رود.
     if (p === '/api/dailies') {
       const codes = parseInsList(u.searchParams.get('ins'), 200);
       const rawN = u.searchParams.get('n');
       const n = rawN == null || rawN === '' ? 0 : Math.max(0, Math.trunc(Number(rawN) || 0));
+      const asOf = u.searchParams.get('asOf');
+      const canFallback = validCompactDate(asOf);
       const one = async (code) => {
+        const listPath = `/ClosingPrice/GetClosingPriceDailyList/${code}/${n}`;
         try {
-          const rows = firstList(await get(`/ClosingPrice/GetClosingPriceDailyList/${code}/${n}`, S.ttlDailySec, 6));
-          return [code, { ins: code, rows: normalizeDailyRows(rows) }];
+          const rows = normalizeDailyRows(firstList(await get(listPath, S.ttlDailySec, 6)));
+          if (rows.length || !canFallback) return [code, { ins: code, rows, source: 'list' }];
+          // منبع دوم فقط وقتی اولی خالی است. اگر این هم خالی بود، خالی
+          // می‌ماند — جای هیچ ردیف ساختگی نیست.
+          const histPath = `/ClosingPrice/GetClosingPriceHistory/${code}/${asOf}`;
+          try {
+            const hist = normalizeDailyRows(firstList(await get(histPath, S.ttlDailySec, 6)));
+            return [code, {
+              ins: code, rows: hist,
+              source: hist.length ? 'history' : 'list',
+              fallbackTried: true,
+            }];
+          } catch (e2) {
+            return [code, {
+              ins: code, rows: [], source: 'list', fallbackTried: true,
+              fallbackError: `${e2.name}: ${e2.message}`,
+            }];
+          }
         } catch (e) {
-          return [code, { ins: code, rows: [], error: `${e.name}: ${e.message}` }];
+          return [code, { ins: code, rows: [], source: 'list', error: `${e.name}: ${e.message}` }];
         }
       };
       return sendJson(res, 200, Object.fromEntries(await Promise.all(codes.map(one))));
