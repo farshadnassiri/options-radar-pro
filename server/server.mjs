@@ -25,11 +25,13 @@ import {
   makeArchive, chainRowsFrom, archiveNote, archiveBoardDownNote, archiveQuality, archiveName, validArchiveDate,
 } from '../core/watch-archive.mjs';
 import {
-  contractStatus, makeRosterFile, mergeRoster, missingDays, normalizeFa,
+  contractStatus, makeRosterFile, missingDays, normalizeFa,
   pickUniverseSource, rangeSummary, rosterAt, rosterChainRows, rosterCoverage,
-  rosterCovers, rosterInRange, rosterNote,
+  rosterCovers, rosterHealth, rosterInRange, rosterNote,
 } from '../core/option-roster.mjs';
-import { dayPath, scanDay, tradingDays } from '../core/roster-scan.mjs';
+import { tradingDays } from '../core/roster-scan.mjs';
+import { runRosterBuild } from '../core/roster-build.mjs';
+import { readJsonSafe } from '../core/json-safe.mjs';
 import { tehranDateNumber } from '../core/live-day.mjs';
 import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
@@ -190,7 +192,11 @@ async function fetchUpstream(url) {
   try {
     const res = await fetch(url, { headers: HEADERS, signal: ac.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const js = await res.json();
+    // `res.json()` نه: شناسهٔ هفده‌رقمی از مرز امنِ عددی جاوااسکریپت رد
+    // می‌شود و `JSON.parse` بی‌هیچ خطایی ارقام آخرش را گرد می‌کند. عددِ
+    // گردشده به هیچ قراردادی نمی‌خورد و ردیفش «بی‌داده» به نظر می‌رسد،
+    // نه «خراب» — بدترین شکل ممکن برای یک خطا.
+    const js = await readJsonSafe(res);
     stat.upstreamMsTotal += Date.now() - t0;
     stat.upstreamCount += 1;
     return js;
@@ -553,7 +559,7 @@ let rosterBuild = {
  * پس بازهٔ پیشین همیشه با بازهٔ تازه یکی می‌شود، نه جایگزین. نوشتنِ
  * ناموفق باید داده کم نکند.
  */
-async function writeRoster(rows, days, { from = 0, to = 0 } = {}) {
+async function writeRoster(rows, days, { from = 0, to = 0, scan = null } = {}) {
   const old = rosterCache.file;
   const lo = [num(old?.scannedFrom, 0), num(from, 0)].filter((v) => v > 0);
   const hi = [num(old?.scannedTo, 0), num(to, 0)].filter((v) => v > 0);
@@ -561,6 +567,7 @@ async function writeRoster(rows, days, { from = 0, to = 0 } = {}) {
     at: Math.floor(Date.now() / 1000), days,
     scannedFrom: lo.length ? Math.min(...lo) : 0,
     scannedTo: hi.length ? Math.max(...hi) : 0,
+    scan: scan || old?.scan || null,
   });
   await fs.mkdir(path.dirname(ROSTER_FILE), { recursive: true });
   await fs.writeFile(ROSTER_FILE, JSON.stringify(body), 'utf8');
@@ -579,43 +586,91 @@ async function writeRoster(rows, days, { from = 0, to = 0 } = {}) {
  * دفتر یک حفرهٔ نامرئی داشت — و همان حفره می‌توانست دقیقاً همان قراردادی
  * باشد که کاربر دنبالش است.
  */
+/**
+ * آیا ساختِ تازه لازم است — و چرا نباید فقط «جفتِ ناقص» ملاک باشد.
+ *
+ * دو محرک معتبر است: روزِ نبوده، و پاسِ کاتالوگی که هرگز اجرا نشده. سومی
+ * وسوسه‌انگیز است و غلط: «هنوز جفتِ ناقص داریم». سازنده در همان اجرا یک
+ * پاسِ دوم برای ناقص‌ها می‌زند؛ اگر بعدش هم ناقص ماند یعنی جست‌وجو آن
+ * سمت را ندارد. اگر این را محرک می‌گرفتیم، هر درخواستِ رابط یک اسکنِ
+ * کامل راه می‌انداخت و بالادست را تا ابد می‌کوبید.
+ *
+ * سردکردن هم لازم است: پاسِ کاتالوگی که همین حالا شکست خورد، با
+ * درخواست بعدی دوباره شروع نمی‌شود.
+ */
+const ROSTER_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
+
+function rosterNeedsBuild(file, missingCount) {
+  if (rosterBuild.running) return false;
+  if (missingCount > 0) return true;
+  if (num(file?.scan?.catalogQueriesDone, 0) > 0) return false;
+  const since = rosterBuild.finishedAt ? Date.now() - rosterBuild.finishedAt : Infinity;
+  return since > ROSTER_RETRY_COOLDOWN_MS;
+}
+
 async function buildRoster(from, to) {
   if (rosterBuild.running) return rosterBuild;
   const { file } = await readRoster();
   const want = missingDays(file, tradingDays(from, to));
-  if (!want.length) return rosterBuild;
+  const firstBuild = !rosterCache.rows.length;
+  // پاس کاتالوگ حتی وقتی همهٔ روزها هست هم لازم است: قراردادِ بی‌معامله
+  // در هیچ روزی نبوده، پس «همهٔ روزها را داریم» یعنی «همهٔ معامله‌ها را
+  // داریم»، نه «همهٔ قراردادها را».
+  const needCatalog = !num(file?.scan?.catalogQueriesDone, 0);
+  if (!want.length && !needCatalog && !firstBuild) return rosterBuild;
 
   rosterBuild = {
     running: true, from: Number(from), to: Number(to), total: want.length, done: 0,
     failed: 0, startedAt: Date.now(), finishedAt: 0, lastError: '', added: 0,
+    stage: 'day', stageDone: 0, stageTotal: want.length,
   };
-  log(`ساخت دفتر قراردادها — ${want.length} روزِ نبوده از ${from} تا ${to}`);
+  log(`ساخت دفتر قراردادها — ${want.length} روزِ نبوده از ${from} تا ${to}${needCatalog ? ' + پاس کاتالوگ' : ''}`);
 
   (async () => {
-    let rows = rosterCache.rows.slice();
-    const before = rows.length;
-    const scanned = [...(rosterCache.file?.days || [])];
-    let sinceSave = 0;
-    for (const day of want) {
-      try {
-        const got = scanDay(await get(dayPath(day), ROSTER_SCAN_TTL, ROSTER_SCAN_PRIORITY), day);
-        rows = mergeRoster(rows, got.rows);
-        scanned.push(day);
-      } catch (e) {
-        rosterBuild.failed += 1;
-        rosterBuild.lastError = `${day}: ${e.message}`;
-      }
-      rosterBuild.done += 1;
-      rosterBuild.added = rows.length - before;
-      if (++sinceSave >= ROSTER_SAVE_EVERY) {
-        sinceSave = 0;
-        try { await writeRoster(rows, scanned); } catch (e) { rosterBuild.lastError = e.message; }
-      }
+    const result = await runRosterBuild({
+      days: want,
+      existing: rosterCache.rows,
+      scannedDays: rosterCache.file?.days || [],
+      get: (path) => get(path, ROSTER_SCAN_TTL, ROSTER_SCAN_PRIORITY),
+      onProgress: (p) => {
+        rosterBuild.stage = p.stage;
+        rosterBuild.stageDone = p.done;
+        rosterBuild.stageTotal = p.total;
+        rosterBuild.added = p.rows - rosterCache.rows.length;
+        if (p.stage === 'day') rosterBuild.done = p.done;
+        rosterBuild.failed = p.stats.dayQueriesFailed + p.stats.catalogQueriesFailed + p.stats.detailQueriesFailed;
+        rosterBuild.lastError = p.stats.lastError || rosterBuild.lastError;
+      },
+      onCheckpoint: async ({ rows, scanned, stats }) => {
+        try { await writeRoster(rows, scanned, { from, to, scan: stats }); }
+        catch (e) { rosterBuild.lastError = e.message; }
+      },
+      stopped: () => false,
+    });
+
+    // ── خروجی ناقص جای دفتر سالم را نمی‌گیرد ──────────────────────────
+    //
+    // اگر هیچ جست‌وجوی کاتالوگی موفق نبوده، این اجرا فقط می‌تواند از
+    // دفتر کم کند. یک اجرای شکست‌خورده نباید کارِ درستِ اجرای قبلی را
+    // پاک کند.
+    const wipe = result.stats.catalogQueriesDone === 0
+      && result.stats.catalogQueriesFailed > 0
+      && rosterCache.rows.length > 0;
+    if (!wipe) {
+      try { await writeRoster(result.rows, result.scanned, { from, to, scan: result.stats }); }
+      catch (e) { rosterBuild.lastError = e.message; }
+    } else {
+      rosterBuild.lastError = `هیچ جست‌وجوی کاتالوگی موفق نبود؛ دفتر دست‌نخورده ماند (${result.stats.lastError || '—'})`;
     }
-    try { await writeRoster(rows, scanned); } catch (e) { rosterBuild.lastError = e.message; }
+
     rosterBuild.running = false;
     rosterBuild.finishedAt = Date.now();
-    log(`دفتر قراردادها — ${rosterBuild.done} روز، ${rosterBuild.added} قرارداد تازه، ${rosterBuild.failed} روزِ نیامده`);
+    rosterBuild.added = result.added;
+    rosterBuild.incompletePairs = result.stats.incompletePairs;
+    rosterBuild.noTrade = result.stats.noTradeContracts;
+    log(`دفتر قراردادها — ${result.stats.dayQueriesDone} روز، ${result.stats.catalogQueriesDone} جست‌وجو، `
+      + `${result.added} قرارداد تازه، ${result.stats.incompletePairs} جفت ناقص، `
+      + `${rosterBuild.failed} درخواست ناموفق`);
   })().catch((e) => {
     rosterBuild.running = false;
     rosterBuild.finishedAt = Date.now();
@@ -632,6 +687,9 @@ function buildStatus(missing = 0) {
     running: rosterBuild.running,
     done: rosterBuild.done, total: rosterBuild.total, failed: rosterBuild.failed,
     added: rosterBuild.added, missing,
+    stage: rosterBuild.stage || '', stageDone: rosterBuild.stageDone || 0, stageTotal: rosterBuild.stageTotal || 0,
+    incompletePairs: rosterBuild.incompletePairs ?? null,
+    noTrade: rosterBuild.noTrade ?? null,
     lastError: rosterBuild.lastError || '',
     finishedAt: rosterBuild.finishedAt || 0,
   };
@@ -718,7 +776,7 @@ async function rosterUniverse(date, boardRows, { hasArchive = false } = {}) {
 const faNum = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
 
 /** جملهٔ صداقتِ بازه — چند قرارداد آمد، چند تا منقضی‌اند، و چه چیزی هنوز نیامده. */
-function rosterRangeNote(built, from, to, missing) {
+function rosterRangeNote(built, from, to, missing, health = null) {
   const s = built.summary;
   if (!built.rows.length) {
     return missing
@@ -733,7 +791,16 @@ function rosterRangeNote(built, from, to, missing) {
   const lost = built.lostBases.length
     ? ` ${faNum(built.lostBases.length)} نماد پایه کدشان به دست نیامد و کنار ماندند: ${built.lostBases.slice(0, 6).join('، ')}.`
     : '';
-  return `${head}${expired}${gap}${lost} دفتر قیمت و اندازهٔ قرارداد ندارد؛ هر دو از مسیر خودشان می‌آیند.`;
+  // ── جفتِ ناقص، ساکت نمی‌ماند ────────────────────────────────────────
+  //
+  // یک سری اختیارِ عادی هر دو سمت را دارد. گروهی که فقط یک سمت دارد،
+  // تقریباً همیشه یعنی ما آن یکی را ندیده‌ایم — و هر استراتژی‌ای که هر
+  // دو سمت را می‌خواهد، روی آن سری بی‌صدا حذف می‌شود. سکوت اینجا یعنی
+  // کاربر نبودِ استراتژی را به موتور نسبت می‌دهد، نه به فهرست.
+  const pairs = health && health.incompletePairs > 0
+    ? ` ${faNum(health.incompletePairs)} سری فقط یک سمت دارد (کال یا پوت، نه هر دو)؛ استراتژی دوسمته روی آن‌ها ساخته نمی‌شود.`
+    : '';
+  return `${head}${expired}${gap}${pairs}${lost} دفتر قیمت و اندازهٔ قرارداد ندارد؛ هر دو از مسیر خودشان می‌آیند.`;
 }
 
 /** جملهٔ صداقتِ مسیرِ دفتر — چند قرارداد، و چه چیزی جا ماند. */
@@ -941,17 +1008,26 @@ async function handle(req, res) {
         }
         if (Number(rTo) < Number(rFrom)) return sendJson(res, 400, { error: 'پایان بازه پیش از آغاز آن است' });
 
-        const { file } = await readRoster();
+        const { file, rows } = await readRoster();
         const wantDays = tradingDays(rFrom, rTo);
         const missing = missingDays(file, wantDays);
         // ساخت در پس‌زمینه شروع می‌شود و پاسخ منتظرش نمی‌ماند: کاربر باید
         // با همان چیزی که هست کار کند و پیشرفت را ببیند، نه پشت یک
         // درخواستِ چنددقیقه‌ای بنشیند.
-        if (missing.length && u.searchParams.get('build') !== '0') buildRoster(rFrom, rTo);
+        // ── محرکِ ساخت، فقط روزِ نبوده نیست ────────────────────────
+        //
+        // پاسِ کاتالوگ حتی وقتی همهٔ روزها هست هم لازم است: قراردادِ
+        // بی‌معامله در **هیچ** روزی نبوده، پس «همهٔ روزها را داریم» یعنی
+        // «همهٔ معامله‌ها را داریم»، نه «همهٔ قراردادها را». دفترِ نسخهٔ
+        // یک دقیقاً همین حالت است و بی این شرط، هرگز کامل نمی‌شد.
+        if (u.searchParams.get('build') !== '0' && rosterNeedsBuild(file, missing.length)) {
+          buildRoster(rFrom, rTo);
+        }
 
         const board = await boardRowsForIndex();
         const built = await rosterRangeUniverse(Number(rFrom), Number(rTo), board);
-        const note = rosterRangeNote(built, Number(rFrom), Number(rTo), missing.length);
+        const health = rosterHealth(file, rows);
+        const note = rosterRangeNote(built, Number(rFrom), Number(rTo), missing.length, health);
         return sendJson(res, 200, {
           at: rosterCache.file?.at ?? 0, source: built.rows.length ? 'roster-range' : 'roster-empty',
           from: Number(rFrom), to: Number(rTo),
@@ -960,6 +1036,8 @@ async function handle(req, res) {
           summary: built.summary, lostBases: built.lostBases,
           contractSizeMissing: built.rows.length > 0,
           missingDays: missing.length, build: buildStatus(missing.length),
+          complete: health.complete && missing.length === 0,
+          health,
           note,
           quality: archiveQuality({
             wanted: Number(rFrom), found: missing.length === 0 && built.rows.length > 0,
@@ -1109,10 +1187,17 @@ async function handle(req, res) {
       // درخواستِ صریحِ ساخت — رابط وقتی می‌زند که کاربر بازه‌ای خواسته و
       // دفتر ندارَدش. پاسخ منتظر پایان اسکن نمی‌ماند.
       if (from && to && u.searchParams.get('build') === '1') await buildRoster(from, to);
+      else if (from && to && rosterNeedsBuild(file, missingDays(file, tradingDays(from, to)).length)) buildRoster(from, to);
       const gap = from && to ? missingDays(file, tradingDays(from, to)).length : 0;
 
+      const health = rosterHealth(file, rows);
       return sendJson(res, 200, {
         ready: coverage.count > 0,
+        // «آماده» با «کامل» یکی نیست و نباید یکی دیده شود: دفتری که
+        // قرارداد دارد قابل استفاده است، ولی تا وقتی جفتِ ناقص یا
+        // درخواستِ ناموفق دارد، کامل نیست.
+        complete: health.complete,
+        health,
         coverage,
         missingDays: gap,
         build: buildStatus(gap),

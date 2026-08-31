@@ -32,9 +32,25 @@ group('۲۱۰-الف. بازه‌های آماده');
 group('۲۱۰-ب. جملهٔ پیشرفتِ ساخت');
 {
   check('چیزی در جریان نیست، جمله‌ای هم نیست', buildLine(null) === '' && buildLine({ running: false, missing: 0 }) === '');
-  const busy = buildLine({ running: true, done: 30, total: 120, added: 900, failed: 0 });
+  const busy = buildLine({ running: true, stage: 'day', stageDone: 30, stageTotal: 120, done: 30, total: 120, added: 900, failed: 0 });
   check('حین ساخت، درصد و شمار قرارداد گفته می‌شود',
     /۳۰/.test(busy) && /۱۲۰/.test(busy) && /۲۵٪/.test(busy) && /۹۰۰/.test(busy), busy);
+
+  // ── شمارنده از مرحلهٔ جاری می‌آید، نه از شمارندهٔ روزها ──────────────
+  //
+  // نسخهٔ اول همیشه روزها را می‌شمرد. در مرحلهٔ جست‌وجو نتیجه‌اش این شد:
+  // «۰ از ۰ روز (۰٪) · ۱۴۹ روز نیامد» — عددی که هیچ‌کدامش راست نبود.
+  const catalog = buildLine({ running: true, stage: 'catalog', stageDone: 67, stageTotal: 288, done: 0, total: 0, failed: 67 });
+  check('مرحلهٔ جست‌وجو با شمارندهٔ خودش گزارش می‌شود',
+    /جست‌وجوی قراردادها/.test(catalog) && /۶۷/.test(catalog) && /۲۸۸/.test(catalog), catalog);
+  check('و شکستِ جست‌وجو «روز نیامد» نامیده نمی‌شود',
+    !/روز نیامد/.test(catalog) && /درخواست ناموفق/.test(catalog), catalog);
+  check('مرحلهٔ مشخصات هم نام خودش را دارد',
+    /مشخصات قراردادها/.test(buildLine({ running: true, stage: 'detail', stageDone: 3, stageTotal: 6 })));
+  // سری‌ای که پس از جست‌وجوی تکمیلی هم یک‌طرفه مانده، سکوت نمی‌گیرد:
+  // کاربر باید بداند چرا استراتژی دوسمته روی آن ساخته نمی‌شود.
+  check('سری یک‌طرفهٔ باقی‌مانده گزارش می‌شود',
+    /سری/.test(buildLine({ running: false, failed: 0, missing: 0, incompletePairs: 12 })));
   // «تمام شد ولی نیامد» با «در جریان» یکی نیست و نباید مثل هم دیده شود:
   // اولی یعنی منتظر نمان، دومی یعنی صبر کن.
   const failed = buildLine({ running: false, failed: 5, missing: 5, lastError: 'HTTP 403' });
@@ -96,7 +112,22 @@ group('۲۱۰-د. سرور: بازه، ساخت خودکار، و پوششی ک�
   // نسخهٔ اول ساختِ دفتر را به دستور ترمینال سپرده بود و کاربر اجرایش
   // نکرد؛ برایش «کار نمی‌کرد». ابزاری که برای کار کردن به یک مرحلهٔ دستی
   // نیاز دارد، برای کاربر خراب است.
-  check('روزهای نبوده در پس‌زمینه گرفته می‌شوند', /if \(missing\.length && .*\) buildRoster\(rFrom, rTo\)/.test(universe));
+  check('روزهای نبوده در پس‌زمینه گرفته می‌شوند',
+    /rosterNeedsBuild\(file, missing\.length\)/.test(universe) && /buildRoster\(rFrom, rTo\)/.test(universe));
+  // ── محرکِ ساخت فقط «روزِ نبوده» نیست ────────────────────────────────
+  //
+  // قراردادِ بی‌معامله در **هیچ** روزی نبوده، پس «همهٔ روزها را داریم»
+  // یعنی «همهٔ معامله‌ها را داریم»، نه «همهٔ قراردادها را». بی این شرط،
+  // دفتری که همهٔ روزهایش را دارد هرگز پاس کاتالوگ نمی‌رفت و برای همیشه
+  // ناقص می‌ماند.
+  const trigger = src.slice(src.indexOf('function rosterNeedsBuild'), src.indexOf('async function buildRoster'));
+  check('نبودِ پاس کاتالوگ هم ساخت را راه می‌اندازد',
+    /catalogQueriesDone/.test(trigger) && /missingCount > 0/.test(trigger));
+  // «هنوز جفت ناقص داریم» محرک نیست: سازنده در همان اجرا یک پاس دوم
+  // می‌زند، و اگر این محرک بود هر درخواستِ رابط یک اسکن کامل راه
+  // می‌انداخت و بالادست را تا ابد می‌کوبید.
+  check('جفتِ ناقص محرکِ اسکنِ دوباره نیست', !/incompletePairs/.test(trigger));
+  check('و شکستِ اخیر بلافاصله تکرار نمی‌شود', /COOLDOWN/.test(trigger) || /COOLDOWN/.test(src));
   // دو بار این ادعا لنگر اشتباه داشت: اول کلِ نقطهٔ پایانی برش خورد و
   // نخستین `return sendJson` خطای تاریخِ بدشکل بود؛ بعد همان خطا داخل
   // خودِ شاخه هم پیدا شد. لنگر درست، پاسخِ **موفق** است — چون ادعا
@@ -113,12 +144,18 @@ group('۲۱۰-د. سرور: بازه، ساخت خودکار، و پوششی ک�
   // بالاتر از شمارندهٔ خطا گذاشت و ادعا همچنان سبز بماند — یک جهش دقیقاً
   // همین کار را کرد. آنچه واقعاً مهم است این است که روزِ **نیامده** هرگز
   // پوشش‌دار حساب نشود، یعنی افزودنش فقط در شاخهٔ موفق باشد.
-  const loop = src.slice(src.indexOf('for (const day of want) {'), src.indexOf('rosterBuild.done += 1'));
+  // حلقهٔ اسکن به `core/roster-build.mjs` رفت، چون سرور و ابزار هر دو
+  // همان را اجرا می‌کنند. ادعا هم با آن رفت — رفتارش را دستهٔ ۲۱۱ روی
+  // شبکهٔ ساختگی می‌سنجد؛ اینجا فقط ساختارش قفل می‌شود.
+  const builder210 = readSrc('../core/roster-build.mjs');
+  const loop = builder210.slice(builder210.indexOf('for (const day of days) {'), builder210.indexOf("onProgress({ stage: 'day'"));
   const tryPart = loop.slice(loop.indexOf('try {'), loop.indexOf('} catch (e) {'));
   const catchPart = loop.slice(loop.indexOf('} catch (e) {'));
   check('روزِ اسکن‌شده فقط در شاخهٔ موفق پوشش‌دار می‌شود',
     tryPart.includes('scanned.push(day)') && !catchPart.includes('scanned.push(day)'));
-  check('و روزِ نیامده شمرده می‌شود، نه بی‌صدا رد', /rosterBuild\.failed \+= 1/.test(catchPart));
+  check('و روزِ نیامده شمرده می‌شود، نه بی‌صدا رد', /stats\.dayQueriesFailed \+= 1/.test(catchPart));
+  check('سرور همان سازندهٔ مشترک را اجرا می‌کند، نه حلقهٔ خودش',
+    /runRosterBuild\(\{/.test(src) && !/for \(const day of want\)/.test(src));
   check('پیشرفت همراه پاسخ می‌آید', /build: buildStatus\(/.test(universe));
 
   // ── پوشش هرگز کوچک نمی‌شود ──────────────────────────────────────────
@@ -126,6 +163,19 @@ group('۲۱۰-د. سرور: بازه، ساخت خودکار، و پوششی ک�
   // یک اجرای واقعی این را نشان داد: اسکنی که هر پنج روزش شکست خورد،
   // پروندهٔ سالمِ دو ساله را با بازهٔ صفر بازنویسی کرد و از آن به بعد هر
   // بازه ناقص گزارش می‌شد — بی‌هیچ خطایی.
+  // ── اجرای شکست‌خورده، کارِ درستِ اجرای قبلی را پاک نمی‌کند ──────────
+  //
+  // اگر هیچ جست‌وجوی کاتالوگی موفق نبوده، آن اجرا فقط می‌تواند از دفتر
+  // کم کند. نوشتنش یعنی از دست دادن دفتری که کامل بود — و بدتر، بی‌هیچ
+  // خطایی.
+  check('اسکنِ کاملاً ناموفق، دفتر موجود را بازنویسی نمی‌کند',
+    /const wipe = result\.stats\.catalogQueriesDone === 0/.test(src)
+    && /result\.stats\.catalogQueriesFailed > 0/.test(src)
+    && /rosterCache\.rows\.length > 0/.test(src)
+    && /if \(!wipe\) \{/.test(src));
+  check('و دلیلش در وضعیت ساخت نوشته می‌شود',
+    /دفتر دست‌نخورده ماند/.test(src));
+
   const writer = src.slice(src.indexOf('async function writeRoster'), src.indexOf('async function buildRoster'));
   check('بازهٔ پیشین با تازه یکی می‌شود، نه جایگزین',
     /Math\.min\(\.\.\.lo\)/.test(writer) && /Math\.max\(\.\.\.hi\)/.test(writer));
