@@ -3,7 +3,8 @@
 // تعداد ترکیب با تعداد پا رشد انفجاری دارد: کندور چهار قیمت اعمال می‌خواهد و
 // روی پانزده قیمت اعمال، ۱۳۶۵ ترکیب در هر سررسید می‌سازد. سه مهار داریم:
 //
-//   ۱. پنجره قیمت اعمال حول قیمت پایه
+//   ۱. پنجره قیمت اعمال — به‌طور پیش‌فرض فقط وقتی سقف مجبور کند
+//      (`core/strike-window.mjs`؛ درصد ثابت هنوز هست ولی دیگر پیش‌فرض نیست)
 //   ۲. بال مساوی برای باترفلای و کندور
 //   ۳. سقف ترکیب هر سررسید و سقف ردیف کل
 //
@@ -18,6 +19,7 @@ import {
   underlyingQuote, legContractSize, comboContractSize,
   blockedExpirySet, expiryBlocked,
 } from './chain.mjs';
+import { selectStrikes, fairShare } from './strike-window.mjs';
 
 // سررسیدهای پرشده جای اصلی‌شان `core/chain.mjs` است، چون فقط مسیر زنده
 // نیست که به آن نیاز دارد — تحلیل تاریخی و بک‌تست هم باید همان سررسید را
@@ -58,7 +60,7 @@ function equalWidth(ks) {
 // `capped` عمداً اینجا نیست: بولی است نه عدد، و جمعش معنی ندارد. تجمیعش
 // جداگانه با «یا» انجام می‌شود.
 const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept',
-  'blockedExpiry', 'evaluated'];
+  'blockedExpiry', 'evaluated', 'outOfWindow'];
 
 
 /**
@@ -83,7 +85,7 @@ export function unexecutableReason(row) {
 }
 
 export function emptyFunnel() {
-  return { built: 0, noQuote: 0, refBasis: 0, noDepth: 0, filtered: 0, kept: 0, blockedExpiry: 0, evaluated: 0, capped: false };
+  return { built: 0, noQuote: 0, refBasis: 0, noDepth: 0, filtered: 0, kept: 0, blockedExpiry: 0, evaluated: 0, outOfWindow: 0, capped: false };
 }
 
 /**
@@ -105,8 +107,6 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
     if (uaValue < s.minUaLiquidity) return [];
   }
 
-  const win = s.comboWindowPct / 100;
-  const lo = spot * (1 - win), hi = spot * (1 + win);
   const out = [];
   const needsStock = def.legs.some((l) => l.kind === 'underlying');
   const uaQ = underlyingQuote(ua);
@@ -119,21 +119,32 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
     ? expiries.flatMap((a, i) => expiries.slice(i + 1).map((b) => [a, b]))
     : expiries.map((a) => [a]);
 
+  // سهم برابر هر سررسید از سقف ردیف. بی این، حلقه از نزدیک‌ترین سررسید
+  // شروع می‌کرد و سقف را همان‌جا تمام می‌کرد؛ سررسید دور اصلاً نوبتش
+  // نمی‌رسید و کاربر نبودنش را «قرارداد نیست» می‌خواند.
+  const share = fairShare(s.maxRows, pairs.length, s.maxCombosPerExpiry);
+
   for (const exSet of pairs) {
     if (out.length >= s.maxRows) { funnel.capped = true; break; }
     const near = exSet[0];
     // قیمت اعمال باید در همه سررسیدهای این ترکیب موجود باشد
-    const usable = near.strikeList
-      .filter((row) => row.strike >= lo && row.strike <= hi)
-      .filter((row) => exSet.every((ex) => ex.strikes.has(row.strike)));
+    const shared = near.strikeList.filter((row) => exSet.every((ex) => ex.strikes.has(row.strike)));
+    const pick = selectStrikes({
+      strikes: shared.map((row) => row.strike), spot, legs: def.strikes, cap: share,
+      mode: s.comboWindowMode, pct: s.comboWindowPct, steps: s.comboWindowSteps,
+    });
+    funnel.outOfWindow += pick.dropped.length;
+    if (pick.forced) funnel.capped = true;
+    const inWin = new Set(pick.picked);
+    const usable = shared.filter((row) => inWin.has(row.strike));
     if (usable.length < def.strikes) continue;
 
     const ks = usable.map((r) => r.strike);
-    const sets = def.strikes === 1 ? ks.map((k) => [k]) : combos(ks, def.strikes, s.maxCombosPerExpiry * 4);
+    const sets = def.strikes === 1 ? ks.map((k) => [k]) : combos(ks, def.strikes, share * 4);
 
     let made = 0;
     for (const set of sets) {
-      if (made >= s.maxCombosPerExpiry) { funnel.capped = true; break; }
+      if (made >= share) { funnel.capped = true; break; }
       if (def.strikes >= 3 && s.wingsEqualWidth && !equalWidth(set)) continue;
       funnel.built += 1;
 

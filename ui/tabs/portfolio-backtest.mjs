@@ -3,7 +3,7 @@ import { goHandoff } from '/ui/handoff.mjs';
 import { buildChain } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
-  HISTORY_BASES, basisMatrix, entrySensitivity, flattenActiveContracts,
+  HISTORY_BASES, basisMatrix, censusNote, entrySensitivity, flattenActiveContracts,
   historyDateLabel, historyMarketMetrics, historyPrice,
   normalizeHistoryDate, replayHistory,
 } from '/core/history.mjs';
@@ -226,6 +226,7 @@ export async function mount(root, { state }) {
   </div>
 
   <div class="pb-panel" data-panel="overview" hidden>
+    <p class="pb-census" id="pb-census" role="status" aria-live="polite"></p>
     <div class="backtest-kpis" id="pb-kpis"></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">سرخط‌ها</p><h2>ده سؤالی که آدم واقعاً می‌پرسد</h2></div><span>روی هر کارت کلیک کن تا همان استراتژی انتخاب شود</span></div><div id="pb-highlights" class="pb-highlights"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">گزارش خانواده‌ها</p><h2>بهترین و بدترین عضو هر خانواده</h2></div></div><div id="pb-groups" class="history-table-wrap"></div></section>
@@ -504,7 +505,7 @@ export async function mount(root, { state }) {
   const numCellOf = (value) => (Number.isFinite(value) ? fmt.num(value) : '—');
 
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
-  let chain = new Map(), ua = null, seriesByIns = {}, baseDates = [], generated = [], activeWorker = null, selectedStrategyId = '';
+  let chain = new Map(), ua = null, seriesByIns = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '';
   // سری‌هایی که **آخرین اجرا** با آن‌ها انجام شد. با پایان روز، همان
   // `seriesByIns` است؛ با لحظهٔ درون‌روز، نسخهٔ مهرخورده. پنل جزئیات و
   // تحلیل حساسیت باید از همین بخوانند، وگرنه رتبه‌بندی ساعت ده و نیم را
@@ -1492,6 +1493,7 @@ export async function mount(root, { state }) {
       ? { ...payload.matrix, pnl: payload.matrix.pnl instanceof Float64Array ? payload.matrix.pnl : Float64Array.from(payload.matrix.pnl || []) }
       : null;
     generated = payload.generatedByStrategy;
+    census = payload.census || null;
     dailyMatrix = payloadMatrix;
     dailyRows = payloadRows;
     grain = DEFAULT_GRAIN;
@@ -1521,6 +1523,10 @@ export async function mount(root, { state }) {
     ].slice(-6);
     const capped = generated.filter((row) => row.capped).length;
     $('pb-audit').textContent = `${fmt.int(generated.length)} استراتژی بررسی شد · ${fmt.int(payload.excluded.invalidAtEnd)} ترکیب فاقد داده معتبر روز سنجش · ${fmt.int(capped)} استراتژی سقف‌خورده`;
+    // سرشماری قرارداد بالای همه چیز. شمارِ ترکیب بدون شمارِ قرارداد
+    // قابل قضاوت نیست و کاربر نباید برای فهمیدنش اجرا را دوباره بزند.
+    const censusEl = $('pb-census');
+    if (censusEl) censusEl.textContent = census ? censusNote(census, 2) : '';
     recompute();
     tabsApi?.show('overview');
   }
@@ -1878,7 +1884,7 @@ export async function mount(root, { state }) {
         ? allocatePortfolio({ capitalRial: capital, picks: basketPicks, analysis, basisId: lens.basisId })
         : null;
       await downloadPortfolioBacktest(analysis, {
-        basket, generated, dateLabel,
+        basket, generated, census, dateLabel,
         context: {
           baseName: nameOf(ua, 'نماد پایه'), baseIns: String(ua?.ins ?? ''),
           entryDate: Number($('pb-entry-date').dataset.value) || null,
