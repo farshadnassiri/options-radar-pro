@@ -23,6 +23,10 @@ import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
   makeArchive, chainRowsFrom, archiveNote, archiveBoardDownNote, archiveQuality, archiveName, validArchiveDate,
 } from '../core/watch-archive.mjs';
+import {
+  contractStatus, normalizeFa, pickUniverseSource, rangeSummary, rosterAt,
+  rosterChainRows, rosterCoverage, rosterInRange, rosterNote,
+} from '../core/option-roster.mjs';
 import { tehranDateNumber } from '../core/live-day.mjs';
 import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
@@ -461,6 +465,110 @@ async function readArchive(date) {
   catch { return null; }
 }
 
+// ——————————————————————— دفتر قراردادهای تاریخی ———————————————————————
+//
+// بایگانی بالا از **امروز** شروع می‌شود و برای دیروزِ پیش از نصب، خالی
+// است. دفتر همان حفره را پر می‌کند: `GetInstrmentsHistoryInDay` تاریخ
+// می‌گیرد، پس گذشته یک بار برای همیشه ساختنی است
+// (`node tools/roster-scan.mjs` یا `tools/roster-import.mjs`).
+//
+// یک‌بار خوانده و در حافظه می‌ماند، ولی `mtime` هر بار سنجیده می‌شود:
+// کاربر می‌تواند وسط کار دفتر را دوباره بسازد و نباید مجبور به ری‌استارت
+// سرور شود. پروندهٔ چند مگابایتی، هر درخواست یک بار JSON.parse نمی‌شود.
+const ROSTER_FILE = path.join(ROOT, 'data', 'option-roster.json');
+let rosterCache = { mtime: 0, rows: [], file: null };
+
+async function readRoster() {
+  let stamp = 0;
+  try { stamp = (await fs.stat(ROSTER_FILE)).mtimeMs; }
+  catch { rosterCache = { mtime: 0, rows: [], file: null }; return rosterCache; }
+  if (stamp === rosterCache.mtime && rosterCache.file) return rosterCache;
+  try {
+    const file = JSON.parse(await fs.readFile(ROSTER_FILE, 'utf8'));
+    rosterCache = { mtime: stamp, rows: Array.isArray(file?.rows) ? file.rows : [], file };
+  } catch (e) {
+    log(`دفتر قراردادها خوانده نشد: ${e.message}`);
+    rosterCache = { mtime: stamp, rows: [], file: null };
+  }
+  return rosterCache;
+}
+
+/**
+ * نگاشتِ «نام نماد پایه → شناسهٔ ابزار»، از فهرست زندهٔ امروز.
+ *
+ * دفتر شناسهٔ پایه را ندارد — نامِ پایه داخل نامِ قرارداد است، ولی کدش
+ * نه. گرفتنش از تابلوی امروز سوگیری بقا نمی‌آورد، چون نمادِ پایه سررسید
+ * نمی‌شود: «اهرم» امسال همان کدی را دارد که پارسال داشت.
+ *
+ * پایه‌ای که در تابلوی امروز نباشد (نمادی که از بازار رفته) کدش خالی
+ * می‌ماند و ردیفش **شمرده و نام‌برده** می‌شود، نه بی‌صدا انداخته — کدِ
+ * ساختگی یعنی کسی روزی رویش قیمت می‌خواهد.
+ */
+function baseIndexFrom(rows) {
+  const index = new Map();
+  for (const row of rows || []) {
+    const ins = String(row?.uaInsCode ?? '').trim();
+    if (!ins) continue;
+    for (const key of [row?.lval30_UA, row?.lVal18AFC_UA]) {
+      const name = normalizeFa(key);
+      if (name && !index.has(name)) index.set(name, ins);
+    }
+  }
+  return index;
+}
+
+/**
+ * ردیف‌هایی که فقط برای نگاشتِ «نام پایه → کد» لازم‌اند.
+ *
+ * هیچ قیمتی از این ردیف‌ها برداشته نمی‌شود؛ تنها دو میدانشان خوانده
+ * می‌شود. پس تازگی‌شان اهمیت ندارد و بایگانیِ ماهِ پیش هم به همان خوبیِ
+ * تابلوی زنده جواب می‌دهد.
+ */
+async function boardRowsForIndex() {
+  if (watch.rows.length) return watch.rows;
+  try {
+    const rows = firstList(await get('/Instrument/GetInstrumentOptionMarketWatch/0', Math.max(60, S.ttlMetaSec), 4));
+    if (rows?.length) return rows;
+  } catch { /* شبکه نبود — بایگانی پایین می‌نشیند */ }
+  const last = await archiveLastDate();
+  const archive = last ? await readArchive(String(last)) : null;
+  return archive ? chainRowsFrom(archive) : [];
+}
+
+/** ردیف‌های زنجیرهٔ یک تاریخ، ساخته از دفتر. */
+async function rosterUniverse(date, boardRows, { hasArchive = false } = {}) {
+  const { rows, file } = await readRoster();
+  const coverage = rosterCoverage(rows, file ? { from: file.scannedFrom, to: file.scannedTo } : null);
+  const wanted = Number(date) || 0;
+
+  // سیاستِ «کدام منبع» در هسته است، نه اینجا. سرور فقط اجرایش می‌کند —
+  // وگرنه ترتیبِ سه منبع یک قاعدهٔ مالی می‌شد که هیچ آزمونی نمی‌گیردش.
+  const plan = pickUniverseSource({ hasArchive, coverage, wanted });
+  if (plan.source !== 'roster') return null;
+
+  const live = rosterAt(rows, wanted);
+  if (!live.length) return null;
+  const index = baseIndexFrom(boardRows);
+  const chain = rosterChainRows(live, { baseIndex: index, at: wanted });
+  const known = chain.filter((row) => row.baseKnown);
+  const lost = [...new Set(chain.filter((row) => !row.baseKnown).map((row) => row.lval30_UA))];
+  return { rows: known, coverage, contracts: live.length, pairs: chain.length, lostBases: lost };
+}
+
+const faNum = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+
+/** جملهٔ صداقتِ مسیرِ دفتر — چند قرارداد، و چه چیزی جا ماند. */
+function rosterUniverseNote(built, wanted) {
+  const head = `فهرست ${faNum(wanted)} از دفتر قراردادهای تاریخی آمد — ${faNum(built.contracts)} قرارداد زنده در آن روز، ${faNum(built.rows.length)} جفتِ کال و پوت. قراردادی که بعداً سررسید شده هم در این فهرست هست، پس سوگیری بقا ندارد.`;
+  // دو نداشتهٔ دفتر، هر بار گفته می‌شوند. اندازهٔ قرارداد مهم‌تر است و
+  // ساکت ماندنش خطرناک: در هر ستون پولی ضرب می‌شود، و لایهٔ بالاتر
+  // پیش‌فرضِ اعلامی کاربر را جایش می‌گذارد. آن پیش‌فرض ممکن است برای سریِ
+  // تعدیل‌شده غلط باشد و ردیف باید نشان‌دار بماند.
+  const price = ' دفتر قیمت و اندازهٔ قرارداد ندارد: قیمتِ آن روز از مسیر تاریخی جدا می‌آید، و اندازه از پیش‌فرض اعلامی شما پر می‌شود و ردیف نشان‌دار می‌ماند.';
+  if (!built.lostBases.length) return head + price;
+  return `${head} ${faNum(built.lostBases.length)} نماد پایه در تابلوی امروز نبود و کدشان به دست نیامد، پس قراردادهایشان در این فهرست نیستند: ${built.lostBases.slice(0, 8).join('، ')}.${price}`;
+}
+
 async function watchLoop() {
   let fails = 0;
   for (;;) {
@@ -657,6 +765,39 @@ async function handle(req, res) {
             market: marketOpen(), count: rows.length, rows,
           });
         }
+
+        // ——— دفتر قراردادهای تاریخی، پیش از تسلیم شدن به فهرست امروز ———
+        //
+        // این همان تکه‌ای است که تا امروز نبود. بایگانی از روزِ نصب شروع
+        // می‌شود؛ برای هر تاریخِ پیش از آن، تنها گزینه فهرست امروز بود و
+        // آن فهرست دقیقاً قراردادهایی را ندارد که داخل بازه سررسید
+        // شده‌اند — یعنی مرتبط‌ترین‌ها. دفتر همان‌ها را دارد.
+        //
+        // ترتیب عوض نشد و نباید بشود: بایگانیِ همان روز مشاهده است و
+        // اندازهٔ قرارداد هم دارد، پس همیشه مقدم است. دفتر جای **نداشتن**
+        // را می‌گیرد، نه جای مشاهده را.
+        //
+        // نگاشتِ نامِ پایه به کدش سه منبع دارد و هر سه یک چیز می‌گویند،
+        // چون نمادِ پایه سررسید نمی‌شود. ترتیبشان فقط دربارهٔ تازگی است،
+        // نه درستی — و مهم‌تر: اگر شبکه قطع باشد، بایگانی روی دیسک همان
+        // نگاشت را دارد و کلِ مسیر دفتر بی‌شبکه هم کار می‌کند.
+        const board = await boardRowsForIndex();
+        const built = await rosterUniverse(Number(wanted), board, { hasArchive: Boolean(archive) });
+        if (built?.rows.length) {
+          const note = rosterUniverseNote(built, Number(wanted));
+          return sendJson(res, 200, {
+            at: rosterCache.file?.at ?? 0, source: 'roster', asOf: Number(wanted), archived: true,
+            fromRoster: true, rosterCoverage: built.coverage,
+            rosterContracts: built.contracts, lostBases: built.lostBases,
+            contractSizeMissing: true,
+            note,
+            quality: archiveQuality({
+              wanted: Number(wanted), found: true, rows: built.rows, source: 'option-roster',
+              asOf: { date: Number(wanted), second: 0 }, note,
+            }),
+            market: marketOpen(), count: built.rows.length, rows: built.rows,
+          });
+        }
       }
 
       // ساعت مشاهده باید راست باشد، نه «هرچه دم دست بود». مصرف‌کننده با
@@ -706,6 +847,55 @@ async function handle(req, res) {
         }),
         market: marketOpen(),
         count: rows.length, rows,
+      });
+    }
+
+    // ——— دفتر قراردادها: پوشش، بازه و وضعیت هر قرارداد در یک تاریخ ———
+    //
+    // این مسیر داده نمی‌سازد؛ فقط همان دفتری را می‌خواند که ابزارهای
+    // `tools/roster-*.mjs` نوشته‌اند. اگر دفتر نباشد، جواب **خالیِ
+    // برچسب‌دار** است نه خطا: رابط باید بتواند بگوید «هنوز ساخته نشده و
+    // این دستور می‌سازدش»، نه اینکه قرمز شود.
+    if (p === '/api/history/roster') {
+      const { rows, file } = await readRoster();
+      const coverage = rosterCoverage(rows, file ? { from: file.scannedFrom, to: file.scannedTo } : null);
+      const from = u.searchParams.get('from') || '';
+      const to = u.searchParams.get('to') || '';
+      const at = u.searchParams.get('at') || '';
+      const base = normalizeFa(u.searchParams.get('base') || '');
+      const wantRows = u.searchParams.get('rows') === '1';
+
+      for (const [name, value] of [['from', from], ['to', to], ['at', at]]) {
+        if (value && !validArchiveDate(value)) {
+          return sendJson(res, 400, { error: `«${name}» باید هشت رقم میلادی باشد` });
+        }
+      }
+
+      let scoped = base ? rows.filter((row) => normalizeFa(row.base) === base) : rows;
+      let summary = null, listed = [];
+      if (from && to) {
+        listed = rosterInRange(scoped, from, to);
+        summary = rangeSummary(scoped, from, to);
+      } else if (at) {
+        listed = rosterAt(scoped, at).map((row) => ({ ...row, statusAt: contractStatus(row, at) }));
+      }
+
+      // سقف، تا پاسخ چند مگابایتی مرورگر را قفل نکند. بریدنش **گفته**
+      // می‌شود؛ فهرستِ بریده‌ای که خودش را کامل جا بزند، همان دروغی است
+      // که کل این ماژول برای رفعش نوشته شد.
+      const CAP = 4000;
+      const truncated = wantRows && listed.length > CAP;
+      return sendJson(res, 200, {
+        ready: coverage.count > 0,
+        coverage,
+        scanned: file ? { from: file.scannedFrom, to: file.scannedTo, at: file.at, intake: file.intake ?? null } : null,
+        note: rosterNote({ coverage, from: Number(from) || 0, to: Number(to) || 0, summary }),
+        summary,
+        bases: [...new Set(rows.map((row) => row.base).filter(Boolean))].sort(),
+        matched: listed.length,
+        truncated,
+        rows: wantRows ? listed.slice(0, CAP) : [],
+        howTo: coverage.count ? '' : 'node tools/roster-scan.mjs --from ۲۰۲۴۰۹۰۱ --to امروز   یا   node tools/roster-import.mjs <فایل.xlsx>',
       });
     }
 

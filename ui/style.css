@@ -327,7 +327,11 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
    در ابتدا) چیدمان اطرافش بالا و پایین نپرد. */
 .date-cal {
   display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 8px;
-  width: 100%; max-width: 100%; min-width: 0; height: 272px; padding: 12px 12px 8px;
+  /* قد از یک ماه کامل درمی‌آید، نه از چشم: بلندترین ماه جلالی با ردیفِ
+     پیش‌رو، شش سطر می‌شود — ۶×۳۰ خانه + ۵×۳ فاصله = ۱۹۵، به‌اضافهٔ سر و
+     نوار هفته و نوار وضعیت و حاشیه. با ۲۷۲ پیکسل دو سطر آخر پشت اسکرول
+     می‌ماندند و روزهای پایان ماه دیده نمی‌شدند. */
+  width: 100%; max-width: 100%; min-width: 0; height: 326px; padding: 12px 12px 8px;
   border: 1px solid var(--line); border-radius: var(--radius-lg);
   background: var(--panel); box-shadow: var(--shadow-2xs);
 }
@@ -2147,6 +2151,25 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
 .funnel span { display: block; height: 100%; }
 .funnel-key { display: flex; gap: 14px; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--muted); font-weight: 600; }
 .funnel-key i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-inline-end: 4px; }
+
+/* ——— دفتر قراردادها: دو تقویم کنار هم ———
+   `[hidden]` **بعد** از `display` می‌آید و باید بیاید: `display:flex` روی
+   خودِ عنصر، `display:none`ِ ضمنیِ `[hidden]` را می‌بازد و فیلدِ پنهان‌شده
+   همچنان دیده می‌شود. دقیقاً همین در حالت «یک روز» رخ داد. */
+.or-when { display: flex; gap: var(--space-4, 16px); flex-wrap: wrap; margin-top: var(--space-4, 16px); }
+.or-cal { display: flex; flex-direction: column; gap: var(--space-1, 4px); flex: 1 1 280px; min-width: 0; }
+.or-cal[hidden] { display: none; }
+
+/* ——— بلوک دستورِ ترمینال ———
+   تنها جای برنامه که کاربر باید چیزی را عیناً کپی کند، پس شکستنِ خط و
+   انتخابِ متن مهم‌ترند تا زیبایی. */
+.code-block {
+  margin: 10px 0 0; padding: 12px 14px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: var(--radius-md); overflow-x: auto;
+  font-family: var(--mono); font-size: var(--fs-sm); line-height: var(--lh-normal);
+  color: var(--ink-2); white-space: pre; user-select: all;
+}
 
 /* ——— شاخص‌های کلیدی ——— */
 .kpis { display: grid; gap: var(--space-3, 12px); grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); margin-bottom: var(--space-4, 16px); }

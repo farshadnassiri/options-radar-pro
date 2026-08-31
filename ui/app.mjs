@@ -303,6 +303,12 @@ const TABS = [
     section: 'پایه', mod: '/ui/tabs/bereket.mjs', phase: 3 },
   { id: 'portfolio-time', title: '🧭 استودیوی سفر زمانی سبد', alias: 'پرتفوی سبد سفر زمان بازی بک تست سرمایه mission portfolio',
     section: 'پایه', mod: '/ui/tabs/portfolio-time.mjs', phase: 3 },
+  // دفتر قراردادها تبِ خودش را دارد، نه پنلی در تنظیمات: وضعیت انقضا یک
+  // رابطهٔ «قرارداد × تاریخ» است و ورودی می‌خواهد. تا پیش از این، هر
+  // تحلیلِ گذشته فقط بازمانده‌های امروز را می‌دید.
+  { id: 'option-roster', title: '🗓 دفتر قراردادهای تاریخی',
+    alias: 'منقضی سررسید expired roster قرارداد گذشته سوگیری بقا آرشیو',
+    section: 'پایه', mod: '/ui/tabs/option-roster.mjs', phase: 3 },
   { id: 'logs', title: 'دفتر خطاها', section: 'پایه', mod: '/ui/tabs/logs.mjs', phase: 1 },
 ];
 
