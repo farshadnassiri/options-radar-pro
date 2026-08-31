@@ -59,8 +59,19 @@ group('۴۷. نوار سقف سررسید، وقتی زنجیره نیست');
   // ادعا عوض نشده، فقط شکل کد: شاخهٔ جایگزینیِ بایگانی که زیرش نشست،
   // ترکیب سه‌تایی را به `if/else` باز کرد. وقتی عکس لحظه‌ای خالی است، همین
   // نقطه هنوز خودش از بالادست می‌گیرد.
+  //
+  // پیش از این، فاصله شمرده می‌شد (`{0,3000}`) و همان عدد یک بار شکست:
+  // شاخهٔ دفتر قراردادهای تاریخی وسط نشست و ادعا — که هنوز درست بود —
+  // قرمز شد. حالا بدنهٔ خودِ همان نقطه بریده می‌شود، پس رشدِ بعدی‌اش
+  // ادعای سالم را نمی‌شکند.
+  const universe47 = serverSrc47.slice(
+    serverSrc47.indexOf("p === '/api/history/universe'"),
+    serverSrc47.indexOf("p === '/api/stream'"),
+  );
   check('`history/universe` وقتی عکس لحظه‌ای خالی است خودش از بالادست می‌گیرد',
-    /history\/universe[\s\S]{0,3000}fromWatch = watch\.rows\.length > 0[\s\S]{0,600}rows = firstList\(await get\(upstream/.test(serverSrc47));
+    universe47.includes('fromWatch = watch.rows.length > 0')
+    && universe47.includes('rows = firstList(await get(upstream')
+    && universe47.indexOf('rows = firstList(await get(upstream') > universe47.indexOf('fromWatch = watch.rows.length > 0'));
   check('نسخهٔ تاریخ‌دار فهرست، پیش از بازگشت به عکس امروز امتحان می‌شود',
     /history\/universe[\s\S]{0,1200}readArchive\(wanted\)[\s\S]{0,600}source: 'archive'/.test(serverSrc47));
   check('نبودن بایگانی برای آن تاریخ، بی‌صدا به عکس امروز برنمی‌گردد',
