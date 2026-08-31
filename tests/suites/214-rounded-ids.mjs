@@ -21,8 +21,10 @@
 
 import { check, group, readSrc } from '../harness.mjs';
 import {
-  repairRoster, rosterIntake, rosterRow, roundedTwins, suspectIds,
+  blockingTwins, mergeRoster, repairRoster, rosterIntake, rosterRow,
+  roundedTwins, suspectIds,
 } from '../../core/option-roster.mjs';
+import { readSource } from '../../tools/roster-import.mjs';
 
 // همان ردیف‌های واقعیِ فایل دو سالهٔ صاحب پروژه.
 const NAME = 'اختیارخ اهرم-74000-1405/06/25';
@@ -155,4 +157,80 @@ group('۲۱۴-د. مسیرِ ترمیم در ابزار');
     src.includes('suspectIds(oldRows)') && src.includes('دست نخوردند'));
   check('و ترمیمِ تنها، ردیف تازه اضافه نمی‌کند',
     src.includes('فقط ترمیم — هیچ ردیف تازه‌ای اضافه نشد'));
+
+  // ── پروندهٔ نبوده، جمله می‌گیرد نه ردِ پشته ────────────────────────
+  //
+  // صاحب پروژه دستور را با نامِ ساده اجرا کرد و چهارده خط ردِ پشتهٔ Node
+  // گرفت که هیچ‌کدامشان نمی‌گفتند چه باید بکند.
+  let thrown = null;
+  try { readSource('/hich/joori/nist.xlsx'); } catch (e) { thrown = e; }
+  check('پروندهٔ نبوده، خطای خوانا می‌دهد نه ردِ پشتهٔ خام',
+    thrown?.friendly === true && thrown.message.includes('پیدا نشد'),
+    String(thrown?.message).split('\n')[0]);
+  check('و مسیرِ مطلق را می‌گوید — در WSL «کنارِ من» و «در ویندوز» یکی به‌نظر می‌آیند',
+    thrown.message.includes('/hich/joori/nist.xlsx') && thrown.message.includes('دنبالش گشتم در'));
+  check('راهِ پیدا کردنش را هم می‌دهد، نه فقط اینکه نیست',
+    thrown.message.includes('/mnt/c/Users'));
+  check('و فقط خطای شناخته‌شده جمله می‌شود؛ بقیه ردِ پشته می‌گیرند',
+    src.includes('if (e?.friendly)') && src.includes('throw e;'));
+
+  // ── ادغامِ بی‌ترمیم باید متوقف شود ──────────────────────────────────
+  //
+  // صاحب پروژه `--repair` را روی نسخهٔ قدیمی اجرا کرد؛ پرچم شناخته نشد و
+  // ادغام سراغ کارش رفت. کلیدِ ادغام خودِ کد است، پس کدِ گردشده و کدِ
+  // درست دو ردیف جدا ماندند: ۸۸۳۰ + ۷۹۳۳ → ۱۴۱۹۴، یعنی ۵۳۶۴ قرارداد
+  // تکراری. و هیچ‌چیز هشدار نداد.
+  check('ابزار قاعدهٔ هسته را صدا می‌زند، نه شرطِ خودش را',
+    src.includes('blockingTwins(oldRows, intake.rows, { repair })')
+    && src.includes('process.exit(2)'));
+  check('و می‌گوید چرا، با نمونه، پیش از آنکه چیزی بنویسد',
+    src.includes('ردیف تکراری می‌سازد') && src.includes('دفتر دست‌نخورده ماند'));
+  check('کنترل پیش از هر نوشتنی است، نه بعدش',
+    src.indexOf('process.exit(2)') < src.indexOf('fs.writeFileSync(ROSTER_FILE'));
+}
+
+
+// ═══════════ ۲۱۴-ه. عددها، روی همان چیدمانی که خراب شد ═══════════
+group('۲۱۴-ه. ادغام با ترمیم و بی ترمیم');
+{
+  const mk = (n) => ({
+    ...SPEC, InsCode: n, Symbol: `ضهرم${String(n).slice(-4)}`,
+    Name: `اختیارخ اهرم-74000-1405/06/25`,
+  });
+  // سه کدِ بالای مرز امن که گرد می‌شوند، به‌علاوهٔ یکی که نمی‌شود.
+  const truth = rosterIntake([
+    mk('58199962935089492'), mk('58199962935089493'), mk('58199962935089494'),
+    mk('9007199254740991'),
+  ]).rows;
+  const poisoned = truth.map((row) => ({ ...row, ins: String(Number(row.ins)) }));
+
+  check('چیدمان: چهار قرارداد، سه‌تایشان در دفتر گرد شده‌اند',
+    truth.length === 4 && roundedTwins(poisoned, truth).length === 3,
+    `${roundedTwins(poisoned, truth).length}`);
+
+  // بی ترمیم: کدِ گردشده و کدِ درست دو کلیدِ متفاوت‌اند.
+  const naive = mergeRoster(poisoned, truth);
+  check('ادغامِ بی‌ترمیم، به‌جای تعمیر، ردیف تکراری می‌سازد',
+    naive.length > truth.length, `${truth.length} → ${naive.length}`);
+
+  // با ترمیم: همان شمار ردیف می‌ماند.
+  const healed = mergeRoster(repairRoster(poisoned, truth).rows, truth);
+  check('با ترمیم، شمار ردیف همان می‌ماند و هیچ تکراری نمی‌ماند',
+    healed.length === truth.length, `${healed.length}`);
+  check('و هر کدِ دفتر با کدِ مرجع می‌خواند',
+    healed.every((row) => truth.some((t) => t.ins === row.ins)));
+
+  // ── قاعدهٔ توقف، با رفتار سنجیده می‌شود نه با متن ────────────────────
+  //
+  // نسخهٔ اولِ این نگهبان یک `if` داخل ابزار بود و ادعایش متنِ منبع را
+  // می‌خواند. جهش‌سنجی نشان داد با عوض کردن شرط به `false` نگهبان خاموش
+  // می‌شد و هیچ ادعایی قرمز نمی‌شد — «هست» را می‌سنجید، نه «کار می‌کند».
+  check('بی ترمیم، ادغام متوقف می‌شود و دوقلوها نام برده می‌شوند',
+    blockingTwins(poisoned, truth).length === 3,
+    `${blockingTwins(poisoned, truth).length}`);
+  check('با ترمیم، هیچ‌چیز جلوی ادغام را نمی‌گیرد',
+    blockingTwins(poisoned, truth, { repair: true }).length === 0);
+  check('و دفترِ سالم هرگز متوقف نمی‌شود، با ترمیم یا بی آن',
+    blockingTwins(truth, truth).length === 0
+    && blockingTwins(truth, truth, { repair: true }).length === 0);
 }

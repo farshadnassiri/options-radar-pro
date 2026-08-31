@@ -25,7 +25,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readXlsx } from '../core/xlsx-read.mjs';
 import {
-  makeRosterFile, mergeRoster, repairRoster, rosterCoverage, rosterIntake, suspectIds,
+  blockingTwins, makeRosterFile, mergeRoster, repairRoster, rosterCoverage,
+  rosterIntake, suspectIds,
 } from '../core/option-roster.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -67,7 +68,25 @@ export function parseCsv(text) {
   return { header, rows: body };
 }
 
+/**
+ * پروندهٔ نبوده، یک جمله می‌گیرد نه یک ردِ پشتهٔ Node.
+ *
+ * صاحب پروژه دستور را با نامِ ساده اجرا کرد و چهارده خط ردِ پشته گرفت که
+ * هیچ‌کدامشان نمی‌گفتند چه باید بکند. مسیرِ مطلق هم چاپ می‌شود، چون در
+ * WSL «فایل کنارِ من است» و «فایل در پوشهٔ ویندوز است» به‌چشم یکی‌اند.
+ */
 export function readSource(file, sheet) {
+  if (!fs.existsSync(file)) {
+    const err = new Error([
+      `پروندهٔ «${file}» پیدا نشد.`,
+      `  دنبالش گشتم در: ${path.resolve(file)}`,
+      '  مسیر کامل بدهید. اگر WSL هستید، پوشهٔ دانلودِ ویندوز معمولاً اینجاست:',
+      '    ls /mnt/c/Users/*/Downloads/*.xlsx',
+      '    find ~ -name "tsetmc_historical*" 2>/dev/null',
+    ].join('\n'));
+    err.friendly = true;
+    throw err;
+  }
   const buf = fs.readFileSync(file);
   if (/\.xlsx$/i.test(file)) return readXlsx(buf, sheet ?? 0);
   return { sheet: path.basename(file), sheets: [], ...parseCsv(buf.toString('utf8')) };
@@ -115,6 +134,26 @@ function main() {
         console.log('  ولی این فایل کدِ درستشان را ندارد، پس دست نخوردند.');
       }
     }
+    // ── ادغامِ بی‌ترمیم، دفتر را دو برابر می‌کند ──────────────────────
+    //
+    // کلیدِ ادغام خودِ کد است. اگر دفتر کدِ گردشده داشته باشد و این فایل
+    // کدِ درست را، آن دو **دو کلیدِ متفاوت‌اند**: به‌جای تعمیر، ردیف
+    // تکراری ساخته می‌شود.
+    //
+    // صاحب پروژه دقیقاً همین را دید — ۸۸۳۰ + ۷۹۳۳ → ۱۴۱۹۴، یعنی ۵۳۶۴
+    // قرارداد تکراری — و هیچ‌چیز هشدار نداد. متوقف شدن از خراب کردنِ
+    // بی‌صدای دفتر بهتر است.
+    {
+      const twins = blockingTwins(oldRows, intake.rows, { repair });
+      if (twins.length) {
+        console.error(`\nدفترِ موجود ${fa(twins.length)} کدِ گردشده دارد که کدِ درستشان در این فایل هست.`);
+        console.error('ادغام بی‌ترمیم، به‌جای تعمیرشان همان‌قدر ردیف تکراری می‌سازد.');
+        console.error('  نمونه:');
+        for (const t of twins.slice(0, 3)) console.error(`    ${t.symbol}  ${t.wrong} → ${t.right}`);
+        console.error('\n`--repair` را اضافه کنید. دفتر دست‌نخورده ماند.');
+        process.exit(2);
+      }
+    }
     if (!merge) { rows = oldRows; console.log('  فقط ترمیم — هیچ ردیف تازه‌ای اضافه نشد.'); }
     else {
       rows = mergeRoster(oldRows, rows);
@@ -134,4 +173,12 @@ function main() {
   console.log(`  ${fa(coverage.count)} قرارداد · ${fa(coverage.bases)} نماد پایه · از ${fa(coverage.from)} تا ${fa(coverage.to)}`);
 }
 
-if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { main(); }
+  catch (e) {
+    // خطای شناخته‌شده یک جمله است؛ بقیه ردِ پشته می‌گیرند چون واقعاً
+    // نقصِ برنامه‌اند و باید دیده شوند.
+    if (e?.friendly) { console.error(e.message); process.exit(1); }
+    throw e;
+  }
+}
