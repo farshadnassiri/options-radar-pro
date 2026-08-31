@@ -33,6 +33,7 @@ import { mountDateWheel } from '/ui/datewheel.mjs';
 import { mountSubtabs } from '/ui/subtabs.mjs';
 import { chart, LEG_COLORS } from '/ui/track-chart.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
+import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { takeHandoff } from '/ui/handoff.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -145,6 +146,7 @@ export async function mount(root, { state }) {
       <label>دامنهٔ داده<select id="gw-scope">${scopeOptionsMarkup()}</select></label>
       <button type="button" class="primary" id="gw-load">دریافت تاریخچه</button>
     </div>
+    <div id="gw-range"></div>
     <p class="backtest-table-note" id="gw-scope-note" hidden></p>
   </section>
 
@@ -250,19 +252,34 @@ export async function mount(root, { state }) {
 
   // ——————————————————————— دریافت داده ———————————————————————
 
-  async function loadUniverse() {
-    try {
-      const response = await fetch('/api/history/universe');
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || 'فهرست دریافت نشد');
-      chain = buildChain(payload.rows || []);
-      $('gw-base').innerHTML = '<option value="">نماد پایه را انتخاب کن</option>'
-        + [...chain.values()].sort((a, b) => a.name.localeCompare(b.name, 'fa'))
-          .map((item) => `<option value="${esc(item.ins)}">${esc(nameOf(item, 'دارایی پایه'))} — ${fmt.int(item.contracts)} قرارداد</option>`).join('');
-      setStatus(`${fmt.int(chain.size)} نماد پایه آماده است.`);
-      if (pendingPlan) applyPlan(pendingPlan);
-    } catch (error) {
-      setStatus(errorText(error, 'فهرست قراردادهای فعال دریافت نشد.'), true);
+  // ——— فهرست قراردادها از **بازه** می‌آید، نه از تابلوی امروز ———
+  //
+  // پیش از این `/api/history/universe` بی‌تاریخ صدا می‌شد، پس هر تحلیلِ
+  // گذشته فقط قراردادهای زندهٔ امروز را می‌دید و آن‌هایی که داخل بازهٔ
+  // بررسی سررسید شده بودند اصلاً در فهرست نبودند.
+  let rangeUi = null, rangeJob = null;
+
+  function fillBases(payload) {
+    const keep = $('gw-base').value;
+    chain = buildChain(payload.rows || []);
+    $('gw-base').innerHTML = '<option value="">نماد پایه را انتخاب کن</option>'
+      + [...chain.values()].sort((a, b) => a.name.localeCompare(b.name, 'fa'))
+        .map((item) => `<option value="${esc(item.ins)}">${esc(nameOf(item, 'دارایی پایه'))} — ${fmt.int(item.contracts)} قرارداد</option>`).join('');
+    if (keep && chain.has(keep)) $('gw-base').value = keep;
+    const expired = payload.summary?.expiredInside || 0;
+    setStatus(`${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند.`);
+    if (pendingPlan) applyPlan(pendingPlan);
+  }
+
+  async function loadUniverse(range = rangeUi?.range) {
+    if (!range) return;
+    rangeJob?.stop();
+    $('gw-base').innerHTML = '<option value="">در حال دریافت…</option>';
+    rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
+    try { fillBases(await rangeJob.first); }
+    catch (error) {
+      $('gw-base').innerHTML = '<option value="">دریافت ناموفق</option>';
+      setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true);
     }
   }
 
@@ -727,6 +744,8 @@ export async function mount(root, { state }) {
   const token = hash.includes('!') ? hash.slice(hash.indexOf('!') + 1) : '';
   const plan = state.handoff?.to === 'greeks-watch' ? state.handoff : takeHandoff(token);
   if (plan?.to === 'greeks-watch') { state.handoff = null; pendingPlan = plan; }
+
+  rangeUi = mountHistoryRange($('gw-range'), { onApply: (range) => loadUniverse(range) });
 
   await loadUniverse();
 }

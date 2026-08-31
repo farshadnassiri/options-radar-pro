@@ -9,6 +9,7 @@ import {
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
+import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { MARK_MOMENTS, marksAt, applyIntradayMark, markNote } from '/core/intraday-mark.mjs';
@@ -204,6 +205,7 @@ export async function mount(root, { state }) {
     <div class="portfolio-form"><label>نماد پایه<select id="pb-base"><option value="">در حال دریافت…</option></select></label><label>دامنه استراتژی<select id="pb-scope"><option value="feasible">فقط استراتژی‌های قابل اجرا</option><option value="all">همه ساختاری، با برچسب غیرقابل اجرا</option></select></label><label>دامنهٔ داده<select id="pb-data-scope">${scopeOptionsMarkup()}</select></label><label>تعداد واحد<input id="pb-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><label>سقف ترکیب هر استراتژی<input id="pb-cap" type="number" min="10" max="1000" step="10" value="120"></label>
       <label>حداقل ارزش پایه (میلیارد ریال)<input id="pb-base-value" type="number" min="0" step="0.1" value="0"></label><label>حداقل ارزش هر قرارداد (میلیون ریال)<input id="pb-leg-value" type="number" min="0" step="0.1" value="0"></label><label>حداقل حجم پایه<input id="pb-base-volume" type="number" min="0" step="1" value="0"></label><label>حداقل حجم هر قرارداد<input id="pb-leg-volume" type="number" min="0" step="1" value="0"></label>
       <button type="button" class="primary" id="pb-load">دریافت تاریخچه نماد</button></div>
+    <div id="pb-range"></div>
     <p class="live-scope-note" id="pb-scope-note" hidden></p>
     <p class="portfolio-note">سقف ترکیب برای کنترل زمان اجراست و در گزارش شفاف ثبت می‌شود. «همه استراتژی‌ها» یعنی همه الگوها بررسی می‌شوند؛ تعداد ترکیب قراردادهای هر الگو می‌تواند با این سقف محدود شود.</p>
   </section>
@@ -2082,18 +2084,45 @@ export async function mount(root, { state }) {
     if (ua && Object.keys(seriesByIns).length) loadHistory();
   });
 
-  try {
-    const response = await fetch('/api/history/universe'), payload = await response.json();
-    if (!response.ok || payload.error) throw new Error(payload.error || 'فهرست دریافت نشد');
-    chain = buildChain(payload.rows || []); baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+  // ——— فهرست قراردادها از **بازه** می‌آید، نه از تابلوی امروز ———
+  //
+  // پیش از این همین‌جا `/api/history/universe` بی‌تاریخ صدا می‌شد. یعنی
+  // هر آزمونِ گذشته فقط روی قراردادهایی اجرا می‌شد که تا امروز زنده
+  // مانده‌اند، و آن‌هایی که داخل بازهٔ آزمون سررسید شده بودند — یعنی
+  // مرتبط‌ترینشان — اصلاً وارد هیچ ترکیبی نمی‌شدند.
+  let rangeUi = null, rangeJob = null;
+
+  function fillBases(payload) {
+    const keep = baseSelect.value;
+    chain = buildChain(payload.rows || []);
+    baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
     for (const item of [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'))) {
       const option = document.createElement('option'); option.value = item.ins; option.textContent = `${nameOf(item, 'نماد پایه')} · ${fmt.int(item.contracts)} قرارداد`; baseSelect.appendChild(option);
     }
-    setStatus(`${fmt.int(chain.size)} نماد پایه آماده است؛ ${fmt.int(CATALOG.filter((item) => item.feasible).length)} استراتژی قابل اجرا و ${fmt.int(Object.keys(GROUPS).length)} دسته.`);
-  } catch (error) { setStatus(errorText(error, 'فهرست نمادها دریافت نشد.'), true); }
+    // انتخابِ کاربر با عوض شدن بازه پاک نمی‌شود، اگر همان نماد هنوز در
+    // بازهٔ تازه قرارداد داشته باشد.
+    if (keep && chain.has(keep)) baseSelect.value = keep;
+    const expired = payload.summary?.expiredInside || 0;
+    setStatus(`${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند. ${fmt.int(CATALOG.filter((item) => item.feasible).length)} استراتژی قابل اجرا.`);
+  }
+
+  async function loadUniverseForRange(range) {
+    rangeJob?.stop();
+    baseSelect.innerHTML = '<option value="">در حال دریافت…</option>';
+    rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
+    try { fillBases(await rangeJob.first); }
+    catch (error) {
+      baseSelect.innerHTML = '<option value="">دریافت ناموفق</option>';
+      setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true);
+    }
+  }
+
+  rangeUi = mountHistoryRange($('pb-range'), { onApply: (range) => { hideReport(); loadUniverseForRange(range); } });
+  await loadUniverseForRange(rangeUi.range);
 
   return () => {
     activeWorker?.terminate();
+    rangeJob?.stop();
     charts.disposeAll();
   };
 }

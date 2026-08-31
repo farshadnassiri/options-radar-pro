@@ -2152,6 +2152,34 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
 .funnel-key { display: flex; gap: 14px; flex-wrap: wrap; font-size: var(--fs-xs); color: var(--muted); font-weight: 600; }
 .funnel-key i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-inline-end: 4px; }
 
+/* ——— بازهٔ تحلیل: کنترل مشترک همهٔ تب‌های تاریخ‌دار ——— */
+/* در تب تحلیل تاریخی، کنترل داخل یک شبکهٔ چهارستونی می‌نشیند و در یک
+   ستونِ ۱۵۰ پیکسلی له می‌شد: جمله ستونی و باریک می‌شد و تقویم‌ها روی هم
+   می‌افتادند. کنترل، تصمیمِ کلِ صفحه است نه یک فیلد کنارِ بقیه. */
+.history-control-grid > .history-range-cell { grid-column: 1 / -1; }
+.hrange { margin: var(--space-3, 12px) 0 0; }
+.hrange-row { display: flex; align-items: end; gap: var(--space-3, 12px); flex-wrap: wrap; }
+.hrange-pick { display: flex; flex-direction: column; gap: var(--space-1, 4px); min-width: 0; }
+.hrange-span {
+  padding: 7px 12px; border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: var(--panel-2); color: var(--ink-2);
+  font-family: var(--mono); font-size: var(--fs-sm); font-variant-numeric: tabular-nums;
+}
+.hrange-cals { display: flex; gap: var(--space-4, 16px); flex-wrap: wrap; margin-top: var(--space-3, 12px); }
+.hrange-cals[hidden] { display: none; }
+.hrange-cal { display: flex; flex-direction: column; gap: var(--space-1, 4px); flex: 1 1 280px; min-width: 0; }
+.hrange-note { margin: var(--space-2, 8px) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-normal); }
+.hrange-note[data-error] { color: var(--loss); }
+/* پیشرفتِ ساخت لحن هشدار دارد نه خطا: چیزی خراب نشده، فقط هنوز تمام
+   نشده — و کاربر باید فرق این دو را از رنگ بفهمد. */
+.hrange-build {
+  margin: var(--space-2, 8px) 0 0; padding: 7px 11px;
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--warn-soft); color: var(--warn);
+  font-size: var(--fs-sm); line-height: var(--lh-normal);
+}
+.hrange-build[hidden] { display: none; }
+
 /* ——— دفتر قراردادها: دو تقویم کنار هم ———
    `[hidden]` **بعد** از `display` می‌آید و باید بیاید: `display:flex` روی
    خودِ عنصر، `display:none`ِ ضمنیِ `[hidden]` را می‌بازد و فیلدِ پنهان‌شده

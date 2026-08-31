@@ -18,15 +18,18 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
+import { num } from '../core/num.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
 import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
   makeArchive, chainRowsFrom, archiveNote, archiveBoardDownNote, archiveQuality, archiveName, validArchiveDate,
 } from '../core/watch-archive.mjs';
 import {
-  contractStatus, normalizeFa, pickUniverseSource, rangeSummary, rosterAt,
-  rosterChainRows, rosterCoverage, rosterInRange, rosterNote,
+  contractStatus, makeRosterFile, mergeRoster, missingDays, normalizeFa,
+  pickUniverseSource, rangeSummary, rosterAt, rosterChainRows, rosterCoverage,
+  rosterCovers, rosterInRange, rosterNote,
 } from '../core/option-roster.mjs';
+import { dayPath, scanDay, tradingDays } from '../core/roster-scan.mjs';
 import { tehranDateNumber } from '../core/live-day.mjs';
 import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
@@ -517,6 +520,123 @@ function baseIndexFrom(rows) {
   return index;
 }
 
+// ——————————————————————— ساختِ خودکار دفتر ———————————————————————
+//
+// نخستین نسخه، ساختِ دفتر را به دو دستور ترمینال سپرده بود. صاحب پروژه
+// دستور را اجرا نکرد و نتیجه‌اش این شد که «کار نمی‌کند» — و حق داشت:
+// ابزاری که برای کار کردن به یک مرحلهٔ دستی نیاز دارد، برای کاربر خراب
+// است، هرچند برای سازنده‌اش کامل باشد.
+//
+// حالا هر بازه‌ای که خواسته شود و دفتر نداشته باشدش، همان‌جا در پس‌زمینه
+// گرفته می‌شود. درخواست منتظر نمی‌ماند: پاسخ با آنچه **همین حالا** هست
+// برمی‌گردد، به‌اضافهٔ پیشرفت، و رابط دوباره می‌پرسد.
+//
+// اولویت ۹ یعنی پایین‌تر از هر چیز زنده. اسکنِ پس‌زمینه نباید جلوی
+// دیده‌بان یا درخواست خودِ کاربر را بگیرد.
+const ROSTER_SCAN_PRIORITY = 9;
+const ROSTER_SCAN_TTL = 86400 * 30;   // فهرست ابزارهای یک روزِ گذشته عوض نمی‌شود
+const ROSTER_SAVE_EVERY = 25;
+
+let rosterBuild = {
+  running: false, from: 0, to: 0, total: 0, done: 0, failed: 0,
+  startedAt: 0, finishedAt: 0, lastError: '', added: 0,
+};
+
+/**
+ * نوشتن دفتر — پوشش هرگز **کوچک** نمی‌شود.
+ *
+ * این را یک اجرای واقعی نشان داد: اسکنی که هر پنج روزش شکست خورد، پروندهٔ
+ * سالمِ موجود را با `scannedFrom/To` صفر بازنویسی کرد و دفترِ دو ساله
+ * یک‌شبه «بی‌پوشش» شد. هیچ خطایی هم بالا نیامد؛ فقط از آن به بعد هر بازه
+ * ناقص گزارش می‌شد.
+ *
+ * پس بازهٔ پیشین همیشه با بازهٔ تازه یکی می‌شود، نه جایگزین. نوشتنِ
+ * ناموفق باید داده کم نکند.
+ */
+async function writeRoster(rows, days, { from = 0, to = 0 } = {}) {
+  const old = rosterCache.file;
+  const lo = [num(old?.scannedFrom, 0), num(from, 0)].filter((v) => v > 0);
+  const hi = [num(old?.scannedTo, 0), num(to, 0)].filter((v) => v > 0);
+  const body = makeRosterFile(rows, {
+    at: Math.floor(Date.now() / 1000), days,
+    scannedFrom: lo.length ? Math.min(...lo) : 0,
+    scannedTo: hi.length ? Math.max(...hi) : 0,
+  });
+  await fs.mkdir(path.dirname(ROSTER_FILE), { recursive: true });
+  await fs.writeFile(ROSTER_FILE, JSON.stringify(body), 'utf8');
+  rosterCache = { mtime: (await fs.stat(ROSTER_FILE)).mtimeMs, rows: body.rows, file: body };
+  return body;
+}
+
+/**
+ * پر کردن روزهای نبودهٔ یک بازه.
+ *
+ * تنها یک اسکن هم‌زمان اجرا می‌شود. درخواست دومی که برسد، همان پیشرفت را
+ * می‌بیند و صف دوم نمی‌سازد — وگرنه چند تبِ باز، بالادست را چند برابر
+ * می‌کوبیدند.
+ *
+ * روزِ نیامده **شمرده** می‌شود و در پوشش نمی‌نشیند. اگر بی‌صدا رد می‌شد،
+ * دفتر یک حفرهٔ نامرئی داشت — و همان حفره می‌توانست دقیقاً همان قراردادی
+ * باشد که کاربر دنبالش است.
+ */
+async function buildRoster(from, to) {
+  if (rosterBuild.running) return rosterBuild;
+  const { file } = await readRoster();
+  const want = missingDays(file, tradingDays(from, to));
+  if (!want.length) return rosterBuild;
+
+  rosterBuild = {
+    running: true, from: Number(from), to: Number(to), total: want.length, done: 0,
+    failed: 0, startedAt: Date.now(), finishedAt: 0, lastError: '', added: 0,
+  };
+  log(`ساخت دفتر قراردادها — ${want.length} روزِ نبوده از ${from} تا ${to}`);
+
+  (async () => {
+    let rows = rosterCache.rows.slice();
+    const before = rows.length;
+    const scanned = [...(rosterCache.file?.days || [])];
+    let sinceSave = 0;
+    for (const day of want) {
+      try {
+        const got = scanDay(await get(dayPath(day), ROSTER_SCAN_TTL, ROSTER_SCAN_PRIORITY), day);
+        rows = mergeRoster(rows, got.rows);
+        scanned.push(day);
+      } catch (e) {
+        rosterBuild.failed += 1;
+        rosterBuild.lastError = `${day}: ${e.message}`;
+      }
+      rosterBuild.done += 1;
+      rosterBuild.added = rows.length - before;
+      if (++sinceSave >= ROSTER_SAVE_EVERY) {
+        sinceSave = 0;
+        try { await writeRoster(rows, scanned); } catch (e) { rosterBuild.lastError = e.message; }
+      }
+    }
+    try { await writeRoster(rows, scanned); } catch (e) { rosterBuild.lastError = e.message; }
+    rosterBuild.running = false;
+    rosterBuild.finishedAt = Date.now();
+    log(`دفتر قراردادها — ${rosterBuild.done} روز، ${rosterBuild.added} قرارداد تازه، ${rosterBuild.failed} روزِ نیامده`);
+  })().catch((e) => {
+    rosterBuild.running = false;
+    rosterBuild.finishedAt = Date.now();
+    rosterBuild.lastError = `${e.name}: ${e.message}`;
+    log(`ساخت دفتر متوقف شد: ${rosterBuild.lastError}`);
+  });
+
+  return rosterBuild;
+}
+
+/** وضعیت ساخت، به شکلی که رابط بتواند جمله‌اش را بسازد. */
+function buildStatus(missing = 0) {
+  return {
+    running: rosterBuild.running,
+    done: rosterBuild.done, total: rosterBuild.total, failed: rosterBuild.failed,
+    added: rosterBuild.added, missing,
+    lastError: rosterBuild.lastError || '',
+    finishedAt: rosterBuild.finishedAt || 0,
+  };
+}
+
 /**
  * ردیف‌هایی که فقط برای نگاشتِ «نام پایه → کد» لازم‌اند.
  *
@@ -533,6 +653,46 @@ async function boardRowsForIndex() {
   const last = await archiveLastDate();
   const archive = last ? await readArchive(String(last)) : null;
   return archive ? chainRowsFrom(archive) : [];
+}
+
+/**
+ * ردیف‌های زنجیرهٔ یک **بازه** — اجتماع هرکس که در هر تکه‌ای از آن زنده بود.
+ *
+ * این همان چیزی است که تب‌های تاریخ‌دار می‌خواهند و تا امروز نداشتند:
+ * `chain` آن‌ها از تابلوی امروز ساخته می‌شد، پس قراردادی که داخل بازهٔ
+ * بررسی سررسید شده بود اصلاً در فهرست نبود و هیچ استراتژی‌ای رویش آزموده
+ * نمی‌شد.
+ *
+ * `remainedDay` نسبت به **آغاز** بازه حساب می‌شود، چون تحلیل از همان‌جا
+ * شروع می‌شود. عمرِ هر ردیف هم همراهش می‌آید تا مصرف‌کننده بداند از کجا
+ * تا کجا حق دارد رویش حساب کند — قراردادی که وسط بازه سررسید شده، بعد از
+ * آن روز عددی ندارد و نباید ساخته شود.
+ */
+async function rosterRangeUniverse(from, to, boardRows) {
+  const { rows, file } = await readRoster();
+  const coverage = rosterCoverage(rows, file ? { from: file.scannedFrom, to: file.scannedTo } : null);
+  const live = rosterInRange(rows, from, to);
+  if (!live.length) return { rows: [], coverage, contracts: 0, lostBases: [], summary: rangeSummary(rows, from, to) };
+
+  const index = baseIndexFrom(boardRows);
+  const chain = rosterChainRows(live, { baseIndex: index, at: from });
+  const life = new Map();
+  for (const row of live) life.set(row.ins, row);
+
+  const known = [];
+  for (const row of chain) {
+    const call = life.get(row.insCode_C), put = life.get(row.insCode_P);
+    const alive = [call, put].filter(Boolean);
+    if (!row.baseKnown) continue;
+    known.push({
+      ...row,
+      activeFrom: Math.min(...alive.map((r) => r.activeFrom)),
+      activeTo: Math.max(...alive.map((r) => r.activeTo)),
+      expiresInside: alive.some((r) => r.expiresInside),
+    });
+  }
+  const lost = [...new Set(chain.filter((row) => !row.baseKnown).map((row) => row.lval30_UA))];
+  return { rows: known, coverage, contracts: live.length, lostBases: lost, summary: rangeSummary(rows, from, to) };
 }
 
 /** ردیف‌های زنجیرهٔ یک تاریخ، ساخته از دفتر. */
@@ -556,6 +716,25 @@ async function rosterUniverse(date, boardRows, { hasArchive = false } = {}) {
 }
 
 const faNum = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+
+/** جملهٔ صداقتِ بازه — چند قرارداد آمد، چند تا منقضی‌اند، و چه چیزی هنوز نیامده. */
+function rosterRangeNote(built, from, to, missing) {
+  const s = built.summary;
+  if (!built.rows.length) {
+    return missing
+      ? `دفتر هنوز این بازه را ندارد؛ ${faNum(missing)} روزِ کاری در حال گرفتن از تابلوی تاریخی است. تا آن موقع فهرستی برای این بازه نیست.`
+      : 'برای این بازه هیچ قراردادی در دفتر نبود.';
+  }
+  const head = `فهرست از دفتر قراردادهای تاریخی آمد — ${faNum(built.contracts)} قرارداد در این بازه زنده بوده، ${faNum(built.rows.length)} جفتِ کال و پوت.`;
+  const expired = s?.expiredInside
+    ? ` ${faNum(s.expiredInside)} تای آن‌ها داخل همین بازه سررسید شده‌اند و در فهرست امروز نیستند — حالا هستند.`
+    : '';
+  const gap = missing ? ` ${faNum(missing)} روزِ کاری هنوز اسکن نشده و در پس‌زمینه گرفته می‌شود؛ تا کامل شدنش فهرست ممکن است ناقص باشد.` : '';
+  const lost = built.lostBases.length
+    ? ` ${faNum(built.lostBases.length)} نماد پایه کدشان به دست نیامد و کنار ماندند: ${built.lostBases.slice(0, 6).join('، ')}.`
+    : '';
+  return `${head}${expired}${gap}${lost} دفتر قیمت و اندازهٔ قرارداد ندارد؛ هر دو از مسیر خودشان می‌آیند.`;
+}
 
 /** جملهٔ صداقتِ مسیرِ دفتر — چند قرارداد، و چه چیزی جا ماند. */
 function rosterUniverseNote(built, wanted) {
@@ -748,6 +927,48 @@ async function handle(req, res) {
       // حالت میانی — بایگانی هست ولی برای آن تاریخ نه — عمداً `false`
       // برمی‌گرداند و فهرست امروز را با برچسب می‌دهد. اگر بی‌صدا جایگزین
       // می‌شد، همان سوگیری با ظاهرِ حل‌شده برمی‌گشت.
+      // ——— بازه، نه یک روز ———
+      //
+      // خواستهٔ صریح صاحب پروژه: «هر جا کاربر بازهٔ تاریخی داد، قرارداد
+      // منقضی هم در محاسبات بیاید.» تب‌ها فهرست را یک بار و **بی‌تاریخ**
+      // می‌گرفتند و بعد کاربر بازه انتخاب می‌کرد؛ یعنی هر تحلیلِ گذشته
+      // روی بازمانده‌های امروز اجرا می‌شد. این شاخه همان را می‌بندد.
+      const rFrom = u.searchParams.get('from') || '';
+      const rTo = u.searchParams.get('to') || '';
+      if (rFrom && rTo) {
+        for (const [name, value] of [['from', rFrom], ['to', rTo]]) {
+          if (!validArchiveDate(value)) return sendJson(res, 400, { error: `«${name}» باید هشت رقم میلادی باشد` });
+        }
+        if (Number(rTo) < Number(rFrom)) return sendJson(res, 400, { error: 'پایان بازه پیش از آغاز آن است' });
+
+        const { file } = await readRoster();
+        const wantDays = tradingDays(rFrom, rTo);
+        const missing = missingDays(file, wantDays);
+        // ساخت در پس‌زمینه شروع می‌شود و پاسخ منتظرش نمی‌ماند: کاربر باید
+        // با همان چیزی که هست کار کند و پیشرفت را ببیند، نه پشت یک
+        // درخواستِ چنددقیقه‌ای بنشیند.
+        if (missing.length && u.searchParams.get('build') !== '0') buildRoster(rFrom, rTo);
+
+        const board = await boardRowsForIndex();
+        const built = await rosterRangeUniverse(Number(rFrom), Number(rTo), board);
+        const note = rosterRangeNote(built, Number(rFrom), Number(rTo), missing.length);
+        return sendJson(res, 200, {
+          at: rosterCache.file?.at ?? 0, source: built.rows.length ? 'roster-range' : 'roster-empty',
+          from: Number(rFrom), to: Number(rTo),
+          archived: missing.length === 0 && built.rows.length > 0,
+          fromRoster: true, rosterCoverage: built.coverage, rosterContracts: built.contracts,
+          summary: built.summary, lostBases: built.lostBases,
+          contractSizeMissing: built.rows.length > 0,
+          missingDays: missing.length, build: buildStatus(missing.length),
+          note,
+          quality: archiveQuality({
+            wanted: Number(rFrom), found: missing.length === 0 && built.rows.length > 0,
+            rows: built.rows, source: 'option-roster', asOf: { date: Number(rFrom), second: 0 }, note,
+          }),
+          market: marketOpen(), count: built.rows.length, rows: built.rows,
+        });
+      }
+
       const wanted = u.searchParams.get('date');
       if (wanted != null && wanted !== '') {
         if (!validArchiveDate(wanted)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
@@ -885,10 +1106,17 @@ async function handle(req, res) {
       // که کل این ماژول برای رفعش نوشته شد.
       const CAP = 4000;
       const truncated = wantRows && listed.length > CAP;
+      // درخواستِ صریحِ ساخت — رابط وقتی می‌زند که کاربر بازه‌ای خواسته و
+      // دفتر ندارَدش. پاسخ منتظر پایان اسکن نمی‌ماند.
+      if (from && to && u.searchParams.get('build') === '1') await buildRoster(from, to);
+      const gap = from && to ? missingDays(file, tradingDays(from, to)).length : 0;
+
       return sendJson(res, 200, {
         ready: coverage.count > 0,
         coverage,
-        scanned: file ? { from: file.scannedFrom, to: file.scannedTo, at: file.at, intake: file.intake ?? null } : null,
+        missingDays: gap,
+        build: buildStatus(gap),
+        scanned: file ? { from: file.scannedFrom, to: file.scannedTo, at: file.at, days: (file.days || []).length, intake: file.intake ?? null } : null,
         note: rosterNote({ coverage, from: Number(from) || 0, to: Number(to) || 0, summary }),
         summary,
         bases: [...new Set(rows.map((row) => row.base).filter(Boolean))].sort(),

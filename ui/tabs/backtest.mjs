@@ -22,6 +22,7 @@ import {
 import { tehranDateNumber } from '/core/live-day.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
+import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { chart, LEG_COLORS } from '/ui/track-chart.mjs';
@@ -98,6 +99,7 @@ export async function mount(root, { state }) {
   root.innerHTML = `<section class="backtest-hero"><div><p class="eyebrow">بعد از ماتریس‌ها · آزمون یک مسیر مشخص</p><h1>🔬 آزمایشگاه آپشن</h1><p>یک استراتژی را با قیمت مشاهده‌شده روز ورود بچین، مسیر روزانه را ببین و روز سنجش را با ریزمعامله‌های واقعی همان روز بازپخش کن.</p></div><span>بدون قیمت ساختگی</span></section>
   <section class="card backtest-setup"><div class="section-head"><div><p class="eyebrow">گام اول</p><h2>انتخاب سناریو</h2></div><b id="bt-status" role="status">در حال دریافت نمادها…</b></div>
     <div class="backtest-form"><label>نماد پایه<select id="bt-base"><option value="">در حال دریافت…</option></select></label><label>استراتژی<select id="bt-strategy"></select></label><label>تعداد واحد<input id="bt-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><button type="button" class="primary" id="bt-load">دریافت روزهای قابل اجرا</button></div>
+    <div id="bt-range"></div>
   </section>
   <section id="bt-work" hidden>
     <nav id="bt-subtabs"></nav>
@@ -1225,15 +1227,35 @@ export async function mount(root, { state }) {
   baseSelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; showSetupOnly(); });
   strategySelect.addEventListener('change', () => { if (liveWatching) stopLiveWatch(); $('bt-work').hidden = true; $('bt-result').hidden = true; showSetupOnly(); });
 
-  try {
-    const response = await fetch('/api/history/universe'), payload = await response.json();
-    if (!response.ok || payload.error) throw new Error(payload.error || 'فهرست دریافت نشد');
-    chain = buildChain(payload.rows || []); baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+  // ——— فهرست قراردادها از **بازه** می‌آید، نه از تابلوی امروز ———
+  //
+  // پیش از این `/api/history/universe` بی‌تاریخ صدا می‌شد، پس هر تحلیلِ
+  // گذشته فقط قراردادهای زندهٔ امروز را می‌دید و آن‌هایی که داخل بازهٔ
+  // بررسی سررسید شده بودند اصلاً در فهرست نبودند.
+  let rangeUi = null, rangeJob = null;
+
+  function fillBases(payload) {
+    const keep = baseSelect.value;
+    chain = buildChain(payload.rows || []);
+    baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
     for (const item of [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'))) {
       const option = document.createElement('option'); option.value = item.ins; option.textContent = `${nameOf(item, 'نماد پایه')} · ${fmt.int(item.contracts)} قرارداد`; baseSelect.appendChild(option);
     }
-    setStatus(`${fmt.int(chain.size)} نماد پایه آماده است.`);
-  } catch (error) { setStatus(errorText(error, 'فهرست نمادها دریافت نشد.'), true); }
+    if (keep && chain.has(keep)) baseSelect.value = keep;
+    const expired = payload.summary?.expiredInside || 0;
+    setStatus(`${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند.`);
+  }
+
+  async function loadUniverseForRange(range) {
+    rangeJob?.stop();
+    baseSelect.innerHTML = '<option value="">در حال دریافت…</option>';
+    rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
+    try { fillBases(await rangeJob.first); }
+    catch (error) { baseSelect.innerHTML = '<option value="">دریافت ناموفق</option>'; setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true); }
+  }
+
+  rangeUi = mountHistoryRange($('bt-range'), { onApply: (range) => loadUniverseForRange(range) });
+  await loadUniverseForRange(rangeUi.range);
 
   // تحویل عمر یک کلیک دارد: همین‌جا برداشته و پاک می‌شود تا باز کردن دوباره
   // این تب، دوباره همان چیدمان را روی انتخاب تازه کاربر ننشاند.
