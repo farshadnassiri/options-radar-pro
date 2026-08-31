@@ -16,6 +16,7 @@
 import { downloadXlsx, sheet, sheetParts } from './xlsx.mjs';
 import { METRICS } from '../core/portfolio-report.mjs';
 import { WINDOW_MODES, windowMode } from '../core/strike-window.mjs';
+import { sourceSummary } from '../core/data-source.mjs';
 
 export const PORTFOLIO_BACKTEST_EXPORT_VERSION = 1;
 
@@ -82,10 +83,29 @@ const pearson = (a = [], b = []) => {
  */
 export function portfolioBacktestWorkbook(analysis, {
   context = {}, basket = null, dateLabel = (value) => String(value ?? ''), generated = [],
-  census = null,
+  census = null, sources = [],
 } = {}) {
   if (!analysis) return [];
   const labels = (analysis.dates || []).map(dateLabel);
+
+  // ── برگ «منبع داده» ─────────────────────────────────────────────────
+  //
+  // یک ردیف برای هر ابزار، **چه داده آمده باشد چه نیامده**. بی این برگ،
+  // راستی‌آزماییِ یک ردیف یعنی ساختنِ دستیِ نشانی بالادست و امید به اینکه
+  // همان باشد که برنامه ساخت.
+  const sourceRows = (sources || []).map((row) => [
+    row.role ?? '', row.name ?? '',
+    row.kind === 'call' ? 'اختیار خرید' : row.kind === 'put' ? 'اختیار فروش' : '',
+    cell(row.strike), row.expiry ? dateLabel(row.expiry) : '',
+    String(row.ins ?? ''), row.purpose ?? '', row.status ?? '',
+    cell(row.rows),
+    row.firstDate ? dateLabel(row.firstDate) : '',
+    row.lastDate ? dateLabel(row.lastDate) : '',
+    row.error ?? '',
+    row.url ?? '', row.local ?? '',
+  ]);
+  const sourceStat = sourceSummary(sources || []);
+
 
   // ── ۱. سرشناسه ───────────────────────────────────────────────────────
   const header = [
@@ -122,6 +142,11 @@ export function portfolioBacktestWorkbook(analysis, {
     ['سری فقط یک‌سمته', cell(census?.incomplete)],
     ['قرارداد دارای قیمت ورود', cell(census?.priced)],
     ['قاعده پنجره قیمت اعمال', windowModeLabel(census?.windowMode)],
+    ['—', ''],
+    ['ابزارِ درخواست‌شده از بالادست', cell(sourceStat.total)],
+    ['داده گرفت', cell(sourceStat.ok)],
+    ['خالی برگشت (هیچ روزی معامله نشده)', cell(sourceStat.empty)],
+    ['درخواستش خطا خورد', cell(sourceStat.failed)],
   ];
 
   // ── ۲. سنجه‌ها ───────────────────────────────────────────────────────
@@ -249,6 +274,7 @@ export function portfolioBacktestWorkbook(analysis, {
     ['استراتژی بدون ترکیب معتبر', cell((generated || []).filter((row) => !row.accepted).length), 'در این بازه هیچ ترکیبی از آن‌ها داده کامل نداشت'],
     ['سری فقط یک‌سمته', cell(census?.incomplete), 'فقط کال دارد یا فقط پوت؛ هیچ استراتژی دوسمته‌ای از آن ساخته نمی‌شود و هیچ سمتی هم برایش ساختگی تولید نشده'],
     ['قرارداد بی‌قیمت در روز ورود', cell((census?.silent ?? 0) + (census?.unseen ?? 0)), 'آن روز معامله نشد یا تا آن روز هیچ سابقه‌ای نداشت؛ بدون قیمت ورود، ترکیب ساخته نمی‌شود'],
+    ['درخواستِ خطاخوردهٔ بالادست', cell(sourceStat.failed), 'نشانی‌اش در برگ «منبع داده» است — اگر خودت بازش کردی و داده دیدی، این یک باگ است نه نبودِ داده'],
     ['روزِ بی‌داده در مسیرها', cell((analysis.combos || []).reduce((sum, combo) => sum + (combo.series?.missing ?? 0), 0)),
       'خانهٔ خالی مانده؛ با قیمت روز قبل پر نشده'],
     ['—', '', ''],
@@ -284,6 +310,9 @@ export function portfolioBacktestWorkbook(analysis, {
       'سری کامل', 'سری یک‌سمته', 'دارای قیمت ورود', 'آن روز معامله نشد', 'بی‌سابقه تا آن روز',
       'از دارای قیمت: زیر دروازهٔ نقدشوندگی', 'نردبان قیمت اعمال'],
       censusRows, [110, 90, 90, 90, 90, 80, 90, 110, 120, 130, 130, 420]),
+    sheet('منبع داده', ['نقش', 'نماد', 'نوع', 'قیمت اعمال', 'سررسید', 'کد نماد', 'برای چه',
+      'وضعیت', 'شمار روز', 'نخستین روز', 'آخرین روز', 'خطا', 'نشانی بالادست', 'مسیر محلی'],
+      sourceRows, [80, 140, 90, 100, 110, 160, 240, 190, 80, 100, 100, 220, 480, 260]),
     sheet('قرارداد بی‌قیمت', ['نماد', 'نوع', 'قیمت اعمال', 'سررسید', 'چرا وارد نشد',
       'نخستین معاملهٔ این قرارداد', 'کد نماد'],
       excludedRows, [150, 90, 100, 110, 200, 170, 160]),
@@ -311,6 +340,7 @@ export function portfolioBacktestWorkbook(analysis, {
     sheet('برگ‌ها', ['برگ', 'چه دارد'], [
       ['سرشناسه', 'پارامترهای اجرا و عدسی؛ بدون این، هیچ درصدی در بقیهٔ برگ‌ها معنا ندارد'],
       ['قراردادها', 'سرشماری روز ورود: هر سررسید با شمار کال و پوت، سری یک‌سمته و نردبان قیمت اعمال'],
+      ['منبع داده', 'نشانیِ دقیقِ بالادست برای هر ابزار — چه داده آمده باشد چه نیامده. برای راستی‌آزمایی، همان نشانی را باز کن'],
       ['قرارداد بی‌قیمت', 'نامِ تک‌تکِ قراردادهایی که وارد ترکیب‌سازی نشدند، با علت و تاریخ نخستین معامله‌شان'],
       ['پنجره قیمت اعمال', 'پنجره برای یک تا چهار پا چه چیزی را وارد کرد و چه چیزی را کنار گذاشت'],
       ['سرخط‌ها', 'ده سؤال تک‌جمله‌ای با جواب و سنجه‌اش'],

@@ -447,7 +447,7 @@ group('۲۱۲-و. سرشماری در خروجی اکسل');
   check('و در رابط، پیش از هر عددِ ترکیبی نشان داده می‌شود',
     tab.includes("$('pb-census')") && tab.includes('censusNote(census, 2)'));
   check('و به دفترچهٔ اکسل هم پاس داده می‌شود',
-    /basket, generated, census, dateLabel/.test(tab));
+    /basket, generated, census, sources, dateLabel/.test(tab));
 
   check('برگ «قرارداد بی‌قیمت» نامِ تک‌تکشان را می‌برد',
     src.includes("sheet('قرارداد بی‌قیمت'") && src.includes('EXCLUDE_REASONS'));
