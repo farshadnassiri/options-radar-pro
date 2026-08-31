@@ -36,6 +36,7 @@
 
 import { num } from './num.mjs';
 import { gregorianToJalali, jalaliToGregorian } from './jalali.mjs';
+import { safeId } from './json-safe.mjs';
 
 /** نسخهٔ ساختار پروندهٔ دفتر. اگر شکل عوض شد، خواننده باید بفهمد. */
 // نسخهٔ ۲: عمر قرارداد از مشخصات رسمی می‌آید، نه از اولین معامله. پروندهٔ
@@ -229,8 +230,22 @@ export function parseContractName(name) {
  * دو در `rosterIntake` است؛ اینجا فقط «شد» یا «نشد».
  */
 export function rosterRow(raw) {
-  const ins = String(raw?.ins ?? raw?.InsCode ?? raw?.insCode ?? '').trim();
-  if (!/^\d{6,20}$/.test(ins)) return null;
+  // ── چرا `safeId` و نه `String()` ────────────────────────────────────
+  //
+  // `String(58199962935089492)` هرگز اجرا نمی‌شود؛ آنچه اجرا می‌شود
+  // `String(<عددی که از قبل گرد شده>)` است و بی‌هیچ خطایی
+  // `'58199962935089490'` می‌دهد — رشته‌ای که از رگولارِ زیر هم رد
+  // می‌شود، چون هجده رقمِ سالم به‌نظر می‌آید.
+  //
+  // صاحب پروژه همین را دید: ضهرم۶۰۵۱ کدِ واقعی‌اش ...۴۹۲ است و برنامه
+  // ...۴۹۰ صدا می‌زد. آن نشانی به هیچ ابزاری نمی‌خورد، پس پاسخ خالی
+  // برمی‌گشت و فایل می‌نوشت «معامله نشده» — بدترین شکل ممکن برای خطا،
+  // چون شبیه واقعیتِ بازار است.
+  //
+  // `core/json-safe.mjs` این نگهبان را داشت و به این مسیر وصل نشده بود.
+  // حالا عددِ ناامن **رد** می‌شود، نه اینکه رشتهٔ گردشده بسازد.
+  const ins = safeId(raw?.ins ?? raw?.InsCode ?? raw?.insCode ?? '');
+  if (!ins || !/^\d{6,20}$/.test(ins)) return null;
 
   const symbol = normalizeFa(raw?.symbol ?? raw?.Symbol ?? raw?.lVal18AFC ?? '');
   const name = normalizeFa(raw?.name ?? raw?.Name ?? raw?.lVal30 ?? '');
@@ -326,6 +341,73 @@ export function rosterIntake(rawRows = []) {
  * آخر را دیده، نباید «از کِی دیده شد» را به ماه آخر عقب بکشد. متادیتای
  * خالی هم جای پرِ قبلی را نمی‌گیرد.
  */
+/**
+ * دوقلوی گردشده: ردیفی که کدش نسخهٔ گردشدهٔ کدِ درست است.
+ *
+ * ═══ چرا این قابل اثبات است و حدس نیست ═══
+ *
+ * کدِ گردشده از روی خودش قابل تشخیص نیست — `58199962935089490` رشتهٔ
+ * کاملاً معتبری است. ولی وقتی منبعِ درست هم در دست باشد، اثبات ساده و
+ * قطعی است:
+ *
+ *   `Number(درست) === Number(گردشده)`  و  `درست !== گردشده`  و  نمادشان یکی
+ *
+ * یعنی این دو کد در دنیای ممیز شناور یکی‌اند و در دنیای واقعی دوتا؛ پس
+ * آن یکی که با منبع نمی‌خواند، همان قربانیِ گرد شدن است.
+ *
+ * شرطِ «نماد یکی» عمدی است: بی آن، دو قراردادِ واقعاً متفاوت که تصادفاً
+ * هم‌ممیزند به هم گره می‌خوردند.
+ */
+export function roundedTwins(rows = [], truth = []) {
+  const byFloat = new Map();
+  for (const row of truth) {
+    const ins = String(row?.ins ?? '');
+    if (!/^\d+$/.test(ins)) continue;
+    const key = `${Number(ins)}|${row?.symbol ?? ''}`;
+    if (!byFloat.has(key)) byFloat.set(key, ins);
+  }
+  const out = [];
+  for (const row of rows) {
+    const ins = String(row?.ins ?? '');
+    if (!/^\d+$/.test(ins) || Number.isSafeInteger(Number(ins))) continue;
+    const right = byFloat.get(`${Number(ins)}|${row?.symbol ?? ''}`);
+    if (right && right !== ins) out.push({ symbol: row?.symbol ?? '', wrong: ins, right });
+  }
+  return out;
+}
+
+/**
+ * شناسه‌ای که **ممکن است** قربانی گرد شدن باشد — بی منبعِ درست، فقط ظن.
+ *
+ * کدِ بزرگ‌تر از مرز امن که بی‌تغییر از `Number` رد می‌شود، یا واقعاً روی
+ * یکی از نقطه‌های نمایش‌پذیرِ ممیز شناور نشسته (که در این بازه از هر ۸ تا
+ * حدود یکی است) یا گردشده است. عدد را گزارش می‌کنیم و **حذف نمی‌کنیم**؛
+ * تصمیم با منبعِ درست گرفته می‌شود، نه با ظن.
+ */
+export function suspectIds(rows = []) {
+  return rows.filter((row) => {
+    const ins = String(row?.ins ?? '');
+    return /^\d+$/.test(ins) && !Number.isSafeInteger(Number(ins)) && String(Number(ins)) === ins;
+  }).length;
+}
+
+/**
+ * ترمیم: کدِ گردشده با کدِ درست عوض می‌شود، بی‌آنکه ردیف تازه‌ای بسازد.
+ *
+ * ادغامِ ساده این را حل نمی‌کند: کلیدِ ادغام خودِ `ins` است، پس کدِ درست
+ * و کدِ گردشده دو ردیف جدا می‌مانند و زنجیره هر دو را نشان می‌دهد.
+ */
+export function repairRoster(rows = [], truth = []) {
+  const fix = new Map(roundedTwins(rows, truth).map((t) => [t.wrong, t.right]));
+  if (!fix.size) return { rows, fixed: 0 };
+  return {
+    rows: rows.map((row) => (fix.has(String(row?.ins))
+      ? { ...row, ins: fix.get(String(row.ins)) }
+      : row)),
+    fixed: fix.size,
+  };
+}
+
 export function mergeRoster(existing = [], incoming = []) {
   const byIns = new Map();
   const put = (row) => {
