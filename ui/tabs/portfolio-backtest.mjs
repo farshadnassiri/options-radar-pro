@@ -82,6 +82,7 @@ import {
   momentDate, momentLabel, momentSecond, momentsFor, normalizeGrain,
 } from '/core/intraday-grid.mjs';
 import { downloadPortfolioBacktest } from '/ui/portfolio-backtest-export.mjs';
+import { dataSourceRows } from '/core/data-source.mjs';
 import {
   correlationHeatOption, correlationOf, familyBarOption, funnelOption, paretoOption,
   roseOption, shareDonutOption, similarityGraphOption, sunburstOption,
@@ -505,7 +506,7 @@ export async function mount(root, { state }) {
   const numCellOf = (value) => (Number.isFinite(value) ? fmt.num(value) : '—');
 
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
-  let chain = new Map(), ua = null, seriesByIns = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '';
+  let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '';
   // سری‌هایی که **آخرین اجرا** با آن‌ها انجام شد. با پایان روز، همان
   // `seriesByIns` است؛ با لحظهٔ درون‌روز، نسخهٔ مهرخورده. پنل جزئیات و
   // تحلیل حساسیت باید از همین بخوانند، وگرنه رتبه‌بندی ساعت ده و نیم را
@@ -586,7 +587,16 @@ export async function mount(root, { state }) {
       }));
       seriesByIns = {};
       runSeriesByIns = {};
-      for (const payload of payloads) for (const [ins, value] of Object.entries(payload)) seriesByIns[ins] = value.rows || [];
+      // خطای هر ابزار جدا نگه داشته می‌شود. پیش از این `value.rows || []`
+      // خطا را به «صفر ردیف» تبدیل می‌کرد و آن‌وقت «درخواست شکست خورد» از
+      // «هیچ روزی معامله نشده» قابل تشخیص نبود — دو چیزِ کاملاً متفاوت.
+      seriesErrors = {};
+      for (const payload of payloads) {
+        for (const [ins, value] of Object.entries(payload)) {
+          seriesByIns[ins] = value.rows || [];
+          if (value.error) seriesErrors[ins] = String(value.error);
+        }
+      }
       // روز جاری پس از فهرست بسته‌شده می‌نشیند، نه به‌جای آن. اگر نچسبد،
       // همان سری‌های بسته‌شده برمی‌گردند و رفتار دقیقاً قبلی می‌ماند.
       await applyScope();
@@ -1883,8 +1893,19 @@ export async function mount(root, { state }) {
       const basket = basketPicks.length
         ? allocatePortfolio({ capitalRial: capital, picks: basketPicks, analysis, basisId: lens.basisId })
         : null;
+      // نشانیِ هر ابزار، چه داده آمده باشد چه نیامده. مبنا همان
+      // `flattenActiveContracts` است که خودِ ترکیب‌ساز از آن می‌خواند، نه
+      // فهرست دیگری — وگرنه فایل نشانیِ ابزاری را می‌داد که اصلاً صدا زده
+      // نشده بود.
+      const sources = dataSourceRows({
+        base: state.settings.baseUrl,
+        ua: { ins: String(ua?.ins ?? ''), name: nameOf(ua, 'نماد پایه') },
+        contracts: flattenActiveContracts(ua, state.settings.blockedExpiries),
+        seriesByIns, errors: seriesErrors, n: 0,
+        markDate: Number($('pb-mark').value) ? Number($('pb-exit-date').dataset.value) || 0 : 0,
+      });
       await downloadPortfolioBacktest(analysis, {
-        basket, generated, census, dateLabel,
+        basket, generated, census, sources, dateLabel,
         context: {
           baseName: nameOf(ua, 'نماد پایه'), baseIns: String(ua?.ins ?? ''),
           entryDate: Number($('pb-entry-date').dataset.value) || null,
