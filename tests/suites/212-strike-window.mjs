@@ -183,10 +183,14 @@ group('۲۱۲-د. اهرم ۱۴۰۵/۰۶/۰۱ — استرانگل فروش');
     pct.outOfWindow === 21, `${pct.outOfWindow}`);
 
   const auto = run({ ...base, comboWindowMode: 'auto' });
-  check('حالت خودکار با همان سقف، سه‌برابرِ درصد ثابت ترکیب می‌سازد',
-    auto.combos.length === 108, `${auto.combos.length} ترکیب`);
-  check('و آنچه کنار می‌گذارد را سقف مجبور کرده، نه یک عدد ثابت',
-    auto.capped === true && auto.outOfWindow === 9, `${auto.outOfWindow} قیمت اعمال`);
+  check('حالت خودکار با همان سقف، چهاربرابرِ درصد ثابت ترکیب می‌سازد',
+    auto.combos.length === 120, `${auto.combos.length} ترکیب`);
+  // آنچه اینجا مهار می‌کند، سقفِ خودِ کاربر است — نه پنجره. پنجره حق
+  // ندارد پیش از آزمونِ قیمت ورود چیزی را کنار بگذارد.
+  check('و پنجره هیچ قیمت اعمالی را کنار نگذاشته؛ فقط سقفِ کاربر خورده',
+    auto.capped === true && auto.outOfWindow === 0, `${auto.outOfWindow} قیمت اعمال`);
+  check('سقف تا آخرین ردیفش خرج می‌شود، نه ۱۱۲ تا از ۱۲۰',
+    auto.combos.length === base.maxRows, `${auto.combos.length} از ${base.maxRows}`);
 
   // سقف که باز شود، خودکار هیچ‌چیز کنار نمی‌گذارد. این همان دستگیره‌ای
   // است که کاربر باید بچرخاند، نه درصد.
@@ -220,6 +224,105 @@ group('۲۱۲-د. اهرم ۱۴۰۵/۰۶/۰۱ — استرانگل فروش');
   check('مسیر زنده هم همان قاعده را دارد، نه قاعدهٔ دیگری',
     liveAuto.funnel.built > livePct.funnel.built && livePct.funnel.outOfWindow === 21,
     `زنده ${livePct.funnel.built} → ${liveAuto.funnel.built}`);
+}
+
+
+// ═══════════ ۲۱۲-ز. ترتیب: قیمت ورود، بعد سقف ═══════════
+//
+// گزارش صاحب پروژه: «سقف ۱۲۰ ترکیب، قبل از بررسی وجود قیمت ورود اعمال
+// شده است... ترتیب درست باید این باشد: بررسی قیمت ورود ← ساخت ترکیب‌های
+// معتبر ← اعمال سقف.»
+//
+// درست بود. دو نگهبان یک بودجه را نگه می‌داشتند و نگهبان اول — پنجره —
+// پیش از آزمونِ قیمت اجرا می‌شد. پس بودجه صرفِ قیمت‌های اعمالی می‌شد که
+// هرگز ترکیبی نمی‌ساختند.
+group('۲۱۲-ز. ترتیب: قیمت ورود، بعد سقف');
+{
+  const g = (jy, jm, jd) => { const [y, m, d] = jalaliToGregorian(jy, jm, jd); return (y * 10000) + (m * 100) + d; };
+  const ENTRY = g(1405, 6, 1), END = g(1405, 7, 29), SPOT = 52646;
+  const LADDER = [20, 22, 24, 26, 28, 30, 34, 38, 42, 46, 50, 56, 62];
+  // فقط این‌ها روز ورود قیمت دارند. بقیه هرگز ترکیبی نمی‌سازند.
+  const PRICED = { call: [38, 42, 46, 50, 56, 62], put: [20, 22, 24, 26, 28, 30, 34] };
+
+  const rows = [];
+  const series = { 9: [{ date: ENTRY, close: SPOT, last: SPOT, first: SPOT, low: SPOT, high: SPOT, vol: 5e6, value: 1e11 }] };
+  const px = { date: ENTRY, close: 900, last: 900, first: 900, low: 880, high: 920, vol: 1000, value: 9e8 };
+  for (const k of LADDER) {
+    const c = `c${k}`, p = `t${k}`;
+    rows.push({
+      uaInsCode: '9', lval30_UA: 'اهرم', pDrCotVal_UA: SPOT, pClosing_UA: SPOT, priceYesterday_UA: SPOT,
+      insCode_C: c, lVal18AFC_C: `ضهرم${k}`, insCode_P: p, lVal18AFC_P: `طهرم${k}`,
+      strikePrice: k * 1000, contractSize: 1000, remainedDay: 59, endDate: END,
+      pMeDem_C: 900, qTitMeDem_C: 500, pMeOf_C: 950, qTitMeOf_C: 500, pDrCotVal_C: 920, pClosing_C: 920, oP_C: 300, qTotTran5J_C: 900,
+      pMeDem_P: 800, qTitMeDem_P: 500, pMeOf_P: 850, qTitMeOf_P: 500, pDrCotVal_P: 820, pClosing_P: 820, oP_P: 300, qTotTran5J_P: 900,
+    });
+    if (PRICED.call.includes(k)) series[c] = [px];
+    if (PRICED.put.includes(k)) series[p] = [px];
+  }
+  // شمار واقعیِ استرانگلِ قابل بک‌تست: پوتِ پایین‌تر، کالِ بالاتر، هر دو قیمت‌دار.
+  let buildable = 0;
+  for (const p of PRICED.put) for (const c of PRICED.call) if (c > p) buildable += 1;
+
+  const ua = buildChain(rows, defaults()).get('9');
+  const run = (cap) => generateHistoricalCombos({
+    def: byId('short-strangle'), ua, seriesByIns: series, startDate: ENTRY, entryBasis: 'CLOSE',
+    settings: { ...defaults(), maxRows: cap, maxCombosPerExpiry: cap },
+  });
+
+  check('نردبان ۱۳تایی است ولی فقط ۴۲ استرانگلِ قیمت‌دار دارد',
+    buildable === 42 && LADDER.length === 13, `${buildable} ترکیب`);
+
+  // سقفی که از شمارِ قابل‌بک‌تست بزرگ‌تر است، نباید هیچ‌چیز را ببُرد.
+  const roomy = run(120);
+  check('سقفِ ۱۲۰ روی ۴۲ ترکیبِ قیمت‌دار، هیچ‌چیز را نمی‌بُرد',
+    roomy.combos.length === buildable && roomy.capped === false,
+    `${roomy.combos.length} از ${buildable} · سقف‌خورده ${roomy.capped}`);
+  check('و پنجره هم دست نمی‌زند — این همان اشتباهِ ترتیب بود',
+    roomy.outOfWindow === 0, `${roomy.outOfWindow} قیمت اعمال`);
+  // برای استرانگل هر ۱۳ قیمت اعمال زنده‌اند: یا کالش قیمت دارد یا پوتش.
+  // پس هیچ‌کدام حذف نمی‌شوند — و این درست است، نه یک نقص.
+  check('استرانگل هر ۱۳ قیمت اعمال را زنده می‌بیند، چون هر کدام یک سمتِ قیمت‌دار دارد',
+    roomy.noPriceStrikes === 0, `${roomy.noPriceStrikes} قیمت اعمال بی‌قیمت`);
+
+  // و وقتی سقف واقعاً کوچک‌تر است، بُرش می‌خورد ولی گزارش می‌شود.
+  const tight = run(20);
+  check('سقفِ کوچک‌تر از شمارِ قابل‌بک‌تست، می‌بُرد و «سقف‌خورده» می‌شود',
+    tight.combos.length === 20 && tight.capped === true,
+    `${tight.combos.length} ترکیب`);
+
+  // ── همان اشکال، در دو پای کال ────────────────────────────────────────
+  //
+  // استراتژیِ فقط-کال نباید قیمت اعمالی را زنده نگه دارد که تنها پوتش
+  // قیمت دارد. آزمونِ «قیمت‌دار بودن» روی نوعِ خودِ استراتژی است.
+  const bull = generateHistoricalCombos({
+    def: byId('bull-call-spread'), ua, seriesByIns: series, startDate: ENTRY, entryBasis: 'CLOSE',
+    settings: { ...defaults(), maxRows: 400, maxCombosPerExpiry: 400 },
+  });
+  const callOnly = (PRICED.call.length * (PRICED.call.length - 1)) / 2;
+  check('اسپرد کال فقط از قیمت‌های اعمالِ کالِ قیمت‌دار ساخته می‌شود',
+    bull.combos.length === callOnly, `${bull.combos.length} به‌جای ${callOnly}`);
+  check('و قیمت اعمالی که فقط پوتش قیمت دارد، برای این استراتژی بی‌قیمت است',
+    bull.noPriceStrikes === LADDER.length - PRICED.call.length,
+    `${bull.noPriceStrikes} از ${LADDER.length - PRICED.call.length}`);
+
+  // ── همان قاعده در مسیر زنده ─────────────────────────────────────────
+  //
+  // آنجا هم «بی‌مظنه» جای «بی‌قیمت ورود» را دارد و همان‌طور بعد از پنجره
+  // آزموده می‌شود. سقفِ خروجی ۳۰ است و C(۱۳,۲)=۷۸ از آن بزرگ‌تر — اگر
+  // پنجره سقفِ خروجی را بگیرد، نردبان را به ۸ می‌بُرد.
+  const liveChain = buildChain(rows.map((row) => (PRICED.call.includes(row.strikePrice / 1000)
+    ? row
+    : { ...row, pMeDem_C: 0, pMeOf_C: 0, pDrCotVal_C: 0 })), defaults());
+  const liveSettings = {
+    ...defaults(), maxRows: 30, maxCombosPerExpiry: 30, greeksInScan: false,
+    minBidQty: 0, minOpenInt: 0, minLegVol: 0, minLegValue: 0, minUaLiquidity: 0,
+  };
+  const live = scanFn({ def: byId('short-strangle'), chain: liveChain, uaKeys: ['9'], settings: liveSettings });
+  check('مسیر زنده هم پیش از آزمونِ مظنه نردبان را نمی‌بُرد',
+    live.funnel.outOfWindow === 0 && comboCount(LADDER.length, 2) > liveSettings.maxRows,
+    `${live.funnel.outOfWindow} کنار · ${comboCount(LADDER.length, 2)} ترکیب ساختاری`);
+  check('و ترکیبِ بی‌مظنه شمرده می‌شود، نه اینکه بودجه را خورده باشد',
+    live.funnel.noQuote > 0, `${live.funnel.noQuote} بی‌مظنه`);
 }
 
 
@@ -259,6 +362,41 @@ group('۲۱۲-ه. بی‌قیمت، ساکت و بی‌سابقه');
   check('جملهٔ سرشماری هر دو را جدا نام می‌برد',
     censusNote(cen, 2).includes('معامله نشد') && censusNote(cen, 2).includes('سابقهٔ معامله'),
     censusNote(cen, 2));
+
+  // ── نام، نه فقط عدد ────────────────────────────────────────────────
+  //
+  // «۲۷ قرارداد قیمت ورود نداشت» قابل پیگیری نیست: کاربر نمی‌داند کدام
+  // سررسید و کدام قیمت اعمال از دستش رفته و نمی‌تواند برود همان نماد را
+  // در تابلو ببیند.
+  check('هر قراردادِ کنارمانده با نام خودش فهرست می‌شود',
+    cen.excluded.length === 2, `${cen.excluded.length} ردیف`);
+  // `?? {}` عمدی است: ادعا باید **رد شود**، نه بترکد. جهشی که علت‌ها را
+  // جابه‌جا می‌کرد با استثنا گرفته می‌شد و استثنا کل دسته را از نیمه
+  // قطع می‌کند — یعنی هر ادعای بعدیِ این فایل هم بی‌صدا اجرا نمی‌شد.
+  const byReason = Object.fromEntries(cen.excluded.map((row) => [row.reason, row]));
+  const silentRow = byReason.silent ?? {};
+  const unseenRow = byReason.unseen ?? {};
+  check('و علتش درست تفکیک می‌شود',
+    !!byReason.silent && !!byReason.unseen
+    && silentRow.strike === 54000 && unseenRow.strike === 54000
+    && silentRow.kind === 'call' && unseenRow.kind === 'put',
+    cen.excluded.map((r) => `${r.kind}/${r.strike}/${r.reason}`).join('، '));
+  check('«ساکت» تاریخ نخستین معامله‌اش را دارد، «بی‌سابقه» ندارد',
+    silentRow.firstTrade === BEFORE && unseenRow.firstTrade === AFTER,
+    `${silentRow.firstTrade} · ${unseenRow.firstTrade}`);
+  check('کد نماد هم می‌آید تا بشود در تابلو دنبالش گشت',
+    cen.excluded.every((row) => typeof row.ins === 'string' && row.ins.length > 0));
+
+  // قراردادی که قیمت دارد ولی زیر دروازهٔ نقدشوندگیِ خودِ کاربر است، علت
+  // سومی دارد: خودِ کاربر می‌تواند آستانه را پایین بیاورد.
+  const gated = contractCensus({
+    ua, seriesByIns: series, startDate: ENTRY, entryBasis: 'CLOSE', settings: defaults(),
+    liquidity: { minLegVolume: 5000 },
+  });
+  check('زیر دروازهٔ نقدشوندگی، علت سوم است و با بی‌قیمتی قاطی نمی‌شود',
+    gated.illiquid === 4 && gated.priced === 4
+    && gated.excluded.filter((row) => row.reason === 'illiquid').length === 4,
+    `${gated.illiquid} زیر دروازه از ${gated.priced} قیمت‌دار`);
 
   // سری یک‌سمته
   const half = buildChain([{ ...mk(46), insCode_P: '', lVal18AFC_P: '' }, mk(50)], defaults()).get('9');
@@ -310,4 +448,13 @@ group('۲۱۲-و. سرشماری در خروجی اکسل');
     tab.includes("$('pb-census')") && tab.includes('censusNote(census, 2)'));
   check('و به دفترچهٔ اکسل هم پاس داده می‌شود',
     /basket, generated, census, dateLabel/.test(tab));
+
+  check('برگ «قرارداد بی‌قیمت» نامِ تک‌تکشان را می‌برد',
+    src.includes("sheet('قرارداد بی‌قیمت'") && src.includes('EXCLUDE_REASONS'));
+  check('و سه علت، سه متن جدا دارند — نه یک برچسبِ سرجمع',
+    src.includes('تا آن روز هیچ معامله‌ای نداشت')
+    && src.includes('آن روز معامله نشد')
+    && src.includes('زیر دروازهٔ نقدشوندگیِ خودت'));
+  check('ستون نقدشوندگی می‌گوید زیرمجموعهٔ قیمت‌دارهاست، نه سطل چهارم',
+    src.includes('از دارای قیمت: زیر دروازهٔ نقدشوندگی'));
 }

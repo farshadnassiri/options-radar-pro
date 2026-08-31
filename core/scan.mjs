@@ -19,7 +19,7 @@ import {
   underlyingQuote, legContractSize, comboContractSize,
   blockedExpirySet, expiryBlocked,
 } from './chain.mjs';
-import { selectStrikes, fairShare } from './strike-window.mjs';
+import { selectStrikes, fairShare, enumBudget } from './strike-window.mjs';
 
 // سررسیدهای پرشده جای اصلی‌شان `core/chain.mjs` است، چون فقط مسیر زنده
 // نیست که به آن نیاز دارد — تحلیل تاریخی و بک‌تست هم باید همان سررسید را
@@ -129,8 +129,13 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
     const near = exSet[0];
     // قیمت اعمال باید در همه سررسیدهای این ترکیب موجود باشد
     const shared = near.strikeList.filter((row) => exSet.every((ex) => ex.strikes.has(row.strike)));
+    // سقفِ پنجره بودجهٔ **شمارش** است، نه بودجهٔ خروجی. خروجی را
+    // `made >= share` نگه می‌دارد و آن فقط ترکیبِ پذیرفته‌شده را می‌شمارد؛
+    // اگر پنجره هم همان عدد را بگیرد، پیش از آزمونِ مظنه می‌بُرد و بودجه
+    // صرفِ ترکیب‌هایی می‌شود که بی‌مظنه‌اند و اصلاً برنمی‌گردند.
+    const budget = enumBudget(share);
     const pick = selectStrikes({
-      strikes: shared.map((row) => row.strike), spot, legs: def.strikes, cap: share,
+      strikes: shared.map((row) => row.strike), spot, legs: def.strikes, cap: budget,
       mode: s.comboWindowMode, pct: s.comboWindowPct, steps: s.comboWindowSteps,
     });
     funnel.outOfWindow += pick.dropped.length;
@@ -140,7 +145,7 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
     if (usable.length < def.strikes) continue;
 
     const ks = usable.map((r) => r.strike);
-    const sets = def.strikes === 1 ? ks.map((k) => [k]) : combos(ks, def.strikes, share * 4);
+    const sets = def.strikes === 1 ? ks.map((k) => [k]) : combos(ks, def.strikes, budget);
 
     let made = 0;
     for (const set of sets) {

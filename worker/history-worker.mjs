@@ -192,7 +192,8 @@ self.onmessage = (event) => {
           strategyId: def.id, strategyName: def.name,
           built: generated.built, candidates: generated.combos.length, accepted,
           noEntry: generated.noEntry, noLiquidity: generated.noLiquidity,
-          outOfWindow: generated.outOfWindow, capped: generated.capped,
+          outOfWindow: generated.outOfWindow, noPriceStrikes: generated.noPriceStrikes,
+          capped: generated.capped,
         });
         self.postMessage({
           type: 'portfolio-progress', id: m.id,
