@@ -1,6 +1,6 @@
 // وارد کردن فهرست تاریخی قراردادها از فایل کاربر.
 //
-//   node tools/roster-import.mjs <فایل.xlsx|csv> [--sheet نام] [--merge]
+//   node tools/roster-import.mjs <فایل.xlsx|csv> [--sheet نام] [--merge] [--repair]
 //
 // چرا هست: اسکنِ دو سال از بالادست چند ده دقیقه طول می‌کشد و به شبکهٔ باز
 // نیاز دارد. اگر کاربر همان فهرست را از قبل دارد، در چند ثانیه وارد
@@ -8,6 +8,11 @@
 //
 // `--merge` روی دفترِ موجود می‌نشیند و عمرها را پهن می‌کند؛ بدون آن، دفتر
 // از نو نوشته می‌شود.
+//
+// `--repair` پیش از ادغام، کدهای گردشدهٔ دفترِ موجود را با کدِ درستِ همین
+// فایل عوض می‌کند. لازم شد چون دفترهایی که پیش از `core/json-safe.mjs`
+// ساخته شده‌اند کدِ هفده‌رقمیِ گردشده دارند، و ادغامِ ساده درستش نمی‌کند:
+// کلیدِ ادغام خودِ کد است، پس کدِ درست و کدِ گردشده دو ردیف جدا می‌مانند.
 //
 // ═══ چرا گزارشِ «چه چیزی نیامد» چاپ می‌شود ═══
 //
@@ -19,7 +24,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readXlsx } from '../core/xlsx-read.mjs';
-import { makeRosterFile, mergeRoster, rosterCoverage, rosterIntake } from '../core/option-roster.mjs';
+import {
+  makeRosterFile, mergeRoster, repairRoster, rosterCoverage, rosterIntake, suspectIds,
+} from '../core/option-roster.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const ROSTER_FILE = path.join(ROOT, 'data', 'option-roster.json');
@@ -70,12 +77,13 @@ function main() {
   const args = process.argv.slice(2);
   const file = args.find((a) => !a.startsWith('--'));
   if (!file) {
-    console.error('کاربرد: node tools/roster-import.mjs <فایل.xlsx|csv> [--sheet نام] [--merge]');
+    console.error('کاربرد: node tools/roster-import.mjs <فایل.xlsx|csv> [--sheet نام] [--merge] [--repair]');
     process.exit(1);
   }
   const sheetAt = args.indexOf('--sheet');
   const sheet = sheetAt >= 0 ? args[sheetAt + 1] : undefined;
   const merge = args.includes('--merge');
+  const repair = args.includes('--repair');
 
   const source = readSource(file, sheet);
   console.log(`خوانده شد: ${path.basename(file)}${source.sheet ? ` › ${source.sheet}` : ''} — ${fa(source.rows.length)} ردیف`);
@@ -93,11 +101,25 @@ function main() {
   }
 
   let rows = intake.rows;
-  if (merge && fs.existsSync(ROSTER_FILE)) {
+  if ((merge || repair) && fs.existsSync(ROSTER_FILE)) {
     const old = JSON.parse(fs.readFileSync(ROSTER_FILE, 'utf8'));
-    const before = Array.isArray(old?.rows) ? old.rows.length : 0;
-    rows = mergeRoster(old?.rows || [], rows);
-    console.log(`  ادغام با دفتر موجود: ${fa(before)} + ${fa(intake.kept)} → ${fa(rows.length)}`);
+    let oldRows = Array.isArray(old?.rows) ? old.rows : [];
+    const before = oldRows.length;
+    if (repair) {
+      const suspects = suspectIds(oldRows);
+      const done = repairRoster(oldRows, intake.rows);
+      oldRows = done.rows;
+      console.log(`  ترمیم کد: ${fa(done.fixed)} کدِ گردشده با کدِ درستِ این فایل عوض شد`);
+      if (suspects) {
+        console.log(`  ${fa(suspects)} کدِ دیگر هم مشکوک‌اند (بزرگ‌تر از مرز امن و بی‌تغییر از Number)؛`);
+        console.log('  ولی این فایل کدِ درستشان را ندارد، پس دست نخوردند.');
+      }
+    }
+    if (!merge) { rows = oldRows; console.log('  فقط ترمیم — هیچ ردیف تازه‌ای اضافه نشد.'); }
+    else {
+      rows = mergeRoster(oldRows, rows);
+      console.log(`  ادغام با دفتر موجود: ${fa(before)} + ${fa(intake.kept)} → ${fa(rows.length)}`);
+    }
   }
 
   const coverage = rosterCoverage(rows);
