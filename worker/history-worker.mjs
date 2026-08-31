@@ -1,7 +1,7 @@
 // محاسبات سنگین تحلیل تاریخی بیرون از نخ رابط کاربری.
 
 import { CATALOG, GROUPS, byId } from '../strategies/catalog.mjs';
-import { generateHistoricalCombos, historyPrice, normalizeHistoryDate, replayHistory, rollingEntryMatrix } from '../core/history.mjs';
+import { contractCensus, generateHistoricalCombos, historyPrice, normalizeHistoryDate, replayHistory, rollingEntryMatrix } from '../core/history.mjs';
 import { summarizePortfolio } from '../core/portfolio.mjs';
 import { buildPnlMatrix } from '../core/portfolio-matrix.mjs';
 import { applyIntradayMark, marksAt } from '../core/intraday-mark.mjs';
@@ -191,7 +191,8 @@ self.onmessage = (event) => {
         generatedByStrategy.push({
           strategyId: def.id, strategyName: def.name,
           built: generated.built, candidates: generated.combos.length, accepted,
-          noEntry: generated.noEntry, noLiquidity: generated.noLiquidity, capped: generated.capped,
+          noEntry: generated.noEntry, noLiquidity: generated.noLiquidity,
+          outOfWindow: generated.outOfWindow, capped: generated.capped,
         });
         self.postMessage({
           type: 'portfolio-progress', id: m.id,
@@ -199,6 +200,13 @@ self.onmessage = (event) => {
           strategyName: def.name, results: rows.length,
         });
       }
+      // سرشماری قرارداد، یک بار برای کل جاروب. عددِ ترکیب بدون این عدد
+      // قابل قضاوت نیست: «شش استرانگل» می‌تواند نتیجهٔ درستِ پانزده
+      // قرارداد باشد یا نتیجهٔ غلطِ دفتری که هفتاد قرارداد داشت و نداد.
+      const census = contractCensus({
+        ua: m.ua, seriesByIns: m.seriesByIns, startDate: m.startDate,
+        entryBasis: m.entryBasis, settings, liquidity: m.liquidity,
+      });
       const report = summarizePortfolio(rows);
       // ماتریس پیش از پاک‌کردن فهرست روزانه ساخته می‌شود. از این به بعد
       // رابط با همین ماتریس کار می‌کند: مبنا، آماره، بازه و وزن، همه
@@ -218,7 +226,7 @@ self.onmessage = (event) => {
       for (const row of rows) delete row.path.daily;
       self.postMessage({
         type: 'portfolio', id: m.id, rows,
-        report, generatedByStrategy,
+        report, generatedByStrategy, census,
         matrix: { dates: matrix.dates, pnl: matrix.pnl, rowCount: matrix.rowCount, baseSeries },
         excluded: { invalidAtEnd, replayErrors },
       }, [matrix.pnl.buffer]);

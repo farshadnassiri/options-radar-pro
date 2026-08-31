@@ -15,6 +15,7 @@
 
 import { downloadXlsx, sheet, sheetParts } from './xlsx.mjs';
 import { METRICS } from '../core/portfolio-report.mjs';
+import { WINDOW_MODES, windowMode } from '../core/strike-window.mjs';
 
 export const PORTFOLIO_BACKTEST_EXPORT_VERSION = 1;
 
@@ -25,6 +26,12 @@ const finite = (value) => {
 };
 
 /** عدد خام برای اکسل؛ نامعلوم، خانهٔ خالی می‌شود نه صفر. */
+/** برچسب فارسیِ قاعدهٔ پنجره — همان متنی که در تنظیمات دیده می‌شود. */
+const windowModeLabel = (value) => {
+  const id = windowMode(value);
+  return (WINDOW_MODES.find(([key]) => key === id) || [id, id])[1];
+};
+
 const cell = (value) => {
   const out = finite(value);
   return out === null ? '' : out;
@@ -61,6 +68,7 @@ const pearson = (a = [], b = []) => {
  */
 export function portfolioBacktestWorkbook(analysis, {
   context = {}, basket = null, dateLabel = (value) => String(value ?? ''), generated = [],
+  census = null,
 } = {}) {
   if (!analysis) return [];
   const labels = (analysis.dates || []).map(dateLabel);
@@ -90,6 +98,16 @@ export function portfolioBacktestWorkbook(analysis, {
     ['خانواده', cell(analysis.groups?.length)],
     ['بازده خودِ نماد پایه (درصد)', round(analysis.baseFinal, 2)],
     ['ترکیبِ زیانِ بیش از مبنا', cell(analysis.beyondBasis)],
+    ['—', ''],
+    // بی این پنج سطر، فایل نمی‌گوید با چند قرارداد ساخته شده. دو خروجیِ
+    // کاربر در ۱۴۰۵/۰۶ هر دو «شش استرانگل فروش» داشتند و هیچ‌کدام نگفتند
+    // که یکی از پانزده قرارداد آمده بود و دیگری از نُه‌تا — پس هیچ‌کدام
+    // بدون اجرای دوباره قابل قضاوت نبودند.
+    ['قرارداد زنده در روز ورود', cell(census?.alive)],
+    ['سری کامل (کال و پوت)', cell(census?.pairs)],
+    ['سری فقط یک‌سمته', cell(census?.incomplete)],
+    ['قرارداد دارای قیمت ورود', cell(census?.priced)],
+    ['قاعده پنجره قیمت اعمال', windowModeLabel(census?.windowMode)],
   ];
 
   // ── ۲. سنجه‌ها ───────────────────────────────────────────────────────
@@ -214,14 +232,38 @@ export function portfolioBacktestWorkbook(analysis, {
     ['ترکیبِ زیانِ بیش از مبنا', cell(analysis.beyondBasis), 'عدد بریده نشده؛ در فروش برهنه زیان سقف ندارد ولی مخرج دارد'],
     ['استراتژی سقف‌خورده', cell((generated || []).filter((row) => row.capped).length), 'شمار ترکیب‌هایشان با سقف کاربر محدود شده'],
     ['استراتژی بدون ترکیب معتبر', cell((generated || []).filter((row) => !row.accepted).length), 'در این بازه هیچ ترکیبی از آن‌ها داده کامل نداشت'],
+    ['سری فقط یک‌سمته', cell(census?.incomplete), 'فقط کال دارد یا فقط پوت؛ هیچ استراتژی دوسمته‌ای از آن ساخته نمی‌شود و هیچ سمتی هم برایش ساختگی تولید نشده'],
+    ['قرارداد بی‌قیمت در روز ورود', cell((census?.silent ?? 0) + (census?.unseen ?? 0)), 'آن روز معامله نشد یا تا آن روز هیچ سابقه‌ای نداشت؛ بدون قیمت ورود، ترکیب ساخته نمی‌شود'],
     ['روزِ بی‌داده در مسیرها', cell((analysis.combos || []).reduce((sum, combo) => sum + (combo.series?.missing ?? 0), 0)),
       'خانهٔ خالی مانده؛ با قیمت روز قبل پر نشده'],
     ['—', '', ''],
     ['قاعدهٔ خانهٔ خالی', '', 'خانهٔ خالی یعنی داده نبود. صفر یعنی سر به سر. اکسل صفر را در میانگین می‌شمارد و خالی را نمی‌شمارد.'],
   ];
 
+  // ── برگ «قراردادها» ─────────────────────────────────────────────────
+  //
+  // یک سطر برای هر سررسیدِ زنده. ستون «یک‌سمته» همان چیزی است که استراتژی
+  // دوسمته را بی‌صدا ناپدید می‌کرد؛ حالا شمرده و دیده می‌شود.
+  const censusRows = (census?.expiries || []).map((ex) => [
+    dateLabel(ex.expiry), cell(ex.days),
+    cell(ex.call), cell(ex.put), cell(ex.strikes),
+    cell(ex.paired), cell(ex.incomplete),
+    cell(ex.priced), cell(ex.silent), cell(ex.unseen), cell(ex.illiquid),
+    (ex.ladder || []).join('، '),
+  ]);
+  const windowRows = (census?.windows || []).map((win) => [
+    cell(win.legs), cell(win.kept), cell(win.dropped),
+    win.dropped ? (win.forced ? 'سقف ترکیب مجبور کرد' : 'بیرون پنجرهٔ انتخابی') : 'چیزی کنار نرفت',
+  ]);
+
   return [
     sheet('سرشناسه', ['قلم', 'مقدار'], header, [200, 320]),
+    sheet('قراردادها', ['سررسید', 'روز تا سررسید', 'اختیار خرید', 'اختیار فروش', 'قیمت اعمال',
+      'سری کامل', 'سری یک‌سمته', 'دارای قیمت ورود', 'آن روز معامله نشد', 'بی‌سابقه تا آن روز',
+      'زیر دروازهٔ نقدشوندگی', 'نردبان قیمت اعمال'],
+      censusRows, [110, 90, 90, 90, 90, 80, 90, 110, 120, 130, 130, 420]),
+    sheet('پنجره قیمت اعمال', ['شمار پای استراتژی', 'قیمت اعمال واردشده', 'کنارگذاشته', 'چرا'],
+      windowRows, [140, 140, 100, 220]),
     sheet('سرخط‌ها', ['سرخط', 'استراتژی', 'سنجه', 'مقدار', 'یعنی چه'], highlightRows, [130, 200, 150, 90, 420]),
     ...sheetParts('سنجه‌ها', [
       'رتبه', 'استراتژی', 'خانواده', 'اجراپذیری', 'ترکیب', 'سودده', 'زیان‌ده', 'نمره', 'پوشش نمره (درصد)',
@@ -243,6 +285,8 @@ export function portfolioBacktestWorkbook(analysis, {
     sheet('محدودیت داده', ['قلم', 'شمار', 'یعنی چه'], limitRows, [240, 90, 520]),
     sheet('برگ‌ها', ['برگ', 'چه دارد'], [
       ['سرشناسه', 'پارامترهای اجرا و عدسی؛ بدون این، هیچ درصدی در بقیهٔ برگ‌ها معنا ندارد'],
+      ['قراردادها', 'سرشماری روز ورود: هر سررسید با شمار کال و پوت، سری یک‌سمته و نردبان قیمت اعمال'],
+      ['پنجره قیمت اعمال', 'پنجره برای یک تا چهار پا چه چیزی را وارد کرد و چه چیزی را کنار گذاشت'],
       ['سرخط‌ها', 'ده سؤال تک‌جمله‌ای با جواب و سنجه‌اش'],
       ['سنجه‌ها', 'هر استراتژی با هر چهارده سنجه و نمرهٔ ترکیبی'],
       ['خانواده‌ها', 'تجمیع خانواده‌ای با سهم درصدی'],

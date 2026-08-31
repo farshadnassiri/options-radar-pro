@@ -3396,3 +3396,18 @@ td.gain, dd.gain { color: var(--gain); }
   .pb-skin #pb-tabs { border-radius: var(--radius-md); }
   .pb-skin .pb-hero { padding-inline-start: var(--space-4); }
 }
+
+/* سرشماری قرارداد — جمله‌ای که پیش از هر عدد ترکیبی خوانده می‌شود.
+   بالای پنل قرار دارد چون «شش استرانگل» بدون «از چند قرارداد» قابل
+   قضاوت نیست، و کاربر نباید برای دیدنش تا برگ آخر اکسل برود. */
+.pb-skin .pb-census {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: var(--pb-hair);
+  border-radius: var(--radius-md);
+  background: var(--pb-tile);
+  color: var(--fg);
+  font-size: var(--fs-xs);
+  line-height: 1.95;
+}
+.pb-skin .pb-census:empty { display: none; }

@@ -85,11 +85,21 @@ group('۱۲. زنجیره و ترکیب‌سازی');
   check('با روشن کردن نمایش غیرقابل اجرا، ردیف برمی‌گردد و برچسب می‌خورد',
     shown.rows.length > 0 && shown.rows.every((r) => !r.executable), `${shown.rows.length} ردیف`);
 
-  // پنجره قیمت اعمال، مهار اصلی است
-  const wide = scanFn({ def: byId('iron-condor'), chain, uaKeys: ['1'], settings: { ...s2, comboWindowPct: 30 } });
-  const narrow = scanFn({ def: byId('iron-condor'), chain, uaKeys: ['1'], settings: { ...s2, comboWindowPct: 6 } });
+  // پنجره قیمت اعمال در حالت «درصد ثابت» — حالتی که تا پیش از پنجرهٔ
+  // خودکار پیش‌فرض بود و برای بازتولید نتیجهٔ قدیمی نگه داشته شده.
+  const pctMode = { ...s2, comboWindowMode: 'pct' };
+  const wide = scanFn({ def: byId('iron-condor'), chain, uaKeys: ['1'], settings: { ...pctMode, comboWindowPct: 30 } });
+  const narrow = scanFn({ def: byId('iron-condor'), chain, uaKeys: ['1'], settings: { ...pctMode, comboWindowPct: 6 } });
   check('پنجره باریک‌تر، ترکیب کمتر', narrow.funnel.built < wide.funnel.built,
     `${wide.funnel.built} → ${narrow.funnel.built}`);
+  check('آنچه پنجره کنار می‌گذارد شمرده می‌شود، نه اینکه ساکت بیفتد',
+    narrow.funnel.outOfWindow > wide.funnel.outOfWindow,
+    `${wide.funnel.outOfWindow} → ${narrow.funnel.outOfWindow}`);
+  // و پیش‌فرض تازه: درصد دیگر بی‌صدا نمی‌بُرد. همان تنظیم با حالت خودکار
+  // باید دست‌کم به اندازهٔ پهن‌ترین درصد ترکیب بسازد.
+  const auto = scanFn({ def: byId('iron-condor'), chain, uaKeys: ['1'], settings: { ...s2, comboWindowPct: 6 } });
+  check('حالت خودکار به عددِ درصد کاری ندارد و کمتر از پنجرهٔ پهن نمی‌سازد',
+    auto.funnel.built >= wide.funnel.built, `خودکار ${auto.funnel.built} · درصدِ ۳۰ ${wide.funnel.built}`);
   check('سقف ترکیب هر سررسید اعمال می‌شود',
     scanFn({ def: byId('iron-condor'), chain, uaKeys: ['1'], settings: { ...s2, maxCombosPerExpiry: 2 } }).funnel.built <= 6);
 

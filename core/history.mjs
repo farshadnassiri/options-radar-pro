@@ -11,6 +11,7 @@ import { strategyMargin, capitalBase } from './margin.mjs';
 import { notionalOf } from './portfolio-basis.mjs';
 import { marginParamsOf } from './settings.mjs';
 import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
+import { selectStrikes, fairShare, windowMode } from './strike-window.mjs';
 import {
   legContractSize, comboContractSize, blockedExpirySet, withoutBlockedExpiries,
 } from './chain.mjs';
@@ -168,6 +169,149 @@ export function flattenActiveContracts(ua, blockedExpiries = '') {
     }
   }
   return out.sort((a, b) => a.expiry - b.expiry || a.strike - b.strike || a.kind.localeCompare(b.kind));
+}
+
+/**
+ * سرشماری قرارداد — پیش از هر ترکیبی.
+ *
+ * ═══ چرا لازم شد ═══
+ *
+ * کاربر دو خروجی گرفت که هر دو برای «استرانگل فروش» شش ترکیب داشتند و
+ * هر دو غلط بودند. غلط بودنشان از خودِ فایل پیدا نبود: فایل می‌گفت «شش
+ * ترکیب»، نمی‌گفت «چون فقط پانزده قرارداد وارد شد». آن پانزده‌تا از
+ * دفترِ آن‌روزِ ناقص می‌آمد.
+ *
+ * پس عددِ ترکیب بدون عددِ قرارداد قابل قضاوت نیست. این تابع عددِ قرارداد
+ * را می‌سازد و رابط و اکسل هر دو نشانش می‌دهند — تا فایل بعدی خودش
+ * بگوید سالم است یا نه.
+ *
+ * ═══ چه چیزی گفته می‌شود و با چه مبنایی ═══
+ *
+ *   زنده           سررسیدش بعد از روز ورود است. از تاریخ سررسید، قطعی.
+ *   جفت ناقص       سری‌ای که فقط کال دارد یا فقط پوت. هیچ سمتی ساخته
+ *                  نمی‌شود؛ فقط شمرده می‌شود.
+ *   قیمت‌دار       روز ورود قیمت دارد و می‌شود واردش شد.
+ *   بی‌سابقه       نخستین ردیفِ سابقه‌اش بعد از روز ورود است — یعنی آن روز
+ *                  هنوز نبوده. **مبنا سابقهٔ معامله است، نه تاریخ رسمی
+ *                  انتشار**؛ قراردادی که منتشر شده و هرگز معامله نشده،
+ *                  اینجا «بی‌سابقه» می‌افتد و این حدس نیست، همان چیزی است
+ *                  که داده می‌گوید.
+ *   ساکت           سابقه‌اش پیش از روز ورود شروع شده ولی همان روز قیمت
+ *                  ندارد. وجود داشته، معامله نشده.
+ *
+ * پنجرهٔ قیمت اعمال به شمار پای استراتژی بند است، پس یک عدد ندارد. برای
+ * یک تا چهار پا جداگانه حساب می‌شود تا کاربر ببیند پنجره کجا و چقدر
+ * می‌بُرد.
+ */
+export function contractCensus({ ua, seriesByIns, startDate, entryBasis = 'CLOSE', settings = {}, liquidity = {} } = {}) {
+  const start = normalizeHistoryDate(startDate);
+  const contracts = flattenActiveContracts(ua, settings.blockedExpiries);
+  const indexes = new Map(Object.entries(seriesByIns || {}).map(([ins, rows]) => [String(ins), indexHistory(rows)]));
+  const firstSeen = new Map();
+  for (const [ins, rows] of Object.entries(seriesByIns || {})) {
+    const dates = (rows || []).map((row) => normalizeHistoryDate(row.date)).filter((d) => d > 0);
+    if (dates.length) firstSeen.set(String(ins), Math.min(...dates));
+  }
+  const spot = historyPrice(indexes.get(String(ua?.ins))?.get(start), 'CLOSE');
+
+  const tally = {
+    date: start, spot: Number.isFinite(spot) && spot > 0 ? spot : null,
+    total: contracts.length, call: 0, put: 0,
+    alive: 0, expired: 0,
+    priced: 0, unseen: 0, silent: 0, illiquid: 0,
+    pairs: 0, incomplete: 0,
+    expiries: [], windows: [],
+  };
+
+  const byExpiry = new Map();
+  for (const c of contracts) {
+    if (c.kind === 'call') tally.call += 1; else tally.put += 1;
+    const alive = c.expiry > start;
+    if (!alive) { tally.expired += 1; continue; }
+    tally.alive += 1;
+    let bucket = byExpiry.get(c.expiry);
+    if (!bucket) {
+      bucket = { expiry: c.expiry, days: daysBetween(start, c.expiry), call: 0, put: 0, strikes: new Set(), sides: new Map(), priced: 0, unseen: 0, silent: 0, illiquid: 0 };
+      byExpiry.set(c.expiry, bucket);
+    }
+    if (c.kind === 'call') bucket.call += 1; else bucket.put += 1;
+    bucket.strikes.add(c.strike);
+    const sides = bucket.sides.get(c.strike) || { call: false, put: false };
+    sides[c.kind] = true;
+    bucket.sides.set(c.strike, sides);
+
+    const row = indexes.get(String(c.ins))?.get(start);
+    const price = historyPrice(row, entryBasis);
+    if (Number.isFinite(price)) {
+      tally.priced += 1; bucket.priced += 1;
+      if (!passesLiquidity(row, liquidity.minLegVolume, liquidity.minLegValue)) {
+        tally.illiquid += 1; bucket.illiquid += 1;
+      }
+    } else if (!(num(firstSeen.get(String(c.ins)), 0) > 0) || num(firstSeen.get(String(c.ins)), 0) > start) {
+      tally.unseen += 1; bucket.unseen += 1;
+    } else {
+      tally.silent += 1; bucket.silent += 1;
+    }
+  }
+
+  for (const bucket of [...byExpiry.values()].sort((a, b) => a.expiry - b.expiry)) {
+    let paired = 0, incomplete = 0;
+    for (const sides of bucket.sides.values()) {
+      if (sides.call && sides.put) paired += 1; else incomplete += 1;
+    }
+    tally.pairs += paired; tally.incomplete += incomplete;
+    const ladder = [...bucket.strikes].sort((a, b) => a - b);
+    tally.expiries.push({
+      expiry: bucket.expiry, days: bucket.days,
+      call: bucket.call, put: bucket.put, strikes: ladder.length,
+      paired, incomplete,
+      priced: bucket.priced, unseen: bucket.unseen, silent: bucket.silent, illiquid: bucket.illiquid,
+      ladder,
+    });
+  }
+
+  // اثر پنجره، به تفکیک شمار پا. سقفِ هر سررسید همان سهم برابری است که
+  // ترکیب‌ساز واقعاً استفاده می‌کند، وگرنه این عدد با آن نمی‌خواند.
+  const share = fairShare(settings.maxRows, Math.max(1, tally.expiries.length), settings.maxCombosPerExpiry);
+  for (const legs of [1, 2, 3, 4]) {
+    let kept = 0, dropped = 0, forced = false;
+    for (const ex of tally.expiries) {
+      const pick = selectStrikes({
+        strikes: ex.ladder, spot, legs, cap: share,
+        mode: settings.comboWindowMode, pct: settings.comboWindowPct, steps: settings.comboWindowSteps,
+      });
+      kept += pick.picked.length; dropped += pick.dropped.length;
+      if (pick.forced) forced = true;
+    }
+    tally.windows.push({ legs, kept, dropped, forced });
+  }
+  tally.windowMode = windowMode(settings.comboWindowMode);
+  return tally;
+}
+
+/**
+ * جملهٔ سرشماری — همان که بالای جدول و در سرشناسهٔ اکسل می‌نشیند.
+ *
+ * عددها با جداکنندهٔ جهت (U+2068/U+2069) بسته می‌شوند. بی آن، دو عددِ
+ * پشت‌سرهم در متنِ راست‌به‌چپ به هم می‌چسبند و «۵۰٪ · ۱ روز» به شکل
+ * «۱۰ روز» خوانده می‌شود — اشتباهی که یک بار در نوار بازه رخ داد.
+ */
+export function censusNote(census, legs = 2) {
+  if (!census || !census.total) return 'برای این تاریخ هیچ قراردادی در دفتر نبود.';
+  const iso = (n) => `\u2068${Number(n).toLocaleString('fa-IR')}\u2069`;
+  const parts = [
+    `${iso(census.alive)} قرارداد در ${historyDateLabel(census.date)} زنده بوده — ${iso(census.pairs)} سری کامل`,
+  ];
+  if (census.incomplete) parts.push(`${iso(census.incomplete)} سری فقط یک سمت دارد و هیچ استراتژی دوسمته‌ای از آن ساخته نمی‌شود`);
+  if (census.silent) parts.push(`${iso(census.silent)} قرارداد آن روز معامله نشد، پس قیمت ورود ندارد`);
+  if (census.unseen) parts.push(`${iso(census.unseen)} قرارداد تا آن روز هیچ سابقهٔ معامله‌ای نداشت`);
+  const win = (census.windows || []).find((w) => w.legs === legs);
+  if (win && win.dropped) {
+    parts.push(win.forced
+      ? `${iso(win.dropped)} قیمت اعمال به‌خاطر سقف ترکیب کنار ماند، از دورترین به قیمت پایه`
+      : `${iso(win.dropped)} قیمت اعمال بیرون پنجرهٔ انتخابی بود`);
+  }
+  return `${parts.join('؛ ')}.`;
 }
 
 const reverseSide = (side) => (side === 'buy' ? 'sell' : 'buy');
@@ -492,9 +636,9 @@ export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entr
   const indexes = new Map(Object.entries(seriesByIns || {}).map(([ins, rows]) => [String(ins), indexHistory(rows)]));
   const baseIndex = indexes.get(String(ua.ins)) || new Map();
   const spot = historyPrice(baseIndex.get(start), 'CLOSE');
-  if (!(spot > 0)) return { combos: [], built: 0, noEntry: 0, noLiquidity: 0, capped: false };
+  if (!(spot > 0)) return { combos: [], built: 0, noEntry: 0, noLiquidity: 0, outOfWindow: 0, capped: false };
   if (!passesLiquidity(baseIndex.get(start), liquidity.minBaseVolume, liquidity.minBaseValue)) {
-    return { combos: [], built: 0, noEntry: 0, noLiquidity: 1, capped: false };
+    return { combos: [], built: 0, noEntry: 0, noLiquidity: 1, outOfWindow: 0, capped: false };
   }
   const expiries = [...new Set(contracts.map((c) => c.expiry))]
     .filter((expiry) => expiry > start)
@@ -509,19 +653,31 @@ export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entr
     : expiries.map((e) => [e]);
   const byKey = new Map(contracts.map((c) => [`${c.expiry}|${c.kind}|${c.strike}`, c]));
   const out = [];
-  let built = 0, noEntry = 0, noLiquidity = 0, capped = false;
+  let built = 0, noEntry = 0, noLiquidity = 0, outOfWindow = 0, capped = false;
   const maxRows = Math.max(1, Math.trunc(num(settings.maxRows, 4000)));
   const maxPerExpiry = Math.max(1, Math.trunc(num(settings.maxCombosPerExpiry, 400)));
-  const windowPct = num(settings.comboWindowPct, 25) / 100;
+  // سهم برابر هر سررسید از سقف ردیف — وگرنه سررسید نزدیک همهٔ سهم را
+  // می‌خورد و سررسید دور، که در دفتر هست، هرگز ساخته نمی‌شود.
+  const share = fairShare(maxRows, expirySets.length, maxPerExpiry);
 
   for (const exSet of expirySets) {
-    const strikes = [...new Set(contracts.filter((c) => c.expiry === exSet[0]).map((c) => c.strike))]
-      .filter((k) => !filtered || (k >= spot * (1 - windowPct) && k <= spot * (1 + windowPct)))
+    const listed = [...new Set(contracts.filter((c) => c.expiry === exSet[0]).map((c) => c.strike))]
       .sort((a, b) => a - b);
-    const sets = def.strikes === 1 ? strikes.map((k) => [k]) : choose(strikes, def.strikes, maxPerExpiry * 4);
+    // پنجره فقط در نمای «غربال‌شده» اثر دارد. نمای خام باید هرچه در دفتر
+    // هست را بسازد، چون کاربر همان‌جا می‌خواهد ببیند چه بوده.
+    const pick = filtered
+      ? selectStrikes({
+        strikes: listed, spot, legs: def.strikes, cap: share,
+        mode: settings.comboWindowMode, pct: settings.comboWindowPct, steps: settings.comboWindowSteps,
+      })
+      : { picked: listed, dropped: [], forced: false };
+    outOfWindow += pick.dropped.length;
+    if (pick.forced) capped = true;
+    const strikes = pick.picked;
+    const sets = def.strikes === 1 ? strikes.map((k) => [k]) : choose(strikes, def.strikes, share * 4);
     let made = 0;
     for (const strikeSet of sets) {
-      if (made >= maxPerExpiry || out.length >= maxRows) { capped = true; break; }
+      if (made >= share || out.length >= maxRows) { capped = true; break; }
       if (filtered && def.strikes >= 3 && settings.wingsEqualWidth && !equalWidth(strikeSet)) continue;
       built += 1;
       // پاهای اختیار اول، تا اندازه پای سهم پایه از قراردادهای همین
@@ -568,7 +724,7 @@ export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entr
     }
     if (out.length >= maxRows) break;
   }
-  return { combos: out, built, noEntry, noLiquidity, capped };
+  return { combos: out, built, noEntry, noLiquidity, outOfWindow, capped };
 }
 
 /** مقایسه چهار مبنای ورود × چهار مبنای آفست در آخرین روز معتبر. */
