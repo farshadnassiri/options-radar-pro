@@ -72,8 +72,13 @@ group('۴۷. نوار سقف سررسید، وقتی زنجیره نیست');
     universe47.includes('fromWatch = watch.rows.length > 0')
     && universe47.includes('rows = firstList(await get(upstream')
     && universe47.indexOf('rows = firstList(await get(upstream') > universe47.indexOf('fromWatch = watch.rows.length > 0'));
+  // همان درسِ بالا، یک ادعا پایین‌تر: شاخهٔ بازه که وسط نشست، این پنجره
+  // را هم شکست. ادعا از فاصله به **ترتیب داخل همان نقطهٔ پایانی** رفت.
   check('نسخهٔ تاریخ‌دار فهرست، پیش از بازگشت به عکس امروز امتحان می‌شود',
-    /history\/universe[\s\S]{0,1200}readArchive\(wanted\)[\s\S]{0,600}source: 'archive'/.test(serverSrc47));
+    universe47.includes('readArchive(wanted)')
+    && universe47.includes("source: 'archive'")
+    && universe47.indexOf("source: 'archive'") > universe47.indexOf('readArchive(wanted)')
+    && universe47.indexOf('readArchive(wanted)') < universe47.indexOf("const upstream = '/Instrument/GetInstrumentOptionMarketWatch/0'"));
   check('نبودن بایگانی برای آن تاریخ، بی‌صدا به عکس امروز برنمی‌گردد',
     /wanted \? archiveNote\(\{ wanted: Number\(wanted\), found: false, firstDate \}\) : ''/.test(serverSrc47)
     && /archived: false,[\s\S]{0,200}note,/.test(serverSrc47));

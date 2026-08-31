@@ -11,6 +11,7 @@ import {
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
+import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { historyHandoffPlan, goHandoff } from '/ui/handoff.mjs';
@@ -229,6 +230,7 @@ export async function mount(root, { state }) {
     <section class="card history-controls">
       <div class="history-control-grid">
         <label for="h-base">نماد پایه<select id="h-base"><option value="">در حال دریافت…</option></select></label>
+        <div id="h-range" class="history-range-cell"></div>
         <label for="h-strategy">استراتژی<select id="h-strategy"></select></label>
         <div class="history-expiry-field" id="h-expiry-field">
           <span>سررسیدهای قابل بررسی</span>
@@ -659,22 +661,37 @@ export async function mount(root, { state }) {
     ensureHistoryWorker().postMessage({ ...message, id });
   });
 
-  async function loadUniverse() {
-    try {
-      const response = await fetch('/api/history/universe');
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || 'فهرست دریافت نشد');
-      chain = buildChain(payload.rows || []);
-      baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
-      for (const item of [...chain.values()].sort((a, b) => a.name.localeCompare(b.name, 'fa'))) {
-        const option = document.createElement('option');
-        option.value = item.ins;
-        option.textContent = `${displayName(item, 'دارایی پایه بدون نام')} — ${fmt.int(item.contracts)} قرارداد${item.value > 0 ? ` — ارزش امروز ${fmt.money(item.value)}` : ''}`;
-        baseSelect.appendChild(option);
-      }
-      setStatus(`${fmt.int(chain.size)} نماد پایه آماده است.`);
-    } catch (error) {
-      setStatus(`فهرست قراردادهای فعال دریافت نشد: ${error.message}`, true);
+  // ——— فهرست قراردادها از **بازه** می‌آید، نه از تابلوی امروز ———
+  //
+  // پیش از این `/api/history/universe` بی‌تاریخ صدا می‌شد، پس هر تحلیلِ
+  // گذشته فقط قراردادهای زندهٔ امروز را می‌دید و آن‌هایی که داخل بازهٔ
+  // بررسی سررسید شده بودند اصلاً در فهرست نبودند.
+  let rangeUi = null, rangeJob = null;
+
+  function fillBases(payload) {
+    const keep = baseSelect.value;
+    chain = buildChain(payload.rows || []);
+    baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+    for (const item of [...chain.values()].sort((a, b) => a.name.localeCompare(b.name, 'fa'))) {
+      const option = document.createElement('option');
+      option.value = item.ins;
+      option.textContent = `${displayName(item, 'دارایی پایه بدون نام')} — ${fmt.int(item.contracts)} قرارداد`;
+      baseSelect.appendChild(option);
+    }
+    if (keep && chain.has(keep)) baseSelect.value = keep;
+    const expired = payload.summary?.expiredInside || 0;
+    setStatus(`${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند.`);
+  }
+
+  async function loadUniverse(range = rangeUi?.range) {
+    if (!range) return;
+    rangeJob?.stop();
+    baseSelect.innerHTML = '<option value="">در حال دریافت…</option>';
+    rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
+    try { fillBases(await rangeJob.first); }
+    catch (error) {
+      baseSelect.innerHTML = '<option value="">دریافت ناموفق</option>';
+      setStatus(`فهرست قراردادهای این بازه دریافت نشد: ${error.message}`, true);
     }
   }
 
@@ -1555,8 +1572,11 @@ export async function mount(root, { state }) {
     renderReplay(selectedAuto.legs, manual, `${selectedAuto.legs.map((l) => l.name).join(' + ')} · ورود دستی`);
   });
 
+  rangeUi = mountHistoryRange($('h-range'), { onApply: (range) => loadUniverse(range) });
+
   await loadUniverse();
   return () => {
+    rangeJob?.stop();
     payoffChart?.destroy?.(); if (worker) worker.terminate();
     frozenCard.removeEventListener('click', handleFrozenClick);
   };

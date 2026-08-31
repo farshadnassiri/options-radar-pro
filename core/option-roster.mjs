@@ -160,6 +160,18 @@ export function parseExpiry(text) {
     const jy = expandJalaliYear(m[1]);
     return jy ? jalaliCompact(jy, +m[2], +m[3]) : 0;
   }
+
+  // شکل قدیمیِ فشرده بی‌ممیز: «۰۳۰۷۱۵» یعنی ۱۴۰۳/۰۷/۱۵. حدود سی قرارداد
+  // این شکل را دارند و بی این شاخه، نامشان خوانده نمی‌شد.
+  //
+  // خطرِ این شاخه، قیمت اعمالِ شش‌رقمی است که تاریخ خوانده شود. دو چیز
+  // جلویش را می‌گیرد: باید بلافاصله پس از یک جداکننده بیاید، و ماه و روزش
+  // باید معتبر باشند — «۱۰۰۰۰۰» می‌شود ماه صفر و رد می‌شود.
+  m = s.match(/[-–—/](\d{2})(\d{2})(\d{2})\s*$/);
+  if (m) {
+    const jy = expandJalaliYear(m[1]);
+    return jy ? jalaliCompact(jy, +m[2], +m[3]) : 0;
+  }
   return 0;
 }
 
@@ -225,16 +237,26 @@ export function rosterRow(raw) {
   const parsed = parseContractName(name);
   const strike = parsed ? parsed.strike : num(raw?.strike ?? raw?.Strike, 0);
   const expiry = parsed ? parsed.expiry : parseExpiry(raw?.expiry ?? raw?.ExpiryJalali ?? '');
+  const base = parsed ? parsed.base : normalizeFa(raw?.base ?? '');
   if (!(strike > 0) || !expiry) return null;
+
+  // ── بی‌پایه، ردیف نیست ──────────────────────────────────────────────
+  //
+  // ستون‌های آمادهٔ فایل می‌توانند قیمت اعمال و سررسید را بدهند حتی وقتی
+  // نام خوانده نشده؛ ولی نامِ پایه فقط از خودِ نام درمی‌آید. ردیفی که
+  // پایه ندارد به هیچ زنجیره‌ای وصل نمی‌شود و هیچ قیمتی برایش خواسته
+  // نمی‌شود — فقط در فهرست «پایهٔ ناشناخته» می‌نشیند، با نامِ خالی.
+  //
+  // در دادهٔ واقعی سی ردیف این شکل بودند و پیامِ کاربر را به «۱ نماد پایه
+  // کدشان به دست نیامد: » ختم می‌کردند — جمله‌ای که نصفه تمام می‌شد.
+  if (!base) return null;
 
   const first = compactOf(raw?.first ?? raw?.FirstSeenGregorian);
   const last = compactOf(raw?.last ?? raw?.LastSeenGregorian);
   if (!first || !last) return null;
 
   return {
-    ins, symbol, name, side,
-    base: parsed ? parsed.base : normalizeFa(raw?.base ?? ''),
-    strike, expiry,
+    ins, symbol, name, side, base, strike, expiry,
     first, last: Math.max(first, last),
     id: String(raw?.id ?? raw?.InstrumentID ?? raw?.instrumentID ?? '').trim(),
   };
@@ -434,6 +456,32 @@ export function rosterNote({ coverage, from = 0, to = 0, summary = null } = {}) 
 }
 
 /**
+ * آیا دفتر این روز را **واقعاً** دیده است.
+ *
+ * «بین اولین و آخرین قرارداد» کافی نیست و این تفاوت مهم است: اگر فقط
+ * مهرماه اسکن شده باشد، قراردادی که مهر دیده شده ممکن است سررسیدش اسفند
+ * باشد، و آن‌وقت بازهٔ ظاهری تا اسفند کش می‌آید در حالی که آبان تا بهمن
+ * هرگز اسکن نشده. فهرستِ آن روزها ناقص است و باید ناقص شمرده شود.
+ *
+ * پس دو منبعِ پوشش داریم: `days` (روزهایی که اسکنر واقعاً گرفت) و بازهٔ
+ * `scannedFrom..scannedTo` (برای فهرستی که یک‌جا وارد شده و روزِ جدا
+ * ندارد). هرکدام بود، همان معتبر است.
+ */
+export function rosterCovers(file, date) {
+  const at = compactOf(date) || num(date, 0);
+  if (!(at > 0)) return false;
+  const days = file?.days;
+  if (Array.isArray(days) && days.length) return days.includes(at);
+  const from = num(file?.scannedFrom, 0), to = num(file?.scannedTo, 0);
+  return from > 0 && to > 0 && at >= from && at <= to;
+}
+
+/** روزهای بازه که دفتر **ندارد** — همان‌هایی که باید اسکن شوند. */
+export function missingDays(file, days = []) {
+  return (Array.isArray(days) ? days : []).filter((day) => !rosterCovers(file, day));
+}
+
+/**
  * کدام منبع به درخواستِ فهرستِ یک تاریخ جواب می‌دهد — و چرا.
  *
  * این تصمیم سیاست است، نه لوله‌کشی، پس اینجاست نه در سرور. سه منبع
@@ -531,14 +579,18 @@ function splitCompact(value) {
 }
 
 /** پروندهٔ دفتر، آمادهٔ نوشتن. */
-export function makeRosterFile(rows = [], { scannedFrom = 0, scannedTo = 0, at = 0, intake = null } = {}) {
+export function makeRosterFile(rows = [], { scannedFrom = 0, scannedTo = 0, at = 0, intake = null, days = [] } = {}) {
   const list = mergeRoster([], rows);
+  const scanned = [...new Set((Array.isArray(days) ? days : []).map((d) => num(d, 0)).filter((d) => d > 0))].sort((a, b) => a - b);
   return {
     version: ROSTER_VERSION,
     at: num(at, 0),
-    scannedFrom: num(scannedFrom, 0),
-    scannedTo: num(scannedTo, 0),
+    scannedFrom: num(scannedFrom, 0) || scanned[0] || 0,
+    scannedTo: num(scannedTo, 0) || scanned.at(-1) || 0,
     count: list.length,
+    // روزهایی که واقعاً گرفته شدند. بی این، «پوشش» یعنی حدس — و حفرهٔ
+    // وسط بازه بی‌صدا کامل به نظر می‌رسید.
+    days: scanned,
     intake: intake ? { seen: intake.seen, kept: intake.kept, notOption: intake.notOption, unparsed: intake.unparsed } : null,
     rows: list,
   };
