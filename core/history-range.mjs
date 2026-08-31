@@ -67,18 +67,45 @@ export function daysBefore(compact, days) {
  * اولی یعنی منتظر نمان، دومی یعنی صبر کن. کاربری که فرق این دو را نداند،
  * یا بیهوده منتظر می‌ماند یا بیهوده تسلیم می‌شود.
  */
+/** نام هر مرحله، به زبان کاربر. */
+export const BUILD_STAGES = {
+  day: 'روزهای معاملاتی',
+  catalog: 'جست‌وجوی قراردادها',
+  detail: 'مشخصات قراردادها',
+};
+
+/**
+ * جملهٔ پیشرفتِ ساخت. `''` یعنی چیزی در جریان نیست.
+ *
+ * «تمام شد ولی نیامد» با «در جریان» یکی نیست و نباید مثل هم دیده شود:
+ * اولی یعنی منتظر نمان، دومی یعنی صبر کن. کاربری که فرق این دو را نداند،
+ * یا بیهوده منتظر می‌ماند یا بیهوده تسلیم می‌شود.
+ *
+ * شمارنده از **مرحلهٔ جاری** می‌آید، نه از شمارندهٔ روزها. نسخهٔ اول
+ * همیشه روزها را می‌شمرد و در مرحلهٔ جست‌وجو «۰ از ۰ روز (۰٪) · ۱۴۹ روز
+ * نیامد» می‌گفت — عددی که هیچ‌کدامش راست نبود: نه روزی در کار بود، نه
+ * آن ۱۴۹ شکست مالِ روزها بود.
+ */
 export function buildLine(build) {
   if (!build) return '';
+  const stage = BUILD_STAGES[build.stage] || '';
   if (build.running) {
-    const pct = build.total ? Math.round((build.done / build.total) * 100) : 0;
-    return `ساخت دفتر در جریان: ${iso(`${faDigits(build.done)} از ${faDigits(build.total)} روز`)} ${iso(`(${faDigits(pct)}٪)`)}`
+    const done = num(build.stageTotal, 0) ? num(build.stageDone, 0) : num(build.done, 0);
+    const total = num(build.stageTotal, 0) || num(build.total, 0);
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    const head = stage ? `ساخت دفتر — ${stage}` : 'ساخت دفتر در جریان';
+    return `${head}: ${iso(`${faDigits(done)} از ${faDigits(total)}`)} ${iso(`(${faDigits(pct)}٪)`)}`
       + (build.added ? ` · ${iso(`${faDigits(build.added)} قرارداد تازه`)}` : '')
-      + (build.failed ? ` · ${iso(`${faDigits(build.failed)} روز نیامد`)}` : '');
+      + (build.failed ? ` · ${iso(`${faDigits(build.failed)} درخواست ناموفق`)}` : '');
   }
-  if (build.failed && build.missing) {
-    return `${iso(`${faDigits(build.failed)} روز`)} از تابلوی تاریخی نیامد و ${iso(`${faDigits(build.missing)} روز`)} هنوز در دفتر نیست`
+  if (build.failed) {
+    return `${iso(`${faDigits(build.failed)} درخواست`)} به تابلوی تاریخی نرسید`
+      + (build.missing ? ` و ${iso(`${faDigits(build.missing)} روز`)} هنوز در دفتر نیست` : '')
       + (build.lastError ? ` — آخرین خطا: ${iso(build.lastError)}` : '');
   }
-  if (build.missing) return `${faDigits(build.missing)} روزِ کاری هنوز در دفتر نیست`;
+  if (build.missing) return `${iso(`${faDigits(build.missing)} روزِ کاری`)} هنوز در دفتر نیست`;
+  if (num(build.incompletePairs, 0) > 0) {
+    return `${iso(`${faDigits(build.incompletePairs)} سری`)} فقط یک سمت دارد؛ جست‌وجوی تکمیلی چیزی پیدا نکرد`;
+  }
   return '';
 }

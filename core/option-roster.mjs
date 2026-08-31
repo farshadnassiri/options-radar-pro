@@ -38,7 +38,10 @@ import { num } from './num.mjs';
 import { gregorianToJalali, jalaliToGregorian } from './jalali.mjs';
 
 /** نسخهٔ ساختار پروندهٔ دفتر. اگر شکل عوض شد، خواننده باید بفهمد. */
-export const ROSTER_VERSION = 1;
+// نسخهٔ ۲: عمر قرارداد از مشخصات رسمی می‌آید، نه از اولین معامله. پروندهٔ
+// نسخهٔ ۱ خوانده می‌شود ولی هرگز «کامل» شمرده نمی‌شود — چون اصلاً از
+// کاتالوگ ابزار عبور نکرده و قراردادهای بی‌معامله داخلش نیستند.
+export const ROSTER_VERSION = 2;
 
 export const SIDE_CALL = 'call';
 export const SIDE_PUT = 'put';
@@ -253,12 +256,27 @@ export function rosterRow(raw) {
 
   const first = compactOf(raw?.first ?? raw?.FirstSeenGregorian);
   const last = compactOf(raw?.last ?? raw?.LastSeenGregorian);
-  if (!first || !last) return null;
+  const listedFrom = compactOf(raw?.listedFrom) || num(raw?.listedFrom, 0);
+
+  // ── قراردادِ بی‌معامله ردیف است، نه هیچ ────────────────────────────
+  //
+  // نسخهٔ پیشین «اولین و آخرین روزِ دیده‌شده» را اجباری کرده بود، و آن
+  // فرضِ نانوشته‌ای داشت: هر قراردادی دست‌کم یک بار معامله شده. برای
+  // بازارِ کم‌عمق غلط است و جهت‌دار هم هست — بی‌معامله‌ها همان
+  // دورافتاده‌هایند. ردیفی که از کاتالوگ آمده تاریخِ معامله ندارد و
+  // نباید داشته باشد؛ عمرش از مشخصات رسمی می‌آید.
+  if ((!first || !last) && !(listedFrom > 0) && raw?.fromCatalog !== true) return null;
 
   return {
     ins, symbol, name, side, base, strike, expiry,
     first, last: Math.max(first, last),
     id: String(raw?.id ?? raw?.InstrumentID ?? raw?.instrumentID ?? '').trim(),
+    // مشخصات رسمی، اگر پاس کاتالوگ رسیده باشد. صفر یعنی «نداریم»، نه صفرم.
+    listedFrom: compactOf(raw?.listedFrom) || num(raw?.listedFrom, 0),
+    listedTo: compactOf(raw?.listedTo) || num(raw?.listedTo, 0),
+    contractSize: num(raw?.contractSize, 0),
+    uaIns: String(raw?.uaIns ?? '').trim(),
+    fromCatalog: raw?.fromCatalog === true,
   };
 }
 
@@ -314,15 +332,22 @@ export function mergeRoster(existing = [], incoming = []) {
     if (!row?.ins) return;
     const old = byIns.get(row.ins);
     if (!old) { byIns.set(row.ins, { ...row }); return; }
-    old.first = Math.min(old.first || row.first, row.first || old.first);
-    old.last = Math.max(old.last || 0, row.last || 0);
-    for (const key of ['symbol', 'name', 'base', 'id']) {
+    // `num` تزیین نیست: ردیفی که میدانِ تاریخ ندارد `undefined` می‌دهد و
+    // `Math.min(undefined, undefined)` می‌شود `NaN` — که در JSON به
+    // `null` تبدیل می‌شود و از آن به بعد هر مقایسه‌ای رویش خاموش است.
+    const oldFirst = num(old.first, 0), newFirst = num(row.first, 0);
+    old.first = oldFirst && newFirst ? Math.min(oldFirst, newFirst) : (oldFirst || newFirst);
+    old.last = Math.max(num(old.last, 0), num(row.last, 0));
+    for (const key of ['symbol', 'name', 'base', 'id', 'uaIns']) {
       if (!old[key] && row[key]) old[key] = row[key];
     }
-    for (const key of ['strike', 'expiry']) {
+    // مشخصات رسمی هرگز با «نداریم» بازنویسی نمی‌شود، و اگر آمد، بر
+    // حدسِ نامی مقدم است: `listedTo` از بازار آمده، `expiry` از نام.
+    for (const key of ['strike', 'expiry', 'listedFrom', 'listedTo', 'contractSize']) {
       if (!(old[key] > 0) && row[key] > 0) old[key] = row[key];
     }
     if (!old.side && row.side) old.side = row.side;
+    if (row.fromCatalog) old.fromCatalog = true;
   };
   for (const row of Array.isArray(existing) ? existing : []) put(row);
   for (const row of Array.isArray(incoming) ? incoming : []) put(row);
@@ -341,12 +366,33 @@ export const STATUS_EXPIRED = 'expired';
  * منقضی؛ پس وضعیت بدونِ تاریخ، معنا ندارد و این تابع تاریخ را **اجباری**
  * می‌گیرد. `null` یعنی نمی‌دانیم، و «نمی‌دانیم» با «منقضی» یکی نیست.
  */
+/**
+ * بازهٔ اعتبارِ یک قرارداد — با اولویت مشخصات رسمی.
+ *
+ * `listedFrom` تاریخِ گشایش است و از بازار می‌آید؛ `first` اولین روزی
+ * است که معامله‌ای دیده شده. این دو یکی نیستند و فرقشان در بک‌تست عدد
+ * عوض می‌کند: قراردادی که سه ماه پیش گشایش شد و دیروز اولین معامله‌اش را
+ * داشت، با معیارِ `first` سه ماه دیر وارد بازار می‌شود — و قراردادی که
+ * هرگز معامله نشد، اصلاً وارد نمی‌شود.
+ *
+ * `first` فقط وقتی جای `listedFrom` می‌نشیند که مشخصات رسمی نداشته
+ * باشیم، و آن‌وقت ردیف `lifeFromTrades` نشان‌دار است تا معلوم باشد این
+ * مرز مشاهده‌ای است نه رسمی.
+ */
+export function contractLife(row) {
+  const listed = num(row?.listedFrom, 0);
+  const official = num(row?.listedTo, 0);
+  const expiry = official > 0 ? official : num(row?.expiry, 0);
+  const from = listed > 0 ? listed : num(row?.first, 0);
+  return { from, to: expiry, official: listed > 0 };
+}
+
 export function contractStatus(row, asOf) {
   const at = compactOf(asOf) || num(asOf, 0);
-  const expiry = num(row?.expiry, 0), first = num(row?.first, 0);
-  if (!(at > 0) || !(expiry > 0)) return null;
-  if (first > 0 && at < first) return STATUS_PENDING;
-  return at > expiry ? STATUS_EXPIRED : STATUS_ACTIVE;
+  const { from, to } = contractLife(row);
+  if (!(at > 0) || !(to > 0)) return null;
+  if (from > 0 && at < from) return STATUS_PENDING;
+  return at > to ? STATUS_EXPIRED : STATUS_ACTIVE;
 }
 
 export function statusLabel(status) {
@@ -377,17 +423,18 @@ export function rosterInRange(rows = [], from, to) {
   if (!(a > 0) || !(b > 0) || b < a) return [];
   const out = [];
   for (const row of Array.isArray(rows) ? rows : []) {
-    const first = num(row?.first, 0), expiry = num(row?.expiry, 0);
+    const { from, to: expiry, official } = contractLife(row);
     if (!(expiry > 0)) continue;
-    const activeFrom = Math.max(first || a, a);
+    const activeFrom = Math.max(from || a, a);
     const activeTo = Math.min(expiry, b);
     if (activeTo < activeFrom) continue;
     out.push({
       ...row,
       activeFrom, activeTo,
       expiresInside: expiry >= a && expiry <= b,
-      listedInside: first > 0 && first >= a && first <= b,
-      wholeRange: (first === 0 || first <= a) && expiry >= b,
+      listedInside: from > 0 && from >= a && from <= b,
+      wholeRange: (from === 0 || from <= a) && expiry >= b,
+      lifeFromTrades: !official,
       statusAtEnd: contractStatus(row, b),
     });
   }
@@ -578,8 +625,148 @@ function splitCompact(value) {
   return { y: Math.floor(v / 10000), m: Math.floor(v / 100) % 100, d: v % 100 };
 }
 
+/**
+ * کنترل صحتِ جفت کال و پوت.
+ *
+ * ═══ چرا کنترل، و نه ترمیم ═══
+ *
+ * هر سری اختیارِ عادی در بورس تهران با هر دو سمت گشایش می‌شود. پس یک
+ * گروهِ «پایه + سررسید + قیمت اعمال» که فقط یک سمت دارد، تقریباً همیشه
+ * یعنی **ما** آن یکی را ندیده‌ایم، نه اینکه وجود نداشته.
+ *
+ * ولی «تقریباً همیشه» با «همیشه» یکی نیست، و همین است که این تابع
+ * ترمیم نمی‌کند. ساختنِ شناسهٔ سمتِ گمشده با تغییر حرف یا رقم — «ضهرم»
+ * به «طهرم» — شناسه‌ای می‌سازد که یا به هیچ‌چیز نمی‌خورد یا، بدتر، به
+ * قرارداد دیگری می‌خورد. یک جای خالیِ اعلام‌شده از یک عددِ غلطِ ساکت
+ * بی‌نهایت بهتر است.
+ *
+ * پس خروجی یک **گزارش** است: کدام گروه‌ها ناقص‌اند و کدام عبارت را باید
+ * جست‌وجو کرد تا کاملشان کنیم.
+ *
+ * اختیار فروش تبعی از این کنترل بیرون است: ناشر می‌فروشد و اصلاً سمتِ
+ * خرید ندارد، پس «ناقص» شمردنش یعنی هزار هشدار دروغ.
+ */
+export function pairAudit(rows = []) {
+  const groups = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.side !== SIDE_CALL && row?.side !== SIDE_PUT) continue;
+    if (!row.base || !(row.strike > 0) || !(row.expiry > 0)) continue;
+    const key = `${row.base}|${row.expiry}|${row.strike}`;
+    let g = groups.get(key);
+    if (!g) { g = { key, base: row.base, expiry: row.expiry, strike: row.strike, call: null, put: null }; groups.set(key, g); }
+    if (row.side === SIDE_CALL) g.call = g.call || row;
+    else g.put = g.put || row;
+  }
+
+  const missingPut = [], missingCall = [];
+  for (const g of groups.values()) {
+    if (g.call && !g.put) missingPut.push(g);
+    else if (g.put && !g.call) missingCall.push(g);
+  }
+  const bySide = (list) => list.map((g) => ({
+    base: g.base, expiry: g.expiry, strike: g.strike,
+    // عبارتی که باید جست‌وجو شود: پیشوندِ حرفیِ نمادِ سمتِ موجود کافی
+    // نیست (پیشوند دو سمت فرق دارد)، پس نامِ پایه می‌رود.
+    term: g.base,
+    have: g.call ? g.call.symbol : g.put.symbol,
+  }));
+
+  return {
+    groups: groups.size,
+    complete: groups.size - missingPut.length - missingCall.length,
+    missingPut: bySide(missingPut),
+    missingCall: bySide(missingCall),
+    incomplete: missingPut.length + missingCall.length,
+    terms: [...new Set([...missingPut, ...missingCall].map((g) => g.base))].sort(),
+  };
+}
+
+/**
+ * شمارِ کال و پوتِ یک سررسیدِ یک پایه — همان معیاری که کاربر می‌سنجد.
+ *
+ * سررسید با **تاریخ استاندارد** مقایسه می‌شود، نه با شباهت نماد. یک
+ * قراردادِ `طهرم۶۰۲۰` که سررسیدش ۱۴۰۳/۰۶/۲۸ است نباید زیر ۱۴۰۴/۰۶/۲۶
+ * بنشیند فقط چون نمادش شبیه است.
+ */
+export function expiryRoll(rows = [], base, expiry) {
+  const want = compactOf(expiry) || num(expiry, 0);
+  const wantBase = normalizeFa(base);
+  const call = [], put = [], tabaee = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (normalizeFa(row?.base) !== wantBase) continue;
+    if (num(row?.expiry, 0) !== want) continue;
+    if (row.side === SIDE_CALL) call.push(row);
+    else if (row.side === SIDE_PUT) put.push(row);
+    else tabaee.push(row);
+  }
+  const key = (r) => r.strike;
+  const strikes = new Set([...call.map(key), ...put.map(key)]);
+  let paired = 0;
+  for (const k of strikes) {
+    if (call.some((r) => r.strike === k) && put.some((r) => r.strike === k)) paired += 1;
+  }
+  return {
+    base: wantBase, expiry: want,
+    call: call.length, put: put.length, tabaee: tabaee.length,
+    total: call.length + put.length,
+    strikes: strikes.size, paired, incomplete: strikes.size - paired,
+    symbols: { call: call.map((r) => r.symbol).sort(), put: put.map((r) => r.symbol).sort() },
+  };
+}
+
+/**
+ * وضعیت سلامت دفتر — و اینکه چرا «کامل» نیست.
+ *
+ * ═══ چرا `complete` این‌قدر سخت‌گیر است ═══
+ *
+ * پیش از این، «اسکن تمام شد» با «دفتر کامل است» یکی گرفته می‌شد. اسکنر
+ * فقط روزهای دریافت‌نشده را می‌شمرد و از قراردادی که اصلاً در منبع
+ * روزانه نبود خبر نداشت — پس گزارشِ موفقیت می‌داد در حالی که شش قرارداد
+ * غایب بودند.
+ *
+ * حالا هر یک از این‌ها `complete` را پایین می‌آورد، و دلیلش نوشته
+ * می‌شود: نسخهٔ قدیمی پرونده، درخواستِ ناموفق، جفتِ ناقص، شناسهٔ ناامن.
+ */
+export function rosterHealth(file, rows = []) {
+  const audit = pairAudit(rows);
+  const stats = file?.scan || {};
+  const reasons = [];
+
+  const version = num(file?.version, 0);
+  if (version < ROSTER_VERSION) {
+    reasons.push(`دفتر با نسخهٔ ${version || '؟'} ساخته شده و از کاتالوگ ابزار عبور نکرده؛ قرارداد بی‌معامله داخلش نیست`);
+  }
+  const failed = num(stats.catalogQueriesFailed, 0) + num(stats.detailQueriesFailed, 0) + num(stats.dayQueriesFailed, 0);
+  if (failed > 0) reasons.push(`${failed} درخواست ناموفق`);
+  if (audit.incomplete > 0) reasons.push(`${audit.incomplete} جفت ناقص کال/پوت`);
+  if (num(stats.unsafeIdentifiers, 0) > 0) reasons.push(`${stats.unsafeIdentifiers} شناسهٔ ناامن کنار گذاشته شد`);
+  if (!num(stats.catalogQueriesDone, 0) && version >= ROSTER_VERSION) {
+    reasons.push('پاس کاتالوگ ابزار اجرا نشده');
+  }
+
+  return {
+    complete: reasons.length === 0,
+    reasons,
+    version,
+    groups: audit.groups,
+    incompletePairs: audit.incomplete,
+    missingPut: audit.missingPut.length,
+    missingCall: audit.missingCall.length,
+    terms: audit.terms,
+    scan: {
+      dayQueriesFailed: num(stats.dayQueriesFailed, 0),
+      catalogQueriesDone: num(stats.catalogQueriesDone, 0),
+      catalogQueriesFailed: num(stats.catalogQueriesFailed, 0),
+      detailQueriesDone: num(stats.detailQueriesDone, 0),
+      detailQueriesFailed: num(stats.detailQueriesFailed, 0),
+      unsafeIdentifiers: num(stats.unsafeIdentifiers, 0),
+      noTradeContracts: num(stats.noTradeContracts, 0),
+    },
+  };
+}
+
 /** پروندهٔ دفتر، آمادهٔ نوشتن. */
-export function makeRosterFile(rows = [], { scannedFrom = 0, scannedTo = 0, at = 0, intake = null, days = [] } = {}) {
+export function makeRosterFile(rows = [], { scannedFrom = 0, scannedTo = 0, at = 0, intake = null, days = [], scan = null } = {}) {
   const list = mergeRoster([], rows);
   const scanned = [...new Set((Array.isArray(days) ? days : []).map((d) => num(d, 0)).filter((d) => d > 0))].sort((a, b) => a - b);
   return {
@@ -592,6 +779,8 @@ export function makeRosterFile(rows = [], { scannedFrom = 0, scannedTo = 0, at =
     // وسط بازه بی‌صدا کامل به نظر می‌رسید.
     days: scanned,
     intake: intake ? { seen: intake.seen, kept: intake.kept, notOption: intake.notOption, unparsed: intake.unparsed } : null,
+    // آمار اسکن، تا «کامل بودن» ادعای اثبات‌پذیر باشد نه حس.
+    scan: scan ? { ...scan } : null,
     rows: list,
   };
 }

@@ -118,9 +118,21 @@ group('۲۰۹-ج. سرور: دفتر جای فهرست امروز می‌نشی�
 
   // ── ابزارها ─────────────────────────────────────────────────────────
   const scanTool = readSrc('../tools/roster-scan.mjs');
-  check('اسکنر checkpoint دارد', /CHECKPOINT/.test(scanTool) && /done: \[\.\.\.done\]/.test(scanTool));
-  check('روزِ نیامده شمرده و گزارش می‌شود', /failed\.push/.test(scanTool) && /روزِ نشده/.test(scanTool));
+  const builder = readSrc('../core/roster-build.mjs');
+
+  // ادعا از ابزار به هسته نقل مکان کرد، چون سرور هم همین را اجرا می‌کند
+  // و دو نسخه از یک قاعده یعنی روزی یکی‌شان عقب می‌ماند.
+  check('اسکنر checkpoint دارد و وضعیت واقعی را ذخیره می‌کند',
+    /CHECKPOINT/.test(scanTool) && /onCheckpoint/.test(scanTool)
+    && /onCheckpoint\(\{ rows, scanned/.test(builder));
+  check('روزِ نیامده شمرده می‌شود و در پوشش نمی‌نشیند',
+    /stats\.dayQueriesFailed \+= 1/.test(builder)
+    && builder.indexOf('scanned.push(day)') < builder.indexOf('stats.dayQueriesFailed += 1'));
   check('دفتر خالی نوشته نمی‌شود', /پروندهٔ خالی نوشته نمی‌شود/.test(scanTool));
+  check('اسکنِ کاملاً ناموفق، دفتر سالم را بازنویسی نمی‌کند',
+    /brokeEverything/.test(scanTool) && /دفتر موجود دست‌نخورده ماند/.test(scanTool));
+  check('اسکنِ ناقص با کد خروج غیرصفر تمام می‌شود',
+    /process\.exitCode = 2/.test(scanTool) && /health\.complete/.test(scanTool));
 
   const importTool = readSrc('../tools/roster-import.mjs');
   check('واردکننده شمارِ ناخوانا را چاپ می‌کند', /نامِ ناخوانا/.test(importTool));
