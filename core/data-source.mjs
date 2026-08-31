@@ -57,6 +57,19 @@ export function dailyListPath(ins, n = 0) {
   return code ? `/ClosingPrice/GetClosingPriceDailyList/${code}/${Math.max(0, Math.trunc(num(n, 0)))}` : null;
 }
 
+/**
+ * منبع دوم — همان داده، برای ابزاری که از تابلو حذف شده.
+ *
+ * `GetClosingPriceDailyList` برای قراردادِ سررسیدشده خالی برمی‌گردد. یعنی
+ * بی این مسیر، هر بک‌تستِ گذشته دقیقاً همان قراردادهایی را از دست می‌داد
+ * که موضوعش بودند.
+ */
+export function closingHistoryPath(ins, date) {
+  const code = insCode(ins);
+  const day = compactDate(date);
+  return code && day ? `/ClosingPrice/GetClosingPriceHistory/${code}/${day}` : null;
+}
+
 /** مسیرِ ریزمعاملهٔ یک روزِ تکمیل‌شده — فقط وقتی «لحظهٔ سنجش» انتخاب شده. */
 export function tradeHistoryPath(ins, date) {
   const code = insCode(ins);
@@ -110,8 +123,14 @@ export function seriesStatus(rows, error) {
  * `markDate` وقتی مقدار دارد که کاربر «لحظهٔ سنجش» را از پایان روز به
  * ساعتی مشخص برده باشد؛ آن‌وقت برای هر ابزار یک نشانی دوم هم هست.
  */
+export const SOURCE_LABEL = {
+  list: 'فهرست روزانه',
+  history: 'منبع دوم — سابقهٔ قیمت پایانی (ابزار از تابلو حذف شده)',
+};
+
 export function dataSourceRows({
-  base = '', ua = null, contracts = [], seriesByIns = {}, errors = {}, markDate = 0, n = 0,
+  base = '', ua = null, contracts = [], seriesByIns = {}, errors = {}, sources = {},
+  asOf = 0, markDate = 0, n = 0,
 } = {}) {
   const out = [];
   const add = (role, item) => {
@@ -130,6 +149,7 @@ export function dataSourceRows({
       expiry: num(item.expiry, 0) || null,
       ins,
       purpose: 'سابقهٔ روزانه — مبنای قیمت ورود و خروج',
+      source: SOURCE_LABEL[sources[ins]] || SOURCE_LABEL.list,
       url: urlOf(base, dailyListPath(ins, n)),
       local: localDailyPath(ins, n),
       status: seriesStatus(rows, error),
@@ -138,6 +158,21 @@ export function dataSourceRows({
       lastDate: dates.length ? dates[dates.length - 1] : null,
       error,
     });
+    // منبع دوم فقط وقتی ردیف می‌گیرد که واقعاً امتحان شده باشد — یعنی
+    // فهرست روزانه خالی برگشته و تاریخِ تکیه‌گاه در دست بوده.
+    if (num(asOf, 0) > 0 && (sources[ins] === 'history' || !(Array.isArray(rows) && rows.length))) {
+      out.push({
+        role, name: item.name ?? '', kind: item.kind ?? '',
+        strike: num(item.strike, 0) || null, expiry: num(item.expiry, 0) || null, ins,
+        purpose: 'منبع دوم — وقتی فهرست روزانه خالی برگردد',
+        source: SOURCE_LABEL.history,
+        url: urlOf(base, closingHistoryPath(ins, asOf)),
+        local: `/api/dailies?ins=${encodeURIComponent(ins)}&n=${Math.max(0, Math.trunc(num(n, 0)))}&asOf=${encodeURIComponent(String(asOf))}`,
+        status: sources[ins] === 'history' ? 'داده آمد' : seriesStatus(rows, error),
+        rows: sources[ins] === 'history' && Array.isArray(rows) ? rows.length : null,
+        firstDate: null, lastDate: null, error: '',
+      });
+    }
     if (num(markDate, 0) > 0) {
       out.push({
         role,
@@ -147,6 +182,7 @@ export function dataSourceRows({
         expiry: num(item.expiry, 0) || null,
         ins,
         purpose: 'ریزمعاملهٔ روز سنجش — برای «لحظهٔ سنجش»',
+        source: '—',
         url: urlOf(base, tradeHistoryPath(ins, markDate)),
         local: localTradePath(ins, markDate),
         status: '—',
@@ -166,5 +202,8 @@ export function sourceSummary(rows = []) {
   const ok = daily.filter((row) => row.status === 'داده آمد').length;
   const empty = daily.filter((row) => row.status.startsWith('خالی')).length;
   const failed = daily.filter((row) => row.status === 'خطا').length;
-  return { total: daily.length, ok, empty, failed };
+  // چند تای‌شان را منبع دوم نجات داد. این عدد مستقیم می‌گوید بک‌تستِ
+  // گذشته بی آن مسیر چقدر ناقص می‌ماند.
+  const rescued = daily.filter((row) => row.source === SOURCE_LABEL.history).length;
+  return { total: daily.length, ok, empty, failed, rescued };
 }

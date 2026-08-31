@@ -506,7 +506,7 @@ export async function mount(root, { state }) {
   const numCellOf = (value) => (Number.isFinite(value) ? fmt.num(value) : '—');
 
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
-  let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '';
+  let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, seriesSource = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '';
   // سری‌هایی که **آخرین اجرا** با آن‌ها انجام شد. با پایان روز، همان
   // `seriesByIns` است؛ با لحظهٔ درون‌روز، نسخهٔ مهرخورده. پنل جزئیات و
   // تحلیل حساسیت باید از همین بخوانند، وگرنه رتبه‌بندی ساعت ده و نیم را
@@ -591,10 +591,43 @@ export async function mount(root, { state }) {
       // خطا را به «صفر ردیف» تبدیل می‌کرد و آن‌وقت «درخواست شکست خورد» از
       // «هیچ روزی معامله نشده» قابل تشخیص نبود — دو چیزِ کاملاً متفاوت.
       seriesErrors = {};
+      seriesSource = {};
       for (const payload of payloads) {
         for (const [ins, value] of Object.entries(payload)) {
           seriesByIns[ins] = value.rows || [];
+          seriesSource[ins] = value.source || 'list';
           if (value.error) seriesErrors[ins] = String(value.error);
+        }
+      }
+
+      // ── منبع دوم، فقط برای آنچه خالی برگشت ────────────────────────────
+      //
+      // `GetClosingPriceDailyList` برای ابزارِ حذف‌شده از تابلو خالی
+      // برمی‌گردد، و قرارداد اختیار پس از سررسید حذف می‌شود. یعنی هر
+      // بک‌تستِ گذشته دقیقاً همان قراردادهایی را از دست می‌داد که
+      // موضوعش بودند.
+      //
+      // تاریخِ منبع دوم حدس زده نمی‌شود: آخرین روزِ سریِ خودِ نماد پایه
+      // است، که قطعاً یک روز معاملاتیِ تکمیل‌شده است.
+      const baseSeries = seriesByIns[String(ua.ins)] || [];
+      const asOf = baseSeries.length
+        ? Math.max(...baseSeries.map((row) => normalizeHistoryDate(row.date)).filter(Boolean))
+        : 0;
+      const emptyCodes = codes.filter((code) => !(seriesByIns[code] || []).length && !seriesErrors[code]);
+      if (asOf && emptyCodes.length) {
+        setStatus(`${fmt.int(emptyCodes.length)} ابزار از فهرست روزانه خالی برگشت — منبع دوم…`);
+        const retries = await Promise.all(chunks(emptyCodes, 70).map(async (part) => {
+          const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0&asOf=${asOf}`);
+          const payload = await response.json();
+          if (!response.ok || payload.error) throw new Error(payload.error || 'منبع دوم پاسخ نداد');
+          return payload;
+        }));
+        for (const payload of retries) {
+          for (const [ins, value] of Object.entries(payload)) {
+            if ((value.rows || []).length) seriesByIns[ins] = value.rows;
+            seriesSource[ins] = value.source || seriesSource[ins] || 'list';
+            if (value.fallbackError) seriesErrors[ins] = String(value.fallbackError);
+          }
         }
       }
       // روز جاری پس از فهرست بسته‌شده می‌نشیند، نه به‌جای آن. اگر نچسبد،
@@ -1901,7 +1934,7 @@ export async function mount(root, { state }) {
         base: state.settings.baseUrl,
         ua: { ins: String(ua?.ins ?? ''), name: nameOf(ua, 'نماد پایه') },
         contracts: flattenActiveContracts(ua, state.settings.blockedExpiries),
-        seriesByIns, errors: seriesErrors, n: 0,
+        seriesByIns, errors: seriesErrors, sources: seriesSource, n: 0,
         markDate: Number($('pb-mark').value) ? Number($('pb-exit-date').dataset.value) || 0 : 0,
       });
       await downloadPortfolioBacktest(analysis, {

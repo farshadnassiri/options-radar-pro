@@ -13,8 +13,9 @@
 
 import { check, group, readSrc } from '../harness.mjs';
 import {
-  NO_URL, compactDate, dailyListPath, dataSourceRows, insCode, joinUrl,
-  localDailyPath, localTradePath, seriesStatus, sourceSummary, tradeHistoryPath, urlOf,
+  NO_URL, SOURCE_LABEL, closingHistoryPath, compactDate, dailyListPath, dataSourceRows,
+  insCode, joinUrl, localDailyPath, localTradePath, seriesStatus, sourceSummary,
+  tradeHistoryPath, urlOf,
 } from '../../core/data-source.mjs';
 
 
@@ -163,4 +164,102 @@ group('۲۱۳-د. برگ در دفترچه و مسیر رابط');
     tab.includes('base: state.settings.baseUrl'));
   check('و منبع داده به دفترچه پاس داده می‌شود',
     /basket, generated, census, sources, dateLabel/.test(tab));
+}
+
+// ═══════════ ۲۱۳-ه. منبع دوم، برای ابزارِ حذف‌شده از تابلو ═══════════
+//
+// یافتهٔ صاحب پروژه: «گاهی در مسیر بالادستی چیزی وجود نداره ولی در مسیر
+// جزیی دیتا وجود داره.»
+//
+// ```
+// GetClosingPriceHistory/58199962935089492/20260829   ← داده دارد
+// GetClosingPriceDailyList/58199962935089492/0        ← خالی
+// ```
+//
+// در فایل خودش، از ۷۴ قراردادِ سه سررسیدِ گذشته ۵۱ تا خالی برگشتند و از
+// سه سررسید زنده فقط ۲۷ تا. الگو تصادفی نیست: **قرارداد پس از سررسید از
+// تابلو حذف می‌شود و فهرست روزانه‌اش با آن می‌رود.**
+//
+// یعنی هر بک‌تستِ گذشته دقیقاً همان قراردادهایی را از دست می‌داد که
+// موضوعش بودند — همان سوگیری بقا، یک لایه پایین‌تر از شناسایی.
+group('۲۱۳-ه. منبع دوم، برای ابزارِ حذف‌شده از تابلو');
+{
+  const base = 'https://cdn.tsetmc.com/api';
+  check('مسیر منبع دوم همان است که صاحب پروژه نشان داد',
+    closingHistoryPath('58199962935089492', '20260829')
+      === '/ClosingPrice/GetClosingPriceHistory/58199962935089492/20260829',
+    String(closingHistoryPath('58199962935089492', '20260829')));
+  check('و کد یا تاریخِ خراب، نشانی نمی‌سازد',
+    closingHistoryPath('x', '20260829') === null
+    && closingHistoryPath('123', '2026') === null);
+
+  const ua = { ins: '17914401175772326', name: 'اهرم' };
+  const contracts = [
+    { ins: '11', name: 'ضهرم3022', kind: 'call', strike: 24000, expiry: 20260617 },
+    { ins: '22', name: 'طهرم3022', kind: 'put', strike: 24000, expiry: 20260617 },
+  ];
+  const seriesByIns = { 17914401175772326: [{ date: 20260829 }], 11: [{ date: 20260601 }], 22: [{ date: 20260601 }] };
+
+  // ۲۲ را منبع دوم نجات داده است.
+  const sources = { 17914401175772326: 'list', 11: 'list', 22: 'history' };
+  const rows = dataSourceRows({ base, ua, contracts, seriesByIns, sources, asOf: 20260829, n: 0 });
+
+  const rescued = rows.filter((row) => row.purpose.startsWith('منبع دوم'));
+  check('برای ابزارِ نجات‌یافته، نشانیِ منبع دوم هم در فایل می‌آید',
+    rescued.some((row) => row.ins === '22' && row.url.endsWith('/22/20260829')),
+    rescued.map((row) => row.ins).join('، '));
+  check('و ستون «داده از کدام منبع آمد» می‌گوید کدام مسیر جواب داد',
+    rows.find((row) => row.ins === '22' && row.purpose.startsWith('سابقهٔ روزانه')).source === SOURCE_LABEL.history
+    && rows.find((row) => row.ins === '11' && row.purpose.startsWith('سابقهٔ روزانه')).source === SOURCE_LABEL.list);
+  check('ابزاری که فهرست روزانه جوابش را داد، ردیف منبع دوم نمی‌گیرد',
+    !rescued.some((row) => row.ins === '11'), rescued.map((row) => row.ins).join('، '));
+
+  // ابزاری که هر دو منبعش خالی بود، باز هم نشانی منبع دوم را نشان می‌دهد
+  // — کاربر باید بتواند خودش هم امتحانش کند.
+  const stillEmpty = dataSourceRows({
+    base, contracts: [{ ins: '33', name: 'ضهرم3023', kind: 'call' }],
+    seriesByIns: { 33: [] }, sources: { 33: 'list' }, asOf: 20260829,
+  });
+  check('ابزاری که هر دو منبعش خالی بود، هر دو نشانی را نشان می‌دهد',
+    stillEmpty.length === 2 && stillEmpty[1].url.includes('GetClosingPriceHistory'),
+    `${stillEmpty.length} ردیف`);
+
+  check('بی‌تاریخِ تکیه‌گاه، هیچ ردیف منبع دومی ساخته نمی‌شود',
+    dataSourceRows({ base, ua, contracts, seriesByIns, sources }).every(
+      (row) => !row.purpose.startsWith('منبع دوم')));
+
+  const stat = sourceSummary(rows);
+  check('جمع‌بندی می‌گوید چند تا را منبع دوم نجات داد',
+    stat.rescued === 1 && stat.total === 3, JSON.stringify(stat));
+}
+
+
+// ═══════════ ۲۱۳-و. مسیر سرور و رابط ═══════════
+group('۲۱۳-و. مسیر سرور و رابط');
+{
+  const server = readSrc('../server/server.mjs');
+  const route = server.slice(server.indexOf("if (p === '/api/dailies')"), server.indexOf("if (p === '/api/clienttype')"));
+  check('مسیر dailies منبع دوم را فقط وقتی می‌زند که اولی خالی باشد',
+    /if \(rows\.length \|\| !canFallback\) return/.test(route)
+    && route.includes('GetClosingPriceHistory'));
+  check('و بی‌`asOf` هیچ درخواست اضافه‌ای نمی‌رود — رفتار قبلی دست‌نخورده',
+    route.includes('const canFallback = validCompactDate(asOf);'));
+  check('منبعِ هر ابزار در پاسخ برمی‌گردد تا فایل بتواند بگوید کدام جواب داد',
+    /source: hist\.length \? 'history' : 'list'/.test(route));
+  check('خطای منبع دوم قورت داده نمی‌شود — متنش حمل می‌شود، نه undefined',
+    /fallbackError: `\$\{e2\.name\}: \$\{e2\.message\}`/.test(route));
+  check('و اگر هر دو خالی بودند، هیچ ردیف ساختگی ساخته نمی‌شود',
+    !/rows: \[\{/.test(route));
+
+  const book = readSrc('../ui/portfolio-backtest-export.mjs');
+  check('برگ «منبع داده» ستون منبع را دارد و سرشناسه شمار نجات‌یافته‌ها را',
+    book.includes("'داده از کدام منبع آمد'") && book.includes('از منبع دوم آمد'));
+
+  const tab = readSrc('../ui/tabs/portfolio-backtest.mjs');
+  check('رابط فقط خالی‌ها را دوباره می‌خواهد، نه همه را',
+    tab.includes('const emptyCodes = codes.filter((code) => !(seriesByIns[code] || []).length && !seriesErrors[code]);'));
+  check('تاریخِ تکیه‌گاه حدس زده نمی‌شود — آخرین روزِ سریِ نماد پایه است',
+    /const asOf = baseSeries\.length/.test(tab) && tab.includes('Math.max(...baseSeries.map'));
+  check('و منبعِ هر ابزار تا دفترچه می‌رود',
+    tab.includes('sources: seriesSource'));
 }
