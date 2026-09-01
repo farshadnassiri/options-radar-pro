@@ -292,7 +292,11 @@ export function contractCensus({ ua, seriesByIns, startDate, entryBasis = 'CLOSE
 
   // اثر پنجره، به تفکیک شمار پا. سقفِ هر سررسید همان سهم برابری است که
   // ترکیب‌ساز واقعاً استفاده می‌کند، وگرنه این عدد با آن نمی‌خواند.
-  const share = fairShare(settings.maxRows, Math.max(1, tally.expiries.length), settings.maxCombosPerExpiry);
+  // سقفی که به پنجره داده می‌شود باید **همانی** باشد که ترکیب‌ساز
+  // می‌دهد، وگرنه این برگ از چیزی خبر می‌دهد که رخ نداده. نسخهٔ اول
+  // `share` را می‌داد و ترکیب‌ساز `enumBudget(share)` را: برگ برای چهار پا
+  // «۳ قیمت اعمال کنار رفت» می‌نوشت در حالی که هیچ‌کدام کنار نرفته بودند.
+  const share = enumBudget(fairShare(settings.maxRows, Math.max(1, tally.expiries.length), settings.maxCombosPerExpiry));
   for (const legs of [1, 2, 3, 4]) {
     let kept = 0, dropped = 0, forced = false;
     for (const ex of tally.expiries) {

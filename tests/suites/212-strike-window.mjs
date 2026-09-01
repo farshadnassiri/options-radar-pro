@@ -210,12 +210,23 @@ group('۲۱۲-د. اهرم ۱۴۰۵/۰۶/۰۱ — استرانگل فروش');
     cen.expiries.length === 3
     && cen.expiries.map((e) => e.strikes).join(',') === '12,13,11',
     cen.expiries.map((e) => e.strikes).join('،'));
+  // سرشماری باید **همان** سقفی را ببیند که ترکیب‌ساز می‌بیند. نسخهٔ اول
+  // `share` را می‌داد و ترکیب‌ساز `enumBudget(share)` را، پس برگ از
+  // کنارگذاشتنی خبر می‌داد که رخ نداده بود.
   check('اثر پنجره برای یک تا چهار پا جدا گزارش می‌شود',
-    cen.windows.length === 4 && cen.windows[0].dropped === 0 && cen.windows[1].dropped === 9,
+    cen.windows.length === 4 && cen.windows.map((w) => w.legs).join(',') === '1,2,3,4',
     JSON.stringify(cen.windows.map((w) => w.dropped)));
-  check('جملهٔ سرشماری، شمار قرارداد و علت کنار رفتن را با هم می‌گوید',
-    censusNote(cen, 2).includes('۷۲') && censusNote(cen, 2).includes('سقف'),
+  check('و گزارشِ سرشماری با کارِ ترکیب‌ساز یکی است، نه سختگیرانه‌تر',
+    cen.windows[1].dropped === auto.outOfWindow && cen.windows[1].dropped === 0,
+    `سرشماری ${cen.windows[1].dropped} · ترکیب‌ساز ${auto.outOfWindow}`);
+  check('پای بیشتر، بریدنِ بیشتر — چون C(n,k) تندتر رشد می‌کند',
+    cen.windows[2].dropped > 0 && cen.windows[3].dropped >= cen.windows[2].dropped,
+    JSON.stringify(cen.windows.map((w) => w.dropped)));
+  check('جملهٔ سرشماری شمار قرارداد را می‌گوید، و چون چیزی کنار نرفته، سقف را نه',
+    censusNote(cen, 2).includes('۷۲') && !censusNote(cen, 2).includes('سقف'),
     censusNote(cen, 2));
+  check('ولی برای چهار پا که واقعاً بریده شده، سقف را نام می‌برد',
+    censusNote(cen, 4).includes('سقف'), censusNote(cen, 4));
 
   // ── همان جدایی، در مسیر زنده ────────────────────────────────────────
   const liveBase = { ...defaults(), maxRows: 120, maxCombosPerExpiry: 120, greeksInScan: false };
