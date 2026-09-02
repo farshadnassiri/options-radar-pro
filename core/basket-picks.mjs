@@ -5,12 +5,40 @@
 // به‌جای شناسهٔ استراتژی می‌نشاند. نتیجه: استراتژی عوض می‌شد، هیچ ترکیبی
 // نمی‌ماند و سبد ساخته نمی‌شد. منطقی که آزمون مستقیم ندارد، همین می‌شود.
 
-/** نخستین ترکیب معتبرِ یک استراتژی در یک اجرا؛ اگر نبود، رشتهٔ خالی. */
-export function firstComboId(source, strategyId) {
-  if (!source || !strategyId) return '';
-  const combos = source.analysis?.combos || [];
-  const found = combos.find((combo) => combo.strategyId === strategyId && combo.series?.ok);
-  return found?.id || '';
+/**
+ * ترکیب‌های انتخاب‌شدنیِ یک استراتژی در یک اجرا — مرتب بر **بهای یک قرارداد**.
+ *
+ * چرا اینجا و نه در تب: همین شرط سه جای دیگر هم نوشته شده بود — جدول
+ * رتبه‌بندی، کشوی جزئیات و کشویی سبد — و «یکی بودنِ این سه فهرست» فقط
+ * تصادفِ سه رونوشت از یک خط بود، نه چیزی که آزمونی نگهش دارد. حالا یک
+ * تعریف است و هر سه از همین می‌خوانند.
+ *
+ * ترتیب از ارزان به گران است، چون سؤالِ این کشویی «کدام بهتر بود» نیست —
+ * آن را جدول رتبه‌بندی جواب می‌دهد — بلکه «با این سهم از سرمایه کدام‌ها
+ * اصلاً یک قرارداد می‌خرند» است. ترکیبی که بهایش معلوم نیست ته فهرست
+ * می‌ماند: نه ارزان است نه گران، فقط ناشناخته، و ناشناخته اول فهرست
+ * نمی‌نشیند.
+ */
+export function combosFor(source, strategyId, basisId = null) {
+  if (!source || !strategyId) return [];
+  const basis = normalizeBasis(basisId ?? source?.analysis?.basisId);
+  return (source.analysis?.combos || [])
+    .filter((combo) => combo.strategyId === strategyId && combo.series?.ok)
+    .map((combo) => ({ combo, cost: comboLotCost(combo, basis) }))
+    // مرتب‌سازی پایدار نیست در همهٔ موتورها؛ گره‌ها با شناسه باز می‌شوند تا
+    // فهرست میان دو رسمِ پیاپی جابه‌جا نشود و انتخابِ کاربر زیر دستش نلغزد.
+    .sort((a, b) => {
+      if (a.cost === null && b.cost === null) return String(a.combo.id).localeCompare(String(b.combo.id));
+      if (a.cost === null) return 1;
+      if (b.cost === null) return -1;
+      return a.cost - b.cost || String(a.combo.id).localeCompare(String(b.combo.id));
+    })
+    .map((row) => row.combo);
+}
+
+/** ارزان‌ترین ترکیب معتبرِ یک استراتژی در یک اجرا؛ اگر نبود، رشتهٔ خالی. */
+export function firstComboId(source, strategyId, basisId = null) {
+  return combosFor(source, strategyId, basisId)[0]?.id || '';
 }
 
 /** آیا این ترکیب در این اجرا و زیر این استراتژی واقعاً هست؟ */
@@ -114,13 +142,18 @@ const num = (value) => {
  * شده. تقسیم بر `entry.units` آن را به یک قرارداد برمی‌گرداند — همان
  * دانه‌بندی‌ای که سبد با آن می‌خرد.
  */
-export function lotCostRial(source, comboId, basisId = null) {
-  const combo = (source?.analysis?.combos || []).find((row) => String(row.id) === String(comboId ?? ''));
+export function comboLotCost(combo, basisId = null) {
   if (!combo) return null;
-  const den = basisDenominator(combo.entry, normalizeBasis(basisId ?? source?.analysis?.basisId));
+  const den = basisDenominator(combo.entry, normalizeBasis(basisId));
   if (!den.ok || num(den.value) === null || !(den.value > 0)) return null;
   const units = num(combo.entry?.units);
   return units !== null && units > 0 ? den.value / units : den.value;
+}
+
+/** همان بها، وقتی فقط شناسهٔ ترکیب در دست است. */
+export function lotCostRial(source, comboId, basisId = null) {
+  const combo = (source?.analysis?.combos || []).find((row) => String(row.id) === String(comboId ?? ''));
+  return comboLotCost(combo, basisId ?? source?.analysis?.basisId);
 }
 
 /**

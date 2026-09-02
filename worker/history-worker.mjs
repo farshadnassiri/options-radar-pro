@@ -77,8 +77,17 @@ self.onmessage = (event) => {
       let priced = 0;
       for (let index = 0; index < moments.length; index++) {
         const second = moments[index];
-        const marked = applyIntradayMark(m.seriesByIns, marksAt(m.tape, second), { date: m.endDate, second });
-        columns.push({ key: momentKey(m.endDate, second), second, marked: marked.marked, dropped: marked.dropped });
+        const marks = marksAt(m.tape, second);
+        const marked = applyIntradayMark(m.seriesByIns, marks, { date: m.endDate, second });
+        // قیمت نماد پایه در همان لحظه — آخرین معاملهٔ خودش تا آن ثانیه.
+        // بی این، نمودار «بازده در برابر قیمت پایه» در دانه‌بندی درون‌روزی
+        // محور افقی نداشت و کاملاً خالی می‌ماند.
+        const basePrice = marks?.[String(m.ua?.ins)]?.price ?? null;
+        columns.push({
+          key: momentKey(m.endDate, second), second,
+          marked: marked.marked, dropped: marked.dropped,
+          basePrice: Number.isFinite(basePrice) && basePrice > 0 ? basePrice : null,
+        });
         if (!marked.marked) {
           self.postMessage({ type: 'portfolio-intraday-progress', id: m.id, done: index + 1, total: moments.length, priced });
           continue;
@@ -229,11 +238,19 @@ self.onmessage = (event) => {
         return Number.isFinite(close) && close > 0 && Number.isFinite(startClose) && startClose > 0
           ? ((close / startClose) - 1) * 100 : null;
       });
+      // قیمتِ خودِ نماد پایه، نه درصدش. نمودار «بازده در برابر قیمت پایه»
+      // روی محور افقی ریال می‌خواهد و درصدِ نسبت‌به‌روزِ‌اول این را نمی‌دهد:
+      // دو اجرای با تاریخ شروع متفاوت، یک قیمت را دو درصد مختلف نشان
+      // می‌دهند. روزِ بی قیمت پایانی `null` می‌ماند.
+      const basePrices = matrix.dates.map((date) => {
+        const close = historyPrice(baseRows.get(date), 'CLOSE');
+        return Number.isFinite(close) && close > 0 ? close : null;
+      });
       for (const row of rows) delete row.path.daily;
       self.postMessage({
         type: 'portfolio', id: m.id, rows,
         report, generatedByStrategy, census,
-        matrix: { dates: matrix.dates, pnl: matrix.pnl, rowCount: matrix.rowCount, baseSeries },
+        matrix: { dates: matrix.dates, pnl: matrix.pnl, rowCount: matrix.rowCount, baseSeries, basePrices },
         excluded: { invalidAtEnd, replayErrors },
       }, [matrix.pnl.buffer]);
       return;
