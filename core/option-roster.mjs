@@ -408,6 +408,23 @@ export function repairRoster(rows = [], truth = []) {
   };
 }
 
+/**
+ * دوقلوهایی که **جلوی ادغام را می‌گیرند**.
+ *
+ * ═══ چرا قاعده در هسته است و نه در ابزار ═══
+ *
+ * نسخهٔ اولش یک `if` داخل `tools/roster-import.mjs` بود و آزمونش متنِ
+ * منبع را می‌خواند. جهش‌سنجی نشانش داد: با عوض کردن شرط به `false`
+ * نگهبان خاموش می‌شد و هیچ ادعایی قرمز نمی‌شد، چون آن رشته سرِ جایش
+ * مانده بود.
+ *
+ * ادعای متنی «هست» را می‌سنجد، نه «کار می‌کند». قاعده اینجا آمد تا با
+ * رفتار سنجیده شود.
+ */
+export function blockingTwins(existing = [], incoming = [], { repair = false } = {}) {
+  return repair ? [] : roundedTwins(existing, incoming);
+}
+
 export function mergeRoster(existing = [], incoming = []) {
   const byIns = new Map();
   const put = (row) => {

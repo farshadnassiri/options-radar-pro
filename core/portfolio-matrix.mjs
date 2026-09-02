@@ -88,3 +88,29 @@ export function columnsInRange(dates = [], from = null, to = null) {
   }
   return out;
 }
+
+/**
+ * زیرمجموعه‌ای از ردیف‌های ماتریس، به همان ترتیب.
+ *
+ * ═══ چرا این تابع هست ═══
+ *
+ * ماتریس ردیف‌ها را **با اندیس** می‌شناسد: ردیف iام از `pnl` در
+ * `i * dates.length` شروع می‌شود. پس هرکس فهرست ردیف‌ها را کوتاه کند و
+ * ماتریس را دست‌نخورده بگذارد، مسیر روزانهٔ هر ردیف به ردیف دیگری
+ * می‌چسبد — و هیچ خطایی نمی‌دهد، فقط عددها عوض می‌شوند.
+ *
+ * `path.daily` پیش از فرستادن از ریسه پاک می‌شود، پس ساختنِ دوبارهٔ
+ * ماتریس در مرورگر ممکن نیست. برش، تنها راهِ درست است.
+ */
+export function selectMatrixRows(matrix, indexes) {
+  if (!matrix || !Array.isArray(indexes)) return matrix;
+  const dates = matrix.dates || [];
+  const width = dates.length;
+  const src = matrix.pnl instanceof Float64Array ? matrix.pnl : Float64Array.from(matrix.pnl || []);
+  const rows = indexes.filter((i) => Number.isInteger(i) && i >= 0 && (i + 1) * width <= src.length);
+  const pnl = new Float64Array(rows.length * width);
+  for (let out = 0; out < rows.length; out += 1) {
+    pnl.set(src.subarray(rows[out] * width, (rows[out] + 1) * width), out * width);
+  }
+  return { ...matrix, pnl, rowCount: rows.length };
+}

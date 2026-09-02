@@ -152,6 +152,11 @@ self.onmessage = (event) => {
               notional: replay.entry.notional, spot: replay.entry.spot,
               maxLoss: Number.isFinite(replay.entry.payoff?.maxLoss) ? replay.entry.payoff.maxLoss : null,
               maxProfit: Number.isFinite(replay.entry.payoff?.maxProfit) ? replay.entry.payoff.maxProfit : null,
+              // نقاط سربه‌سری، برای پالایه. آرایه است چون استرادل دو نقطه
+              // دارد و اسپردِ یک‌طرفه یکی؛ نبودنِ نقطهٔ دوم «صفر» نیست،
+              // «نداریم» است و پالایه همان‌طور رفتارش می‌کند.
+              breakevens: Array.isArray(replay.entry.payoff?.breakevens)
+                ? replay.entry.payoff.breakevens.filter(Number.isFinite) : [],
               // شمار واحدی که این عددها بر آن بسته شده‌اند.
               //
               // بی این عدد، «مخرج» یک جعبهٔ بستهٔ N واحدی است و سبد فرضی

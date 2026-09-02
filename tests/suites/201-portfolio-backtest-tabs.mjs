@@ -25,10 +25,17 @@ group('۲۰۱. صفحهٔ تب‌بندی‌شدهٔ آزمون همه استر�
   check('هر تغییر عدسی فقط بازساخت است، نه اجرای دوباره',
     tab201.includes('const relens = (patch) => { lens = { ...lens, ...patch }; recompute(); };')
     && !/relens[\s\S]{0,200}runAll\(/.test(tab201));
+  // ادعا روی **قصد** است نه روی یک رشتهٔ دقیق: ماتریسِ همان اجرا مبنا
+  // بماند و هیچ بازپخشی راه نیفتد. رشتهٔ دقیق سه بار با جابه‌جا شدن کد
+  // شکست، در حالی که قصد هر بار سرِ جایش بود — و یک بار هم پالایه که
+  // ماتریس را می‌بُرد، بی‌آنکه چیزی خراب شده باشد.
+  const recompute201 = tab201.slice(tab201.indexOf('function recompute()'));
   check('بازساخت از همان ماتریسِ اجرا می‌آید و بازپخش تازه نمی‌کند',
     tab201.includes('analysis = analyzePortfolio({')
-    && tab201.includes('rows: payloadRows, matrix: payloadMatrix,')
-    && !/function recompute\(\)[\s\S]{0,600}replayHistory\(/.test(tab201));
+    && recompute201.slice(0, 900).includes('payloadMatrix')
+    && !/function recompute\(\)[\s\S]{0,900}replayHistory\(/.test(tab201));
+  check('و ردیف‌ها و ماتریس با هم می‌آیند — برشِ نامتقارن، مسیر هر ردیف را جابه‌جا می‌کند',
+    recompute201.slice(0, 900).includes('selectMatrixRows(payloadMatrix, comboFilter.indexes)'));
   check('عدسی در تب راه‌اندازی پنهان می‌شود',
     tab201.includes("$('pb-lens').hidden = id === 'setup';"));
 

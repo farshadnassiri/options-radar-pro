@@ -3411,3 +3411,34 @@ td.gain, dd.gain { color: var(--gain); }
   line-height: 1.95;
 }
 .pb-skin .pb-census:empty { display: none; }
+
+/* پالایهٔ ترکیب — شبکهٔ قیدها.
+   دو ورودی در هر خانه («از» و «تا») چون قید یک‌طرفه هم لازم است: «حداکثر
+   زیان تا صد میلیون» بی کف معنی دارد. */
+.pb-skin .pb-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.pb-skin .pb-filter-cell { display: flex; flex-direction: column; gap: var(--space-1); }
+.pb-skin .pb-filter-cell > label {
+  font-size: var(--fs-xs); font-weight: 700; color: var(--fg);
+}
+.pb-skin .pb-filter-cell > label small { font-weight: 500; color: var(--muted); }
+.pb-skin .pb-filter-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+.pb-skin .pb-filter-pair input {
+  min-width: 0; padding: var(--space-2) var(--space-3);
+  border: var(--pb-hair); border-radius: var(--radius-sm);
+  background: var(--pb-tile); color: var(--fg); font-size: var(--fs-xs);
+}
+.pb-skin .pb-filter-hint {
+  font-size: var(--fs-xs); color: var(--muted); line-height: 1.7;
+}
+.pb-skin .pb-filter-note {
+  margin: 0; padding: var(--space-3) var(--space-4);
+  border: var(--pb-hair); border-radius: var(--radius-md);
+  background: var(--pb-tile); color: var(--fg);
+  font-size: var(--fs-xs); line-height: 1.95;
+}
+.pb-skin .pb-filter-note:empty { display: none; }

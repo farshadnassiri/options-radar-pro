@@ -83,6 +83,8 @@ import {
 } from '/core/intraday-grid.mjs';
 import { downloadPortfolioBacktest } from '/ui/portfolio-backtest-export.mjs';
 import { dataSourceRows } from '/core/data-source.mjs';
+import { FILTER_FIELDS, applyComboFilter, filterNote } from '/core/combo-filter.mjs';
+import { selectMatrixRows } from '/core/portfolio-matrix.mjs';
 import {
   correlationHeatOption, correlationOf, familyBarOption, funnelOption, paretoOption,
   roseOption, shareDonutOption, similarityGraphOption, sunburstOption,
@@ -234,6 +236,11 @@ export async function mount(root, { state }) {
   </div>
 
   <div class="pb-panel" data-panel="ranking" hidden>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">پالایه</p><h2>کدام ترکیب‌ها بمانند</h2></div><button type="button" class="ghost" id="pb-filter-clear">پاک کردن همه</button></div>
+      <p class="pb-hint">هر خانه خالی یعنی آن قید خاموش است. پالایه روی ورودی می‌نشیند، پس رتبه‌بندی و نمودارها و خروجی اکسل همه با همین ردیف‌ها ساخته می‌شوند. ردیفی که مقدارِ یک قید را ندارد کنار نمی‌رود — جدا شمرده می‌شود.</p>
+      <div id="pb-filter-grid" class="pb-filter-grid"></div>
+      <p class="pb-filter-note" id="pb-filter-note" role="status" aria-live="polite"></p>
+    </section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">جدول اصلی</p><h2>رتبه‌بندی با نمرهٔ ترکیبی</h2></div><span id="pb-audit">—</span></div>
       <p class="pb-hint">ترتیب از نمرهٔ ترکیبی می‌آید، نه فقط از بازده. وزن سنجه‌ها را در تب «سنجه‌ها» می‌توانی عوض کنی و همین جدول همان لحظه از نو مرتب می‌شود. روی هر ردیف کلیک کن تا ترکیب‌هایش را ببینی.</p>
       <div id="pb-strategies" class="history-table-wrap"></div>
@@ -506,6 +513,7 @@ export async function mount(root, { state }) {
   const numCellOf = (value) => (Number.isFinite(value) ? fmt.num(value) : '—');
 
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
+  let comboFilter = null;
   let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, seriesSource = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '';
   // سری‌هایی که **آخرین اجرا** با آن‌ها انجام شد. با پایان روز، همان
   // `seriesByIns` است؛ با لحظهٔ درون‌روز، نسخهٔ مهرخورده. پنل جزئیات و
@@ -515,6 +523,9 @@ export async function mount(root, { state }) {
   let runSeriesByIns = {};
   // روز جاریِ چسبانده‌شده. صفر یعنی همه‌چیز بسته‌شده است.
   let liveDate = 0;
+  // محدودهٔ هر قید. خالی یعنی خاموش؛ هیچ قیدی پیش‌فرض روشن نیست، چون
+  // پالایهٔ روشنِ نادیده بدتر از نبودنِ پالایه است.
+  let comboRanges = {};
   const setStatus = (text, error = false) => { status.textContent = text; status.toggleAttribute('data-error', error); };
   const rowAt = (ins, date) => (seriesByIns[String(ins)] || []).find((row) => normalizeHistoryDate(row.date) === Number(date));
   const liquidity = () => ({
@@ -730,16 +741,72 @@ export async function mount(root, { state }) {
    */
   function recompute() {
     if (!payloadMatrix) return;
+    // پالایه روی **ورودی** می‌نشیند، نه روی یک جدول. وگرنه رتبه‌بندی و
+    // نمودارها و خروجی اکسل هر کدام عدد خودشان را می‌دادند.
+    //
+    // ماتریس با همان اندیس‌ها بریده می‌شود: ردیف‌ها را با اندیس
+    // می‌شناسد و برشِ نامتقارن، مسیر روزانهٔ هر ردیف را به ردیف دیگری
+    // می‌چسباند بی‌آنکه خطایی بدهد.
+    comboFilter = applyComboFilter(payloadRows, comboRanges);
+    const matrix = comboFilter.indexes
+      ? selectMatrixRows(payloadMatrix, comboFilter.indexes)
+      : payloadMatrix;
     analysis = analyzePortfolio({
-      rows: payloadRows, matrix: payloadMatrix,
+      rows: comboFilter.rows, matrix,
       basisId: lens.basisId, statistic: lens.statistic, weighting: lens.weighting,
       from: lens.from, to: lens.to, weights: metricWeights,
     });
+    paintFilterNote();
     if (!trendPick.length) trendPick = analysis.strategies.slice(0, 4).map((row) => row.strategyId);
     paintLensNote();
     paintHero();
     for (const tab of PB_TABS) if (tab.id !== 'setup') dirty.add(tab.id);
     paintPanel(tabsApi?.current || 'overview');
+  }
+
+  /**
+   * شبکهٔ قیدها — یک بار ساخته می‌شود و بعد فقط مقدارها خوانده می‌شوند.
+   *
+   * `input` به‌جای `change` گوش داده می‌شود ولی با تأخیر، چون هر تغییر
+   * کل تحلیل را از نو می‌سازد و تایپِ «۱۰۰۰۰۰» پنج بار اجرایش می‌کرد.
+   */
+  function mountFilters() {
+    const host = $('pb-filter-grid');
+    if (!host || host.dataset.ready) return;
+    host.dataset.ready = '1';
+    host.innerHTML = FILTER_FIELDS.map((f) => `
+      <div class="pb-filter-cell">
+        <label for="pbf-${f.id}-min">${esc(f.label)}${f.unit ? ` <small>${esc(f.unit)}</small>` : ''}</label>
+        <div class="pb-filter-pair">
+          <input type="number" id="pbf-${f.id}-min" data-field="${f.id}" data-edge="min" placeholder="از" step="any">
+          <input type="number" id="pbf-${f.id}-max" data-field="${f.id}" data-edge="max" placeholder="تا" step="any">
+        </div>
+        ${f.hint ? `<small class="pb-filter-hint">${esc(f.hint)}</small>` : ''}
+      </div>`).join('');
+
+    let timer = 0;
+    host.addEventListener('input', (event) => {
+      const el = event.target.closest('input[data-field]');
+      if (!el) return;
+      const id = el.dataset.field, edge = el.dataset.edge;
+      const raw = el.value.trim();
+      const next = { ...(comboRanges[id] || {}) };
+      next[edge] = raw === '' ? null : Number(raw);
+      if (next.min == null && next.max == null) delete comboRanges[id];
+      else comboRanges[id] = next;
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (payloadMatrix) recompute(); }, 250);
+    });
+    $('pb-filter-clear').onclick = () => {
+      comboRanges = {};
+      for (const el of host.querySelectorAll('input[data-field]')) el.value = '';
+      if (payloadMatrix) recompute();
+    };
+  }
+
+  function paintFilterNote() {
+    const el = $('pb-filter-note');
+    if (el) el.textContent = comboFilter ? filterNote(comboFilter) : '';
   }
 
   function paintHero() {
@@ -752,6 +819,9 @@ export async function mount(root, { state }) {
     // پیش از هر تعویض پنل، انیمیشن‌های در جریان می‌خوابند: نمودار پنهان
     // نباید نخِ اصلی را نگه دارد.
     charts.stopAll();
+    // شبکهٔ قیدها پیش از `dirty` سوار می‌شود: پنلِ تازه‌سازی‌نشده هم باید
+    // ورودی‌هایش را داشته باشد، وگرنه بار اول خالی باز می‌شود.
+    if (id === 'ranking') mountFilters();
     if (!analysis || !dirty.has(id)) { charts.resizeAll(); return; }
     dirty.delete(id);
     if (id === 'overview') paintOverview();
@@ -1861,6 +1931,17 @@ export async function mount(root, { state }) {
     return result.series;
   }
 
+  /**
+   * سقفِ ترکیبِ هر استراتژی، پس از کران.
+   *
+   * یک جا حساب می‌شود چون دو جا لازم است: یکی برای اجرا و یکی برای
+   * گزارش. دو نسخهٔ جدا یعنی روزی که کران عوض شود، گزارش از اجرا جدا
+   * می‌افتد — و همین شد: کران `Math.min(1000, …)` فقط در مسیر اجرا بود.
+   */
+  function effectiveCap() {
+    return Math.max(10, Math.min(1000, Math.trunc(safeNum($('pb-cap').value, 120))));
+  }
+
   async function runAll() {
     const startDate = Number($('pb-entry-date').dataset.value), endDate = Number($('pb-exit-date').dataset.value);
     if (!ua || !startDate || !endDate || endDate < startDate) { setStatus('نماد و بازه معتبر را انتخاب کن.', true); return; }
@@ -1873,7 +1954,7 @@ export async function mount(root, { state }) {
         id: `portfolio-${Date.now()}`, type: 'portfolio', ua, seriesByIns: runSeries, startDate, endDate,
         entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST',
         units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))), fees: feesOf(state.settings), settings: state.settings,
-        filtered: true, liquidity: liquidity(), maxPerStrategy: Math.max(10, Math.min(1000, Math.trunc(safeNum($('pb-cap').value, 120)))),
+        filtered: true, liquidity: liquidity(), maxPerStrategy: effectiveCap(),
         includeInfeasible: $('pb-scope').value === 'all',
       });
       if (!payload.rows.length) throw new Error('هیچ ترکیبی با قیمت و نقدشوندگی معتبر در هر دو تاریخ پیدا نشد');
@@ -1939,6 +2020,7 @@ export async function mount(root, { state }) {
       });
       await downloadPortfolioBacktest(analysis, {
         basket, generated, census, sources, dateLabel,
+        filter: comboFilter, filterRanges: comboRanges,
         context: {
           baseName: nameOf(ua, 'نماد پایه'), baseIns: String(ua?.ins ?? ''),
           entryDate: Number($('pb-entry-date').dataset.value) || null,
@@ -1947,7 +2029,10 @@ export async function mount(root, { state }) {
           entryBasis: HISTORY_BASES.find(([key]) => key === (entryRail.dataset.value || 'LAST'))?.[1] || '',
           exitBasis: HISTORY_BASES.find(([key]) => key === (exitRail.dataset.value || 'LAST'))?.[1] || '',
           units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
-          cap: Math.max(10, Math.trunc(safeNum($('pb-cap').value, 120))),
+          // سقفِ **مؤثر**، نه عددی که تایپ شده. کاربر ۱۰۰۰۰۰۰ زد و اجرا
+          // با ۱۰۰۰ رفت، ولی سرشناسه ۱۰۰۰۰۰۰ نوشت — عددی که هیچ‌جا اعمال
+          // نشده بود.
+          cap: effectiveCap(),
         },
       });
     } catch (error) {

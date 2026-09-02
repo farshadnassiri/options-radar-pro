@@ -17,6 +17,13 @@ import { downloadXlsx, sheet, sheetParts } from './xlsx.mjs';
 import { METRICS } from '../core/portfolio-report.mjs';
 import { WINDOW_MODES, windowMode } from '../core/strike-window.mjs';
 import { sourceSummary } from '../core/data-source.mjs';
+import { FIELD_BY_ID, FILTER_FIELDS, breakevens, filterNote } from '../core/combo-filter.mjs';
+
+/** nامین نقطهٔ سربه‌سری، یا خالی اگر نباشد — خالی صفر نیست. */
+const beOf = (combo, index) => {
+  const list = breakevens(combo);
+  return index < list.length ? list[index] : null;
+};
 
 export const PORTFOLIO_BACKTEST_EXPORT_VERSION = 1;
 
@@ -83,7 +90,7 @@ const pearson = (a = [], b = []) => {
  */
 export function portfolioBacktestWorkbook(analysis, {
   context = {}, basket = null, dateLabel = (value) => String(value ?? ''), generated = [],
-  census = null, sources = [],
+  census = null, sources = [], filter = null, filterRanges = {},
 } = {}) {
   if (!analysis) return [];
   const labels = (analysis.dates || []).map(dateLabel);
@@ -148,7 +155,30 @@ export function portfolioBacktestWorkbook(analysis, {
     ['خالی برگشت (هیچ روزی معامله نشده)', cell(sourceStat.empty)],
     ['از منبع دوم آمد (ابزار از تابلو حذف شده)', cell(sourceStat.rescued)],
     ['درخواستش خطا خورد', cell(sourceStat.failed)],
+    ['—', ''],
+    // بی این دو سطر، دو خروجی با دو پالایهٔ متفاوت به‌چشم یکی می‌آیند و
+    // «چرا این‌بار کمتر شد» جوابی ندارد.
+    ['ترکیب پیش از پالایه', cell(filter?.total)],
+    ['ترکیب پس از پالایه', cell(filter?.kept)],
+    ['خلاصهٔ پالایه', filter && filter.active?.length ? filterNote(filter) : 'هیچ قیدی فعال نبود'],
   ];
+
+  // ── برگ «پالایه» ────────────────────────────────────────────────────
+  //
+  // هر قید با محدوده‌اش و شمار آنچه انداخت. یک عددِ سرجمع کافی نیست:
+  // قیدی که همه را می‌اندازد باید بی‌درنگ پیدا شود.
+  const filterRows = FILTER_FIELDS.map((field) => {
+    const range = filterRanges?.[field.id] || {};
+    const on = Number.isFinite(range.min) || Number.isFinite(range.max);
+    return [
+      field.label, field.unit || '',
+      on ? cell(range.min) : '', on ? cell(range.max) : '',
+      on ? 'روشن' : 'خاموش',
+      on ? cell(filter?.dropped?.[field.id] ?? 0) : '',
+      on ? cell(filter?.unknown?.[field.id] ?? 0) : '',
+      field.hint || '',
+    ];
+  });
 
   // ── ۲. سنجه‌ها ───────────────────────────────────────────────────────
   const metricRows = (analysis.strategies || []).map((row) => [
@@ -193,6 +223,15 @@ export function portfolioBacktestWorkbook(analysis, {
       ? '' : cell(combo.series.firstProfitIndex),
     cell(combo.series?.observed), cell(combo.series?.missing),
     combo.series?.beyondBasis ? 'بله' : 'خیر',
+    // میدان‌های پالایه، از همان تابعی که پالایه استفاده می‌کند — نه یک
+    // حسابِ موازی. دو حساب یعنی روزی که یکی عوض شود، فایل عددی نشان
+    // می‌دهد که هیچ قیدی بر پایه‌اش کار نکرده.
+    cell(FIELD_BY_ID.get('maxProfit').pick(combo)),
+    cell(FIELD_BY_ID.get('maxLoss').pick(combo)),
+    cell(beOf(combo, 0)), cell(beOf(combo, 1)),
+    round(FIELD_BY_ID.get('breakevenGap1').pick(combo), 2),
+    round(FIELD_BY_ID.get('breakevenGap2').pick(combo), 2),
+    round(FIELD_BY_ID.get('breakevenWidth').pick(combo), 2),
   ]);
 
   // ── ۶. مسیر روزانه ───────────────────────────────────────────────────
@@ -311,6 +350,8 @@ export function portfolioBacktestWorkbook(analysis, {
       'سری کامل', 'سری یک‌سمته', 'دارای قیمت ورود', 'آن روز معامله نشد', 'بی‌سابقه تا آن روز',
       'از دارای قیمت: زیر دروازهٔ نقدشوندگی', 'نردبان قیمت اعمال'],
       censusRows, [110, 90, 90, 90, 90, 80, 90, 110, 120, 130, 130, 420]),
+    sheet('پالایه', ['قید', 'یکا', 'از', 'تا', 'وضعیت', 'کنارگذاشته', 'مقدارش نبود', 'یعنی چه'],
+      filterRows, [190, 70, 110, 110, 80, 100, 110, 420]),
     sheet('منبع داده', ['نقش', 'نماد', 'نوع', 'قیمت اعمال', 'سررسید', 'کد نماد', 'برای چه',
       'داده از کدام منبع آمد', 'وضعیت', 'شمار روز', 'نخستین روز', 'آخرین روز', 'خطا',
       'نشانی بالادست', 'مسیر محلی'],
@@ -332,6 +373,8 @@ export function portfolioBacktestWorkbook(analysis, {
       'مخرج بازده', 'وجه تضمین ناخالص', 'وجه تضمین خالص', 'نقد خالص ورود', 'ارزش اسمی', 'قیمت پایه در ورود',
       'ارزش معاملهٔ ورود', 'سود/زیان پایان', 'بازده پایان (درصد)', 'بهترین نقطه (درصد)', 'بدترین نقطه (درصد)',
       'بیشترین افت (درصد)', 'روز تا نخستین سود', 'روز دارای داده', 'روز بی‌داده', 'زیان بیش از مبنا',
+      'حداکثر سود', 'حداکثر زیان', 'سربه‌سری ۱', 'سربه‌سری ۲',
+      'فاصله تا سربه‌سری ۱ (درصد)', 'فاصله تا سربه‌سری ۲ (درصد)', 'پهنای سربه‌سری (درصد)',
     ], comboRows),
     ...sheetParts('مسیر روزانه', ['استراتژی', 'خانواده', 'تاریخ', 'روز نگهداری', 'بازده تجمعی (درصد)', 'تغییر همان روز (درصد)', 'افت از سقف (درصد)', 'نرخ برد روز (درصد)', 'رتبهٔ روز', 'نمونهٔ روز'], pathRows),
     sheet('افق نگهداری', ['روز نگهداری', 'تاریخ خروج', 'ترکیب معتبر', 'میانهٔ بازده (درصد)', 'نرخ برد (درصد)', 'بهترین (درصد)', 'بدترین (درصد)'], horizonRows),
@@ -342,6 +385,7 @@ export function portfolioBacktestWorkbook(analysis, {
     sheet('برگ‌ها', ['برگ', 'چه دارد'], [
       ['سرشناسه', 'پارامترهای اجرا و عدسی؛ بدون این، هیچ درصدی در بقیهٔ برگ‌ها معنا ندارد'],
       ['قراردادها', 'سرشماری روز ورود: هر سررسید با شمار کال و پوت، سری یک‌سمته و نردبان قیمت اعمال'],
+      ['پالایه', 'هر قید با محدوده‌اش و شمار آنچه انداخت؛ «مقدارش نبود» یعنی آن قید روی آن ردیف‌ها سنجیده نشد'],
       ['منبع داده', 'نشانیِ دقیقِ بالادست برای هر ابزار — چه داده آمده باشد چه نیامده. ستون «داده از کدام منبع آمد» می‌گوید فهرست روزانه جواب داد یا منبع دوم'],
       ['قرارداد بی‌قیمت', 'نامِ تک‌تکِ قراردادهایی که وارد ترکیب‌سازی نشدند، با علت و تاریخ نخستین معامله‌شان'],
       ['پنجره قیمت اعمال', 'پنجره برای یک تا چهار پا چه چیزی را وارد کرد و چه چیزی را کنار گذاشت'],
