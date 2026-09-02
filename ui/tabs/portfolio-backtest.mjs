@@ -72,9 +72,10 @@ import {
   gaugeOption as bkGauge, weekdayOption as bkWeekday, slopeOption as bkSlope,
   familyBubbleOption as bkBubble,
 } from '/ui/basket-charts-extra.mjs';
+import { payoffCurveOption as bkPayoff, payoffNote } from '/ui/basket-payoff.mjs';
 import { allocatePortfolio } from '/core/portfolio-allocation.mjs';
 import {
-  addPick, applyBasketEdit, firstComboId, freePct, lotCostRial,
+  addPick, applyBasketEdit, comboLotCost, combosFor, firstComboId, freePct, lotCostRial,
   normalizeBasketPicks, pickOn, pickWarning, usedPct,
 } from '/core/basket-picks.mjs';
 import {
@@ -442,7 +443,10 @@ export async function mount(root, { state }) {
     <div id="bk-tabs" hidden></div>
     <div class="pb-sub" data-panel="bk-mix" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">تخصیص</p><h2>وافل سرمایه — هر خانه یک درصد</h2></div></div><p class="pb-hint">صد خانه، صد درصد سرمایه. خانهٔ خاکستری یعنی نقدِ تخصیص‌نیافته.</p><div id="bk-waffle" class="pb-chart pb-chart"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">غربال</p><h2>از سرمایه تا ارزش پایانی</h2></div></div><p class="pb-hint">سه پله: آنچه داشتی، آنچه واقعاً درگیر شد، و آنچه ماند.</p><div id="bk-funnel" class="pb-chart pb-chart"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">جریان سرمایه</p><h2>پول از کجا به کجا رفت</h2></div></div><p class="pb-hint">پهنای هر نوار، مقدار پول است. جزئی که ارزش پایانی مثبت ندارد، جریانی از آن بیرون نمی‌رود.</p><div id="bk-flow" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">لایه‌ها</p><h2>خانواده ← استراتژی ← ترکیب</h2></div></div><p class="pb-hint">هر حلقه یک پله ریزتر. کلیک روی هر بخش، همان شاخه را باز می‌کند.</p><div id="bk-sun" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">وزن و نتیجه</p><h2>درخت‌نقشهٔ پول درگیر</h2></div></div><p class="pb-hint">مساحت هر خانه پول درگیر است و رنگش بازده همان جزء.</p><div id="bk-tree" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">هدف و واقعیت</p><h2>بودجهٔ هدف در برابر پول درگیر</h2></div></div><p class="pb-hint">فاصلهٔ دو میله، پولی است که به یک قرارداد کامل نرسید و نقد ماند.</p><div id="bk-dumb" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">سهم و اثر</p><h2>ماریمکو: عرض سهم، ارتفاع بازده</h2></div></div><p class="pb-hint">ستون پهن و کوتاه یعنی پول زیاد با بازده کم — بدترین ترکیب برای سبد.</p><div id="bk-mek" class="pb-chart pb-chart-lg"></div></section></div>
     <div class="pb-sub" data-panel="bk-path" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">مسیر ارزش سبد</p><h2>از سرمایهٔ اول دوره تا پایان</h2></div></div><p class="pb-hint">سایهٔ کم‌رنگ، بازهٔ بیشترین افت است. با غلتاندن روی نمودار می‌توانی بزرگ‌نمایی کنی.</p><div id="bk-equity" class="pb-chart pb-chart-xl"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">ریتم</p><h2>بازده گام‌به‌گام سبد</h2></div></div><p class="pb-hint">هر میله یک دوره. رشتهٔ میله‌های هم‌رنگ یعنی روند، نه شانس.</p><div id="bk-step" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">پایداری</p><h2>نرخ برد غلتان پنج دوره‌ای</h2></div></div><p class="pb-hint">بالای خط‌چین یعنی در آن پنجره بیشتر دوره‌ها مثبت بوده‌اند.</p><div id="bk-roll" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">توزیع</p><h2>هیستوگرام گام‌های سبد</h2></div></div><p class="pb-hint">شکل توزیع مهم‌تر از میانگین است: دم بلندِ چپ یعنی زیان‌های نادر ولی بزرگ.</p><div id="bk-hist" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">توزیع تجمعی</p><h2>چند درصد دوره‌ها از این بدتر بودند</h2></div></div><p class="pb-hint">برای خواندن: یک عدد روی محور افقی بگیر، ارتفاع منحنی می‌گوید چند درصد دوره‌ها بدتر یا برابر بودند.</p><div id="bk-ecdf" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">تقویم</p><h2>گام هر روز، روی تقویم</h2></div></div><p class="pb-hint">برای دیدن الگوی زمانی — سه روز بد پشت هم، یا همیشه اول هفته.</p><div id="bk-cal" class="pb-chart pb-chart-lg"></div></section></div>
-    <div class="pb-sub" data-panel="bk-vs" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">در برابر بازار</p><h2>سبد فرضی در برابر نماد پایه</h2></div></div><p class="pb-hint">هر دو از صفر شروع می‌شوند. میلهٔ پایین، مازاد سبد بر نماد پایه در همان دوره است.</p><div id="bk-versus" class="pb-chart pb-chart-xl"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">ضبط بازار</p><h2>در صعود چند گرفتیم، در نزول چند خوردیم</h2></div></div><p class="pb-hint">زیر صد در نزول یعنی کمتر از بازار آسیب دیدی — گاهی از بازده بیشتر مهم‌تر است.</p><div id="bk-capture" class="pb-chart pb-chart"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">حکم</p><h2>بازده سبد در برابر نماد پایه</h2></div></div><p class="pb-hint">عقربهٔ رنگی سبد است و عقربهٔ خاکستری نماد پایه.</p><div id="bk-gauge" class="pb-chart pb-chart"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">الگوی هفتگی</p><h2>میانگین گام در هر روز هفته</h2></div></div><p class="pb-hint">اگر همهٔ ستون‌ها هم‌اندازه‌اند، الگوی هفتگی‌ای در کار نیست.</p><div id="bk-weekday" class="pb-chart pb-chart"></div></section></div>
+    <div class="pb-sub" data-panel="bk-vs" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">منحنی سود و زیان</p><h2>بازده سبد در برابر قیمت نماد پایه</h2></div><label class="pb-inline-pick">پلهٔ قیمت<select id="bk-payoff-bins"><option value="0">بی‌میانگین</option><option value="12">۱۲ پله</option><option value="24" selected>۲۴ پله</option><option value="48">۴۸ پله</option></select></label></div>
+      <p class="pb-hint">محور افقی قیمت نماد پایه است و محور عمودی بازده سبد. نقطه‌ها به ترتیب زمان به هم وصل‌اند و رنگشان از کم‌رنگ (اول دوره) به پررنگ (آخر دوره) می‌رود، چون یک قیمت چند بار تکرار می‌شود و هر بار بازده دیگری دارد. دانهٔ زمان را از «دانه‌بندی زمان» در مرحلهٔ راه‌اندازی عوض کن: از روزانه تا یک‌دقیقه‌ای، همین نمودار ریزتر می‌شود.</p>
+      <div id="bk-payoff" class="pb-chart pb-chart-xl"></div>
+      <p class="portfolio-note" id="bk-payoff-note"></p></section><section class="card"><div class="section-head"><div><p class="eyebrow">در برابر بازار</p><h2>سبد فرضی در برابر نماد پایه</h2></div></div><p class="pb-hint">هر دو از صفر شروع می‌شوند. میلهٔ پایین، مازاد سبد بر نماد پایه در همان دوره است.</p><div id="bk-versus" class="pb-chart pb-chart-xl"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">ضبط بازار</p><h2>در صعود چند گرفتیم، در نزول چند خوردیم</h2></div></div><p class="pb-hint">زیر صد در نزول یعنی کمتر از بازار آسیب دیدی — گاهی از بازده بیشتر مهم‌تر است.</p><div id="bk-capture" class="pb-chart pb-chart"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">حکم</p><h2>بازده سبد در برابر نماد پایه</h2></div></div><p class="pb-hint">عقربهٔ رنگی سبد است و عقربهٔ خاکستری نماد پایه.</p><div id="bk-gauge" class="pb-chart pb-chart"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">الگوی هفتگی</p><h2>میانگین گام در هر روز هفته</h2></div></div><p class="pb-hint">اگر همهٔ ستون‌ها هم‌اندازه‌اند، الگوی هفتگی‌ای در کار نیست.</p><div id="bk-weekday" class="pb-chart pb-chart"></div></section></div>
     <div class="pb-sub" data-panel="bk-members" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">رفتار اعضا</p><h2>مسیر تجمعی هر عضو</h2></div></div><p class="pb-hint">هر خط یک عضو، روی سرمایهٔ درگیر خودش. عضوی که آخر سربه‌سر است شاید وسط راه نصف شده باشد.</p><div id="bk-mpath" class="pb-chart pb-chart-xl"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">سهم در طول زمان</p><h2>سود انباشتهٔ اعضا</h2></div></div><p class="pb-hint">ضخامت هر لایه، سهم همان عضو از سود آن دوره است.</p><div id="bk-mstack" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">جابه‌جایی رتبه</p><h2>چه کسی کِی جلو افتاد</h2></div></div><p class="pb-hint">محور وارونه است: بالا یعنی رتبهٔ بهتر. خط پرنوسان یعنی بردش شانسی بوده.</p><div id="bk-mbump" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">گام هر عضو</p><h2>نقشهٔ حرارتی عضو در برابر دوره</h2></div></div><p class="pb-hint">ستون یکدست قرمز یعنی آن دوره همه با هم باختند — یعنی تنوع سبد کار نکرده.</p><div id="bk-mheat" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">درد هر عضو</p><h2>افت هر عضو از سقف خودش</h2></div></div><p class="pb-hint">عمق هر ناحیه، بدترین عقب‌نشینی آن عضو تا آن لحظه است.</p><div id="bk-mdd" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">نیمهٔ اول و دوم</p><h2>چه کسی در نیمهٔ دوم قوی‌تر شد</h2></div></div><p class="pb-hint">خط بالارونده یعنی عضو در نیمهٔ دوم بهتر شد؛ پایین‌رونده یعنی سوختِ اولش تمام شد.</p><div id="bk-slope" class="pb-chart pb-chart-lg"></div></section></div>
     <div class="pb-sub" data-panel="bk-risk" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">ریسک و بازده</p><h2>هر عضو، یک حباب</h2></div></div><p class="pb-hint">اندازهٔ حباب پول درگیر است. بالا و راست بهتر: بازده بیشتر با افت کمتر.</p><div id="bk-risk" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">تنوع واقعی</p><h2>همبستگی گام اعضا</h2></div></div><p class="pb-hint">دو عضو با همبستگی نزدیک یک، تنوع نمی‌سازند — هرچند اسمشان فرق کند.</p><div id="bk-corr" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">سهم از ریسک</p><h2>سهم از سرمایه در برابر سهم از نوسان</h2></div></div><p class="pb-hint">عضوی که میلهٔ نوسانش بلندتر از میلهٔ سرمایه‌اش است، بیش از سهمش ریسک می‌آورد.</p><div id="bk-riskshare" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">پراکندگی</p><h2>جعبه‌ای گام روزانهٔ هر عضو</h2></div></div><p class="pb-hint">طول جعبه یعنی بی‌ثباتی. جعبهٔ کوتاهِ بالا، بهترین حالت است.</p><div id="bk-box" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">ازدحام</p><h2>هر نقطه یک دوره</h2></div></div><p class="pb-hint">برای دیدن خودِ داده‌ها، نه خلاصه‌شان: نقاط دورافتاده همان روزهای استثنایی‌اند.</p><div id="bk-swarm" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">چهار سنجه</p><h2>رادار اعضا</h2></div></div><p class="pb-hint">شکل بزرگ‌تر بهتر است؛ شکل کج یعنی عضو در یک بعد قوی و در بقیه ضعیف.</p><div id="bk-radar" class="pb-chart pb-chart-lg"></div></section></div>
     <div class="pb-sub" data-panel="bk-shape" hidden><section class="card"><div class="section-head"><div><p class="eyebrow">آبشار</p><h2>از سرمایه، جزء به جزء، تا ارزش پایانی</h2></div></div><p class="pb-hint">هر ستون یک عضو. ستون‌های قرمز آنچه را ستون‌های سبز ساخته‌اند پس می‌گیرند.</p><div id="bk-fall" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">چه کسی سود را ساخت</p><h2>سهم هر عضو از سود کل</h2></div></div><p class="pb-hint">عضوی که تنها سود را ساخته یعنی سبد در واقع تک‌پایه بوده.</p><div id="bk-lolli" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">خانواده‌ها</p><h2>حباب‌های هم‌خانواده</h2></div></div><p class="pb-hint">اندازهٔ حباب پول درگیر است و رنگ، خانواده. برای دیدن تمرکز سبد روی یک خانواده.</p><div id="bk-bubble" class="pb-chart pb-chart-lg"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">جدول اجزا</p><h2>هر جزء با عدد کاملش</h2></div><span id="pb-sankey-note"></span></div><p class="pb-hint">کلیک روی هر ردیف، کشوی جزئیات همان ترکیب را باز می‌کند.</p><div id="pb-basket-table" class="history-table-wrap"></div></section></div>
@@ -868,8 +872,8 @@ export async function mount(root, { state }) {
   function paintDrawerBody(row) {
     const host = $('pb-drawer-body');
     if (drawerView === 'combos') {
-      const combos = analysis.combos
-        .filter((combo) => combo.strategyId === row.strategyId && combo.series.ok)
+      const combos = combosFor({ analysis }, row.strategyId, lens.basisId)
+        .slice()
         .sort((a, b) => (b.series.finalPct ?? -Infinity) - (a.series.finalPct ?? -Infinity));
       const bound = heatScale(combos.map((combo) => combo.series.finalPct));
       host.innerHTML = combos.length
@@ -1253,7 +1257,9 @@ export async function mount(root, { state }) {
     const sources = basketSources();
     const source = sources.find((row) => row.id === pick.sourceId) || sources[0] || null;
     const strategies = source?.analysis?.strategies || [];
-    const combos = (source?.analysis?.combos || []).filter((combo) => combo.strategyId === pick.strategyId && combo.series.ok);
+    // همان مجموعه‌ای که جدول رتبه‌بندی نشان می‌دهد — یک تعریف، سه خواننده —
+    // ولی به ترتیبِ بهای یک قرارداد، از ارزان به گران.
+    const combos = combosFor(source, pick.strategyId, lens.basisId);
     // ستون «اجرا» تا وقتی کتابخانه یک اجرا بیشتر ندارد، ستونی است که
     // همیشه یک مقدار دارد — یعنی جای خالیِ گران. پهنایش به نام استراتژی
     // و ترکیب می‌رسد که واقعاً بلندند.
@@ -1263,7 +1269,12 @@ export async function mount(root, { state }) {
       : '';
     // نامِ بلند در `select` با سه‌نقطه بریده می‌شود؛ `title` همان متن کامل
     // را برمی‌گرداند تا چیزی از دسترس بیرون نرود.
-    const comboLabel = (combo) => `${comboName(combo)} · ${pctCell(combo.series.finalPct)}`;
+    // بها در خودِ برچسب می‌آید، وگرنه «مرتب بر قیمت» ادعایی است که کاربر
+    // نمی‌تواند وارسی کند: فهرستی مرتب بر عددی که دیده نمی‌شود.
+    const comboLabel = (combo) => {
+      const each = comboLotCost(combo, lens.basisId);
+      return `${comboName(combo)} · ${each === null ? 'بهای قرارداد نامعلوم' : fmt.money(each)} · ${pctCell(combo.series.finalPct)}`;
+    };
     // چرا این سطر در سبد نمی‌نشیند، همین‌جا گفته می‌شود — نه بعد از ساخت.
     const cost = lotCostRial(source, pick.comboId, lens.basisId);
     const warn = pickWarning({ pick, source, capitalRial: basketCapital(), basisId: lens.basisId, picks: basketPicks });
@@ -1467,6 +1478,8 @@ export async function mount(root, { state }) {
     'bk-cal': ['bk-path', (b, c, t) => bkCal(b, c.iso, t),
       (c) => (c.intraday ? 'در دانه‌بندی درون‌روزی، تقویم روزانه یک خانه بیشتر ندارد.'
         : 'برای تقویم دست‌کم دو روز با گام معلوم لازم است.')],
+    'bk-payoff': ['bk-vs', (b, c, t) => bkPayoff(b, c.basePrices, c.labels, t, { bins: c.payoffBins }),
+      'برای این نمودار هر لحظه باید هم قیمت نماد پایه را داشته باشد هم ارزش کامل سبد را؛ در این اجرا دو لحظه هم پیدا نشد.'],
     'bk-versus': ['bk-vs', (b, c, t) => bkVersus(b, c.base, c.labels, t),
       'ارزش سبد در هیچ دوره‌ای کامل معلوم نشد؛ دست‌کم یک جزء هر دوره قیمت نداشت.'],
     'bk-capture': ['bk-vs', (b, c, t) => bkCapture(b, c.base, t),
@@ -1501,6 +1514,10 @@ export async function mount(root, { state }) {
     }) || basketTabsApi;
   }
 
+  // صفر یعنی «خط میانگین را نکش». مقدار از خودِ کشویی خوانده می‌شود نه از
+  // یک متغیر موازی، تا حالت دیده‌شده و حالت رسم‌شده نتوانند از هم جدا شوند.
+  const payoffBinCount = () => Math.max(0, Math.trunc(safeNum($('bk-payoff-bins')?.value, 24)));
+
   /** بستهٔ داده‌ای که همهٔ نمودارهای سبد از آن می‌خوانند. */
   function basketContext() {
     const dates = analysis?.dates || [];
@@ -1508,7 +1525,9 @@ export async function mount(root, { state }) {
       labels: labelsOf(),
       iso: dates.map(isoDate),
       base: analysis?.baseSeries || [],
+      basePrices: analysis?.basePrices || [],
       baseFinal: analysis?.baseFinal ?? null,
+      payoffBins: payoffBinCount(),
       intraday: isIntradayGrain(grain),
       // روز هفتهٔ جلالی از تاریخ میلادیِ معادل می‌آید؛ روزی که تبدیلش
       // ممکن نباشد `null` می‌ماند و در الگوی هفتگی شمرده نمی‌شود.
@@ -1523,6 +1542,8 @@ export async function mount(root, { state }) {
 
   function paintBasketGroup(id) {
     if (!lastBasket) return;
+    const noteEl = $('bk-payoff-note');
+    if (noteEl) noteEl.textContent = payoffNote(lastBasket, analysis?.basePrices || [], labelsOf());
     // نمودارِ پنهان را نه می‌شود اندازه گرفت و نه ارزش رسم‌کردن دارد.
     charts.stopAll();
     const context = basketContext();
@@ -1652,8 +1673,8 @@ export async function mount(root, { state }) {
     if (!strategy) return;
     selectedStrategyId = strategyId;
     root.querySelectorAll('[data-strategy]').forEach((row) => row.classList.toggle('selected', row.dataset.strategy === strategyId));
-    const rows = analysis.combos
-      .filter((combo) => combo.strategyId === strategyId && combo.series.ok)
+    const rows = combosFor({ analysis }, strategyId, lens.basisId)
+      .slice()
       .sort((a, b) => (b.series.finalPct ?? -Infinity) - (a.series.finalPct ?? -Infinity));
     $('pb-combo-title').textContent = `${strategy.strategyName} · ${fmt.int(rows.length)} ترکیب`;
     $('pb-combos').innerHTML = rows.length
@@ -2086,7 +2107,15 @@ export async function mount(root, { state }) {
         if (y === undefined || x === undefined) continue;
         pnl[(y * dates.length) + x] = row.netPnl;
       }
-      payloadMatrix = { dates, pnl, rowCount: payloadRows.length, baseSeries: dates.map(() => null) };
+      // قیمت نماد پایه در هر لحظه از خودِ ستون‌ها می‌آید. `baseSeries` هم
+      // دیگر یکسره `null` نیست: درصدِ حرکت پایه نسبت به نخستین لحظهٔ
+      // قیمت‌دارِ همان روز، که در دانه‌بندی درون‌روزی همان مبدأ درست است.
+      const priceAt = new Map(live.map((column) => [column.key, column.basePrice ?? null]));
+      const basePrices = dates.map((key) => priceAt.get(key) ?? null);
+      const firstPrice = basePrices.find((value) => value !== null && value > 0) ?? null;
+      const baseSeries = basePrices.map((value) => (value !== null && value > 0 && firstPrice > 0
+        ? ((value / firstPrice) - 1) * 100 : null));
+      payloadMatrix = { dates, pnl, rowCount: payloadRows.length, baseSeries, basePrices };
       lens = { ...lens, from: null, to: null };
       paintLensOptions();
       recompute();
@@ -2110,6 +2139,7 @@ export async function mount(root, { state }) {
     }
   });
   $('pb-grain-go').addEventListener('click', runIntraday);
+  $('bk-payoff-bins').addEventListener('change', () => paintBasketGroup(basketGroup));
 
   $('pb-lens-toggle').addEventListener('click', () => {
     setLensOpen($('pb-lens').dataset.open !== 'true');

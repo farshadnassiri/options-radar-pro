@@ -182,6 +182,14 @@ export function analyzePortfolio({
 
   // مسیر نماد پایه روی همین ستون‌ها، برای سنجهٔ «مازاد بر نماد پایه».
   const baseWindow = columns.map((column) => finite(matrix?.baseSeries?.[column]));
+  // قیمت خودِ نماد پایه روی همین ستون‌ها — محور افقیِ نمودار «بازده در
+  // برابر قیمت پایه». اجرایی که این را نفرستاده باشد آرایهٔ `null` می‌گیرد،
+  // نه آرایهٔ خالی: هم‌طولیِ ستون‌ها شرطِ هر نموداری است که با اندیس کار
+  // می‌کند، و آرایهٔ کوتاه‌تر یعنی نقطه‌های جابه‌جا.
+  const basePriceWindow = columns.map((column) => {
+    const value = finite(matrix?.basePrices?.[column]);
+    return value !== null && value > 0 ? value : null;
+  });
   let baseFinal = null;
   for (let index = baseWindow.length - 1; index >= 0; index--) {
     if (baseWindow[index] !== null) { baseFinal = baseWindow[index]; break; }
@@ -367,7 +375,7 @@ export function analyzePortfolio({
     weighting: mode, weightingLabel: weightingMeta(mode)?.label || '',
     range: { from: windowDates[0] ?? null, to: windowDates.at(-1) ?? null, days: windowDates.length },
     dates: windowDates, columns,
-    baseSeries: baseWindow, baseFinal,
+    baseSeries: baseWindow, basePrices: basePriceWindow, baseFinal,
     combos, usable: usable.length, unusable,
     strategies: ranked, groups,
     best: ranked[0] || null,
