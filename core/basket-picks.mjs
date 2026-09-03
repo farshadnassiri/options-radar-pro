@@ -6,28 +6,51 @@
 // نمی‌ماند و سبد ساخته نمی‌شد. منطقی که آزمون مستقیم ندارد، همین می‌شود.
 
 /**
- * ترکیب‌های انتخاب‌شدنیِ یک استراتژی در یک اجرا — مرتب بر **بهای یک قرارداد**.
+ * ترکیب‌های انتخاب‌شدنیِ یک استراتژی در یک اجرا — مرتب بر **نردبان اعمال**.
  *
  * چرا اینجا و نه در تب: همین شرط سه جای دیگر هم نوشته شده بود — جدول
  * رتبه‌بندی، کشوی جزئیات و کشویی سبد — و «یکی بودنِ این سه فهرست» فقط
  * تصادفِ سه رونوشت از یک خط بود، نه چیزی که آزمونی نگهش دارد. حالا یک
  * تعریف است و هر سه از همین می‌خوانند.
  *
- * ترتیب از ارزان به گران است، چون سؤالِ این کشویی «کدام بهتر بود» نیست —
- * آن را جدول رتبه‌بندی جواب می‌دهد — بلکه «با این سهم از سرمایه کدام‌ها
- * اصلاً یک قرارداد می‌خرند» است. ترکیبی که بهایش معلوم نیست ته فهرست
- * می‌ماند: نه ارزان است نه گران، فقط ناشناخته، و ناشناخته اول فهرست
- * نمی‌نشیند.
+ * قیمت اعمال پایۀ اول کلید اصلی است و قیمت‌های اعمال بعدی، به‌ترتیب،
+ * گره‌های بعدی‌اند. این قاعده به نوع قرارداد وابسته نیست: کال، پوت،
+ * استرانگل و اسپرد همگی از همان بردار `strikes` می‌خوانند. مقدار نامعلوم
+ * ته فهرست می‌ماند و شناسه گرهٔ نهاییِ پایدار است.
  */
+const strikeVector = (combo) => {
+  const declared = (combo?.strikes || []).map(num).filter((strike) => strike !== null);
+  if (declared.length) return declared;
+  return [...new Set((combo?.legs || [])
+    .map((leg) => num(leg?.strike))
+    .filter((strike) => strike !== null))]
+    .sort((a, b) => a - b);
+};
+
+const compareVector = (left, right) => {
+  if (!left.length && !right.length) return 0;
+  if (!left.length) return 1;
+  if (!right.length) return -1;
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return left.length - right.length;
+};
+
 export function combosFor(source, strategyId, basisId = null) {
   if (!source || !strategyId) return [];
   const basis = normalizeBasis(basisId ?? source?.analysis?.basisId);
   return (source.analysis?.combos || [])
     .filter((combo) => combo.strategyId === strategyId && combo.series?.ok)
-    .map((combo) => ({ combo, cost: comboLotCost(combo, basis) }))
-    // مرتب‌سازی پایدار نیست در همهٔ موتورها؛ گره‌ها با شناسه باز می‌شوند تا
-    // فهرست میان دو رسمِ پیاپی جابه‌جا نشود و انتخابِ کاربر زیر دستش نلغزد.
+    .map((combo) => ({
+      combo,
+      strikes: strikeVector(combo),
+      cost: comboLotCost(combo, basis),
+    }))
     .sort((a, b) => {
+      const byStrike = compareVector(a.strikes, b.strikes);
+      if (byStrike) return byStrike;
       if (a.cost === null && b.cost === null) return String(a.combo.id).localeCompare(String(b.combo.id));
       if (a.cost === null) return 1;
       if (b.cost === null) return -1;
@@ -36,7 +59,7 @@ export function combosFor(source, strategyId, basisId = null) {
     .map((row) => row.combo);
 }
 
-/** ارزان‌ترین ترکیب معتبرِ یک استراتژی در یک اجرا؛ اگر نبود، رشتهٔ خالی. */
+/** نخستین ترکیبِ نردبان اعمال در یک اجرا؛ اگر نبود، رشتهٔ خالی. */
 export function firstComboId(source, strategyId, basisId = null) {
   return combosFor(source, strategyId, basisId)[0]?.id || '';
 }
