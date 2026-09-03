@@ -191,7 +191,11 @@ export function buildChain(rows) {
 
     let ex = ua.expiries.get(days);
     if (!ex) {
-      ex = { days, endDate: n(r.endDate), strikes: new Map() };
+      // ردیف‌های دفتر تاریخی تاریخ جلالی را در `endDate` نگه می‌دارند، اما
+      // کلید سقف‌پر از تابلوی روز با تاریخ میلادی ساخته می‌شود. API دفتر
+      // تاریخ هم‌ارز میلادی را صریح می‌دهد؛ همان باید کلید مشترک همهٔ مسیرها
+      // باشد، وگرنه یک سررسید با دو عدد متفاوت هیچ‌وقت با تیکش جور نمی‌شود.
+      ex = { days, endDate: n(r.expiryGregorian) || n(r.endDate), strikes: new Map() };
       ua.expiries.set(days, ex);
     }
 

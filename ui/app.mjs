@@ -12,6 +12,9 @@ import { installGlobalCapture, logError } from '/ui/errlog.mjs';
 import { linkLabelKey } from '/ui/feed-state.mjs';
 import { takeHandoff } from '/ui/handoff.mjs';
 import { installTableEnhance } from '/ui/table-enhance.mjs';
+import {
+  SETTINGS_CHANGED_EVENT, changedSettingKeys, createSettingsSaver,
+} from '/ui/settings-sync.mjs';
 
 export const state = {
   settings: defaults(),
@@ -34,25 +37,47 @@ export const state = {
   handoff: null,
 };
 
+const announceSettings = (previous, next) => {
+  const keys = changedSettingKeys(previous, next);
+  if (!keys.length) return;
+  document.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT, { detail: { keys, settings: next } }));
+};
+
+const settingsSaver = createSettingsSaver({
+  get: () => state.settings,
+  set: (value) => { state.settings = value; },
+  notify: announceSettings,
+  write: async (next) => {
+    const response = await fetch('/api/settings', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next),
+    });
+    if (!response.ok) throw new Error('ذخیره نشد');
+    return response.json();
+  },
+});
+
 // ————————————————————————————————— تنظیمات —————————————————————————————————
 
 export async function loadSettings() {
+  // اجرای محاسبه‌ای که بلافاصله پس از تیک می‌آید، نخست منتظر همان ذخیره
+  // می‌ماند. این انتظار محلی است و درخواست نامرتبطی را کند نمی‌کند.
+  await settingsSaver.idle();
+  const revision = settingsSaver.revision();
   try {
     const r = await fetch('/api/settings');
-    state.settings = await r.json();
+    const loaded = await r.json();
+    // اگر در فاصلهٔ GET کاربر تنظیم تازه‌ای زد، پاسخ قدیمی آن را پس نزند.
+    if (revision === settingsSaver.revision()) {
+      const previous = state.settings;
+      state.settings = loaded;
+      announceSettings(previous, loaded);
+    }
   } catch { /* پیش‌فرض می‌ماند */ }
   return state.settings;
 }
 
-export async function putSettings(next) {
-  const r = await fetch('/api/settings', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(next),
-  });
-  if (!r.ok) throw new Error('ذخیره نشد');
-  state.settings = await r.json();
-  return state.settings;
-}
+export const putSettings = (next) => settingsSaver.save(next);
 
 // ————————————————————————————————— اشتراک عکس لحظه‌ای —————————————————————————————————
 // یک اتصال پایدار برای کل برنامه. سرور بار اول کل عکس و بعد فقط ردیف تغییرکرده
