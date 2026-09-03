@@ -1,4 +1,4 @@
-// ۲۱۶. کشویی مرتب بر بهای قرارداد، و منحنی بازده در برابر قیمت پایه
+// ۲۱۶. کشویی مرتب بر نردبان اعمال، و منحنی بازده در برابر قیمت پایه
 //
 // دستهٔ مستقل آزمون. اجرا با کل مجموعه:  node tests/run.mjs
 //
@@ -31,6 +31,16 @@ const combo = (id, capital, units = 1, over = {}) => ({
   series: { ok: true, finalPct: 0, finalIndex: 0, ...over.series },
   ...over,
 });
+const strangle = (id, putStrike, callStrike, capital) => combo(id, capital, 1, {
+  legs: [
+    { kind: 'call', strike: callStrike },
+    { kind: 'put', strike: putStrike },
+  ],
+  strikes: [putStrike, callStrike],
+});
+const callCombo = (id, strike, capital) => combo(id, capital, 1, {
+  legs: [{ kind: 'call', strike }], strikes: [strike],
+});
 const src = (combos) => ({ id: 'r1', label: 'اجرا', analysis: { combos, basisId: 'net' } });
 
 group('۲۱۶-الف. بهای یک قرارداد');
@@ -48,43 +58,44 @@ group('۲۱۶-الف. بهای یک قرارداد');
     lotCostRial(src([combo('a', 4e6)]), 'nope', 'net') === null);
 }
 
-group('۲۱۶-ب. ترتیب کشویی: ارزان به گران');
+group('۲۱۶-ب. ترتیب کشویی: اعمال پایۀ اول، سپس اعمال‌های بعدی');
 {
   const list = combosFor(src([
-    combo('gran', 9e6), combo('arzan', 1e6), combo('miane', 4e6),
+    strangle('p30-c50', 30_000, 50_000, 1e6),
+    strangle('p20-c60', 20_000, 60_000, 9e6),
+    strangle('p20-c40', 20_000, 40_000, 7e6),
   ]), 'S', 'net');
   check('هر سه هستند', list.length === 3);
-  check('از ارزان به گران مرتب است',
-    list.map((row) => row.id).join(',') === 'arzan,miane,gran');
-  check('بهاها هم صعودی‌اند',
-    list.map((row) => comboLotCost(row, 'net')).every((value, at, all) => at === 0 || all[at - 1] <= value));
+  check('اعمال پایۀ اول کلید اصلی و اعمال بعدی کلیدهای بعدی‌اند',
+    list.map((row) => row.id).join(',') === 'p20-c40,p20-c60,p30-c50');
+  check('بهای قرارداد ترتیب اعمال را عوض نمی‌کند',
+    list.map((row) => comboLotCost(row, 'net')).join(',') === '7000000,9000000,1000000');
 
   const withUnknown = combosFor(src([
-    combo('gran', 9e6), combo('gomnam', null), combo('arzan', 1e6),
+    strangle('p30', 30_000, 50_000, 9e6), combo('gomnam', 1e6), strangle('p20', 20_000, 40_000, 7e6),
   ]), 'S', 'net');
-  check('بهای نامعلوم ته فهرست می‌ماند، نه اولِ آن',
-    withUnknown.map((row) => row.id).join(',') === 'arzan,gran,gomnam');
+  check('اعمال نامعلوم ته فهرست می‌ماند، نه اولِ آن',
+    withUnknown.map((row) => row.id).join(',') === 'p20,p30,gomnam');
 
-  // بهای برابر نباید ترتیب را میان دو رسم جابه‌جا کند: کشویی‌ای که زیر
+  // اعمال برابر نباید ترتیب را میان دو رسم جابه‌جا کند: کشویی‌ای که زیر
   // دست کاربر می‌لغزد، از کشویی نامرتب بدتر است.
   const tied = () => combosFor(src([
-    combo('z', 5e6), combo('a', 5e6), combo('m', 5e6),
+    strangle('z', 20_000, 40_000, 5e6), strangle('a', 20_000, 40_000, 5e6),
+    strangle('m', 20_000, 40_000, 5e6),
   ]), 'S', 'net').map((row) => row.id).join(',');
-  check('بهای برابر با شناسه باز می‌شود و پایدار می‌ماند',
+  check('اعمال برابر با شناسه باز می‌شود و پایدار می‌ماند',
     tied() === 'a,m,z' && tied() === tied());
 
-  check('مبنای دیگر، ترتیب دیگر می‌سازد — مبنا واقعاً خوانده می‌شود',
-    combosFor(src([combo('a', 1e6), combo('b', 9e6)]), 'S', 'net')[0].id === 'a'
-    && combosFor({ id: 'r', analysis: { combos: [
-      { ...combo('a', 1e6), entry: { capital: 1e6, netCash: -9e6, units: 1 } },
-      { ...combo('b', 9e6), entry: { capital: 9e6, netCash: -1e6, units: 1 } },
-    ], basisId: 'net' } }, 'S', 'cash')[0].id === 'b');
+  check('ترتیب برای استراتژی فقط-کال هم از اعمال می‌آید، نه از بها',
+    combosFor(src([
+      callCombo('call-40-cheap', 40_000, 1e6), callCombo('call-20-expensive', 20_000, 9e6),
+    ]), 'S', 'net').map((row) => row.id).join(',') === 'call-20-expensive,call-40-cheap');
 }
 
 group('۲۱۶-ج. همان مجموعه‌ای که رتبه‌بندی نشان می‌دهد');
 {
   const rows = [
-    combo('ok1', 3e6), combo('ok2', 1e6),
+    strangle('ok1', 20_000, 50_000, 3e6), strangle('ok2', 30_000, 40_000, 1e6),
     combo('bad', 2e6, 1, { series: { ok: false, finalPct: 99, finalIndex: 0 } }),
     { ...combo('other', 1, 1), strategyId: 'T' },
   ];
@@ -98,8 +109,8 @@ group('۲۱۶-ج. همان مجموعه‌ای که رتبه‌بندی نشان
   check('ترکیبِ استراتژی دیگر وارد نمی‌شود', !dropdown.includes('other'));
   check('استراتژی نبود یعنی فهرست خالی، نه همه‌چیز',
     combosFor(source, '', 'net').length === 0 && combosFor(null, 'S').length === 0);
-  check('پیش‌فرضِ سطر تازه ارزان‌ترین است، نه اولین ساخته‌شده',
-    firstComboId(source, 'S', 'net') === 'ok2');
+  check('پیش‌فرضِ سطر تازه کمترین اعمال پایه است، نه ارزان‌ترین قرارداد',
+    firstComboId(source, 'S', 'net') === 'ok1');
   check('استراتژی بی‌ترکیب، شناسهٔ خالی می‌دهد',
     firstComboId(source, 'NOPE', 'net') === '');
 }

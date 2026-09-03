@@ -1258,7 +1258,7 @@ export async function mount(root, { state }) {
     const source = sources.find((row) => row.id === pick.sourceId) || sources[0] || null;
     const strategies = source?.analysis?.strategies || [];
     // همان مجموعه‌ای که جدول رتبه‌بندی نشان می‌دهد — یک تعریف، سه خواننده —
-    // ولی به ترتیبِ بهای یک قرارداد، از ارزان به گران.
+    // با اعمال پایۀ اول به‌عنوان کلید اصلی و اعمال‌های بعدی به‌عنوان گره.
     const combos = combosFor(source, pick.strategyId, lens.basisId);
     // ستون «اجرا» تا وقتی کتابخانه یک اجرا بیشتر ندارد، ستونی است که
     // همیشه یک مقدار دارد — یعنی جای خالیِ گران. پهنایش به نام استراتژی
@@ -1269,8 +1269,8 @@ export async function mount(root, { state }) {
       : '';
     // نامِ بلند در `select` با سه‌نقطه بریده می‌شود؛ `title` همان متن کامل
     // را برمی‌گرداند تا چیزی از دسترس بیرون نرود.
-    // بها در خودِ برچسب می‌آید، وگرنه «مرتب بر قیمت» ادعایی است که کاربر
-    // نمی‌تواند وارسی کند: فهرستی مرتب بر عددی که دیده نمی‌شود.
+    // بها همچنان در خودِ برچسب می‌آید تا کاربر هم‌زمان ببیند آیا سهمش یک
+    // قرارداد کامل می‌خرد؛ اما دیگر کلید مرتب‌سازی نیست.
     const comboLabel = (combo) => {
       const each = comboLotCost(combo, lens.basisId);
       return `${comboName(combo)} · ${each === null ? 'بهای قرارداد نامعلوم' : fmt.money(each)} · ${pctCell(combo.series.finalPct)}`;
