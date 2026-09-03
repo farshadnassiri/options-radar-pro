@@ -162,4 +162,10 @@ group('۴۴. سررسید با سقف پر در تحلیل تاریخی');
     portfolioTab44.includes('SETTINGS_CHANGED_EVENT')
     && portfolioTab44.includes('runEpoch !== settingsEpoch')
     && portfolioTab44.includes("includes('blockedExpiries')"));
+  check('برداشتن تیک پس از بارگیری، تاریخچهٔ قرارداد تازه‌آزادشده را دوباره می‌گیرد',
+    portfolioTab44.includes('const hadHistory = historyLoading || Object.keys(seriesByIns).length > 0')
+    && /if \(hadHistory && baseSelect\.value\)[\s\S]{0,300}void loadHistory\(\)/.test(portfolioTab44));
+  check('تغییر تیک وسط دریافت، دور تازه را صف می‌کند و درخواست موازی نمی‌سازد',
+    portfolioTab44.includes('if (historyLoading) { historyReloadRequested = true; return; }')
+    && portfolioTab44.includes('while (historyReloadRequested)'));
 }

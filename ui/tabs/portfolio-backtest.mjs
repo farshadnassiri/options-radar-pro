@@ -521,6 +521,12 @@ export async function mount(root, { state, api }) {
   let comboFilter = null;
   let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, seriesSource = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '';
   let settingsEpoch = 0;
+  // تاریخچه با فهرست قراردادهای همان لحظه بارگیری می‌شود. اگر سررسیدی هنگام
+  // بارگیری سقف‌پر بوده باشد، سری قراردادهایش اصلاً در `seriesByIns` نیست؛
+  // پس صرفاً اجرای دوباره نمی‌تواند آن را بعد از برداشتن تیک برگرداند.
+  // این دو پرچم بارگیری را تک‌مسیره می‌کنند و تغییر هم‌زمان تیک را برای یک
+  // دور تازه صف می‌گذارند، تا پاسخ قدیمی روی انتخاب تازه ننشیند.
+  let historyLoading = false, historyReloadRequested = false;
   // سری‌هایی که **آخرین اجرا** با آن‌ها انجام شد. با پایان روز، همان
   // `seriesByIns` است؛ با لحظهٔ درون‌روز، نسخهٔ مهرخورده. پنل جزئیات و
   // تحلیل حساسیت باید از همین بخوانند، وگرنه رتبه‌بندی ساعت ده و نیم را
@@ -590,75 +596,88 @@ export async function mount(root, { state, api }) {
   }
 
   async function loadHistory() {
-    // ممکن است تیک سقف سررسید در تب یا پنجرهٔ دیگری عوض شده باشد. پیش از
-    // ساخت فهرست ابزار، تنظیم قطعی سرور خوانده می‌شود.
-    await api.loadSettings();
-    ua = chain.get(baseSelect.value);
-    if (!ua) { setStatus('ابتدا نماد پایه را انتخاب کن.', true); return; }
-    const contracts = flattenActiveContracts(ua, state.settings.blockedExpiries);
-    const codes = [...new Set([String(ua.ins), ...contracts.map((contract) => String(contract.ins))])];
-    $('pb-load').disabled = true; hideReport();
-    setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
+    // یک بارگیریِ در حال اجرا قطع نمی‌شود؛ دور تازه پشت همان بارگیری می‌آید.
+    // این حالت دقیقاً وقتی رخ می‌دهد که کاربر وسط دریافت، تیک سررسید را عوض
+    // کند. دو درخواست موازی می‌توانستند به ترتیب وارونه تمام شوند.
+    if (historyLoading) { historyReloadRequested = true; return; }
+    historyLoading = true;
+    $('pb-load').disabled = true;
     try {
-      const payloads = await Promise.all(chunks(codes, 70).map(async (part) => {
-        const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0`), payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
-        return payload;
-      }));
-      seriesByIns = {};
-      runSeriesByIns = {};
-      // خطای هر ابزار جدا نگه داشته می‌شود. پیش از این `value.rows || []`
-      // خطا را به «صفر ردیف» تبدیل می‌کرد و آن‌وقت «درخواست شکست خورد» از
-      // «هیچ روزی معامله نشده» قابل تشخیص نبود — دو چیزِ کاملاً متفاوت.
-      seriesErrors = {};
-      seriesSource = {};
-      for (const payload of payloads) {
-        for (const [ins, value] of Object.entries(payload)) {
-          seriesByIns[ins] = value.rows || [];
-          seriesSource[ins] = value.source || 'list';
-          if (value.error) seriesErrors[ins] = String(value.error);
-        }
-      }
-
-      // ── منبع دوم، فقط برای آنچه خالی برگشت ────────────────────────────
-      //
-      // `GetClosingPriceDailyList` برای ابزارِ حذف‌شده از تابلو خالی
-      // برمی‌گردد، و قرارداد اختیار پس از سررسید حذف می‌شود. یعنی هر
-      // بک‌تستِ گذشته دقیقاً همان قراردادهایی را از دست می‌داد که
-      // موضوعش بودند.
-      //
-      // تاریخِ منبع دوم حدس زده نمی‌شود: آخرین روزِ سریِ خودِ نماد پایه
-      // است، که قطعاً یک روز معاملاتیِ تکمیل‌شده است.
-      const baseSeries = seriesByIns[String(ua.ins)] || [];
-      const asOf = baseSeries.length
-        ? Math.max(...baseSeries.map((row) => normalizeHistoryDate(row.date)).filter(Boolean))
-        : 0;
-      const emptyCodes = codes.filter((code) => !(seriesByIns[code] || []).length && !seriesErrors[code]);
-      if (asOf && emptyCodes.length) {
-        setStatus(`${fmt.int(emptyCodes.length)} ابزار از فهرست روزانه خالی برگشت — منبع دوم…`);
-        const retries = await Promise.all(chunks(emptyCodes, 70).map(async (part) => {
-          const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0&asOf=${asOf}`);
-          const payload = await response.json();
-          if (!response.ok || payload.error) throw new Error(payload.error || 'منبع دوم پاسخ نداد');
-          return payload;
-        }));
-        for (const payload of retries) {
-          for (const [ins, value] of Object.entries(payload)) {
-            if ((value.rows || []).length) seriesByIns[ins] = value.rows;
-            seriesSource[ins] = value.source || seriesSource[ins] || 'list';
-            if (value.fallbackError) seriesErrors[ins] = String(value.fallbackError);
+      do {
+        historyReloadRequested = false;
+        // ممکن است تیک سقف سررسید در تب یا پنجرهٔ دیگری عوض شده باشد. پیش از
+        // ساخت فهرست ابزار، تنظیم قطعی سرور خوانده می‌شود.
+        await api.loadSettings();
+        ua = chain.get(baseSelect.value);
+        if (!ua) { setStatus('ابتدا نماد پایه را انتخاب کن.', true); return; }
+        const contracts = flattenActiveContracts(ua, state.settings.blockedExpiries);
+        const codes = [...new Set([String(ua.ins), ...contracts.map((contract) => String(contract.ins))])];
+        hideReport();
+        setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
+        try {
+          const payloads = await Promise.all(chunks(codes, 70).map(async (part) => {
+            const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0`), payload = await response.json();
+            if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
+            return payload;
+          }));
+          seriesByIns = {};
+          runSeriesByIns = {};
+          // خطای هر ابزار جدا نگه داشته می‌شود. پیش از این `value.rows || []`
+          // خطا را به «صفر ردیف» تبدیل می‌کرد و آن‌وقت «درخواست شکست خورد» از
+          // «هیچ روزی معامله نشده» قابل تشخیص نبود — دو چیزِ کاملاً متفاوت.
+          seriesErrors = {};
+          seriesSource = {};
+          for (const payload of payloads) {
+            for (const [ins, value] of Object.entries(payload)) {
+              seriesByIns[ins] = value.rows || [];
+              seriesSource[ins] = value.source || 'list';
+              if (value.error) seriesErrors[ins] = String(value.error);
+            }
           }
-        }
-      }
-      // روز جاری پس از فهرست بسته‌شده می‌نشیند، نه به‌جای آن. اگر نچسبد،
-      // همان سری‌های بسته‌شده برمی‌گردند و رفتار دقیقاً قبلی می‌ماند.
-      await applyScope();
-      baseDates = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
-      if (!baseDates.length) throw new Error('برای نماد پایه تاریخچه‌ای دریافت نشد');
-      $('pb-work').hidden = false; refreshDates();
-      setStatus(`${fmt.int(baseDates.length)} روز معاملاتی آماده است.`);
-    } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); }
-    finally { $('pb-load').disabled = false; }
+
+          // ── منبع دوم، فقط برای آنچه خالی برگشت ────────────────────────────
+          //
+          // `GetClosingPriceDailyList` برای ابزارِ حذف‌شده از تابلو خالی
+          // برمی‌گردد، و قرارداد اختیار پس از سررسید حذف می‌شود. یعنی هر
+          // بک‌تستِ گذشته دقیقاً همان قراردادهایی را از دست می‌داد که
+          // موضوعش بودند.
+          //
+          // تاریخِ منبع دوم حدس زده نمی‌شود: آخرین روزِ سریِ خودِ نماد پایه
+          // است، که قطعاً یک روز معاملاتیِ تکمیل‌شده است.
+          const baseSeries = seriesByIns[String(ua.ins)] || [];
+          const asOf = baseSeries.length
+            ? Math.max(...baseSeries.map((row) => normalizeHistoryDate(row.date)).filter(Boolean))
+            : 0;
+          const emptyCodes = codes.filter((code) => !(seriesByIns[code] || []).length && !seriesErrors[code]);
+          if (asOf && emptyCodes.length) {
+            setStatus(`${fmt.int(emptyCodes.length)} ابزار از فهرست روزانه خالی برگشت — منبع دوم…`);
+            const retries = await Promise.all(chunks(emptyCodes, 70).map(async (part) => {
+              const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0&asOf=${asOf}`);
+              const payload = await response.json();
+              if (!response.ok || payload.error) throw new Error(payload.error || 'منبع دوم پاسخ نداد');
+              return payload;
+            }));
+            for (const payload of retries) {
+              for (const [ins, value] of Object.entries(payload)) {
+                if ((value.rows || []).length) seriesByIns[ins] = value.rows;
+                seriesSource[ins] = value.source || seriesSource[ins] || 'list';
+                if (value.fallbackError) seriesErrors[ins] = String(value.fallbackError);
+              }
+            }
+          }
+          // روز جاری پس از فهرست بسته‌شده می‌نشیند، نه به‌جای آن. اگر نچسبد،
+          // همان سری‌های بسته‌شده برمی‌گردند و رفتار دقیقاً قبلی می‌ماند.
+          await applyScope();
+          baseDates = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
+          if (!baseDates.length) throw new Error('برای نماد پایه تاریخچه‌ای دریافت نشد');
+          $('pb-work').hidden = false; refreshDates();
+          setStatus(`${fmt.int(baseDates.length)} روز معاملاتی آماده است.`);
+        } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); }
+      } while (historyReloadRequested);
+    } finally {
+      historyLoading = false;
+      $('pb-load').disabled = false;
+    }
   }
 
   function runWorker(message) {
@@ -2260,9 +2279,18 @@ export async function mount(root, { state, api }) {
   $('pb-load').addEventListener('click', loadHistory); $('pb-run').addEventListener('click', runAll);
   const onSettingsChanged = (event) => {
     if (!(event.detail?.keys || []).includes('blockedExpiries')) return;
+    // اگر قبلاً تاریخچه گرفته شده، مجموعه سری‌ها به فهرست قراردادهای قدیمی
+    // تعلق دارد. به‌ویژه با برداشتن تیک، قرارداد تازه‌آزادشده هیچ سری‌ای
+    // ندارد و اجرای مجدد به‌تنهایی نمی‌تواند آن را وارد ترکیب کند.
+    const hadHistory = historyLoading || Object.keys(seriesByIns).length > 0;
     settingsEpoch += 1;
     hideReport();
-    setStatus('فهرست سررسیدهای سقف‌پر تغییر کرد؛ اجرای بعدی این سررسیدها را کنار می‌گذارد.');
+    if (hadHistory && baseSelect.value) {
+      setStatus('فهرست سررسیدهای سقف‌پر تغییر کرد؛ تاریخچهٔ قراردادها دوباره بارگیری می‌شود…');
+      void loadHistory();
+    } else {
+      setStatus('فهرست سررسیدهای سقف‌پر تغییر کرد؛ بارگیری بعدی با همین فهرست انجام می‌شود.');
+    }
   };
   document.addEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged);
   baseSelect.addEventListener('change', () => { $('pb-work').hidden = true; hideReport(); });
