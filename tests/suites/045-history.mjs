@@ -10,6 +10,9 @@ import {
 import { blockedExpirySet, scan as scanFn } from '../../core/scan.mjs';
 import { defaults } from '../../core/settings.mjs';
 import { byId } from '../../strategies/catalog.mjs';
+import {
+  SETTINGS_CHANGED_EVENT, changedSettingKeys, createSettingsSaver,
+} from '../../ui/settings-sync.mjs';
 
 
 // ═══════════ ۴۴. سررسید با سقف پر، از تحلیل تاریخی هم بیرون است ═══════════
@@ -57,6 +60,23 @@ group('۴۴. سررسید با سقف پر در تحلیل تاریخی');
   check('و هیچ قرارداد سررسید پرشده باقی نمی‌ماند',
     kept44.every((c) => c.expiryRaw === FAR));
 
+  // دفتر واقعی `endDate` را جلالی و تاریخ متناظر را در
+  // `expiryGregorian` می‌دهد، در حالی که تیک نوار بالا با تاریخ میلادی
+  // ذخیره می‌شود. این دقیقاً همان شکلی است که برای اهرم نشتی داشت.
+  const ARCHIVE_NEAR = 20260916;
+  const archiveRows44 = [];
+  for (const k of [95000, 100000, 105000]) {
+    archiveRows44.push({ ...mkRow(k, 30, 14050625), expiryGregorian: ARCHIVE_NEAR });
+    archiveRows44.push(mkRow(k, 90, FAR));
+  }
+  const archiveUa44 = buildChain(archiveRows44, defaults()).get('7');
+  const archiveKept44 = flattenActiveContracts(archiveUa44, `7:${ARCHIVE_NEAR}`);
+  check('تاریخ میلادی دفتر، کلید مشترک سررسید تاریخی و تیک سقف‌پر است',
+    archiveUa44.expiryList.some((expiry) => expiry.endDate === ARCHIVE_NEAR));
+  check('تیک میلادی، ردیف تاریخی با endDate جلالی را هم کامل حذف می‌کند',
+    archiveKept44.length === 6 && archiveKept44.every((contract) => contract.expiryRaw === FAR),
+    `${archiveKept44.length} قرارداد ماند`);
+
   // ——— ترکیب‌سازی تاریخی ———
   const day = (date, close) => ({ date, close, last: close, low: close, high: close, vol: 1000, trades: 5, value: 1e6 });
   const series44 = { 7: [day(20260801, 100000), day(20260802, 100500)] };
@@ -101,4 +121,45 @@ group('۴۴. سررسید با سقف پر در تحلیل تاریخی');
   });
   check('هیچ تب تاریخی، فهرست قرارداد را بدون قید سقف نمی‌گیرد',
     unguarded.length === 0, unguarded.join('، '));
+
+  // ——— تیک رابط، پیش از پایان ذخیره هم معتبر است ———
+  let settings44 = { blockedExpiries: '', maxRows: 120 };
+  const writes44 = [];
+  const notices44 = [];
+  const saver44 = createSettingsSaver({
+    get: () => settings44,
+    set: (value) => { settings44 = value; },
+    notify: (before, after) => notices44.push(changedSettingKeys(before, after)),
+    write: (value) => new Promise((resolve) => { writes44.push({ value, resolve }); }),
+  });
+  const firstSave44 = saver44.save({ ...settings44, blockedExpiries: blockNear });
+  check('تیک سقف‌پر همان لحظه وارد حافظهٔ محاسبه می‌شود',
+    settings44.blockedExpiries === blockNear);
+  const secondKey44 = `7:${FAR}`;
+  const secondSave44 = saver44.save({ ...settings44, blockedExpiries: `${blockNear},${secondKey44}` });
+  check('دو تیک سریع همدیگر را پاک نمی‌کنند',
+    settings44.blockedExpiries === `${blockNear},${secondKey44}`);
+  // صف: تا اولی تمام نشود، دومی هنوز به نویسنده نرسیده است.
+  await Promise.resolve();
+  check('ذخیره‌های سریع به‌ترتیب نوشته می‌شوند', writes44.length === 1);
+  writes44[0].resolve(writes44[0].value);
+  await firstSave44;
+  await Promise.resolve();
+  check('پاسخ ذخیرهٔ قدیمی، تیک تازه را عقب نمی‌برد',
+    settings44.blockedExpiries === `${blockNear},${secondKey44}` && writes44.length === 2);
+  writes44[1].resolve(writes44[1].value);
+  await secondSave44;
+  check('پس از پایان صف، هر دو سررسید بسته‌اند',
+    settings44.blockedExpiries === `${blockNear},${secondKey44}`);
+  check('رویداد تغییر، کلید سقف سررسید را نام می‌برد',
+    notices44.some((keys) => keys.includes('blockedExpiries')) && SETTINGS_CHANGED_EVENT.includes('settings-changed'));
+
+  // ——— خودِ تب همه‌استراتژی، تنظیم کهنه را به Worker نمی‌دهد ———
+  const portfolioTab44 = readSrc('../ui/tabs/portfolio-backtest.mjs');
+  check('پیش از دریافت تاریخچه و پیش از اجرای همه، تنظیمات قطعی خوانده می‌شود',
+    (portfolioTab44.match(/await api\.loadSettings\(\)/g) || []).length >= 2);
+  check('تغییر سقف، گزارش قبلی را باطل می‌کند و اجرای میان‌راه را نمی‌پذیرد',
+    portfolioTab44.includes('SETTINGS_CHANGED_EVENT')
+    && portfolioTab44.includes('runEpoch !== settingsEpoch')
+    && portfolioTab44.includes("includes('blockedExpiries')"));
 }

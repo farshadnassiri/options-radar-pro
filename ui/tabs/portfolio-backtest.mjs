@@ -12,6 +12,7 @@ import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.m
 import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
+import { SETTINGS_CHANGED_EVENT } from '/ui/settings-sync.mjs';
 import { MARK_MOMENTS, marksAt, applyIntradayMark, markNote } from '/core/intraday-mark.mjs';
 import { ivParams } from '/core/leg-iv.mjs';
 import { resolveHistVol } from '/core/hist-vol.mjs';
@@ -163,7 +164,7 @@ function lineChart(host, rows, { xLabel, yLabel } = {}) {
 // جابه‌جایی رتبه — جایشان را به همتاهای ECharts دادند: رنگ پیوسته به‌جای
 // چهار پله، و برچسب پایانی و کانونی‌شدن سری به‌جای عنوان کناری.
 
-export async function mount(root, { state }) {
+export async function mount(root, { state, api }) {
   // پوستهٔ این صفحه در `.pb-skin` بسته می‌شود، نه در کنترل‌های سراسری:
   // دکمه و ورودیِ همین تب عوض می‌شود و بقیهٔ برنامه دست نمی‌خورد.
   root.classList.add('pb-skin');
@@ -519,6 +520,7 @@ export async function mount(root, { state }) {
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
   let comboFilter = null;
   let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, seriesSource = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '';
+  let settingsEpoch = 0;
   // سری‌هایی که **آخرین اجرا** با آن‌ها انجام شد. با پایان روز، همان
   // `seriesByIns` است؛ با لحظهٔ درون‌روز، نسخهٔ مهرخورده. پنل جزئیات و
   // تحلیل حساسیت باید از همین بخوانند، وگرنه رتبه‌بندی ساعت ده و نیم را
@@ -588,6 +590,9 @@ export async function mount(root, { state }) {
   }
 
   async function loadHistory() {
+    // ممکن است تیک سقف سررسید در تب یا پنجرهٔ دیگری عوض شده باشد. پیش از
+    // ساخت فهرست ابزار، تنظیم قطعی سرور خوانده می‌شود.
+    await api.loadSettings();
     ua = chain.get(baseSelect.value);
     if (!ua) { setStatus('ابتدا نماد پایه را انتخاب کن.', true); return; }
     const contracts = flattenActiveContracts(ua, state.settings.blockedExpiries);
@@ -1969,6 +1974,10 @@ export async function mount(root, { state }) {
     $('pb-run').disabled = true; hideReport();
     setStatus('آماده‌سازی اجرای همه استراتژی‌ها…');
     try {
+      // ذخیرهٔ تیکی که درست پیش از اجرا زده شده تمام می‌شود و تغییرِ تب
+      // دیگر هم از سرور می‌آید؛ Worker هرگز عکس کهنهٔ تنظیمات را نمی‌گیرد.
+      await api.loadSettings();
+      const runEpoch = settingsEpoch;
       const runSeries = await seriesForRun(endDate);
       runSeriesByIns = runSeries;
       const payload = await runWorker({
@@ -1978,6 +1987,7 @@ export async function mount(root, { state }) {
         filtered: true, liquidity: liquidity(), maxPerStrategy: effectiveCap(),
         includeInfeasible: $('pb-scope').value === 'all',
       });
+      if (runEpoch !== settingsEpoch) throw new Error('فهرست سررسیدهای سقف‌پر هنگام اجرا عوض شد؛ آزمون را دوباره اجرا کن.');
       if (!payload.rows.length) throw new Error('هیچ ترکیبی با قیمت و نقدشوندگی معتبر در هر دو تاریخ پیدا نشد');
       renderReport(payload);
       setStatus(`${fmt.int(payload.rows.length)} ترکیب معتبر از ${fmt.int(payload.generatedByStrategy.length)} استراتژی گزارش شد.`);
@@ -2248,6 +2258,13 @@ export async function mount(root, { state }) {
   entryRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(entryRail, button.dataset.basis); if (ua) refreshDates(); } });
   exitRail.addEventListener('click', (event) => { const button = event.target.closest('[data-basis]'); if (button) { setRail(exitRail, button.dataset.basis); if (ua) refreshDates(); } });
   $('pb-load').addEventListener('click', loadHistory); $('pb-run').addEventListener('click', runAll);
+  const onSettingsChanged = (event) => {
+    if (!(event.detail?.keys || []).includes('blockedExpiries')) return;
+    settingsEpoch += 1;
+    hideReport();
+    setStatus('فهرست سررسیدهای سقف‌پر تغییر کرد؛ اجرای بعدی این سررسیدها را کنار می‌گذارد.');
+  };
+  document.addEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged);
   baseSelect.addEventListener('change', () => { $('pb-work').hidden = true; hideReport(); });
   // عوض‌کردن دامنه یعنی مجموعهٔ روزهای موجود عوض می‌شود. نتیجهٔ قبلی کنار
   // انتخاب تازه، بدترین حالت است: کاربر فکر می‌کند آنچه می‌بیند مال دامنهٔ
@@ -2299,5 +2316,6 @@ export async function mount(root, { state }) {
     activeWorker?.terminate();
     rangeJob?.stop();
     charts.disposeAll();
+    document.removeEventListener(SETTINGS_CHANGED_EVENT, onSettingsChanged);
   };
 }
