@@ -189,6 +189,16 @@ group('۲۱۸-د. فاصله، کامل — همان که کاربر خواست'
 
   check('پای بی‌قیمت، کلِ فاصله را باطل می‌کند و علتش را می‌گوید',
     !measureGap({ legs: BULL, prices: { c50: 3200 }, strategyId: 'bull-call-spread' }).ok);
+
+  // ── ارزشِ صفر، فاصله نیست ──────────────────────────────────────────
+  //
+  // این را اجرای آزمایشیِ مرورگر پیدا کرد، نه فکر کردن. دو پای هم‌قیمت
+  // «۰٪ پر شده، ۱۰۰٪ جا دارد» می‌داد و با مرتب‌سازی بر «بیشترین جای
+  // باقی‌مانده» صدرِ جدول می‌نشست — بهترین پیشنهادِ برنامه، ساختاری که
+  // نه می‌شود خرید نه فروخت.
+  const hollow = measureGap({ legs: BULL, prices: { c50: 900, c54: 900 }, strategyId: 'bull-call-spread' });
+  check('دو پای هم‌قیمت، فاصله ندارند — نه «۱۰۰٪ جا برای پر شدن»',
+    !hollow.ok && !Number.isFinite(hollow.roomPct) && hollow.why.includes('صفر'), hollow.why);
   check('جملهٔ فاصله هر دو درصد را می‌گوید، نه فقط یکی',
     gapNote(gap).includes('پر شده') && gapNote(gap).includes('جا دارد')
     && gapNote(gap).includes('سودِ باقی‌مانده'), gapNote(gap));
@@ -253,6 +263,25 @@ group('۲۱۸-ه. تاریخچهٔ فاصله، روزانه و دقیقه‌ا�
     gapVerdict(daily, measureGap({ legs: BULL, prices: { c50: 2600, c54: 400 }, strategyId: 'bull-call-spread' })).tone === 'میانه');
   check('بی تاریخچه، حکمی صادر نمی‌شود',
     !gapVerdict({ points: [], stats: seriesStats([]) }, now).ok);
+
+  // ── توزیعِ بی‌پراکندگی هم حکمی ندارد ───────────────────────────────
+  //
+  // این هم از همان اجرای آزمایشی آمد: `percentileRank` برای عددِ برابر
+  // صد می‌دهد و صد یعنی «گران»، پس ساختاری که در کل بازه تکان نخورده بود
+  // «گران» خوانده می‌شد. ادعا از داده بزرگ‌تر بود.
+  const flatSeries = dailyGapSeries({
+    legs: BULL, basis: 'CLOSE', dates, strategyId: 'bull-call-spread',
+    seriesByIns: {
+      c50: dates.map((date) => ({ date, close: 2000 })),
+      c54: dates.map((date) => ({ date, close: 400 })),
+    },
+  });
+  const flatNow = measureGap({ legs: BULL, prices: { c50: 2000, c54: 400 }, strategyId: 'bull-call-spread' });
+  check('فاصله‌ای که در کل بازه تکان نخورده، «گران» خوانده نمی‌شود',
+    flatSeries.points.length === 5 && flatSeries.stats.min === flatSeries.stats.max
+    && !gapVerdict(flatSeries, flatNow).ok
+    && gapVerdict(flatSeries, flatNow).why.includes('ثابت'),
+    gapVerdict(flatSeries, flatNow).why);
 
   // ── درون‌روزی: همان عدد، به دقیقه ───────────────────────────────────
   //

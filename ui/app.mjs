@@ -328,6 +328,11 @@ const TABS = [
     section: 'پایه', mod: '/ui/tabs/bereket.mjs', phase: 3 },
   { id: 'portfolio-time', title: '🧭 استودیوی سفر زمانی سبد', alias: 'پرتفوی سبد سفر زمان بازی بک تست سرمایه mission portfolio',
     section: 'پایه', mod: '/ui/tabs/portfolio-time.mjs', phase: 3 },
+  // «فاصله» پرسشی است که در همهٔ خانواده‌های اسپرد و استرانگل یکی است و در
+  // هیچ تب موجودی موضوعِ اصلی نیست. پنلِ شانزدهم شدن در «آزمون همه
+  // استراتژی‌ها» یعنی کسی که فقط دنبال فاصله است از پانزده پنل رد شود.
+  { id: 'spread-radar', title: '📏 رادار فاصله', alias: 'اسپرد فاصله عرض استرانگل دهانه پر شدن باقی مانده هشدار آلارم spread gap width',
+    section: 'پایه', mod: '/ui/tabs/spread-radar.mjs', phase: 3 },
   { id: 'logs', title: 'دفتر خطاها', section: 'پایه', mod: '/ui/tabs/logs.mjs', phase: 1 },
 ];
 

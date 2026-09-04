@@ -3248,6 +3248,224 @@ button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
   cursor: not-allowed;
 }
 
+/* ————————————————————————————————————————————————
+   رادار فاصله — پوستهٔ تب و اجزای مشترکِ فاصله.
+   قاعده‌ها زیر `.gap-skin` بسته می‌شوند تا چگالیِ این صفحه به صفحه‌های
+   ساده‌تر سرایت نکند؛ همان قاعده‌ای که `.pb-skin` دارد. استثنا سه چیزِ
+   قابل‌استفادهٔ مجدد است — اسپارک‌لاین، نوار پرشدگی و کارت هشدار — که
+   عمداً سراسری‌اند چون در تب‌های دیگر هم می‌نشینند.
+   ———————————————————————————————————————————————— */
+
+/* ——— اسپارک‌لاین: یک path، بی عمر و بی ناظر ——— */
+.spark { display: block; overflow: visible; }
+.spark-empty { color: var(--muted); font-variant-numeric: tabular-nums; }
+.spark-line { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.spark.up .spark-line { stroke: var(--gain); }
+.spark.down .spark-line { stroke: var(--loss); }
+.spark.up .spark-dot { fill: var(--gain); }
+.spark.down .spark-dot { fill: var(--loss); }
+.spark-band { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 3 3; opacity: .5; vector-effect: non-scaling-stroke; }
+
+/* ——— نوار پرشدگی: یک نوار با دو رنگ، چون دو درصد متمم هم‌اند ——— */
+.gap-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 148px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  overflow: hidden;
+  font-size: .74rem;
+  font-variant-numeric: tabular-nums;
+}
+.gap-bar > b {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: var(--fill, 0%);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  transition: width var(--transition-med);
+}
+.gap-bar.over > b { background: color-mix(in srgb, var(--warn) 30%, transparent); }
+.gap-bar > span { position: relative; }
+.gap-bar-filled { color: var(--accent-ink); font-weight: 600; }
+.gap-bar-room { color: var(--muted); }
+.gap-bar-empty { color: var(--muted); justify-content: flex-start; }
+
+/* ——— کارت هشدار: کفِ تضمین‌شده وقتی اعلان مرورگر نیست ——— */
+.gap-alarm-host {
+  position: fixed;
+  inset-block-end: var(--space-5);
+  inset-inline-start: var(--space-5);
+  z-index: 60;
+  display: grid;
+  gap: var(--space-2);
+  width: min(340px, calc(100vw - 2 * var(--space-5)));
+  pointer-events: none;
+}
+.gap-alarm-card {
+  pointer-events: auto;
+  position: relative;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--warn);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  animation: gap-alarm-in var(--transition-smooth);
+}
+@keyframes gap-alarm-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gap-alarm-card { animation: none; }
+}
+.gap-alarm-card header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.gap-alarm-card header b { font-size: .9rem; }
+.gap-alarm-card time { color: var(--muted); font-size: .74rem; font-variant-numeric: tabular-nums; }
+.gap-alarm-card p { margin: var(--space-2) 0 0; font-size: .82rem; }
+.gap-alarm-card p strong { color: var(--accent-ink); }
+.gap-alarm-card small { display: block; margin-top: var(--space-1); color: var(--muted); font-size: .74rem; }
+.gap-alarm-close {
+  position: absolute;
+  inset-block-start: var(--space-2);
+  inset-inline-end: var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.gap-alarm-close:hover { color: var(--ink); }
+
+/* ——— پوستهٔ خودِ تب ——— */
+.gap-skin {
+  --gap-hair: color-mix(in srgb, var(--line) 70%, transparent);
+  --gap-tile: color-mix(in srgb, var(--panel-2) 60%, transparent);
+  display: grid;
+  gap: var(--space-5);
+}
+.gap-skin .gap-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+.gap-skin .gap-hero h1 { margin: var(--space-1) 0; font-size: 1.5rem; }
+.gap-skin .gap-hero p:last-child { max-width: 62ch; color: var(--muted); font-size: .88rem; }
+.gap-skin .gap-hero-tag {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--gap-tile);
+  color: var(--muted);
+  font-size: .76rem;
+  white-space: nowrap;
+}
+.gap-skin .gap-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+  margin-top: var(--space-4);
+}
+.gap-skin .gap-form label { display: grid; gap: var(--space-1); font-size: .78rem; color: var(--muted); }
+.gap-skin .gap-form label.check { display: flex; align-items: center; gap: var(--space-2); }
+.gap-skin .gap-note { margin-top: var(--space-3); color: var(--muted); font-size: .78rem; line-height: 1.75; }
+.gap-skin .gap-verdict { margin: var(--space-3) 0 0; font-size: .84rem; line-height: 1.9; }
+.gap-skin .gap-toolbar { display: flex; align-items: end; gap: var(--space-3); flex-wrap: wrap; }
+.gap-skin .gap-toolbar label { display: grid; gap: var(--space-1); font-size: .76rem; color: var(--muted); }
+.gap-skin .gap-toolbar label.check { display: flex; align-items: center; gap: var(--space-2); }
+.gap-skin .gap-live-state { color: var(--muted); font-size: .74rem; font-variant-numeric: tabular-nums; }
+
+.gap-skin .gap-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+.gap-skin .gap-kpi {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--gap-hair);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.gap-skin .gap-kpi b { color: var(--muted); font-size: .74rem; font-weight: 500; }
+.gap-skin .gap-kpi strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.gap-skin .gap-kpi small { color: var(--muted); font-size: .7rem; line-height: 1.6; }
+
+.gap-skin .gap-table-wrap { overflow-x: auto; margin-top: var(--space-3); }
+.gap-skin .gap-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.gap-skin .gap-table th {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 500;
+  text-align: start;
+  white-space: nowrap;
+}
+.gap-skin .gap-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--gap-hair);
+  vertical-align: middle;
+}
+.gap-skin .gap-table tbody tr { cursor: pointer; transition: background var(--transition-fast); }
+.gap-skin .gap-table tbody tr:hover { background: var(--gap-tile); }
+.gap-skin .gap-table tbody tr.live { background: color-mix(in srgb, var(--gain) 5%, transparent); }
+.gap-skin .gap-table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gap-skin .gap-table td small { display: block; color: var(--muted); font-size: .68rem; }
+.gap-skin .gap-table td.spark-cell { width: 100px; }
+
+.gap-skin .gap-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
+}
+.gap-skin .gap-chart-wide { grid-column: 1 / -1; }
+.gap-skin .gap-chart { min-height: 260px; margin-top: var(--space-3); }
+.gap-skin .gap-chart-lg { min-height: 340px; }
+
+.gap-skin .gap-rule-form { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.gap-skin .gap-alarm-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); flex-wrap: wrap; }
+.gap-skin .gap-rule-list { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+.gap-skin .gap-rule {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--gap-hair);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.gap-skin .gap-rule.off { opacity: .55; }
+.gap-skin .gap-rule header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.gap-skin .gap-rule header b { font-size: .84rem; }
+.gap-skin .gap-rule header span { color: var(--muted); font-size: .72rem; }
+.gap-skin .gap-rule footer { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }
+.gap-skin .gap-rule footer small { flex: 1 1 auto; color: var(--muted); font-size: .72rem; }
+
+.gap-skin .gap-log { display: grid; gap: var(--space-1); margin-top: var(--space-3); }
+.gap-skin .gap-log-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2) var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--gap-tile);
+  font-size: .78rem;
+}
+.gap-skin .gap-log-row time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.gap-skin .gap-log-row span { font-variant-numeric: tabular-nums; }
+.gap-skin .gap-log-row small { grid-column: 1 / -1; color: var(--muted); font-size: .7rem; }
+
 .pb-skin {
   --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */
   --pb-hair: 1px solid var(--line-soft);            /* مرز مویی مشترک */

@@ -184,6 +184,15 @@ function toPoint(gap, meta) {
 export function gapVerdict(series, gap) {
   const stats = series?.stats;
   if (!stats?.count || !gap?.ok) return { ok: false, why: 'تاریخچهٔ کافی برای مقایسه نیست', rank: NaN };
+  // ── توزیعِ بی‌پراکندگی، حکمی ندارد ──────────────────────────────────
+  //
+  // وقتی همهٔ نقاط یک عددند، صدک هر مقداری بدهد بی‌معنی است:
+  // `percentileRank` برای عددِ برابر، صد می‌دهد و صد یعنی «گران» — پس
+  // ساختاری که اصلاً حرکت نکرده «گران» خوانده می‌شد. در اجرای آزمایشی
+  // همین دیده شد و همان‌جا معلوم شد که ادعا از داده بزرگ‌تر است.
+  if (!(stats.max > stats.min)) {
+    return { ok: false, why: 'فاصله در کل این بازه ثابت مانده؛ توزیعی نیست که «اکنون» را در آن جا داد', rank: NaN, stats };
+  }
   const rank = percentileRank(series.points.map((point) => point.current), gap.current);
   const tone = rank >= 80 ? 'گران' : rank <= 20 ? 'ارزان' : 'میانه';
   return {
