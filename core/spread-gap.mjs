@@ -131,6 +131,19 @@ export const GAP_STRATEGY_IDS = [...KIND_BY_STRATEGY.keys()];
 const finite = (value) => Number.isFinite(value);
 
 /**
+ * ارزشِ این ساختار جمعِ دو نرخ است یا تفاضلشان؟
+ *
+ * پاسخ از سمتِ پاها می‌آید نه از نامِ استراتژی: هر ترکیبی که همهٔ پاهایش
+ * خریده (یا همه فروخته) باشند، جمعِ علامت‌دارش جمعِ ساده است. اسپرد عمودی
+ * یک خریده و یک فروخته دارد، پس تفاضل. باترفلای هر دو را دارد، پس تفاضل.
+ */
+export function combineOf(legs = []) {
+  const sides = new Set(legs.filter((leg) => leg && leg.kind !== 'underlying')
+    .map((leg) => (leg.side === 'sell' ? 'sell' : 'buy')));
+  return sides.size === 1 ? 'sum' : 'diff';
+}
+
+/**
  * لنگرِ ساختاری: فاصلهٔ میان دورترین دو قیمت اعمالِ ترکیب، به ریالِ هر واحد.
  *
  * چرا «دورترین دو»: کندور چهار اعمال دارد و بین هر جفت یک فاصله هست، ولی
@@ -266,7 +279,14 @@ export function measureGap({
     mixedSize: !!anchor.mixedSize, equalWings: anchor.equalWings,
     current: NaN, coverage: NaN, coveragePct: NaN, room: NaN, roomPct: NaN,
     coverageLabel: '', roomLabel: '',
+    // «جمع» یا «تفریق» — از خودِ پاها، نه از نامِ خانواده. هر ترکیبی که
+    // همهٔ پاهایش یک‌سمت باشند (هر دو خریده یا هر دو فروخته) ارزشش جمعِ
+    // دو نرخ است؛ بقیه تفاضل‌اند. نمودارِ «دو نرخ و فاصله‌شان» از همین
+    // یک کلمه می‌فهمد ناحیه بکشد یا نوار.
+    combine: combineOf(legs),
     side: '', entry: num(entry, NaN), filledPct: NaN, upside: NaN, upsidePct: NaN,
+    gained: NaN, gainedPct: NaN, maxProfit: NaN, maxLoss: NaN,
+    unbounded: false, underwater: false,
     perDay: NaN, daysLeft: num(daysLeft, NaN), perLeg: [],
   };
   if (!anchor.ok) return { ...base, why: anchor.why };
@@ -289,136 +309,99 @@ export function measureGap({
   if (hasEntry) out.entry = paid;
 
   // ── لنگر ─────────────────────────────────────────────────────────────
+  //
+  // ═══ چرا استرانگل دیگر روی «قیمت ورود» لنگر نمی‌اندازد ═══
+  //
+  // نسخهٔ پیشین برای استرانگل، جمعِ پرمیوم در نخستین روزِ بازه را لنگر
+  // می‌گرفت و رویش «چند درصد سود گرفته‌ای» می‌ساخت. گزارش صاحب پروژه:
+  // «قسمت short strangle درست نمایش داده نمی‌شود؛ اصولاً لنگر نداریم.»
+  //
+  // و درست بود. آن روز، **ورودِ کسی نبود**. رادار ترکیب‌هایی را نشان
+  // می‌دهد که هنوز باز نشده‌اند؛ نخستین روزِ بازه فقط مرزِ نمودار است.
+  // ساختنِ «۲۲٪ از سودت را گرفته‌ای» روی موقعیتی که اصلاً باز نشده، عددی
+  // است که هیچ‌چیز در بازار با آن جور درنمی‌آید.
+  //
+  // آنچه برای استرانگل **همیشه** هست، دهانهٔ اعمال است: راهروی خنثایی که
+  // در فروشش شرط می‌بندی. پس همان لنگر می‌شود و نسبت، معنیِ روشنی
+  // می‌گیرد: **پرمیومی که می‌گیری چند درصدِ دهانه را می‌پوشاند.** این
+  // برای مقایسهٔ دو استرانگل روی یک نماد دقیقاً همان کاری را می‌کند که
+  // «پر شدن» برای دو اسپرد می‌کند، و به هیچ ورودِ خیالی‌ای نیاز ندارد.
+  //
+  // «هرچه این جمع کمتر شود سود است» — که خواستهٔ اصلی بود — از بین نرفت:
+  // در `gained` می‌آید (نسبت به مبدأ مقایسه، با نامِ خودش) و در نمودار
+  // مسیر و نمودار دو نرخ، که خودِ آب‌شدن را نشان می‌دهند.
+  out.anchorSource = 'strike';
+  out.anchored = true;
   if (kind === 'strangle') {
-    if (!hasEntry) {
-      // دهانهٔ اعمال هست و نشان داده می‌شود، ولی لنگر نیست و ادعایی
-      // رویش ساخته نمی‌شود.
-      // `ok` می‌ماند چون جمعِ کنونی **سنجیده شد** و خودش عددِ درستی
-      // است؛ آنچه نیست، لنگر است. `anchored: false` همین تفکیک را
-      // حمل می‌کند تا رابط جمع را نشان دهد و درصدی نسازد.
-      return {
-        ...out, anchor: NaN, anchorSource: 'entry', anchored: false,
-        anchorLabel: 'جمع پرمیوم ورود',
-        why: 'برای استرانگل، لنگر جمعِ پرمیوم در لحظهٔ ورود است؛ بی آن، «چقدر سود گرفته‌ای» پرسشِ بی‌جوابی است و درصدی ساخته نمی‌شود',
-      };
-    }
-    out.anchor = paid;
-    out.anchorSource = 'entry';
-    out.anchored = true;
-    // ═══ خریده یا فروخته — دو جهتِ کاملاً وارونه ═══
-    //
-    // خواستهٔ کاربر دربارهٔ استرانگلِ **فروش** بود: «جمع دو تا قرارداد
-    // (که فروختیم) بیشینه سود، و هرچی در طول زمان این جمع کمتر بشه
-    // می‌شه سود استراتژی.»
-    //
-    // ولی استرانگلِ خرید هم در کاتالوگ هست و آنجا همه‌چیز وارونه است:
-    // پرمیوم را **داده‌ای**، و سود از **بیشتر شدنِ** همان جمع می‌آید.
-    // نسخهٔ اول این تفکیک را نداشت و هر دو را «فروخته» فرض می‌کرد؛
-    // نتیجه‌اش در اجرای مرورگر دیده شد: یک استرانگلِ خرید که ۲۱۵ خریده
-    // شده و حالا ۷۱۷ است — یعنی سه برابر شده — «‎−۲۳۳٪ سود گرفته‌شده»
-    // نشان می‌داد.
-    //
-    // و یک تفاوتِ دوم که پنهان‌کردنش بدتر بود: استرانگلِ فروش سقفِ سود
-    // دارد (همان بستانکار) ولی استرانگلِ خرید ندارد — پایه می‌تواند هر
-    // قدر برود. پس «چند درصد مانده» برای خرید جواب ندارد و ساخته
-    // نمی‌شود، به‌جای اینکه عددی بی‌معنی بگیرد.
-    out.anchorLabel = now.side === 'credit' ? 'جمع پرمیوم ورود' : 'جمع پرمیوم پرداختی';
-    if (now.side === 'credit') {
-      out.coverageLabel = 'سودِ گرفته‌شده';
-      // ── چرا «سودِ باقی‌مانده» نیست ──────────────────────────────────
-      //
-      // این عدد `جمعِ کنونی ÷ جمعِ ورود` است. وقتی موقعیت در سود است
-      // (جمع کوچک‌تر شده) زیر صد می‌ماند و «سودِ باقی‌مانده» خواندنش
-      // بی‌ضرر است. ولی وقتی جمع **بزرگ‌تر** از ورود شده — یعنی موقعیت
-      // در زیان است — از صد رد می‌شود و «۳۳۳٪ سود باقی‌مانده» یک ادعای
-      // کاملاً غلط است: سودِ فروشندهٔ استرانگل هرگز از خودِ بستانکارِ
-      // ورود بیشتر نمی‌شود.
-      //
-      // اجرای مرورگر دقیقاً همین را نشان داد. آنچه این عدد واقعاً
-      // می‌گوید «چقدر ارزش هنوز باید آب شود» است، و همان نوشته می‌شود.
-      out.roomLabel = 'ارزشی که باید آب شود';
-    } else {
-      out.coverageLabel = 'نسبت به پرمیوم پرداختی';
-      out.roomLabel = '';
-      out.unbounded = true;
-    }
+    out.anchorLabel = 'دهانهٔ اعمال';
+    out.coverageLabel = now.side === 'credit' ? 'پوشش پرمیوم از دهانه' : 'بهای پرداختی از دهانه';
+    out.roomLabel = 'دهانهٔ بی‌پوشش';
   } else {
-    out.anchorSource = 'strike';
-    out.anchored = true;
     out.coverageLabel = 'پر شده';
     out.roomLabel = 'جا برای پر شدن';
   }
 
   // ── دو درصد ──────────────────────────────────────────────────────────
   //
-  // در اسپرد: ارزشِ کنونی بر فاصلهٔ اعمال. در استرانگل: سودی که تا حالا
-  // از آبِ‌شدنِ پرمیوم گرفته‌ای، بر بیشینهٔ سود. هر دو یک جمله می‌گویند —
-  // «چقدر از راه رفته‌ام» — ولی مخرجشان یکی نیست و برچسبشان هم.
-  if (kind === 'strangle' && now.side === 'credit') {
-    // فروخته: جمع باید آب شود. آنچه آب شده، سود است.
-    out.coverage = (paid - current) / paid;
-    out.room = current;
-  } else if (kind === 'strangle') {
-    // خریده: جمع باید بزرگ شود، و سقفی ندارد. پس «نسبت به پرداختی»
-    // گفته می‌شود و «باقی‌مانده» ساخته نمی‌شود.
-    out.coverage = current / paid;
-    out.coveragePct = out.coverage * 100;
-    out.room = NaN;
-    out.roomPct = NaN;
-    out.gained = current - paid;
-    out.maxProfit = NaN;
-    out.maxLoss = -paid;
-    out.upside = NaN;
-    out.upsidePct = NaN;
-    return out;
-  } else {
-    out.coverage = current / out.anchor;
-    out.room = out.anchor - current;
-  }
+  // ارزشِ کنونی بر لنگرِ ساختاری. در اسپرد یعنی «چقدر از راه رفته‌ام» و در
+  // استرانگل یعنی «پرمیوم چقدر از دهانه را می‌پوشاند». یک ریاضی، دو جمله،
+  // و هر جمله برچسبِ خودش را دارد — چون یکی‌شان را به نامِ دیگری گفتن،
+  // همان جایی است که گزارش‌های مالی دروغ می‌گویند بی آنکه عددی غلط باشد.
+  out.coverage = current / out.anchor;
+  out.room = out.anchor - current;
   out.coveragePct = out.coverage * 100;
   out.roomPct = 100 - out.coveragePct;
 
-  if (!hasEntry) return out;
-
-  // ── لنگر موقعیتی ─────────────────────────────────────────────────────
-  if (now.side === 'debit') {
-    out.maxProfit = out.anchorSource === 'strike' ? out.anchor - paid : NaN;
-    out.maxLoss = -paid;
-    out.gained = current - paid;
-    out.upside = out.anchorSource === 'strike' ? out.anchor - current : NaN;
+  // ── بیشینهٔ سود و زیانِ «اگر همین حالا وارد شوی» ──────────────────────
+  //
+  // مبنا قیمتِ **اکنون** است نه قیمتِ روز ورود، چون کسی که امروز به این
+  // ردیف نگاه می‌کند امروز وارد می‌شود. برای عددهای دقیق‌تر — با کارمزد
+  // تسویه، سربه‌سری، وجه تضمین و سرمایه — `core/radar-metrics.mjs` همان
+  // خط لولهٔ مشترکِ برنامه را اجرا می‌کند؛ اینجا فقط شکلِ ساختاری است.
+  if (kind === 'strangle') {
+    // فروش: بستانکارِ امروز سقفِ سود است و زیان سقف ندارد.
+    // خرید: بهای امروز سقفِ زیان است و سود سقف ندارد.
+    out.maxProfit = now.side === 'credit' ? current : Infinity;
+    out.maxLoss = now.side === 'credit' ? -Infinity : -current;
+    out.unbounded = true;
+    out.upside = NaN;
+  } else if (now.side === 'debit') {
+    out.maxProfit = out.anchor - current;
+    out.maxLoss = -current;
+    out.upside = out.anchor - current;
   } else {
-    // بستانکار: بستانکارِ ورود بیشینهٔ سود است و ارزش باید به صفر برود.
-    out.maxProfit = paid;
-    out.maxLoss = out.anchorSource === 'strike' ? -(out.anchor - paid) : NaN;
-    out.gained = paid - current;
+    out.maxProfit = current;
+    out.maxLoss = -(out.anchor - current);
     out.upside = current;
   }
-  out.filledPct = finite(out.maxProfit) && out.maxProfit !== 0
-    ? (out.gained / out.maxProfit) * 100 : NaN;
-  // زیر آب بودن، خودش یک حالت است و باید نامش را داشته باشد — نه اینکه
-  // با یک درصدِ منفی وسطِ ستونی از درصدهای مثبت پنهان بماند.
-  out.underwater = finite(out.gained) && out.gained < 0;
-  // ── لنگرِ ورودی، مخرجی برای «بازده» ندارد ────────────────────────────
+
+  // ── نسبت به مبدأ مقایسه ──────────────────────────────────────────────
   //
-  // برای اسپرد، سرمایهٔ درگیرِ همین لحظه معلوم است و «سود باقی‌مانده بر
-  // آن» عدد درستی است. برای استرانگل نیست: سرمایهٔ فروشنده وجه تضمین
-  // است، نه بستانکار. تقسیم بر بستانکار، «۳۳۳٪ بازده» می‌داد برای
-  // موقعیتی که در زیان بود. مخرجِ مدافع‌پذیر نداریم، پس عددی هم ساخته
-  // نمی‌شود — و `upside` به ریال می‌ماند که خودش صادق است.
-  if (out.anchorSource === 'entry') {
-    out.upsidePct = NaN;
-    out.perDay = NaN;
-    return out;
+  // `entry` ورودِ واقعیِ کاربر نیست و ادعا هم نمی‌کند که هست: نخستین روزِ
+  // بازه با قیمت معتبرِ همهٔ پاهاست. با آن یک چیز گفتنی است و فقط همان:
+  // از آن روز تا امروز، ارزشِ ساختار چقدر به نفع یا زیانِ دارندهٔ آن
+  // موقعیت حرکت کرده.
+  if (hasEntry) {
+    out.gained = now.side === 'credit' ? paid - current : current - paid;
+    out.gainedPct = (out.gained / paid) * 100;
+    out.underwater = out.gained < 0;
+    out.filledPct = finite(out.maxProfit) && out.maxProfit !== 0
+      ? (out.gained / out.maxProfit) * 100 : NaN;
   }
-  // سودِ باقی‌مانده بر سرمایه‌ای که **همین حالا** درگیرش می‌شوید — نه بر
-  // سرمایهٔ روز ورود. کسی که امروز نگاه می‌کند، امروز وارد می‌شود.
-  const atRisk = now.side === 'debit'
-    ? current
-    : (finite(out.anchor) && out.anchorSource === 'strike' ? out.anchor - current : paid);
+
+  // ── سودِ باقی‌مانده، فقط جایی که مخرج دارد ────────────────────────────
+  //
+  // برای اسپرد و بال، سرمایهٔ درگیرِ همین لحظه معلوم است. برای استرانگل
+  // نیست: سرمایهٔ فروشنده وجه تضمین است نه بستانکار، و تقسیم بر بستانکار
+  // «۳۳۳٪ بازده» می‌داد برای موقعیتی که در زیان بود. آنجا عددی ساخته
+  // نمی‌شود و `radar-metrics` بازده را روی وجه تضمینِ واقعی می‌دهد.
+  if (kind === 'strangle') return out;
+  const atRisk = now.side === 'debit' ? current : out.anchor - current;
   out.upsidePct = atRisk > 0 && finite(out.upside) ? (out.upside / atRisk) * 100 : NaN;
   const days = num(daysLeft, NaN);
   if (finite(days) && days > 0 && finite(out.upsidePct)) out.perDay = out.upsidePct / days;
   return out;
+
 }
 
 /**
@@ -431,24 +414,26 @@ export function measureGap({
 export function gapNote(gap) {
   if (!gap) return '';
   if (!gap.ok) return gap.why || 'فاصله محاسبه نشد';
-  const iso = (n) => `\u2068${Number(n).toLocaleString('fa-IR', { maximumFractionDigits: 1 })}\u2069`;
+  const iso = (n) => `⁨${Number(n).toLocaleString('fa-IR', { maximumFractionDigits: 1 })}⁩`;
+  const round = (n) => iso(Math.round(n));
   const parts = [];
 
-  if (gap.anchorSource === 'entry') {
-    if (gap.unbounded) {
-      parts.push(`جمع پرمیومِ پرداختی ${iso(Math.round(gap.entry))} بود و اکنون ${iso(Math.round(gap.current))} است — ${iso(gap.coveragePct)}٪ آن. سودِ استرانگلِ خرید سقف ندارد، پس «باقی‌مانده» ساخته نمی‌شود`);
-    } else if (gap.underwater) {
-      parts.push(`جمع پرمیومِ ورود ${iso(Math.round(gap.entry))} بود و اکنون ${iso(Math.round(gap.current))} — یعنی جمع بزرگ‌تر شده و موقعیت در زیان است؛ ${iso(Math.abs(gap.coveragePct))}٪ از بیشینهٔ سود از دست رفته و ${iso(gap.roomPct)}٪ ارزش هنوز باید آب شود`);
-    } else {
-      parts.push(`جمع پرمیومِ ورود ${iso(Math.round(gap.entry))} بود و اکنون ${iso(Math.round(gap.current))} است — ${iso(gap.coveragePct)}٪ از بیشینهٔ سود گرفته شده و ${iso(gap.roomPct)}٪ ارزش هنوز باید آب شود`);
-    }
-    if (finite(gap.strikeGap)) parts.push(`دهانهٔ اعمال ${iso(Math.round(gap.strikeGap))}`);
+  if (gap.kind === 'strangle') {
+    const what = gap.side === 'credit' ? 'جمعِ پرمیومی که می‌گیری' : 'جمعِ پرمیومی که می‌دهی';
+    parts.push(`دهانهٔ اعمال ${round(gap.anchor)}؛ ${what} اکنون ${round(gap.current)} — ${iso(gap.coveragePct)}٪ دهانه`);
+    parts.push(gap.side === 'credit'
+      ? 'بیشینهٔ سود همین بستانکار است و هرچه این جمع آب شود، همان‌قدر محقق می‌شود؛ زیانش سقف ندارد'
+      : 'بیشترین زیان همین بهاست و سود سقف ندارد');
   } else {
-    parts.push(`فاصلهٔ اعمال ${iso(Math.round(gap.anchor))}؛ تفاضل دو نرخ اکنون ${iso(Math.round(gap.current))} — ${iso(gap.coveragePct)}٪ پر شده و ${iso(gap.roomPct)}٪ جا دارد`);
+    parts.push(`فاصلهٔ اعمال ${round(gap.anchor)}؛ تفاضل دو نرخ اکنون ${round(gap.current)} — ${iso(gap.coveragePct)}٪ پر شده و ${iso(gap.roomPct)}٪ جا دارد`);
   }
-  if (finite(gap.upsidePct)) {
-    parts.push(`سودِ باقی‌مانده ${iso(gap.upsidePct)}٪ سرمایهٔ همین لحظه`);
+
+  if (finite(gap.gained)) {
+    parts.push(gap.underwater
+      ? `از مبدأ مقایسه ${round(Math.abs(gap.gained))} در زیان است (${iso(Math.abs(gap.gainedPct))}٪)`
+      : `از مبدأ مقایسه ${round(gap.gained)} به سودِ دارندهٔ آن موقعیت حرکت کرده (${iso(gap.gainedPct)}٪)`);
   }
+  if (finite(gap.upsidePct)) parts.push(`سودِ باقی‌مانده ${iso(gap.upsidePct)}٪ سرمایهٔ همین لحظه`);
   if (finite(gap.perDay)) parts.push(`${iso(gap.perDay)}٪ در هر روزِ مانده`);
   return `${parts.join('؛ ')}. عددها به ${gap.scale === 'raw' ? 'قیمت خام قرارداد' : gap.scale === 'size' ? 'ریالِ یک قرارداد' : 'ریالِ کل موقعیت'}.`;
 }
