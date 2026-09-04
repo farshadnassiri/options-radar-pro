@@ -1904,7 +1904,7 @@ export async function mount(root, { state, api }) {
     to: 'backtest', from: 'portfolio-backtest',
     uaIns: String(ua.ins), uaName: nameOf(ua, 'نماد پایه'),
     strategyId: item.strategyId, strategyName: item.strategyName,
-    legIns: item.legs.map((leg) => String(leg.ins)),
+    legIns: item.legs.filter((leg) => leg.kind !== 'underlying').map((leg) => String(leg.ins)),
     comboName: comboName(item),
     entryDate: Number($('pb-entry-date').dataset.value),
     exitDate: Number($('pb-exit-date').dataset.value),
