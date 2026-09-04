@@ -24,7 +24,9 @@ import { num } from './num.mjs';
 import { historyPrice, normalizeHistoryDate, historyDateLabel } from './history.mjs';
 import { marksAt } from './intraday-mark.mjs';
 import { momentsFor, momentLabel, momentKey, isIntradayGrain, normalizeGrain } from './intraday-grid.mjs';
-import { measureGap } from './spread-gap.mjs';
+import { DEFAULT_SCALE, measureGap } from './spread-gap.mjs';
+// تقویم جلالی برای سطلِ ماهانه — سطلِ میلادی وسطِ ماهِ جلالی می‌شکند.
+import { gregorianToJalali } from './jalali.mjs';
 
 const finite = (value) => Number.isFinite(value);
 
@@ -83,6 +85,7 @@ export function seriesStats(points = [], field = 'current') {
 export function dailyGapSeries({
   legs = [], seriesByIns = {}, dates = [], basis = 'CLOSE',
   strategyId = '', entry = NaN, expiry = NaN,
+  scale = DEFAULT_SCALE, units = 1, baseIns = '',
 } = {}) {
   const index = new Map();
   for (const leg of legs) {
@@ -92,6 +95,9 @@ export function dailyGapSeries({
     const rows = new Map((seriesByIns[ins] || []).map((row) => [normalizeHistoryDate(row.date), row]));
     index.set(ins, rows);
   }
+  // سری خودِ دارایی پایه، برای «رفتار فاصله در برابر پایه».
+  const baseRows = new Map((seriesByIns[String(baseIns)] || [])
+    .map((row) => [normalizeHistoryDate(row.date), row]));
   const points = [];
   let missing = 0;
   const end = normalizeHistoryDate(expiry);
@@ -107,11 +113,17 @@ export function dailyGapSeries({
     }
     if (!complete) { missing += 1; continue; }
     const daysLeft = end ? dayGap(date, end) : NaN;
-    const gap = measureGap({ legs, prices, strategyId, entry, daysLeft });
+    const gap = measureGap({ legs, prices, strategyId, entry, daysLeft, scale, units });
     if (!gap.ok) { missing += 1; continue; }
-    points.push(toPoint(gap, { key: date, t: date, label: historyDateLabel(date), grain: 'day' }));
+    // قیمت پایه در همان روز. نبودش نقطه را باطل نمی‌کند — فاصله بی آن هم
+    // سنجیده می‌شود؛ فقط نمودارِ مقایسه با پایه آن نقطه را ندارد.
+    const basePrice = historyPrice(baseRows.get(date), basis);
+    points.push(toPoint(gap, {
+      key: date, t: date, label: historyDateLabel(date), grain: 'day',
+      basePrice: finite(basePrice) && basePrice > 0 ? basePrice : null,
+    }));
   }
-  return { points, missing, grain: 'day', stats: seriesStats(points) };
+  return { points, missing, grain: 'day', scale, stats: seriesStats(points) };
 }
 
 /**
@@ -124,9 +136,10 @@ export function dailyGapSeries({
 export function intradayGapSeries({
   legs = [], tapeByIns = {}, date = 0, grain = 'm5',
   strategyId = '', entry = NaN, expiry = NaN,
+  scale = DEFAULT_SCALE, units = 1, baseIns = '',
 } = {}) {
   const id = normalizeGrain(grain);
-  if (!isIntradayGrain(id)) return { points: [], missing: 0, grain: id, stats: seriesStats([]) };
+  if (!isIntradayGrain(id)) return { points: [], missing: 0, grain: id, scale, stats: seriesStats([]) };
   const day = normalizeHistoryDate(date);
   const end = normalizeHistoryDate(expiry);
   const daysLeft = day && end ? dayGap(day, end) : NaN;
@@ -143,14 +156,16 @@ export function intradayGapSeries({
       prices[ins] = price;
     }
     if (!complete) { missing += 1; continue; }
-    const gap = measureGap({ legs, prices, strategyId, entry, daysLeft });
+    const gap = measureGap({ legs, prices, strategyId, entry, daysLeft, scale, units });
     if (!gap.ok) { missing += 1; continue; }
+    const basePrice = num(marks[String(baseIns)]?.price, NaN);
     points.push(toPoint(gap, {
       key: momentKey(day, second), t: second, second,
       label: momentLabel(second), grain: id,
+      basePrice: finite(basePrice) && basePrice > 0 ? basePrice : null,
     }));
   }
-  return { points, missing, grain: id, stats: seriesStats(points) };
+  return { points, missing, grain: id, scale, day, stats: seriesStats(points) };
 }
 
 /**
@@ -168,10 +183,14 @@ function dayGap(from, to) {
 function toPoint(gap, meta) {
   return {
     ...meta,
-    current: gap.current, anchor: gap.anchor,
+    current: gap.current, anchor: gap.anchor, anchored: gap.anchored,
     coveragePct: gap.coveragePct, roomPct: gap.roomPct,
     upsidePct: gap.upsidePct, filledPct: gap.filledPct,
     perDay: gap.perDay, side: gap.side, daysLeft: gap.daysLeft,
+    // قیمتِ تک‌تکِ پاها همراه نقطه می‌ماند. بی این، «نمودار فاصله‌ای» —
+    // دو خط و فضای میانشان — ساخته نمی‌شود و کاربر فقط حاصلِ تفریق را
+    // می‌بیند نه دو عددی که از هم کم شده‌اند.
+    legs: gap.perLeg.map((leg) => ({ ins: leg.ins, name: leg.name, side: leg.side, scaled: leg.scaled })),
   };
 }
 
@@ -202,4 +221,141 @@ export function gapVerdict(series, gap) {
     vsMax: finite(stats.max) && stats.max !== 0 ? ((gap.current / stats.max) - 1) * 100 : NaN,
     stats,
   };
+}
+
+// ═══════════════════════ تایم‌فریم ═══════════════════════
+//
+// «این فاصله در بازه‌های زمانی مختلف باید قابل نمایش باشد… در تایم‌فریم‌های
+// مختلف… چه در بازه‌های زمانی گذشته چه حال.»
+//
+// بازه (از کِی تا کِی) را کنترل بازه می‌دهد و هر بازه‌ای — گذشته یا امروز
+// — کار می‌کند. آنچه نبود، **دانه‌بندیِ بالاتر از روز** بود: روی یک سالِ
+// معاملاتی، ۲۴۰ نقطهٔ روزانه روند را زیر نویز دفن می‌کند.
+//
+// چرا تجمیع و نه نمونه‌برداری: برداشتنِ «قیمتِ آخرین روزِ هر هفته» جهش‌های
+// درون‌هفته را کاملاً گم می‌کند. سطلِ هفتگی هر چهار عدد را نگه می‌دارد —
+// باز، بیشینه، کمینه، بسته — تا نمودار میله‌ای دامنه هم بتواند از همین
+// ساخته شود.
+
+export const GAP_TIMEFRAMES = [
+  { id: 'day', label: 'روزانه', hint: 'یک نقطه برای هر روز معاملاتی' },
+  { id: 'week', label: 'هفتگی', hint: 'سطل هفت‌روزه؛ برای بازه‌های چندماهه' },
+  { id: 'month', label: 'ماهانه', hint: 'سطل جلالی؛ برای بازه‌های چندساله' },
+];
+
+const TIMEFRAME_IDS = new Set(GAP_TIMEFRAMES.map((row) => row.id));
+export const normalizeTimeframe = (id) => (TIMEFRAME_IDS.has(String(id ?? '')) ? String(id) : 'day');
+
+/**
+ * کلیدِ سطل برای یک تاریخ هشت‌رقمی میلادی.
+ *
+ * ماه از تقویم **جلالی** گرفته می‌شود نه میلادی: کاربر بازه را جلالی
+ * انتخاب می‌کند و برچسب‌ها جلالی‌اند؛ سطلِ میلادی وسطِ ماهِ جلالی می‌شکند
+ * و «مهر» به دو ستون تقسیم می‌شود.
+ */
+function bucketOf(date, timeframe) {
+  if (timeframe === 'week') {
+    // شمارهٔ هفته از یک مبدأ ثابت. مبدأ اهمیتی ندارد، پیوستگی دارد.
+    const at = Date.UTC(Math.trunc(date / 10000), (Math.trunc(date / 100) % 100) - 1, date % 100);
+    return `w${Math.floor(at / (7 * 86400000))}`;
+  }
+  const [jy, jm] = gregorianToJalali(Math.trunc(date / 10000), Math.trunc(date / 100) % 100, date % 100);
+  return `m${jy}-${String(jm).padStart(2, '0')}`;
+}
+
+/**
+ * تجمیعِ نقاط روزانه به سطل‌های بزرگ‌تر.
+ *
+ * هر سطل چهار عددِ قیمتی نگه می‌دارد و برای بقیهٔ میدان‌ها مقدارِ **آخرین**
+ * نقطهٔ سطل را می‌گیرد — نه میانگین. میانگینِ «روز تا سررسید» یا «درصد
+ * پر شدن» عددی می‌سازد که در هیچ لحظه‌ای واقعاً وجود نداشته.
+ */
+export function resample(series, timeframe = 'day') {
+  const id = normalizeTimeframe(timeframe);
+  const points = series?.points || [];
+  if (id === 'day' || points.length < 2) return { ...series, timeframe: 'day' };
+
+  const buckets = new Map();
+  for (const point of points) {
+    const key = bucketOf(point.t, id);
+    const bucket = buckets.get(key);
+    if (!bucket) buckets.set(key, { key, first: point, last: point, lo: point, hi: point, count: 1 });
+    else {
+      bucket.last = point;
+      bucket.count += 1;
+      if (point.current < bucket.lo.current) bucket.lo = point;
+      if (point.current > bucket.hi.current) bucket.hi = point;
+    }
+  }
+  const out = [...buckets.values()].map((bucket) => ({
+    ...bucket.last,
+    key: bucket.key,
+    label: bucket.last.label,
+    open: bucket.first.current,
+    close: bucket.last.current,
+    low: bucket.lo.current,
+    high: bucket.hi.current,
+    days: bucket.count,
+  }));
+  return { ...series, points: out, timeframe: id, stats: seriesStats(out) };
+}
+
+// ═══════════════════ فاصله در برابر دارایی پایه ═══════════════════
+//
+// «رفتار این تفاوت یا جمع رو با دارایی پایه بسنج در نمودار.»
+//
+// دو عدد این را می‌گویند و هر دو لازم‌اند:
+//
+//   همبستگی   جهت و شدتِ رابطه. نزدیک ۱ یعنی فاصله با پایه بالا می‌رود،
+//             نزدیک ۱− یعنی وارونه، نزدیک صفر یعنی رابطه‌ای نیست.
+//   شیب       اندازهٔ رابطه: با هر یک ریال حرکتِ پایه، فاصله چند ریال.
+//
+// همبستگیِ تنها گمراه‌کننده است: همبستگیِ ۰٫۹ با شیبِ ۰٫۰۰۱ یعنی رابطه
+// محکم است ولی عملاً بی‌اثر.
+
+export function versusBase(series) {
+  const rows = (series?.points || [])
+    .filter((point) => finite(point.basePrice) && finite(point.current));
+  if (rows.length < 3) {
+    return { ok: false, why: 'برای سنجش رابطه با پایه دست‌کم سه نقطه با قیمت پایه لازم است', count: rows.length };
+  }
+  const xs = rows.map((row) => row.basePrice);
+  const ys = rows.map((row) => row.current);
+  const mx = xs.reduce((sum, x) => sum + x, 0) / xs.length;
+  const my = ys.reduce((sum, y) => sum + y, 0) / ys.length;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < xs.length; i += 1) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    sxy += dx * dy; sxx += dx * dx; syy += dy * dy;
+  }
+  const denom = Math.sqrt(sxx * syy);
+  const r = denom > 0 ? sxy / denom : NaN;
+  const slope = sxx > 0 ? sxy / sxx : NaN;
+  return {
+    ok: true, count: rows.length, r, slope,
+    intercept: finite(slope) ? my - (slope * mx) : NaN,
+    rows: rows.map((row) => ({ base: row.basePrice, gap: row.current, label: row.label })),
+    tone: !finite(r) ? '—'
+      : Math.abs(r) < 0.3 ? 'رابطهٔ ضعیف'
+        : r > 0 ? 'هم‌جهت با پایه' : 'وارونهٔ پایه',
+  };
+}
+
+/**
+ * هر دو سری، نرمال‌شده به صد در نقطهٔ اول.
+ *
+ * فاصله به ریالِ قرارداد است و پایه به ریالِ سهم؛ روی یک محور، یکی از
+ * دیگری چند مرتبه بزرگ‌تر است و خطِ کوچک‌تر صاف دیده می‌شود. نرمال‌کردن
+ * هر دو را قابل مقایسه می‌کند و پرسشِ واقعی — «کدام بیشتر حرکت کرد» —
+ * را جواب می‌دهد.
+ */
+export function indexedPair(series) {
+  const points = (series?.points || []).filter((point) => finite(point.current));
+  const firstGap = points.find((point) => point.current > 0)?.current;
+  const firstBase = points.find((point) => finite(point.basePrice) && point.basePrice > 0)?.basePrice;
+  return points.map((point) => ({
+    label: point.label,
+    gap: finite(firstGap) ? (point.current / firstGap) * 100 : null,
+    base: finite(firstBase) && finite(point.basePrice) ? (point.basePrice / firstBase) * 100 : null,
+  }));
 }

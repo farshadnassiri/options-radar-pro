@@ -15,10 +15,12 @@
 
 import { check, group, near, readSrc } from '../harness.mjs';
 import {
-  GAP_STRATEGY_IDS, gapKind, gapNote, hasGap, measureGap, strikeAnchor, structureValue,
+  GAP_SCALES, GAP_STRATEGY_IDS, DEFAULT_SCALE, gapKind, gapMultiplier, gapNote, hasGap,
+  measureGap, strikeAnchor, structureValue,
 } from '../../core/spread-gap.mjs';
 import {
-  dailyGapSeries, gapVerdict, intradayGapSeries, percentileRank, quantile, seriesStats,
+  GAP_TIMEFRAMES, dailyGapSeries, gapVerdict, indexedPair, intradayGapSeries, percentileRank,
+  quantile, resample, seriesStats, versusBase,
 } from '../../core/spread-gap-series.mjs';
 import {
   ALERT_METRICS, ALERT_OPS, alertSnapshot, evaluateAlerts, normalizeRule, ruleFires, ruleNote,
@@ -63,15 +65,36 @@ group('۲۱۸-الف. کدام استراتژی فاصله دارد');
 
 group('۲۱۸-ب. لنگر: فاصلهٔ اعمال');
 {
+  // ═══ مقیاس، انتخابِ کاربر است ═══
+  //
+  // گزارش صاحب پروژه: «ضرب کردن در اندازه قرارداد و حجم رو در اختیار
+  // کاربر بذار که انتخاب بکنه یا نکنه.»
+  //
+  // پیش‌فرض `raw` است چون معامله‌گر روی تابلو **قیمت خام قرارداد** را
+  // می‌بیند: کالِ ۵۰ روی ۳٬۲۰۰ و کالِ ۵۴ روی ۸۰۰، و آنچه با چشمش کم
+  // می‌کند ۲٬۴۰۰ است. عددِ ۲٬۴۰۰٬۰۰۰ همان است ضربدر هزار، ولی با هیچ
+  // عددی روی تابلو جور درنمی‌آید.
+  check('پیش‌فرضِ مقیاس، قیمت خام است — نه ضرب‌شده',
+    DEFAULT_SCALE === 'raw' && GAP_SCALES[0].id === 'raw');
+  check('و هر سه مقیاس برچسب و راهنما دارند',
+    GAP_SCALES.length === 3 && GAP_SCALES.every((row) => row.label && row.hint && row.unit)
+    && GAP_SCALES.map((row) => row.id).join(',') === 'raw,size,qty');
+  check('ضریب: خام یک است، اندازه همان اندازه، و تعداد در آن ضرب می‌شود',
+    gapMultiplier({ scale: 'raw', size: 1000, units: 3 }) === 1
+    && gapMultiplier({ scale: 'size', size: 1000, units: 3 }) === 1000
+    && gapMultiplier({ scale: 'qty', size: 1000, units: 3 }) === 3000);
+
   const bull = strikeAnchor(BULL, 'vertical');
-  check('عرضِ اسپرد چهارهزارتومانی با اندازهٔ ۱۰۰۰، چهار میلیون ریال است',
-    bull.ok && bull.anchor === 4e6, `${bull.anchor}`);
+  check('عرضِ اسپرد چهارهزارتومانی، در مقیاس خام همان ۴٬۰۰۰ است',
+    bull.ok && bull.anchor === 4000 && bull.raw === 4000, `${bull.anchor}`);
+  check('و با ضریبِ اندازه، چهار میلیون ریال',
+    strikeAnchor(BULL, 'vertical', 1000).anchor === 4e6);
   check('و قیمت‌های اعمال مرتب و یکتا برمی‌گردند',
     bull.strikes.join(',') === '50000,54000');
 
   const strangle = strikeAnchor(STRANGLE, 'strangle');
-  check('دهانهٔ استرانگل ۴۶ تا ۵۶، ده میلیون ریال است',
-    strangle.ok && strangle.anchor === 1e7, `${strangle.anchor}`);
+  check('دهانهٔ استرانگل ۴۶ تا ۵۶، ده هزار است',
+    strangle.ok && strangle.anchor === 10000, `${strangle.anchor}`);
 
   // ── بال، نه پهنای کل ────────────────────────────────────────────────
   //
@@ -84,13 +107,13 @@ group('۲۱۸-ب. لنگر: فاصلهٔ اعمال');
   }));
   const wing = strikeAnchor(condor, 'wing');
   check('لنگرِ کندور، بالِ باریک‌ترین است نه پهنای کل',
-    wing.ok && wing.anchor === 4e6 && wing.equalWings === true,
-    `بال ${wing.anchor} در برابر پهنای کل ${(58 - 46) * 1000 * 1000}`);
+    wing.ok && wing.anchor === 4000 && wing.equalWings === true,
+    `بال ${wing.anchor} در برابر پهنای کل ${58000 - 46000}`);
   const uneven = strikeAnchor([46, 50, 62].map((k) => ({
     ins: `u${k}`, kind: 'call', side: 'buy', strike: k * 1000, size: 1000, ratio: 1,
   })), 'wing');
   check('بالِ نامساوی: باریک‌ترین حاکم است، نه میانگین',
-    uneven.anchor === 4e6 && uneven.equalWings === false,
+    uneven.anchor === 4000 && uneven.equalWings === false,
     `${uneven.wingWidths.join('، ')}`);
 
   check('یک قیمت اعمال یعنی فاصله‌ای نیست، و همین گفته می‌شود',
@@ -98,112 +121,248 @@ group('۲۱۸-ب. لنگر: فاصلهٔ اعمال');
     && strikeAnchor([BULL[0]], 'vertical').why.includes('کمتر از دو'));
   check('دو اعمالِ یکسان هم فاصله نمی‌سازند',
     !strikeAnchor([BULL[0], { ...BULL[1], strike: 50000 }], 'vertical').ok);
-  check('اندازهٔ نااعلام، لنگر را باطل می‌کند نه اینکه ۱ فرض شود',
-    !strikeAnchor(BULL.map((leg) => ({ ...leg, size: 0 })), 'vertical').ok);
+  // در مقیاس خام، اندازهٔ قرارداد اصلاً وارد حساب نمی‌شود، پس نبودش هم
+  // فاصله را باطل نمی‌کند. این تغییرِ عمدیِ همین نسخه است: پیش از این
+  // ضرب اجباری بود و بی اندازه، هیچ عددی ساخته نمی‌شد.
+  const sizeless = strikeAnchor(BULL.map((leg) => ({ ...leg, size: 0 })), 'vertical');
+  check('بی اندازهٔ اعلام‌شده، مقیاس خام همچنان کار می‌کند',
+    sizeless.ok && sizeless.anchor === 4000 && sizeless.size === 1);
   check('اندازهٔ ناهمگون علامت می‌خورد و کوچک‌ترین حاکم می‌شود',
     strikeAnchor([BULL[0], { ...BULL[1], size: 500 }], 'vertical').mixedSize === true
-    && strikeAnchor([BULL[0], { ...BULL[1], size: 500 }], 'vertical').anchor === 2e6);
+    && strikeAnchor([BULL[0], { ...BULL[1], size: 500 }], 'vertical', 500).anchor === 2e6);
 }
 
 
-group('۲۱۸-ج. ارزش ساختار در یک لحظه');
+group('۲۱۸-ج. ارزش ساختار در یک لحظه — تفریق یا جمع');
 {
-  // خرید ۵۰ به ۲۵۰۰ و فروش ۵۴ به ۹۰۰ → بدهکارِ ۱۶۰۰ × ۱۰۰۰ = ۱٬۶۰۰٬۰۰۰
+  // ═══ اسپرد: دو نرخ از هم کم می‌شوند ═══
+  //
+  // «در اسپرد عمودی در هر لحظه دو تا نرخ داریم که باید از هم کم بشن.»
+  // خرید ۵۰ به ۲٬۵۰۰ و فروش ۵۴ به ۹۰۰ → ۱٬۶۰۰. همان تفریق، بی هیچ ضربی.
   const debit = structureValue(BULL, { c50: 2500, c54: 900 });
-  check('اسپرد خریداری‌شده بدهکار است و ارزشش قدرمطلقِ جمعِ علامت‌دار',
-    debit.ok && debit.value === 1.6e6 && debit.side === 'debit', `${debit.value} · ${debit.side}`);
+  check('اسپرد: تفاضلِ دو نرخ، بدهکار، و همان عددِ روی تابلو',
+    debit.ok && debit.value === 1600 && debit.side === 'debit', `${debit.value} · ${debit.side}`);
+  check('و با ضریبِ اندازه، همان عدد ضربدر هزار',
+    structureValue(BULL, { c50: 2500, c54: 900 }, 1000).value === 1.6e6);
 
-  // فروش هر دو پای استرانگل به ۳۰۰ و ۴۰۰ → بستانکارِ ۷۰۰ × ۱۰۰۰
+  // ═══ استرانگل: دو نرخ با هم جمع می‌شوند ═══
+  //
+  // «برای استرانگل می‌شه جمع دو تا قرارداد (که فروختیم).»
   const credit = structureValue(STRANGLE, { p46: 300, c56: 400 });
-  check('استرانگل فروش بستانکار است و همان ۷۰۰ هزار را می‌دهد',
-    credit.ok && credit.value === 7e5 && credit.side === 'credit', `${credit.value} · ${credit.side}`);
+  check('استرانگل: جمعِ دو پرمیوم، بستانکار — ۳۰۰ به‌علاوهٔ ۴۰۰',
+    credit.ok && credit.value === 700 && credit.side === 'credit', `${credit.value} · ${credit.side}`);
+
+  // ── قیمتِ تک‌تکِ پاها برمی‌گردد ──────────────────────────────────────
+  //
+  // بی این، «نمودار فاصله‌ای» — دو خط و فضای میانشان — ساخته نمی‌شود و
+  // کاربر فقط حاصلِ تفریق را می‌بیند نه دو عددی که از هم کم شده‌اند.
+  check('قیمت هر پا جدا برمی‌گردد، برای نمودارِ دو-خطی',
+    debit.perLeg.length === 2
+    && debit.perLeg.map((leg) => leg.scaled).join(',') === '2500,900'
+    && debit.perLeg.map((leg) => leg.side).join(',') === 'buy,sell',
+    JSON.stringify(debit.perLeg.map((leg) => leg.scaled)));
 
   // ── مرزی که رد نمی‌شود ──────────────────────────────────────────────
   const gap = structureValue(BULL, { c50: 2500 });
   check('پای بی‌قیمت، محاسبه را باطل می‌کند — صفر نمی‌گیرد',
     !gap.ok && gap.missing.join(',') === 'ضهرم۵۴' && !Number.isFinite(gap.value),
     gap.why);
-  check('و اگر صفر می‌گرفت، فاصله ۲٬۵۰۰٬۰۰۰ می‌شد — عددی که در بازار نیست',
-    structureValue(BULL, { c50: 2500, c54: 0 }).value === 2.5e6);
+  check('و اگر صفر می‌گرفت، فاصله ۲٬۵۰۰ می‌شد — عددی که در بازار نیست',
+    structureValue(BULL, { c50: 2500, c54: 0 }).value === 2500);
   check('نسبت پا در جمع ضرب می‌شود — نسبت‌اسپرد دو برابر می‌فروشد',
-    structureValue([BULL[0], { ...BULL[1], ratio: 2 }], { c50: 2500, c54: 900 }).value === 7e5);
+    structureValue([BULL[0], { ...BULL[1], ratio: 2 }], { c50: 2500, c54: 900 }).value === 700);
   check('پای سهم پایه در ارزشِ ساختارِ اختیار نمی‌آید',
     structureValue([...BULL, { kind: 'underlying', side: 'buy', ins: 'ua' }], { c50: 2500, c54: 900 }).ok);
 }
 
 
-group('۲۱۸-د. فاصله، کامل — همان که کاربر خواست');
+group('۲۱۸-د. فاصله، کامل — دو خانواده، دو لنگر');
 {
-  // عرض ۴٬۰۰۰٬۰۰۰ · ورود ۱٬۶۰۰٬۰۰۰ · اکنون ۲٬۴۰۰٬۰۰۰
+  // ═══ اسپرد عمودی: لنگر، فاصلهٔ اعمال ═══
+  //
+  // «اگه این تفاضل به اندازهٔ تفاضل دو تا قیمت اعمال برسه، می‌تونه سود
+  // بده.» پس عرض سقفِ ارزش است و «باقی‌مانده» همان سودِ نگرفته.
+  //
+  // عرض ۴٬۰۰۰ · ورود ۱٬۶۰۰ · اکنون ۲٬۴۰۰ — همه به قیمت خام.
   const gap = measureGap({
     legs: BULL, prices: { c50: 3200, c54: 800 },
-    strategyId: 'bull-call-spread', entry: 1.6e6, daysLeft: 30,
+    strategyId: 'bull-call-spread', entry: 1600, daysLeft: 30,
   });
-  check('فاصلهٔ اکنون ۲٬۴۰۰٬۰۰۰ است و فاصلهٔ اعمال ۴٬۰۰۰٬۰۰۰',
-    gap.ok && gap.current === 2.4e6 && gap.anchor === 4e6);
+  check('تفاضل اکنون ۲٬۴۰۰ است و تفاضلِ دو اعمال ۴٬۰۰۰',
+    gap.ok && gap.current === 2400 && gap.anchor === 4000 && gap.anchorSource === 'strike',
+    `${gap.current} از ${gap.anchor}`);
   check('تقسیمِ یکی بر دیگری: ۶۰٪ پر شده',
     near(gap.coveragePct, 60), `${gap.coveragePct}`);
   check('و ۴۰٪ جا دارد پر بشود — همان که کاربر «باقی‌مانده» گفت',
-    near(gap.roomPct, 40) && gap.room === 1.6e6, `${gap.roomPct}٪ · ${gap.room} ریال`);
+    near(gap.roomPct, 40) && gap.room === 1600, `${gap.roomPct}٪ · ${gap.room}`);
   check('دو درصد همیشه صد می‌شوند، وگرنه یکی‌شان از دیگری حساب نشده',
     near(gap.coveragePct + gap.roomPct, 100));
+  check('برچسبِ دو درصد برای اسپرد، «پر شده» و «جا برای پر شدن» است',
+    gap.coverageLabel === 'پر شده' && gap.roomLabel === 'جا برای پر شدن');
 
-  // ── لنگر موقعیتی، جدا از ساختاری ────────────────────────────────────
+  // ═══ مقیاس، نسبت را عوض نمی‌کند ═══
+  //
+  // چون هم لنگر و هم ارزش با یک ضریب بزرگ می‌شوند. هر چیز دیگری اشتباه
+  // بود، و همین است که «انتخابِ کاربر بودنِ مقیاس» را بی‌خطر می‌کند.
+  const scaled = GAP_SCALES.map((row) => measureGap({
+    legs: BULL, prices: { c50: 3200, c54: 800 },
+    strategyId: 'bull-call-spread', entry: 1600, scale: row.id, units: 5,
+  }));
+  check('هر سه مقیاس، یک درصدِ پرشدگی می‌دهند',
+    scaled.every((one) => near(one.coveragePct, 60)),
+    scaled.map((one) => one.coveragePct.toFixed(2)).join(' · '));
+  check('ولی عددِ ریالی‌شان سه‌تاست: خام، یک قرارداد، و کل موقعیت',
+    scaled.map((one) => one.current).join(',') === '2400,2400000,12000000',
+    scaled.map((one) => one.current).join('، '));
+  check('و مقیاسِ انتخابی در خودِ نتیجه حمل می‌شود، تا رابط واحد را بنویسد',
+    scaled.map((one) => one.scale).join(',') === 'raw,size,qty'
+    && scaled[2].units === 5 && scaled[2].mult === 5000);
+
+  // ── لنگر موقعیتی ────────────────────────────────────────────────────
   check('بیشینهٔ سود بدهکار: عرض منهای بهای ورود',
-    gap.maxProfit === 2.4e6 && gap.maxLoss === -1.6e6);
-  check('از آن بیشینه، ۸۰۰٬۰۰۰ گرفته شده یعنی یک‌سومش',
-    gap.gained === 8e5 && near(gap.filledPct, 100 / 3), `${gap.filledPct}٪`);
+    gap.maxProfit === 2400 && gap.maxLoss === -1600);
+  check('از آن بیشینه، ۸۰۰ گرفته شده یعنی یک‌سومش',
+    gap.gained === 800 && near(gap.filledPct, 100 / 3), `${gap.filledPct}٪`);
   check('«درصد پر شدن ساختاری» و «درصد سودِ گرفته‌شده» یکی نیستند',
     Math.abs(gap.coveragePct - gap.filledPct) > 20,
     `ساختاری ${gap.coveragePct.toFixed(1)}٪ · موقعیتی ${gap.filledPct.toFixed(1)}٪`);
   check('سودِ باقی‌مانده بر سرمایهٔ همین لحظه است، نه سرمایهٔ روز ورود',
-    gap.upside === 1.6e6 && near(gap.upsidePct, (1.6e6 / 2.4e6) * 100), `${gap.upsidePct}٪`);
+    gap.upside === 1600 && near(gap.upsidePct, (1600 / 2400) * 100), `${gap.upsidePct}٪`);
   check('و همان، تقسیم بر روزهای مانده',
     near(gap.perDay, gap.upsidePct / 30), `${gap.perDay}`);
 
-  // ── بستانکار، جهتِ وارونه ───────────────────────────────────────────
+  // ═══ استرانگل: لنگر، جمعِ پرمیومِ ورود ═══
   //
-  // در بستانکار ارزش باید به صفر برود، پس «باقی‌مانده» خودِ ارزشِ کنونی
-  // است نه فاصله‌اش تا عرض. با یک فرمولِ واحد برای هر دو، فروشندهٔ
-  // استرانگل «۹۳٪ جا برای سود» می‌دید در حالی که سودش همان ۷٪ بود.
+  // «جمع دو تا قرارداد (که فروختیم) بیشینه سود، و هرچی در طول زمان این
+  // جمع کمتر بشه می‌شه سود استراتژی.»
+  //
+  // پس اینجا دهانهٔ اعمال سقفِ ارزش **نیست** — بستر است. لنگر، همان جمعی
+  // است که روز فروش گرفته‌ای. فروخته به ۹۰۰، اکنون ۷۰۰ → ۲۰۰ سود، یعنی
+  // ۲۲٫۲٪ از بیشینه.
   const short = measureGap({
     legs: STRANGLE, prices: { p46: 300, c56: 400 },
-    strategyId: 'short-strangle', entry: 9e5, daysLeft: 45,
+    strategyId: 'short-strangle', entry: 900, daysLeft: 45,
   });
-  check('استرانگل فروش بستانکار تشخیص داده می‌شود',
-    short.ok && short.side === 'credit' && short.current === 7e5);
-  check('بیشینهٔ سودش همان بستانکارِ ورود است، نه عرضِ دهانه',
-    short.maxProfit === 9e5 && short.maxProfit !== short.anchor);
-  check('و سودِ باقی‌مانده، خودِ ارزشِ کنونی است — چون باید به صفر برسد',
-    short.upside === 7e5, `${short.upside}`);
-  check('۲۰۰ هزار از ۹۰۰ هزار گرفته شده',
-    short.gained === 2e5 && near(short.filledPct, (2 / 9) * 100));
-  check('پوششِ ساختاری هم می‌آید: پرمیوم ۷٪ از دهانه است',
-    near(short.coveragePct, 7), `${short.coveragePct}٪`);
+  check('استرانگل فروش بستانکار تشخیص داده می‌شود و جمعش ۷۰۰ است',
+    short.ok && short.side === 'credit' && short.current === 700);
+  check('لنگرش جمعِ پرمیومِ ورود است، نه دهانهٔ اعمال',
+    short.anchor === 900 && short.anchorSource === 'entry'
+    && short.anchorLabel === 'جمع پرمیوم ورود' && short.strikeGap === 10000,
+    `لنگر ${short.anchor} · دهانه ${short.strikeGap}`);
+  check('۲۰۰ از ۹۰۰ گرفته شده — یعنی ۲۲٫۲٪ از بیشینهٔ سود',
+    short.gained === 200 && near(short.coveragePct, (2 / 9) * 100), `${short.coveragePct}٪`);
+  check('و سودِ باقی‌مانده، خودِ جمعِ کنونی است — چون باید به صفر برسد',
+    short.room === 700 && short.upside === 700 && near(short.roomPct, 100 - ((2 / 9) * 100)));
+  check('برچسبِ دو درصد اینجا فرق می‌کند: «سودِ گرفته‌شده» و «ارزشی که باید آب شود»',
+    short.coverageLabel === 'سودِ گرفته‌شده' && short.roomLabel === 'ارزشی که باید آب شود');
 
-  // ── بی قیمت ورود، لنگر موقعیتی نمی‌آید ──────────────────────────────
-  const anon = measureGap({ legs: BULL, prices: { c50: 3200, c54: 800 }, strategyId: 'bull-call-spread' });
-  check('بی قیمت ورود، نسبتِ ساختاری هست ولی موقعیتی ساخته نمی‌شود',
-    anon.ok && near(anon.coveragePct, 60)
-    && !Number.isFinite(anon.filledPct) && !Number.isFinite(anon.upsidePct));
+  // ═══ فروشندهٔ زیر آب ═══
+  //
+  // اجرای مرورگر این را داد: استرانگلی که به ۲۱۵ فروخته شده و جمعش به
+  // ۷۱۷ رسیده — یعنی در زیان — «۳۳۳٪ سود باقی‌مانده» نشان می‌داد. سودِ
+  // فروشندهٔ استرانگل هرگز از خودِ بستانکارِ ورود بیشتر نمی‌شود، پس آن
+  // یک ادعای کاملاً غلط بود.
+  const drowning = measureGap({
+    legs: STRANGLE, prices: { p46: 800, c56: 705 },
+    strategyId: 'short-strangle', entry: 900, daysLeft: 30,
+  });
+  check('جمعِ بزرگ‌تر از ورود یعنی زیان، و همین‌طور علامت می‌خورد',
+    drowning.ok && drowning.current === 1505 && drowning.underwater === true
+    && drowning.gained < 0, `${drowning.gained}`);
+  check('و آن درصدِ بالای صد «سود» نامیده نمی‌شود',
+    drowning.roomLabel === 'ارزشی که باید آب شود' && drowning.roomPct > 100,
+    `${drowning.roomPct.toFixed(1)}٪ ${drowning.roomLabel}`);
+  check('جملهٔ فارسی هم صریح می‌گوید موقعیت در زیان است',
+    gapNote(drowning).includes('در زیان'), gapNote(drowning).slice(0, 110));
+  // جمله با `textContent` نوشته می‌شود، پس هیچ نشانهٔ مارک‌داونی در آن
+  // رندر نمی‌شود و عیناً چاپ می‌شود — در نماگرفت «**بزرگ‌تر**» دیده شد.
+  check('و هیچ ستارهٔ مارک‌داونی در متن نمانده',
+    !/\*/.test(gapNote(drowning)) && !/\*/.test(gapNote(gap)) && !/\*/.test(gapNote(short)));
+
+  // ── لنگرِ ورودی، مخرجی برای «بازده» ندارد ───────────────────────────
+  //
+  // سرمایهٔ فروشندهٔ استرانگل وجه تضمین است نه بستانکار. تقسیم بر
+  // بستانکار «۳۳۳٪ بازده» می‌داد برای موقعیتی که در زیان بود.
+  check('برای استرانگل، «سود باقی‌مانده بر سرمایه» ادعا نمی‌شود',
+    !Number.isFinite(short.upsidePct) && !Number.isFinite(short.perDay)
+    && short.upside === 700,
+    `upside ${short.upside} ریال، بی درصد`);
+  check('ولی برای اسپرد می‌شود، چون سرمایهٔ درگیرش معلوم است',
+    Number.isFinite(gap.upsidePct) && Number.isFinite(gap.perDay));
+  check('دهانهٔ اعمال حذف نمی‌شود؛ به‌عنوان بستر می‌ماند',
+    short.strikeGap === 10000 && short.strikes.join(',') === '46000,56000');
+
+  // ── هرچه جمع کمتر شود، سود بیشتر ────────────────────────────────────
+  //
+  // ادعای مستقیمِ خواستهٔ کاربر، به‌شکل یک ادعای یکنواختی.
+  const shrinking = [900, 700, 400, 100, 1].map((sum) => measureGap({
+    legs: STRANGLE, prices: { p46: sum / 2, c56: sum / 2 },
+    strategyId: 'short-strangle', entry: 900,
+  }).coveragePct);
+  check('هرچه جمع کمتر شود، درصدِ سودِ گرفته‌شده یکنواخت بالا می‌رود',
+    shrinking.every((value, at) => at === 0 || value > shrinking[at - 1]),
+    shrinking.map((value) => value.toFixed(1)).join(' → '));
+  check('و در جمعِ برابرِ ورود، هنوز هیچ سودی گرفته نشده',
+    near(shrinking[0], 0));
+
+  // ═══ استرانگلِ خرید: همه‌چیز وارونه ═══
+  //
+  // خواستهٔ کاربر دربارهٔ فروش بود، ولی خرید هم در کاتالوگ هست و آنجا
+  // پرمیوم را **داده‌ای**: سود از بیشتر شدنِ جمع می‌آید، نه کمتر شدنش.
+  // نسخهٔ اول هر دو را «فروخته» فرض می‌کرد و اجرای مرورگر نشانش داد —
+  // استرانگلی که ۲۱۵ خریده شده و ۷۱۷ است، «‎−۲۳۳٪ سود گرفته‌شده» می‌داد.
+  const LONG_STRANGLE = STRANGLE.map((leg) => ({ ...leg, side: 'buy' }));
+  const bought = measureGap({
+    legs: LONG_STRANGLE, prices: { p46: 350, c56: 367 },
+    strategyId: 'long-strangle', entry: 215,
+  });
+  check('استرانگلِ خرید بدهکار است و سودش از بیشتر شدنِ جمع می‌آید',
+    bought.ok && bought.side === 'debit' && bought.current === 717 && bought.gained === 502,
+    `${bought.current} از ${bought.entry}`);
+  check('و درصدش «نسبت به پرمیوم پرداختی» است، نه «سود گرفته‌شده»',
+    bought.coverageLabel === 'نسبت به پرمیوم پرداختی' && near(bought.coveragePct, (717 / 215) * 100),
+    `${bought.coveragePct.toFixed(1)}٪`);
+  check('هرگز عددِ منفیِ «سود گرفته‌شده» نمی‌دهد — همان اشکالی که دیده شد',
+    bought.coveragePct > 0);
+  check('و چون سقفِ سود ندارد، «باقی‌مانده» ساخته نمی‌شود',
+    bought.unbounded === true && !Number.isFinite(bought.roomPct)
+    && !Number.isFinite(bought.maxProfit) && bought.maxLoss === -215);
+
+  // دو جهت، دو رفتار — و همین ادعا هر دو را با هم قفل می‌کند.
+  const grow = [215, 400, 717].map((sum) => measureGap({
+    legs: LONG_STRANGLE, prices: { p46: sum / 2, c56: sum / 2 },
+    strategyId: 'long-strangle', entry: 215,
+  }).coveragePct);
+  check('در خرید، بزرگ‌شدنِ جمع درصد را بالا می‌برد؛ در فروش، کوچک‌شدنش',
+    grow.every((value, at) => at === 0 || value > grow[at - 1])
+    && shrinking.every((value, at) => at === 0 || value > shrinking[at - 1]),
+    `خرید ${grow.map((v) => v.toFixed(0)).join('→')} · فروش ${shrinking.map((v) => v.toFixed(0)).join('→')}`);
+
+  // ── بی قیمت ورود، استرانگل لنگر ندارد ───────────────────────────────
+  const anon = measureGap({ legs: STRANGLE, prices: { p46: 300, c56: 400 }, strategyId: 'short-strangle' });
+  check('استرانگلِ بی قیمت ورود، جمعش را می‌دهد ولی درصدی نمی‌سازد',
+    anon.ok && anon.current === 700 && anon.anchored === false
+    && !Number.isFinite(anon.coveragePct) && anon.why.includes('لنگر'),
+    anon.why.slice(0, 40));
+  // و اسپرد برعکس: لنگرش ساختاری است و بی قیمت ورود هم کار می‌کند.
+  const anonSpread = measureGap({ legs: BULL, prices: { c50: 3200, c54: 800 }, strategyId: 'bull-call-spread' });
+  check('ولی اسپرد بی قیمت ورود هم لنگر دارد، چون لنگرش ساختاری است',
+    anonSpread.ok && anonSpread.anchored === true && near(anonSpread.coveragePct, 60)
+    && !Number.isFinite(anonSpread.filledPct));
 
   check('پای بی‌قیمت، کلِ فاصله را باطل می‌کند و علتش را می‌گوید',
     !measureGap({ legs: BULL, prices: { c50: 3200 }, strategyId: 'bull-call-spread' }).ok);
 
-  // ── ارزشِ صفر، فاصله نیست ──────────────────────────────────────────
-  //
-  // این را اجرای آزمایشیِ مرورگر پیدا کرد، نه فکر کردن. دو پای هم‌قیمت
-  // «۰٪ پر شده، ۱۰۰٪ جا دارد» می‌داد و با مرتب‌سازی بر «بیشترین جای
-  // باقی‌مانده» صدرِ جدول می‌نشست — بهترین پیشنهادِ برنامه، ساختاری که
-  // نه می‌شود خرید نه فروخت.
   const hollow = measureGap({ legs: BULL, prices: { c50: 900, c54: 900 }, strategyId: 'bull-call-spread' });
   check('دو پای هم‌قیمت، فاصله ندارند — نه «۱۰۰٪ جا برای پر شدن»',
     !hollow.ok && !Number.isFinite(hollow.roomPct) && hollow.why.includes('صفر'), hollow.why);
-  check('جملهٔ فاصله هر دو درصد را می‌گوید، نه فقط یکی',
-    gapNote(gap).includes('پر شده') && gapNote(gap).includes('جا دارد')
-    && gapNote(gap).includes('سودِ باقی‌مانده'), gapNote(gap));
-  check('و برای فاصلهٔ باطل، همان علت را می‌نویسد نه عدد',
-    gapNote(measureGap({ legs: BULL, prices: {}, strategyId: 'bull-call-spread' })).includes('قیمت ندارند'));
+
+  check('جملهٔ اسپرد از «تفاضل دو نرخ» حرف می‌زند و واحدش را می‌گوید',
+    gapNote(gap).includes('تفاضل دو نرخ') && gapNote(gap).includes('پر شده')
+    && gapNote(gap).includes('قیمت خام'), gapNote(gap));
+  check('و جملهٔ استرانگل از «جمع پرمیومِ ورود»',
+    gapNote(short).includes('جمع پرمیومِ ورود') && gapNote(short).includes('بیشینهٔ سود'),
+    gapNote(short));
 }
 
 
@@ -218,12 +377,12 @@ group('۲۱۸-ه. تاریخچهٔ فاصله، روزانه و دقیقه‌ا�
   };
   const daily = dailyGapSeries({
     legs: BULL, seriesByIns, dates, basis: 'CLOSE',
-    strategyId: 'bull-call-spread', entry: 1.6e6, expiry: 14050625,
+    strategyId: 'bull-call-spread', entry: 1600, expiry: 14050625,
   });
   check('برای هر روزِ کامل یک نقطه ساخته می‌شود',
     daily.points.length === 5 && daily.missing === 0, `${daily.points.length} نقطه`);
-  check('و فاصله همان ۱٬۶۰۰٬۰۰۰ تا ۲٬۸۰۰٬۰۰۰ را دنبال می‌کند',
-    daily.points.map((point) => point.current / 1000).join(',') === spreads.join(','));
+  check('و فاصله همان ۱٬۶۰۰ تا ۲٬۸۰۰ را دنبال می‌کند',
+    daily.points.map((point) => point.current).join(',') === spreads.join(','));
   check('روزِ مانده تا سررسید در هر نقطه هست و کم می‌شود',
     daily.points[0].daysLeft === 24 && daily.points[4].daysLeft === 20,
     `${daily.points[0].daysLeft} → ${daily.points[4].daysLeft}`);
@@ -240,9 +399,9 @@ group('۲۱۸-ه. تاریخچهٔ فاصله، روزانه و دقیقه‌ا�
 
   // ── آمار ────────────────────────────────────────────────────────────
   check('کمینه، بیشینه و میانگین از همان پنج نقطه‌اند',
-    daily.stats.min === 1.6e6 && daily.stats.max === 2.8e6 && daily.stats.mean === 2.2e6);
+    daily.stats.min === 1600 && daily.stats.max === 2800 && daily.stats.mean === 2200);
   check('و «اکنون» در صدک صدِ تاریخِ خودش ایستاده — بالاترین تا امروز',
-    daily.stats.last === 2.8e6 && near(daily.stats.rank, 100));
+    daily.stats.last === 2800 && near(daily.stats.rank, 100));
   check('صدک، «کمتر یا مساوی» است نه درون‌یابی',
     near(percentileRank([1, 2, 3, 4], 2), 50) && near(percentileRank([1, 2, 3, 4], 1), 25));
   check('و صدکِ p با درون‌یابی خطی میان دو همسایه',
@@ -251,13 +410,13 @@ group('۲۱۸-ه. تاریخچهٔ فاصله، روزانه و دقیقه‌ا�
     seriesStats([]).count === 0 && !Number.isFinite(seriesStats([]).mean));
 
   // ── حکم ─────────────────────────────────────────────────────────────
-  const now = measureGap({ legs: BULL, prices: { c50: 3300, c54: 400 }, strategyId: 'bull-call-spread', entry: 1.6e6 });
+  const now = measureGap({ legs: BULL, prices: { c50: 3300, c54: 400 }, strategyId: 'bull-call-spread', entry: 1600 });
   const verdict = gapVerdict(daily, now);
   check('حکم می‌گوید فاصله در بالای توزیعِ تاریخی است، پس گران',
     verdict.ok && verdict.tone === 'گران' && near(verdict.rank, 100),
     `صدک ${verdict.rank}`);
   check('و چند درصد بالاتر از میانگین تاریخی است',
-    near(verdict.vsMean, ((2.9e6 / 2.2e6) - 1) * 100), `${verdict.vsMean}`);
+    near(verdict.vsMean, ((2900 / 2200) - 1) * 100), `${verdict.vsMean}`);
   // میانهٔ توزیع باید «میانه» بخواند، نه گران. بی این، هر عددی گران بود.
   check('و فاصله‌ای که وسطِ توزیع است، «میانه» خوانده می‌شود نه گران',
     gapVerdict(daily, measureGap({ legs: BULL, prices: { c50: 2600, c54: 400 }, strategyId: 'bull-call-spread' })).tone === 'میانه');
@@ -292,13 +451,13 @@ group('۲۱۸-ه. تاریخچهٔ فاصله، روزانه و دقیقه‌ا�
   };
   const intraday = intradayGapSeries({
     legs: STRANGLE, tapeByIns: tape, date: 14050601, grain: 'm1',
-    strategyId: 'short-strangle', entry: 9e5, expiry: 14050625,
+    strategyId: 'short-strangle', entry: 900, expiry: 14050625,
   });
   const at = (label) => intraday.points.find((point) => point.label === label);
-  check('در دانهٔ یک دقیقه، ساعت ۱۰:۰۰ فاصله ۷۰۰ هزار است',
-    at('۱۰:۰۰')?.current === 7e5, `${at('۱۰:۰۰')?.current}`);
-  check('و یک دقیقه بعد ۷۱۰ هزار — همان «۳۰۰ شد ۳۱۰»',
-    at('۱۰:۰۱')?.current === 7.1e5, `${at('۱۰:۰۱')?.current}`);
+  check('در دانهٔ یک دقیقه، ساعت ۱۰:۰۰ جمعِ استرانگل ۷۰۰ است',
+    at('۱۰:۰۰')?.current === 700, `${at('۱۰:۰۰')?.current}`);
+  check('و یک دقیقه بعد ۷۱۰ — دقیقاً همان «موقع فروش ۳۰۰، یک دقیقه بعد ۳۱۰»',
+    at('۱۰:۰۱')?.current === 710, `${at('۱۰:۰۱')?.current}`);
   check('پیش از نخستین معامله نقطه‌ای نیست، چون قیمتی نبوده',
     !at('۰۹:۳۰') && intraday.missing > 0);
   check('دانهٔ روزانه در مسیر درون‌روزی نقطه نمی‌سازد — پرسشِ دیگری است',
@@ -349,33 +508,33 @@ group('۲۱۸-و. هشدار: شرط، عبور، و آرامش');
 
   // ── سنجشِ دسته‌ای ───────────────────────────────────────────────────
   const snapshots = {
-    A: alertSnapshot({ gap: measureGap({ legs: STRANGLE, prices: { p46: 300, c56: 400 }, strategyId: 'short-strangle', entry: 9e5 }), label: 'A', strategyId: 'short-strangle' }),
-    B: alertSnapshot({ gap: measureGap({ legs: BULL, prices: { c50: 3200, c54: 800 }, strategyId: 'bull-call-spread', entry: 1.6e6 }), label: 'B', strategyId: 'bull-call-spread' }),
+    A: alertSnapshot({ gap: measureGap({ legs: STRANGLE, prices: { p46: 300, c56: 400 }, strategyId: 'short-strangle', entry: 900 }), label: 'A', strategyId: 'short-strangle' }),
+    B: alertSnapshot({ gap: measureGap({ legs: BULL, prices: { c50: 3200, c54: 800 }, strategyId: 'bull-call-spread', entry: 1600 }), label: 'B', strategyId: 'bull-call-spread' }),
   };
-  const wide = normalizeRule({ metric: 'current', op: 'ge', value: 6e5, cooldownSec: 0 }).rule;
+  const wide = normalizeRule({ metric: 'current', op: 'ge', value: 600, cooldownSec: 0 }).rule;
   const both = evaluateAlerts({ rules: [wide], snapshots, prev: {}, nowMs: 5000 });
   check('قاعدهٔ بی‌کلید همهٔ ترکیب‌ها را می‌بیند — یک قاعده به‌جای سی‌تا',
     both.fired.length === 2 && both.fired.map((row) => row.comboKey).sort().join(',') === 'A,B');
-  const scoped = normalizeRule({ metric: 'current', op: 'ge', value: 6e5, strategyId: 'short-strangle', cooldownSec: 0 }).rule;
+  const scoped = normalizeRule({ metric: 'current', op: 'ge', value: 600, strategyId: 'short-strangle', cooldownSec: 0 }).rule;
   check('و قاعدهٔ استراتژی‌دار فقط همان خانواده را',
     evaluateAlerts({ rules: [scoped], snapshots, prev: {}, nowMs: 5000 }).fired
       .map((row) => row.comboKey).join(',') === 'A');
   check('قاعده‌ها جهش نمی‌خورند؛ نسخهٔ تازه با شمارِ آتش برمی‌گردد',
     wide.firedCount === 0 && both.rules[0].firedCount === 1 && both.rules[0].lastFiredAt === 5000);
   check('و عکسِ این سنجش برای سنجش بعدی نگه داشته می‌شود',
-    both.prev.A.current === 7e5);
+    both.prev.A.current === 700);
   check('جملهٔ قاعده، سنجه و عملگر و واحد را با هم می‌گوید',
     ruleNote(wide).includes('فاصلهٔ اکنون') && ruleNote(wide).includes('ریال'), ruleNote(wide));
 
   // ── سنجه‌های بستری ──────────────────────────────────────────────────
   const withDay = alertSnapshot({
-    gap: measureGap({ legs: STRANGLE, prices: { p46: 300, c56: 400 }, strategyId: 'short-strangle', entry: 9e5 }),
-    day: { low: 6.5e5, high: 7.5e5 }, basePrice: 52646,
+    gap: measureGap({ legs: STRANGLE, prices: { p46: 300, c56: 400 }, strategyId: 'short-strangle', entry: 900 }),
+    day: { low: 650, high: 750 }, basePrice: 52646,
   });
   check('«درصد از کف امروز» از خودِ کف همان روز حساب می‌شود',
-    near(withDay.fromDayLowPct, ((7e5 / 6.5e5) - 1) * 100), `${withDay.fromDayLowPct}`);
+    near(withDay.fromDayLowPct, ((700 / 650) - 1) * 100), `${withDay.fromDayLowPct}`);
   check('و «درصد از سقف امروز» همیشه صفر یا منفی است',
-    withDay.fromDayHighPct < 0 && near(withDay.fromDayHighPct, ((7e5 / 7.5e5) - 1) * 100));
+    withDay.fromDayHighPct < 0 && near(withDay.fromDayHighPct, ((700 / 750) - 1) * 100));
   check('بی دامنهٔ روز، هیچ‌کدام ساخته نمی‌شوند',
     !Number.isFinite(alertSnapshot({ gap: measureGap({ legs: BULL, prices: { c50: 3200, c54: 800 }, strategyId: 'bull-call-spread' }) }).fromDayLowPct));
 }

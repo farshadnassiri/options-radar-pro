@@ -42,11 +42,38 @@ function pricesAt(legs, seriesByIns, date, basis) {
 }
 
 export async function buildRadarHistory({ ua, defs, seriesByIns, range, basis = 'CLOSE', settings = {},
+  scale = 'raw', units = 1,
   onProgress = () => {}, cancel = () => false, yieldControl = async () => {} }) {
   const dates = radarDates(seriesByIns[String(ua.ins)] || [], range);
   const startDate = dates[0], markDate = dates.at(-1), rows = [];
   const excluded = { entry: 0, mark: 0, invalid: 0 };
-  if (!dates.length) return { dates, rows, excluded };
+  if (!dates.length) return { dates, rows, excluded, expiryWindow: null };
+
+  // ═══ سررسیدی که پنجرهٔ «روز تا سررسید» بیرونش گذاشته ═══
+  //
+  // `generateHistoricalCombos` سررسیدها را با `minDays` و `maxDays`
+  // تنظیمات غربال می‌کند و چیزی هم نمی‌گوید. پیش‌فرضِ `maxDays` صد و
+  // بیست روز است، پس روی بازهٔ سه‌ماهه، سررسیدهای دورتر **همه** بی‌صدا
+  // می‌افتند و نتیجه صفر ردیف می‌شود.
+  //
+  // این دقیقاً همان شکایتی است که گزارش شد: «معلوم نیست فرصت نیست یا
+  // داده نداریم.» اینجا شمرده می‌شود تا رابط بتواند بگوید علت کدام است
+  // و دستگیره‌اش کجاست.
+  const minDays = Number.isFinite(settings.minDays) ? settings.minDays : 0;
+  const maxDays = Number.isFinite(settings.maxDays) ? settings.maxDays : 400;
+  const expiries = [...new Set(flattenActiveContracts(ua, settings.blockedExpiries)
+    .map((row) => row.expiry))].filter((expiry) => expiry > startDate);
+  const inWindow = expiries.filter((expiry) => {
+    const days = daysBetween(startDate, expiry);
+    return days >= minDays && days <= maxDays;
+  });
+  const expiryWindow = {
+    total: expiries.length, kept: inWindow.length, dropped: expiries.length - inWindow.length,
+    minDays, maxDays,
+    // دورترین سررسیدی که افتاد — عددی که کاربر باید `maxDays` را تا آن
+    // بالا ببرد. بی این، «سررسیدها افتادند» یک شکایت است نه یک راهنما.
+    farthest: expiries.length ? Math.max(...expiries.map((expiry) => daysBetween(startDate, expiry))) : NaN,
+  };
   const active = () => { if (cancel()) throw new Error('ساخت متوقف شد'); };
   for (let index = 0; index < defs.length; index++) {
     active();
@@ -61,19 +88,19 @@ export async function buildRadarHistory({ ua, defs, seriesByIns, range, basis = 
       const combo = generated.combos[n], legs = combo.legs.map((leg) => ({ ...leg }));
       const entryPrices = pricesAt(legs, seriesByIns, startDate, basis);
       if (!entryPrices) { excluded.entry++; continue; }
-      const entryGap = measureGap({ legs, prices: entryPrices, strategyId: def.id });
+      const entryGap = measureGap({ legs, prices: entryPrices, strategyId: def.id, scale, units });
       if (!entryGap.ok) { excluded.invalid++; continue; }
       const markPrices = pricesAt(legs, seriesByIns, markDate, basis);
       if (!markPrices || combo.expiries[0] < markDate) { excluded.mark++; continue; }
       const gap = measureGap({ legs, prices: markPrices, strategyId: def.id, entry: entryGap.current,
-        daysLeft: Math.max(0, daysBetween(markDate, combo.expiries[0])) });
+        daysLeft: Math.max(0, daysBetween(markDate, combo.expiries[0])), scale, units });
       if (!gap.ok) { excluded.invalid++; continue; }
       const series = dailyGapSeries({ legs, seriesByIns, dates, basis, strategyId: def.id,
-        entry: entryGap.current, expiry: combo.expiries[0] });
+        entry: entryGap.current, expiry: combo.expiries[0], scale, units, baseIns: String(ua.ins) });
       rows.push({ key: `${def.id}::${comboKey(legs)}`, def, legs, strikes: combo.strikes,
         expiry: combo.expiries[0], entry: entryGap.current, gap, series, verdict: gapVerdict(series, gap) });
     }
   }
   onProgress({ done: defs.length, total: defs.length, combos: rows.length });
-  return { dates, rows, excluded };
+  return { dates, rows, excluded, expiryWindow };
 }
