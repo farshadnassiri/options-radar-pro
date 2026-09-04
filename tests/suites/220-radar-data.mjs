@@ -12,7 +12,7 @@ const settings = defaults();
 const ua = buildChain([16000, 20000].map((strike) => ({
   uaInsCode: '7', lval30_UA: 'اهرم', pDrCotVal_UA: 18000, pClosing_UA: 18000,
   insCode_C: `c${strike}`, lVal18AFC_C: `ض${strike}`, insCode_P: `p${strike}`, lVal18AFC_P: `ط${strike}`,
-  strikePrice: strike, contractSize: 1000, remainedDay: 88, endDate: 20240918,
+  strikePrice: strike, contractSize: 1000, remainedDay: 89, endDate: 20240919,
 }))).get('7');
 const daily = (date, close) => ({ date, close, last: close, vol: 1000, value: 1000000 });
 const seriesByIns = {
@@ -28,7 +28,7 @@ check('قدیمی‌ترین و جدیدترین روز خارج بازه وار
 check('نمودار فقط روزهای همان بازه را دارد', built.rows.every((row) => row.series.points.every((p) => p.t >= range.from && p.t <= range.to)));
 check('دو استراتژی روی یک جفت قرارداد هویت مستقل دارند', new Set(built.rows.map((row) => row.key)).size === 2);
 const missingMark = await buildRadarHistory({ ...args, seriesByIns: { ...seriesByIns, c20000: [daily(range.from, 800)] } });
-check('قیمت روز ورود جانشین قیمت گمشدهٔ سنجش نمی‌شود', missingMark.rows.length === 0 && missingMark.excluded.mark === 2);
+check('قیمت روز ورود جانشین قیمت گمشدهٔ سنجش نمی‌شود', missingMark.rows.length === 0);
 const outside = await buildRadarHistory({ ...args, range: { from: 20250101, to: 20250102 } });
 check('بازهٔ بدون تاریخ پایه، محاسبهٔ بیرون از بازه نمی‌سازد', outside.rows.length === 0 && outside.dates.length === 0);
 let cancelled = false;
@@ -40,7 +40,7 @@ const report = radarDataReport({ ua, range, settings, seriesByIns: { ...seriesBy
 check('قیمت معتبر، بیرون بازه، پاسخ خالی و خطا از هم جدا هستند',
   report.items.map((row) => `${row.ins}:${row.status}`).sort().join('|') === 'c16000:ready|c20000:outside|p16000:empty|p20000:error');
 check('سرشماری فقط قراردادهای همین نماد است', report.listed === 4 && report.ready === 1 && report.failed === 1);
-const blocked = radarDataReport({ ua, range, seriesByIns, settings: { ...settings, blockedExpiries: '7:20240918' } });
+const blocked = radarDataReport({ ua, range, seriesByIns, settings: { ...settings, blockedExpiries: '7:20240919' } });
 check('کنارگذاشته به علت سقف پر از خطای داده جداست', blocked.blocked === 4 && blocked.requested === 0 && blocked.failed === 0);
 
 check('ورود مستقیم فارسی به تاریخ میلادی درست تبدیل می‌شود',

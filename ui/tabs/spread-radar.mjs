@@ -165,7 +165,7 @@ export async function mount(root, { state }) {
     <div class="gap-chart-grid">
       <section class="card gap-chart-wide"><div class="section-head"><div><p class="eyebrow">دو نرخ، و فاصله‌شان</p><h3 id="gr-band-title">تفاضل دو نرخ</h3></div><span id="gr-band-unit">—</span></div><p class="gap-hint" id="gr-band-hint"></p><div id="gr-band" class="gap-chart gap-chart-lg"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">مسیر</p><h3>فاصله در طول زمان</h3></div><span id="gr-path-unit">—</span></div><div id="gr-path" class="gap-chart gap-chart-lg"></div></section>
-      <section class="card"><div class="section-head"><div><p class="eyebrow">دامنه</p><h3>باز، بیشینه، کمینه، بسته</h3></div><span>فقط در تایم‌فریم هفتگی و ماهانه</span></div><div id="gr-range" class="gap-chart gap-chart-lg"></div></section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">دامنه</p><h3>باز، بیشینه، کمینه، بسته</h3></div><span>فقط در تایم‌فریم هفتگی و ماهانه</span></div><div id="gr-range-chart" class="gap-chart gap-chart-lg"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">پرشدگی</p><h3>چقدر پر شد، چقدر جا ماند</h3></div><span>درصد</span></div><div id="gr-cover" class="gap-chart gap-chart-lg"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">توزیع</p><h3>اکنون کجای تاریخِ خودش ایستاده</h3></div><span>شمار نقاط</span></div><div id="gr-dist" class="gap-chart"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">حکم</p><h3>عقربهٔ پرشدگی</h3></div></div><div id="gr-gauge" class="gap-chart"></div></section>
@@ -329,8 +329,8 @@ export async function mount(root, { state }) {
     const problem = [report.base, ...report.items].filter((item) => item.status !== 'ready' || !item.entry || !item.mark);
     $('gr-data').innerHTML = `<p><b>${esc(header)}</b></p>
       <p>${esc(baseText)} · ${fmt.int(report.ready)} قرارداد دارای قیمت در بازه · ${fmt.int(report.failed)} قرارداد با خطای دریافت</p>
-      <p>قیمت ورود ${dateText(report.dates[0])}: ${fmt.int(report.entryReady)} قرارداد · قیمت سنجش ${dateText(report.dates.at(-1))}: ${fmt.int(report.markReady)} قرارداد</p>
-      ${problem.length ? `<details><summary>علت کمبود داده، به تفکیک ابزار (${fmt.int(problem.length)})</summary><div class="gap-table-wrap"><table class="gap-table"><thead><tr><th>ابزار</th><th>وضعیت</th><th>قیمت ورود</th><th>قیمت سنجش</th></tr></thead><tbody>${problem.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(reasons[item.status])}${item.error ? `<details><summary>جزئیات خطای دریافت</summary><span>${esc(item.error)}</span></details>` : ''}</td><td>${item.entry && item.status !== 'error' ? 'دارد' : 'ندارد'}</td><td>${item.mark && item.status !== 'error' ? 'دارد' : 'ندارد'}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
+      <p>قیمت ابتدای بازه ${dateText(report.dates[0])}: ${fmt.int(report.entryReady)} قرارداد · قیمت سنجش ${dateText(report.dates.at(-1))}: ${fmt.int(report.markReady)} قرارداد. نداشتن قیمت ابتدای بازه مانع نمایش قرارداد تازه نیست.</p>
+      ${problem.length ? `<details><summary>علت کمبود داده، به تفکیک ابزار (${fmt.int(problem.length)})</summary><div class="gap-table-wrap"><table class="gap-table"><thead><tr><th>ابزار</th><th>وضعیت</th><th>قیمت ابتدای بازه</th><th>قیمت سنجش</th></tr></thead><tbody>${problem.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(reasons[item.status])}${item.error ? `<details><summary>جزئیات خطای دریافت</summary><span>${esc(item.error)}</span></details>` : ''}</td><td>${item.entry && item.status !== 'error' ? 'دارد' : 'ندارد'}</td><td>${item.mark && item.status !== 'error' ? 'دارد' : 'ندارد'}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
   }
 
   async function loadEverything() {
@@ -406,12 +406,12 @@ export async function mount(root, { state }) {
     // تنظیمات است نه در این صفحه. اگر چیزی انداخته، همین‌جا با دستگیره‌اش
     // گفته می‌شود.
     const windowNote = win && win.dropped
-      ? ` · ${fmt.int(win.dropped)} سررسید از ${fmt.int(win.total)} بیرونِ پنجرهٔ «${fmt.int(win.minDays)} تا ${fmt.int(win.maxDays)} روز تا سررسید» افتاد${Number.isFinite(win.farthest) ? `؛ دورترین سررسید ${fmt.int(win.farthest)} روز فاصله دارد، پس برای دیدنش «بیشینه روز تا سررسید» را در تنظیمات دست‌کم همان‌قدر بگذار` : ''}`
+      ? ` · ${fmt.int(win.dropped)} سررسید از ${fmt.int(win.total)} بیرونِ پنجرهٔ «${fmt.int(win.minDays)} تا ${fmt.int(win.maxDays)} روز تا سررسید» نسبت به روز سنجش افتاد${win.farthest > win.maxDays ? `؛ دورترین سررسید ${fmt.int(win.farthest)} روز از روز سنجش فاصله دارد؛ برای بررسی آن «بیشینه روز تا سررسید» را در تنظیمات تغییر بده` : ''}`
       : '';
-    const breakdown = `${fmt.int(excluded.entry)} ترکیب فاقد قیمت ورود · ${fmt.int(excluded.mark)} ترکیب فاقد قیمت روز سنجش یا سررسیدشده · ${fmt.int(excluded.invalid)} ساختار بدون فاصلهٔ معتبر${windowNote}`;
+    const breakdown = `${fmt.int(excluded.mark)} ترکیب فاقد قیمت روز سنجش · ${fmt.int(excluded.invalid)} ساختار بدون فاصلهٔ معتبر · ${fmt.int(win?.expired || 0)} سررسید در روز سنجش پایان یافته${windowNote}`;
     if (!rows.length) {
       $('gr-hero-tag').textContent = 'قیمت‌ها بررسی شد؛ ترکیب قابل نمایش نیست';
-      setStatus(`با قیمت‌های دریافت‌شده و قیود فعلی ترکیبی برای نمایش ساخته نشد؛ ${breakdown}. قیمت ورود و سنجش ابزارها را بررسی کن؛ سپس بازه، خانواده یا فیلترهای استراتژی را تغییر بده.`, true);
+      setStatus(`در روز سنجش و با قیود فعلی ترکیبی برای نمایش ساخته نشد؛ ${breakdown}. قیمت روز سنجش ابزارها را بررسی کن؛ سپس بازه، خانواده یا فیلترهای استراتژی را تغییر بده.`, true);
       return;
     }
     $('gr-tabs').hidden = false;
@@ -478,12 +478,12 @@ export async function mount(root, { state }) {
   function paintTable() {
     if (!rows.length) return;
     const list = sortedRows();
-    $('gr-now-note').textContent = `روز ورود ${faDigits(historyDateLabel(dates[0]))} · روز سنجش ${faDigits(historyDateLabel(dates.at(-1)))}؛ روزهای موجود در بازهٔ انتخابی. مبنا: ${$('gr-basis').selectedOptions[0].textContent}. قیمت روزانه، تضمین اجرای هم‌زمان پاها نیست. «روند بازه» مسیر فاصله در همین بازه است.`;
+    $('gr-now-note').textContent = `روز سنجش ${faDigits(historyDateLabel(dates.at(-1)))}؛ انتخاب قرارداد و پنجرهٔ سررسید بر مبنای همین روز است. مبنا: ${$('gr-basis').selectedOptions[0].textContent}. مبدأ مقایسهٔ هر ردیف، اولین روز با قیمت معتبر همهٔ پاها در بازه است؛ ورود واقعی شما نیست. قیمت روزانه، تضمین اجرای هم‌زمان پاها نیست.`;
     $('gr-rows').innerHTML = list.map((row) => {
       const gap = row.gap;
       const values = row.series.points.map((point) => point.current);
       return `<tr data-key="${esc(row.key)}"${livePrices ? ' class="live"' : ''}>
-        <td><b>${esc(row.def.name)}</b><small>${esc(row.gap.kindLabel)}</small></td>
+        <td><b>${esc(row.def.name)}</b><small>${esc(row.gap.kindLabel)}</small><small>مبدأ مقایسه ${faDigits(historyDateLabel(row.entryDate))}</small></td>
         <td class="num">${row.strikes.map((k) => fmt.money(k)).join(' / ')}</td>
         <td>${faDigits(historyDateLabel(row.expiry))}<small>${finite(gap.daysLeft) ? `${fmt.int(gap.daysLeft)} روز` : ''}</small></td>
         <td class="num">${moneyCell(gap.anchor)}<small>${esc(gap.anchorLabel)}</small></td>
@@ -557,7 +557,7 @@ export async function mount(root, { state }) {
     const unitText = gapScale(row.gap.scale).unit;
     const isSum = row.gap.anchorSource === 'entry';
 
-    $('gr-verdict').textContent = `${gapNote(row.gap)} ${row.verdict?.ok ? `فاصله در صدک ⁨${fmt.pct(row.verdict.rank)}⁩ تاریخِ همین بازه است — ${row.verdict.tone}.` : ''}`;
+    $('gr-verdict').textContent = `مبدأ مقایسه ${faDigits(historyDateLabel(row.entryDate))}؛ نخستین قیمت مشترک معتبر در بازه، نه ورود واقعی شما. ${gapNote(row.gap)} ${row.verdict?.ok ? `فاصله در صدک ⁨${fmt.pct(row.verdict.rank)}⁩ تاریخِ همین بازه است — ${row.verdict.tone}.` : ''}`;
 
     // ── نمودار فاصله‌ای: دو نرخ، و فضای میانشان ──────────────────────
     $('gr-band-title').textContent = isSum ? 'جمع دو نرخ' : 'تفاضل دو نرخ';
@@ -575,7 +575,7 @@ export async function mount(root, { state }) {
 
     $('gr-path-unit').textContent = unitText;
     void charts.set('path', $('gr-path'), gapPathChart(show, { anchor: row.gap.anchor }), { empty: 'برای این ترکیب نقطه‌ای در این تایم‌فریم نیست' });
-    void charts.set('range', $('gr-range'), rangeChart(show), { empty: 'میلهٔ دامنه با تایم‌فریم هفتگی یا ماهانه ساخته می‌شود' });
+    void charts.set('range', $('gr-range-chart'), rangeChart(show), { empty: 'میلهٔ دامنه با تایم‌فریم هفتگی یا ماهانه ساخته می‌شود' });
     void charts.set('cover', $('gr-cover'), coverageChart(show), { empty: 'برای این ترکیب نقطه‌ای در این تایم‌فریم نیست' });
     void charts.set('dist', $('gr-dist'), distributionChart(show, row.gap.current), { empty: 'برای ساختن توزیع دست‌کم سه نقطه لازم است' });
     void charts.set('gauge', $('gr-gauge'), fillGauge(row.gap), { empty: row.gap.anchored ? 'فاصله محاسبه نشد' : 'بی قیمت ورود، درصدی برای عقربه نیست' });
