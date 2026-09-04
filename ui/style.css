@@ -3348,6 +3348,12 @@ button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
   transition: width var(--transition-med);
 }
 .gap-bar.over > b { background: color-mix(in srgb, var(--warn) 30%, transparent); }
+/* بی‌سقف: نوار پر می‌شود ولی نیمهٔ راستش ادعای «باقی‌مانده» ندارد. */
+.gap-bar.unbounded > b { background: color-mix(in srgb, var(--gain) 26%, transparent); }
+/* زیر آب: قرمز، تا در ستونی از درصدهای مثبت گم نشود. */
+.gap-bar.underwater > b { background: color-mix(in srgb, var(--loss) 28%, transparent); }
+.gap-bar.underwater .gap-bar-filled { color: var(--loss); }
+.gap-bar.unbounded .gap-bar-room { font-style: italic; }
 .gap-bar > span { position: relative; }
 .gap-bar-filled { color: var(--accent-ink); font-weight: 600; }
 .gap-bar-room { color: var(--muted); }
@@ -3486,6 +3492,8 @@ button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
 .gap-skin .gap-table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .gap-skin .gap-table td small { display: block; color: var(--muted); font-size: .68rem; }
 .gap-skin .gap-table td.spark-cell { width: 100px; }
+
+.gap-skin .gap-hint { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-2xs); line-height: var(--lh-normal); }
 
 .gap-skin .gap-chart-grid {
   display: grid;

@@ -27,8 +27,10 @@ import {
 } from '/core/history.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
-import { GAP_STRATEGY_IDS, gapNote, measureGap } from '/core/spread-gap.mjs';
-import { gapVerdict, intradayGapSeries, seriesStats } from '/core/spread-gap-series.mjs';
+import { DEFAULT_SCALE, GAP_SCALES, GAP_STRATEGY_IDS, gapNote, gapScale, measureGap } from '/core/spread-gap.mjs';
+import {
+  GAP_TIMEFRAMES, gapVerdict, indexedPair, intradayGapSeries, resample, seriesStats, versusBase,
+} from '/core/spread-gap-series.mjs';
 import { buildRadarHistory, radarDataReport } from '/core/radar-history.mjs';
 import {
   ALERT_METRICS, ALERT_OPS, DEFAULT_COOLDOWN_SEC, alertSnapshot, evaluateAlerts,
@@ -38,7 +40,8 @@ import { MOMENT_GRAINS, isIntradayGrain } from '/core/intraday-grid.mjs';
 import { chartGroup } from '/ui/chart-host.mjs';
 import { mountSubtabs } from '/ui/subtabs.mjs';
 import {
-  coverageChart, distributionChart, fillBar, fillGauge, gapPathChart, hourHeatmap, sparkline,
+  coverageChart, distributionChart, fillBar, fillGauge, gapBandChart, gapPathChart, hourHeatmap,
+  indexedChart, rangeChart, sparkline, versusBaseChart, versusBaseScatter,
 } from '/ui/gap-charts.mjs';
 import {
   NOTIFY_LABEL, askNotifyPermission, clearLog, deliver, metricText, notifyState, readLog, testDelivery,
@@ -99,11 +102,15 @@ export async function mount(root, { state }) {
         <option value="LAST">آخرین معامله</option>
         <option value="FIRST">اولین معامله</option>
       </select></label>
+      <label>مقیاس عدد<select id="gr-scale">
+        ${GAP_SCALES.map((row) => `<option value="${esc(row.id)}"${row.id === DEFAULT_SCALE ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}
+      </select></label>
       <label>تعداد واحد<input id="gr-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label>
       <button type="button" class="primary" id="gr-load">دریافت تاریخچه و ساخت فاصله‌ها</button>
       <button type="button" class="ghost" id="gr-stop" hidden>توقف دریافت و ساخت</button>
     </div>
     <div class="gap-data" id="gr-data" aria-live="polite"></div>
+    <p class="gap-note" id="gr-scale-note"></p>
     <p class="gap-note">قیمت روزانه برای بررسی تاریخی است؛ آخرین معامله نیز تضمین اجرای هم‌زمان پاها نیست.</p>
     <p class="gap-note">فاصله فقط برای ساختارهایی معنی دارد که دست‌کم دو قیمت اعمال داشته باشند. تک‌پا و استرادل و کاوردکال در این تب نمی‌آیند — و این نبودن، نقص نیست.</p>
   </section>
@@ -132,7 +139,7 @@ export async function mount(root, { state }) {
       <div class="gap-table-wrap"><table class="gap-table" id="gr-table">
         <thead><tr>
           <th>استراتژی</th><th>قیمت اعمال</th><th>سررسید</th>
-          <th>فاصلهٔ اعمال</th><th>فاصلهٔ اکنون</th><th>پر شده / جا دارد</th>
+          <th>لنگر</th><th>تفاضل / جمعِ اکنون</th><th>پر شده / باقی‌مانده</th>
           <th>سود باقی‌مانده</th><th>روزانه</th><th>صدک تاریخی</th><th>روند بازه</th>
         </tr></thead>
         <tbody id="gr-rows"></tbody>
@@ -146,7 +153,8 @@ export async function mount(root, { state }) {
       <div class="section-head"><div><p class="eyebrow">یک ترکیب، در عمق</p><h2>تاریخچهٔ فاصله</h2></div>
         <div class="gap-toolbar">
           <label>ترکیب<select id="gr-pick"></select></label>
-          <label>دانه‌بندی<select id="gr-grain">${MOMENT_GRAINS.map((row) => `<option value="${row.id}">${esc(row.label)}</option>`).join('')}</select></label>
+          <label>تایم‌فریم<select id="gr-timeframe">${GAP_TIMEFRAMES.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
+          <label>دانه‌بندی درون‌روزی<select id="gr-grain">${MOMENT_GRAINS.map((row) => `<option value="${row.id}">${esc(row.label)}</option>`).join('')}</select></label>
           <label id="gr-day-wrap" hidden>روز سنجش<select id="gr-day"></select></label>
           <button type="button" class="ghost" id="gr-grain-run" hidden>دریافت ریزمعاملهٔ آن روز</button>
         </div>
@@ -155,11 +163,22 @@ export async function mount(root, { state }) {
       <p class="gap-verdict" id="gr-verdict">—</p>
     </section>
     <div class="gap-chart-grid">
-      <section class="card"><div class="section-head"><div><p class="eyebrow">مسیر</p><h3>فاصله در طول زمان</h3></div><span>ریال هر واحد</span></div><div id="gr-path" class="gap-chart gap-chart-lg"></div></section>
+      <section class="card gap-chart-wide"><div class="section-head"><div><p class="eyebrow">دو نرخ، و فاصله‌شان</p><h3 id="gr-band-title">تفاضل دو نرخ</h3></div><span id="gr-band-unit">—</span></div><p class="gap-hint" id="gr-band-hint"></p><div id="gr-band" class="gap-chart gap-chart-lg"></div></section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">مسیر</p><h3>فاصله در طول زمان</h3></div><span id="gr-path-unit">—</span></div><div id="gr-path" class="gap-chart gap-chart-lg"></div></section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">دامنه</p><h3>باز، بیشینه، کمینه، بسته</h3></div><span>فقط در تایم‌فریم هفتگی و ماهانه</span></div><div id="gr-range" class="gap-chart gap-chart-lg"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">پرشدگی</p><h3>چقدر پر شد، چقدر جا ماند</h3></div><span>درصد</span></div><div id="gr-cover" class="gap-chart gap-chart-lg"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">توزیع</p><h3>اکنون کجای تاریخِ خودش ایستاده</h3></div><span>شمار نقاط</span></div><div id="gr-dist" class="gap-chart"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">حکم</p><h3>عقربهٔ پرشدگی</h3></div></div><div id="gr-gauge" class="gap-chart"></div></section>
       <section class="card gap-chart-wide"><div class="section-head"><div><p class="eyebrow">الگوی ساعتی</p><h3>روز در برابر ساعت</h3></div><span>فقط با دانه‌بندی درون‌روزی</span></div><div id="gr-heat" class="gap-chart gap-chart-lg"></div></section>
+    </div>
+
+    <section class="card"><div class="section-head"><div><p class="eyebrow">در برابر دارایی پایه</p><h2>فاصله با نماد پایه چه می‌کند</h2></div><b id="gr-base-verdict">—</b></div>
+      <p class="gap-note">سه نگاه به یک پرسش: هم‌زمان روی دو محور، هم‌مقیاس‌شده به صد، و پراکنش با خط برازش. ساختاری که ادعای خنثی‌بودن دارد باید در پراکنش، ابرِ بی‌شکل بدهد؛ شیبِ نزدیک به یک یعنی در عمل یک شرط جهت‌دار بوده.</p>
+    </section>
+    <div class="gap-chart-grid">
+      <section class="card gap-chart-wide"><div class="section-head"><div><p class="eyebrow">هم‌زمان</p><h3>فاصله و قیمت پایه، دو محور</h3></div></div><div id="gr-vs" class="gap-chart gap-chart-lg"></div></section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">هم‌مقیاس</p><h3>هر دو از صد شروع می‌کنند</h3></div><span>درصد</span></div><div id="gr-indexed" class="gap-chart gap-chart-lg"></div></section>
+      <section class="card"><div class="section-head"><div><p class="eyebrow">رابطه</p><h3>پراکنش و خط برازش</h3></div></div><div id="gr-scatter" class="gap-chart gap-chart-lg"></div></section>
     </div>
   </div>
 
@@ -275,6 +294,18 @@ export async function mount(root, { state }) {
   baseSelect.addEventListener('change', invalidate);
   $('gr-family').addEventListener('change', invalidate);
   $('gr-basis').addEventListener('change', invalidate);
+  // مقیاس، خودِ عددها را عوض می‌کند (خام / ×اندازه / ×اندازه×تعداد)، پس
+  // مثل مبنای قیمت، نتیجهٔ ساخته‌شده را باطل می‌کند. نسبت‌ها عوض
+  // نمی‌شوند — واحد عوض می‌شود — ولی هر عددِ ریالیِ روی صفحه می‌شود.
+  $('gr-scale').addEventListener('change', () => { paintScaleNote(); invalidate(); });
+  $('gr-units').addEventListener('change', () => { paintScaleNote(); if ($('gr-scale').value === 'qty') invalidate(); });
+
+  /** جملهٔ زیر فرم: این مقیاس یعنی چه، و چه چیزی را عوض نمی‌کند. */
+  function paintScaleNote() {
+    const meta = gapScale($('gr-scale').value);
+    const tail = meta.id === 'qty' ? ` تعداد فعلی: ${fmt.int(units())}.` : '';
+    $('gr-scale-note').textContent = `${meta.hint}${tail} مقیاس فقط واحدِ نمایش را عوض می‌کند؛ «چند درصد پر شده» در هر سه مقیاس یک عدد است، چون هم فاصلهٔ اعمال و هم ارزش کنونی با یک ضریب بزرگ می‌شوند.`;
+  }
   $('gr-sort').addEventListener('change', paintTable);
 
   // ————————————————————————— ساخت فاصله‌ها —————————————————————————
@@ -362,6 +393,7 @@ export async function mount(root, { state }) {
   async function buildRows({ range, basis, family, job, current }) {
     const defs = GAP_DEFS.filter((def) => family === 'all' || def.group === family);
     const result = await buildRadarHistory({ defs, ua, seriesByIns, range, basis, settings: state.settings,
+      scale: $('gr-scale').value, units: units(),
       cancel: () => job.signal.aborted || !current(), yieldControl: nextFrame,
       onProgress: ({ done, total, name, combos }) => {
         if (current()) setStatus(`ساخت فاصله‌ها: ${fmt.int(done)} از ${fmt.int(total)} استراتژی بررسی شد · ${fmt.int(combos)} ترکیب آماده${name ? ` · ${name}` : ''}`);
@@ -369,7 +401,14 @@ export async function mount(root, { state }) {
     if (!current()) return;
     rows = result.rows; dates = result.dates;
     const excluded = result.excluded;
-    const breakdown = `${fmt.int(excluded.entry)} ترکیب فاقد قیمت ورود · ${fmt.int(excluded.mark)} ترکیب فاقد قیمت روز سنجش یا سررسیدشده · ${fmt.int(excluded.invalid)} ساختار بدون فاصلهٔ معتبر`;
+    const win = result.expiryWindow;
+    // پنجرهٔ «روز تا سررسید» بی‌صداترین علتِ صفر شدنِ نتیجه است، چون در
+    // تنظیمات است نه در این صفحه. اگر چیزی انداخته، همین‌جا با دستگیره‌اش
+    // گفته می‌شود.
+    const windowNote = win && win.dropped
+      ? ` · ${fmt.int(win.dropped)} سررسید از ${fmt.int(win.total)} بیرونِ پنجرهٔ «${fmt.int(win.minDays)} تا ${fmt.int(win.maxDays)} روز تا سررسید» افتاد${Number.isFinite(win.farthest) ? `؛ دورترین سررسید ${fmt.int(win.farthest)} روز فاصله دارد، پس برای دیدنش «بیشینه روز تا سررسید» را در تنظیمات دست‌کم همان‌قدر بگذار` : ''}`
+      : '';
+    const breakdown = `${fmt.int(excluded.entry)} ترکیب فاقد قیمت ورود · ${fmt.int(excluded.mark)} ترکیب فاقد قیمت روز سنجش یا سررسیدشده · ${fmt.int(excluded.invalid)} ساختار بدون فاصلهٔ معتبر${windowNote}`;
     if (!rows.length) {
       $('gr-hero-tag').textContent = 'قیمت‌ها بررسی شد؛ ترکیب قابل نمایش نیست';
       setStatus(`با قیمت‌های دریافت‌شده و قیود فعلی ترکیبی برای نمایش ساخته نشد؛ ${breakdown}. قیمت ورود و سنجش ابزارها را بررسی کن؛ سپس بازه، خانواده یا فیلترهای استراتژی را تغییر بده.`, true);
@@ -448,7 +487,7 @@ export async function mount(root, { state }) {
         <td class="num">${row.strikes.map((k) => fmt.money(k)).join(' / ')}</td>
         <td>${faDigits(historyDateLabel(row.expiry))}<small>${finite(gap.daysLeft) ? `${fmt.int(gap.daysLeft)} روز` : ''}</small></td>
         <td class="num">${moneyCell(gap.anchor)}<small>${esc(gap.anchorLabel)}</small></td>
-        <td class="num"><b>${moneyCell(gap.current)}</b><small>${gap.side === 'credit' ? 'بستانکار' : 'بدهکار'}</small></td>
+        <td class="num"><b>${moneyCell(gap.current)}</b><small>${gap.anchorSource === 'entry' ? 'جمع دو نرخ' : 'تفاضل دو نرخ'}</small></td>
         <td>${fillBar(gap)}</td>
         <td class="num">${pctCell(gap.upsidePct)}</td>
         <td class="num">${pctCell(gap.perDay)}</td>
@@ -474,7 +513,10 @@ export async function mount(root, { state }) {
     if (keep && rows.some((row) => row.key === keep)) select.value = keep;
   }
 
-  $('gr-pick').addEventListener('change', paintHistory);
+  $('gr-pick').addEventListener('change', () => paintHistory());
+  // تایم‌فریم داده را عوض نمی‌کند، فقط سطلش را. پس دریافت دوباره لازم
+  // نیست و نمودارها از همان سریِ خام از نو ساخته می‌شوند.
+  $('gr-timeframe').addEventListener('change', () => paintCharts(selectedRow()));
   $('gr-grain').addEventListener('change', () => {
     const intraday = isIntradayGrain($('gr-grain').value);
     $('gr-day-wrap').hidden = !intraday;
@@ -488,18 +530,65 @@ export async function mount(root, { state }) {
 
   const selectedRow = () => rows.find((row) => row.key === $('gr-pick').value) || rows[0] || null;
 
+  /** آخرین سریِ خامِ نمایش‌داده‌شده — تایم‌فریم روی همین اعمال می‌شود. */
+  let shownSeries = null;
+
   function paintHistory(series = null) {
     const row = selectedRow();
     if (!row) return;
     $('gr-day').innerHTML = dates.map((date) => `<option value="${date}">${faDigits(historyDateLabel(date))}</option>`).join('');
     if (tapeDate) $('gr-day').value = String(tapeDate);
-    const show = series || row.series;
+    shownSeries = series || row.series;
+    paintCharts(row);
+  }
+
+  /**
+   * نمودارها، از سریِ خام و تایم‌فریمِ انتخابی.
+   *
+   * تایم‌فریم روی سریِ **درون‌روزی** اعمال نمی‌شود: سطلِ هفتگیِ یک روز
+   * بی‌معنی است و سطلِ ماهانه‌اش یک ستون. آنجا خودِ دانه‌بندی همان نقش را
+   * دارد.
+   */
+  function paintCharts(row) {
+    if (!row || !shownSeries) return;
+    const timeframe = $('gr-timeframe').value;
+    const intraday = isIntradayGrain(shownSeries.grain);
+    const show = intraday ? shownSeries : resample(shownSeries, timeframe);
+    const unitText = gapScale(row.gap.scale).unit;
+    const isSum = row.gap.anchorSource === 'entry';
+
     $('gr-verdict').textContent = `${gapNote(row.gap)} ${row.verdict?.ok ? `فاصله در صدک ⁨${fmt.pct(row.verdict.rank)}⁩ تاریخِ همین بازه است — ${row.verdict.tone}.` : ''}`;
-    void charts.set('path', $('gr-path'), gapPathChart(show, { anchor: row.gap.anchor }), { empty: 'برای این ترکیب نقطه‌ای در این دانه‌بندی نیست' });
-    void charts.set('cover', $('gr-cover'), coverageChart(show), { empty: 'برای این ترکیب نقطه‌ای در این دانه‌بندی نیست' });
+
+    // ── نمودار فاصله‌ای: دو نرخ، و فضای میانشان ──────────────────────
+    $('gr-band-title').textContent = isSum ? 'جمع دو نرخ' : 'تفاضل دو نرخ';
+    $('gr-band-unit').textContent = unitText;
+    $('gr-band-hint').textContent = isSum
+      ? 'دو پرمیومِ فروخته‌شده روی هم. ارتفاعِ کل، همان جمعی است که باید آب شود؛ خطِ چین، جمعِ روز ورود یعنی بیشینهٔ سود.'
+      : 'دو نرخِ پاها، و فضای رنگیِ میانشان که خودِ فاصله است. خطِ چین، تفاضلِ دو قیمت اعمال یعنی سقفی که فاصله می‌تواند به آن برسد.';
+    void charts.set('band', $('gr-band'),
+      gapBandChart(show, {
+        mode: isSum ? 'sum' : 'spread',
+        anchor: isSum ? row.gap.entry : row.gap.strikeGap,
+        anchorLabel: isSum ? 'جمع پرمیوم ورود' : 'فاصلهٔ اعمال',
+      }),
+      { empty: 'برای این ترکیب نقطه‌ای با قیمت هر دو پا نیست' });
+
+    $('gr-path-unit').textContent = unitText;
+    void charts.set('path', $('gr-path'), gapPathChart(show, { anchor: row.gap.anchor }), { empty: 'برای این ترکیب نقطه‌ای در این تایم‌فریم نیست' });
+    void charts.set('range', $('gr-range'), rangeChart(show), { empty: 'میلهٔ دامنه با تایم‌فریم هفتگی یا ماهانه ساخته می‌شود' });
+    void charts.set('cover', $('gr-cover'), coverageChart(show), { empty: 'برای این ترکیب نقطه‌ای در این تایم‌فریم نیست' });
     void charts.set('dist', $('gr-dist'), distributionChart(show, row.gap.current), { empty: 'برای ساختن توزیع دست‌کم سه نقطه لازم است' });
-    void charts.set('gauge', $('gr-gauge'), fillGauge(row.gap), { empty: 'فاصله محاسبه نشد' });
+    void charts.set('gauge', $('gr-gauge'), fillGauge(row.gap), { empty: row.gap.anchored ? 'فاصله محاسبه نشد' : 'بی قیمت ورود، درصدی برای عقربه نیست' });
     void charts.set('heat', $('gr-heat'), hourHeatmap(heatRows(show)), { empty: 'نقشهٔ ساعتی با دانه‌بندی درون‌روزی ساخته می‌شود' });
+
+    // ── در برابر دارایی پایه ─────────────────────────────────────────
+    const verdict = versusBase(show);
+    $('gr-base-verdict').textContent = verdict.ok
+      ? `همبستگی ⁨${fmt.pct(verdict.r * 100)}⁩٪ · شیب ⁨${fmt.num(verdict.slope)}⁩ — ${verdict.tone}`
+      : verdict.why;
+    void charts.set('vs', $('gr-vs'), versusBaseChart(show), { empty: 'قیمت نماد پایه برای این نقاط موجود نیست' });
+    void charts.set('indexed', $('gr-indexed'), indexedChart(indexedPair(show)), { empty: 'برای هم‌مقیاس‌کردن، هر دو سری باید نقطهٔ شروع داشته باشند' });
+    void charts.set('scatter', $('gr-scatter'), versusBaseScatter(verdict), { empty: verdict.why || 'داده‌ای برای پراکنش نیست' });
   }
 
   /** ردیف‌های نقشهٔ حرارتی از نقاطِ درون‌روزی. روزانه ساعت ندارد. */
@@ -524,7 +613,11 @@ export async function mount(root, { state }) {
     $('gr-grain-run').disabled = true;
     $('gr-grain-note').textContent = `دریافت ریزمعاملهٔ ${fmt.int(legs.length)} پا برای ${historyDateLabel(date)}…`;
     try {
-      const requests = legs.map((leg) => ({ ins: String(leg.ins), date: String(date) }));
+      // ریزمعاملهٔ خودِ نماد پایه هم خواسته می‌شود، وگرنه نمودارهای «در
+      // برابر دارایی پایه» در دانه‌بندی درون‌روزی خالی می‌مانند — همان
+      // نموداری که پرسیده شد.
+      const wanted = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua?.ins ?? '')])].filter(Boolean);
+      const requests = wanted.map((ins) => ({ ins, date: String(date) }));
       const response = await fetch('/api/trades/batch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requests }),
@@ -532,11 +625,12 @@ export async function mount(root, { state }) {
       const payload = await response.json();
       if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
       tapeByIns = {};
-      for (const leg of legs) tapeByIns[String(leg.ins)] = payload.items?.[`${date}:${leg.ins}`]?.rows || [];
+      for (const ins of wanted) tapeByIns[ins] = payload.items?.[`${date}:${ins}`]?.rows || [];
       tapeDate = date;
       const series = intradayGapSeries({
         legs: row.legs, tapeByIns, date, grain: $('gr-grain').value,
         strategyId: row.def.id, entry: row.entry, expiry: row.expiry,
+        scale: $('gr-scale').value, units: units(), baseIns: String(ua?.ins ?? ''),
       });
       series.day = date;
       if (!series.points.length) {
@@ -609,6 +703,7 @@ export async function mount(root, { state }) {
       const gap = measureGap({
         legs: row.legs, prices: livePrices, strategyId: row.def.id,
         entry: row.entry, daysLeft: row.gap.daysLeft,
+        scale: $('gr-scale').value, units: units(),
       });
       if (!gap.ok) continue;
       row.gap = gap;
@@ -739,6 +834,7 @@ export async function mount(root, { state }) {
   // ————————————————————————— راه‌اندازی —————————————————————————
 
   paintNotifyState();
+  paintScaleNote();
   paintRuleHint();
   paintRules();
   paintLog();
