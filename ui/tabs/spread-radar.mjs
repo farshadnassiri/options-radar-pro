@@ -21,15 +21,15 @@
 
 import { faDigits, fmt, signTone } from '/ui/fmt.mjs';
 import { buildChain } from '/core/chain.mjs';
-import { CATALOG, byId } from '/strategies/catalog.mjs';
+import { byId } from '/strategies/catalog.mjs';
 import {
-  flattenActiveContracts, generateHistoricalCombos, historyDateLabel, historyPrice,
-  normalizeHistoryDate,
+  flattenActiveContracts, historyDateLabel,
 } from '/core/history.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
-import { GAP_STRATEGY_IDS, gapNote, hasGap, measureGap } from '/core/spread-gap.mjs';
-import { dailyGapSeries, gapVerdict, intradayGapSeries, seriesStats } from '/core/spread-gap-series.mjs';
+import { GAP_STRATEGY_IDS, gapNote, measureGap } from '/core/spread-gap.mjs';
+import { gapVerdict, intradayGapSeries, seriesStats } from '/core/spread-gap-series.mjs';
+import { buildRadarHistory, radarDataReport } from '/core/radar-history.mjs';
 import {
   ALERT_METRICS, ALERT_OPS, DEFAULT_COOLDOWN_SEC, alertSnapshot, evaluateAlerts,
   normalizeRule, ruleNote,
@@ -101,7 +101,10 @@ export async function mount(root, { state }) {
       </select></label>
       <label>تعداد واحد<input id="gr-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label>
       <button type="button" class="primary" id="gr-load">دریافت تاریخچه و ساخت فاصله‌ها</button>
+      <button type="button" class="ghost" id="gr-stop" hidden>توقف دریافت و ساخت</button>
     </div>
+    <div class="gap-data" id="gr-data" aria-live="polite"></div>
+    <p class="gap-note">قیمت روزانه برای بررسی تاریخی است؛ آخرین معامله نیز تضمین اجرای هم‌زمان پاها نیست.</p>
     <p class="gap-note">فاصله فقط برای ساختارهایی معنی دارد که دست‌کم دو قیمت اعمال داشته باشند. تک‌پا و استرادل و کاوردکال در این تب نمی‌آیند — و این نبودن، نقص نیست.</p>
   </section>
 
@@ -201,6 +204,8 @@ export async function mount(root, { state }) {
   let prevSnapshots = {};
   let liveTimer = 0, livePrices = null, tapeByIns = null, tapeDate = 0;
   let subtabs = null;
+  let activeLoad = null, mounted = true, report = null, universeVersion = 0;
+  const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 
   const setStatus = (text, bad = false) => {
     const node = $('gr-status');
@@ -223,18 +228,29 @@ export async function mount(root, { state }) {
       baseSelect.appendChild(option);
     }
     if (keep && chain.has(keep)) baseSelect.value = keep;
-    const expired = payload.summary?.expiredInside || 0;
-    setStatus(`${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند.`);
+    if (!activeLoad && !rows.length) {
+      setStatus(`${fmt.int(chain.size)} نماد پایه آمادهٔ انتخاب است؛ جزئیات پوشش کل بازار زیر بازه قرار دارد.`);
+      $('gr-hero-tag').textContent = 'فهرست قراردادها آماده است';
+      paintData();
+    }
   }
 
   async function loadUniverseForRange(range) {
+    const version = ++universeVersion;
+    cancelLoad();
     rangeJob?.stop();
     baseGate.loading();
     hideResults();
-    rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
-    try { fillBases(await rangeJob.first); }
+    chain = new Map(); report = null; paintData();
+    const current = () => mounted && version === universeVersion;
+    const rangeStatus = { note: (...args) => { if (current()) rangeUi?.note(...args); },
+      build: (value) => current() ? rangeUi?.build(value) : false };
+    rangeJob = loadRange(range, rangeStatus, { onUpdate: (payload) => { if (current()) fillBases(payload); } });
+    try { const payload = await rangeJob.first; if (current()) fillBases(payload); }
     catch (error) {
+      if (!current()) return;
       baseGate.failed();
+      $('gr-hero-tag').textContent = 'دریافت فهرست ناموفق بود';
       setStatus(`فهرست قراردادهای این بازه دریافت نشد: ${error.message}`, true);
     }
   }
@@ -245,39 +261,95 @@ export async function mount(root, { state }) {
     rows = [];
     $('gr-tabs').hidden = true;
     for (const panel of root.querySelectorAll('.gap-panel')) panel.hidden = true;
-    $('gr-hero-tag').textContent = 'هنوز چیزی بارگذاری نشده';
+    $('gr-hero-tag').textContent = 'برای این انتخاب هنوز قیمت دریافت نشده';
   }
 
-  baseSelect.addEventListener('change', hideResults);
-  $('gr-family').addEventListener('change', () => { if (rows.length) buildRows(); });
-  $('gr-basis').addEventListener('change', () => { if (rows.length) buildRows(); });
+  function cancelLoad() {
+    activeLoad?.abort(); activeLoad = null;
+    $('gr-load').disabled = false; $('gr-stop').hidden = true;
+  }
+  function invalidate() {
+    cancelLoad(); hideResults(); report = null; paintData();
+    setStatus('انتخاب تغییر کرد؛ دریافت تاریخچه و ساخت فاصله‌ها را اجرا کن.');
+  }
+  baseSelect.addEventListener('change', invalidate);
+  $('gr-family').addEventListener('change', invalidate);
+  $('gr-basis').addEventListener('change', invalidate);
   $('gr-sort').addEventListener('change', paintTable);
 
   // ————————————————————————— ساخت فاصله‌ها —————————————————————————
 
   $('gr-load').addEventListener('click', () => void loadEverything());
+  $('gr-stop').addEventListener('click', () => {
+    cancelLoad(); hideResults();
+    $('gr-hero-tag').textContent = 'عملیات متوقف شد';
+    setStatus('دریافت و ساخت متوقف شد؛ نتیجه‌ای از اجرای ناتمام نمایش داده نمی‌شود. برای تلاش دوباره دکمهٔ دریافت را بزن.');
+  });
+
+  function paintData() {
+    const selected = chain.get(baseSelect.value);
+    if (!selected) { $('gr-data').textContent = 'یک نماد انتخاب کن تا وضعیت قراردادهای همان نماد را ببینی.'; return; }
+    const all = flattenActiveContracts(selected, ''), active = flattenActiveContracts(selected, state.settings.blockedExpiries);
+    const header = `${nameOf(selected)}: ${fmt.int(all.length)} قرارداد در بازه · ${fmt.int(all.length - active.length)} قرارداد کنارگذاشته به‌علت سررسید سقف‌پر · ${fmt.int(active.length)} قرارداد برای دریافت قیمت`;
+    if (!report) { $('gr-data').textContent = header; return; }
+    const reasons = { error: 'دریافت ناموفق', empty: 'پاسخ خالی؛ قیمت دریافت نشد', outside: 'تاریخچه موجود است، اما بیرون از بازه', unpriced: 'در مبنای انتخابی قیمت معتبر ندارد', ready: 'قیمت در بازه دارد' };
+    const dateText = (date) => date ? faDigits(historyDateLabel(date)) : '—';
+    const baseText = report.base.status === 'ready' ? `پایه در بازه قیمت دارد؛ ${fmt.int(report.dates.length)} روز در تاریخچهٔ پایه` : `نماد پایه: ${reasons[report.base.status]}`;
+    const problem = [report.base, ...report.items].filter((item) => item.status !== 'ready' || !item.entry || !item.mark);
+    $('gr-data').innerHTML = `<p><b>${esc(header)}</b></p>
+      <p>${esc(baseText)} · ${fmt.int(report.ready)} قرارداد دارای قیمت در بازه · ${fmt.int(report.failed)} قرارداد با خطای دریافت</p>
+      <p>قیمت ورود ${dateText(report.dates[0])}: ${fmt.int(report.entryReady)} قرارداد · قیمت سنجش ${dateText(report.dates.at(-1))}: ${fmt.int(report.markReady)} قرارداد</p>
+      ${problem.length ? `<details><summary>علت کمبود داده، به تفکیک ابزار (${fmt.int(problem.length)})</summary><div class="gap-table-wrap"><table class="gap-table"><thead><tr><th>ابزار</th><th>وضعیت</th><th>قیمت ورود</th><th>قیمت سنجش</th></tr></thead><tbody>${problem.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(reasons[item.status])}${item.error ? `<details><summary>جزئیات خطای دریافت</summary><span>${esc(item.error)}</span></details>` : ''}</td><td>${item.entry && item.status !== 'error' ? 'دارد' : 'ندارد'}</td><td>${item.mark && item.status !== 'error' ? 'دارد' : 'ندارد'}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
+  }
 
   async function loadEverything() {
     const ins = baseSelect.value;
     if (!ins) { setStatus('اول بازه و بعد نماد پایه را انتخاب کن.', true); return; }
+    cancelLoad();
+    const job = new AbortController(); activeLoad = job;
+    const current = () => mounted && activeLoad === job && !job.signal.aborted;
+    const range = rangeUi.range, basis = $('gr-basis').value, family = $('gr-family').value;
+    report = null; paintData();
     $('gr-load').disabled = true;
+    $('gr-stop').hidden = false;
     hideResults();
+    $('gr-hero-tag').textContent = 'در حال دریافت قیمت‌ها';
     try {
       ua = chain.get(ins);
       const contracts = flattenActiveContracts(ua, state.settings.blockedExpiries);
       if (!contracts.length) throw new Error('برای این نماد در این بازه قراردادی نبود');
       setStatus(`دریافت تاریخچهٔ ${fmt.int(contracts.length + 1)} ابزار…`);
       const codes = [...new Set([String(ua.ins), ...contracts.map((row) => String(row.ins))])];
-      const loaded = await loadHistoricalDailies(codes, ua.ins);
+      const loaded = await loadHistoricalDailies(codes, ua.ins, fetch, { signal: job.signal, tolerateErrors: true,
+        onProgress: ({ phase, done, total }) => {
+          if (!current()) return;
+          setStatus(`${phase === 'fallback' ? 'بررسی منبع دوم برای پاسخ‌های خالی' : 'دریافت تاریخچه'}: ${fmt.int(done)} از ${fmt.int(total)} ابزار بررسی شد.`);
+        } });
+      if (!current()) return;
       seriesByIns = loaded.seriesByIns;
-      dates = [...new Set((seriesByIns[String(ua.ins)] || [])
-        .map((row) => normalizeHistoryDate(row.date)).filter(Boolean))].sort((a, b) => a - b);
-      if (!dates.length) throw new Error('برای نماد پایه تاریخچه‌ای دریافت نشد');
-      buildRows();
+      report = radarDataReport({ ua, seriesByIns, errors: loaded.errors, range, basis, settings: state.settings });
+      dates = report.dates; paintData();
+      if (report.base.status === 'error' || report.failed) {
+        $('gr-hero-tag').textContent = 'دریافت قیمت ناقص است';
+        setStatus('دریافت بخشی از قیمت‌ها ناموفق بود؛ این وضعیت به معنی نبود فرصت نیست. علت هر ابزار را باز کن و دریافت را دوباره اجرا کن.', true);
+        return;
+      }
+      if (!dates.length || report.base.status !== 'ready') {
+        $('gr-hero-tag').textContent = 'قیمت پایه در بازه موجود نیست';
+        setStatus('نماد پایه در این بازه قیمت معتبر ندارد؛ وضعیت داده را بررسی کن یا بازه را تغییر بده.', true); return;
+      }
+      if (!report.ready) {
+        $('gr-hero-tag').textContent = 'قیمت قراردادها در بازه موجود نیست';
+        setStatus('برای قراردادهای انتخابی قیمت معتبری در بازه دریافت نشد. این پیام تأیید نمی‌کند که معامله‌ای انجام نشده؛ جزئیات ابزارها و بازه را بررسی کن.', true); return;
+      }
+      $('gr-hero-tag').textContent = 'قیمت‌ها دریافت شد؛ در حال ساخت فاصله‌ها';
+      await buildRows({ range, basis, family, job, current });
     } catch (error) {
+      if (!current()) return;
       logError('spread-radar', error);
+      $('gr-hero-tag').textContent = 'عملیات کامل نشد';
       setStatus(`ساخت فاصله‌ها کامل نشد: ${error.message}`, true);
-    } finally { $('gr-load').disabled = false; }
+    } finally { if (activeLoad === job) cancelLoad(); }
   }
 
   /**
@@ -287,71 +359,32 @@ export async function mount(root, { state }) {
    * باشد و «فاصلهٔ اکنون»ِ یک بازهٔ گذشته یعنی فاصله در پایان همان بازه.
    * گرفتنِ امروز، عددی می‌داد که به بازهٔ انتخابی ربطی نداشت.
    */
-  function buildRows() {
-    const basis = $('gr-basis').value;
-    const family = $('gr-family').value;
+  async function buildRows({ range, basis, family, job, current }) {
     const defs = GAP_DEFS.filter((def) => family === 'all' || def.group === family);
-    const startDate = dates[0];
-    const markDate = dates[dates.length - 1];
-    const built = [];
-    let noEntry = 0;
-    for (const def of defs) {
-      const generated = generateHistoricalCombos({
-        def, ua, seriesByIns, startDate, entryBasis: basis,
-        settings: state.settings, filtered: true, liquidity: {},
-      });
-      for (const combo of generated.combos) {
-        const legs = combo.legs.map((leg) => ({ ...leg }));
-        const entryPrices = pricesAt(legs, startDate, basis);
-        const entry = entryPrices ? measureGap({ legs, prices: entryPrices, strategyId: def.id }).current : NaN;
-        const series = dailyGapSeries({
-          legs, seriesByIns, dates, basis, strategyId: def.id,
-          entry, expiry: combo.expiries[0],
-        });
-        if (!series.points.length) { noEntry += 1; continue; }
-        const markPrices = pricesAt(legs, markDate, basis);
-        const gap = markPrices
-          ? measureGap({
-            legs, prices: markPrices, strategyId: def.id, entry,
-            daysLeft: series.points[series.points.length - 1]?.daysLeft,
-          })
-          : { ...series.points[series.points.length - 1], ok: true, why: '' };
-        if (!gap.ok) { noEntry += 1; continue; }
-        built.push({
-          key: legs.map((leg) => leg.ins).join('|'),
-          def, legs, strikes: combo.strikes, expiry: combo.expiries[0],
-          entry, gap, series, verdict: gapVerdict(series, gap),
-        });
-      }
-    }
-    rows = built;
+    const result = await buildRadarHistory({ defs, ua, seriesByIns, range, basis, settings: state.settings,
+      cancel: () => job.signal.aborted || !current(), yieldControl: nextFrame,
+      onProgress: ({ done, total, name, combos }) => {
+        if (current()) setStatus(`ساخت فاصله‌ها: ${fmt.int(done)} از ${fmt.int(total)} استراتژی بررسی شد · ${fmt.int(combos)} ترکیب آماده${name ? ` · ${name}` : ''}`);
+      } });
+    if (!current()) return;
+    rows = result.rows; dates = result.dates;
+    const excluded = result.excluded;
+    const breakdown = `${fmt.int(excluded.entry)} ترکیب فاقد قیمت ورود · ${fmt.int(excluded.mark)} ترکیب فاقد قیمت روز سنجش یا سررسیدشده · ${fmt.int(excluded.invalid)} ساختار بدون فاصلهٔ معتبر`;
     if (!rows.length) {
-      setStatus('در این بازه هیچ ترکیب فاصله‌داری قیمت کامل نداشت.', true);
+      $('gr-hero-tag').textContent = 'قیمت‌ها بررسی شد؛ ترکیب قابل نمایش نیست';
+      setStatus(`با قیمت‌های دریافت‌شده و قیود فعلی ترکیبی برای نمایش ساخته نشد؛ ${breakdown}. قیمت ورود و سنجش ابزارها را بررسی کن؛ سپس بازه، خانواده یا فیلترهای استراتژی را تغییر بده.`, true);
       return;
     }
     $('gr-tabs').hidden = false;
-    subtabs = subtabs || mountRadarTabs();
-    $('gr-hero-tag').textContent = `${fmt.int(rows.length)} ترکیب فاصله‌دار · ${esc(nameOf(ua))}`;
-    setStatus(`${fmt.int(rows.length)} ترکیب فاصله‌دار ساخته شد${noEntry ? ` · ${fmt.int(noEntry)} ترکیب داده کامل نداشت` : ''}.`);
+    subtabs = mountRadarTabs(); subtabs.show('now');
+    $('gr-hero-tag').textContent = `${fmt.int(rows.length)} ترکیب فاصله‌دار · ${nameOf(ua)}`;
+    setStatus(`${fmt.int(rows.length)} ترکیب فاصله‌دار ساخته شد · ${breakdown}.`);
     paintKpis();
     paintTable();
     fillPicker();
     paintHistory();
     paintRules();
     paintLog();
-  }
-
-  /** قیمت هر پا در یک روز، یا `null` اگر حتی یکی نبود. */
-  function pricesAt(legs, date, basis) {
-    const out = {};
-    for (const leg of legs) {
-      if (leg.kind === 'underlying') continue;
-      const row = (seriesByIns[String(leg.ins)] || []).find((item) => normalizeHistoryDate(item.date) === date);
-      const price = historyPrice(row, basis);
-      if (!finite(price)) return null;
-      out[String(leg.ins)] = price;
-    }
-    return out;
   }
 
   function mountRadarTabs() {
@@ -406,7 +439,7 @@ export async function mount(root, { state }) {
   function paintTable() {
     if (!rows.length) return;
     const list = sortedRows();
-    $('gr-now-note').textContent = `روز مبنا ${historyDateLabel(dates[dates.length - 1])} — آخرین روزِ همین بازه، نه امروز. «روند بازه» مسیر فاصله در کل بازه است و خط کم‌رنگ، سقفِ ساختاری.`;
+    $('gr-now-note').textContent = `روز ورود ${faDigits(historyDateLabel(dates[0]))} · روز سنجش ${faDigits(historyDateLabel(dates.at(-1)))}؛ روزهای موجود در بازهٔ انتخابی. مبنا: ${$('gr-basis').selectedOptions[0].textContent}. قیمت روزانه، تضمین اجرای هم‌زمان پاها نیست. «روند بازه» مسیر فاصله در همین بازه است.`;
     $('gr-rows').innerHTML = list.map((row) => {
       const gap = row.gap;
       const values = row.series.points.map((point) => point.current);
@@ -709,10 +742,11 @@ export async function mount(root, { state }) {
   paintRuleHint();
   paintRules();
   paintLog();
-  rangeUi = mountHistoryRange($('gr-range'), { onApply: (range) => loadUniverseForRange(range) });
+  rangeUi = mountHistoryRange($('gr-range'), { quickEntry: true, compactNote: true, onApply: (range) => loadUniverseForRange(range) });
   await loadUniverseForRange(rangeUi.range);
 
   return () => {
+    mounted = false; cancelLoad();
     stopLive();
     rangeJob?.stop();
     charts.disposeAll();

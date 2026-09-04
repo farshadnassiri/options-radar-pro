@@ -6,6 +6,7 @@
 
 import { num } from './num.mjs';
 import { expiryLabel } from './option-roster.mjs';
+import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
 
 const faDigits = (value) => String(value).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
 
@@ -54,6 +55,26 @@ export function calendarDays(from, to) {
 }
 
 export const rangeLabel = ({ from, to }) => `${faDigits(expiryLabel(from))} تا ${faDigits(expiryLabel(to))}`;
+
+/** ورود مستقیمِ تاریخ شمسی؛ تبدیل رفت‌وبرگشت، روز نامعتبر را رد می‌کند. */
+export function parseJalaliRange(fromText, toText, maxDate = todayCompact()) {
+  const parse = (text) => {
+    const plain = String(text).trim().replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+      .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+    const match = /^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/.exec(plain);
+    if (!match) return 0;
+    const [y, m, d] = match.slice(1).map(Number);
+    if (y < 1300 || y > 1699 || m < 1 || m > 12 || d < 1 || d > 31) return 0;
+    const gregorian = jalaliToGregorian(y, m, d);
+    if (gregorianToJalali(...gregorian).join(',') !== [y, m, d].join(',')) return 0;
+    return gregorian[0] * 10000 + gregorian[1] * 100 + gregorian[2];
+  };
+  const from = parse(fromText), to = parse(toText);
+  if (!from || !to) return { ok: false, error: 'تاریخ شمسی معتبر را به شکل سال/ماه/روز وارد کن.' };
+  if (from > to) return { ok: false, error: 'تاریخ شروع باید پیش از تاریخ پایان یا برابر آن باشد.' };
+  if (to > maxDate) return { ok: false, error: 'تاریخ پایان نمی‌تواند پس از امروز باشد.' };
+  return { ok: true, range: { from, to } };
+}
 
 /** تاریخِ `days` روز پیش از یک تاریخ فشرده. */
 export function daysBefore(compact, days) {
