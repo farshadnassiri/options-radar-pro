@@ -22,7 +22,7 @@ import {
 import { tehranDateNumber } from '/core/live-day.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
-import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
 import { handoffRange } from '/ui/handoff.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
@@ -99,8 +99,8 @@ function marketSnapshot(snapshots, selectedBasis, scope, manual = {}) {
 export async function mount(root, { state }) {
   root.innerHTML = `<section class="backtest-hero"><div><p class="eyebrow">بعد از ماتریس‌ها · آزمون یک مسیر مشخص</p><h1>🔬 آزمایشگاه آپشن</h1><p>یک استراتژی را با قیمت مشاهده‌شده روز ورود بچین، مسیر روزانه را ببین و روز سنجش را با ریزمعامله‌های واقعی همان روز بازپخش کن.</p></div><span>بدون قیمت ساختگی</span></section>
   <section class="card backtest-setup"><div class="section-head"><div><p class="eyebrow">گام اول</p><h2>انتخاب سناریو</h2></div><b id="bt-status" role="status">در حال دریافت نمادها…</b></div>
-    <div class="backtest-form"><label>نماد پایه<select id="bt-base"><option value="">در حال دریافت…</option></select></label><label>استراتژی<select id="bt-strategy"></select></label><label>تعداد واحد<input id="bt-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><button type="button" class="primary" id="bt-load">دریافت روزهای قابل اجرا</button></div>
-    <div id="bt-range"></div>
+    <div id="bt-range" class="step-first" data-step="۱"></div>
+    <div class="backtest-form"><label class="step-next" data-step="۲">نماد پایه<select id="bt-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label>استراتژی<select id="bt-strategy"></select></label><label>تعداد واحد<input id="bt-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><button type="button" class="primary" id="bt-load">دریافت روزهای قابل اجرا</button></div>
   </section>
   <section id="bt-work" hidden>
     <nav id="bt-subtabs"></nav>
@@ -196,6 +196,7 @@ export async function mount(root, { state }) {
     return subtabs;
   };
   const status = $('bt-status'), baseSelect = $('bt-base'), strategySelect = $('bt-strategy');
+  const baseGate = baseAfterRange(baseSelect);
   const entryRail = $('bt-entry-basis'), exitRail = $('bt-exit-basis');
   let chain = new Map(), ua = null, contracts = [], seriesByIns = {}, entryDates = [], combos = [], legs = null;
   let replay = null, intraday = [], intradayDate = null, exitDates = [];
@@ -1237,6 +1238,7 @@ export async function mount(root, { state }) {
     const keep = baseSelect.value;
     chain = buildChain(payload.rows || []);
     baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+    baseGate.ready(chain.size);
     for (const item of [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'))) {
       const option = document.createElement('option'); option.value = item.ins; option.textContent = `${nameOf(item, 'نماد پایه')} · ${fmt.int(item.contracts)} قرارداد`; baseSelect.appendChild(option);
     }
@@ -1247,10 +1249,10 @@ export async function mount(root, { state }) {
 
   async function loadUniverseForRange(range) {
     rangeJob?.stop();
-    baseSelect.innerHTML = '<option value="">در حال دریافت…</option>';
+    baseGate.loading();
     rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
     try { fillBases(await rangeJob.first); }
-    catch (error) { baseSelect.innerHTML = '<option value="">دریافت ناموفق</option>'; setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true); }
+    catch (error) { baseGate.failed(); setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true); }
   }
 
   rangeUi = mountHistoryRange($('bt-range'), { initialRange: handoffRange(state.handoff), onApply: (range) => loadUniverseForRange(range) });

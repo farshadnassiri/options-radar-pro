@@ -3208,6 +3208,46 @@ td.gain, dd.gain { color: var(--gain); }
 button.ghost.danger { color: var(--loss); border-color: color-mix(in srgb, var(--loss) 35%, transparent); }
 button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
 
+/* ————————————————————————————————————————————————
+   گام یک، گام دو — تاریخ پیش از نماد پایه.
+   فهرست نماد پایه از خودِ بازه ساخته می‌شود، پس بازه اول است. شمارهٔ گام
+   این ترتیب را می‌گوید بی آنکه جمله‌ای لازم باشد، و کشویی نمادِ غیرفعال
+   خودش دلیلِ غیرفعال‌بودنش را در متنش دارد.
+   ———————————————————————————————————————————————— */
+.step-first,
+.step-next { position: relative; }
+
+.step-first::before,
+.step-next::before {
+  content: attr(data-step);
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: -1.9rem;
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: .72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* زیر ۹۰۰ پیکسل جای حاشیه نیست، پس شماره داخل جریان می‌آید. */
+@media (max-width: 900px) {
+  .step-first::before,
+  .step-next::before { position: static; margin-bottom: var(--space-2); }
+}
+
+.step-next select:disabled {
+  opacity: 1;
+  color: var(--muted);
+  background-color: var(--panel-2);
+  cursor: not-allowed;
+}
+
 .pb-skin {
   --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */
   --pb-hair: 1px solid var(--line-soft);            /* مرز مویی مشترک */

@@ -11,7 +11,7 @@ import {
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
-import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { historyHandoffPlan, goHandoff } from '/ui/handoff.mjs';
@@ -229,8 +229,8 @@ export async function mount(root, { state }) {
 
     <section class="card history-controls">
       <div class="history-control-grid">
-        <label for="h-base">نماد پایه<select id="h-base"><option value="">در حال دریافت…</option></select></label>
-        <div id="h-range" class="history-range-cell"></div>
+        <div id="h-range" class="history-range-cell step-first" data-step="۱"></div>
+        <label for="h-base" class="step-next" data-step="۲">نماد پایه<select id="h-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label>
         <label for="h-strategy">استراتژی<select id="h-strategy"></select></label>
         <div class="history-expiry-field" id="h-expiry-field">
           <span>سررسیدهای قابل بررسی</span>
@@ -264,7 +264,7 @@ export async function mount(root, { state }) {
       <p class="live-scope-note" id="h-scope-note" hidden></p>
     </section>
 
-    <section class="card history-range" id="h-range" hidden>
+    <section class="card history-range" id="h-days-range" hidden>
       <div class="range-head"><h2>بازه روزهای معاملاتی</h2><b id="h-range-label">—</b></div>
       <div class="date-wheel-grid">
         <div class="date-wheel-field"><span>شروع</span><div id="h-start"></div></div>
@@ -380,6 +380,7 @@ export async function mount(root, { state }) {
 
   const $ = (id) => root.querySelector(`#${id}`);
   const baseSelect = $('h-base'), strategySelect = $('h-strategy'), modeSelect = $('h-mode');
+  const baseGate = baseAfterRange(baseSelect);
   const entrySelect = $('h-entry'), exitSelect = $('h-exit'), status = $('h-status');
   const loadBtn = $('h-load'), runBtn = $('h-run'), exportBtn = $('h-export');
   let chain = new Map(), ua = null, analysisUa = null, contracts = [], seriesByIns = {}, dates = [];
@@ -602,7 +603,7 @@ export async function mount(root, { state }) {
     analysisUa = null; contracts = []; seriesByIns = {}; dates = []; liveDate = 0;
     rollingArgs = null; rollingResult = null; setRollingCandidates([]);
     runBtn.disabled = true; exportBtn.disabled = true;
-    $('h-range').hidden = true; $('h-legs-card').hidden = true; $('h-results').hidden = true;
+    $('h-days-range').hidden = true; $('h-legs-card').hidden = true; $('h-results').hidden = true;
     $('h-matrix-export-csv').disabled = true; $('h-matrix-export-excel').disabled = true;
   }
 
@@ -672,6 +673,7 @@ export async function mount(root, { state }) {
     const keep = baseSelect.value;
     chain = buildChain(payload.rows || []);
     baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+    baseGate.ready(chain.size);
     for (const item of [...chain.values()].sort((a, b) => a.name.localeCompare(b.name, 'fa'))) {
       const option = document.createElement('option');
       option.value = item.ins;
@@ -686,11 +688,11 @@ export async function mount(root, { state }) {
   async function loadUniverse(range = rangeUi?.range) {
     if (!range) return;
     rangeJob?.stop();
-    baseSelect.innerHTML = '<option value="">در حال دریافت…</option>';
+    baseGate.loading();
     rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
     try { fillBases(await rangeJob.first); }
     catch (error) {
-      baseSelect.innerHTML = '<option value="">دریافت ناموفق</option>';
+      baseGate.failed();
       setStatus(`فهرست قراردادهای این بازه دریافت نشد: ${error.message}`, true);
     }
   }
@@ -752,7 +754,7 @@ export async function mount(root, { state }) {
         .sort((a, b) => a - b);
       if (!dates.length) throw new Error('برای نماد پایه تاریخچه‌ای برنگشت');
       mountRangeWheels();
-      $('h-range').hidden = false;
+      $('h-days-range').hidden = false;
       runBtn.disabled = false;
       buildLegControls();
       paintRange();

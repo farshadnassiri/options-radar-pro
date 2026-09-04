@@ -9,7 +9,7 @@ import {
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
-import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { SETTINGS_CHANGED_EVENT } from '/ui/settings-sync.mjs';
@@ -207,10 +207,10 @@ export async function mount(root, { state, api }) {
   </aside>
   <div class="pb-panel" data-panel="setup">
     <section class="card portfolio-controls"><div class="section-head"><div><p class="eyebrow">مرحله اول</p><h2>نماد، نقدشوندگی و دامنه آزمون</h2></div><b id="pb-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
-    <div class="portfolio-form"><label>نماد پایه<select id="pb-base"><option value="">در حال دریافت…</option></select></label><label>دامنه استراتژی<select id="pb-scope"><option value="feasible">فقط استراتژی‌های قابل اجرا</option><option value="all">همه ساختاری، با برچسب غیرقابل اجرا</option></select></label><label>دامنهٔ داده<select id="pb-data-scope">${scopeOptionsMarkup()}</select></label><label>تعداد واحد<input id="pb-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label>
+    <div id="pb-range" class="step-first" data-step="۱"></div>
+    <div class="portfolio-form"><label class="step-next" data-step="۲">نماد پایه<select id="pb-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label>دامنه استراتژی<select id="pb-scope"><option value="feasible">فقط استراتژی‌های قابل اجرا</option><option value="all">همه ساختاری، با برچسب غیرقابل اجرا</option></select></label><label>دامنهٔ داده<select id="pb-data-scope">${scopeOptionsMarkup()}</select></label><label>تعداد واحد<input id="pb-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label>
       <label>حداقل ارزش پایه (میلیارد ریال)<input id="pb-base-value" type="number" min="0" step="0.1" value="0"></label><label>حداقل ارزش هر قرارداد (میلیون ریال)<input id="pb-leg-value" type="number" min="0" step="0.1" value="0"></label><label>حداقل حجم پایه<input id="pb-base-volume" type="number" min="0" step="1" value="0"></label><label>حداقل حجم هر قرارداد<input id="pb-leg-volume" type="number" min="0" step="1" value="0"></label>
       <button type="button" class="primary" id="pb-load">دریافت تاریخچه نماد</button></div>
-    <div id="pb-range"></div>
     <p class="live-scope-note" id="pb-scope-note" hidden></p>
     <p class="portfolio-note">سقف ترکیب برداشته شد: هر الگو <b>همهٔ</b> ترکیب‌های ساختاریِ ممکن را می‌سازد و هیچ ردیفی بی‌صدا بریده نمی‌شود. تنها چیزهایی که ردیفی را بیرون می‌گذارند نبودِ قیمت ورود، نبودِ نقدشوندگیِ خواسته‌شده، و پنجرهٔ قیمت اعمالی است که خودت در تنظیمات گذاشته باشی — و هر سه در گزارش شمرده می‌شوند. روی زنجیرهٔ پهن، اجرا می‌تواند چند دقیقه طول بکشد؛ پیشرفت زنده است و دکمهٔ «توقف» هرچه تا آن لحظه ساخته شده را نگه می‌دارد.</p>
   </section>
@@ -519,6 +519,7 @@ export async function mount(root, { state, api }) {
   const numCellOf = (value) => (Number.isFinite(value) ? fmt.num(value) : '—');
 
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
+  const baseGate = baseAfterRange(baseSelect);
   let comboFilter = null;
   let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, seriesSource = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '', lastRunStopped = false;
   let settingsEpoch = 0;
@@ -2351,6 +2352,7 @@ export async function mount(root, { state, api }) {
     const keep = baseSelect.value;
     chain = buildChain(payload.rows || []);
     baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+    baseGate.ready(chain.size);
     for (const item of [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'))) {
       const option = document.createElement('option'); option.value = item.ins; option.textContent = `${nameOf(item, 'نماد پایه')} · ${fmt.int(item.contracts)} قرارداد`; baseSelect.appendChild(option);
     }
@@ -2363,11 +2365,11 @@ export async function mount(root, { state, api }) {
 
   async function loadUniverseForRange(range) {
     rangeJob?.stop();
-    baseSelect.innerHTML = '<option value="">در حال دریافت…</option>';
+    baseGate.loading();
     rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
     try { fillBases(await rangeJob.first); }
     catch (error) {
-      baseSelect.innerHTML = '<option value="">دریافت ناموفق</option>';
+      baseGate.failed();
       setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true);
     }
   }
