@@ -2218,6 +2218,13 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
 }
 .hrange-cals { display: flex; gap: var(--space-4, 16px); flex-wrap: wrap; margin-top: var(--space-3, 12px); }
 .hrange-cals[hidden] { display: none; }
+.hrange-direct { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-3); flex-basis: 100%; }
+.hrange-direct label { display: grid; gap: var(--space-1); flex: 1 1 160px; }
+.hrange-direct-error { flex-basis: 100%; color: var(--loss); }
+.hrange-market-details { margin-top: var(--space-3); color: var(--muted); }
+.gap-data { margin-top: var(--space-3); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius); }
+.gap-data p { margin: var(--space-2) 0; }
+.gap-data summary { cursor: pointer; }
 .hrange-cal { display: flex; flex-direction: column; gap: var(--space-1, 4px); flex: 1 1 280px; min-width: 0; }
 .hrange-note { margin: var(--space-2, 8px) 0 0; color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-normal); }
 .hrange-note[data-error] { color: var(--loss); }

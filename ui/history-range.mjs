@@ -18,7 +18,7 @@
 
 import { mountDateWheel } from './datewheel.mjs';
 import {
-  DEFAULT_PRESET, RANGE_PRESETS, buildLine, calendarDays, daysBefore, presetRange, rangeLabel, todayCompact,
+  DEFAULT_PRESET, RANGE_PRESETS, buildLine, calendarDays, daysBefore, parseJalaliRange, presetRange, rangeLabel, todayCompact,
 } from '../core/history-range.mjs';
 
 export {
@@ -46,11 +46,11 @@ export async function fetchRangeUniverse({ from, to }) {
  * `onApply({from,to})` هر بار که بازه عوض شد صدا می‌شود — و یک بار هم در
  * پایان سوار شدن، تا تب لازم نباشد خودش مقدار اولیه را بسازد.
  */
-export function mountHistoryRange(host, { onApply = () => {}, preset = DEFAULT_PRESET, back = 900, initialRange = null } = {}) {
+export function mountHistoryRange(host, { onApply = () => {}, preset = DEFAULT_PRESET, back = 900, initialRange = null, quickEntry = false, compactNote = false } = {}) {
   const today = todayCompact();
   let range = initialRange ? { ...initialRange } : presetRange(preset, today);
   if (initialRange) preset = 'custom';
-  const days = calendarDays(Math.min(daysBefore(today, back), range.from), Math.max(today, range.to));
+  let days = calendarDays(Math.min(daysBefore(today, back), range.from), Math.max(today, range.to));
 
   host.classList.add('hrange');
   host.innerHTML = `
@@ -63,36 +63,72 @@ export function mountHistoryRange(host, { onApply = () => {}, preset = DEFAULT_P
       <button type="button" class="ghost hrange-edit" aria-expanded="false">تغییر تاریخ</button>
     </div>
     <div class="hrange-cals" hidden>
+      ${quickEntry ? `<div class="hrange-direct">
+        <label>از تاریخ شمسی<input class="hrange-direct-from" type="text" placeholder="۱۴۰۳/۰۴/۰۲" dir="ltr"></label>
+        <label>تا تاریخ شمسی<input class="hrange-direct-to" type="text" placeholder="۱۴۰۳/۰۶/۲۸" dir="ltr"></label>
+        <button type="button" class="ghost hrange-direct-apply">اعمال بازه</button>
+        <span class="hrange-direct-error" role="alert"></span>
+      </div>` : ''}
       <div class="hrange-cal"><span class="field-label">از تاریخ</span><div class="hrange-from"></div></div>
       <div class="hrange-cal"><span class="field-label">تا تاریخ</span><div class="hrange-to"></div></div>
     </div>
+    ${compactNote ? '<details class="hrange-market-details"><summary>جزئیات پوشش کل بازار</summary>' : ''}
     <p class="hrange-note"></p>
+    ${compactNote ? '</details>' : ''}
     <p class="hrange-build" hidden></p>`;
 
   const $ = (sel) => host.querySelector(sel);
   const spanEl = $('.hrange-span');
   let fromWheel = null, toWheel = null, quiet = false;
 
-  const paintSpan = () => { spanEl.textContent = rangeLabel(range); };
+  const paintSpan = () => {
+    spanEl.textContent = rangeLabel(range);
+    if (quickEntry) {
+      const labels = rangeLabel(range).split(' تا ');
+      $('.hrange-direct-from').value = labels[0];
+      $('.hrange-direct-to').value = labels[1];
+      $('.hrange-direct-error').textContent = '';
+    }
+  };
 
   const apply = () => { paintSpan(); onApply({ ...range }); };
 
-  fromWheel = mountDateWheel($('.hrange-from'), days, range.from, (value) => {
-    range.from = value;
-    if (range.to < value) toWheel.select(value, false);
-    range.to = Number($('.hrange-to').dataset.value) || range.to;
-    if (quiet) return;
-    $('.hrange-preset').value = 'custom';
-    apply();
-  });
-  toWheel = mountDateWheel($('.hrange-to'), days, range.to, (value) => {
-    range.to = value;
-    if (range.from > value) fromWheel.select(value, false);
-    range.from = Number($('.hrange-from').dataset.value) || range.from;
-    if (quiet) return;
-    $('.hrange-preset').value = 'custom';
-    apply();
-  });
+  function mountCalendars() {
+    fromWheel = mountDateWheel($('.hrange-from'), days, range.from, (value) => {
+      range.from = value;
+      if (range.to < value) toWheel.select(value, false);
+      range.to = Number($('.hrange-to').dataset.value) || range.to;
+      if (quiet) return;
+      $('.hrange-preset').value = 'custom';
+      apply();
+    });
+    toWheel = mountDateWheel($('.hrange-to'), days, range.to, (value) => {
+      range.to = value;
+      if (range.from > value) fromWheel.select(value, false);
+      range.from = Number($('.hrange-from').dataset.value) || range.from;
+      if (quiet) return;
+      $('.hrange-preset').value = 'custom';
+      apply();
+    });
+  }
+  mountCalendars();
+
+  if (quickEntry) {
+    const applyDirect = () => {
+      const parsed = parseJalaliRange($('.hrange-direct-from').value, $('.hrange-direct-to').value, today);
+      $('.hrange-direct-error').textContent = parsed.error || '';
+      if (!parsed.ok) return;
+      range = parsed.range;
+      days = calendarDays(Math.min(daysBefore(today, back), range.from), today);
+      mountCalendars();
+      $('.hrange-preset').value = 'custom';
+      apply();
+    };
+    $('.hrange-direct-apply').addEventListener('click', applyDirect);
+    for (const input of host.querySelectorAll('.hrange-direct input')) input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); applyDirect(); }
+    });
+  }
 
   $('.hrange-preset').addEventListener('change', (event) => {
     const id = event.target.value;
