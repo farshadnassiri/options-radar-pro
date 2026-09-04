@@ -9,7 +9,7 @@ import {
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
-import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { SETTINGS_CHANGED_EVENT } from '/ui/settings-sync.mjs';
@@ -207,12 +207,12 @@ export async function mount(root, { state, api }) {
   </aside>
   <div class="pb-panel" data-panel="setup">
     <section class="card portfolio-controls"><div class="section-head"><div><p class="eyebrow">مرحله اول</p><h2>نماد، نقدشوندگی و دامنه آزمون</h2></div><b id="pb-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
-    <div class="portfolio-form"><label>نماد پایه<select id="pb-base"><option value="">در حال دریافت…</option></select></label><label>دامنه استراتژی<select id="pb-scope"><option value="feasible">فقط استراتژی‌های قابل اجرا</option><option value="all">همه ساختاری، با برچسب غیرقابل اجرا</option></select></label><label>دامنهٔ داده<select id="pb-data-scope">${scopeOptionsMarkup()}</select></label><label>تعداد واحد<input id="pb-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><label>سقف ترکیب هر استراتژی<input id="pb-cap" type="number" min="10" max="1000" step="10" value="120"></label>
+    <div id="pb-range" class="step-first" data-step="۱"></div>
+    <div class="portfolio-form"><label class="step-next" data-step="۲">نماد پایه<select id="pb-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label>دامنه استراتژی<select id="pb-scope"><option value="feasible">فقط استراتژی‌های قابل اجرا</option><option value="all">همه ساختاری، با برچسب غیرقابل اجرا</option></select></label><label>دامنهٔ داده<select id="pb-data-scope">${scopeOptionsMarkup()}</select></label><label>تعداد واحد<input id="pb-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label>
       <label>حداقل ارزش پایه (میلیارد ریال)<input id="pb-base-value" type="number" min="0" step="0.1" value="0"></label><label>حداقل ارزش هر قرارداد (میلیون ریال)<input id="pb-leg-value" type="number" min="0" step="0.1" value="0"></label><label>حداقل حجم پایه<input id="pb-base-volume" type="number" min="0" step="1" value="0"></label><label>حداقل حجم هر قرارداد<input id="pb-leg-volume" type="number" min="0" step="1" value="0"></label>
       <button type="button" class="primary" id="pb-load">دریافت تاریخچه نماد</button></div>
-    <div id="pb-range"></div>
     <p class="live-scope-note" id="pb-scope-note" hidden></p>
-    <p class="portfolio-note">سقف ترکیب برای کنترل زمان اجراست و در گزارش شفاف ثبت می‌شود. «همه استراتژی‌ها» یعنی همه الگوها بررسی می‌شوند؛ تعداد ترکیب قراردادهای هر الگو می‌تواند با این سقف محدود شود.</p>
+    <p class="portfolio-note">سقف ترکیب برداشته شد: هر الگو <b>همهٔ</b> ترکیب‌های ساختاریِ ممکن را می‌سازد و هیچ ردیفی بی‌صدا بریده نمی‌شود. تنها چیزهایی که ردیفی را بیرون می‌گذارند نبودِ قیمت ورود، نبودِ نقدشوندگیِ خواسته‌شده، و پنجرهٔ قیمت اعمالی است که خودت در تنظیمات گذاشته باشی — و هر سه در گزارش شمرده می‌شوند. روی زنجیرهٔ پهن، اجرا می‌تواند چند دقیقه طول بکشد؛ پیشرفت زنده است و دکمهٔ «توقف» هرچه تا آن لحظه ساخته شده را نگه می‌دارد.</p>
   </section>
     <section id="pb-work" hidden>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود همه استراتژی‌ها</h2></div><span id="pb-entry-market">—</span></div><div id="pb-entry-date"></div></section><section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ مقایسه نهایی</h2></div><span id="pb-exit-market">—</span></div><div id="pb-exit-date"></div></section></div>
@@ -226,7 +226,8 @@ export async function mount(root, { state, api }) {
       </div>
       <p class="portfolio-note" id="pb-mark-note">با انتخاب یک ساعت، قیمت خروج هر قرارداد آخرین معاملهٔ پیش از همان لحظه می‌شود و ریزمعاملهٔ روز سنجش گرفته می‌شود. قراردادی که تا آن لحظه معامله نشده قیمت نمی‌گیرد و ترکیب‌های وابسته‌اش از رتبه‌بندی بیرون می‌مانند — قیمت پایانی روز یا قیمت دیروز جایش نمی‌نشیند. حجم و ارزش هم تا همان لحظه شمرده می‌شوند، پس غربال نقدشوندگی روی عدد واقعیِ آن ساعت می‌نشیند نه عدد پایان روز.</p>
     </section>
-    <section class="card portfolio-run"><div><p class="eyebrow">مرحله دوم</p><h2>ساخت و بازپخش دسته‌ای</h2><p>فقط ترکیبی وارد رتبه‌بندی می‌شود که دقیقاً در روز سنجش برای همه پاها قیمت و نقدشوندگی معتبر داشته باشد.</p></div><button type="button" class="primary" id="pb-run">اجرای همه استراتژی‌ها</button></section>
+    <section class="card portfolio-run"><div><p class="eyebrow">مرحله دوم</p><h2>ساخت و بازپخش دسته‌ای</h2><p>فقط ترکیبی وارد رتبه‌بندی می‌شود که دقیقاً در روز سنجش برای همه پاها قیمت و نقدشوندگی معتبر داشته باشد.</p></div><div class="pb-run-actions"><button type="button" class="primary" id="pb-run">اجرای همه استراتژی‌ها</button><button type="button" class="ghost danger" id="pb-stop" hidden>توقف و نگه‌داشتن نتیجهٔ تا اینجا</button></div>
+      <div class="pb-progress" id="pb-progress" hidden><div class="pb-progress-track"><b id="pb-progress-bar" style="--done:0%"></b></div><span id="pb-progress-text">—</span></div></section>
   </section>
   </div>
 
@@ -518,8 +519,9 @@ export async function mount(root, { state, api }) {
   const numCellOf = (value) => (Number.isFinite(value) ? fmt.num(value) : '—');
 
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
+  const baseGate = baseAfterRange(baseSelect);
   let comboFilter = null;
-  let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, seriesSource = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '';
+  let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, seriesSource = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '', lastRunStopped = false;
   let settingsEpoch = 0;
   // تاریخچه با فهرست قراردادهای همان لحظه بارگیری می‌شود. اگر سررسیدی هنگام
   // بارگیری سقف‌پر بوده باشد، سری قراردادهایش اصلاً در `seriesByIns` نیست؛
@@ -680,6 +682,31 @@ export async function mount(root, { state, api }) {
     }
   }
 
+  /**
+   * نوار پیشرفت — دو عدد، نه یکی.
+   *
+   * «۷ از ۳۱ استراتژی» به‌تنهایی دروغِ نرمی است: استراتژی هشتم می‌تواند
+   * به‌اندازهٔ هفت‌تای قبلی طول بکشد، چون کندور آهنی روی همان نردبان
+   * C(n,4) ترکیب دارد و اسپرد عمودی C(n,2). پس نسبتِ درونِ استراتژی هم
+   * گفته می‌شود و خودِ میله از همان ساخته می‌شود.
+   */
+  function paintProgress({ done, total, strategyName, results, comboDone, comboTotal }) {
+    const box = $('pb-progress');
+    box.hidden = false;
+    const within = comboTotal > 0 ? Math.min(1, (comboDone || 0) / comboTotal) : 0;
+    const ratio = total > 0 ? Math.min(1, ((done || 0) + within) / total) : 0;
+    $('pb-progress-bar').style.setProperty('--done', `${(ratio * 100).toFixed(1)}%`);
+    const inner = comboTotal > 0
+      ? ` · ترکیب ${fmt.int(comboDone || 0)} از ${fmt.int(comboTotal)}`
+      : '';
+    $('pb-progress-text').textContent = `${strategyName}: استراتژی ${fmt.int((done || 0) + 1)} از ${fmt.int(total)}${inner} · ${fmt.int(results || 0)} نتیجه معتبر`;
+  }
+
+  function hideProgress() {
+    $('pb-progress').hidden = true;
+    $('pb-stop').hidden = true;
+  }
+
   function runWorker(message) {
     activeWorker?.terminate();
     activeWorker = new Worker('/worker/history-worker.mjs', { type: 'module' });
@@ -689,9 +716,11 @@ export async function mount(root, { state, api }) {
         if (payload.id !== message.id) return;
         if (payload.type === 'portfolio-intraday-progress') {
           setStatus(`قیمت‌گذاری لحظه‌ها: ${fmt.int(payload.done)} از ${fmt.int(payload.total)} · ${fmt.int(payload.priced)} قیمت معتبر`);
+          paintProgress({ done: payload.done, total: payload.total, strategyName: 'قیمت‌گذاری لحظه‌ها', results: payload.priced });
         } else if (payload.type === 'portfolio-intraday') resolve(payload);
         else if (payload.type === 'portfolio-progress') {
           setStatus(`${payload.strategyName}: ${fmt.int(payload.done)} از ${fmt.int(payload.total)} استراتژی · ${fmt.int(payload.results)} نتیجه معتبر`);
+          paintProgress(payload);
         } else if (payload.type === 'portfolio') resolve(payload);
         else if (payload.type === 'error') reject(new Error(payload.error));
       };
@@ -699,6 +728,16 @@ export async function mount(root, { state, api }) {
       activeWorker.postMessage(message);
     });
   }
+
+  // توقف، پیامی است نه `terminate()`: ریسه در جای امن برمی‌گردد و هرچه تا
+  // آن لحظه ساخته شده را با برچسب «ناتمام» تحویل می‌دهد. کشتنِ ریسه همان
+  // کار را با دور ریختنِ نتیجه انجام می‌داد.
+  $('pb-stop').addEventListener('click', () => {
+    $('pb-stop').disabled = true;
+    $('pb-stop').textContent = 'در حال بستنِ اجرا…';
+    setStatus('توقف خواسته شد؛ نتیجهٔ ساخته‌شده تا این لحظه نگه داشته می‌شود.');
+    activeWorker?.postMessage({ type: 'stop' });
+  });
 
   // ═══════════════════ عدسی گزارش ═══════════════════
 
@@ -1679,8 +1718,8 @@ export async function mount(root, { state, api }) {
       ...runs.filter((row) => row.id !== runId),
       { id: runId, label, baseIns: String(ua?.ins ?? ''), rows: payloadRows, matrix: payloadMatrix },
     ].slice(-6);
-    const capped = generated.filter((row) => row.capped).length;
-    $('pb-audit').textContent = `${fmt.int(generated.length)} استراتژی بررسی شد · ${fmt.int(payload.excluded.invalidAtEnd)} ترکیب فاقد داده معتبر روز سنجش · ${fmt.int(capped)} استراتژی سقف‌خورده`;
+    const built = generated.reduce((sum, row) => sum + (Number(row.built) || 0), 0);
+    $('pb-audit').textContent = `${fmt.int(generated.length)} استراتژی بررسی شد · ${fmt.int(built)} ترکیب ساختاری ساخته شد · ${fmt.int(payload.excluded.invalidAtEnd)} ترکیب فاقد داده معتبر روز سنجش${payload.stopped ? ' · اجرا با توقف تو ناتمام ماند' : ' · بی هیچ سقفی'}`;
     // سرشماری قرارداد بالای همه چیز. شمارِ ترکیب بدون شمارِ قرارداد
     // قابل قضاوت نیست و کاربر نباید برای فهمیدنش اجرا را دوباره بزند.
     const censusEl = $('pb-census');
@@ -1976,21 +2015,16 @@ export async function mount(root, { state, api }) {
     return result.series;
   }
 
-  /**
-   * سقفِ ترکیبِ هر استراتژی، پس از کران.
-   *
-   * یک جا حساب می‌شود چون دو جا لازم است: یکی برای اجرا و یکی برای
-   * گزارش. دو نسخهٔ جدا یعنی روزی که کران عوض شود، گزارش از اجرا جدا
-   * می‌افتد — و همین شد: کران `Math.min(1000, …)` فقط در مسیر اجرا بود.
-   */
-  function effectiveCap() {
-    return Math.max(10, Math.min(1000, Math.trunc(safeNum($('pb-cap').value, 120))));
-  }
-
   async function runAll() {
     const startDate = Number($('pb-entry-date').dataset.value), endDate = Number($('pb-exit-date').dataset.value);
     if (!ua || !startDate || !endDate || endDate < startDate) { setStatus('نماد و بازه معتبر را انتخاب کن.', true); return; }
     $('pb-run').disabled = true; hideReport();
+    lastRunStopped = false;
+    $('pb-stop').hidden = false; $('pb-stop').disabled = false;
+    $('pb-stop').textContent = 'توقف و نگه‌داشتن نتیجهٔ تا اینجا';
+    $('pb-progress').hidden = false;
+    $('pb-progress-bar').style.setProperty('--done', '0%');
+    $('pb-progress-text').textContent = 'آماده‌سازی…';
     setStatus('آماده‌سازی اجرای همه استراتژی‌ها…');
     try {
       // ذخیرهٔ تیکی که درست پیش از اجرا زده شده تمام می‌شود و تغییرِ تب
@@ -2003,16 +2037,21 @@ export async function mount(root, { state, api }) {
         id: `portfolio-${Date.now()}`, type: 'portfolio', ua, seriesByIns: runSeries, startDate, endDate,
         entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST',
         units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))), fees: feesOf(state.settings), settings: state.settings,
-        filtered: true, liquidity: liquidity(), maxPerStrategy: effectiveCap(),
+        filtered: true, liquidity: liquidity(),
         includeInfeasible: $('pb-scope').value === 'all',
       });
       if (runEpoch !== settingsEpoch) throw new Error('فهرست سررسیدهای سقف‌پر هنگام اجرا عوض شد؛ آزمون را دوباره اجرا کن.');
-      if (!payload.rows.length) throw new Error('هیچ ترکیبی با قیمت و نقدشوندگی معتبر در هر دو تاریخ پیدا نشد');
+      lastRunStopped = !!payload.stopped;
+      if (!payload.rows.length) {
+        throw new Error(payload.stopped
+          ? 'اجرا پیش از رسیدن به اولین ترکیبِ معتبر متوقف شد'
+          : 'هیچ ترکیبی با قیمت و نقدشوندگی معتبر در هر دو تاریخ پیدا نشد');
+      }
       renderReport(payload);
-      setStatus(`${fmt.int(payload.rows.length)} ترکیب معتبر از ${fmt.int(payload.generatedByStrategy.length)} استراتژی گزارش شد.`);
+      setStatus(`${fmt.int(payload.rows.length)} ترکیب معتبر از ${fmt.int(payload.generatedByStrategy.length)} استراتژی گزارش شد.${payload.stopped ? ' اجرا با توقف تو ناتمام ماند — عددها فقط بخشِ ساخته‌شده را می‌گویند.' : ''}`, false);
       $('pb-tabs').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) { setStatus(errorText(error, 'اجرای دسته‌ای کامل نشد.'), true); }
-    finally { $('pb-run').disabled = false; }
+    finally { $('pb-run').disabled = false; hideProgress(); }
   }
 
   /**
@@ -2079,10 +2118,7 @@ export async function mount(root, { state, api }) {
           entryBasis: HISTORY_BASES.find(([key]) => key === (entryRail.dataset.value || 'LAST'))?.[1] || '',
           exitBasis: HISTORY_BASES.find(([key]) => key === (exitRail.dataset.value || 'LAST'))?.[1] || '',
           units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))),
-          // سقفِ **مؤثر**، نه عددی که تایپ شده. کاربر ۱۰۰۰۰۰۰ زد و اجرا
-          // با ۱۰۰۰ رفت، ولی سرشناسه ۱۰۰۰۰۰۰ نوشت — عددی که هیچ‌جا اعمال
-          // نشده بود.
-          cap: effectiveCap(),
+          stopped: lastRunStopped,
         },
       });
     } catch (error) {
@@ -2316,6 +2352,7 @@ export async function mount(root, { state, api }) {
     const keep = baseSelect.value;
     chain = buildChain(payload.rows || []);
     baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+    baseGate.ready(chain.size);
     for (const item of [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'))) {
       const option = document.createElement('option'); option.value = item.ins; option.textContent = `${nameOf(item, 'نماد پایه')} · ${fmt.int(item.contracts)} قرارداد`; baseSelect.appendChild(option);
     }
@@ -2328,11 +2365,11 @@ export async function mount(root, { state, api }) {
 
   async function loadUniverseForRange(range) {
     rangeJob?.stop();
-    baseSelect.innerHTML = '<option value="">در حال دریافت…</option>';
+    baseGate.loading();
     rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
     try { fillBases(await rangeJob.first); }
     catch (error) {
-      baseSelect.innerHTML = '<option value="">دریافت ناموفق</option>';
+      baseGate.failed();
       setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true);
     }
   }

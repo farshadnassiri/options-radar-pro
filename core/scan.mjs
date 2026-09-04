@@ -19,24 +19,22 @@ import {
   underlyingQuote, legContractSize, comboContractSize,
   blockedExpirySet, expiryBlocked,
 } from './chain.mjs';
-import { selectStrikes, fairShare, enumBudget } from './strike-window.mjs';
+import { selectStrikes } from './strike-window.mjs';
 
 // سررسیدهای پرشده جای اصلی‌شان `core/chain.mjs` است، چون فقط مسیر زنده
 // نیست که به آن نیاز دارد — تحلیل تاریخی و بک‌تست هم باید همان سررسید را
 // کنار بگذارند. اینجا دوباره صادر می‌شود تا مصرف‌کننده‌های قبلی نشکنند.
 export { blockedExpirySet, expiryBlocked };
 
-/** انتخاب k عضوی از فهرست، به ترتیب صعودی. */
-function combos(arr, k, cap) {
+/** انتخاب k عضوی از فهرست، به ترتیب صعودی. بی سقف — همه ساخته می‌شوند. */
+function combos(arr, k) {
   const out = [];
   const pick = (start, acc) => {
-    if (out.length >= cap) return;
     if (acc.length === k) { out.push([...acc]); return; }
     for (let i = start; i < arr.length; i++) {
       acc.push(arr[i]);
       pick(i + 1, acc);
       acc.pop();
-      if (out.length >= cap) return;
     }
   };
   pick(0, []);
@@ -57,8 +55,6 @@ function equalWidth(ks) {
 // نبودنش در این فهرست یعنی نمای «برترین موقعیت‌ها» همیشه «۰ ترکیب ارزیابی
 // شد» گزارش می‌کرد، در حالی که هزاران‌تا ارزیابی شده بود.
 //
-// `capped` عمداً اینجا نیست: بولی است نه عدد، و جمعش معنی ندارد. تجمیعش
-// جداگانه با «یا» انجام می‌شود.
 const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kept',
   'blockedExpiry', 'evaluated', 'outOfWindow'];
 
@@ -85,7 +81,7 @@ export function unexecutableReason(row) {
 }
 
 export function emptyFunnel() {
-  return { built: 0, noQuote: 0, refBasis: 0, noDepth: 0, filtered: 0, kept: 0, blockedExpiry: 0, evaluated: 0, outOfWindow: 0, capped: false };
+  return { built: 0, noQuote: 0, refBasis: 0, noDepth: 0, filtered: 0, kept: 0, blockedExpiry: 0, evaluated: 0, outOfWindow: 0 };
 }
 
 /**
@@ -119,37 +115,26 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
     ? expiries.flatMap((a, i) => expiries.slice(i + 1).map((b) => [a, b]))
     : expiries.map((a) => [a]);
 
-  // سهم برابر هر سررسید از سقف ردیف. بی این، حلقه از نزدیک‌ترین سررسید
-  // شروع می‌کرد و سقف را همان‌جا تمام می‌کرد؛ سررسید دور اصلاً نوبتش
-  // نمی‌رسید و کاربر نبودنش را «قرارداد نیست» می‌خواند.
-  const share = fairShare(s.maxRows, pairs.length, s.maxCombosPerExpiry);
-
+  // هیچ سهم و هیچ سقفی. هر سررسید هرچه ترکیبِ ساختاری دارد می‌سازد و
+  // تنها چیزی که ردیفی را بیرون می‌گذارد، نبودِ مظنه یا خودِ غربال است —
+  // که هر دو در نوار تشخیص شمرده و گفته می‌شوند.
   for (const exSet of pairs) {
-    if (out.length >= s.maxRows) { funnel.capped = true; break; }
     const near = exSet[0];
     // قیمت اعمال باید در همه سررسیدهای این ترکیب موجود باشد
     const shared = near.strikeList.filter((row) => exSet.every((ex) => ex.strikes.has(row.strike)));
-    // سقفِ پنجره بودجهٔ **شمارش** است، نه بودجهٔ خروجی. خروجی را
-    // `made >= share` نگه می‌دارد و آن فقط ترکیبِ پذیرفته‌شده را می‌شمارد؛
-    // اگر پنجره هم همان عدد را بگیرد، پیش از آزمونِ مظنه می‌بُرد و بودجه
-    // صرفِ ترکیب‌هایی می‌شود که بی‌مظنه‌اند و اصلاً برنمی‌گردند.
-    const budget = enumBudget(share);
     const pick = selectStrikes({
-      strikes: shared.map((row) => row.strike), spot, legs: def.strikes, cap: budget,
+      strikes: shared.map((row) => row.strike), spot,
       mode: s.comboWindowMode, pct: s.comboWindowPct, steps: s.comboWindowSteps,
     });
     funnel.outOfWindow += pick.dropped.length;
-    if (pick.forced) funnel.capped = true;
     const inWin = new Set(pick.picked);
     const usable = shared.filter((row) => inWin.has(row.strike));
     if (usable.length < def.strikes) continue;
 
     const ks = usable.map((r) => r.strike);
-    const sets = def.strikes === 1 ? ks.map((k) => [k]) : combos(ks, def.strikes, budget);
+    const sets = def.strikes === 1 ? ks.map((k) => [k]) : combos(ks, def.strikes);
 
-    let made = 0;
     for (const set of sets) {
-      if (made >= share) { funnel.capped = true; break; }
       if (def.strikes >= 3 && s.wingsEqualWidth && !equalWidth(set)) continue;
       funnel.built += 1;
 
@@ -208,7 +193,6 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
       }
 
       if (missing && !s.showUnexecutable) { funnel.noQuote += 1; continue; }
-      made += 1;
       out.push({
         def, legs, quotes,
         underlying: ua.name, uaIns: ua.ins,
@@ -220,7 +204,6 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
         hasQuoteGap: missing,
         needsStock,
       });
-      if (out.length >= s.maxRows) { funnel.capped = true; break; }
     }
   }
   return out;
@@ -328,9 +311,6 @@ export function scanAll({ defs, chain, uaKeys, settings, sigmaByUa = {}, sigmaSo
   for (const def of defs) {
     const res = scan({ def, chain, uaKeys, settings, sigmaByUa, sigmaSourceByUa, qty });
     for (const k of FUNNEL_KEYS) funnel[k] += res.funnel[k] || 0;
-    // «به سقف خورد» بولی است: اگر حتی یک استراتژی به سقف بخورد، نمای کلی
-    // هم به سقف خورده و هشدارش نباید پنهان بماند.
-    if (res.funnel.capped) funnel.capped = true;
     total += res.total;
     rows.push(...res.rows);
   }

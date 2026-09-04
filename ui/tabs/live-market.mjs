@@ -176,6 +176,17 @@ async function legacyMount(root, { state, api }) {
       <div class="live-market-model" id="lm-model"></div><div class="live-market-pick-tools"><input id="lm-search" type="search" placeholder="جست‌وجوی قرارداد"><button type="button" class="ghost" data-lm-pick="top">پرحجم‌ها</button><button type="button" class="ghost" data-lm-pick="call">همه کال</button><button type="button" class="ghost" data-lm-pick="put">همه پوت</button><button type="button" class="ghost" data-lm-pick="none">پاک‌کردن</button><span id="lm-selected"></span></div>
       <div id="lm-contracts" class="live-market-contracts"><p class="empty-note">پس از انتخاب پایه، قراردادهای معامله‌شده اینجا می‌آیند.</p></div><p class="note" id="lm-status" role="status">در انتظار فهرست بازار…</p>
     </section>
+    <!-- هشدارِ شرطی اینجا **تکرار** نمی‌شود.
+         این تب نوارِ معاملهٔ تک‌تکِ قراردادهاست؛ هشدارِ فاصله دربارهٔ
+         ترکیبِ دو یا چند قرارداد است و ریاضی‌اش در «رادار فاصله» زندگی
+         می‌کند، با همان حلقهٔ زندهٔ ده‌ثانیه‌ای. پیاده‌سازیِ دومش اینجا
+         یعنی دو تعریف از یک عدد، و روزی یکی‌شان عقب می‌ماند.
+         آنچه لازم بود، پیدا شدنش بود — چون کاربر همین‌جا دنبالش می‌گردد. -->
+    <section class="card live-market-alert-link">
+      <div class="section-head"><div><p class="eyebrow">هشدار شرطی</p><h3>می‌خواهی به محض رسیدن به عددی خبرت کنم؟</h3></div></div>
+      <p class="note">شرط گذاشتن روی فاصلهٔ اسپرد و استرانگل — عددِ مشخص، درصدِ پرشدن، درصد از کف امروز، یا صدکِ میانگین تاریخی — در تب <b>رادار فاصله</b> است. همان‌جا تیکِ «رصد زندهٔ بازار» را بزن تا هر ده ثانیه سنجیده شود و به محض برقرارشدنِ شرط اعلان بگیری.</p>
+      <a class="ghost" href="#spread-radar">رفتن به رادار فاصله</a>
+    </section>
     <div class="kpis" id="lm-kpis"></div>
     <div class="live-market-chart-grid"><section class="card"><div class="section-head"><h3>تغییر قیمت از اولین معامله امروز</h3><span>مقایسه‌پذیر میان نمادها</span></div><div id="lm-price-chart"></div></section><section class="card"><div class="section-head"><h3>تلاطم ضمنی هر معامله</h3><span>با آخرین پایه در ثانیه قبلی</span></div><div id="lm-iv-chart"></div></section><section class="card live-market-wide"><div class="section-head"><h3>حجم تجمعی از شروع بازار</h3><span>هر خط یک نماد</span></div><div id="lm-volume-chart"></div></section></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">خلاصه انتخاب</p><h3>وضعیت نمادها تا آخرین معامله</h3></div></div><div id="lm-summary"></div></section>

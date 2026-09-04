@@ -7,8 +7,23 @@ import { buildPnlMatrix } from '../core/portfolio-matrix.mjs';
 import { applyIntradayMark, marksAt } from '../core/intraday-mark.mjs';
 import { momentKey, momentsFor } from '../core/intraday-grid.mjs';
 
+// ═══ توقف، به‌جای سقف ═══
+//
+// سقف ترکیب برداشته شد، پس اجرای یک نماد با زنجیرهٔ پهن می‌تواند دقیقه‌ها
+// طول بکشد. جای مهار، همین‌جاست و شکلش «کاربر می‌بیند و خودش می‌بُرد»
+// است نه «برنامه بی‌صدا می‌بُرد».
+//
+// چرا پیام و نه `terminate()`: پایان‌دادن به ریسه، محاسبهٔ نیمه‌تمام را
+// دور می‌ریزد. با پرچم، حلقه در جای امن برمی‌گردد و **هرچه تا آن لحظه
+// ساخته شده** با برچسب «ناتمام» گزارش می‌شود. کاربری که بعد از سه دقیقه
+// توقف می‌زند، سه دقیقه نتیجه دارد، نه هیچ.
+let stopRequested = false;
+
 self.onmessage = (event) => {
   const m = event.data;
+  if (m?.type === 'stop') { stopRequested = true; return; }
+  stopRequested = false;
+  const cancel = () => stopRequested;
   try {
     if (m.type === 'combos') {
       const def = byId(m.defId);
@@ -16,10 +31,12 @@ self.onmessage = (event) => {
       const generated = generateHistoricalCombos({
         def, ua: m.ua, seriesByIns: m.seriesByIns, startDate: m.startDate,
         entryBasis: m.entryBasis, settings: m.settings, filtered: m.filtered,
-        liquidity: m.liquidity,
+        liquidity: m.liquidity, cancel,
       });
       const rows = [];
+      let stoppedAt = generated.stopped;
       for (let i = 0; i < generated.combos.length; i++) {
+        if (stopRequested) { stoppedAt = true; break; }
         const combo = generated.combos[i];
         const replay = replayHistory({
           legs: combo.legs, seriesByIns: m.seriesByIns, baseIns: combo.uaIns,
@@ -49,7 +66,7 @@ self.onmessage = (event) => {
       self.postMessage({
         type: 'combos', id: m.id, rows,
         generated: { built: generated.built, noEntry: generated.noEntry,
-          noLiquidity: generated.noLiquidity, capped: generated.capped },
+          noLiquidity: generated.noLiquidity, stopped: stoppedAt },
       });
       return;
     }
@@ -75,7 +92,9 @@ self.onmessage = (event) => {
       const rows = [];
       const columns = [];
       let priced = 0;
+      let stoppedAt = false;
       for (let index = 0; index < moments.length; index++) {
+        if (stopRequested) { stoppedAt = true; break; }
         const second = moments[index];
         const marks = marksAt(m.tape, second);
         const marked = applyIntradayMark(m.seriesByIns, marks, { date: m.endDate, second });
@@ -107,7 +126,7 @@ self.onmessage = (event) => {
         }
         self.postMessage({ type: 'portfolio-intraday-progress', id: m.id, done: index + 1, total: moments.length, priced });
       }
-      self.postMessage({ type: 'portfolio-intraday', id: m.id, columns, rows, moments: moments.length });
+      self.postMessage({ type: 'portfolio-intraday', id: m.id, columns, rows, moments: moments.length, stopped: stoppedAt });
       return;
     }
 
@@ -116,20 +135,36 @@ self.onmessage = (event) => {
       const rows = [];
       const generatedByStrategy = [];
       let invalidAtEnd = 0, replayErrors = 0;
-      const settings = {
-        ...m.settings,
-        maxRows: Math.max(1, Math.trunc(Number(m.maxPerStrategy) || 120)),
-        maxCombosPerExpiry: Math.max(1, Math.trunc(Number(m.maxPerStrategy) || 120)),
-      };
+      // هیچ سقفی به تنظیمات تزریق نمی‌شود. پیش از این همین‌جا `maxRows` و
+      // `maxCombosPerExpiry` با عدد فرم بازنویسی می‌شدند و ترکیب‌ها را
+      // پیش از دیده‌شدن می‌بریدند.
+      const settings = m.settings;
+      let stoppedAt = false;
       for (let strategyIndex = 0; strategyIndex < definitions.length; strategyIndex++) {
+        if (stopRequested) { stoppedAt = true; break; }
         const def = definitions[strategyIndex];
         const generated = generateHistoricalCombos({
           def, ua: m.ua, seriesByIns: m.seriesByIns, startDate: m.startDate,
           entryBasis: m.entryBasis, settings, filtered: m.filtered,
-          liquidity: m.liquidity,
+          liquidity: m.liquidity, cancel,
         });
+        if (generated.stopped) stoppedAt = true;
         let accepted = 0;
+        let replayed = 0;
         for (const combo of generated.combos) {
+          if (stopRequested) { stoppedAt = true; break; }
+          replayed += 1;
+          // بازپخشِ هر ترکیب گران است و یک استراتژی می‌تواند ده‌ها هزار
+          // ترکیب داشته باشد. بی این خط، نوار پیشرفت بین دو استراتژی
+          // دقیقه‌ها بی‌حرکت می‌ماند و کاربر برنامه را «هنگ‌کرده» می‌خواند.
+          if ((replayed & 511) === 0) {
+            self.postMessage({
+              type: 'portfolio-progress', id: m.id,
+              done: strategyIndex, total: definitions.length,
+              strategyName: def.name, results: rows.length,
+              comboDone: replayed, comboTotal: generated.combos.length,
+            });
+          }
           const replay = replayHistory({
             legs: combo.legs, seriesByIns: m.seriesByIns, baseIns: combo.uaIns,
             startDate: m.startDate, endDate: m.endDate,
@@ -207,12 +242,13 @@ self.onmessage = (event) => {
           built: generated.built, candidates: generated.combos.length, accepted,
           noEntry: generated.noEntry, noLiquidity: generated.noLiquidity,
           outOfWindow: generated.outOfWindow, noPriceStrikes: generated.noPriceStrikes,
-          capped: generated.capped,
+          stopped: generated.stopped || stoppedAt,
         });
         self.postMessage({
           type: 'portfolio-progress', id: m.id,
           done: strategyIndex + 1, total: definitions.length,
           strategyName: def.name, results: rows.length,
+          comboDone: generated.combos.length, comboTotal: generated.combos.length,
         });
       }
       // سرشماری قرارداد، یک بار برای کل جاروب. عددِ ترکیب بدون این عدد
@@ -251,7 +287,7 @@ self.onmessage = (event) => {
         type: 'portfolio', id: m.id, rows,
         report, generatedByStrategy, census,
         matrix: { dates: matrix.dates, pnl: matrix.pnl, rowCount: matrix.rowCount, baseSeries, basePrices },
-        excluded: { invalidAtEnd, replayErrors },
+        excluded: { invalidAtEnd, replayErrors }, stopped: stoppedAt,
       }, [matrix.pnl.buffer]);
       return;
     }

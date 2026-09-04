@@ -3,7 +3,7 @@ import { flattenActiveContracts, historyDateLabel, indexHistory, normalizeHistor
 import { analyzeDailyOpenView, analyzeIntradayOpenView, relationMatrix } from '/core/open-view.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
 import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
-import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -192,8 +192,8 @@ export async function mount(root, { state }) {
   };
   root.innerHTML = `<section class="open-view-hero"><div><p class="eyebrow">نقشه انتظارات بازار اختیار</p><h1>نگاه باز</h1><p>سربه‌سر و نوسان ضمنی همه کال‌ها و پوت‌های یک نماد، جدا برای هر سررسید و با وزن ارزش معامله.</p></div><span>روزانه → جزئیات هر روز</span></section>
   <section class="card open-view-controls"><div class="section-head"><div><p class="eyebrow">مرحله اول</p><h2>نماد و دامنه تحلیل روزانه</h2></div><b id="ov-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
-    <div class="open-view-form"><label>نماد پایه<select id="ov-base"><option value="">در حال دریافت…</option></select></label><label>مبنای روزانه<select id="ov-basis"><option value="CLOSE">قیمت پایانی</option><option value="LAST">آخرین معامله</option><option value="FIRST">اولین معامله</option></select></label><label>از تاریخ<select id="ov-from" disabled></select></label><label>تا تاریخ<select id="ov-to" disabled></select></label><label>سررسید انتخابی<select id="ov-expiry" disabled><option value="">پس از دریافت انتخاب می‌شود</option></select></label><button type="button" class="primary" id="ov-load">دریافت تاریخچه روزانه</button><button type="button" class="ghost" id="ov-excel" disabled>خروجی جامع Excel</button></div>
-    <div id="ov-range"></div>
+    <div id="ov-range" class="step-first" data-step="۱"></div>
+    <div class="open-view-form"><label class="step-next" data-step="۲">نماد پایه<select id="ov-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label>مبنای روزانه<select id="ov-basis"><option value="CLOSE">قیمت پایانی</option><option value="LAST">آخرین معامله</option><option value="FIRST">اولین معامله</option></select></label><label>از تاریخ<select id="ov-from" disabled></select></label><label>تا تاریخ<select id="ov-to" disabled></select></label><label>سررسید انتخابی<select id="ov-expiry" disabled><option value="">پس از دریافت انتخاب می‌شود</option></select></label><button type="button" class="primary" id="ov-load">دریافت تاریخچه روزانه</button><button type="button" class="ghost" id="ov-excel" disabled>خروجی جامع Excel</button></div>
     <div class="open-view-model-settings"><div><p class="eyebrow">فرض‌های مدل بلک–شولز</p><h3>پارامترهای محاسبه نوسان ضمنی</h3><small id="ov-iv-current">—</small></div><div class="open-view-model-grid"><label>نرخ بدون ریسک سالانه ٪<input id="ov-rfree" type="number" min="0" max="200" step="0.1" value="${initialModel.rFreePct}"></label><label>بازده نقدی سالانه ٪<input id="ov-divyield" type="number" min="0" max="100" step="0.1" value="${initialModel.divYieldPct}"></label><label>روزهای سال<input id="ov-year-days" type="number" min="1" max="1000" step="1" value="${initialModel.yearDays}"></label><label>کمینه IV ٪<input id="ov-iv-lo" type="number" min="0.01" max="999" step="0.1" value="${initialModel.ivLoPct}"></label><label>بیشینه IV ٪<input id="ov-iv-hi" type="number" min="0.02" max="1000" step="1" value="${initialModel.ivHiPct}"></label></div><button type="button" class="ghost" id="ov-apply-iv">اعمال پارامترها</button></div>
     <p class="portfolio-note">برای دیدن فرمول، وزن هر قرارداد و نمودار ریز همان روز، روی ردیف روز کلیک کن. قیمت یا ارزش گمشده با مشاهده قبلی پر نمی‌شود.</p>
   </section>
@@ -384,10 +384,12 @@ export async function mount(root, { state }) {
   // گذشته فقط قراردادهای زندهٔ امروز را می‌دید و آن‌هایی که داخل بازهٔ
   // بررسی سررسید شده بودند اصلاً در فهرست نبودند.
   let rangeUi = null, rangeJob = null;
+  const baseGate = baseAfterRange(baseSelect);
 
   function fillBases(payload) {
     const keep = baseSelect.value;
     chain = buildChain(payload.rows || []);
+    baseGate.ready(chain.size);
     const list = [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'));
     baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>' + list.map((item) => `<option value="${esc(item.ins)}">${esc(nameOf(item))} · ${fmt.int(item.contracts)} قرارداد · ${fmt.int(item.expiryList.length)} سررسید</option>`).join('');
     if (keep && chain.has(keep)) baseSelect.value = keep;
@@ -397,10 +399,10 @@ export async function mount(root, { state }) {
 
   async function loadUniverseForRange(range) {
     rangeJob?.stop();
-    baseSelect.innerHTML = '<option value="">در حال دریافت…</option>';
+    baseGate.loading();
     rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
     try { fillBases(await rangeJob.first); }
-    catch (error) { baseSelect.innerHTML = '<option value="">دریافت ناموفق</option>'; setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true); }
+    catch (error) { baseGate.failed(); setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true); }
   }
 
   rangeUi = mountHistoryRange($('ov-range'), { onApply: (range) => loadUniverseForRange(range) });

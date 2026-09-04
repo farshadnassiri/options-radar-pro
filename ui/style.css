@@ -106,12 +106,17 @@
      کادر را «بادکرده» نشان می‌دهد؛ روی صفحه‌ای با ده‌ها کنترل، همان چند
      پیکسل جمع می‌شود. ورودی ۶، جعبه فشرده ۸، کارت ۱۲، پوسته ۱۶. دکمه در
      هیچ‌کدام نیست — دکمه قرص است. */
-  --radius: 12px;
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* ——— گردی، یک پله بازتر از نسخهٔ پیشین ———
+     پوستهٔ شیشه‌ای بدون گردیِ کافی کار نمی‌کند: لبهٔ تیز، شفافیت را «شیشهٔ
+     شکسته» نشان می‌دهد نه «شیشهٔ صیقلی». چون همهٔ اجزا از همین شش توکن
+     می‌خوانند، این هفت خط کلِ زبانِ شکلیِ برنامه را جابه‌جا می‌کند و هیچ
+     جزئی جا نمی‌ماند. */
+  --radius: 16px;
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 13px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
   --radius-pill: 9999px;
   --transition-fast: .15s cubic-bezier(.4, 0, .2, 1);
   --transition-med: .25s cubic-bezier(.4, 0, .2, 1);
@@ -146,6 +151,37 @@
   --fs-chart: 16px;
   --fs-chart-lg: 18.5px;
   --fs-axis: 17px;
+
+  /* ═══════════════════ پوستهٔ شیشه‌ای ═══════════════════
+
+     سه چیز شیشه را می‌سازد و هر سه باید توکن باشند، وگرنه هر جزء نسخهٔ
+     خودش را سرِ هم می‌کند و صفحه از چند شیشهٔ ناهم‌جنس درمی‌آید:
+
+       سطح    نیمه‌شفاف، تا آنچه زیرش است کم‌رنگ دیده شود
+       تاری   `backdrop-filter`، تا آن «زیر» خوانا نماند و نویز نشود
+       لبه    یک خطِ روشن در بالای هر سطح — همان چیزی که مغز آن را
+              «ضخامتِ شیشه» می‌خواند. بی این خط، سطحِ نیمه‌شفاف فقط
+              «کم‌رنگ» است، نه شیشه‌ای.
+
+     شدتِ تاری یک توکن است چون روی سخت‌افزار ضعیف باید بشود پایینش آورد،
+     و چون در پوستهٔ تیره عدد دیگری لازم دارد. */
+  --glass: color-mix(in srgb, #ffffff 62%, transparent);
+  --glass-2: color-mix(in srgb, #ffffff 44%, transparent);
+  --glass-edge: color-mix(in srgb, #0d253d 9%, transparent);
+  --glass-sheen: color-mix(in srgb, #ffffff 85%, transparent);
+  --glass-blur: 20px;
+  --glass-blur-lg: 32px;
+
+  /* ——— نورِ محیط ———
+     سه لکهٔ رنگیِ بسیار کم‌رنگ پشت کل صفحه. کارشان زیبایی نیست: زمینهٔ
+     تخت، شیشه را نامرئی می‌کند — چیزی نیست که از پشتش دیده شود. با این
+     سه، هر سطحِ شیشه‌ای رنگِ زیرش را کمی می‌گیرد و عمق پیدا می‌کند. */
+  --ambient-1: color-mix(in srgb, #533afd 26%, transparent);
+  --ambient-2: color-mix(in srgb, #2c84ff 21%, transparent);
+  --ambient-3: color-mix(in srgb, #e54d97 17%, transparent);
+
+  /* درخششِ دکمهٔ اصلی و حلقهٔ تمرکز — هم‌رنگِ تأکید، نه خاکستری. */
+  --glow-accent: 0 6px 20px -6px color-mix(in srgb, #533afd 55%, transparent);
 
   --lh-tight: 1.5;
   --lh-normal: 1.75;
@@ -203,6 +239,21 @@ body[data-theme="board"] {
   --shadow-md: 0 4px 14px -2px rgba(0, 0, 0, .5), 0 2px 6px -1px rgba(0, 0, 0, .35);
   --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, .6), 0 6px 12px -2px rgba(0, 0, 0, .4);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+
+  /* شیشه در پوستهٔ تیره وارونه است: سطح باید *تیره‌تر* از زمینه باشد نه
+     روشن‌تر، وگرنه شبیه لکهٔ نور می‌شود نه شیشه. لبه اما روشن می‌ماند —
+     همان‌جاست که ضخامت دیده می‌شود. تاری هم بیشتر است چون کنتراستِ زیر
+     سطح در تیره بالاتر است و کم‌تاری، متنِ پشت را خوانا نگه می‌دارد. */
+  --glass: color-mix(in srgb, #121a2e 94%, transparent);
+  --glass-2: color-mix(in srgb, #1b2440 82%, transparent);
+  --glass-edge: color-mix(in srgb, #f6f9fc 12%, transparent);
+  --glass-sheen: color-mix(in srgb, #f6f9fc 10%, transparent);
+  --glass-blur: 24px;
+  --glass-blur-lg: 38px;
+  --ambient-1: color-mix(in srgb, #665efd 34%, transparent);
+  --ambient-2: color-mix(in srgb, #2c84ff 26%, transparent);
+  --ambient-3: color-mix(in srgb, #e54d97 20%, transparent);
+  --glow-accent: 0 8px 26px -8px color-mix(in srgb, #665efd 70%, transparent);
   --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238c9bb1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
 }
 
@@ -3164,6 +3215,622 @@ td.gain, dd.gain { color: var(--gain); }
    هیچ رنگ خامی اینجا نیست؛ همه از توکن می‌آید تا پوستهٔ روشن و تیره
    هر دو با یک تعریف کار کنند.
    ═══════════════════════════════════════════════════════════════════ */
+
+/* ————————————————————————————————————————————————
+   اجرای بی‌سقف: پیشرفت زنده و دکمهٔ توقف.
+   سقف ترکیب برداشته شد، پس اجرا می‌تواند دقیقه‌ها طول بکشد. این دو، جای
+   آن سقف‌اند: کاربر می‌بیند کجای کار است و خودش می‌بُرد.
+   ———————————————————————————————————————————————— */
+.pb-run-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pb-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  font-size: .82rem;
+  color: var(--muted);
+}
+
+.pb-progress-track {
+  flex: 1 1 200px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+
+.pb-progress-track > b {
+  display: block;
+  height: 100%;
+  width: var(--done, 0%);
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width var(--transition-med);
+}
+
+.pb-progress > span { font-variant-numeric: tabular-nums; }
+
+button.ghost.danger { color: var(--loss); border-color: color-mix(in srgb, var(--loss) 35%, transparent); }
+button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
+
+/* ————————————————————————————————————————————————
+   گام یک، گام دو — تاریخ پیش از نماد پایه.
+   فهرست نماد پایه از خودِ بازه ساخته می‌شود، پس بازه اول است. شمارهٔ گام
+   این ترتیب را می‌گوید بی آنکه جمله‌ای لازم باشد، و کشویی نمادِ غیرفعال
+   خودش دلیلِ غیرفعال‌بودنش را در متنش دارد.
+   ———————————————————————————————————————————————— */
+.step-first,
+.step-next { position: relative; }
+
+.step-first::before,
+.step-next::before {
+  content: attr(data-step);
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: -1.9rem;
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  font-size: .72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* زیر ۹۰۰ پیکسل جای حاشیه نیست، پس شماره داخل جریان می‌آید. */
+@media (max-width: 900px) {
+  .step-first::before,
+  .step-next::before { position: static; margin-bottom: var(--space-2); }
+}
+
+.step-next select:disabled {
+  opacity: 1;
+  color: var(--muted);
+  background-color: var(--panel-2);
+  cursor: not-allowed;
+}
+
+/* ————————————————————————————————————————————————
+   رادار فاصله — پوستهٔ تب و اجزای مشترکِ فاصله.
+   قاعده‌ها زیر `.gap-skin` بسته می‌شوند تا چگالیِ این صفحه به صفحه‌های
+   ساده‌تر سرایت نکند؛ همان قاعده‌ای که `.pb-skin` دارد. استثنا سه چیزِ
+   قابل‌استفادهٔ مجدد است — اسپارک‌لاین، نوار پرشدگی و کارت هشدار — که
+   عمداً سراسری‌اند چون در تب‌های دیگر هم می‌نشینند.
+   ———————————————————————————————————————————————— */
+
+/* ——— اسپارک‌لاین: یک path، بی عمر و بی ناظر ——— */
+.spark { display: block; overflow: visible; }
+.spark-empty { color: var(--muted); font-variant-numeric: tabular-nums; }
+.spark-line { fill: none; stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.spark.up .spark-line { stroke: var(--gain); }
+.spark.down .spark-line { stroke: var(--loss); }
+.spark.up .spark-dot { fill: var(--gain); }
+.spark.down .spark-dot { fill: var(--loss); }
+.spark-band { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 3 3; opacity: .5; vector-effect: non-scaling-stroke; }
+
+/* ——— نوار پرشدگی: یک نوار با دو رنگ، چون دو درصد متمم هم‌اند ——— */
+.gap-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 148px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  overflow: hidden;
+  font-size: .74rem;
+  font-variant-numeric: tabular-nums;
+}
+.gap-bar > b {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: var(--fill, 0%);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  transition: width var(--transition-med);
+}
+.gap-bar.over > b { background: color-mix(in srgb, var(--warn) 30%, transparent); }
+.gap-bar > span { position: relative; }
+.gap-bar-filled { color: var(--accent-ink); font-weight: 600; }
+.gap-bar-room { color: var(--muted); }
+.gap-bar-empty { color: var(--muted); justify-content: flex-start; }
+
+/* ——— کارت هشدار: کفِ تضمین‌شده وقتی اعلان مرورگر نیست ——— */
+.gap-alarm-host {
+  position: fixed;
+  inset-block-end: var(--space-5);
+  inset-inline-start: var(--space-5);
+  z-index: 60;
+  display: grid;
+  gap: var(--space-2);
+  width: min(340px, calc(100vw - 2 * var(--space-5)));
+  pointer-events: none;
+}
+.gap-alarm-card {
+  pointer-events: auto;
+  position: relative;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--warn);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  animation: gap-alarm-in var(--transition-smooth);
+}
+@keyframes gap-alarm-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gap-alarm-card { animation: none; }
+}
+.gap-alarm-card header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.gap-alarm-card header b { font-size: .9rem; }
+.gap-alarm-card time { color: var(--muted); font-size: .74rem; font-variant-numeric: tabular-nums; }
+.gap-alarm-card p { margin: var(--space-2) 0 0; font-size: .82rem; }
+.gap-alarm-card p strong { color: var(--accent-ink); }
+.gap-alarm-card small { display: block; margin-top: var(--space-1); color: var(--muted); font-size: .74rem; }
+.gap-alarm-close {
+  position: absolute;
+  inset-block-start: var(--space-2);
+  inset-inline-end: var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.gap-alarm-close:hover { color: var(--ink); }
+
+/* ——— پوستهٔ خودِ تب ——— */
+.gap-skin {
+  --gap-hair: color-mix(in srgb, var(--line) 70%, transparent);
+  --gap-tile: color-mix(in srgb, var(--panel-2) 60%, transparent);
+  display: grid;
+  gap: var(--space-5);
+}
+.gap-skin .gap-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+.gap-skin .gap-hero h1 { margin: var(--space-1) 0; font-size: 1.5rem; }
+.gap-skin .gap-hero p:last-child { max-width: 62ch; color: var(--muted); font-size: .88rem; }
+.gap-skin .gap-hero-tag {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-pill);
+  /* سطحِ خودش را دارد، نه شفافیتِ روی لکهٔ رنگی. سنجش نشان داد روی لکهٔ
+     آبیِ سرصفحه نسبت کنتراست به ۳٫۶۶ می‌رسید — زیر کف ۴٫۵. */
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  color: var(--ink-2);
+  font-size: .76rem;
+  white-space: nowrap;
+}
+.gap-skin .gap-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+  margin-top: var(--space-4);
+}
+.gap-skin .gap-form label { display: grid; gap: var(--space-1); font-size: .78rem; color: var(--muted); }
+.gap-skin .gap-form label.check { display: flex; align-items: center; gap: var(--space-2); }
+.gap-skin .gap-note { margin-top: var(--space-3); color: var(--muted); font-size: .78rem; line-height: 1.75; }
+.gap-skin .gap-verdict { margin: var(--space-3) 0 0; font-size: .84rem; line-height: 1.9; }
+.gap-skin .gap-toolbar { display: flex; align-items: end; gap: var(--space-3); flex-wrap: wrap; }
+.gap-skin .gap-toolbar label { display: grid; gap: var(--space-1); font-size: .76rem; color: var(--muted); }
+.gap-skin .gap-toolbar label.check { display: flex; align-items: center; gap: var(--space-2); }
+.gap-skin .gap-live-state { color: var(--muted); font-size: .74rem; font-variant-numeric: tabular-nums; }
+
+.gap-skin .gap-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+.gap-skin .gap-kpi {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border: 1px solid var(--gap-hair);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.gap-skin .gap-kpi b { color: var(--muted); font-size: .74rem; font-weight: 500; }
+.gap-skin .gap-kpi strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.gap-skin .gap-kpi small { color: var(--muted); font-size: .7rem; line-height: 1.6; }
+
+.gap-skin .gap-table-wrap { overflow-x: auto; margin-top: var(--space-3); }
+.gap-skin .gap-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.gap-skin .gap-table th {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 1;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-weight: 500;
+  text-align: start;
+  white-space: nowrap;
+}
+.gap-skin .gap-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--gap-hair);
+  vertical-align: middle;
+}
+.gap-skin .gap-table tbody tr { cursor: pointer; transition: background var(--transition-fast); }
+.gap-skin .gap-table tbody tr:hover { background: var(--gap-tile); }
+.gap-skin .gap-table tbody tr.live { background: color-mix(in srgb, var(--gain) 5%, transparent); }
+.gap-skin .gap-table td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.gap-skin .gap-table td small { display: block; color: var(--muted); font-size: .68rem; }
+.gap-skin .gap-table td.spark-cell { width: 100px; }
+
+.gap-skin .gap-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
+}
+.gap-skin .gap-chart-wide { grid-column: 1 / -1; }
+.gap-skin .gap-chart { min-height: 260px; margin-top: var(--space-3); }
+.gap-skin .gap-chart-lg { min-height: 340px; }
+
+.gap-skin .gap-rule-form { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.gap-skin .gap-alarm-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); flex-wrap: wrap; }
+.gap-skin .gap-rule-list { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+.gap-skin .gap-rule {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--gap-hair);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.gap-skin .gap-rule.off { opacity: .55; }
+.gap-skin .gap-rule header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.gap-skin .gap-rule header b { font-size: .84rem; }
+.gap-skin .gap-rule header span { color: var(--muted); font-size: .72rem; }
+.gap-skin .gap-rule footer { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }
+.gap-skin .gap-rule footer small { flex: 1 1 auto; color: var(--muted); font-size: .72rem; }
+
+.gap-skin .gap-log { display: grid; gap: var(--space-1); margin-top: var(--space-3); }
+.gap-skin .gap-log-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2) var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--gap-tile);
+  font-size: .78rem;
+}
+.gap-skin .gap-log-row time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.gap-skin .gap-log-row span { font-variant-numeric: tabular-nums; }
+.gap-skin .gap-log-row small { grid-column: 1 / -1; color: var(--muted); font-size: .7rem; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   پوستهٔ شیشه‌ای — بازطراحی ظاهر (خواستهٔ ۱۴۰۵/۰۶/۱۳)
+
+   این بلوک عمداً **آخر** است و عمداً بر پایه‌ها می‌نشیند. جایگزین‌کردنِ
+   خودِ قاعده‌های پایه، چهارهزار خط شیوه‌نامه را دست می‌زد که هر کدامشان
+   یک باگِ حل‌شده پشتش دارد. یک لایه روی همان‌ها، همان ظاهر را عوض می‌کند
+   بی آنکه هیچ‌کدام از آن تصمیم‌ها را دور بریزد — و برگرداندنش هم حذفِ
+   همین یک بلوک است.
+
+   قاعده‌های این لایه سه چیزند و بس: سطح، لبه، و نور. هر چیز دیگری —
+   چیدمان، فاصله، ترتیب — دست‌نخورده می‌ماند.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ——— نورِ محیط ———
+   لایه‌های تصویرِ پس‌زمینهٔ خودِ `body`، نه یک شبه‌عنصر.
+   نسخهٔ اول `body::before` با `z-index: -1` بود. شبه‌عنصرِ منفی **پشتِ
+   زمینهٔ والدش** می‌نشیند، پس تا وقتی body رنگ داشت لکه‌ها دیده نمی‌شدند.
+   رنگ به `html` منتقل شد و لکه‌ها ظاهر شدند — و یک اشکالِ بدتر ساختند که
+   فقط با سنجش پیدا شد: `--ground` پوستهٔ تیره روی
+   `body[data-theme="board"]` تعریف شده، پس `html` هرگز آن را نمی‌بیند و
+   زمینه در پوستهٔ تیره **روشن** می‌ماند. عنوانِ سفیدِ صفحه روی آن به
+   نسبت کنتراست ۱٫۱۸ رسید؛ یعنی عملاً نامرئی.
+   لایه‌بندی روی خودِ body هر دو را با هم حل می‌کند: تصویر روی رنگ می‌نشیند
+   و هر دو از یک عنصر خوانده می‌شوند، پس پوسته درست کار می‌کند و هیچ
+   ترتیبِ لایه‌ای هم لازم نیست.
+   `fixed` است تا با پیمایشِ صحنه حرکت نکند. */
+body {
+  background-color: var(--ground);
+  background-image:
+    radial-gradient(58vw 46vh at 82% -6%, var(--ambient-1), transparent 62%),
+    radial-gradient(52vw 40vh at 8% 12%, var(--ambient-2), transparent 60%),
+    radial-gradient(46vw 44vh at 50% 108%, var(--ambient-3), transparent 62%);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+
+/* صحنه و پوسته باید بگذارند آن نور دیده شود. */
+.stage,
+.shell { background: transparent; }
+
+/* ——— `hidden` باید مخفی کند ———
+   `.subtabs` مقدار `display: flex` می‌گذارد و همان، `display: none` که
+   مرورگر برای صفت `hidden` می‌دهد را می‌شکند. نتیجه‌اش در «رادار فاصله»
+   یک جعبهٔ خالیِ شیشه‌ای بود که پیش از هر بارگذاری وسط صفحه می‌نشست و
+   هیچ‌چیز داخلش نبود — نماگرفت نشانش داد.
+   قاعده عمداً سراسری است: هر جزء دیگری هم که روزی `display` بگیرد، همین
+   دام را دارد. `!important` اینجا درست است چون `hidden` یک ادعای صریحِ
+   نشانه‌گذاری است، نه سلیقهٔ شیوه‌نامه. */
+[hidden] { display: none !important; }
+
+/* ——— نوار بالا ——— */
+.top {
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
+  border-bottom: 1px solid var(--glass-edge);
+  box-shadow: inset 0 1px 0 var(--glass-sheen);
+}
+
+/* ——— ستون استراتژی‌ها ——— */
+.rail {
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--glass-sheen);
+}
+
+/* ——— کارت ———
+   دو سایه، نه یکی: بیرونی عمق می‌دهد و درونیِ بالا، ضخامتِ لبه را. با یک
+   سایه، کارت «شناور» می‌شود ولی شیشه‌ای نه. */
+.card {
+  /* دو لایه: نوارِ نورِ کوتاه در بالای کارت، روی سطحِ نیمه‌شفاف. سطحِ
+     یکدست، حتی نیمه‌شفاف، باز هم «کاغذ» خوانده می‌شود؛ نورِ جهت‌دار است
+     که شیشه‌اش می‌کند.
+     نوار با **پیکسل** تمام می‌شود نه با درصد. نسخهٔ اول درصدی بود
+     (`transparent 42%`) و در کارتِ بلند، آن ۴۲٪ روی متن می‌افتاد: در
+     پوستهٔ تیره کلِ ردیفِ برچسب‌ها زیر یک مهِ خاکستری رفت و «حالت بررسی»
+     و «سررسیدهای قابل بررسی» خاکستری‌روی‌خاکستری شدند. نماگرفتِ پوستهٔ
+     تیره همان را نشان داد. با واحد ثابت، نوار همیشه بالای کارت می‌ماند و
+     به متن نمی‌رسد، کارت هر چه بلند باشد. */
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--glass-sheen) 42%, transparent),
+      transparent 72px),
+    var(--glass);
+  border: 1px solid var(--glass-edge);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-sheen);
+  transition: box-shadow var(--transition-med), border-color var(--transition-med),
+              transform var(--transition-med);
+}
+.card:hover {
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--glass-edge));
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-sheen);
+}
+
+/* ——— دکمهٔ اصلی ———
+   شیب، نه رنگِ تخت. و درخششی هم‌رنگِ خودش، نه سایهٔ خاکستری: سایهٔ خاکستری
+   زیر یک دکمهٔ بنفش، رنگ را کدر می‌کند. */
+.btn, .primary {
+  background: linear-gradient(160deg, var(--accent-2), var(--accent));
+  border: 1px solid color-mix(in srgb, var(--accent-active) 55%, transparent);
+  box-shadow: var(--glow-accent), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 28%, transparent);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast),
+              transform var(--transition-fast), border-color var(--transition-fast);
+}
+.btn:hover, .primary:hover {
+  background: linear-gradient(160deg, var(--accent), var(--accent-hover));
+  box-shadow: var(--glow-accent), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 38%, transparent);
+  transform: translateY(-1px);
+}
+.btn:active, .primary:active {
+  background: linear-gradient(160deg, var(--accent-active), var(--accent));
+  box-shadow: inset 0 2px 6px color-mix(in srgb, var(--accent-active) 55%, transparent);
+  transform: none;
+}
+.btn:disabled, .primary:disabled { box-shadow: none; transform: none; }
+
+/* ——— دکمهٔ دوم و دکمهٔ سبک: شیشه، نه سطحِ پر ——— */
+.ghost, .btn.sec, .btn-sec {
+  background: var(--glass-2);
+  border: 1px solid var(--glass-edge);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  box-shadow: inset 0 1px 0 var(--glass-sheen);
+}
+.ghost:hover, .btn.sec:hover, .btn-sec:hover {
+  background: color-mix(in srgb, var(--accent) 12%, var(--glass-2));
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.ghost[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 18%, var(--glass-2));
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.ghost:disabled:hover { background: var(--glass-2); border-color: var(--glass-edge); }
+
+/* ——— ورودی و کشویی ———
+   ورودی تنها جایی است که شیشه **فرو رفته** است نه برجسته: سایهٔ درونی
+   به‌جای لبهٔ روشن. همین یک وارونگی، «اینجا می‌شود نوشت» را از «اینجا
+   می‌شود فشرد» جدا می‌کند، بی آنکه رنگی اضافه شود. */
+.field input, .field select,
+select, input[type="text"], input[type="search"], input[type="number"], input[type="date"],
+textarea {
+  background-color: var(--glass-2);
+  border: 1px solid color-mix(in srgb, var(--line-input) 60%, transparent);
+  box-shadow: inset 0 1px 3px color-mix(in srgb, var(--ink) 7%, transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.3);
+}
+.field input:focus, .field select:focus,
+select:focus, input[type="text"]:focus, input[type="search"]:focus,
+input[type="number"]:focus, input[type="date"]:focus, textarea:focus {
+  background-color: var(--glass);
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring), inset 0 1px 3px color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.field input:disabled, .field select:disabled,
+select:disabled, input:disabled {
+  background-color: color-mix(in srgb, var(--panel-2) 55%, transparent);
+  box-shadow: none;
+}
+
+/* ——— نشان و تراشه ——— */
+.pill {
+  background: var(--glass-2);
+  border: 1px solid var(--glass-edge);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  box-shadow: inset 0 1px 0 var(--glass-sheen);
+}
+.capacity > summary {
+  background: var(--glass-2);
+  border-color: var(--glass-edge);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+}
+.capacity-panel {
+  background: var(--glass);
+  border-color: var(--glass-edge);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--glass-sheen);
+}
+
+/* ——— نوار زیرتب: کنترلِ قطعه‌ای ——— */
+.subtabs {
+  padding: 4px;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-pill);
+  background: var(--glass-2);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  box-shadow: inset 0 1px 3px color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.subtabs button[aria-selected="true"] {
+  background: linear-gradient(160deg, var(--accent-2), var(--accent));
+  box-shadow: var(--glow-accent), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 28%, transparent);
+}
+
+/* ——— سرستون جدول: نوارِ مه‌آلود ———
+   ردیف‌ها زیرش رد می‌شوند و کم‌رنگ دیده می‌شوند؛ همان چیزی که «این ستون
+   ثابت است» را بی خطِ اضافه می‌گوید. */
+table.data thead th {
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  border-bottom: 1px solid var(--glass-edge);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ——— خانهٔ راستِ سرِ بخش، جای بی‌نهایت متن نیست ———
+   `#gr-status` جمله‌های بلند می‌نویسد («۰ نماد پایه در این بازه؛ …») و در
+   یک `flex` بی‌مهار، عنوان را می‌بلعد و از کارت بیرون می‌زند. سقفِ عرض و
+   اجازهٔ شکستن، هر دو لازم است: بی دومی، جمله در یک خط از کارت می‌زند
+   بیرون. */
+.section-head { flex-wrap: wrap; }
+.section-head > b,
+.section-head > span {
+  flex: 0 1 auto;
+  max-width: min(52ch, 55%);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+/* زیر ۱۱۰۰ پیکسل، خانهٔ راست زیرِ عنوان می‌رود نه کنارش: در آن عرض،
+   ۵۵٪ برای یک جملهٔ وضعیت هنوز باریک است و کلمه‌ها تک‌تک می‌شکنند. */
+@media (max-width: 1100px) {
+  .section-head > b,
+  .section-head > span { max-width: 100%; }
+}
+
+/* پیوندِ هشدار در تب رصد زنده — دکمه‌نما، ولی پیوند است.
+   `a` با کلاس `.ghost` ارتفاع دکمه را از `min-height` می‌گیرد ولی
+   `inline-flex` را نه، چون قاعدهٔ `.ghost` روی `button` نوشته شده بود. */
+.live-market-alert-link a.ghost {
+  display: inline-flex;
+  align-items: center;
+  margin-top: var(--space-3);
+  text-decoration: none;
+}
+
+/* ——— اجزای رادار فاصله، بر همان زبان ——— */
+.gap-skin .gap-kpi,
+.gap-skin .gap-rule {
+  background: var(--glass-2);
+  border-color: var(--glass-edge);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  box-shadow: inset 0 1px 0 var(--glass-sheen);
+}
+.gap-skin .gap-table th {
+  background: var(--glass);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  border-bottom: 1px solid var(--glass-edge);
+}
+.gap-alarm-card {
+  background: var(--glass);
+  border-color: var(--glass-edge);
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--glass-sheen);
+}
+
+/* ——— سه احتیاط ———
+
+   ۱. `backdrop-filter` روی سخت‌افزار ضعیف گران است. کاربری که «حرکت کمتر»
+      را در سیستم‌عاملش خواسته، معمولاً همان کاربر است؛ پس تاری برداشته
+      می‌شود و سطح‌ها پر می‌شوند. خواناییِ متن هیچ تغییری نمی‌کند.
+   ۲. چاپ، شیشه ندارد. سطحِ نیمه‌شفاف روی کاغذ سفید یعنی متنِ کم‌رنگ.
+   ۳. مرورگری که `backdrop-filter` ندارد، سطحِ نیمه‌شفاف را روی هر چیزی
+      که پشتش باشد نشان می‌دهد — یعنی متن روی متن. برای آن، سطح‌ها پرند. */
+@media (prefers-reduced-motion: reduce) {
+  .top, .rail, .card, .ghost, .btn.sec, .btn-sec, .pill, .subtabs,
+  table.data thead th, .capacity > summary, .capacity-panel,
+  .gap-skin .gap-kpi, .gap-skin .gap-rule, .gap-skin .gap-table th, .gap-alarm-card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .card, .top, .rail, .capacity-panel, .gap-alarm-card { background: var(--panel); }
+  .ghost, .btn.sec, .btn-sec, .pill, .subtabs, .capacity > summary,
+  .gap-skin .gap-kpi, .gap-skin .gap-rule { background: var(--panel-2); }
+  table.data thead th, .gap-skin .gap-table th { background: var(--panel-2); }
+  .btn:hover, .primary:hover { transform: none; }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .top, .rail, .card, .capacity-panel, .gap-alarm-card { background: var(--panel); }
+  .ghost, .btn.sec, .btn-sec, .pill, .subtabs, .capacity > summary,
+  .gap-skin .gap-kpi, .gap-skin .gap-rule { background: var(--panel-2); }
+  table.data thead th, .gap-skin .gap-table th { background: var(--panel-2); }
+  /* ورودی‌ها جدا، و با `background-color` نه `background`.
+     میان‌بر `background` تصویرِ پس‌زمینه را هم صفر می‌کند، و فلشِ کشویی
+     دقیقاً یک `background-image` است — پس همین یک خط، در هر مرورگرِ بدونِ
+     `backdrop-filter` فلشِ همهٔ کشویی‌ها را بی‌صدا پاک می‌کرد. نگهبان ۱۱
+     برای همین هست و همین را گرفت. */
+  .field input, .field select, select, input[type="text"], input[type="search"],
+  input[type="number"], input[type="date"], textarea { background-color: var(--panel-2); }
+}
+
+@media print {
+  body { background-image: none; }
+  .top, .rail, .card, .ghost, .btn, .primary, .pill, .subtabs,
+  table.data thead th, .gap-skin .gap-kpi, .gap-skin .gap-rule {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--panel);
+    box-shadow: none;
+  }
+}
 
 .pb-skin {
   --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */

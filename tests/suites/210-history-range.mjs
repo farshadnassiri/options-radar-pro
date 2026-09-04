@@ -196,9 +196,31 @@ group('۲۱۰-ه. هر تبِ تاریخ‌دار از همان بازه می‌
     const src = readSrc(file);
     const name = file.split('/').pop();
     check(`${name} کنترل مشترک بازه را سوار می‌کند`,
-      /import \{ loadRange, mountHistoryRange \} from '\/ui\/history-range\.mjs'/.test(src)
+      /import \{ baseAfterRange, loadRange, mountHistoryRange \} from '\/ui\/history-range\.mjs'/.test(src)
       && src.includes(`mountHistoryRange($('${host}')`)
       && src.includes(`id="${host}"`));
+
+    // ── تاریخ اول، نماد پایه بعد ────────────────────────────────────
+    //
+    // فهرست نماد از خودِ بازه ساخته می‌شود، پس هر بار که تاریخ عوض شود
+    // فهرست از نو ساخته می‌شود و انتخابِ قبلی می‌تواند اصلاً در آن نباشد.
+    // تا امروز این وابستگی در کد بود و در صفحه نبود: «نماد پایه» بالای
+    // کنترل بازه می‌نشست و کاربر اولش نماد را انتخاب می‌کرد.
+    //
+    // سه ادعا، چون یکی‌شان به‌تنهایی دور می‌خورد: ترتیبِ نشانه‌ها در متن،
+    // غیرفعال‌بودنِ کشویی در نشانه‌گذاری اولیه، و اینکه دروازه واقعاً به
+    // مسیرِ بارگذاری وصل باشد نه فقط تعریف شده باشد.
+    const rangeAt = src.indexOf(`id="${host}"`);
+    const baseAt = src.search(/<select id="(pb|bt|h|ov|gw)-base"/);
+    check(`${name} کنترل بازه پیش از کشویی نماد پایه رندر می‌شود`,
+      rangeAt >= 0 && baseAt >= 0 && rangeAt < baseAt,
+      `بازه در ${rangeAt} · نماد در ${baseAt}`);
+    check(`${name} کشویی نماد تا نیامدنِ فهرستِ بازه غیرفعال است`,
+      /<select id="(pb|bt|h|ov|gw)-base" disabled>/.test(src)
+      && /اول بازه را انتخاب کن/.test(src));
+    check(`${name} دروازهٔ نماد به هر سه حالتِ بارگذاری وصل است`,
+      /baseAfterRange\(/.test(src) && /baseGate\.loading\(\)/.test(src)
+      && /baseGate\.failed\(\)/.test(src) && /baseGate\.ready\(/.test(src));
     check(`${name} دیگر فهرست بی‌تاریخِ امروز را نمی‌گیرد`,
       !/fetch\('\/api\/history\/universe'\)/.test(src));
     check(`${name} شمار سررسیدشدهٔ بازه را به کاربر می‌گوید`,

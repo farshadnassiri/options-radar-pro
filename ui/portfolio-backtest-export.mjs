@@ -124,7 +124,8 @@ export function portfolioBacktestWorkbook(analysis, {
     ['مبنای قیمت ورود', context.entryBasis ?? ''],
     ['مبنای قیمت خروج', context.exitBasis ?? ''],
     ['تعداد واحد', cell(context.units)],
-    ['سقف ترکیب هر استراتژی', cell(context.cap)],
+    ['سقف ترکیب هر استراتژی', 'برداشته شده — همهٔ ترکیب‌های ساختاری ساخته می‌شوند'],
+    ['اجرای ناتمام', context.stopped ? 'بله — با دکمهٔ توقف بریده شد' : 'خیر'],
     ['—', ''],
     ['مبنای بازده', analysis.basis?.label ?? ''],
     ['تعریف مبنا', analysis.basis?.hint ?? ''],
@@ -309,8 +310,8 @@ export function portfolioBacktestWorkbook(analysis, {
   const limitRows = [
     ['ترکیب فاقد مخرج یا پایان معتبر', cell(analysis.unusable), 'وارد هیچ آماره‌ای نشده'],
     ['ترکیبِ زیانِ بیش از مبنا', cell(analysis.beyondBasis), 'عدد بریده نشده؛ در فروش برهنه زیان سقف ندارد ولی مخرج دارد'],
-    ['استراتژی سقف‌خورده', cell((generated || []).filter((row) => row.capped).length),
-      'ترکیب‌هایشان با سقفِ خودت بریده شد — نه با پنجره. سقف ترکیب هر استراتژی را بالا ببر تا کامل شود.'],
+    ['استراتژی ناتمام‌مانده', cell((generated || []).filter((row) => row.stopped).length),
+      'اجرای این‌ها با دکمهٔ توقف نیمه‌کاره ماند. بدون توقف، هیچ استراتژی‌ای ناقص نمی‌ماند — سقف ترکیب برداشته شده.'],
     ['استراتژی بدون ترکیب معتبر', cell((generated || []).filter((row) => !row.accepted).length), 'در این بازه هیچ ترکیبی از آن‌ها داده کامل نداشت'],
     ['سری فقط یک‌سمته', cell(census?.incomplete), 'فقط کال دارد یا فقط پوت؛ هیچ استراتژی دوسمته‌ای از آن ساخته نمی‌شود و هیچ سمتی هم برایش ساختگی تولید نشده'],
     ['قرارداد بی‌قیمت در روز ورود', cell((census?.silent ?? 0) + (census?.unseen ?? 0)), 'آن روز معامله نشد یا تا آن روز هیچ سابقه‌ای نداشت؛ بدون قیمت ورود، ترکیب ساخته نمی‌شود'],
@@ -341,7 +342,7 @@ export function portfolioBacktestWorkbook(analysis, {
   ]);
   const windowRows = (census?.windows || []).map((win) => [
     cell(win.legs), cell(win.kept), cell(win.dropped),
-    win.dropped ? (win.forced ? 'سقف ترکیب مجبور کرد' : 'بیرون پنجرهٔ انتخابی') : 'چیزی کنار نرفت',
+    win.dropped ? 'بیرون پنجرهٔ انتخابیِ خودت' : 'چیزی کنار نرفت',
   ]);
 
   return [

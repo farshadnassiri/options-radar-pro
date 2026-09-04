@@ -41,8 +41,6 @@
   "maxSpreadPct": 100,
   "minReturnPct": 0,
   "comboWindowPct": 25,
-  "maxCombosPerExpiry": 400,
-  "maxRows": 4000,
   "wingsEqualWidth": true,
   "greeksInScan": false,
   "rankBy": "retMonthPct",

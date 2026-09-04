@@ -33,7 +33,7 @@ import { mountDateWheel } from '/ui/datewheel.mjs';
 import { mountSubtabs } from '/ui/subtabs.mjs';
 import { chart, LEG_COLORS } from '/ui/track-chart.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
-import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { takeHandoff } from '/ui/handoff.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -139,14 +139,14 @@ export async function mount(root, { state }) {
   <section class="backtest-hero"><div><p class="eyebrow">حساسیت، نه سود</p><h1>رصد یونانی و تلاطم</h1><p>یک موقعیت را از روز ایجاد تا روز بسته‌شدن، فقط با پنج یونانی و دو تلاطم دنبال کن — برای هر پا جدا و برای کل موقعیت.</p></div><span>هر عدد از قیمت مشاهده‌شده</span></section>
 
   <section class="card backtest-setup"><div class="section-head"><div><p class="eyebrow">گام اول</p><h2>موقعیتی که می‌خواهی رصد کنی</h2></div><b id="gw-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
+    <div id="gw-range" class="step-first" data-step="۱"></div>
     <div class="backtest-form">
-      <label>نماد پایه<select id="gw-base"><option value="">در حال دریافت…</option></select></label>
+      <label class="step-next" data-step="۲">نماد پایه<select id="gw-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label>
       <label>استراتژی<select id="gw-strategy"></select></label>
       <label>تعداد واحد<input id="gw-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label>
       <label>دامنهٔ داده<select id="gw-scope">${scopeOptionsMarkup()}</select></label>
       <button type="button" class="primary" id="gw-load">دریافت تاریخچه</button>
     </div>
-    <div id="gw-range"></div>
     <p class="backtest-table-note" id="gw-scope-note" hidden></p>
   </section>
 
@@ -258,10 +258,12 @@ export async function mount(root, { state }) {
   // گذشته فقط قراردادهای زندهٔ امروز را می‌دید و آن‌هایی که داخل بازهٔ
   // بررسی سررسید شده بودند اصلاً در فهرست نبودند.
   let rangeUi = null, rangeJob = null;
+  const baseGate = baseAfterRange($('gw-base'));
 
   function fillBases(payload) {
     const keep = $('gw-base').value;
     chain = buildChain(payload.rows || []);
+    baseGate.ready(chain.size);
     $('gw-base').innerHTML = '<option value="">نماد پایه را انتخاب کن</option>'
       + [...chain.values()].sort((a, b) => a.name.localeCompare(b.name, 'fa'))
         .map((item) => `<option value="${esc(item.ins)}">${esc(nameOf(item, 'دارایی پایه'))} — ${fmt.int(item.contracts)} قرارداد</option>`).join('');
@@ -274,11 +276,11 @@ export async function mount(root, { state }) {
   async function loadUniverse(range = rangeUi?.range) {
     if (!range) return;
     rangeJob?.stop();
-    $('gw-base').innerHTML = '<option value="">در حال دریافت…</option>';
+    baseGate.loading();
     rangeJob = loadRange(range, rangeUi, { onUpdate: fillBases });
     try { fillBases(await rangeJob.first); }
     catch (error) {
-      $('gw-base').innerHTML = '<option value="">دریافت ناموفق</option>';
+      baseGate.failed();
       setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true);
     }
   }
