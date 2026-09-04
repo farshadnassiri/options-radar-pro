@@ -46,10 +46,11 @@ export async function fetchRangeUniverse({ from, to }) {
  * `onApply({from,to})` هر بار که بازه عوض شد صدا می‌شود — و یک بار هم در
  * پایان سوار شدن، تا تب لازم نباشد خودش مقدار اولیه را بسازد.
  */
-export function mountHistoryRange(host, { onApply = () => {}, preset = DEFAULT_PRESET, back = 900 } = {}) {
+export function mountHistoryRange(host, { onApply = () => {}, preset = DEFAULT_PRESET, back = 900, initialRange = null } = {}) {
   const today = todayCompact();
-  const days = calendarDays(daysBefore(today, back), today);
-  let range = presetRange(preset, today);
+  let range = initialRange ? { ...initialRange } : presetRange(preset, today);
+  if (initialRange) preset = 'custom';
+  const days = calendarDays(Math.min(daysBefore(today, back), range.from), Math.max(today, range.to));
 
   host.classList.add('hrange');
   host.innerHTML = `

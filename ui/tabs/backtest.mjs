@@ -23,6 +23,8 @@ import { tehranDateNumber } from '/core/live-day.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
+import { handoffRange } from '/ui/handoff.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { chart, LEG_COLORS } from '/ui/track-chart.mjs';
@@ -35,7 +37,6 @@ const nameOf = (entity, fallback = 'بدون نام') => {
   return value && value !== String(entity?.ins || '') ? value : fallback;
 };
 const dateLabel = (value) => faDigits(historyDateLabel(value));
-const chunks = (list, size) => Array.from({ length: Math.ceil(list.length / size) }, (_, index) => list.slice(index * size, (index + 1) * size));
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 
 // پارامترهای تلاطم ضمنی، فقط برای همین تب.
@@ -346,20 +347,18 @@ export async function mount(root, { state }) {
     return found;
   }
 
-  async function loadHistory() {
+  async function loadHistory({ requiredIns = [] } = {}) {
+    entryDates = [];
     ua = chain.get(baseSelect.value);
     if (!ua) { setStatus('ابتدا نماد پایه را انتخاب کن.', true); return; }
     contracts = flattenActiveContracts(ua, state.settings.blockedExpiries);
     const codes = [...new Set([String(ua.ins), ...contracts.map((contract) => String(contract.ins))])];
     $('bt-load').disabled = true; setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
     try {
-      const payloads = await Promise.all(chunks(codes, 70).map(async (part) => {
-        const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0`), payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
-        return payload;
-      }));
-      seriesByIns = {};
-      for (const payload of payloads) for (const [ins, value] of Object.entries(payload)) seriesByIns[ins] = value.rows || [];
+      const loaded = await loadHistoricalDailies(codes, ua.ins);
+      seriesByIns = loaded.seriesByIns;
+      const failed = [String(ua.ins), ...requiredIns.map(String)].filter((ins) => loaded.errors[ins]);
+      if (failed.length) throw new Error(`دریافت تاریخچه ناموفق بود: ${failed.map((ins) => `${nameOf(contracts.find((contract) => String(contract.ins) === ins) || ua)}: ${loaded.errors[ins]}`).join('؛ ')}`);
       entryDates = await findExecutableDates();
       if (!entryDates.length) throw new Error('با این نماد و استراتژی روز قابل‌اجرایی پیدا نشد');
       $('bt-work').hidden = false;
@@ -1068,7 +1067,7 @@ export async function mount(root, { state }) {
     $('bt-units').value = String(plan.units);
     setRail(entryRail, plan.entryBasis); setRail(exitRail, plan.exitBasis);
 
-    await loadHistory();
+    await loadHistory({ requiredIns: plan.legIns });
     if (!entryDates.length) return;
     // «خودکار» یعنی ردیف زنده تاریخ نداشت. بلندترین بازهٔ موجودِ همین ترکیب
     // برداشته می‌شود: قدیمی‌ترین روزِ دارای ترکیب معتبر. حدس‌زدن یک بازهٔ
@@ -1254,7 +1253,7 @@ export async function mount(root, { state }) {
     catch (error) { baseSelect.innerHTML = '<option value="">دریافت ناموفق</option>'; setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true); }
   }
 
-  rangeUi = mountHistoryRange($('bt-range'), { onApply: (range) => loadUniverseForRange(range) });
+  rangeUi = mountHistoryRange($('bt-range'), { initialRange: handoffRange(state.handoff), onApply: (range) => loadUniverseForRange(range) });
   await loadUniverseForRange(rangeUi.range);
 
   // تحویل عمر یک کلیک دارد: همین‌جا برداشته و پاک می‌شود تا باز کردن دوباره
@@ -1265,5 +1264,5 @@ export async function mount(root, { state }) {
     if (chain.size) await applyHandoff(plan);
   }
 
-  return () => { clearInterval(liveTimer); };
+  return () => { clearInterval(liveTimer); rangeJob?.stop(); };
 }

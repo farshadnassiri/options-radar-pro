@@ -14,6 +14,15 @@
 // تازه‌ترین روزِ دارای قیمت کامل. حدس‌زدن یک بازهٔ ثابت از اینجا، بازه‌ای
 // می‌ساخت که ممکن است برای این قرارداد اصلاً وجود نداشته باشد.
 
+import { normalizeHistoryDate } from '../core/history.mjs';
+
+/** بازهٔ مقصد پیش از گرفتن فهرست قراردادها از تاریخ‌های مبدأ تعیین می‌شود. */
+export function handoffRange(plan) {
+  if (plan?.to !== 'backtest') return null;
+  const from = normalizeHistoryDate(plan.entryDate), to = normalizeHistoryDate(plan.exitDate);
+  return from && to && from <= to ? { from, to } : null;
+}
+
 const legIns = (row) => (row.__legs || [])
   .filter((leg) => leg.kind !== 'underlying' && leg.ins)
   .map((leg) => String(leg.ins));
