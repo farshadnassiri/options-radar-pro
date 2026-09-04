@@ -3752,6 +3752,16 @@ table.data thead th {
   .section-head > span { max-width: 100%; }
 }
 
+/* پیوندِ هشدار در تب رصد زنده — دکمه‌نما، ولی پیوند است.
+   `a` با کلاس `.ghost` ارتفاع دکمه را از `min-height` می‌گیرد ولی
+   `inline-flex` را نه، چون قاعدهٔ `.ghost` روی `button` نوشته شده بود. */
+.live-market-alert-link a.ghost {
+  display: inline-flex;
+  align-items: center;
+  margin-top: var(--space-3);
+  text-decoration: none;
+}
+
 /* ——— اجزای رادار فاصله، بر همان زبان ——— */
 .gap-skin .gap-kpi,
 .gap-skin .gap-rule {
