@@ -340,7 +340,7 @@ export async function mount(root, { state }) {
     const found = [];
     for (let index = 0; index < baseDates.length; index++) {
       const date = baseDates[index];
-      const generated = generateHistoricalCombos({ def, ua, seriesByIns, startDate: date, entryBasis: basis, settings: { ...state.settings, maxRows: 1 }, filtered: true });
+      const generated = generateHistoricalCombos({ def, ua, seriesByIns, startDate: date, entryBasis: basis, settings: state.settings, filtered: true, probe: true });
       if (generated.combos.length) found.push(date);
       if (index % 10 === 0) { setStatus(`سنجش روزهای قابل اجرا: ${fmt.int(index + 1)} از ${fmt.int(baseDates.length)}`); await nextFrame(); }
     }

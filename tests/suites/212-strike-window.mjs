@@ -25,7 +25,7 @@ import { jalaliToGregorian } from '../../core/jalali.mjs';
 import { scan as scanFn } from '../../core/scan.mjs';
 import { defaults } from '../../core/settings.mjs';
 import {
-  DEFAULT_WINDOW_MODE, WINDOW_MODES, comboCount, fairShare,
+  DEFAULT_WINDOW_MODE, WINDOW_MODES, comboCount,
   selectStrikes, windowMode, windowNote,
 } from '../../core/strike-window.mjs';
 import { byId } from '../../strategies/catalog.mjs';
@@ -52,86 +52,66 @@ group('۲۱۲-ب. انتخاب قیمت اعمال');
   const ladder = [26, 28, 30, 34, 38, 42, 46, 50, 56, 62, 68, 74].map((k) => k * 1000);
   const spot = 52646;
 
-  // ── تک‌پا: پنجره هیچ کاری ندارد و نباید بکند ─────────────────────────
-  const solo = selectStrikes({ strikes: ladder, spot, legs: 1, cap: 400 });
-  check('استراتژی تک‌پا: هیچ قیمت اعمالی کنار نمی‌رود',
-    solo.picked.length === 12 && solo.dropped.length === 0 && solo.forced === false,
+  // ── خودکار: هیچ‌چیز کنار نمی‌رود، برای هیچ شمار پایی ────────────────
+  //
+  // این چهار ادعا با هم، تضمینِ «سقف ترکیب برداشته شد» را می‌سازند. پیش
+  // از این، همین ورودی با سقفِ ۴۰ سه قیمت اعمال را کنار می‌گذاشت و
+  // کاربر هرگز نمی‌فهمید کدام‌ها.
+  const solo = selectStrikes({ strikes: ladder, spot });
+  check('حالت خودکار: هیچ قیمت اعمالی کنار نمی‌رود',
+    solo.picked.length === 12 && solo.dropped.length === 0,
     `${solo.picked.length} ماند`);
-
-  // ── چهارپا زیر سقف تنگ: کنار می‌رود، ولی از دورترین ──────────────────
-  const tight = selectStrikes({ strikes: ladder, spot, legs: 4, cap: 40 });
-  check('سقف تنگ، قیمت اعمال کنار می‌گذارد و «اجباری» علامت می‌خورد',
-    tight.forced === true && tight.dropped.length > 0);
-  check('و همان‌قدر که لازم است، نه بیشتر — تعداد نهایی زیر سقف می‌نشیند',
-    comboCount(tight.picked.length, 4) <= 40 && comboCount(tight.picked.length + 1, 4) > 40,
-    `${tight.picked.length} قیمت اعمال → ${comboCount(tight.picked.length, 4)} ترکیب`);
-  const far = Math.max(...tight.dropped.map((k) => Math.abs(k - spot)));
-  const near = Math.max(...tight.picked.map((k) => Math.abs(k - spot)));
-  check('کنارگذاشته‌ها دورترین‌ها از قیمت پایه‌اند، نه دلخواه',
-    far >= near, `دورترینِ مانده ${near} · نزدیک‌ترینِ رفته ${far}`);
-  check('هیچ قیمت اعمالی ساخته نمی‌شود؛ خروجی زیرمجموعهٔ ورودی است',
-    tight.picked.every((k) => ladder.includes(k))
-    && tight.picked.length + tight.dropped.length === ladder.length);
+  check('و خروجی زیرمجموعهٔ ورودی است — هیچ قیمت اعمالی ساخته نمی‌شود',
+    solo.picked.every((k) => ladder.includes(k)) && solo.picked.join(',') === ladder.join(','));
+  check('نتیجه به شمار پا وابسته نیست: چهار پا هم همان دوازده‌تا را می‌گیرد',
+    selectStrikes({ strikes: ladder, spot }).picked.length === 12
+    && comboCount(12, 4) === 495,
+    `C(12,4) = ${comboCount(12, 4)} ترکیب، و هیچ‌کدام بریده نمی‌شود`);
+  check('بی قیمت پایه هم چیزی حذف نمی‌شود',
+    selectStrikes({ strikes: ladder, spot: 0 }).dropped.length === 0);
 
   // ── درصد ثابت: همان رفتار پیشین، دست‌نخورده ─────────────────────────
-  const pct = selectStrikes({ strikes: ladder, spot, legs: 2, cap: 400, mode: 'pct', pct: 25 });
+  const pct = selectStrikes({ strikes: ladder, spot, mode: 'pct', pct: 25 });
   check('حالت درصد ثابت دقیقاً همان پنج قیمت اعمال قدیمی را می‌دهد',
     pct.picked.join(',') === [42000, 46000, 50000, 56000, 62000].join(','),
     pct.picked.join('،'));
-  check('و درصد ثابت هرگز «اجباری» نیست — سلیقهٔ کاربر است، نه سقف',
-    pct.forced === false && pct.dropped.length === 7);
+  check('و کنارگذاشتنش خواستهٔ خودِ کاربر است، نه سقف',
+    pct.dropped.length === 7 && pct.reason === 'pct');
 
   // ── بی‌پنجره ─────────────────────────────────────────────────────────
-  const all = selectStrikes({ strikes: ladder, spot, legs: 4, cap: 10, mode: 'all' });
-  check('حالت «همه» حتی زیر سقفِ خفه‌کننده هم چیزی کنار نمی‌گذارد',
-    all.picked.length === 12 && all.dropped.length === 0);
+  const all = selectStrikes({ strikes: ladder, spot, mode: 'all' });
+  check('حالت «همه» با خودکار یکی است — هر دو کل نردبان را می‌دهند',
+    all.picked.join(',') === solo.picked.join(',') && all.dropped.length === 0);
 
   // ── شمار پله ─────────────────────────────────────────────────────────
-  const steps = selectStrikes({ strikes: ladder, spot, legs: 2, cap: 400, mode: 'steps', steps: 3 });
+  const steps = selectStrikes({ strikes: ladder, spot, mode: 'steps', steps: 3 });
   check('سه پله هر طرف یعنی شش قیمت اعمال حول پایه',
     steps.picked.join(',') === [42000, 46000, 50000, 56000, 62000, 68000].join(','),
     steps.picked.join('،'));
 
-  // ── بی‌قیمتِ پایه هیچ «دور»ی تعریف نمی‌شود ───────────────────────────
-  const blind = selectStrikes({ strikes: ladder, spot: 0, legs: 4, cap: 5 });
-  check('بی قیمت پایه، هیچ قراردادی با حدسِ مرکز حذف نمی‌شود',
-    blind.dropped.length === 0 && blind.reason === 'noSpot');
-
-  // ── گره‌گشاییِ اعلام‌شده ─────────────────────────────────────────────
-  //
-  // ۴۶ و ۵۴ از پایهٔ ۵۰ دقیقاً هم‌فاصله‌اند و یکی باید برود. قاعده اعلام
-  // شده: بالاتری. بی این ادعا، تصمیم به پایداریِ `sort` واگذار بود —
-  // درست کار می‌کرد ولی هیچ آزمونی نمی‌گفت کدام‌یک باید برود.
-  const tie = [46, 48, 50, 52, 54].map((k) => k * 1000);
-  const cut = selectStrikes({ strikes: tie, spot: 50000, legs: 2, cap: 6 });
-  check('در فاصلهٔ برابر، بالاتری کنار می‌رود — قاعده‌ای اعلام‌شده، نه اتفاقی',
-    cut.dropped.join(',') === '54000', cut.dropped.join('،'));
-  check('و ترتیب ورودی، که پیش از انتخاب مرتب می‌شود، اثری ندارد',
-    selectStrikes({ strikes: [...tie].reverse(), spot: 50000, legs: 2, cap: 6 }).picked.join(',')
-    === cut.picked.join(','));
-
-  // ── مرزِ دقیقِ سقف ────────────────────────────────────────────────────
-  //
-  // وقتی C(n,k) دقیقاً برابر سقف است، باید بماند نه اینکه یک پله دیگر هم
-  // بریده شود. با ۱۲ قیمت اعمال و دو پا، سقفِ ۳۶ یعنی دقیقاً ۹ تا.
-  const edge = selectStrikes({ strikes: ladder, spot, legs: 2, cap: 36 });
-  check('سقفِ دقیقاً برابر، یک پله اضافه نمی‌بُرد',
-    edge.picked.length === 9 && comboCount(9, 2) === 36, `${edge.picked.length} قیمت اعمال`);
-
-  check('جملهٔ پنجره، «اجباری» را از «انتخابی» جدا می‌گوید',
-    windowNote(tight).includes('سقف') && windowNote(pct).includes('پنجرهٔ انتخابی')
-    && windowNote(solo).includes('همهٔ'));
+  check('جملهٔ پنجره دیگر هیچ‌جا از «سقف» حرف نمی‌زند',
+    !windowNote(solo).includes('سقف') && !windowNote(pct).includes('سقف')
+    && windowNote(pct).includes('پنجرهٔ انتخابی') && windowNote(solo).includes('همهٔ'),
+    `${windowNote(solo)} · ${windowNote(pct)}`);
 }
 
 
-group('۲۱۲-ج. سهم برابر هر سررسید');
+group('۲۱۲-ج. هیچ سقفی در کد نمانده');
 {
-  check('سقف ۱۲۰ روی سه سررسید یعنی ۴۰ برای هرکدام',
-    fairShare(120, 3, 120) === 40, `${fairShare(120, 3, 120)}`);
-  check('سقفِ خودِ سررسید اگر تنگ‌تر باشد، همان می‌ماند',
-    fairShare(4000, 2, 50) === 50);
-  check('هیچ سررسیدی سهم صفر نمی‌گیرد — حذفِ خاموش همین بود',
-    fairShare(2, 10, 400) === 1 && fairShare(0, 0, 0) >= 1);
+  // نگهبانِ متنی. یک ادعای رفتاری کافی نیست: سقف در چهار فایل بود و
+  // برگشتنِ هرکدامشان بی‌صداست. این دو، برگشتن را قرمز می‌کنند.
+  const win = readSrc('../core/strike-window.mjs');
+  check('`strike-window` دیگر نه سهم دارد نه بودجه نه پرچمِ اجباری',
+    !/fairShare|enumBudget|ENUM_HEADROOM/.test(win) && !/\bforced\b/.test(win));
+  const hist = readSrc('../core/history.mjs');
+  check('ترکیب‌سازِ تاریخی نه `maxRows` می‌خواند نه `maxCombosPerExpiry`',
+    !/maxRows|maxCombosPerExpiry/.test(hist));
+  const scanSrc = readSrc('../core/scan.mjs');
+  check('مسیر زنده هم همان‌طور — و سطلِ «سقف‌خورده» برداشته شد',
+    !/maxRows|maxCombosPerExpiry|capped/.test(scanSrc));
+  const worker = readSrc('../worker/history-worker.mjs');
+  check('ریسه دیگر سقفی به تنظیمات تزریق نمی‌کند، و به‌جایش توقف دارد',
+    !/maxPerStrategy/.test(worker) && /stopRequested/.test(worker));
 }
 
 
@@ -169,8 +149,8 @@ group('۲۱۲-د. اهرم ۱۴۰۵/۰۶/۰۱ — استرانگل فروش');
     }
   }
   const ua = buildChain(rows, defaults()).get('9');
-  // همان سقفی که کاربر داشت: ۱۲۰ ترکیب برای هر استراتژی.
-  const base = { ...defaults(), maxRows: 120, maxCombosPerExpiry: 120 };
+  // هیچ سقفی. همان تنظیماتِ پیش‌فرض، که دیگر کلیدِ سقف ندارد.
+  const base = defaults();
   const def = byId('short-strangle');
   const run = (settings) => generateHistoricalCombos({
     def, ua, seriesByIns: series, startDate: ENTRY, entryBasis: 'CLOSE', settings,
@@ -182,25 +162,25 @@ group('۲۱۲-د. اهرم ۱۴۰۵/۰۶/۰۱ — استرانگل فروش');
   check('و ۲۱ قیمت اعمالِ کنارگذاشته را دیگر ساکت نمی‌گذارد',
     pct.outOfWindow === 21, `${pct.outOfWindow}`);
 
+  // ═══ همان اجرا، بی سقف ═══
+  //
+  // پیش از این همین ورودی با سقفِ ۱۲۰، **۱۲۰** ترکیب می‌داد و کاربر
+  // نمی‌دانست ۱۹۹ تا وجود داشت. حالا هر سه سررسید کاملِ C(n,2) خودشان را
+  // می‌دهند: ۶۶ + ۷۸ + ۵۵ = ۱۹۹. عدد از خودِ ریاضی می‌آید، نه از اجرا.
   const auto = run({ ...base, comboWindowMode: 'auto' });
-  check('حالت خودکار با همان سقف، چهاربرابرِ درصد ثابت ترکیب می‌سازد',
-    auto.combos.length === 120, `${auto.combos.length} ترکیب`);
-  // آنچه اینجا مهار می‌کند، سقفِ خودِ کاربر است — نه پنجره. پنجره حق
-  // ندارد پیش از آزمونِ قیمت ورود چیزی را کنار بگذارد.
-  check('و پنجره هیچ قیمت اعمالی را کنار نگذاشته؛ فقط سقفِ کاربر خورده',
-    auto.capped === true && auto.outOfWindow === 0, `${auto.outOfWindow} قیمت اعمال`);
-  check('سقف تا آخرین ردیفش خرج می‌شود، نه ۱۱۲ تا از ۱۲۰',
-    auto.combos.length === base.maxRows, `${auto.combos.length} از ${base.maxRows}`);
-
-  // سقف که باز شود، خودکار هیچ‌چیز کنار نمی‌گذارد. این همان دستگیره‌ای
-  // است که کاربر باید بچرخاند، نه درصد.
-  const roomy = run({ ...base, maxRows: 4000, maxCombosPerExpiry: 400, comboWindowMode: 'auto' });
-  check('با سقف بازتر، خودکار هر ۳۶ قیمت اعمال را وارد می‌کند',
-    roomy.outOfWindow === 0 && roomy.combos.length === 199,
-    `${roomy.combos.length} ترکیب · ${roomy.outOfWindow} کنار`);
+  const exact = comboCount(12, 2) + comboCount(13, 2) + comboCount(11, 2);
+  check('حالت خودکار همهٔ ۱۹۹ استرانگلِ ساختاری را می‌سازد، نه ۱۲۰ تا',
+    auto.combos.length === 199 && exact === 199,
+    `${auto.combos.length} ترکیب · C(12,2)+C(13,2)+C(11,2) = ${exact}`);
+  check('و هیچ قیمت اعمالی کنار نرفته و اجرا ناتمام نمانده',
+    auto.outOfWindow === 0 && auto.stopped === false, `${auto.outOfWindow} قیمت اعمال`);
+  check('ترتیبِ نوبتی مانده: ده ردیف اول از هر سه سررسید می‌آیند، نه فقط نزدیک‌ترین',
+    new Set(auto.combos.slice(0, 9).map((c) => c.expiries[0])).size === 3,
+    [...new Set(auto.combos.slice(0, 9).map((c) => c.expiries[0]))].join('،'));
 
   // ── سرشماری ─────────────────────────────────────────────────────────
   const cen = contractCensus({ ua, seriesByIns: series, startDate: ENTRY, entryBasis: 'CLOSE', settings: { ...base, comboWindowMode: 'auto' } });
+  const roomy = auto;
   check('سرشماری همان ۳۶ کال و ۳۶ پوتِ اجرای واقعی را می‌شمارد',
     cen.call === 36 && cen.put === 36 && cen.alive === 72,
     `${cen.call}/${cen.put}/${cen.alive}`);
@@ -210,26 +190,19 @@ group('۲۱۲-د. اهرم ۱۴۰۵/۰۶/۰۱ — استرانگل فروش');
     cen.expiries.length === 3
     && cen.expiries.map((e) => e.strikes).join(',') === '12,13,11',
     cen.expiries.map((e) => e.strikes).join('،'));
-  // سرشماری باید **همان** سقفی را ببیند که ترکیب‌ساز می‌بیند. نسخهٔ اول
-  // `share` را می‌داد و ترکیب‌ساز `enumBudget(share)` را، پس برگ از
-  // کنارگذاشتنی خبر می‌داد که رخ نداده بود.
   check('اثر پنجره برای یک تا چهار پا جدا گزارش می‌شود',
     cen.windows.length === 4 && cen.windows.map((w) => w.legs).join(',') === '1,2,3,4',
     JSON.stringify(cen.windows.map((w) => w.dropped)));
-  check('و گزارشِ سرشماری با کارِ ترکیب‌ساز یکی است، نه سختگیرانه‌تر',
-    cen.windows[1].dropped === auto.outOfWindow && cen.windows[1].dropped === 0,
-    `سرشماری ${cen.windows[1].dropped} · ترکیب‌ساز ${auto.outOfWindow}`);
-  check('پای بیشتر، بریدنِ بیشتر — چون C(n,k) تندتر رشد می‌کند',
-    cen.windows[2].dropped > 0 && cen.windows[3].dropped >= cen.windows[2].dropped,
+  check('و در حالت خودکار، ستون «کنارگذاشته» برای هر چهار شمار پا صفر است',
+    cen.windows.every((w) => w.dropped === 0) && cen.windows[1].dropped === auto.outOfWindow,
     JSON.stringify(cen.windows.map((w) => w.dropped)));
-  check('جملهٔ سرشماری شمار قرارداد را می‌گوید، و چون چیزی کنار نرفته، سقف را نه',
-    censusNote(cen, 2).includes('۷۲') && !censusNote(cen, 2).includes('سقف'),
-    censusNote(cen, 2));
-  check('ولی برای چهار پا که واقعاً بریده شده، سقف را نام می‌برد',
-    censusNote(cen, 4).includes('سقف'), censusNote(cen, 4));
+  check('جملهٔ سرشماری برای هیچ شمار پایی از سقف حرف نمی‌زند',
+    censusNote(cen, 2).includes('۷۲') && !censusNote(cen, 2).includes('سقف')
+    && !censusNote(cen, 4).includes('سقف'),
+    censusNote(cen, 4));
 
   // ── همان جدایی، در مسیر زنده ────────────────────────────────────────
-  const liveBase = { ...defaults(), maxRows: 120, maxCombosPerExpiry: 120, greeksInScan: false };
+  const liveBase = { ...defaults(), greeksInScan: false };
   const livePct = scanFn({ def, chain: buildChain(rows, defaults()), uaKeys: ['9'], settings: { ...liveBase, comboWindowMode: 'pct', comboWindowPct: 25 } });
   const liveAuto = scanFn({ def, chain: buildChain(rows, defaults()), uaKeys: ['9'], settings: { ...liveBase, comboWindowMode: 'auto' } });
   check('مسیر زنده هم همان قاعده را دارد، نه قاعدهٔ دیگری',
@@ -275,19 +248,18 @@ group('۲۱۲-ز. ترتیب: قیمت ورود، بعد سقف');
   for (const p of PRICED.put) for (const c of PRICED.call) if (c > p) buildable += 1;
 
   const ua = buildChain(rows, defaults()).get('9');
-  const run = (cap) => generateHistoricalCombos({
+  const run = () => generateHistoricalCombos({
     def: byId('short-strangle'), ua, seriesByIns: series, startDate: ENTRY, entryBasis: 'CLOSE',
-    settings: { ...defaults(), maxRows: cap, maxCombosPerExpiry: cap },
+    settings: defaults(),
   });
 
   check('نردبان ۱۳تایی است ولی فقط ۴۲ استرانگلِ قیمت‌دار دارد',
     buildable === 42 && LADDER.length === 13, `${buildable} ترکیب`);
 
-  // سقفی که از شمارِ قابل‌بک‌تست بزرگ‌تر است، نباید هیچ‌چیز را ببُرد.
-  const roomy = run(120);
-  check('سقفِ ۱۲۰ روی ۴۲ ترکیبِ قیمت‌دار، هیچ‌چیز را نمی‌بُرد',
-    roomy.combos.length === buildable && roomy.capped === false,
-    `${roomy.combos.length} از ${buildable} · سقف‌خورده ${roomy.capped}`);
+  const roomy = run();
+  check('هر ۴۲ ترکیبِ قیمت‌دار ساخته می‌شود و اجرا ناتمام نمی‌ماند',
+    roomy.combos.length === buildable && roomy.stopped === false,
+    `${roomy.combos.length} از ${buildable}`);
   check('و پنجره هم دست نمی‌زند — این همان اشتباهِ ترتیب بود',
     roomy.outOfWindow === 0, `${roomy.outOfWindow} قیمت اعمال`);
   // برای استرانگل هر ۱۳ قیمت اعمال زنده‌اند: یا کالش قیمت دارد یا پوتش.
@@ -295,11 +267,26 @@ group('۲۱۲-ز. ترتیب: قیمت ورود، بعد سقف');
   check('استرانگل هر ۱۳ قیمت اعمال را زنده می‌بیند، چون هر کدام یک سمتِ قیمت‌دار دارد',
     roomy.noPriceStrikes === 0, `${roomy.noPriceStrikes} قیمت اعمال بی‌قیمت`);
 
-  // و وقتی سقف واقعاً کوچک‌تر است، بُرش می‌خورد ولی گزارش می‌شود.
-  const tight = run(20);
-  check('سقفِ کوچک‌تر از شمارِ قابل‌بک‌تست، می‌بُرد و «سقف‌خورده» می‌شود',
-    tight.combos.length === 20 && tight.capped === true,
-    `${tight.combos.length} ترکیب`);
+  // ── توقف، تنها چیزی که می‌تواند نتیجه را ناتمام بگذارد ───────────────
+  //
+  // و برخلاف سقف، ساکت نیست: `stopped` برمی‌گردد و رابط رویش برچسب
+  // «ناتمام» می‌زند.
+  const halted = generateHistoricalCombos({
+    def: byId('short-strangle'), ua, seriesByIns: series, startDate: ENTRY, entryBasis: 'CLOSE',
+    settings: defaults(), cancel: () => true,
+  });
+  check('توقفِ فوری، اجرا را ناتمام علامت می‌زند و ادعای کامل‌بودن نمی‌کند',
+    halted.stopped === true && halted.combos.length < buildable,
+    `${halted.combos.length} ترکیب · ناتمام ${halted.stopped}`);
+
+  // ── و پرسشِ «آیا هست؟» از پرسشِ «همه‌اش را بده» جداست ───────────────
+  const probe = generateHistoricalCombos({
+    def: byId('short-strangle'), ua, seriesByIns: series, startDate: ENTRY, entryBasis: 'CLOSE',
+    settings: defaults(), probe: true,
+  });
+  check('حالت کاوش با اولین ترکیب برمی‌گردد — پرسشِ دیگری است، نه سقفِ پنهان',
+    probe.combos.length === 1 && roomy.combos.length === buildable,
+    `${probe.combos.length} در برابر ${roomy.combos.length}`);
 
   // ── همان اشکال، در دو پای کال ────────────────────────────────────────
   //
@@ -307,7 +294,7 @@ group('۲۱۲-ز. ترتیب: قیمت ورود، بعد سقف');
   // قیمت دارد. آزمونِ «قیمت‌دار بودن» روی نوعِ خودِ استراتژی است.
   const bull = generateHistoricalCombos({
     def: byId('bull-call-spread'), ua, seriesByIns: series, startDate: ENTRY, entryBasis: 'CLOSE',
-    settings: { ...defaults(), maxRows: 400, maxCombosPerExpiry: 400 },
+    settings: defaults(),
   });
   const callOnly = (PRICED.call.length * (PRICED.call.length - 1)) / 2;
   check('اسپرد کال فقط از قیمت‌های اعمالِ کالِ قیمت‌دار ساخته می‌شود',
@@ -325,13 +312,13 @@ group('۲۱۲-ز. ترتیب: قیمت ورود، بعد سقف');
     ? row
     : { ...row, pMeDem_C: 0, pMeOf_C: 0, pDrCotVal_C: 0 })), defaults());
   const liveSettings = {
-    ...defaults(), maxRows: 30, maxCombosPerExpiry: 30, greeksInScan: false,
+    ...defaults(), greeksInScan: false,
     minBidQty: 0, minOpenInt: 0, minLegVol: 0, minLegValue: 0, minUaLiquidity: 0,
   };
   const live = scanFn({ def: byId('short-strangle'), chain: liveChain, uaKeys: ['9'], settings: liveSettings });
-  check('مسیر زنده هم پیش از آزمونِ مظنه نردبان را نمی‌بُرد',
-    live.funnel.outOfWindow === 0 && comboCount(LADDER.length, 2) > liveSettings.maxRows,
-    `${live.funnel.outOfWindow} کنار · ${comboCount(LADDER.length, 2)} ترکیب ساختاری`);
+  check('مسیر زنده هم نردبان را نمی‌بُرد و هر ۷۸ ترکیبِ ساختاری را می‌شمارد',
+    live.funnel.outOfWindow === 0 && live.funnel.built === comboCount(LADDER.length, 2),
+    `${live.funnel.built} ساخته · ${comboCount(LADDER.length, 2)} ترکیب ساختاری`);
   check('و ترکیبِ بی‌مظنه شمرده می‌شود، نه اینکه بودجه را خورده باشد',
     live.funnel.noQuote > 0, `${live.funnel.noQuote} بی‌مظنه`);
 }

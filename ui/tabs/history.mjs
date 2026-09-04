@@ -1265,7 +1265,7 @@ export async function mount(root, { state }) {
 
   function renderAutoTable(rows, generated) {
     $('h-auto-card').hidden = false;
-    $('h-combo-note').textContent = `${fmt.int(rows.length)} ترکیب معتبر · ${fmt.int(generated.noEntry)} فاقد قیمت ورود · ${fmt.int(generated.noLiquidity || 0)} حذف نقدشوندگی${generated.capped ? ' · سقف ترکیب اعمال شد' : ''}`;
+    $('h-combo-note').textContent = `${fmt.int(rows.length)} ترکیب معتبر · ${fmt.int(generated.noEntry)} فاقد قیمت ورود · ${fmt.int(generated.noLiquidity || 0)} حذف نقدشوندگی${generated.stopped ? ' · اجرا با توقف تو ناتمام ماند' : ''}`;
     const sorted = [...rows].sort((a, b) => (b.summary.last?.returnPct ?? -Infinity) - (a.summary.last?.returnPct ?? -Infinity));
     autoRows = sorted;
     setRollingCandidates(sorted.slice(0, 1000).map((row) => ({

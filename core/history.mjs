@@ -11,7 +11,7 @@ import { strategyMargin, capitalBase } from './margin.mjs';
 import { notionalOf } from './portfolio-basis.mjs';
 import { marginParamsOf } from './settings.mjs';
 import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
-import { selectStrikes, fairShare, enumBudget, windowMode } from './strike-window.mjs';
+import { selectStrikes, windowMode } from './strike-window.mjs';
 import {
   legContractSize, comboContractSize, blockedExpirySet, withoutBlockedExpiries,
 } from './chain.mjs';
@@ -290,24 +290,24 @@ export function contractCensus({ ua, seriesByIns, startDate, entryBasis = 'CLOSE
     });
   }
 
-  // اثر پنجره، به تفکیک شمار پا. سقفِ هر سررسید همان سهم برابری است که
-  // ترکیب‌ساز واقعاً استفاده می‌کند، وگرنه این عدد با آن نمی‌خواند.
-  // سقفی که به پنجره داده می‌شود باید **همانی** باشد که ترکیب‌ساز
-  // می‌دهد، وگرنه این برگ از چیزی خبر می‌دهد که رخ نداده. نسخهٔ اول
-  // `share` را می‌داد و ترکیب‌ساز `enumBudget(share)` را: برگ برای چهار پا
-  // «۳ قیمت اعمال کنار رفت» می‌نوشت در حالی که هیچ‌کدام کنار نرفته بودند.
-  const share = enumBudget(fairShare(settings.maxRows, Math.max(1, tally.expiries.length), settings.maxCombosPerExpiry));
+  // اثر پنجره، به تفکیک شمار پا. حالا که سقف برداشته شده، تنها چیزی که
+  // می‌تواند قیمت اعمالی را کنار بگذارد پنجرهٔ **انتخابیِ خودِ کاربر** است
+  // (`pct` یا `steps`). ستون «کنارگذاشته» در حالت پیش‌فرض همیشه صفر است و
+  // همان صفر، ادعای این نسخه را قابل بازبینی می‌کند.
+  //
+  // چهار ردیف برای چهار شمارِ پا مانده، هرچند خروجی پنجره دیگر به شمار پا
+  // وابسته نیست: برگ اکسل همین شکل را دارد و خواننده‌اش به تفکیک نگاه
+  // می‌کند.
   for (const legs of [1, 2, 3, 4]) {
-    let kept = 0, dropped = 0, forced = false;
+    let kept = 0, dropped = 0;
     for (const ex of tally.expiries) {
       const pick = selectStrikes({
-        strikes: ex.ladder, spot, legs, cap: share,
+        strikes: ex.ladder, spot,
         mode: settings.comboWindowMode, pct: settings.comboWindowPct, steps: settings.comboWindowSteps,
       });
       kept += pick.picked.length; dropped += pick.dropped.length;
-      if (pick.forced) forced = true;
     }
-    tally.windows.push({ legs, kept, dropped, forced });
+    tally.windows.push({ legs, kept, dropped });
   }
   tally.windowMode = windowMode(settings.comboWindowMode);
   return tally;
@@ -330,11 +330,7 @@ export function censusNote(census, legs = 2) {
   if (census.silent) parts.push(`${iso(census.silent)} قرارداد آن روز معامله نشد، پس قیمت ورود ندارد`);
   if (census.unseen) parts.push(`${iso(census.unseen)} قرارداد تا آن روز هیچ سابقهٔ معامله‌ای نداشت`);
   const win = (census.windows || []).find((w) => w.legs === legs);
-  if (win && win.dropped) {
-    parts.push(win.forced
-      ? `${iso(win.dropped)} قیمت اعمال به‌خاطر سقف ترکیب کنار ماند، از دورترین به قیمت پایه`
-      : `${iso(win.dropped)} قیمت اعمال بیرون پنجرهٔ انتخابی بود`);
-  }
+  if (win && win.dropped) parts.push(`${iso(win.dropped)} قیمت اعمال بیرون پنجرهٔ انتخابیِ خودت بود`);
   return `${parts.join('؛ ')}.`;
 }
 
@@ -615,14 +611,28 @@ export function replayHistory({
   };
 }
 
-function choose(arr, k, cap = Infinity) {
+/**
+ * همهٔ زیرمجموعه‌های k عضوی، بی سقف.
+ *
+ * پیش از این یک پارامتر `cap` داشت و حلقه در نیمهٔ راه برمی‌گشت. آن سقف
+ * برداشته شد؛ مهارِ زمان حالا کارِ صداکننده است — با `cancel` که هر چند
+ * هزار ترکیب پرسیده می‌شود، نه با بریدنِ بی‌صدای نتیجه.
+ */
+function choose(arr, k, cancel = null) {
   const out = [];
+  let ticks = 0;
+  let stopped = false;
   const walk = (at, picked) => {
-    if (out.length >= cap) return;
-    if (picked.length === k) { out.push([...picked]); return; }
+    if (stopped) return;
+    if (picked.length === k) {
+      out.push([...picked]);
+      ticks += 1;
+      if (cancel && (ticks & 8191) === 0 && cancel()) stopped = true;
+      return;
+    }
     for (let i = at; i < arr.length; i++) {
       picked.push(arr[i]); walk(i + 1, picked); picked.pop();
-      if (out.length >= cap) return;
+      if (stopped) return;
     }
   };
   walk(0, []);
@@ -654,15 +664,24 @@ export function comboKey(legs = []) {
     .join('::');
 }
 
-export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entryBasis = 'CLOSE', settings = {}, filtered = true, liquidity = {} }) {
+/**
+ * `probe: true` پرسشِ دیگری است، نه سقفِ پنهان: «آیا **دست‌کم یک** ترکیب
+ * قابل اجرا وجود دارد؟» — همان چیزی که فهرستِ «روزهای قابل اجرا» می‌پرسد.
+ * با اولین ترکیبِ پذیرفته‌شده برمی‌گردد. هیچ مسیری که نتیجه نشان می‌دهد از
+ * این پرچم استفاده نمی‌کند.
+ */
+export function generateHistoricalCombos({
+  def, ua, seriesByIns, startDate, entryBasis = 'CLOSE', settings = {},
+  filtered = true, liquidity = {}, onProgress = null, cancel = null, probe = false,
+}) {
   const start = normalizeHistoryDate(startDate);
   const contracts = flattenActiveContracts(ua, settings.blockedExpiries);
   const indexes = new Map(Object.entries(seriesByIns || {}).map(([ins, rows]) => [String(ins), indexHistory(rows)]));
   const baseIndex = indexes.get(String(ua.ins)) || new Map();
   const spot = historyPrice(baseIndex.get(start), 'CLOSE');
-  if (!(spot > 0)) return { combos: [], built: 0, noEntry: 0, noLiquidity: 0, outOfWindow: 0, noPriceStrikes: 0, capped: false };
+  if (!(spot > 0)) return { combos: [], built: 0, noEntry: 0, noLiquidity: 0, outOfWindow: 0, noPriceStrikes: 0, stopped: false };
   if (!passesLiquidity(baseIndex.get(start), liquidity.minBaseVolume, liquidity.minBaseValue)) {
-    return { combos: [], built: 0, noEntry: 0, noLiquidity: 1, outOfWindow: 0, noPriceStrikes: 0, capped: false };
+    return { combos: [], built: 0, noEntry: 0, noLiquidity: 1, outOfWindow: 0, noPriceStrikes: 0, stopped: false };
   }
   const expiries = [...new Set(contracts.map((c) => c.expiry))]
     .filter((expiry) => expiry > start)
@@ -677,18 +696,15 @@ export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entr
     : expiries.map((e) => [e]);
   const byKey = new Map(contracts.map((c) => [`${c.expiry}|${c.kind}|${c.strike}`, c]));
   const out = [];
-  let built = 0, noEntry = 0, noLiquidity = 0, outOfWindow = 0, noPriceStrikes = 0, capped = false;
+  let built = 0, noEntry = 0, noLiquidity = 0, outOfWindow = 0, noPriceStrikes = 0, stopped = false, probeHit = false;
   // نوع قراردادهایی که خودِ این استراتژی لازم دارد — پای سهم پایه نوع
   // اختیار ندارد و در این آزمون نمی‌آید.
   const kinds = new Set(def.legs.filter((t) => t.kind !== 'underlying').map((t) => t.kind));
   const buckets = [];
-  const maxRows = Math.max(1, Math.trunc(num(settings.maxRows, 4000)));
-  const maxPerExpiry = Math.max(1, Math.trunc(num(settings.maxCombosPerExpiry, 400)));
-  // سهم برابر هر سررسید از سقف ردیف — وگرنه سررسید نزدیک همهٔ سهم را
-  // می‌خورد و سررسید دور، که در دفتر هست، هرگز ساخته نمی‌شود.
-  const share = fairShare(maxRows, expirySets.length, maxPerExpiry);
 
-  for (const exSet of expirySets) {
+  for (let setIndex = 0; setIndex < expirySets.length; setIndex += 1) {
+    if (cancel && cancel()) { stopped = true; break; }
+    const exSet = expirySets[setIndex];
     const listed = [...new Set(contracts.filter((c) => c.expiry === exSet[0]).map((c) => c.strike))]
       .sort((a, b) => a - b);
 
@@ -712,27 +728,25 @@ export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entr
     const alive = filtered ? listed.filter((k) => priceable.has(k)) : listed;
     noPriceStrikes += listed.length - alive.length;
 
-    // پنجره فقط در نمای «غربال‌شده» اثر دارد. نمای خام باید هرچه در دفتر
-    // هست را بسازد، چون کاربر همان‌جا می‌خواهد ببیند چه بوده.
-    //
-    // سقفی که به پنجره داده می‌شود بودجهٔ **شمارش** است، نه بودجهٔ خروجی؛
-    // خروجی را همین پایین `made >= share` نگه می‌دارد و آن فقط ترکیبِ
-    // پذیرفته‌شده را می‌شمارد.
-    const budget = enumBudget(share);
+    // پنجره فقط در نمای «غربال‌شده» اثر دارد و فقط وقتی کاربر خودش پنجره
+    // خواسته باشد. نمای خام باید هرچه در دفتر هست را بسازد، چون کاربر
+    // همان‌جا می‌خواهد ببیند چه بوده.
     const pick = filtered
       ? selectStrikes({
-        strikes: alive, spot, legs: def.strikes, cap: budget,
+        strikes: alive, spot,
         mode: settings.comboWindowMode, pct: settings.comboWindowPct, steps: settings.comboWindowSteps,
       })
-      : { picked: alive, dropped: [], forced: false };
+      : { picked: alive, dropped: [] };
     outOfWindow += pick.dropped.length;
-    if (pick.forced) capped = true;
     const strikes = pick.picked;
-    const sets = def.strikes === 1 ? strikes.map((k) => [k]) : choose(strikes, def.strikes, budget);
+    const sets = def.strikes === 1 ? strikes.map((k) => [k]) : choose(strikes, def.strikes, cancel);
     const bucket = [];
     buckets.push(bucket);
-    for (const strikeSet of sets) {
-      if (bucket.length >= budget) { capped = true; break; }
+    for (let sIndex = 0; sIndex < sets.length; sIndex += 1) {
+      const strikeSet = sets[sIndex];
+      // پرسشِ توقف هر ۴۰۹۶ ترکیب. کمتر از این، خودِ پرسیدن هزینه می‌شود؛
+      // بیشتر از این، دکمهٔ توقف کُند به نظر می‌رسد.
+      if (cancel && (sIndex & 4095) === 4095 && cancel()) { stopped = true; break; }
       if (filtered && def.strikes >= 3 && settings.wingsEqualWidth && !equalWidth(strikeSet)) continue;
       built += 1;
       // پاهای اختیار اول، تا اندازه پای سهم پایه از قراردادهای همین
@@ -775,33 +789,29 @@ export function generateHistoricalCombos({ def, ua, seriesByIns, startDate, entr
         id: legs.map((l) => l.ins).join('|'), legs, strikes: strikeSet,
         expiries: exSet, spot, underlying: ua.name, uaIns: String(ua.ins),
       });
+      if (probe) { probeHit = true; break; }
     }
+    if (probeHit) break;
   }
 
-  // ── تقسیم سقف بین سررسیدها: نوبتی، نه پشت‌سرهم ───────────────────────
+  // ── چیدنِ نوبتی بین سررسیدها ────────────────────────────────────────
   //
-  // «سهم برابر» به‌تنهایی کافی نبود. سهم از روی *شمار سررسید* حساب می‌شد،
-  // پیش از آنکه معلوم شود هر سررسید واقعاً چند ترکیبِ قیمت‌دار دارد. پس
-  // سررسیدِ کم‌ترکیب سهمش را کامل خرج نمی‌کرد و آن باقی‌مانده هم به
-  // سررسیدِ پرترکیب نمی‌رسید — با سقف ۱۲۰ و سه سررسیدِ ۴۶ و ۵۷ و ۳۲
-  // ترکیبی، ۱۱۲ ردیف ساخته می‌شد و هشت جای خالی می‌سوخت.
-  //
-  // نوبتی برداشتن هر دو را با هم حل می‌کند: تا وقتی جا هست هیچ سررسیدی
-  // گرسنه نمی‌ماند، و هیچ سهمی هم بی‌مصرف نمی‌سوزد.
-  const totalBuilt = buckets.reduce((sum, bucket) => sum + bucket.length, 0);
-  for (let round = 0; out.length < maxRows; round += 1) {
+  // سقف رفت، ولی نوبتی‌چیدن ماند — به دلیل دیگری. هیچ ردیفی دیگر بریده
+  // نمی‌شود، پس این فقط **ترتیب** است: ردیف‌های نخستِ جدول از همهٔ
+  // سررسیدها می‌آیند نه فقط از نزدیک‌ترین. کاربری که ده ردیف اول را
+  // نگاه می‌کند، تصویر پهنای واقعی زنجیره را می‌بیند نه یک برش از آن.
+  for (let round = 0; ; round += 1) {
     let any = false;
     for (const bucket of buckets) {
       if (round >= bucket.length) continue;
       any = true;
-      if (out.length >= maxRows) break;
       out.push(bucket[round]);
     }
     if (!any) break;
   }
-  if (out.length < totalBuilt) capped = true;
 
-  return { combos: out, built, noEntry, noLiquidity, outOfWindow, noPriceStrikes, capped };
+  onProgress?.({ built, kept: out.length, expirySets: expirySets.length, stopped });
+  return { combos: out, built, noEntry, noLiquidity, outOfWindow, noPriceStrikes, stopped };
 }
 
 /** مقایسه چهار مبنای ورود × چهار مبنای آفست در آخرین روز معتبر. */

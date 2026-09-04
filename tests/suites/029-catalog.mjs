@@ -80,13 +80,12 @@ group('۲۸. غربال روی کل کاتالوگ — برترین موقعیت
   check('شمار ارزیابی‌شده در نمای کلی صفر نمی‌ماند', merged.funnel.evaluated > 0,
     `${merged.funnel.evaluated}`);
 
-  // «به سقف خورد» بولی است؛ با جمعِ عددی تجمیع نمی‌شود و باید با «یا» بیاید،
-  // وگرنه هشدار سقفِ یک استراتژی در نمای کلی پنهان می‌ماند.
-  const sCap = { ...s4, maxRows: 2 };
-  const perCap = feasible.map((def) => scanFn({ def, chain: chain4, uaKeys: ['1'], settings: sCap }));
-  const mergedCap = scanAll({ defs: feasible, chain: chain4, uaKeys: ['1'], settings: sCap, limit: 500 });
-  check('اگر حتی یک استراتژی به سقف بخورد، نمای کلی هم می‌گوید',
-    perCap.some((r) => r.funnel.capped) && mergedCap.funnel.capped === true);
-  check('بدون برخورد به سقف، پرچم سقف روشن نمی‌شود',
-    perDef.every((r) => !r.funnel.capped) && merged.funnel.capped === false);
+  // سطلِ «سقف‌خورده» برداشته شد چون سقفی نمانده. آنچه جایش را می‌گیرد یک
+  // ادعای قوی‌تر است: شمارِ ساخته‌شدهٔ هر استراتژی دقیقاً برابر شمارِ
+  // ترکیب‌های ساختاریِ همان استراتژی روی همان نردبان است.
+  check('هیچ سطلی به نام «سقف‌خورده» نمانده',
+    perDef.every((r) => !('capped' in r.funnel)) && !('capped' in merged.funnel));
+  check('و «ساخته‌شده» بریده نشده: جمعِ کل با جمعِ تک‌تک یکی است',
+    merged.funnel.built === perDef.reduce((sum, r) => sum + r.funnel.built, 0),
+    `${merged.funnel.built}`);
 }

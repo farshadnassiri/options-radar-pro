@@ -57,7 +57,7 @@ group('۲۰۲. دفترچهٔ اکسل');
     })),
   });
   const book202 = portfolioBacktestWorkbook(analysis202, {
-    basket: basket202, generated: [{ strategyId: 'S0', capped: true, accepted: 3 }, { strategyId: 'S9', capped: false, accepted: 0 }],
+    basket: basket202, generated: [{ strategyId: 'S0', stopped: true, accepted: 3 }, { strategyId: 'S9', stopped: false, accepted: 0 }],
     dateLabel: (value) => `روز ${value}`,
     context: { baseName: 'نماد آزمایشی', baseIns: '1', entryDate: 20260801, exitDate: 20260808, units: 5, cap: 120, entryBasis: 'پایانی', exitBasis: 'آخرین' },
   });
@@ -122,8 +122,14 @@ group('۲۰۲. دفترچهٔ اکسل');
   // ── برگ محدودیت، عمداً هست ──────────────────────────────────────────
   // فایلی که فقط عددهای موفق را نشان دهد، خودش یک ادعای ناگفته دارد.
   const limits202 = Object.fromEntries(byName('محدودیت داده').rows.map((row) => [row[0], row[1]]));
-  check('استراتژی سقف‌خورده و بدون ترکیب معتبر شمرده می‌شوند',
-    limits202['استراتژی سقف‌خورده'] === 1 && limits202['استراتژی بدون ترکیب معتبر'] === 1);
+  check('استراتژی ناتمام‌مانده و بدون ترکیب معتبر شمرده می‌شوند',
+    limits202['استراتژی ناتمام‌مانده'] === 1 && limits202['استراتژی بدون ترکیب معتبر'] === 1);
+  // سرشناسه باید بگوید سقف برداشته شده. اگر روزی سقفی برگردد و این خط
+  // نخواند، همین‌جا قرمز می‌شود.
+  const head202 = Object.fromEntries(byName('سرشناسه').rows.map((row) => [row[0], row[1]]));
+  check('سرشناسه صریح می‌گوید سقف ترکیب برداشته شده',
+    String(head202['سقف ترکیب هر استراتژی']).includes('برداشته شده'),
+    String(head202['سقف ترکیب هر استراتژی']));
   check('شمار روزهای بی‌داده گزارش می‌شود',
     limits202['روزِ بی‌داده در مسیرها'] > 0, String(limits202['روزِ بی‌داده در مسیرها']));
   check('قاعدهٔ خانهٔ خالی در خود فایل نوشته شده',

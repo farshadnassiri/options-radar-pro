@@ -18,14 +18,19 @@
 //
 // ═══ قاعدهٔ تازه ═══
 //
-// حالت پیش‌فرض `auto` است و یک جمله دارد: **هیچ قیمت اعمالی کنار گذاشته
-// نمی‌شود مگر سقفِ ترکیب مجبور کند.** اگر مجبور شد، دورترین‌ها از قیمت
-// پایه کنار می‌روند، نه دلخواه — و شمارِ کنارگذاشته برمی‌گردد تا رابط
-// بتواند بگوید «چهار قیمت اعمال به‌خاطر سقف نیامد»، نه اینکه خاموش بماند.
+// حالت پیش‌فرض `auto` است و حالا یک جملهٔ کوتاه‌تر دارد: **هیچ قیمت اعمالی
+// کنار گذاشته نمی‌شود.** نقطه. سقفِ ترکیب برداشته شد، پس دیگر چیزی نیست
+// که «مجبور کند».
 //
-// سه حالت دیگر برای کسی است که عمداً پنجره می‌خواهد: `pct` همان رفتار
-// قدیمی (تا نتیجهٔ قدیمی قابل بازتولید بماند)، `steps` شمار پله به‌جای
-// درصد، و `all` بی‌پنجره.
+// چرا برداشته شد: سقف، مهارِ زمانِ اجرا بود و هزینه‌اش را جای اشتباهی
+// می‌گرفت — از خودِ نتیجه. کاربر «۲۳ استرانگل» می‌دید و نمی‌دانست ۷۵ تا
+// وجود داشت. مهارِ زمان حالا جای درستش نشسته: اجرا در ریسه، با شمارشِ
+// زندهٔ پیشرفت و دکمهٔ توقف. کاربر می‌بیند چقدر مانده و خودش تصمیم
+// می‌گیرد، به‌جای اینکه عددی که هرگز ندید بی‌صدا بریده شود.
+//
+// دو حالت دیگر برای کسی است که **عمداً** پنجره می‌خواهد: `pct` همان رفتار
+// قدیمی (تا نتیجهٔ قدیمی قابل بازتولید بماند) و `steps` شمار پله به‌جای
+// درصد. `all` مترادف `auto` مانده چون در تنظیمات ذخیره‌شدهٔ کاربران هست.
 //
 // ═══ مرزی که رد نمی‌شود ═══
 //
@@ -36,40 +41,13 @@
 import { num } from './num.mjs';
 
 export const WINDOW_MODES = [
-  ['auto', 'خودکار — همه، مگر سقف ترکیب مجبور کند'],
+  ['auto', 'خودکار — همهٔ قیمت‌های اعمال'],
   ['pct', 'درصد ثابت حول قیمت پایه'],
   ['steps', 'شمار پلهٔ ثابت هر طرف'],
   ['all', 'همه — بی‌پنجره'],
 ];
 
 export const DEFAULT_WINDOW_MODE = 'auto';
-
-/**
- * پنجره، بودجهٔ **شمارش** را مهار می‌کند، نه بودجهٔ **خروجی**.
- *
- * این تفکیک گران به دست آمد. پنجره سقفِ خروجی را می‌گرفت و نردبان را تا
- * جایی می‌بُرید که C(n,k) زیر همان سقف بنشیند — در حالی که حلقهٔ
- * ترکیب‌ساز خودش با `made >= share` سقفِ خروجی را نگه می‌داشت، و آن هم
- * فقط ترکیبِ **پذیرفته‌شده** را می‌شمرد.
- *
- * دو نگهبان برای یک چیز، و بدترش: نگهبان اول پیش از آزمونِ «قیمت ورود
- * دارد یا نه» اجرا می‌شد. پس بودجه صرفِ قیمت‌های اعمالی می‌شد که هرگز
- * ترکیبی نمی‌ساختند، و ترکیب‌های واقعاً قیمت‌دار بیرون می‌ماندند.
- *
- * صاحب پروژه دقیقاً همین را دید: از ۷۵ استرانگلِ قابل بک‌تست، ۲۳ تا ساخته
- * شد. ترتیب درست همان است که خودش نوشت — «بررسی قیمت ورود ← ساخت
- * ترکیب‌های معتبر ← اعمال سقف».
- *
- * عدد ۴ از خودِ ترکیب‌ساز می‌آید: `choose(...)` از قبل تا چهاربرابرِ سقفِ
- * خروجی می‌شمرد، چون می‌دانست بخشی رد می‌شود. حالا پنجره هم همان عدد را
- * می‌بیند و دو نگهبان یک زبان دارند.
- */
-export const ENUM_HEADROOM = 4;
-
-/** بودجهٔ شمارشِ یک سررسید — همان که هم پنجره و هم `choose` می‌بینند. */
-export function enumBudget(share) {
-  return Math.max(1, Math.trunc(num(share, 1))) * ENUM_HEADROOM;
-}
 
 const MODE_SET = new Set(WINDOW_MODES.map(([id]) => id));
 
@@ -109,38 +87,21 @@ function cleanStrikes(strikes = []) {
 }
 
 /**
- * ترتیبِ کنار گذاشتن: دورترین از قیمت پایه اول.
- *
- * دو قیمت اعمال می‌توانند دقیقاً هم‌فاصله از پایه باشند — ۴۶ و ۵۴ وقتی پایه
- * ۵۰ است. آن‌وقت باید یکی برود و «دورتر» جوابی ندارد. قاعده اعلام می‌شود
- * نه واگذار: **بالاتری می‌رود.** بی این خط، تصمیم به پایداریِ `sort` واگذار
- * می‌شد؛ درست کار می‌کرد ولی هیچ‌جا نوشته نبود که کدام‌یک می‌رود و چرا،
- * و هر بازچینشِ بعدیِ این تابع می‌توانست بی‌صدا عوضش کند.
- */
-function farthestFirst(strikes, spot) {
-  return [...strikes].sort((a, b) => {
-    const da = Math.abs(a - spot), db = Math.abs(b - spot);
-    return db - da || b - a;
-  });
-}
-
-/**
  * انتخاب قیمت‌های اعمالِ یک سررسید.
  *
  * @param strikes قیمت‌های اعمال موجود در همین سررسید
  * @param spot    قیمت پایه در همان لحظه
- * @param legs    شمار اسلات قیمت اعمالِ استراتژی (`def.strikes`)
- * @param cap     سقف ترکیب همین سررسید
- * @returns { picked, dropped, all, mode, forced, lo, hi, reason }
- *          `forced` یعنی سقف مجبور کرد، نه سلیقهٔ کاربر.
+ * @returns { picked, dropped, all, mode, lo, hi, reason }
+ *
+ * `dropped` فقط وقتی پر است که کاربر **خودش** پنجره خواسته باشد (`pct` یا
+ * `steps`). در `auto` همیشه خالی است — این تضمینِ «هیچ ترکیبی بی‌صدا بریده
+ * نمی‌شود» است و آزمون دارد.
  */
-export function selectStrikes({ strikes = [], spot = 0, legs = 1, cap = 400, mode = DEFAULT_WINDOW_MODE, pct = 25, steps = 6 } = {}) {
+export function selectStrikes({ strikes = [], spot = 0, mode = DEFAULT_WINDOW_MODE, pct = 25, steps = 6 } = {}) {
   const all = cleanStrikes(strikes);
   const id = windowMode(mode);
   const s = num(spot, 0);
-  const k = Math.max(1, Math.trunc(num(legs, 1)));
-  const limit = Math.max(1, Math.trunc(num(cap, 400)));
-  const base = { all, mode: id, forced: false, lo: null, hi: null };
+  const base = { all, mode: id, lo: null, hi: null };
 
   if (!all.length) return { ...base, picked: [], dropped: [], reason: 'empty' };
 
@@ -175,46 +136,10 @@ export function selectStrikes({ strikes = [], spot = 0, legs = 1, cap = 400, mod
 
   // ─── auto ───
   //
-  // بی‌قیمتِ پایه هیچ «دور»ی تعریف نمی‌شود، پس چیزی هم کنار گذاشته نمی‌شود.
-  // این حالت واقعی است: روزی که نماد پایه معامله نشده، ترکیب‌ساز جلوتر خودش
-  // برمی‌گردد؛ اینجا نباید با حدسِ مرکز، قرارداد حذف کند.
-  if (comboCount(all.length, k) <= limit || !(s > 0) || all.length <= k) {
-    return { ...base, picked: all, dropped: [], reason: comboCount(all.length, k) <= limit ? 'fits' : 'noSpot' };
-  }
-
-  const order = farthestFirst(all, s);
-  const dropped = [];
-  const keep = new Set(all);
-  for (const x of order) {
-    if (keep.size <= k) break;
-    if (comboCount(keep.size, k) <= limit) break;
-    keep.delete(x);
-    dropped.push(x);
-  }
-  const picked = all.filter((x) => keep.has(x));
-  return {
-    ...base, picked, dropped: dropped.sort((a, b) => a - b), forced: dropped.length > 0,
-    lo: picked.length ? picked[0] : null, hi: picked.length ? picked[picked.length - 1] : null,
-    reason: 'capped',
-  };
-}
-
-/**
- * سهم هر مجموعه‌سررسید از سقف ردیف.
- *
- * `maxRows` پیش از این پشت‌سرهم پر می‌شد: حلقه از نزدیک‌ترین سررسید شروع
- * می‌کرد و تا سقف پیش می‌رفت، پس سررسید دور در نمادی با زنجیرهٔ پهن اصلاً
- * نوبتش نمی‌رسید. کاربر آن را «برنامه سررسید آبان را ندارد» می‌خواند، در
- * حالی که دفتر داشت و سقف خورده بود.
- *
- * دست‌کم یک ردیف به هر سررسید می‌رسد؛ سررسیدی که سهمش صفر شود، همان حذفِ
- * خاموشی است که این تابع برای رفعش هست.
- */
-export function fairShare(maxRows, expirySets, perExpiry) {
-  const rows = Math.max(1, Math.trunc(num(maxRows, 4000)));
-  const sets = Math.max(1, Math.trunc(num(expirySets, 1)));
-  const own = Math.max(1, Math.trunc(num(perExpiry, 400)));
-  return Math.max(1, Math.min(own, Math.floor(rows / sets)));
+  // یک خط، و همان یک خط تمامِ قاعده است: همه می‌مانند. پیش از این اینجا
+  // حلقه‌ای بود که تا زیر سقف نشستنِ C(n,k) دورترین‌ها را برمی‌داشت؛ با
+  // برداشتن سقف، آن حلقه چیزی جز حذفِ بی‌دلیل نبود.
+  return { ...base, picked: all, dropped: [], reason: 'all' };
 }
 
 /** یک جملهٔ فارسی از نتیجهٔ پنجره — همان که رابط و اکسل نشان می‌دهند. */
@@ -224,6 +149,5 @@ export function windowNote(result) {
   const gone = result.dropped?.length || 0;
   if (result.reason === 'empty') return 'قیمت اعمالی در این سررسید نبود';
   if (!gone) return `همهٔ ${kept} قیمت اعمال وارد ترکیب‌سازی شد`;
-  if (result.forced) return `${kept} قیمت اعمال وارد شد؛ ${gone} تا به‌خاطر سقف ترکیب کنار ماند، از دورترین به پایه`;
   return `${kept} قیمت اعمال وارد شد؛ ${gone} تا بیرون پنجرهٔ انتخابی بود`;
 }
