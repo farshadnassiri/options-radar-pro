@@ -30,11 +30,10 @@ export function radarDataReport({ ua, seriesByIns = {}, errors = {}, range, basi
 }
 
 /** قیمتِ دقیقِ همین روز؛ روزِ دیگری جانشینش نمی‌شود. */
-function pricesAt(legs, seriesByIns, date, basis) {
+function pricesAt(legs, priceIndex, date) {
   const prices = {};
   for (const leg of legs.filter((item) => item.kind !== 'underlying')) {
-    const row = (seriesByIns[String(leg.ins)] || []).find((item) => normalizeHistoryDate(item.date) === date);
-    const price = historyPrice(row, basis);
+    const price = priceIndex.get(String(leg.ins))?.get(date);
     if (!Number.isFinite(price)) return null;
     prices[String(leg.ins)] = price;
   }
@@ -45,34 +44,28 @@ export async function buildRadarHistory({ ua, defs, seriesByIns, range, basis = 
   scale = 'raw', units = 1,
   onProgress = () => {}, cancel = () => false, yieldControl = async () => {} }) {
   const dates = radarDates(seriesByIns[String(ua.ins)] || [], range);
-  const startDate = dates[0], markDate = dates.at(-1), rows = [];
+  const markDate = dates.at(-1), rows = [];
   const excluded = { entry: 0, mark: 0, invalid: 0 };
   if (!dates.length) return { dates, rows, excluded, expiryWindow: null };
 
-  // ═══ سررسیدی که پنجرهٔ «روز تا سررسید» بیرونش گذاشته ═══
-  //
-  // `generateHistoricalCombos` سررسیدها را با `minDays` و `maxDays`
-  // تنظیمات غربال می‌کند و چیزی هم نمی‌گوید. پیش‌فرضِ `maxDays` صد و
-  // بیست روز است، پس روی بازهٔ سه‌ماهه، سررسیدهای دورتر **همه** بی‌صدا
-  // می‌افتند و نتیجه صفر ردیف می‌شود.
-  //
-  // این دقیقاً همان شکایتی است که گزارش شد: «معلوم نیست فرصت نیست یا
-  // داده نداریم.» اینجا شمرده می‌شود تا رابط بتواند بگوید علت کدام است
-  // و دستگیره‌اش کجاست.
+  // رادارِ اکنون قرارداد و پنجره را در روز سنجش انتخاب می‌کند.
+  // ابتدای بازه فقط مرز نمودار است، نه شرطِ وجود قرارداد یا روز ورود.
+  const priceIndex = new Map(Object.entries(seriesByIns).map(([ins, series]) => [ins,
+    new Map(series.map(row => [normalizeHistoryDate(row.date), historyPrice(row, basis)]))]));
   const minDays = Number.isFinite(settings.minDays) ? settings.minDays : 0;
   const maxDays = Number.isFinite(settings.maxDays) ? settings.maxDays : 400;
-  const expiries = [...new Set(flattenActiveContracts(ua, settings.blockedExpiries)
-    .map((row) => row.expiry))].filter((expiry) => expiry > startDate);
+  const allExpiries = [...new Set(flattenActiveContracts(ua, settings.blockedExpiries).map(row => row.expiry))];
+  const expiries = allExpiries.filter((expiry) => expiry > markDate);
   const inWindow = expiries.filter((expiry) => {
-    const days = daysBetween(startDate, expiry);
+    const days = daysBetween(markDate, expiry);
     return days >= minDays && days <= maxDays;
   });
   const expiryWindow = {
     total: expiries.length, kept: inWindow.length, dropped: expiries.length - inWindow.length,
-    minDays, maxDays,
+    minDays, maxDays, date: markDate, expired: allExpiries.length - expiries.length,
     // دورترین سررسیدی که افتاد — عددی که کاربر باید `maxDays` را تا آن
     // بالا ببرد. بی این، «سررسیدها افتادند» یک شکایت است نه یک راهنما.
-    farthest: expiries.length ? Math.max(...expiries.map((expiry) => daysBetween(startDate, expiry))) : NaN,
+    farthest: expiries.length ? Math.max(...expiries.map((expiry) => daysBetween(markDate, expiry))) : NaN,
   };
   const active = () => { if (cancel()) throw new Error('ساخت متوقف شد'); };
   for (let index = 0; index < defs.length; index++) {
@@ -80,25 +73,34 @@ export async function buildRadarHistory({ ua, defs, seriesByIns, range, basis = 
     const def = defs[index];
     onProgress({ done: index, total: defs.length, name: def.name, combos: rows.length });
     await yieldControl(); active();
-    const generated = generateHistoricalCombos({ def, ua, seriesByIns, startDate, entryBasis: basis,
+    const generated = generateHistoricalCombos({ def, ua, seriesByIns, startDate: markDate, entryBasis: basis,
       settings, filtered: true, liquidity: {}, cancel });
-    excluded.entry += generated.noEntry || 0;
+    excluded.mark += generated.noEntry || 0;
     for (let n = 0; n < generated.combos.length; n++) {
       if (n % 50 === 0) { await yieldControl(); active(); }
       const combo = generated.combos[n], legs = combo.legs.map((leg) => ({ ...leg }));
-      const entryPrices = pricesAt(legs, seriesByIns, startDate, basis);
-      if (!entryPrices) { excluded.entry++; continue; }
-      const entryGap = measureGap({ legs, prices: entryPrices, strategyId: def.id, scale, units });
-      if (!entryGap.ok) { excluded.invalid++; continue; }
-      const markPrices = pricesAt(legs, seriesByIns, markDate, basis);
-      if (!markPrices || combo.expiries[0] < markDate) { excluded.mark++; continue; }
+      const markPrices = pricesAt(legs, priceIndex, markDate);
+      if (!markPrices) { excluded.mark++; continue; }
+      const markGap = measureGap({ legs, prices: markPrices, strategyId: def.id, scale, units });
+      if (!markGap.ok) { excluded.invalid++; continue; }
+      // مبدأِ مقایسه، نخستین روزِ همین بازه با قیمت معتبرِ همهٔ پاهاست.
+      // قرارداد تازه به‌خاطر نداشتن سابقه در ابتدای بازه حذف نمی‌شود؛
+      // این تاریخ صریح نمایش داده می‌شود و ادعای ورود واقعی کاربر نیست.
+      let entryGap = null, entryDate = null;
+      for (const date of dates) {
+        const prices = pricesAt(legs, priceIndex, date);
+        if (!prices) continue;
+        const measured = measureGap({ legs, prices, strategyId: def.id, scale, units });
+        if (measured.ok) { entryGap = measured; entryDate = date; break; }
+      }
+      if (!entryGap) { excluded.entry++; continue; }
       const gap = measureGap({ legs, prices: markPrices, strategyId: def.id, entry: entryGap.current,
         daysLeft: Math.max(0, daysBetween(markDate, combo.expiries[0])), scale, units });
       if (!gap.ok) { excluded.invalid++; continue; }
       const series = dailyGapSeries({ legs, seriesByIns, dates, basis, strategyId: def.id,
         entry: entryGap.current, expiry: combo.expiries[0], scale, units, baseIns: String(ua.ins) });
       rows.push({ key: `${def.id}::${comboKey(legs)}`, def, legs, strikes: combo.strikes,
-        expiry: combo.expiries[0], entry: entryGap.current, gap, series, verdict: gapVerdict(series, gap) });
+        expiry: combo.expiries[0], entryDate, markDate, entry: entryGap.current, gap, series, verdict: gapVerdict(series, gap) });
     }
   }
   onProgress({ done: defs.length, total: defs.length, combos: rows.length });
