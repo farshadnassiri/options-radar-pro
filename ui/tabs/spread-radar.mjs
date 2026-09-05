@@ -41,7 +41,8 @@ import {
 } from '/core/gap-alert.mjs';
 import { comboMetrics } from '/core/radar-metrics.mjs';
 import {
-  LIVE_INS_CAP, LIVE_PRIORITIES, comboLiveQuote, livePriority, liveQuoteBook, planLiveQuotes,
+  BOOK_INS_CAP, LIVE_INS_CAP, LIVE_PRIORITIES, LIVE_SOURCES, bookQuoteBook, comboBookQuote,
+  comboLiveQuote, listedOrderScore, livePriority, liveQuoteBook, liveSource, planLiveQuotes,
   tehranSecondOfDay,
 } from '/core/live-quote.mjs';
 import { makeDayRange } from '/core/day-range.mjs';
@@ -137,7 +138,10 @@ export async function mount(root, { state }) {
         <div><p class="eyebrow">همهٔ ترکیب‌های فاصله‌دار</p><h2>فاصله در این لحظه</h2></div>
         <div class="gap-toolbar">
           <label class="check"><input type="checkbox" id="gr-live"> رصد زندهٔ بازار</label>
+          <label>منبع مظنه<select id="gr-live-source">${LIVE_SOURCES.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
           <label>اولویت سهمیهٔ زنده<select id="gr-live-priority">${LIVE_PRIORITIES.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
+          <label class="check"><input type="checkbox" id="gr-live-rotate" checked> چرخش سهمیه</label>
+          <label>کمینه عمق (واحد)<input id="gr-live-depth" type="number" min="0" step="1" value="0"></label>
           <span id="gr-live-state" class="gap-live-state">خاموش</span>
         </div>
       </div>
@@ -236,6 +240,11 @@ export async function mount(root, { state }) {
   // توقف، درخواستِ جاری را واقعاً لغو می‌کند.
   let liveGen = 0, liveBusy = false, liveJob = null;
   let liveBook = null, liveBase = NaN, liveAt = 0;
+  // مکان‌نمای چرخشِ سهمیه. بی این، ترکیبِ ردیفِ ۲۸۳ هرگز نوبت نمی‌گرفت.
+  let liveCursor = 0;
+  // ترکیبی که مظنه‌اش کهنه‌تر از این باشد، به عددِ روز سنجش برمی‌گردد.
+  // با چرخش، عددِ زندهٔ یک ترکیب چند تیک عمر می‌کند و باید سنش دیده شود.
+  const LIVE_KEEP_MS = 180000;
   // دفترِ کف و سقفِ **امروز**. پیش از این «کف امروز» کمینهٔ کل بازهٔ
   // تاریخی بود؛ حالا فقط از مشاهده‌های همین رصد ساخته می‌شود.
   const dayRange = makeDayRange();
@@ -307,9 +316,12 @@ export async function mount(root, { state }) {
   }
 
   function hideResults() {
+    // ترتیب مهم است: ردیف‌ها اول خالی می‌شوند تا `stopLive` توضیحِ
+    // اجرای قبلی را دوباره ننویسد. ساختِ تازه از همین‌جا می‌گذرد و
+    // «۱۰۵ ترکیب»ِ اجرای پیشین نباید کنارِ ۷۸ ترکیبِ تازه بماند.
+    rows = [];
     stopLive();
     charts.disposeAll();
-    rows = [];
     $('gr-tabs').hidden = true;
     for (const panel of root.querySelectorAll('.gap-panel')) panel.hidden = true;
     $('gr-hero-tag').textContent = 'برای این انتخاب هنوز قیمت دریافت نشده';
@@ -442,7 +454,7 @@ export async function mount(root, { state }) {
     // می‌نویسد و خاموش‌شدنش باید بتواند عددِ روزانه را برگرداند، وگرنه
     // جدولِ خاموش، عددِ نیمه‌زندهٔ آخرین تیک را نگه می‌دارد.
     rows = result.rows.map((row) => ({ ...row,
-      daily: { gap: row.gap, metrics: row.metrics, verdict: row.verdict } }));
+      daily: { gap: row.gap, metrics: row.metrics, verdict: row.verdict, spot: row.spot } }));
     dates = result.dates;
     const excluded = result.excluded;
     const win = result.expiryWindow;
@@ -738,10 +750,13 @@ export async function mount(root, { state }) {
   $('gr-live').addEventListener('change', () => {
     if ($('gr-live').checked) startLive(); else stopLive();
   });
-  $('gr-live-priority').addEventListener('change', () => {
-    if (liveTimer) { $('gr-live-note').textContent = livePriorityNote(); void pollLive(); }
-    else $('gr-live-note').textContent = livePriorityNote();
-  });
+  for (const id of ['gr-live-priority', 'gr-live-source', 'gr-live-rotate', 'gr-live-depth']) {
+    $(id).addEventListener('change', () => {
+      liveCursor = 0;
+      $('gr-live-note').textContent = livePriorityNote();
+      if (liveTimer) void pollLive();
+    });
+  }
 
   /**
    * روزِ سنجشِ این ساخت، امروز است؟
@@ -767,10 +782,18 @@ export async function mount(root, { state }) {
     return { ok: true, mark, today, why: '' };
   }
 
+  /** سقفِ ابزارِ هر تیک، به منبعِ انتخابی بسته است. */
+  const liveCap = () => (liveSource($('gr-live-source').value).id === 'book' ? BOOK_INS_CAP : LIVE_INS_CAP);
+  const liveRotates = () => $('gr-live-rotate').checked;
+  const liveDepth = () => Math.max(0, Math.trunc(Number($('gr-live-depth').value) || 0));
+
   function livePriorityNote() {
     const meta = livePriority($('gr-live-priority').value);
-    const total = rows.length;
-    return `سقفِ مظنهٔ زنده ${fmt.int(LIVE_INS_CAP)} ابزار در هر تیک است و ${fmt.int(total)} ترکیب ساخته شده؛ سهمیه به ترکیبِ کامل داده می‌شود، نه به پا، تا ترکیبِ نیم‌قیمت ساخته نشود. اولویت فعلی: ${meta.label} — ${meta.hint}`;
+    const source = liveSource($('gr-live-source').value);
+    const rotate = liveRotates()
+      ? 'سهمیه می‌چرخد: هر تیک از جایی که تیکِ قبلی تمام کرده شروع می‌شود، پس ترکیبی برای همیشه بیرون نمی‌ماند.'
+      : 'چرخش خاموش است: هر تیک همان بالاترین‌های همین اولویت سهمیه می‌گیرند و بقیه تا وقتی اولویت عوض نشود بیرون می‌مانند.';
+    return `منبع: ${source.label} — ${source.hint} سقفِ این منبع ${fmt.int(liveCap())} ابزار در هر تیک است و ${fmt.int(rows.length)} ترکیب ساخته شده؛ سهمیه به ترکیبِ کامل داده می‌شود، نه به پا. اولویت: ${meta.label} — ${meta.hint} ${rotate}`;
   }
 
   function startLive() {
@@ -783,6 +806,7 @@ export async function mount(root, { state }) {
       return;
     }
     dayRange.reset(gate.today);
+    $('gr-live').checked = true;
     $('gr-live-state').textContent = 'روشن — هر ۱۰ ثانیه';
     $('gr-live-note').textContent = livePriorityNote();
     const tick = () => void pollLive();
@@ -804,6 +828,17 @@ export async function mount(root, { state }) {
     // ردیف‌ها با قیمتِ زنده بازنویسی شده بودند؛ عددِ روزِ سنجش را
     // برمی‌گردانیم تا جدولِ خاموش، عددِ نیمه‌زندهٔ آخرین تیک را نگه ندارد.
     restoreDaily();
+    // ── تیک و متن با هم بخوانند ────────────────────────────────────────
+    //
+    // «پس از تغییر بازه و ساخت ۷۸ ترکیب، تیک رصد زنده روشن ماند، وضعیت
+    // خاموش بود و توضیح همچنان اطلاعات اجرای قبلی با ۱۰۵ ترکیب را نشان
+    // می‌داد.» ساختِ تازه از راهِ `hideResults` می‌آمد که `stopLive` را
+    // صدا می‌زند، ولی `stopLive` نه تیک را برمی‌داشت نه توضیح را پاک
+    // می‌کرد. سه چیز باید با هم عوض شوند، نه یکی.
+    const box = $('gr-live');
+    if (box) box.checked = false;
+    const note = $('gr-live-note');
+    if (note) note.textContent = rows.length ? livePriorityNote() : '—';
     const node = $('gr-live-state');
     if (node) node.textContent = 'خاموش';
     const tail = $('gr-tail-note');
@@ -816,6 +851,7 @@ export async function mount(root, { state }) {
     for (const row of rows) {
       if (!row.daily) continue;
       row.gap = row.daily.gap; row.metrics = row.daily.metrics; row.verdict = row.daily.verdict;
+      row.spot = row.daily.spot;
     }
   }
 
@@ -874,28 +910,45 @@ export async function mount(root, { state }) {
     const job = new AbortController();
     liveBusy = true; liveJob = job;
     try {
-      const priority = livePriority($('gr-live-priority').value).id;
+      const source = liveSource($('gr-live-source').value).id;
       const plan = planLiveQuotes({
-        rows, cap: LIVE_INS_CAP, priority,
+        rows, cap: liveCap(), priority: livePriority($('gr-live-priority').value).id,
         reserve: ua?.ins ? [String(ua.ins)] : [],
-        score: priority === 'near' ? nearScore() : null,
+        score: priorityScore(),
+        startAt: liveRotates() ? liveCursor : 0,
       });
       if (!plan.ins.length) { $('gr-live-state').textContent = 'ابزاری برای مظنهٔ زنده نبود'; return; }
-      const response = await fetch(`/api/live-trades?ins=${plan.ins.join(',')}`, { signal: job.signal });
+      const path = source === 'book' ? '/api/books' : '/api/live-trades';
+      const response = await fetch(`${path}?ins=${plan.ins.join(',')}`, { signal: job.signal });
       const payload = await response.json();
       // پاسخ رسید، ولی رصد در این فاصله خاموش شده یا اولویت عوض شده:
       // نه نوار عوض می‌شود، نه جدول. این همان «توقفِ قابل اعتماد» است.
       if (gen !== liveGen || !mounted) return;
       if (!response.ok || payload.error) throw new Error(payload.error || 'مظنهٔ زنده دریافت نشد');
-      liveBook = liveQuoteBook(payload);
-      liveAt = Number(payload.at) || 0;
-      liveBase = Number(liveBook.prices[String(ua?.ins ?? '')] ?? NaN);
-      livePrices = liveBook.prices;
-      const applied = applyLive();
-      const clock = faDigits(new Date(payload.at).toLocaleTimeString('fa-IR'));
-      $('gr-live-state').textContent = `روشن · ${fmt.int(applied.covered)} ترکیب با مظنهٔ هم‌زمان · ${clock}`;
-      $('gr-live-note').textContent = `${livePriorityNote()} در این تیک ${fmt.int(plan.covered)} ترکیب سهمیه گرفت و ${fmt.int(plan.dropped)} ترکیب بیرون ماند؛ از سهمیه‌گرفته‌ها ${fmt.int(applied.covered)} ترکیب مظنهٔ هم‌زمان داشت و ${fmt.int(applied.stale)} ترکیب کنار گذاشته شد چون پاهایش در یک لحظه معامله نشده بودند یا آخرین معامله‌شان کهنه بود. ${Number.isFinite(liveBase) ? `قیمت زندهٔ ${nameOf(ua)}: ${fmt.money(liveBase)}.` : `برای ${nameOf(ua)} امروز معامله‌ای در پاسخ نبود؛ شرطِ «قیمت نماد پایه» عدد ندارد و برقرار نمی‌شود.`} ترکیبِ بیرون‌مانده با عددِ روز سنجش سنجیده نمی‌شود.`;
-      runAlerts();
+      liveCursor = liveRotates() ? plan.nextStart : 0;
+      if (source === 'book') {
+        liveBook = bookQuoteBook(payload);
+        // دفترِ نمادِ پایه: میانهٔ دو سمت، چون «قیمت پایه» جهت ندارد.
+        const base = liveBook.books[String(ua?.ins ?? '')];
+        liveBase = base && Number.isFinite(base.bid) && Number.isFinite(base.ask)
+          ? (base.bid + base.ask) / 2
+          : Number(base?.bid ?? base?.ask ?? NaN);
+        livePrices = null;
+      } else {
+        liveBook = liveQuoteBook(payload);
+        liveBase = Number(liveBook.prices[String(ua?.ins ?? '')] ?? NaN);
+        livePrices = liveBook.prices;
+      }
+      liveAt = Number(payload.at) || Date.now();
+      const applied = applyLive(source);
+      const clock = faDigits(new Date(liveAt).toLocaleTimeString('fa-IR'));
+      const what = source === 'book' ? 'مظنهٔ قابل اجرا' : 'مظنهٔ هم‌زمان';
+      $('gr-live-state').textContent = `روشن · ${fmt.int(applied.fresh)} ترکیب با ${what} · ${fmt.int(applied.covered)} ترکیب دارای عددِ زنده · ${clock}`;
+      const cycle = liveRotates() && Number.isFinite(plan.cycleTicks) && plan.cycleTicks > 1
+        ? ` یک دورِ کاملِ چرخش ${fmt.int(plan.cycleTicks)} تیک است، یعنی هر ترکیب تقریباً هر ${fmt.int(plan.cycleTicks * 10)} ثانیه یک بار تازه می‌شود؛ عددِ زندهٔ کهنه‌تر از ${fmt.int(LIVE_KEEP_MS / 1000)} ثانیه به عددِ روز سنجش برمی‌گردد.`
+        : '';
+      $('gr-live-note').textContent = `${livePriorityNote()} در این تیک ${fmt.int(plan.covered)} ترکیب سهمیه گرفت و ${fmt.int(plan.dropped)} ترکیب بیرون ماند؛ ${fmt.int(applied.fresh)} ترکیب ${what} داشت و ${fmt.int(applied.stale)} ترکیب کنار گذاشته شد. ${Number.isFinite(liveBase) ? `قیمت زندهٔ ${nameOf(ua)}: ${fmt.money(liveBase)}.` : `برای ${nameOf(ua)} مظنه‌ای در پاسخ نبود؛ شرطِ «قیمت نماد پایه» عدد ندارد و برقرار نمی‌شود.`}${cycle} ترکیبِ بیرون‌مانده با عددِ روز سنجش سنجیده نمی‌شود.`;
+      runAlerts(applied.fresh_keys);
       void refreshLiveTail();
     } catch (error) {
       if (gen !== liveGen || !mounted || error?.name === 'AbortError') return;
@@ -907,82 +960,63 @@ export async function mount(root, { state }) {
   }
 
   /**
-   * امتیازِ «نزدیک‌ترین به شرط» — ترکیبی که تا زنگ‌زدنِ هشدارت کم مانده،
-   * اول سهمیهٔ زنده می‌گیرد.
-   *
-   * امتیاز از عددِ **روز سنجش** ساخته می‌شود، چون در لحظهٔ تصمیم‌گیریِ
-   * سهمیه هنوز قیمتِ زنده‌ای نداریم. بی هشدارِ فعال، همه `NaN` می‌شوند و
-   * `planLiveQuotes` به ترتیب جدول برمی‌گردد.
-   */
-  function nearScore() {
-    if (!rules.length) return null;
-    return (row) => {
-      const stats = dayRange.get(row.key);
-      const snapshot = alertSnapshot({
-        gap: row.gap, verdict: row.verdict, day: stats,
-        basePrice: Number.isFinite(liveBase) ? liveBase : row.spot,
-        strategyId: row.def.id, strategyName: row.def.name,
-      });
-      snapshot.key = row.key;
-      const distance = alertDistance(rules, snapshot);
-      return Number.isFinite(distance) ? -distance : NaN;
-    };
-  }
-
-  /**
    * فاصله **و سنجه‌های** هر ردیف را با قیمت زنده بازمی‌سازد.
    *
    * ═══ چرا سنجه‌ها هم، نه فقط فاصله ═══
    *
    * «سود، زیان و بازده با قیمت زنده دوباره محاسبه نمی‌شوند … فاصله از
    * ۱٬۱۲۴ به ۲٬۲۴۸ رسید، اما حداکثر سود ٪ همچنان ۴۲۷٫۴۹٪ باقی ماند.»
-   *
-   * درست بود: `measureGap` فقط فاصله را می‌ساخت و `row.metrics` — که
-   * حداکثر سود، حداکثر زیان، بازده، سرمایه و وجه تضمین از آن می‌آید —
-   * دست‌نخورده از روز سنجش می‌ماند. پس هشدارِ «حداکثر سود ≥ ۴۰٪» روی
-   * عددِ دیروز آتش می‌کرد. حالا هر تیک، همان خط لولهٔ مشترکِ برنامه
+   * `row.metrics` دست‌نخورده از روز سنجش می‌ماند، پس هشدارِ «حداکثر سود
+   * ≥ ۴۰٪» روی عددِ دیروز آتش می‌کرد. حالا همان خط لولهٔ مشترکِ برنامه
    * (`comboMetrics`) با قیمتِ زنده و اسپاتِ زنده دوباره اجرا می‌شود.
    *
    * ═══ و چرا هر ردیفی زنده نمی‌شود ═══
    *
-   * `comboLiveQuote` سه چیز را می‌سنجد: همهٔ پاها قیمت دارند، زمانشان
-   * معلوم است، و در یک بازهٔ کوتاه معامله شده‌اند. ردیفی که یکی از این
-   * سه را ندارد **دست‌نخورده** می‌ماند و در `liveKeys` نمی‌آید — یعنی نه
-   * جدول «زنده» صدایش می‌کند و نه هشدار رویش می‌نشیند.
+   * در منبعِ **معامله**، `comboLiveQuote` سه چیز را می‌سنجد: همهٔ پاها
+   * قیمت دارند، زمانشان معلوم است، و در یک بازهٔ کوتاه معامله شده‌اند.
+   * در منبعِ **دفتر**، `comboBookQuote` سمتِ درستِ هر پا را برمی‌دارد
+   * (خریدنی از عرضه، فروختنی از تقاضا) و عمقِ خواسته‌شده را می‌سنجد.
+   * ردیفی که رد شود دست‌نخورده می‌ماند و در `liveKeys` نمی‌آید.
+   *
+   * ═══ چرخش، و عمرِ عددِ زنده ═══
+   *
+   * با چرخش، ردیفی که این تیک نوبت نگرفته عددِ زندهٔ تیکِ قبلش را نگه
+   * می‌دارد — ولی نه برای همیشه. کهنه‌تر از `LIVE_KEEP_MS` به عددِ روز
+   * سنجش برمی‌گردد، و هشدار فقط روی ردیف‌های **همین تیک** سنجیده می‌شود.
    */
-  function applyLive() {
-    let covered = 0, stale = 0;
-    liveKeys.clear();
+  function applyLive(source) {
+    let fresh = 0, stale = 0;
+    const fresh_keys = new Set();
     const nowSec = tehranSecondOfDay();
     const today = tehranDateNumber();
     const scale = $('gr-scale').value;
+    const depth = liveDepth();
     for (const row of rows) {
-      const quote = comboLiveQuote({ legs: row.legs, book: liveBook, nowSec });
+      const quote = source === 'book'
+        ? comboBookQuote({ legs: row.legs, book: liveBook, minUnits: depth })
+        : comboLiveQuote({ legs: row.legs, book: liveBook, nowSec });
       if (!quote.ok) {
         if (quote.priced === quote.legs && quote.legs > 0) stale += 1;
         continue;
       }
+      const prices = source === 'book' ? quote.prices : livePrices;
       const gap = measureGap({
-        legs: row.legs, prices: livePrices, strategyId: row.def.id,
-        entry: row.entry, daysLeft: row.gap.daysLeft,
-        scale, units: units(),
+        legs: row.legs, prices, strategyId: row.def.id,
+        entry: row.entry, daysLeft: row.gap.daysLeft, scale, units: units(),
       });
       if (!gap.ok) continue;
-      // اسپاتِ زنده اگر پایه امروز معامله شده، وگرنه اسپاتِ روز سنجش —
+      // اسپاتِ زنده اگر پایه امروز مظنه دارد، وگرنه اسپاتِ روز سنجش —
       // که مبنای وجه تضمین است و نبودش یعنی سرمایه و درصدها عدد ندارند.
-      const spot = Number.isFinite(liveBase) && liveBase > 0 ? liveBase : row.spot;
+      const spot = Number.isFinite(liveBase) && liveBase > 0 ? liveBase : row.daily?.spot ?? row.spot;
       // `rowByIns` خالی است چون ارزش و حجمِ معامله از تابلوی روزانه
       // می‌آید و مظنهٔ زنده آن را نمی‌دهد؛ همان‌ها پایین‌تر از نسخهٔ روزانه
       // برگردانده می‌شوند.
       const metrics = comboMetrics({
-        legs: row.legs, prices: livePrices, spot, rowByIns: {},
+        legs: row.legs, prices, spot, rowByIns: {},
         settings: state.settings, daysLeft: row.gap.daysLeft, scale, units: units(),
       });
       row.gap = gap;
       row.verdict = gapVerdict(row.series, gap);
-      // ارزش و حجمِ معاملهٔ پاها از تابلوی روزانه می‌آید و مظنهٔ زنده آن را
-      // نمی‌دهد؛ همان عددِ روز سنجش نگه داشته می‌شود تا ستون خالی نشود و
-      // ادعای تازه‌ای هم ساخته نشود.
       row.metrics = metrics.ok
         ? { ...metrics,
           legValue: row.daily?.metrics?.legValue ?? metrics.legValue,
@@ -990,32 +1024,51 @@ export async function mount(root, { state }) {
           legTrades: row.daily?.metrics?.legTrades ?? metrics.legTrades,
           thinLegs: row.daily?.metrics?.thinLegs ?? metrics.thinLegs }
         : row.daily?.metrics || row.metrics;
+      // ستونِ «قیمت نماد پایه» هم باید همان عددی را بدهد که نوار وضعیت
+      // می‌گوید. پیش از این نوار ۱۱۱٬۰۱۲ می‌نوشت و ستون ۵۵٬۵۴۷ — یعنی
+      // هشدار عددِ زنده را می‌گرفت و جدول عددِ تاریخی را نشان می‌داد.
+      row.spot = spot;
+      row.liveAt = liveAt;
       dayRange.observe(row.key, gap.current, { date: today });
       liveKeys.add(row.key);
-      covered += 1;
+      fresh_keys.add(row.key);
+      fresh += 1;
+    }
+    // ردیفی که عددِ زنده‌اش پوسیده، به عددِ روز سنجش برمی‌گردد. نگه‌داشتنِ
+    // عددی که نمی‌دانیم هنوز درست است یا نه، همان «زندهٔ دروغین» است.
+    for (const row of rows) {
+      if (fresh_keys.has(row.key) || !liveKeys.has(row.key)) continue;
+      if (liveAt - Number(row.liveAt || 0) <= LIVE_KEEP_MS) continue;
+      liveKeys.delete(row.key);
+      row.liveAt = 0;
+      if (row.daily) {
+        row.gap = row.daily.gap; row.metrics = row.daily.metrics;
+        row.verdict = row.daily.verdict; row.spot = row.daily.spot;
+      }
     }
     paintKpis();
     paintTable();
-    return { covered, stale };
+    return { fresh, stale, covered: liveKeys.size, fresh_keys };
   }
 
   /**
-   * هشدارها — **فقط** روی ردیف‌هایی که همین حالا مظنهٔ زنده دارند.
+   * هشدارها — **فقط** روی ردیف‌هایی که در همین تیک مظنه گرفتند.
    *
    * «رادار بدون داشتن قیمت زنده، اعلان زنده می‌فرستد. در آزمون، وضعیت
    * ۰ ترکیب با قیمت زنده بود؛ با این حال شرط فاصله ≥ ۰ روی قیمت تاریخی
-   * اجرا شد و ده‌ها اعلان ثبت کرد.»
-   *
-   * علتش همین بود که حلقه روی `rows` می‌چرخید نه روی `liveKeys`. یک
-   * هشدارِ زنده که عددش مالِ روز سنجش است، بدتر از نبودِ هشدار است.
+   * اجرا شد و ده‌ها اعلان ثبت کرد.» علتش این بود که حلقه روی `rows`
+   * می‌چرخید. حالا حتی ردیفی که عددِ زندهٔ تیکِ **قبل** را دارد هم
+   * سنجیده نمی‌شود: هشدار روی تازه‌ترین اندازه‌گیری می‌نشیند، نه روی
+   * چیزی که ممکن است در این تیک عوض شده باشد.
    */
-  function runAlerts() {
+  function runAlerts(freshKeys) {
     if (!rules.length || !liveTimer) return;
-    if (!liveKeys.size) return;
+    const keys = freshKeys instanceof Set ? freshKeys : liveKeys;
+    if (!keys.size) return;
     const snapshots = {};
     const today = tehranDateNumber();
     for (const row of rows) {
-      if (!liveKeys.has(row.key)) continue;
+      if (!keys.has(row.key)) continue;
       snapshots[row.key] = alertSnapshot({
         gap: row.gap, verdict: row.verdict,
         // کف و سقفِ امروز، از دفترِ مشاهده‌های امروز — نه از کمینه و
@@ -1039,6 +1092,44 @@ export async function mount(root, { state }) {
       paintRules();
       paintLog();
     }
+  }
+
+  /**
+   * امتیازِ اولویتِ انتخاب‌شده، وقتی از خودِ صفحه می‌آید نه از سنجه‌ها.
+   *
+   * «ترتیب جدول» باید ترتیبِ **دیده‌شدهٔ** جدول باشد: کاربر ستونی را
+   * مرتب می‌کند و انتظار دارد تیکِ بعدی سهمیه را از بالای همان ترتیب
+   * بردارد. پیش از این به ترتیبِ آرایهٔ ساخت نگاه می‌شد و مرتب‌سازی هیچ
+   * اثری نداشت.
+   */
+  function priorityScore() {
+    const mode = livePriority($('gr-live-priority').value).id;
+    if (mode === 'near') return nearScore();
+    if (mode === 'listed') return table ? listedOrderScore(table.get()) : null;
+    return null;
+  }
+
+  /**
+   * امتیازِ «نزدیک‌ترین به شرط» — ترکیبی که تا زنگ‌زدنِ هشدارت کم مانده،
+   * اول سهمیهٔ زنده می‌گیرد.
+   *
+   * امتیاز از عددِ **روز سنجش** ساخته می‌شود، چون در لحظهٔ تصمیم‌گیریِ
+   * سهمیه هنوز قیمتِ زنده‌ای نداریم. بی هشدارِ فعال، همه `NaN` می‌شوند و
+   * `planLiveQuotes` به ترتیب جدول برمی‌گردد.
+   */
+  function nearScore() {
+    if (!rules.length) return null;
+    return (row) => {
+      const stats = dayRange.get(row.key);
+      const snapshot = alertSnapshot({
+        gap: row.gap, verdict: row.verdict, day: stats,
+        basePrice: Number.isFinite(liveBase) ? liveBase : row.spot,
+        strategyId: row.def.id, strategyName: row.def.name,
+      });
+      snapshot.key = row.key;
+      const distance = alertDistance(rules, snapshot);
+      return Number.isFinite(distance) ? -distance : NaN;
+    };
   }
 
   // ————————————————————————— زیرتب «هشدارها» —————————————————————————

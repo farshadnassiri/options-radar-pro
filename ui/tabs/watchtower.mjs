@@ -40,11 +40,12 @@ import { buildRadarHistory, expiryShortfall, radarDataReport } from '/core/radar
 import { comboMetrics } from '/core/radar-metrics.mjs';
 import {
   ALERT_OPS, DEFAULT_COOLDOWN_SEC, DEFAULT_WINDOW_DAYS, WATCH_METRICS, WATCH_METRIC_GROUPS,
-  WATCH_REFS, conditionNote, evaluateWatch, normalizeCondition, normalizeWatchRule, watchDistance,
-  watchMetric, watchRef, watchRuleNote, watchSnapshot,
+  WATCH_REFS, conditionNote, evaluateWatch, normalizeCondition, normalizeWatchRule, ruleCoverage,
+  ruleScopeUnion, watchDistance, watchMetric, watchRef, watchRuleNote, watchSnapshot,
 } from '/core/watch-rule.mjs';
 import {
-  LIVE_INS_CAP, LIVE_PRIORITIES, comboLiveQuote, livePriority, liveQuoteBook, planLiveQuotes,
+  BOOK_INS_CAP, LIVE_INS_CAP, LIVE_PRIORITIES, LIVE_SOURCES, bookQuoteBook, comboBookQuote,
+  comboLiveQuote, listedOrderScore, livePriority, liveQuoteBook, liveSource, planLiveQuotes,
   tehranSecondOfDay,
 } from '/core/live-quote.mjs';
 import { makeDayRange } from '/core/day-range.mjs';
@@ -136,6 +137,7 @@ export async function mount(root, { state }) {
     <div class="section-head"><div><p class="eyebrow">گام سه</p><h2>چه چیزی همین حالا منطبق است</h2></div>
       <div class="gap-toolbar">
         <button type="button" class="primary" id="wt-run">ساخت و تطبیق</button>
+        <button type="button" class="ghost" id="wt-scope-all">دامنه را برای همهٔ قاعده‌ها بچین</button>
         <button type="button" class="ghost" id="wt-stop" hidden>توقف</button>
       </div>
     </div>
@@ -149,7 +151,10 @@ export async function mount(root, { state }) {
       <label>نامِ قاعده<input id="wt-name" type="text" placeholder="مثلاً: اسپردهای ارزانِ اهرم"></label>
       <label>آرامش (ثانیه)<input id="wt-cooldown" type="number" min="0" step="10" value="${DEFAULT_COOLDOWN_SEC}"></label>
       <label class="check"><input type="checkbox" id="wt-sound"> صدا هم بزند</label>
+      <label>منبع مظنه<select id="wt-live-source">${LIVE_SOURCES.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
       <label>اولویت سهمیهٔ زنده<select id="wt-live-priority">${LIVE_PRIORITIES.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
+      <label class="check"><input type="checkbox" id="wt-live-rotate" checked> چرخش سهمیه</label>
+      <label>کمینه عمق (واحد)<input id="wt-live-depth" type="number" min="0" step="1" value="0"></label>
       <button type="button" class="primary" id="wt-save" disabled>ذخیرهٔ قاعده و شروع رصد</button>
       <button type="button" class="ghost" id="wt-watch-stop" hidden>توقف رصد</button>
       <span id="wt-watch-state" class="gap-live-state">خاموش</span>
@@ -182,7 +187,9 @@ export async function mount(root, { state }) {
   let watchTimer = 0, watchRules = [], prevSnaps = {};
   // نسل و قفل — همان دو چیزی که «توقفِ قابل اعتماد» و «درخواستِ روی هم
   // نیفتادن» را ممکن می‌کنند.
-  let watchGen = 0, watchBusy = false, watchJob = null;
+  let watchGen = 0, watchBusy = false, watchJob = null, watchCursor = 0, watchAt = 0;
+  // ترکیبی که مظنه‌اش کهنه‌تر از این باشد، به عددِ روز سنجش برمی‌گردد.
+  const LIVE_KEEP_MS = 180000;
   // ترکیب‌هایی که در آخرین تیک مظنهٔ هم‌زمان داشتند. جدول از همین می‌فهمد
   // کدام ردیف «زنده» است — پیش از این همهٔ ردیف‌ها زنده برچسب می‌خوردند.
   const liveKeys = new Set();
@@ -253,6 +260,18 @@ export async function mount(root, { state }) {
    * نماد، استراتژی، مبنای قیمت، تعداد واحد، آستانهٔ نقدشوندگی، و بازه.
    */
   function stalePreview(why = 'دامنه یا شرط‌ها عوض شد') {
+    // ── رصد هم باید بایستد، نه فقط دکمه قفل شود ──────────────────────
+    //
+    // «تغییر بازه هنگام روشن‌بودن دیده‌بان، رصد را متوقف نمی‌کند. بازه از
+    // امروز به ۱۴۰۵/۰۳/۱۶ تا ۱۴۰۵/۰۶/۱۱ تغییر کرد، ولی وضعیت همچنان
+    // روشن · ۵ قاعده · ۲۸۰ ترکیب باقی ماند و دامنهٔ قبلی رصد شد.»
+    //
+    // دامنه‌ای که کاربر عوضش کرده، دیگر دامنهٔ او نیست؛ ادامهٔ رصد رویش
+    // یعنی زنگ‌زدن روی چیزی که کاربر فکر می‌کند رهایش کرده.
+    if (watchTimer) {
+      stopWatch();
+      setStatus(`${why}؛ رصد ایستاد. دامنهٔ تازه را بساز و دوباره شروع کن.`, true);
+    }
     if (!previewFresh && previewNote === why) { paintCounts(); return; }
     previewFresh = false; previewNote = why;
     if (matched.length || built.length) {
@@ -397,7 +416,7 @@ export async function mount(root, { state }) {
         // عددِ روزانه را برگرداند.
         for (const row of result.rows) {
           built.push({ row: Object.assign(row, {
-            daily: { gap: row.gap, metrics: row.metrics, verdict: row.verdict } }), ua });
+            daily: { gap: row.gap, metrics: row.metrics, verdict: row.verdict, spot: row.spot } }), ua });
         }
       }
       if (!current()) return;
@@ -478,17 +497,85 @@ export async function mount(root, { state }) {
     startWatch();
   });
 
-  $('wt-live-priority').addEventListener('change', () => {
-    $('wt-watch-note').textContent = watchNote();
-    if (watchTimer) void pollWatch();
-  });
+  for (const id of ['wt-live-priority', 'wt-live-source', 'wt-live-rotate', 'wt-live-depth']) {
+    $(id).addEventListener('change', () => {
+      watchCursor = 0;
+      $('wt-watch-note').textContent = watchNote();
+      if (watchTimer) void pollWatch();
+    });
+  }
+
+  const liveCap = () => (liveSource($('wt-live-source').value).id === 'book' ? BOOK_INS_CAP : LIVE_INS_CAP);
+  const liveRotates = () => $('wt-live-rotate').checked;
+  const liveDepth = () => Math.max(0, Math.trunc(Number($('wt-live-depth').value) || 0));
 
   /** قاعده‌های فعالِ ذخیره‌شده — همهٔ آن‌ها رصد می‌شوند، نه فقط آخری. */
   const activeRules = () => rules.filter((rule) => rule.enabled !== false);
 
+  /** دامنه‌ای که واقعاً ساخته شده: کدام نمادها، کدام استراتژی‌ها، کدام ترکیب‌ها. */
+  const builtDomain = () => ({
+    baseIns: [...new Set(built.map(({ ua }) => String(ua.ins)))],
+    strategyIds: [...new Set(built.map(({ row }) => String(row.def?.id ?? '')))],
+    keys: built.map(({ row }) => row.key),
+  });
+
+  /**
+   * حقیقتِ پوشش: کدام قاعده در این ساخت داده دارد و کدام ندارد.
+   *
+   * «رابط ۸ قاعده نشان داد، ولی حلقه فقط ۱۰۵ ترکیب مربوط به آخرین
+   * پیش‌نمایش را دریافت کرد؛ قواعد قبلیِ استراتژی‌های دیگر عملاً بدون
+   * داده ماندند.» قاعده ذخیره می‌شود ولی دامنه نه — پس قاعده‌ای که برای
+   * نمادِ دیگری ساخته شده در این ساخت هیچ ردیفی ندارد. نوشتنِ «۸ قاعده»
+   * روی این وضعیت، ادعای پوششی است که وجود ندارد.
+   */
+  function coverageNote(coverage) {
+    const parts = [];
+    if (coverage.dormant.length) {
+      parts.push(`⁨${fmt.int(coverage.dormant.length)}⁩ قاعده در این ساخت هیچ ردیفی ندارد و رصد نمی‌شود: ${coverage.dormant.map(({ rule, why }) => `«${rule.name || watchRuleNote(rule)}» (${why})`).join('؛ ')}. برای رصدشان «دامنه را برای همهٔ قاعده‌ها بچین» را بزن و دوباره بساز.`);
+    }
+    if (coverage.partial.length) {
+      parts.push(`⁨${fmt.int(coverage.partial.length)}⁩ قاعده فقط روی بخشی از دامنه‌اش سنجیده می‌شود، چون بقیهٔ نمادها یا استراتژی‌هایش در این ساخت نیستند.`);
+    }
+    return parts.join(' ');
+  }
+
+  /**
+   * دامنهٔ اجتماعِ همهٔ قاعده‌های فعال را در فرم می‌چیند.
+   *
+   * ساختنِ خودکارش را عمداً نمی‌کنیم: هر نماد یک دورِ کاملِ دریافت است و
+   * هشت قاعده روی هشت نماد یعنی دقایق انتظارِ ناخواسته. انتخابِ ساختن با
+   * کاربر است؛ کارِ ما این است که چیدنش یک دکمه باشد نه ده تیک.
+   */
+  $('wt-scope-all').addEventListener('click', () => {
+    const active = activeRules();
+    if (!active.length) { setStatus('قاعدهٔ فعالی ذخیره نشده.', true); return; }
+    const union = ruleScopeUnion(active);
+    const bases = new Set(union.baseIns), defs = new Set(union.strategyIds);
+    let missing = 0;
+    for (const box of root.querySelectorAll('[data-base]')) {
+      const want = union.anyBase || bases.has(box.dataset.base);
+      box.checked = want;
+    }
+    for (const one of union.baseIns) {
+      if (!root.querySelector(`[data-base="${CSS.escape(one)}"]`)) missing += 1;
+    }
+    for (const box of root.querySelectorAll('[data-def]')) {
+      box.checked = union.anyDef || defs.has(box.dataset.def);
+    }
+    stalePreview('دامنه برای همهٔ قاعده‌ها چیده شد');
+    const notes = [];
+    if (union.anyBase) notes.push('دست‌کم یک قاعده قیدِ نماد ندارد، پس همهٔ نمادهای این بازه انتخاب شدند — ساختنش طول می‌کشد.');
+    if (missing) notes.push(`⁨${fmt.int(missing)}⁩ نمادِ خواسته‌شده در این بازه نیست؛ بازه را عوض کن تا در فهرست بیاید.`);
+    setStatus(`دامنهٔ ${fmt.int(active.length)} قاعدهٔ فعال چیده شد. «ساخت و تطبیق» را بزن. ${notes.join(' ')}`);
+  });
+
   function watchNote() {
     const meta = livePriority($('wt-live-priority').value);
-    return `رصد روی همهٔ ${fmt.int(built.length)} ترکیبِ دامنه اجرا می‌شود، نه فقط منطبق‌های پیش‌نمایش — ترکیبی که ده دقیقه بعد وارد شرط شود باید دیده شود. سقفِ مظنهٔ زنده ${fmt.int(LIVE_INS_CAP)} ابزار در هر تیک است و سهمیه به ترکیبِ کامل داده می‌شود، نه به پا. اولویت فعلی: ${meta.label} — ${meta.hint}`;
+    const source = liveSource($('wt-live-source').value);
+    const rotate = liveRotates()
+      ? 'سهمیه می‌چرخد: هر تیک از جایی که تیکِ قبلی تمام کرده شروع می‌شود، پس ترکیبی برای همیشه بیرون نمی‌ماند.'
+      : 'چرخش خاموش است: هر تیک همان بالاترین‌های همین اولویت سهمیه می‌گیرند.';
+    return `رصد روی همهٔ ${fmt.int(built.length)} ترکیبِ دامنه اجرا می‌شود، نه فقط منطبق‌های پیش‌نمایش. منبع: ${source.label} — ${source.hint} سقفِ این منبع ${fmt.int(liveCap())} ابزار در هر تیک است و سهمیه به ترکیبِ کامل داده می‌شود، نه به پا. اولویت: ${meta.label} — ${meta.hint} ${rotate}`;
   }
 
   /**
@@ -521,14 +608,24 @@ export async function mount(root, { state }) {
       $('wt-watch-note').textContent = gate.why;
       return;
     }
-    watchRules = active;
+    // فقط قاعده‌هایی که در این ساخت ردیف دارند. بقیه صریح نام برده
+    // می‌شوند — «۸ قاعده» نوشتن روی ساختی که سه‌تایشان را نمی‌بیند،
+    // ادعای پوششی است که وجود ندارد.
+    const coverage = ruleCoverage(active, builtDomain());
+    if (!coverage.watched.length) {
+      $('wt-watch-state').textContent = 'هیچ قاعده‌ای در این ساخت داده ندارد';
+      $('wt-watch-note').textContent = coverageNote(coverage);
+      return;
+    }
+    watchRules = coverage.watched;
     dayRange.reset(gate.today);
     $('wt-watch-stop').hidden = false;
-    $('wt-watch-state').textContent = `روشن — هر ۱۰ ثانیه · ${fmt.int(active.length)} قاعده`;
-    $('wt-watch-note').textContent = watchNote();
+    $('wt-watch-state').textContent = `روشن — هر ۱۰ ثانیه · ${fmt.int(coverage.watched.length)} از ${fmt.int(active.length)} قاعده`;
+    $('wt-watch-note').textContent = `${watchNote()} ${coverageNote(coverage)}`.trim();
     const tick = () => void pollWatch();
     tick();
     watchTimer = setInterval(tick, 10000);
+    paintRules();
   }
 
   function stopWatch() {
@@ -542,9 +639,15 @@ export async function mount(root, { state }) {
     liveKeys.clear();
     dayRange.reset(0);
     restoreDaily();
-    $('wt-watch-stop').hidden = true;
-    $('wt-watch-state').textContent = 'خاموش';
-    if (mounted && built.length) paintPool();
+    // خروج از تب هم از همین‌جا می‌گذرد و آن‌وقت گره‌ها دیگر در سند
+    // نیستند؛ پس هر دست‌بردن به DOM شرطی است.
+    if (!mounted) return;
+    const stopBtn = $('wt-watch-stop');
+    if (stopBtn) stopBtn.hidden = true;
+    const state = $('wt-watch-state');
+    if (state) state.textContent = 'خاموش';
+    paintRules();
+    if (built.length) paintPool();
   }
   $('wt-watch-stop').addEventListener('click', stopWatch);
 
@@ -553,6 +656,7 @@ export async function mount(root, { state }) {
     for (const { row } of built) {
       if (!row.daily) continue;
       row.gap = row.daily.gap; row.metrics = row.daily.metrics; row.verdict = row.daily.verdict;
+      row.spot = row.daily.spot;
     }
   }
 
@@ -588,47 +692,92 @@ export async function mount(root, { state }) {
   async function pollWatch() {
     if (!watchRules.length || !built.length) return;
     if (watchBusy) return;
+    // دروازهٔ «روز سنجش = امروز» در هر تیک سنجیده می‌شود، نه فقط در شروع.
+    // بازه می‌تواند وسطِ رصد عوض شود، و ساختِ گذشته با مظنهٔ امروز عددی
+    // می‌سازد که هیچ‌وقت وجود نداشته.
+    const dayGate = watchDayGate();
+    if (!dayGate.ok) {
+      stopWatch();
+      $('wt-watch-state').textContent = 'روی بازهٔ تاریخی روشن نمی‌ماند';
+      $('wt-watch-note').textContent = dayGate.why;
+      return;
+    }
     const gen = watchGen;
     const job = new AbortController();
     watchBusy = true; watchJob = job;
     try {
-      const priority = livePriority($('wt-live-priority').value).id;
+      // ── نمادهای پایه، رزروشده ────────────────────────────────────
+      //
+      // «دیده‌بان نماد پایه را در سهمیهٔ live-trades رزرو نمی‌کند. شرط
+      // ترکیبیِ پرشدگی ≥ ۳۰٪ و قیمت پایه ≥ ۰ در پیش‌نمایش ۲۴۴ نتیجه
+      // داشت، اما پس از شروع رصد هیچ نتیجه‌ای به شمار زنده اضافه نکرد.
+      // محاسبات وجه تضمین نیز ناچار از قیمت تاریخی پایه استفاده
+      // می‌کنند.» رادار این را داشت و دیده‌بان نه.
+      //
+      // سقف عمدی است: با ده نماد، رزروِ همه یعنی نصفِ سهمیه پیش از
+      // نخستین ترکیب رفته. یک‌سومِ سهمیه مرزِ انتخابی است، و نمادها به
+      // ترتیبِ سهمِ ردیف‌هایشان در دامنه رزرو می‌شوند.
+      const baseCount = new Map();
+      for (const { ua } of built) {
+        const ins = String(ua.ins);
+        baseCount.set(ins, (baseCount.get(ins) || 0) + 1);
+      }
+      const reserve = [...baseCount.entries()].sort((a, b) => b[1] - a[1])
+        .map(([ins]) => ins).slice(0, Math.max(1, Math.floor(LIVE_INS_CAP / 3)));
+      const source = liveSource($('wt-live-source').value).id;
       const plan = planLiveQuotes({
         rows: built.map(({ row }) => row),
-        cap: LIVE_INS_CAP, priority,
-        score: priority === 'near' ? nearScore() : null,
+        cap: liveCap(), priority: livePriority($('wt-live-priority').value).id,
+        reserve, score: priorityScore(),
+        startAt: liveRotates() ? watchCursor : 0,
       });
       if (!plan.ins.length) { $('wt-watch-state').textContent = 'ابزاری برای مظنهٔ زنده نبود'; return; }
-      const response = await fetch(`/api/live-trades?ins=${plan.ins.join(',')}`, { signal: job.signal });
+      const path = source === 'book' ? '/api/books' : '/api/live-trades';
+      const response = await fetch(`${path}?ins=${plan.ins.join(',')}`, { signal: job.signal });
       const payload = await response.json();
       // رصد در این فاصله خاموش شده: پاسخ دور ریخته می‌شود. این همان
       // «توقفِ قابل اعتماد» است — پیش از این پاسخِ کندِ پانزده‌ثانیه‌ای
       // نوار را دوباره «روشن» می‌کرد.
       if (gen !== watchGen || !mounted) return;
       if (!response.ok || payload.error) throw new Error(payload.error || 'مظنهٔ زنده دریافت نشد');
-      const book = liveQuoteBook(payload);
+      watchCursor = liveRotates() ? plan.nextStart : 0;
+      watchAt = Number(payload.at) || Date.now();
+      const book = source === 'book' ? bookQuoteBook(payload) : liveQuoteBook(payload);
+      const basePriceOf = (ins) => {
+        if (source !== 'book') return num(book.prices[String(ins)], NaN);
+        const top = book.books[String(ins)];
+        if (!top) return NaN;
+        // «قیمت پایه» جهت ندارد، پس میانهٔ دو سمت. یک‌سمته گرفتنش یعنی
+        // شرطِ کاربر به عرضه یا تقاضا سوگیری پیدا کند.
+        if (Number.isFinite(top.bid) && Number.isFinite(top.ask)) return (top.bid + top.ask) / 2;
+        return num(top.bid ?? top.ask, NaN);
+      };
       const nowSec = tehranSecondOfDay();
       const today = tehranDateNumber();
+      const depth = liveDepth();
       const snapshots = [];
       let covered = 0, stale = 0;
-      liveKeys.clear();
+      const freshKeys = new Set();
       for (const { row, ua } of built) {
-        const quote = comboLiveQuote({ legs: row.legs, book, nowSec });
+        const quote = source === 'book'
+          ? comboBookQuote({ legs: row.legs, book, minUnits: depth })
+          : comboLiveQuote({ legs: row.legs, book, nowSec });
         if (!quote.ok) {
           if (quote.priced === quote.legs && quote.legs > 0) stale += 1;
           continue;
         }
-        const gap = measureGap({ legs: row.legs, prices: book.prices, strategyId: row.def.id,
+        const prices = source === 'book' ? quote.prices : book.prices;
+        const gap = measureGap({ legs: row.legs, prices, strategyId: row.def.id,
           entry: row.entry, daysLeft: row.gap.daysLeft, scale: 'raw', units: units() });
         if (!gap.ok) continue;
-        // اسپاتِ زنده اگر پایه امروز معامله شده باشد. پایه در سهمیه نیست
-        // مگر خودش پای ترکیبی باشد، پس نبودش عادی است و عددِ روز سنجش
+        // اسپاتِ زنده اگر پایه مظنه دارد. نبودش عادی است و عددِ روز سنجش
         // جایش می‌ماند — نه عددِ ساختگی.
-        const spot = num(book.prices[String(ua.ins)], row.spot);
+        const livedBase = basePriceOf(ua.ins);
+        const spot = Number.isFinite(livedBase) && livedBase > 0 ? livedBase : (row.daily?.spot ?? row.spot);
         // سود، زیان، بازده، سرمایه و وجه تضمین هم با قیمتِ زنده از نو
         // ساخته می‌شوند؛ پیش از این فقط فاصله زنده می‌شد و شرطِ «حداکثر
         // سود ٪» روی عددِ روز سنجش آتش می‌کرد.
-        const metrics = comboMetrics({ legs: row.legs, prices: book.prices, spot, rowByIns: {},
+        const metrics = comboMetrics({ legs: row.legs, prices, spot, rowByIns: {},
           settings: state.settings, daysLeft: row.gap.daysLeft, scale: 'raw', units: units() });
         row.gap = gap;
         row.verdict = gapVerdict(row.series, gap);
@@ -639,14 +788,33 @@ export async function mount(root, { state }) {
             legTrades: row.daily?.metrics?.legTrades ?? metrics.legTrades,
             thinLegs: row.daily?.metrics?.thinLegs ?? metrics.thinLegs }
           : row.daily?.metrics || row.metrics;
+        // ستونِ «قیمت نماد پایه» هم همان عددی را می‌دهد که شرط می‌سنجد.
+        row.spot = spot;
+        row.liveAt = watchAt;
         dayRange.observe(row.key, gap.current, { date: today });
         liveKeys.add(row.key);
+        freshKeys.add(row.key);
         snapshots.push(watchSnapshot(row, {
           baseIns: String(ua.ins), baseName: nameOf(ua),
-          basePrice: num(book.prices[String(ua.ins)], NaN),
+          basePrice: livedBase,
           day: dayRange.get(row.key),
         }));
         covered += 1;
+      }
+      // با چرخش، ردیفی که این تیک نوبت نگرفته عددِ زندهٔ تیکِ قبلش را نگه
+      // می‌دارد — ولی نه برای همیشه. کهنه‌تر از سقف، به عددِ روز سنجش
+      // برمی‌گردد؛ نگه‌داشتنِ عددی که نمی‌دانیم هنوز درست است یا نه، همان
+      // «زندهٔ دروغین» است. شرط‌ها فقط روی ردیف‌های همین تیک سنجیده
+      // می‌شوند، پس عددِ نگه‌داشته فقط جدول را پر می‌کند نه زنگ را.
+      for (const { row } of built) {
+        if (freshKeys.has(row.key) || !liveKeys.has(row.key)) continue;
+        if (watchAt - Number(row.liveAt || 0) <= LIVE_KEEP_MS) continue;
+        liveKeys.delete(row.key);
+        row.liveAt = 0;
+        if (row.daily) {
+          row.gap = row.daily.gap; row.metrics = row.daily.metrics;
+          row.verdict = row.daily.verdict; row.spot = row.daily.spot;
+        }
       }
       const verdict = evaluateWatch({ rules: watchRules, snapshots, prev: prevSnaps, nowMs: Date.now() });
       prevSnaps = verdict.prev;
@@ -660,8 +828,16 @@ export async function mount(root, { state }) {
         paintLog();
       }
       const hits = watchRules.reduce((sum, one) => sum + (verdict.matched.get(one.id) || []).length, 0);
-      $('wt-watch-state').textContent = `روشن · ${fmt.int(watchRules.length)} قاعده · ${fmt.int(covered)} ترکیب با مظنهٔ هم‌زمان · ${fmt.int(hits)} منطبق · ${faDigits(new Date(payload.at).toLocaleTimeString('fa-IR'))}`;
-      $('wt-watch-note').textContent = `${watchNote()} در این تیک ${fmt.int(plan.covered)} ترکیب از ${fmt.int(built.length)} ترکیبِ دامنه سهمیه گرفت؛ ${fmt.int(covered)} ترکیب مظنهٔ هم‌زمان داشت و ${fmt.int(stale)} ترکیب کنار گذاشته شد چون پاهایش در یک لحظه معامله نشده بودند یا آخرین معامله‌شان کهنه بود. ترکیبِ بیرون‌مانده با عددِ روز سنجش سنجیده نمی‌شود.`;
+      const what = source === 'book' ? 'مظنهٔ قابل اجرا' : 'مظنهٔ هم‌زمان';
+      $('wt-watch-state').textContent = `روشن · ${fmt.int(watchRules.length)} از ${fmt.int(activeRules().length)} قاعده · ${fmt.int(covered)} ترکیب با ${what} · ${fmt.int(liveKeys.size)} ترکیب دارای عددِ زنده · ${fmt.int(hits)} منطبق · ${faDigits(new Date(watchAt).toLocaleTimeString('fa-IR'))}`;
+      const livedBases = reserve.filter((ins) => Number.isFinite(basePriceOf(ins))).length;
+      const baseNote = reserve.length
+        ? ` ${fmt.int(reserve.length)} خانه از سهمیه برای نمادهای پایه رزرو شد و ${fmt.int(livedBases)} نماد قیمت زنده گرفت؛ شرطِ «قیمت نماد پایه» و مبنای وجه تضمین از همین می‌آید.`
+        : '';
+      const cycle = liveRotates() && Number.isFinite(plan.cycleTicks) && plan.cycleTicks > 1
+        ? ` یک دورِ کاملِ چرخش ${fmt.int(plan.cycleTicks)} تیک است، یعنی هر ترکیب تقریباً هر ${fmt.int(plan.cycleTicks * 10)} ثانیه یک بار تازه می‌شود؛ عددِ زندهٔ کهنه‌تر از ${fmt.int(LIVE_KEEP_MS / 1000)} ثانیه به عددِ روز سنجش برمی‌گردد و شرط‌ها فقط روی ترکیب‌های همین تیک سنجیده می‌شوند.`
+        : '';
+      $('wt-watch-note').textContent = `${watchNote()} در این تیک ${fmt.int(plan.covered)} ترکیب از ${fmt.int(built.length)} ترکیبِ دامنه سهمیه گرفت؛ ${fmt.int(covered)} ترکیب ${what} داشت و ${fmt.int(stale)} ترکیب کنار گذاشته شد. ترکیبِ بیرون‌مانده با عددِ روز سنجش سنجیده نمی‌شود.${baseNote}${cycle}`;
       paintPool();
     } catch (error) {
       if (gen !== watchGen || !mounted || error?.name === 'AbortError') return;
@@ -670,6 +846,19 @@ export async function mount(root, { state }) {
       watchBusy = false;
       if (watchJob === job) watchJob = null;
     }
+  }
+
+  /**
+   * امتیازِ اولویتِ انتخاب‌شده، وقتی از خودِ صفحه می‌آید نه از سنجه‌ها.
+   *
+   * «ترتیب جدول» باید ترتیبِ دیده‌شدهٔ جدول باشد: کاربر ستونی را مرتب
+   * می‌کند و تیکِ بعدی باید سهمیه را از بالای همان ترتیب بردارد.
+   */
+  function priorityScore() {
+    const mode = livePriority($('wt-live-priority').value).id;
+    if (mode === 'near') return nearScore();
+    if (mode === 'listed') return table ? listedOrderScore(table.get()) : null;
+    return null;
   }
 
   /** امتیازِ «نزدیک‌ترین به شرط» برای سهمیهٔ زنده — بدترین شرطِ هر قاعده ملاک است. */
@@ -701,10 +890,13 @@ export async function mount(root, { state }) {
       $('wt-rules').innerHTML = '<p class="empty-note">هنوز قاعده‌ای ذخیره نشده.</p>';
       return;
     }
+    // کارتی که در ساختِ فعلی داده ندارد، باید همان‌جا بگوید — وگرنه
+    // فهرست، وعدهٔ رصدی می‌دهد که حلقه نمی‌تواند اجرا کند.
+    const live = new Set(watchRules.map((one) => one.id));
     $('wt-rules').innerHTML = rules.map((rule) => `<article class="gap-rule${rule.enabled ? '' : ' off'}" data-rule="${esc(rule.id)}">
       <header><b>${esc(rule.name || watchRuleNote(rule))}</b><span>${esc(watchRuleNote(rule))}</span></header>
       <footer>
-        <small>${rule.firedCount ? `${fmt.int(rule.firedCount)} بار زده` : 'هنوز نزده'} · آرامش ${fmt.int(rule.cooldownSec)} ثانیه${rule.sound ? ' · با صدا' : ''}</small>
+        <small>${watchTimer ? (live.has(rule.id) ? 'در حال رصد' : 'در این ساخت داده ندارد') : 'رصد خاموش'} · ${rule.firedCount ? `${fmt.int(rule.firedCount)} بار زده` : 'هنوز نزده'} · آرامش ${fmt.int(rule.cooldownSec)} ثانیه${rule.sound ? ' · با صدا' : ''}</small>
         <button type="button" class="ghost" data-act="load">بارگذاری در فرم</button>
         <button type="button" class="ghost danger" data-act="drop">حذف</button>
       </footer></article>`).join('');
