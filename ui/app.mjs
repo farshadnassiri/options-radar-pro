@@ -333,6 +333,11 @@ const TABS = [
   // استراتژی‌ها» یعنی کسی که فقط دنبال فاصله است از پانزده پنل رد شود.
   { id: 'spread-radar', title: '📏 رادار فاصله', alias: 'اسپرد فاصله عرض استرانگل دهانه پر شدن باقی مانده هشدار آلارم spread gap width',
     section: 'پایه', mod: '/ui/tabs/spread-radar.mjs', phase: 3 },
+  // «دیده‌بان شرطی» از رادار جدا است چون جهتش وارونه است: رادار از یک
+  // نماد شروع می‌کند و ترکیب‌هایش را نشان می‌دهد؛ این یکی از **شرط** شروع
+  // می‌کند و می‌گردد ببیند کدام ترکیب — در هر نمادی — به آن می‌خورد.
+  { id: 'watchtower', title: '🔔 دیده‌بان شرطی', alias: 'هشدار اعلان شرط فیلتر رصد چند نماد notification alert watch condition',
+    section: 'پایه', mod: '/ui/tabs/watchtower.mjs', phase: 3 },
   { id: 'logs', title: 'دفتر خطاها', section: 'پایه', mod: '/ui/tabs/logs.mjs', phase: 1 },
 ];
 

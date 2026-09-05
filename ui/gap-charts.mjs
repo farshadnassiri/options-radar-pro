@@ -79,11 +79,19 @@ export function fillBar(gap) {
   // معنی را در یک شکل جمع می‌کرد و هیچ‌کدام خوانده نمی‌شد.
   const filledLabel = gap.coverageLabel || 'پر شده';
   const roomLabel = gap.roomLabel || 'باقی‌مانده';
-  const tone = gap.coveragePct > 100 ? ' over' : '';
-  return `<div class="gap-bar${tone}" role="img" aria-label="${fmt.pct(gap.coveragePct)} درصد ${esc(filledLabel)}">
+  // ── وقتی از لنگر گذشته، «باقی‌مانده» عددِ منفی نیست ─────────────────
+  //
+  // در اجرای مرورگر دیده شد: استرانگلی که پرمیومش از دهانهٔ اعمال بزرگ‌تر
+  // بود، «‎−۴۰٪ دهانهٔ بی‌پوشش» می‌داد. دهانهٔ بی‌پوششِ منفی چیزی نیست.
+  // آنچه واقعاً رخ داده این است که لنگر رد شده — و همان نوشته می‌شود.
+  const over = gap.coveragePct > 100;
+  const room = over
+    ? `از ${esc(gap.anchorLabel || 'لنگر')} گذشته`
+    : `${fmt.pct(gap.roomPct)}٪ ${esc(roomLabel)}`;
+  return `<div class="gap-bar${over ? ' over' : ''}" role="img" aria-label="${fmt.pct(gap.coveragePct)} درصد ${esc(filledLabel)}">
     <b style="--fill:${filled.toFixed(2)}%"></b>
     <span class="gap-bar-filled">${fmt.pct(gap.coveragePct)}٪ ${esc(filledLabel)}</span>
-    <span class="gap-bar-room">${fmt.pct(gap.roomPct)}٪ ${esc(roomLabel)}</span>
+    <span class="gap-bar-room">${room}</span>
   </div>`;
 }
 

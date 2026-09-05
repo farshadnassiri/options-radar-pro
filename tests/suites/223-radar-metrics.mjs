@@ -21,6 +21,9 @@
 
 import { check, group, near } from '../harness.mjs';
 import { comboMetrics, contractSizeOf, passesValueFilter } from '../../core/radar-metrics.mjs';
+import { measureGap } from '../../core/spread-gap.mjs';
+import { fillBar } from '../../ui/gap-charts.mjs';
+import { RADAR_ALL_COLS, toTableRow } from '../../ui/radar-columns.mjs';
 import { defaults } from '../../core/settings.mjs';
 
 const S = defaults();
@@ -159,4 +162,47 @@ group('۲۲۳-ه. مرزهای اعلام‌شده');
   const noSpot = comboMetrics({ legs: BULL, prices: { c50: 5000, c60: 1000 }, settings: S });
   check('بی قیمت پایه، وجه تضمین ساخته نمی‌شود ولی سود و زیان می‌مانند',
     noSpot.ok === true && !Number.isFinite(noSpot.marginNet) && noSpot.maxProfit > 0);
+}
+
+group('۲۲۳-و. دو چیزی که فقط در مرورگر دیده شد');
+{
+  // ── «دهانهٔ بی‌پوششِ منفی» چیزی نیست ─────────────────────────────────
+  //
+  // در اجرای مرورگر، استرانگل فروشی که پرمیومش از دهانهٔ اعمال بزرگ‌تر
+  // بود «‎−۴۰٪ دهانهٔ بی‌پوشش» نشان می‌داد. آنچه واقعاً رخ داده، رد شدن
+  // از لنگر است — و همان باید نوشته شود، نه درصدی منفی.
+  const over = measureGap({
+    legs: SHORT_STRANGLE, prices: { p50: 6000, c60: 5000 },
+    strategyId: 'short-strangle',
+  });
+  check('پوششِ بیش از صد درصد، خودش عدد درستی است',
+    over.ok && over.coveragePct > 100 && over.roomPct < 0);
+  const bar = fillBar(over);
+  check('ولی نوار درصدِ منفی نمی‌نویسد؛ می‌گوید از لنگر گذشته',
+    bar.includes('از دهانهٔ اعمال گذشته') && !/−\d|-\d/.test(bar.split('gap-bar-room')[1] || ''),
+    bar.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 90));
+  const under = fillBar(measureGap({
+    legs: SHORT_STRANGLE, prices: { p50: 300, c60: 400 }, strategyId: 'short-strangle',
+  }));
+  check('و در حالت عادی همان درصدِ باقی‌مانده را می‌نویسد',
+    under.includes('دهانهٔ بی‌پوشش') && !under.includes('گذشته'));
+
+  // ── «نامحدود» با «—» یکی نیست ───────────────────────────────────────
+  //
+  // ستون «سود در برابر زیان» برای فروشِ برهنه «—» می‌داد، چون درصدِ زیان
+  // مخرج ندارد. ردیفی که زیانش نامحدود است نباید در نگاه اول بی‌ریسک
+  // به نظر برسد.
+  const short = comboMetrics({
+    legs: SHORT_STRANGLE, prices: { p50: 300, c60: 400 }, spot: SPOT, settings: S, daysLeft: 30,
+  });
+  const flat = toTableRow({
+    key: 'k', def: { id: 'short-strangle', name: 'Short Strangle' }, strikes: [50000, 60000],
+    legs: SHORT_STRANGLE, gap: over, metrics: short, verdict: {}, series: { points: [] },
+  }, {});
+  check('پرچمِ «زیانِ بی‌سقف» تا خودِ ردیفِ جدول می‌رسد',
+    flat.unlimitedLoss === true && flat.unlimitedProfit === false);
+  const cell = RADAR_ALL_COLS.find((col) => col.key === 'riskBar').cell(flat);
+  check('و نوارِ سود/زیان واژه‌اش را می‌نویسد، نه خط تیره',
+    cell.includes('نامحدود') && cell.includes('boundless'),
+    cell.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
 }

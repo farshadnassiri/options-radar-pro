@@ -3549,6 +3549,13 @@ td.rich { padding-block: var(--space-1); }
 }
 .rad-risk-gain::before { background: color-mix(in srgb, var(--gain) 55%, transparent); }
 .rad-risk-loss::before { background: color-mix(in srgb, var(--loss) 55%, transparent); }
+/* زیانِ بی‌سقف: نوارِ راه‌راه، تا در یک نگاه از زیانِ «زیاد ولی محدود»
+   جدا باشد — رنگ به تنهایی این تفاوت را نمی‌رساند. */
+.rad-risk-loss.boundless::before {
+  background: repeating-linear-gradient(45deg,
+    color-mix(in srgb, var(--loss) 60%, transparent) 0 4px,
+    color-mix(in srgb, var(--loss) 22%, transparent) 4px 8px);
+}
 .rad-risk b {
   position: relative;
   font-size: var(--fs-3xs);
@@ -3579,6 +3586,59 @@ td.rich { padding-block: var(--space-1); }
   .gap-skin .gap-chart-lg,
   .gap-skin .gap-chart-wide .gap-chart-lg { min-height: 340px; }
 }
+
+/* ═══ دیده‌بان شرطی ═══
+   دو ستونِ انتخاب کنار هم، چون «کدام نمادها» و «کدام استراتژی‌ها» یک
+   تصمیم‌اند و پشت سر هم گذاشتنشان، بالا و پایین رفتن می‌خواهد. */
+.gap-skin .wt-scope {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+.gap-skin .wt-pick {
+  border: 1px solid var(--gap-hair);
+  border-radius: var(--radius-sm);
+  background: var(--gap-tile);
+  overflow: hidden;
+}
+.gap-skin .wt-pick header {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-block-end: 1px solid var(--gap-hair);
+}
+.gap-skin .wt-pick header b { font-size: var(--fs-xs); }
+.gap-skin .wt-pick header span { color: var(--muted); font-size: var(--fs-3xs); margin-inline-end: auto; }
+.gap-skin .wt-pick header button { padding: 2px var(--space-2); font-size: var(--fs-3xs); }
+/* فهرست بلند، ولی صفحه را بی‌انتها نمی‌کند: دو ستونِ انتخاب باید هر دو
+   در یک نگاه دیده شوند، وگرنه تصمیم دو تکه می‌شود. */
+.gap-skin .wt-list {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  display: grid;
+  gap: var(--space-1);
+}
+.gap-skin .wt-list label.check { font-size: var(--fs-2xs); }
+.gap-skin .wt-list small { color: var(--muted); font-size: var(--fs-3xs); }
+
+.gap-skin .wt-conds { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+.gap-skin .wt-cond {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--gap-hair);
+  border-radius: var(--radius-sm);
+  background: var(--gap-tile);
+}
+.gap-skin .wt-cond b { font-size: var(--fs-2xs); font-weight: 600; margin-inline-end: auto; }
+
+/* کارتِ هشدارِ چندشرطی: هر شرط یک سطر، با عددی که دیده شد و آستانه‌ای
+   که سنجیده شد. بی آستانه، عدد در شرطِ نسبی بی‌معنی است. */
+.gap-alarm-parts { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: grid; gap: var(--space-1); }
+.gap-alarm-parts li { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--fs-3xs); }
+.gap-alarm-parts li span { color: var(--muted); margin-inline-end: auto; }
+.gap-alarm-parts li strong { font-variant-numeric: tabular-nums; }
+.gap-alarm-parts li small { color: var(--muted); }
 
 .gap-skin .gap-rule-form { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .gap-skin .gap-alarm-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); flex-wrap: wrap; }
