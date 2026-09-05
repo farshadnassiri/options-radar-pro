@@ -12,7 +12,7 @@
 //   رنگ وضعیت ردیف، برای در سود بودن و سررسید نزدیک و مظنه کهنه
 //   نشانگر جهت تغییر نسبت به عکس لحظه‌ای قبلی
 
-const ROW_H = 27;
+const DEFAULT_ROW_H = 27;
 const OVER = 12;
 let tableA11ySeq = 0;
 
@@ -158,6 +158,10 @@ export function makeTable(host, cols, opts = {}) {
   const byKey = new Map(all.map((c) => [c.key, c]));
   const baseKeys = cols.map((c) => c.key);
   const columnPanelId = `table-columns-${++tableA11ySeq}`;
+  // ارتفاع ردیف، ثابتِ مجازی‌سازی است: جای ردیف‌های بیرونِ قاب با یک
+  // ردیفِ فاصله‌گذارِ هم‌ارتفاع پر می‌شود. جدولی که سلولِ نگاره‌دار دارد
+  // ردیفِ بلندتری می‌خواهد، وگرنه محاسبهٔ پیمایش با واقعیت نمی‌خواند.
+  const ROW_H = Math.max(20, Math.trunc(Number(opts.rowHeight) || DEFAULT_ROW_H));
 
   // انتخاب ذخیره‌شده فقط تا جایی معتبر است که ستون‌هایش هنوز وجود داشته باشند
   const saved = loadPick(opts.storeKey)?.filter((k) => byKey.has(k));
@@ -222,7 +226,9 @@ export function makeTable(host, cols, opts = {}) {
   function exportRows() {
     const cols = active();
     const head = cols.map((c) => c.label);
-    const body = view.map((r) => cols.map((c) => (fmt[c.fmt] || fmt.text)(r[c.key])));
+    const body = view.map((r) => cols.map((c) => (c.text
+      ? c.text(r, r[c.key])
+      : (fmt[c.fmt] || fmt.text)(r[c.key]))));
     return [head, ...body];
   }
   exportBtn?.addEventListener('click', () => {
@@ -531,8 +537,16 @@ export function makeTable(host, cols, opts = {}) {
         const v = r[c.key];
         const isNum = NUM_FMT.has(c.fmt);
         const isNeg = isNum && Number.isFinite(v) && v < 0;
-        td.className = `${isNum ? 'n' : ''}${isNeg ? ' neg' : ''}`;
-        td.textContent = (fmt[c.fmt] || fmt.text)(v);
+        td.className = `${isNum ? 'n' : ''}${isNeg ? ' neg' : ''}${c.cell ? ' rich' : ''}`;
+        // ── سلولِ نگاره‌دار ──────────────────────────────────────────
+        //
+        // ستونی که `cell` دارد خودش HTML می‌سازد — نوار پرشدگی، اسپارک‌لاین،
+        // نامِ نمادها. مجازی‌سازی همین را ممکن می‌کند: صد ردیف یعنی صد
+        // نگاره، ولی فقط پنجاه ردیفِ داخل قاب ساخته می‌شوند.
+        //
+        // خروجی اکسل از `text` می‌آید نه از این، چون فایل نگاره ندارد.
+        if (c.cell) td.innerHTML = c.cell(r, v);
+        else td.textContent = (fmt[c.fmt] || fmt.text)(v);
         if (c.heat) td.style.cssText = heatStyle(c, v);
         tr.appendChild(td);
       }
