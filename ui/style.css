@@ -3493,6 +3493,34 @@ button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
 .gap-skin .gap-table td small { display: block; color: var(--muted); font-size: .68rem; }
 .gap-skin .gap-table td.spark-cell { width: 100px; }
 
+/* نمادهای ترکیب — خرید و فروش در یک ستون، از هم جدا. */
+.gap-skin .gap-syms { display: flex; flex-direction: column; gap: 3px; }
+.gap-skin .gap-sym {
+  display: flex; align-items: baseline; gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-xs);
+  border-inline-start: 3px solid var(--muted);
+  background: var(--gap-tile);
+  white-space: nowrap;
+}
+.gap-skin .gap-sym[data-side="buy"] { border-inline-start-color: var(--gain); }
+.gap-skin .gap-sym[data-side="sell"] { border-inline-start-color: var(--loss); }
+.gap-skin .gap-sym i { font-style: normal; color: var(--muted); font-size: .66rem; }
+.gap-skin .gap-sym b { font-family: var(--mono); font-size: .74rem; }
+.gap-skin .gap-sym u { text-decoration: none; color: var(--muted); font-size: .66rem; }
+
+/* شناسنامهٔ ترکیبِ باز — بالای نمودارهای تاریخچه. */
+.gap-skin .gap-ident {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--gap-hair);
+  border-radius: var(--radius-sm);
+  background: var(--gap-tile);
+}
+.gap-skin .gap-ident .gap-syms { flex-direction: row; flex-wrap: wrap; }
+.gap-skin .gap-ident span { color: var(--muted); font-size: var(--fs-2xs); }
+
 .gap-skin .gap-hint { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-2xs); line-height: var(--lh-normal); }
 
 .gap-skin .gap-chart-grid {
