@@ -44,8 +44,8 @@ export const ALERT_METRICS = [
   { id: 'perDay', label: 'سود روزانهٔ باقی‌مانده', unit: 'pct', hint: 'سود باقی‌مانده تقسیم بر روزهای مانده تا سررسید.' },
   { id: 'rank', label: 'صدک تاریخی فاصله', unit: 'pct', hint: 'فاصلهٔ اکنون کجای توزیعِ تاریخیِ خودش ایستاده. صفر یعنی کمینهٔ تاریخی، صد یعنی بیشینه.' },
   { id: 'vsMeanPct', label: 'فاصله از میانگین تاریخی', unit: 'pct', hint: 'چند درصد بالاتر یا پایین‌تر از میانگینِ همین بازه. منفی یعنی پایین‌تر.' },
-  { id: 'fromDayLowPct', label: 'درصد از کف امروز', unit: 'pct', hint: 'چند درصد بالاتر از کمترین فاصلهٔ امروز است.' },
-  { id: 'fromDayHighPct', label: 'درصد از سقف امروز', unit: 'pct', hint: 'چند درصد پایین‌تر از بیشترین فاصلهٔ امروز است. همیشه صفر یا منفی.' },
+  { id: 'fromDayLowPct', label: 'درصد از کفِ مشاهده‌شدهٔ امروز', unit: 'pct', hint: 'چند درصد بالاتر از کمترین فاصله‌ای که از آغاز رصدِ زندهٔ امروز دیده شده. کفِ واقعیِ جلسه نیست — پیش از نخستین تیک عدد ندارد و شرط برقرار نمی‌شود.' },
+  { id: 'fromDayHighPct', label: 'درصد از سقفِ مشاهده‌شدهٔ امروز', unit: 'pct', hint: 'چند درصد پایین‌تر از بیشترین فاصله‌ای که از آغاز رصدِ زندهٔ امروز دیده شده. همیشه صفر یا منفی.' },
   { id: 'basePrice', label: 'قیمت نماد پایه', unit: 'rial', hint: 'برای شرطی که به خودِ سهم بسته است، نه به ساختار.' },
   { id: 'daysLeft', label: 'روز مانده تا سررسید', unit: 'day', hint: 'برای «سه روز مانده خبرم کن».' },
 ];
@@ -194,6 +194,9 @@ export function evaluateAlerts({ rules = [], snapshots = {}, prev = {}, nowMs = 
  * نسخهٔ جدا یعنی روزی هشدار روی عددی آتش می‌کند که جدول نشانش نمی‌دهد.
  */
 export function alertSnapshot({ gap, verdict = null, day = null, basePrice = NaN, label = '', strategyId = '', strategyName = '' } = {}) {
+  // `day` فقط از دفترِ مشاهده‌های امروز می‌آید (`core/day-range.mjs`).
+  // پیش از این، صداکننده `min`/`max` سریِ **روزانهٔ بازه** را می‌داد و
+  // «کف امروز» در عمل کفِ کل بازهٔ تاریخی بود. نداشتنش `NaN` می‌ماند.
   const low = num(day?.low, NaN), high = num(day?.high, NaN);
   const current = num(gap?.current, NaN);
   return {
@@ -208,4 +211,28 @@ export function alertSnapshot({ gap, verdict = null, day = null, basePrice = NaN
       ? ((current / high) - 1) * 100 : NaN,
     basePrice: num(basePrice, NaN),
   };
+}
+
+
+/**
+ * چقدر مانده تا این هشدارها روی این ترکیب برقرار شوند — برای اولویتِ سهمیهٔ زنده.
+ *
+ * نزدیک‌ترین قاعده ملاک است: ترکیبی که یکی از هشدارهایت را تقریباً برقرار
+ * کرده، باید قیمتِ زنده بگیرد حتی اگر بقیهٔ قاعده‌ها از آن دورند. عدد
+ * نسبی است تا شرطِ درصدی و شرطِ ریالی با یک خط‌کش سنجیده نشوند.
+ */
+export function alertDistance(rules = [], snapshot = {}) {
+  let best = NaN;
+  for (const rule of rules) {
+    if (!rule?.enabled) continue;
+    if (rule.comboKey && rule.comboKey !== snapshot?.key) continue;
+    if (rule.strategyId && rule.strategyId !== snapshot?.strategyId) continue;
+    const value = num(snapshot?.[rule.metric], NaN);
+    const threshold = num(rule.value, NaN);
+    if (!Number.isFinite(value) || !Number.isFinite(threshold)) continue;
+    const met = rule.op === 'le' || rule.op === 'crossDown' ? value <= threshold : value >= threshold;
+    const gap = met ? 0 : Math.abs(value - threshold) / Math.max(Math.abs(threshold), 1);
+    if (!Number.isFinite(best) || gap < best) best = gap;
+  }
+  return best;
 }

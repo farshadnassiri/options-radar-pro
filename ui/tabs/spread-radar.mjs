@@ -34,11 +34,17 @@ import {
   GAP_TIMEFRAMES, gapVerdict, indexedPair, intradayGapSeries, joinLive, resample, seriesStats,
   versusBase,
 } from '/core/spread-gap-series.mjs';
-import { buildRadarHistory, radarDataReport } from '/core/radar-history.mjs';
+import { buildRadarHistory, expiryShortfall, radarDataReport } from '/core/radar-history.mjs';
 import {
-  ALERT_METRICS, ALERT_OPS, DEFAULT_COOLDOWN_SEC, alertSnapshot, evaluateAlerts,
+  ALERT_METRICS, ALERT_OPS, DEFAULT_COOLDOWN_SEC, alertDistance, alertSnapshot, evaluateAlerts,
   normalizeRule, ruleNote,
 } from '/core/gap-alert.mjs';
+import { comboMetrics } from '/core/radar-metrics.mjs';
+import {
+  LIVE_INS_CAP, LIVE_PRIORITIES, comboLiveQuote, livePriority, liveQuoteBook, planLiveQuotes,
+  tehranSecondOfDay,
+} from '/core/live-quote.mjs';
+import { makeDayRange } from '/core/day-range.mjs';
 import { MOMENT_GRAINS, isIntradayGrain } from '/core/intraday-grid.mjs';
 import { tehranDateNumber } from '/core/live-day.mjs';
 import { chartGroup } from '/ui/chart-host.mjs';
@@ -50,7 +56,8 @@ import {
   indexedChart, rangeChart, versusBaseChart, versusBaseScatter,
 } from '/ui/gap-charts.mjs';
 import {
-  NOTIFY_LABEL, askNotifyPermission, clearLog, deliver, metricText, notifyState, readLog, testDelivery,
+  NOTIFY_LABEL, askNotifyPermission, clearLog, deliverBurst, metricText, notifyState, readLog,
+  testDelivery,
 } from '/ui/gap-alarm.mjs';
 import { logError } from '/ui/errlog.mjs';
 
@@ -130,9 +137,11 @@ export async function mount(root, { state }) {
         <div><p class="eyebrow">همهٔ ترکیب‌های فاصله‌دار</p><h2>فاصله در این لحظه</h2></div>
         <div class="gap-toolbar">
           <label class="check"><input type="checkbox" id="gr-live"> رصد زندهٔ بازار</label>
+          <label>اولویت سهمیهٔ زنده<select id="gr-live-priority">${LIVE_PRIORITIES.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
           <span id="gr-live-state" class="gap-live-state">خاموش</span>
         </div>
       </div>
+      <p class="gap-note" id="gr-live-note">—</p>
       <p class="gap-note" id="gr-now-note">—</p>
       <div id="gr-table" class="gap-grid"></div>
     </section>
@@ -215,6 +224,21 @@ export async function mount(root, { state }) {
   let rules = readRules();
   let prevSnapshots = {};
   let liveTimer = 0, livePrices = null, tapeByIns = null, tapeDate = 0;
+  // ── حالتِ رصد زنده ───────────────────────────────────────────────────
+  //
+  // `liveGen` نسلِ رصد است. «توقف هنگام درخواست کند قابل اعتماد نیست»:
+  // رصد در میانهٔ یک پاسخِ پانزده‌ثانیه‌ای خاموش می‌شد و پاسخ که می‌رسید،
+  // نوار دوباره «روشن» می‌نوشت و جدول را زنده می‌کرد. حالا هر پاسخ نسلِ
+  // خودش را با نسلِ فعلی می‌سنجد و پاسخِ نسلِ مرده دور ریخته می‌شود.
+  //
+  // `liveBusy` و `liveJob` جوابِ «درخواست‌های زنده می‌توانند روی هم
+  // بیفتند»‌اند: تیک ده‌ثانیه‌ای روی پاسخی که هنوز نیامده سوار نمی‌شود، و
+  // توقف، درخواستِ جاری را واقعاً لغو می‌کند.
+  let liveGen = 0, liveBusy = false, liveJob = null;
+  let liveBook = null, liveBase = NaN, liveAt = 0;
+  // دفترِ کف و سقفِ **امروز**. پیش از این «کف امروز» کمینهٔ کل بازهٔ
+  // تاریخی بود؛ حالا فقط از مشاهده‌های همین رصد ساخته می‌شود.
+  const dayRange = makeDayRange();
   // ── دنبالهٔ زندهٔ امروز ────────────────────────────────────────────────
   //
   // «رصدگر لحظه‌ای در هر زمان از روز … از شروع بازار تا آن لحظه را هم
@@ -414,7 +438,12 @@ export async function mount(root, { state }) {
         if (current()) setStatus(`ساخت فاصله‌ها: ${fmt.int(done)} از ${fmt.int(total)} استراتژی بررسی شد · ${fmt.int(combos)} ترکیب آماده${name ? ` · ${name}` : ''}`);
       } });
     if (!current()) return;
-    rows = result.rows; dates = result.dates;
+    // نسخهٔ روزِ سنجش کنار هر ردیف می‌ماند. رصد زنده روی `gap`/`metrics`
+    // می‌نویسد و خاموش‌شدنش باید بتواند عددِ روزانه را برگرداند، وگرنه
+    // جدولِ خاموش، عددِ نیمه‌زندهٔ آخرین تیک را نگه می‌دارد.
+    rows = result.rows.map((row) => ({ ...row,
+      daily: { gap: row.gap, metrics: row.metrics, verdict: row.verdict } }));
+    dates = result.dates;
     const excluded = result.excluded;
     const win = result.expiryWindow;
     // پنجرهٔ «روز تا سررسید» بی‌صداترین علتِ صفر شدنِ نتیجه است، چون در
@@ -425,15 +454,20 @@ export async function mount(root, { state }) {
       : '';
     const thinNote = excluded.thin ? ` · ${fmt.int(excluded.thin)} ترکیب زیر آستانهٔ ارزش یا حجم معاملهٔ پاها` : '';
     const breakdown = `${fmt.int(excluded.mark)} ترکیب فاقد قیمت روز سنجش · ${fmt.int(excluded.invalid)} ساختار بدون فاصلهٔ معتبر · ${fmt.int(win?.expired || 0)} سررسید در روز سنجش پایان یافته${thinNote}${windowNote}`;
+    // ساختارِ دو سررسیدی با یک سررسید ساخته نمی‌شود، و این را باید صریح
+    // گفت — نه اینکه کاربر را دنبالِ بررسی قیمت‌هایی بفرستیم که سالم‌اند.
+    const shortfall = expiryShortfall(defs, win);
     if (!rows.length) {
       $('gr-hero-tag').textContent = 'قیمت‌ها بررسی شد؛ ترکیب قابل نمایش نیست';
-      setStatus(`در روز سنجش و با قیود فعلی ترکیبی برای نمایش ساخته نشد؛ ${breakdown}. قیمت روز سنجش ابزارها را بررسی کن؛ سپس بازه، خانواده یا فیلترهای استراتژی را تغییر بده.`, true);
+      setStatus(shortfall.note
+        ? `در روز سنجش ترکیبی ساخته نشد. ${shortfall.note} (${breakdown}.)`
+        : `در روز سنجش و با قیود فعلی ترکیبی برای نمایش ساخته نشد؛ ${breakdown}. قیمت روز سنجش ابزارها را بررسی کن؛ سپس بازه، خانواده یا فیلترهای استراتژی را تغییر بده.`, true);
       return;
     }
     $('gr-tabs').hidden = false;
     subtabs = mountRadarTabs(); subtabs.show('now');
     $('gr-hero-tag').textContent = `${fmt.int(rows.length)} ترکیب فاصله‌دار · ${nameOf(ua)}`;
-    setStatus(`${fmt.int(rows.length)} ترکیب فاصله‌دار ساخته شد · ${breakdown}.`);
+    setStatus(`${fmt.int(rows.length)} ترکیب فاصله‌دار ساخته شد · ${breakdown}.${shortfall.note ? ` ${shortfall.note}` : ''}`);
     paintKpis();
     paintTable();
     fillPicker();
@@ -704,10 +738,53 @@ export async function mount(root, { state }) {
   $('gr-live').addEventListener('change', () => {
     if ($('gr-live').checked) startLive(); else stopLive();
   });
+  $('gr-live-priority').addEventListener('change', () => {
+    if (liveTimer) { $('gr-live-note').textContent = livePriorityNote(); void pollLive(); }
+    else $('gr-live-note').textContent = livePriorityNote();
+  });
+
+  /**
+   * روزِ سنجشِ این ساخت، امروز است؟
+   *
+   * «رصد زنده روی بازهٔ تاریخی نیز فعال می‌شود. قراردادها و روزهای مانده
+   * بر اساس پایان بازهٔ انتخابی ساخته می‌شوند، نه امروز. با انتخاب یک
+   * بازهٔ قدیمی ممکن است قرارداد منقضی یا روزماندهٔ تاریخی رصد شود.»
+   *
+   * درست بود و بدترین شکلِ ممکن را داشت: مظنهٔ زندهٔ امروز روی ترکیبی
+   * می‌نشست که «روز مانده تا سررسید»ش از پایانِ یک بازهٔ گذشته حساب شده
+   * بود، و قراردادش می‌توانست از همان موقع منقضی شده باشد. حالا رصد فقط
+   * وقتی روشن می‌شود که روزِ سنجش، خودِ امروز باشد.
+   */
+  function liveDayGate() {
+    const mark = Number(dates.at(-1)) || 0;
+    const today = tehranDateNumber();
+    if (!mark) return { ok: false, why: 'هنوز روز سنجشی ساخته نشده.' };
+    if (!today) return { ok: false, why: 'ساعت مرورگر خوانده نشد؛ نمی‌شود گفت روز سنجش امروز است یا نه.' };
+    if (mark !== today) {
+      return { ok: false, mark, today,
+        why: `روز سنجشِ این ساخت ${faDigits(historyDateLabel(mark))} است، نه امروز ${faDigits(historyDateLabel(today))}. قرارداد، پنجرهٔ سررسید و «روز مانده» همه بر مبنای همان روز ساخته شده‌اند؛ نشاندنِ مظنهٔ امروز رویشان، عددی می‌سازد که هیچ‌وقت وجود نداشته. بازه را تا امروز بیاور.` };
+    }
+    return { ok: true, mark, today, why: '' };
+  }
+
+  function livePriorityNote() {
+    const meta = livePriority($('gr-live-priority').value);
+    const total = rows.length;
+    return `سقفِ مظنهٔ زنده ${fmt.int(LIVE_INS_CAP)} ابزار در هر تیک است و ${fmt.int(total)} ترکیب ساخته شده؛ سهمیه به ترکیبِ کامل داده می‌شود، نه به پا، تا ترکیبِ نیم‌قیمت ساخته نشود. اولویت فعلی: ${meta.label} — ${meta.hint}`;
+  }
 
   function startLive() {
     stopLive();
+    const gate = liveDayGate();
+    if (!gate.ok) {
+      $('gr-live').checked = false;
+      $('gr-live-state').textContent = 'روی بازهٔ تاریخی روشن نمی‌شود';
+      $('gr-live-note').textContent = gate.why;
+      return;
+    }
+    dayRange.reset(gate.today);
     $('gr-live-state').textContent = 'روشن — هر ۱۰ ثانیه';
+    $('gr-live-note').textContent = livePriorityNote();
     const tick = () => void pollLive();
     tick();
     liveTimer = setInterval(tick, 10000);
@@ -718,11 +795,28 @@ export async function mount(root, { state }) {
     liveTimer = 0; livePrices = null;
     liveSeries = null; liveTailKey = '';
     liveKeys.clear();
+    // نسل عوض می‌شود و درخواستِ جاری لغو: پاسخی که بعد از این برسد، مالِ
+    // نسلِ مرده است و نه نوار را عوض می‌کند نه جدول را.
+    liveGen += 1; liveBusy = false;
+    liveJob?.abort(); liveJob = null;
+    liveBook = null; liveBase = NaN; liveAt = 0;
+    dayRange.reset(0);
+    // ردیف‌ها با قیمتِ زنده بازنویسی شده بودند؛ عددِ روزِ سنجش را
+    // برمی‌گردانیم تا جدولِ خاموش، عددِ نیمه‌زندهٔ آخرین تیک را نگه ندارد.
+    restoreDaily();
     const node = $('gr-live-state');
     if (node) node.textContent = 'خاموش';
     const tail = $('gr-tail-note');
     if (tail) tail.textContent = '';
-    if (rows.length) { paintTable(); paintHistory(); }
+    if (mounted && rows.length) { paintKpis(); paintTable(); paintHistory(); }
+  }
+
+  /** فاصله، سنجه و حکمِ روزِ سنجش را برمی‌گرداند — همان که ساخت اولیه داد. */
+  function restoreDaily() {
+    for (const row of rows) {
+      if (!row.daily) continue;
+      row.gap = row.daily.gap; row.metrics = row.daily.metrics; row.verdict = row.daily.verdict;
+    }
   }
 
   /**
@@ -759,64 +853,177 @@ export async function mount(root, { state }) {
   /**
    * قیمت زندهٔ پاها، و سنجشِ هشدارها روی همان.
    *
-   * سقف ۲۴ ابزار، همان سقفِ `/api/live-trades` است. با ده‌ها ترکیب،
-   * پرمعامله‌ترین پاها اولویت می‌گیرند — نه اینکه بی‌صدا نصفشان بیفتد؛
-   * شمارِ پوشش‌داده‌شده در نوار وضعیت گفته می‌شود.
+   * ═══ سه چیزی که اینجا عوض شد ═══
+   *
+   * **سهمیه به ترکیب، نه به پا.** `slice(0, 24)` روی فهرستِ پاها، ترکیب
+   * را نصفه می‌کرد: پای اولش قیمت می‌گرفت، پای دومش نه، و آن ترکیب هم
+   * پوشش نداشت و سهمیه‌اش هم سوخته بود. حالا `planLiveQuotes` بودجه را
+   * ترکیب‌به‌ترکیب می‌دهد و اولویتش انتخابِ کاربر است.
+   *
+   * **قیمتِ نماد پایه هم زنده می‌آید.** یک خانه از بیست‌وچهار، تا شرطِ
+   * «قیمت نماد پایه» از `NaN` دربیاید و وجه تضمین با اسپاتِ امروز حساب
+   * شود.
+   *
+   * **یک درخواست در هر لحظه.** تیکِ ده‌ثانیه‌ای روی پاسخِ نیامده سوار
+   * نمی‌شود و پاسخِ نسلِ خاموش‌شده دور ریخته می‌شود.
    */
   async function pollLive() {
     if (!rows.length) return;
-    const wanted = [...new Set(rows.flatMap((row) => row.legs)
-      .filter((leg) => leg.kind !== 'underlying').map((leg) => String(leg.ins)))].slice(0, 24);
+    if (liveBusy) return;
+    const gen = liveGen;
+    const job = new AbortController();
+    liveBusy = true; liveJob = job;
     try {
-      const response = await fetch(`/api/live-trades?ins=${wanted.join(',')}`);
+      const priority = livePriority($('gr-live-priority').value).id;
+      const plan = planLiveQuotes({
+        rows, cap: LIVE_INS_CAP, priority,
+        reserve: ua?.ins ? [String(ua.ins)] : [],
+        score: priority === 'near' ? nearScore() : null,
+      });
+      if (!plan.ins.length) { $('gr-live-state').textContent = 'ابزاری برای مظنهٔ زنده نبود'; return; }
+      const response = await fetch(`/api/live-trades?ins=${plan.ins.join(',')}`, { signal: job.signal });
       const payload = await response.json();
+      // پاسخ رسید، ولی رصد در این فاصله خاموش شده یا اولویت عوض شده:
+      // نه نوار عوض می‌شود، نه جدول. این همان «توقفِ قابل اعتماد» است.
+      if (gen !== liveGen || !mounted) return;
       if (!response.ok || payload.error) throw new Error(payload.error || 'مظنهٔ زنده دریافت نشد');
-      livePrices = {};
-      for (const [ins, item] of Object.entries(payload.items || {})) {
-        const price = Number(item?.summary?.lastPrice);
-        if (price > 0) livePrices[ins] = price;
-      }
-      const covered = applyLive();
-      $('gr-live-state').textContent = `روشن · ${fmt.int(covered)} ترکیب با قیمت زنده · ${faDigits(new Date(payload.at).toLocaleTimeString('fa-IR'))}`;
+      liveBook = liveQuoteBook(payload);
+      liveAt = Number(payload.at) || 0;
+      liveBase = Number(liveBook.prices[String(ua?.ins ?? '')] ?? NaN);
+      livePrices = liveBook.prices;
+      const applied = applyLive();
+      const clock = faDigits(new Date(payload.at).toLocaleTimeString('fa-IR'));
+      $('gr-live-state').textContent = `روشن · ${fmt.int(applied.covered)} ترکیب با مظنهٔ هم‌زمان · ${clock}`;
+      $('gr-live-note').textContent = `${livePriorityNote()} در این تیک ${fmt.int(plan.covered)} ترکیب سهمیه گرفت و ${fmt.int(plan.dropped)} ترکیب بیرون ماند؛ از سهمیه‌گرفته‌ها ${fmt.int(applied.covered)} ترکیب مظنهٔ هم‌زمان داشت و ${fmt.int(applied.stale)} ترکیب کنار گذاشته شد چون پاهایش در یک لحظه معامله نشده بودند یا آخرین معامله‌شان کهنه بود. ${Number.isFinite(liveBase) ? `قیمت زندهٔ ${nameOf(ua)}: ${fmt.money(liveBase)}.` : `برای ${nameOf(ua)} امروز معامله‌ای در پاسخ نبود؛ شرطِ «قیمت نماد پایه» عدد ندارد و برقرار نمی‌شود.`} ترکیبِ بیرون‌مانده با عددِ روز سنجش سنجیده نمی‌شود.`;
       runAlerts();
       void refreshLiveTail();
     } catch (error) {
+      if (gen !== liveGen || !mounted || error?.name === 'AbortError') return;
       $('gr-live-state').textContent = `دریافت زنده نشد: ${error.message}`;
+    } finally {
+      liveBusy = false;
+      if (liveJob === job) liveJob = null;
     }
   }
 
-  /** فاصلهٔ هر ردیف را با قیمت زنده بازمی‌سازد. ردیفِ بی‌قیمتِ زنده دست‌نخورده می‌ماند. */
+  /**
+   * امتیازِ «نزدیک‌ترین به شرط» — ترکیبی که تا زنگ‌زدنِ هشدارت کم مانده،
+   * اول سهمیهٔ زنده می‌گیرد.
+   *
+   * امتیاز از عددِ **روز سنجش** ساخته می‌شود، چون در لحظهٔ تصمیم‌گیریِ
+   * سهمیه هنوز قیمتِ زنده‌ای نداریم. بی هشدارِ فعال، همه `NaN` می‌شوند و
+   * `planLiveQuotes` به ترتیب جدول برمی‌گردد.
+   */
+  function nearScore() {
+    if (!rules.length) return null;
+    return (row) => {
+      const stats = dayRange.get(row.key);
+      const snapshot = alertSnapshot({
+        gap: row.gap, verdict: row.verdict, day: stats,
+        basePrice: Number.isFinite(liveBase) ? liveBase : row.spot,
+        strategyId: row.def.id, strategyName: row.def.name,
+      });
+      snapshot.key = row.key;
+      const distance = alertDistance(rules, snapshot);
+      return Number.isFinite(distance) ? -distance : NaN;
+    };
+  }
+
+  /**
+   * فاصله **و سنجه‌های** هر ردیف را با قیمت زنده بازمی‌سازد.
+   *
+   * ═══ چرا سنجه‌ها هم، نه فقط فاصله ═══
+   *
+   * «سود، زیان و بازده با قیمت زنده دوباره محاسبه نمی‌شوند … فاصله از
+   * ۱٬۱۲۴ به ۲٬۲۴۸ رسید، اما حداکثر سود ٪ همچنان ۴۲۷٫۴۹٪ باقی ماند.»
+   *
+   * درست بود: `measureGap` فقط فاصله را می‌ساخت و `row.metrics` — که
+   * حداکثر سود، حداکثر زیان، بازده، سرمایه و وجه تضمین از آن می‌آید —
+   * دست‌نخورده از روز سنجش می‌ماند. پس هشدارِ «حداکثر سود ≥ ۴۰٪» روی
+   * عددِ دیروز آتش می‌کرد. حالا هر تیک، همان خط لولهٔ مشترکِ برنامه
+   * (`comboMetrics`) با قیمتِ زنده و اسپاتِ زنده دوباره اجرا می‌شود.
+   *
+   * ═══ و چرا هر ردیفی زنده نمی‌شود ═══
+   *
+   * `comboLiveQuote` سه چیز را می‌سنجد: همهٔ پاها قیمت دارند، زمانشان
+   * معلوم است، و در یک بازهٔ کوتاه معامله شده‌اند. ردیفی که یکی از این
+   * سه را ندارد **دست‌نخورده** می‌ماند و در `liveKeys` نمی‌آید — یعنی نه
+   * جدول «زنده» صدایش می‌کند و نه هشدار رویش می‌نشیند.
+   */
   function applyLive() {
-    let covered = 0;
+    let covered = 0, stale = 0;
     liveKeys.clear();
+    const nowSec = tehranSecondOfDay();
+    const today = tehranDateNumber();
+    const scale = $('gr-scale').value;
     for (const row of rows) {
-      const legs = row.legs.filter((leg) => leg.kind !== 'underlying');
-      if (!legs.every((leg) => finite(livePrices?.[String(leg.ins)]))) continue;
+      const quote = comboLiveQuote({ legs: row.legs, book: liveBook, nowSec });
+      if (!quote.ok) {
+        if (quote.priced === quote.legs && quote.legs > 0) stale += 1;
+        continue;
+      }
       const gap = measureGap({
         legs: row.legs, prices: livePrices, strategyId: row.def.id,
         entry: row.entry, daysLeft: row.gap.daysLeft,
-        scale: $('gr-scale').value, units: units(),
+        scale, units: units(),
       });
       if (!gap.ok) continue;
+      // اسپاتِ زنده اگر پایه امروز معامله شده، وگرنه اسپاتِ روز سنجش —
+      // که مبنای وجه تضمین است و نبودش یعنی سرمایه و درصدها عدد ندارند.
+      const spot = Number.isFinite(liveBase) && liveBase > 0 ? liveBase : row.spot;
+      // `rowByIns` خالی است چون ارزش و حجمِ معامله از تابلوی روزانه
+      // می‌آید و مظنهٔ زنده آن را نمی‌دهد؛ همان‌ها پایین‌تر از نسخهٔ روزانه
+      // برگردانده می‌شوند.
+      const metrics = comboMetrics({
+        legs: row.legs, prices: livePrices, spot, rowByIns: {},
+        settings: state.settings, daysLeft: row.gap.daysLeft, scale, units: units(),
+      });
       row.gap = gap;
       row.verdict = gapVerdict(row.series, gap);
+      // ارزش و حجمِ معاملهٔ پاها از تابلوی روزانه می‌آید و مظنهٔ زنده آن را
+      // نمی‌دهد؛ همان عددِ روز سنجش نگه داشته می‌شود تا ستون خالی نشود و
+      // ادعای تازه‌ای هم ساخته نشود.
+      row.metrics = metrics.ok
+        ? { ...metrics,
+          legValue: row.daily?.metrics?.legValue ?? metrics.legValue,
+          legVolume: row.daily?.metrics?.legVolume ?? metrics.legVolume,
+          legTrades: row.daily?.metrics?.legTrades ?? metrics.legTrades,
+          thinLegs: row.daily?.metrics?.thinLegs ?? metrics.thinLegs }
+        : row.daily?.metrics || row.metrics;
+      dayRange.observe(row.key, gap.current, { date: today });
       liveKeys.add(row.key);
       covered += 1;
     }
     paintKpis();
     paintTable();
-    return covered;
+    return { covered, stale };
   }
 
+  /**
+   * هشدارها — **فقط** روی ردیف‌هایی که همین حالا مظنهٔ زنده دارند.
+   *
+   * «رادار بدون داشتن قیمت زنده، اعلان زنده می‌فرستد. در آزمون، وضعیت
+   * ۰ ترکیب با قیمت زنده بود؛ با این حال شرط فاصله ≥ ۰ روی قیمت تاریخی
+   * اجرا شد و ده‌ها اعلان ثبت کرد.»
+   *
+   * علتش همین بود که حلقه روی `rows` می‌چرخید نه روی `liveKeys`. یک
+   * هشدارِ زنده که عددش مالِ روز سنجش است، بدتر از نبودِ هشدار است.
+   */
   function runAlerts() {
-    if (!rules.length) return;
+    if (!rules.length || !liveTimer) return;
+    if (!liveKeys.size) return;
     const snapshots = {};
+    const today = tehranDateNumber();
     for (const row of rows) {
-      const stats = seriesStats(row.series.points);
+      if (!liveKeys.has(row.key)) continue;
       snapshots[row.key] = alertSnapshot({
         gap: row.gap, verdict: row.verdict,
-        day: { low: stats.min, high: stats.max },
-        basePrice: NaN,
+        // کف و سقفِ امروز، از دفترِ مشاهده‌های امروز — نه از کمینه و
+        // بیشینهٔ کل بازهٔ تاریخی، که پیش از این جایش نشسته بود.
+        day: dayRange.date === today ? dayRange.get(row.key) : null,
+        // قیمتِ زندهٔ پایه. پیش از این عمداً `NaN` فرستاده می‌شد و شرطِ
+        // «قیمت نماد پایه» هیچ‌وقت کار نمی‌کرد.
+        basePrice: liveBase,
         // اعلان بی نامِ نماد، خبری است که نمی‌شود رویش سفارش گذاشت.
         label: `${row.def.name} · ${comboSymbolText(row.legs)} · ${row.strikes.map((k) => fmt.money(k)).join('/')}`,
         strategyId: row.def.id, strategyName: row.def.name,
@@ -827,8 +1034,8 @@ export async function mount(root, { state }) {
     if (result.fired.length) {
       rules = result.rules;
       saveRules(rules);
-      const host = $('gr-alarm-host');
-      for (const fired of result.fired) deliver(fired, { host });
+      // موجِ بزرگ: همه در دفترچه، چند کارت روی صفحه، یک جمع‌بندی.
+      deliverBurst(result.fired, { host: $('gr-alarm-host'), scope: 'radar', kind: 'gap' });
       paintRules();
       paintLog();
     }
@@ -902,7 +1109,7 @@ export async function mount(root, { state }) {
   }
 
   function paintLog() {
-    const log = readLog();
+    const log = readLog('radar');
     if (!log.length) { $('gr-log').innerHTML = '<p class="empty-note">دفترچه خالی است.</p>'; return; }
     $('gr-log').innerHTML = log.slice(0, 60).map((row) => `<div class="gap-log-row">
       <time>${faDigits(row.clock)}</time>
@@ -921,10 +1128,10 @@ export async function mount(root, { state }) {
     paintNotifyState();
   });
   $('gr-notify-test').addEventListener('click', () => {
-    testDelivery({ host: $('gr-alarm-host-2'), sound: $('gr-rule-sound').checked });
+    testDelivery({ host: $('gr-alarm-host-2'), sound: $('gr-rule-sound').checked, scope: 'radar' });
     paintLog();
   });
-  $('gr-log-clear').addEventListener('click', () => { clearLog(); paintLog(); });
+  $('gr-log-clear').addEventListener('click', () => { clearLog('radar'); paintLog(); });
 
   // ————————————————————————— راه‌اندازی —————————————————————————
 

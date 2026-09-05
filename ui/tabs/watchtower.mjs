@@ -36,16 +36,23 @@ import { loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
 import { GAP_STRATEGY_IDS, measureGap } from '/core/spread-gap.mjs';
 import { gapVerdict } from '/core/spread-gap-series.mjs';
-import { buildRadarHistory, radarDataReport } from '/core/radar-history.mjs';
+import { buildRadarHistory, expiryShortfall, radarDataReport } from '/core/radar-history.mjs';
+import { comboMetrics } from '/core/radar-metrics.mjs';
 import {
   ALERT_OPS, DEFAULT_COOLDOWN_SEC, DEFAULT_WINDOW_DAYS, WATCH_METRICS, WATCH_METRIC_GROUPS,
-  WATCH_REFS, conditionNote, evaluateWatch, normalizeCondition, normalizeWatchRule, watchMetric,
-  watchRef, watchRuleNote, watchSnapshot,
+  WATCH_REFS, conditionNote, evaluateWatch, normalizeCondition, normalizeWatchRule, watchDistance,
+  watchMetric, watchRef, watchRuleNote, watchSnapshot,
 } from '/core/watch-rule.mjs';
+import {
+  LIVE_INS_CAP, LIVE_PRIORITIES, comboLiveQuote, livePriority, liveQuoteBook, planLiveQuotes,
+  tehranSecondOfDay,
+} from '/core/live-quote.mjs';
+import { makeDayRange } from '/core/day-range.mjs';
+import { tehranDateNumber } from '/core/live-day.mjs';
 import { makeTable } from '/ui/table.mjs';
 import { RADAR_ALL_COLS, RADAR_COLS, toTableRow } from '/ui/radar-columns.mjs';
 import {
-  NOTIFY_LABEL, askNotifyPermission, clearLog, deliverWatch, notifyState, readLog, testDelivery,
+  NOTIFY_LABEL, askNotifyPermission, clearLog, deliverBurst, notifyState, readLog, testDelivery,
 } from '/ui/gap-alarm.mjs';
 import { logError } from '/ui/errlog.mjs';
 
@@ -54,6 +61,7 @@ const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
 }[char]));
 const finite = (value) => Number.isFinite(value);
+const num = (value, fallback = NaN) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 const nameOf = (item, fallback = 'نماد پایه') => String(item?.name || '').trim() || fallback;
 const RULES_KEY = 'watchtower:rules';
 const DEFS = GAP_STRATEGY_IDS.map((id) => byId(id)).filter(Boolean);
@@ -141,10 +149,12 @@ export async function mount(root, { state }) {
       <label>نامِ قاعده<input id="wt-name" type="text" placeholder="مثلاً: اسپردهای ارزانِ اهرم"></label>
       <label>آرامش (ثانیه)<input id="wt-cooldown" type="number" min="0" step="10" value="${DEFAULT_COOLDOWN_SEC}"></label>
       <label class="check"><input type="checkbox" id="wt-sound"> صدا هم بزند</label>
+      <label>اولویت سهمیهٔ زنده<select id="wt-live-priority">${LIVE_PRIORITIES.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
       <button type="button" class="primary" id="wt-save" disabled>ذخیرهٔ قاعده و شروع رصد</button>
       <button type="button" class="ghost" id="wt-watch-stop" hidden>توقف رصد</button>
       <span id="wt-watch-state" class="gap-live-state">خاموش</span>
     </div>
+    <p class="gap-note" id="wt-watch-note">رصد روی همهٔ ترکیب‌های دامنه اجرا می‌شود، نه فقط آن‌هایی که در پیش‌نمایش منطبق بودند — وگرنه ترکیبی که ده دقیقه بعد وارد شرط می‌شود هرگز دیده نمی‌شد.</p>
     <div class="gap-alarm-actions">
       <button type="button" class="ghost" id="wt-notify-ask">اجازهٔ اعلان مرورگر</button>
       <button type="button" class="ghost" id="wt-notify-test">آزمایش کانال‌ها</button>
@@ -163,7 +173,27 @@ export async function mount(root, { state }) {
   let conditions = [], rules = readRules();
   let built = [], matched = [], table = null;
   let activeLoad = null, mounted = true, universeVersion = 0;
-  let watchTimer = 0, watchRule = null, prevSnaps = {};
+  // ── رصد ───────────────────────────────────────────────────────────────
+  //
+  // `watchRules` جمع است، نه مفرد. «چند قاعده ذخیره می‌شود، اما فقط آخرین
+  // قاعده واقعاً رصد می‌شود؛ قواعد قبلی در فهرست ظاهراً فعال باقی
+  // می‌مانند، ولی حلقه فقط یک `watchRule` را ارزیابی می‌کند.» درست بود:
+  // فهرست، وعدهٔ چند قاعده می‌داد و حلقه یکی را می‌سنجید.
+  let watchTimer = 0, watchRules = [], prevSnaps = {};
+  // نسل و قفل — همان دو چیزی که «توقفِ قابل اعتماد» و «درخواستِ روی هم
+  // نیفتادن» را ممکن می‌کنند.
+  let watchGen = 0, watchBusy = false, watchJob = null;
+  // ترکیب‌هایی که در آخرین تیک مظنهٔ هم‌زمان داشتند. جدول از همین می‌فهمد
+  // کدام ردیف «زنده» است — پیش از این همهٔ ردیف‌ها زنده برچسب می‌خوردند.
+  const liveKeys = new Set();
+  const dayRange = makeDayRange();
+  // ── تازگیِ پیش‌نمایش ────────────────────────────────────────────────
+  //
+  // «تغییر شرط یا دامنه، نتیجهٔ پیش‌نمایش را باطل نمی‌کند»: شرطِ ناممکن
+  // اضافه می‌شد و جدول همان ۱۰۳ ترکیبِ قبلی را منطبق نشان می‌داد و اجازهٔ
+  // شروع رصد می‌داد. حالا هر تغییری در شرط یا دامنه، پیش‌نمایش را کهنه
+  // می‌کند و دکمهٔ رصد تا «ساخت و تطبیق»ِ دوباره خاموش می‌ماند.
+  let previewFresh = false, previewNote = '';
   const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 
   const setStatus = (text, bad = false) => {
@@ -210,18 +240,41 @@ export async function mount(root, { state }) {
     const bases = pickedBases().length, defs = pickedDefs().length;
     $('wt-base-count').textContent = bases ? `${fmt.int(bases)} انتخاب‌شده` : 'هیچ‌کدام';
     $('wt-def-count').textContent = defs ? `${fmt.int(defs)} انتخاب‌شده` : 'هیچ‌کدام';
-    $('wt-save').disabled = !(conditions.length && matched.length);
+    // سه شرطِ لازم، و «تازه بودنِ پیش‌نمایش» یکی از آن‌هاست: قاعده‌ای که
+    // روی فهرستی از پیشِ باطل‌شده ذخیره شود، همان چیزی است که کاربر
+    // ندیده روی چه می‌نشیند.
+    $('wt-save').disabled = !(conditions.length && matched.length && previewFresh);
   }
+
+  /**
+   * پیش‌نمایش را کهنه اعلام می‌کند.
+   *
+   * هر چیزی که می‌تواند فهرستِ منطبق‌ها را عوض کند اینجا می‌آید: شرط،
+   * نماد، استراتژی، مبنای قیمت، تعداد واحد، آستانهٔ نقدشوندگی، و بازه.
+   */
+  function stalePreview(why = 'دامنه یا شرط‌ها عوض شد') {
+    if (!previewFresh && previewNote === why) { paintCounts(); return; }
+    previewFresh = false; previewNote = why;
+    if (matched.length || built.length) {
+      $('wt-match-note').textContent = `${why}؛ فهرستِ زیر مالِ تطبیقِ قبلی است و دیگر معتبر نیست. «ساخت و تطبیق» را دوباره بزن تا ببینی همین حالا چه چیزی منطبق است.`;
+      $('wt-hero-tag').textContent = 'پیش‌نمایش کهنه شد';
+    }
+    paintCounts();
+  }
+
   root.addEventListener('change', (event) => {
-    if (event.target.matches('[data-base],[data-def]')) paintCounts();
+    if (event.target.matches('[data-base],[data-def]')) stalePreview('دامنه عوض شد');
   });
+  for (const id of ['wt-basis', 'wt-min-value', 'wt-units']) {
+    $(id).addEventListener('change', () => stalePreview('مبنای ساخت عوض شد'));
+  }
   for (const button of root.querySelectorAll('[data-all],[data-none]')) {
     button.addEventListener('click', () => {
       const which = button.dataset.all || button.dataset.none;
       const on = !!button.dataset.all;
       const selector = which === 'bases' ? '[data-base]' : '[data-def]';
       for (const box of root.querySelectorAll(selector)) box.checked = on;
-      paintCounts();
+      stalePreview('دامنه عوض شد');
     });
   }
 
@@ -250,6 +303,7 @@ export async function mount(root, { state }) {
     });
     if (!built.ok) { $('wt-cond-hint').textContent = `شرط اضافه نشد: ${built.why}`; return; }
     conditions = [...conditions, built.condition];
+    stalePreview('شرط تازه اضافه شد');
     paintConds();
   });
 
@@ -261,6 +315,7 @@ export async function mount(root, { state }) {
     for (const button of $('wt-conds').querySelectorAll('[data-drop]')) {
       button.addEventListener('click', () => {
         conditions = conditions.filter((_, at) => at !== Number(button.dataset.drop));
+        stalePreview('شرطی حذف شد');
         paintConds();
       });
     }
@@ -331,8 +386,19 @@ export async function mount(root, { state }) {
           cancel: () => job.signal.aborted || !current(), yieldControl: nextFrame,
         });
         if (!current()) return;
-        if (!result.rows.length) { skipped.push(`${nameOf(ua)}: ترکیبی ساخته نشد`); continue; }
-        for (const row of result.rows) built.push({ row, ua });
+        if (!result.rows.length) {
+          // ساختارِ دو سررسیدی با یک سررسید ساخته نمی‌شود، و این را باید
+          // صریح گفت — نه اینکه فقط بنویسیم «ترکیبی ساخته نشد».
+          const shortfall = expiryShortfall(defs, result.expiryWindow);
+          skipped.push(`${nameOf(ua)}: ${shortfall.note || 'ترکیبی ساخته نشد'}`);
+          continue;
+        }
+        // نسخهٔ روزِ سنجش کنار هر ردیف می‌ماند تا خاموش‌شدنِ رصد بتواند
+        // عددِ روزانه را برگرداند.
+        for (const row of result.rows) {
+          built.push({ row: Object.assign(row, {
+            daily: { gap: row.gap, metrics: row.metrics, verdict: row.verdict } }), ua });
+        }
       }
       if (!current()) return;
       evaluateNow(skipped);
@@ -344,7 +410,14 @@ export async function mount(root, { state }) {
     } finally { if (activeLoad === job) cancelLoad(); }
   }
 
-  /** شرط‌ها روی هرچه ساخته شده. `matched` است نه `fired` — هنوز زنگی نیست. */
+  /**
+   * شرط‌ها روی هرچه ساخته شده. `matched` است نه `fired` — هنوز زنگی نیست.
+   *
+   * `previewCross` جوابِ بن‌بستِ «عبور از آستانه» است: پیش‌نمایش یک سنجش
+   * است و عبور در یک سنجش دیده نمی‌شود، پس صفر ترکیب منطبق می‌شد و دکمهٔ
+   * رصد هیچ‌وقت روشن نمی‌شد. اینجا — و فقط اینجا — «رد شد» مثل «آن‌سوی
+   * خط هست» سنجیده می‌شود؛ زنگِ واقعی همچنان فقط در لحظهٔ عبور می‌زند.
+   */
   function evaluateNow(skipped = []) {
     const rule = normalizeWatchRule({
       name: $('wt-name').value, conditions,
@@ -356,10 +429,11 @@ export async function mount(root, { state }) {
       baseIns: String(ua.ins), baseName: nameOf(ua), basePrice: row.spot,
     }));
     const byKey = new Map(built.map(({ row, ua }) => [row.key, { row, ua }]));
-    const verdict = evaluateWatch({ rules: [rule.rule], snapshots, prev: {}, nowMs: 0 });
+    const verdict = evaluateWatch({ rules: [rule.rule], snapshots, prev: {}, nowMs: 0, previewCross: true });
     const hits = verdict.matched.get(rule.rule.id) || [];
     matched = hits.map((hit) => byKey.get(hit.snapshot.key)).filter(Boolean);
-    paintMatch(skipped);
+    previewFresh = true; previewNote = '';
+    paintMatch(skipped, rule.rule);
   }
 
   function mountTable() {
@@ -371,12 +445,17 @@ export async function mount(root, { state }) {
     return table;
   }
 
-  function paintMatch(skipped = []) {
-    mountTable().set(matched.map(({ row, ua }) => toTableRow(row, { baseName: nameOf(ua) })));
+  function paintMatch(skipped = [], rule = null) {
+    mountTable().set(matched.map(({ row, ua }) => toTableRow(row, { baseName: nameOf(ua), live: null })));
     mountTable().setEmptyMessage('هیچ ترکیبی همهٔ شرط‌ها را با هم ندارد. شرط‌ها با «و» جمع می‌شوند؛ یکی را شل کن.');
     const note = `${fmt.int(built.length)} ترکیب ساخته شد · ${fmt.int(matched.length)} ترکیب همهٔ شرط‌ها را با هم دارد.`;
     const why = skipped.length ? ` نمادهایی که ردیفی ندادند: ${skipped.join('؛ ')}.` : '';
-    $('wt-match-note').textContent = `${note}${why} این فهرست، همان چیزی است که رصد رویش زنگ می‌زند.`;
+    // شرطِ «عبور» در پیش‌نمایش مثل «بودن» سنجیده شده و کاربر باید بداند.
+    const crossed = (rule?.conditions || []).some((one) => one.op === 'crossUp' || one.op === 'crossDown');
+    const crossNote = crossed
+      ? ' شرطِ «رد شدن از عدد» در این پیش‌نمایش مثل «آن‌سوی عدد بودن» سنجیده شد، چون عبور با یک سنجش دیده نمی‌شود؛ در رصد، فقط لحظهٔ خودِ عبور زنگ می‌زند و این فهرست از آن بزرگ‌تر است.'
+      : '';
+    $('wt-match-note').textContent = `${note}${why} رصد روی هر ${fmt.int(built.length)} ترکیبِ دامنه اجرا می‌شود، نه فقط این ${fmt.int(matched.length)} تا؛ این فهرست می‌گوید همین حالا چه چیزی منطبق است.${crossNote}`;
     $('wt-hero-tag').textContent = matched.length
       ? `${fmt.int(matched.length)} ترکیب منطبق` : 'هیچ ترکیبی منطبق نشد';
     setStatus(note);
@@ -392,90 +471,226 @@ export async function mount(root, { state }) {
       cooldownSec: Number($('wt-cooldown').value), sound: $('wt-sound').checked,
     });
     if (!rule.ok) { setStatus(`قاعده ذخیره نشد: ${rule.why}`, true); return; }
+    if (!previewFresh) { setStatus('پیش‌نمایش کهنه است؛ اول «ساخت و تطبیق» را دوباره بزن.', true); return; }
     rules = [...rules, rule.rule];
     saveRules(rules);
-    watchRule = rule.rule;
     paintRules();
     startWatch();
   });
 
+  $('wt-live-priority').addEventListener('change', () => {
+    $('wt-watch-note').textContent = watchNote();
+    if (watchTimer) void pollWatch();
+  });
+
+  /** قاعده‌های فعالِ ذخیره‌شده — همهٔ آن‌ها رصد می‌شوند، نه فقط آخری. */
+  const activeRules = () => rules.filter((rule) => rule.enabled !== false);
+
+  function watchNote() {
+    const meta = livePriority($('wt-live-priority').value);
+    return `رصد روی همهٔ ${fmt.int(built.length)} ترکیبِ دامنه اجرا می‌شود، نه فقط منطبق‌های پیش‌نمایش — ترکیبی که ده دقیقه بعد وارد شرط شود باید دیده شود. سقفِ مظنهٔ زنده ${fmt.int(LIVE_INS_CAP)} ابزار در هر تیک است و سهمیه به ترکیبِ کامل داده می‌شود، نه به پا. اولویت فعلی: ${meta.label} — ${meta.hint}`;
+  }
+
+  /**
+   * روزِ سنجشِ ساخت، امروز است؟ رصدِ زنده روی بازهٔ گذشته اجرا نمی‌شود.
+   *
+   * قرارداد، پنجرهٔ سررسید و «روز مانده» همه از پایانِ بازهٔ انتخابی
+   * ساخته می‌شوند؛ نشاندنِ مظنهٔ امروز رویشان یعنی سنجیدنِ قراردادی که
+   * ممکن است ماه‌ها پیش منقضی شده باشد.
+   */
+  function watchDayGate() {
+    const today = tehranDateNumber();
+    if (!today) return { ok: false, today: 0, why: 'ساعت مرورگر خوانده نشد؛ نمی‌شود گفت ساخت مالِ امروز است یا نه.' };
+    const marks = [...new Set(built.map(({ row }) => Number(row.markDate) || 0))].filter(Boolean);
+    if (!marks.length) return { ok: false, today, why: 'هنوز ترکیبی ساخته نشده.' };
+    const old = marks.filter((one) => one !== today);
+    if (old.length) {
+      return { ok: false, today, why: `روز سنجشِ این ساخت ${old.map((one) => faDigits(String(one))).join('، ')} است، نه امروز. قرارداد، پنجرهٔ سررسید و «روز مانده» بر مبنای همان روز ساخته شده‌اند؛ رصدِ زنده رویشان عددی می‌سازد که هیچ‌وقت وجود نداشته. بازه را تا امروز بیاور و دوباره بساز.` };
+    }
+    return { ok: true, today, why: '' };
+  }
+
   function startWatch() {
     stopWatch();
-    if (!watchRule || !built.length) return;
+    if (!built.length) { $('wt-watch-state').textContent = 'ترکیبی برای رصد نیست'; return; }
+    const active = activeRules();
+    if (!active.length) { $('wt-watch-state').textContent = 'قاعدهٔ فعالی نیست'; return; }
+    const gate = watchDayGate();
+    if (!gate.ok) {
+      $('wt-watch-state').textContent = 'روی بازهٔ تاریخی روشن نمی‌شود';
+      $('wt-watch-note').textContent = gate.why;
+      return;
+    }
+    watchRules = active;
+    dayRange.reset(gate.today);
     $('wt-watch-stop').hidden = false;
-    $('wt-watch-state').textContent = 'روشن — هر ۱۰ ثانیه';
+    $('wt-watch-state').textContent = `روشن — هر ۱۰ ثانیه · ${fmt.int(active.length)} قاعده`;
+    $('wt-watch-note').textContent = watchNote();
     const tick = () => void pollWatch();
     tick();
     watchTimer = setInterval(tick, 10000);
   }
+
   function stopWatch() {
     if (watchTimer) clearInterval(watchTimer);
     watchTimer = 0;
+    // نسل عوض می‌شود و درخواستِ جاری لغو: پاسخی که بعد از این برسد نه
+    // نوار را «روشن» می‌کند و نه جدول را زنده نشان می‌دهد.
+    watchGen += 1; watchBusy = false;
+    watchJob?.abort(); watchJob = null;
+    watchRules = [];
+    liveKeys.clear();
+    dayRange.reset(0);
+    restoreDaily();
     $('wt-watch-stop').hidden = true;
     $('wt-watch-state').textContent = 'خاموش';
+    if (mounted && built.length) paintPool();
   }
   $('wt-watch-stop').addEventListener('click', stopWatch);
 
+  /** عددِ روزِ سنجش را به ردیف‌ها برمی‌گرداند، تا جدولِ خاموش عددِ نیمه‌زنده نگه ندارد. */
+  function restoreDaily() {
+    for (const { row } of built) {
+      if (!row.daily) continue;
+      row.gap = row.daily.gap; row.metrics = row.daily.metrics; row.verdict = row.daily.verdict;
+    }
+  }
+
+  /** جدولِ رصد: کلِ دامنه، با برچسبِ زنده/روزانهٔ **هر ردیف**. */
+  function paintPool() {
+    mountTable().set(built.map(({ row, ua }) => toTableRow(row, {
+      baseName: nameOf(ua),
+      // «همهٔ ردیف‌های جدول دیده‌بان برچسب زنده می‌گیرند» — پرچمِ زنده
+      // برای کل جدول ثابت و روشن بود، حتی وقتی ۲۴۴ ترکیب در دامنه و ۲۲۸
+      // ترکیب پوشش زنده داشت. حالا هر ردیف وضعیت خودش را می‌گوید.
+      live: watchTimer ? liveKeys.has(row.key) : null,
+    })));
+  }
+
   /**
-   * مظنهٔ زنده برای پاهای ترکیب‌های منطبق، و سنجشِ قاعده روی همان.
+   * مظنهٔ زنده برای **کلِ دامنه**، و سنجشِ همهٔ قاعده‌های فعال روی همان.
    *
-   * سقفِ ۲۴ ابزار همان سقفِ `/api/live-trades` است. ترکیب‌هایی که پایشان
-   * جا نشد، با عددِ روزانه سنجیده **نمی‌شوند** — بی‌صدا افتادنشان یعنی
-   * قاعده‌ای که کاربر فکر می‌کند روی صد ترکیب کار می‌کند، روی دوازده‌تا
-   * کار کند. شمارِ پوشش‌داده‌شده نوشته می‌شود.
+   * ═══ چرا کلِ دامنه و نه منطبق‌های پیش‌نمایش ═══
+   *
+   * «فقط ترکیب‌هایی رصد می‌شوند که در پیش‌نمایش اولیه منطبق بوده‌اند.
+   * ترکیبی که هنگام ساخت زیر آستانه بوده و ده دقیقه بعد وارد محدودهٔ شرط
+   * شود، اصلاً بررسی نمی‌شود. این دقیقاً خلاف هدف پیدا کردن فرصت تازه
+   * است.»
+   *
+   * دقیقاً همین بود: استخرِ رصد وقتی پیش‌نمایش چیزی پیدا کرده بود به
+   * همان فهرستِ منطبق‌ها قفل می‌شد و بقیهٔ دامنه اصلاً سنجیده نمی‌شد. حالا
+   * استخر همیشه `built` است — همان دامنه‌ای که کاربر انتخاب کرده — و
+   * پیش‌نمایش فقط «همین حالا چه چیزی منطبق است» را می‌گوید.
+   *
+   * سهمیهٔ ۲۴ ابزار همچنان واقعی است، پس ترتیبِ گرفتنش انتخابِ کاربر
+   * است و ترکیبِ بیرون‌مانده با عددِ روزانه سنجیده نمی‌شود.
    */
   async function pollWatch() {
-    if (!watchRule) return;
-    const pool = matched.length ? matched : built;
-    if (!pool.length) return;
-    const legIds = [];
-    for (const { row } of pool) {
-      for (const leg of row.legs) {
-        if (leg.kind === 'underlying') continue;
-        if (!legIds.includes(String(leg.ins))) legIds.push(String(leg.ins));
-      }
-      if (legIds.length >= 24) break;
-    }
-    const wanted = legIds.slice(0, 24);
+    if (!watchRules.length || !built.length) return;
+    if (watchBusy) return;
+    const gen = watchGen;
+    const job = new AbortController();
+    watchBusy = true; watchJob = job;
     try {
-      const response = await fetch(`/api/live-trades?ins=${wanted.join(',')}`);
+      const priority = livePriority($('wt-live-priority').value).id;
+      const plan = planLiveQuotes({
+        rows: built.map(({ row }) => row),
+        cap: LIVE_INS_CAP, priority,
+        score: priority === 'near' ? nearScore() : null,
+      });
+      if (!plan.ins.length) { $('wt-watch-state').textContent = 'ابزاری برای مظنهٔ زنده نبود'; return; }
+      const response = await fetch(`/api/live-trades?ins=${plan.ins.join(',')}`, { signal: job.signal });
       const payload = await response.json();
+      // رصد در این فاصله خاموش شده: پاسخ دور ریخته می‌شود. این همان
+      // «توقفِ قابل اعتماد» است — پیش از این پاسخِ کندِ پانزده‌ثانیه‌ای
+      // نوار را دوباره «روشن» می‌کرد.
+      if (gen !== watchGen || !mounted) return;
       if (!response.ok || payload.error) throw new Error(payload.error || 'مظنهٔ زنده دریافت نشد');
-      const prices = {};
-      for (const [ins, item] of Object.entries(payload.items || {})) {
-        const price = Number(item?.summary?.lastPrice);
-        if (price > 0) prices[ins] = price;
-      }
+      const book = liveQuoteBook(payload);
+      const nowSec = tehranSecondOfDay();
+      const today = tehranDateNumber();
       const snapshots = [];
-      let covered = 0;
-      for (const { row, ua } of pool) {
-        const legs = row.legs.filter((leg) => leg.kind !== 'underlying');
-        if (!legs.every((leg) => finite(prices[String(leg.ins)]))) continue;
-        const gap = measureGap({ legs: row.legs, prices, strategyId: row.def.id,
+      let covered = 0, stale = 0;
+      liveKeys.clear();
+      for (const { row, ua } of built) {
+        const quote = comboLiveQuote({ legs: row.legs, book, nowSec });
+        if (!quote.ok) {
+          if (quote.priced === quote.legs && quote.legs > 0) stale += 1;
+          continue;
+        }
+        const gap = measureGap({ legs: row.legs, prices: book.prices, strategyId: row.def.id,
           entry: row.entry, daysLeft: row.gap.daysLeft, scale: 'raw', units: units() });
         if (!gap.ok) continue;
+        // اسپاتِ زنده اگر پایه امروز معامله شده باشد. پایه در سهمیه نیست
+        // مگر خودش پای ترکیبی باشد، پس نبودش عادی است و عددِ روز سنجش
+        // جایش می‌ماند — نه عددِ ساختگی.
+        const spot = num(book.prices[String(ua.ins)], row.spot);
+        // سود، زیان، بازده، سرمایه و وجه تضمین هم با قیمتِ زنده از نو
+        // ساخته می‌شوند؛ پیش از این فقط فاصله زنده می‌شد و شرطِ «حداکثر
+        // سود ٪» روی عددِ روز سنجش آتش می‌کرد.
+        const metrics = comboMetrics({ legs: row.legs, prices: book.prices, spot, rowByIns: {},
+          settings: state.settings, daysLeft: row.gap.daysLeft, scale: 'raw', units: units() });
         row.gap = gap;
         row.verdict = gapVerdict(row.series, gap);
-        snapshots.push(watchSnapshot(row, { baseIns: String(ua.ins), baseName: nameOf(ua), basePrice: row.spot }));
+        row.metrics = metrics.ok
+          ? { ...metrics,
+            legValue: row.daily?.metrics?.legValue ?? metrics.legValue,
+            legVolume: row.daily?.metrics?.legVolume ?? metrics.legVolume,
+            legTrades: row.daily?.metrics?.legTrades ?? metrics.legTrades,
+            thinLegs: row.daily?.metrics?.thinLegs ?? metrics.thinLegs }
+          : row.daily?.metrics || row.metrics;
+        dayRange.observe(row.key, gap.current, { date: today });
+        liveKeys.add(row.key);
+        snapshots.push(watchSnapshot(row, {
+          baseIns: String(ua.ins), baseName: nameOf(ua),
+          basePrice: num(book.prices[String(ua.ins)], NaN),
+          day: dayRange.get(row.key),
+        }));
         covered += 1;
       }
-      const verdict = evaluateWatch({ rules: [watchRule], snapshots, prev: prevSnaps, nowMs: Date.now() });
+      const verdict = evaluateWatch({ rules: watchRules, snapshots, prev: prevSnaps, nowMs: Date.now() });
       prevSnaps = verdict.prev;
       if (verdict.fired.length) {
-        watchRule = verdict.rules[0];
-        rules = rules.map((one) => (one.id === watchRule.id ? watchRule : one));
+        watchRules = verdict.rules;
+        const byId = new Map(watchRules.map((one) => [one.id, one]));
+        rules = rules.map((one) => byId.get(one.id) || one);
         saveRules(rules);
-        const host = $('wt-alarm-host');
-        for (const fired of verdict.fired) deliverWatch(fired, { host, sound: watchRule.sound });
+        deliverBurst(verdict.fired, { host: $('wt-alarm-host'), scope: 'watch', kind: 'watch' });
         paintRules();
         paintLog();
       }
-      const hits = (verdict.matched.get(watchRule.id) || []).length;
-      $('wt-watch-state').textContent = `روشن · ${fmt.int(covered)} ترکیب با قیمت زنده · ${fmt.int(hits)} منطبق · ${faDigits(new Date(payload.at).toLocaleTimeString('fa-IR'))}`;
-      mountTable().set(pool.map(({ row, ua }) => toTableRow(row, { baseName: nameOf(ua), live: true })));
+      const hits = watchRules.reduce((sum, one) => sum + (verdict.matched.get(one.id) || []).length, 0);
+      $('wt-watch-state').textContent = `روشن · ${fmt.int(watchRules.length)} قاعده · ${fmt.int(covered)} ترکیب با مظنهٔ هم‌زمان · ${fmt.int(hits)} منطبق · ${faDigits(new Date(payload.at).toLocaleTimeString('fa-IR'))}`;
+      $('wt-watch-note').textContent = `${watchNote()} در این تیک ${fmt.int(plan.covered)} ترکیب از ${fmt.int(built.length)} ترکیبِ دامنه سهمیه گرفت؛ ${fmt.int(covered)} ترکیب مظنهٔ هم‌زمان داشت و ${fmt.int(stale)} ترکیب کنار گذاشته شد چون پاهایش در یک لحظه معامله نشده بودند یا آخرین معامله‌شان کهنه بود. ترکیبِ بیرون‌مانده با عددِ روز سنجش سنجیده نمی‌شود.`;
+      paintPool();
     } catch (error) {
+      if (gen !== watchGen || !mounted || error?.name === 'AbortError') return;
       $('wt-watch-state').textContent = `دریافت زنده نشد: ${error.message}`;
+    } finally {
+      watchBusy = false;
+      if (watchJob === job) watchJob = null;
     }
+  }
+
+  /** امتیازِ «نزدیک‌ترین به شرط» برای سهمیهٔ زنده — بدترین شرطِ هر قاعده ملاک است. */
+  function nearScore() {
+    const active = watchRules.length ? watchRules : activeRules();
+    if (!active.length) return null;
+    const byKey = new Map(built.map(({ row, ua }) => [row.key, { row, ua }]));
+    return (row) => {
+      const found = byKey.get(row.key);
+      if (!found) return NaN;
+      const snapshot = watchSnapshot(found.row, {
+        baseIns: String(found.ua.ins), baseName: nameOf(found.ua), basePrice: found.row.spot,
+        day: dayRange.get(row.key),
+      });
+      let best = NaN;
+      for (const rule of active) {
+        const distance = watchDistance(rule, snapshot);
+        if (Number.isFinite(distance) && (!Number.isFinite(best) || distance < best)) best = distance;
+      }
+      return Number.isFinite(best) ? -best : NaN;
+    };
   }
 
   // ————————————————————————— قاعده‌ها و دفترچه —————————————————————————
@@ -497,6 +712,12 @@ export async function mount(root, { state }) {
       card.querySelector('[data-act="drop"]').addEventListener('click', () => {
         rules = rules.filter((rule) => rule.id !== card.dataset.rule);
         saveRules(rules); paintRules();
+        // «حذف قاعدهٔ فعال، رصد آن را متوقف نمی‌کند»: فهرست خالی می‌شد و
+        // نوار همچنان «روشن» بود و دریافت زنده ادامه داشت. حالا حذف،
+        // مجموعهٔ رصد را از نو می‌سازد و با خالی شدنش رصد می‌ایستد.
+        if (!watchTimer) return;
+        if (activeRules().length) startWatch();
+        else { stopWatch(); setStatus('آخرین قاعدهٔ فعال حذف شد؛ رصد ایستاد.'); }
       });
       card.querySelector('[data-act="load"]').addEventListener('click', () => {
         const rule = rules.find((one) => one.id === card.dataset.rule);
@@ -514,7 +735,7 @@ export async function mount(root, { state }) {
   }
 
   function paintLog() {
-    const log = readLog();
+    const log = readLog('watch');
     if (!log.length) { $('wt-log').innerHTML = '<p class="empty-note">دفترچه خالی است.</p>'; return; }
     $('wt-log').innerHTML = log.slice(0, 60).map((row) => `<div class="gap-log-row">
       <time>${faDigits(row.clock)}</time><b>${esc(row.title)}</b><small>${esc(row.note)}</small>
@@ -523,8 +744,8 @@ export async function mount(root, { state }) {
 
   function paintNotifyState() { $('wt-notify-state').textContent = NOTIFY_LABEL[notifyState()] || '—'; }
   $('wt-notify-ask').addEventListener('click', async () => { await askNotifyPermission(); paintNotifyState(); });
-  $('wt-notify-test').addEventListener('click', () => { testDelivery({ host: $('wt-alarm-host'), sound: $('wt-sound').checked }); paintLog(); });
-  $('wt-log-clear').addEventListener('click', () => { clearLog(); paintLog(); });
+  $('wt-notify-test').addEventListener('click', () => { testDelivery({ host: $('wt-alarm-host'), sound: $('wt-sound').checked, scope: 'watch' }); paintLog(); });
+  $('wt-log-clear').addEventListener('click', () => { clearLog('watch'); paintLog(); });
 
   // ————————————————————————— راه‌اندازی —————————————————————————
 
@@ -534,7 +755,7 @@ export async function mount(root, { state }) {
   paintRules();
   paintLog();
   rangeUi = mountHistoryRange($('wt-range'), { quickEntry: true, compactNote: true,
-    onApply: (range) => loadUniverseForRange(range) });
+    onApply: (range) => { stalePreview('بازه عوض شد'); return loadUniverseForRange(range); } });
   await loadUniverseForRange(rangeUi.range);
 
   return () => {

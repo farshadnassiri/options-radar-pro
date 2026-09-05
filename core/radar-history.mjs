@@ -125,3 +125,34 @@ export async function buildRadarHistory({ ua, defs, seriesByIns, range, basis = 
   onProgress({ done: defs.length, total: defs.length, combos: rows.length });
   return { dates, rows, excluded, expiryWindow };
 }
+
+/**
+ * استراتژی‌هایی که سررسیدِ کافی برایشان نیست — و گفتنِ صریحش.
+ *
+ * ═══ ایرادی که این تابع جوابش است ═══
+ *
+ * «علت نبود اسپرد مورب اشتباه توضیح داده می‌شود. در نمونه فقط یک سررسید
+ * فعال بود، بنابراین Diagonal Call/Put قابل ساخت نبود. پیام برنامه
+ * پیشنهاد بررسی قیمت‌ها را می‌دهد و نمی‌گوید این استراتژی حداقل دو
+ * سررسید نیاز دارد.»
+ *
+ * درست بود، و بدترین نوعِ پیامِ غلط: کاربر را می‌فرستد قیمت‌ها را بررسی
+ * کند، در حالی که قیمت‌ها سالم‌اند و مسئله ساختاری است — مورب و تقویمی
+ * ذاتاً دو سررسید می‌خواهند و با یک سررسید **هیچ‌وقت** ساخته نمی‌شوند،
+ * هرچقدر هم داده کامل باشد.
+ *
+ * `def.expiries` همان‌جایی است که خودِ کاتالوگ این را می‌گوید، پس ادعای
+ * تازه‌ای ساخته نمی‌شود.
+ */
+export function expiryShortfall(defs = [], expiryWindow = null) {
+  const kept = Math.max(0, Math.trunc(Number(expiryWindow?.kept) || 0));
+  const short = (defs || []).filter((def) => Math.trunc(Number(def?.expiries) || 1) > kept);
+  if (!short.length) return { kept, short: [], need: 0, note: '' };
+  const need = Math.max(...short.map((def) => Math.trunc(Number(def.expiries) || 1)));
+  const fa = (value) => Number(value).toLocaleString('fa-IR');
+  const names = short.map((def) => def.name).join('، ');
+  return {
+    kept, need, short: short.map((def) => def.name),
+    note: `${names} دست‌کم ⁨${fa(need)}⁩ سررسید هم‌زمان می‌خواهد و در روز سنجش ⁨${fa(kept)}⁩ سررسید در پنجره بود؛ این ساختار با داده‌ای که هست ساخته نمی‌شود و مسئله، قیمتِ ابزارها نیست. سررسید دیگری در پنجره بیاور (بازه یا «بیشینه روز تا سررسید» را باز کن) یا ساختار دیگری انتخاب کن.`,
+  };
+}
