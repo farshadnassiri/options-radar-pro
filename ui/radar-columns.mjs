@@ -21,8 +21,8 @@
 // نیست.
 
 import { faDigits, fmt } from './fmt.mjs';
-
 import { fillBar, sparkline } from './gap-charts.mjs';
+import { comboSymbolText, comboSymbols } from '../core/spread-gap.mjs';
 import { historyDateLabel } from '../core/history.mjs';
 
 const finite = (value) => Number.isFinite(value);
@@ -50,22 +50,30 @@ function riskBar(row) {
   </div>`;
 }
 
-/** نامِ نمادهای پاها — خریده و فروخته، با نشانهٔ خودشان. */
-function symbolCell(row) {
-  const legs = row.__row?.legs || [];
-  if (!legs.length) return '<span class="rad-dim">—</span>';
-  return `<span class="rad-syms">${legs.filter((leg) => leg.kind !== 'underlying').map((leg) => `<i class="rad-sym ${leg.side === 'sell' ? 'sell' : 'buy'}" title="${esc(leg.side === 'sell' ? 'فروش' : 'خرید')} ${esc(leg.name || leg.ins)}">${esc(faDigits(leg.name || String(leg.ins)))}</i>`).join('')}</span>`;
+/**
+ * نمادهای ترکیب، هرکدام در یک سطر با جهتش.
+ *
+ * ═══ چرا نامِ نماد فارسی‌سازیِ رقم نمی‌شود ═══
+ *
+ * هر عددِ نمایشیِ این برنامه از `ui/fmt.mjs` رقم فارسی می‌گیرد. نامِ نماد
+ * عددِ نمایشی نیست — رشته‌ای است که کاربر روی تابلو با آن سفارش می‌گذارد
+ * و جست‌وجو می‌کند. دست‌کاری‌اش، همان کاری را می‌کند که هیچ‌کس نمی‌خواهد:
+ * چیزی نشان می‌دهد که در تابلو پیدا نمی‌شود. پس دست‌نخورده می‌آید.
+ *
+ * یک تابع، دو مصرف‌کننده: همین ستون، و شناسنامهٔ بالای نمودارهای تاریخچه.
+ */
+export function symbolCell(legs = []) {
+  const list = comboSymbols(legs);
+  if (!list.length) return '<span class="rad-dim">—</span>';
+  return `<div class="gap-syms">${list.map((leg) => `<span class="gap-sym" data-side="${leg.side}"><i>${esc(leg.sideLabel)}</i><b>${esc(leg.name)}</b>${leg.ratio > 1 ? `<u>×${fmt.int(leg.ratio)}</u>` : ''}</span>`).join('')}</div>`;
 }
-
-const symbolText = (row) => (row.__row?.legs || [])
-  .filter((leg) => leg.kind !== 'underlying')
-  .map((leg) => `${leg.side === 'sell' ? '−' : '+'}${leg.name || leg.ins}`).join(' ');
 
 export const RADAR_ALL_COLS = [
   // ——— شناسه ———
   { key: 'strategyName', label: 'استراتژی', fmt: 'text', group: 'شناسه' },
   { key: 'symbols', label: 'نمادها', fmt: 'text', group: 'شناسه',
-    cell: symbolCell, text: (row) => symbolText(row) },
+    cell: (row) => symbolCell(row.__row?.legs || []),
+    text: (row) => comboSymbolText(row.__row?.legs || []) },
   { key: 'baseName', label: 'نماد پایه', fmt: 'text', group: 'شناسه' },
   { key: 'strikeText', label: 'قیمت اعمال', fmt: 'text', group: 'شناسه' },
   { key: 'expiryText', label: 'سررسید', fmt: 'text', group: 'شناسه' },

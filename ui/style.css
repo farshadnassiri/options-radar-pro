@@ -3493,25 +3493,40 @@ button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
 .gap-skin .gap-table td small { display: block; color: var(--muted); font-size: .68rem; }
 .gap-skin .gap-table td.spark-cell { width: 100px; }
 
+/* نمادهای ترکیب — خرید و فروش در یک ستون، از هم جدا. */
+.gap-syms { display: flex; flex-direction: column; gap: 3px; }
+.gap-sym {
+  display: flex; align-items: baseline; gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-xs);
+  border-inline-start: 3px solid var(--muted);
+  background: var(--gap-tile);
+  white-space: nowrap;
+}
+.gap-sym[data-side="buy"] { border-inline-start-color: var(--gain); }
+.gap-sym[data-side="sell"] { border-inline-start-color: var(--loss); }
+.gap-sym i { font-style: normal; color: var(--muted); font-size: .66rem; }
+.gap-sym b { font-family: var(--mono); font-size: .74rem; }
+.gap-sym u { text-decoration: none; color: var(--muted); font-size: .66rem; }
+
+/* شناسنامهٔ ترکیبِ باز — بالای نمودارهای تاریخچه. */
+.gap-skin .gap-ident {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--gap-hair);
+  border-radius: var(--radius-sm);
+  background: var(--gap-tile);
+}
+.gap-skin .gap-ident .gap-syms { flex-direction: row; flex-wrap: wrap; }
+.gap-skin .gap-ident span { color: var(--muted); font-size: var(--fs-2xs); }
+
 .gap-skin .gap-hint { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-2xs); line-height: var(--lh-normal); }
 
 /* ═══ سلول‌های نگاره‌دارِ جدول رادار ═══
    «جداول ویژوال و رنگی و نمودار داخل جداول». هر سه سلولِ زیر در
    ui/radar-columns.mjs ساخته می‌شوند و فقط اینجا شکل می‌گیرند. */
 td.rich { padding-block: var(--space-1); }
-.rad-syms { display: inline-flex; gap: var(--space-1); flex-wrap: wrap; }
-.rad-sym {
-  font-style: normal;
-  font-size: var(--fs-3xs);
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-pill);
-  border: 1px solid var(--line);
-  white-space: nowrap;
-}
-/* خریده و فروخته دو رنگ دارند، چون در یک ترکیبِ چندپا «کدام را
-   می‌خری» تمامِ تفاوتِ سود و زیان است و از نامِ نماد پیدا نیست. */
-.rad-sym.buy { color: var(--gain); border-color: color-mix(in srgb, var(--gain) 40%, transparent); }
-.rad-sym.sell { color: var(--loss); border-color: color-mix(in srgb, var(--loss) 40%, transparent); }
 .rad-dim { color: var(--muted); }
 .rad-boundless { font-style: normal; color: var(--warn); font-size: var(--fs-3xs); }
 
