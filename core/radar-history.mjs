@@ -1,6 +1,7 @@
 // کیفیت داده و ساخت رادار روی بازهٔ انتخابی؛ مستقل از رابط و شبکه.
 import { comboKey, daysBetween, flattenActiveContracts, generateHistoricalCombos, historyPrice, normalizeHistoryDate } from './history.mjs';
 import { measureGap } from './spread-gap.mjs';
+import { comboMetrics, passesValueFilter } from './radar-metrics.mjs';
 import { dailyGapSeries, gapVerdict } from './spread-gap-series.mjs';
 
 export function radarDates(series = [], range) {
@@ -41,17 +42,25 @@ function pricesAt(legs, priceIndex, date) {
 }
 
 export async function buildRadarHistory({ ua, defs, seriesByIns, range, basis = 'CLOSE', settings = {},
-  scale = 'raw', units = 1,
+  scale = 'raw', units = 1, minLegValue = 0, minLegVolume = 0,
   onProgress = () => {}, cancel = () => false, yieldControl = async () => {} }) {
   const dates = radarDates(seriesByIns[String(ua.ins)] || [], range);
   const markDate = dates.at(-1), rows = [];
-  const excluded = { entry: 0, mark: 0, invalid: 0 };
+  const excluded = { entry: 0, mark: 0, invalid: 0, thin: 0 };
   if (!dates.length) return { dates, rows, excluded, expiryWindow: null };
 
   // رادارِ اکنون قرارداد و پنجره را در روز سنجش انتخاب می‌کند.
   // ابتدای بازه فقط مرز نمودار است، نه شرطِ وجود قرارداد یا روز ورود.
   const priceIndex = new Map(Object.entries(seriesByIns).map(([ins, series]) => [ins,
     new Map(series.map(row => [normalizeHistoryDate(row.date), historyPrice(row, basis)]))]));
+  // سطرِ خامِ روز سنجش برای هر ابزار — «ارزش معامله» و حجم از همین می‌آید،
+  // نه از قیمت. قیمت می‌گوید چند، این می‌گوید چقدرش واقعاً معامله شد.
+  const rowByIns = {};
+  for (const [ins, series] of Object.entries(seriesByIns)) {
+    const found = series.find((row) => normalizeHistoryDate(row.date) === markDate);
+    if (found) rowByIns[ins] = found;
+  }
+  const spot = historyPrice(rowByIns[String(ua.ins)], 'CLOSE');
   const minDays = Number.isFinite(settings.minDays) ? settings.minDays : 0;
   const maxDays = Number.isFinite(settings.maxDays) ? settings.maxDays : 400;
   const allExpiries = [...new Set(flattenActiveContracts(ua, settings.blockedExpiries).map(row => row.expiry))];
@@ -94,13 +103,23 @@ export async function buildRadarHistory({ ua, defs, seriesByIns, range, basis = 
         if (measured.ok) { entryGap = measured; entryDate = date; break; }
       }
       if (!entryGap) { excluded.entry++; continue; }
+      const daysLeft = Math.max(0, daysBetween(markDate, combo.expiries[0]));
       const gap = measureGap({ legs, prices: markPrices, strategyId: def.id, entry: entryGap.current,
-        daysLeft: Math.max(0, daysBetween(markDate, combo.expiries[0])), scale, units });
+        daysLeft, scale, units });
       if (!gap.ok) { excluded.invalid++; continue; }
+      // سنجه‌های کامل از خط لولهٔ مشترکِ برنامه — بیشترین سود و زیان،
+      // سربه‌سری، وجه تضمین، سرمایه و بازده. جدول از همین ستون می‌گیرد،
+      // نه از حسابِ جداگانهٔ رادار.
+      const metrics = comboMetrics({ legs, prices: markPrices, spot, rowByIns,
+        settings, daysLeft, scale, units });
+      // پالایهٔ «ارزش معامله»: ترکیبی که یک پایش امروز معامله‌ای نداشته،
+      // روی کاغذ هست و در بازار نه. صفرِ آستانه یعنی قید نگذاشته‌ای.
+      if (!passesValueFilter(metrics, { minLegValue, minLegVolume })) { excluded.thin++; continue; }
       const series = dailyGapSeries({ legs, seriesByIns, dates, basis, strategyId: def.id,
         entry: entryGap.current, expiry: combo.expiries[0], scale, units, baseIns: String(ua.ins) });
       rows.push({ key: `${def.id}::${comboKey(legs)}`, def, legs, strikes: combo.strikes,
-        expiry: combo.expiries[0], entryDate, markDate, entry: entryGap.current, gap, series, verdict: gapVerdict(series, gap) });
+        expiry: combo.expiries[0], entryDate, markDate, entry: entryGap.current,
+        spot, daysLeft, gap, metrics, series, verdict: gapVerdict(series, gap) });
     }
   }
   onProgress({ done: defs.length, total: defs.length, combos: rows.length });

@@ -359,3 +359,50 @@ export function indexedPair(series) {
     base: finite(firstBase) && finite(point.basePrice) ? (point.basePrice / firstBase) * 100 : null,
   }));
 }
+
+
+// ═══════════════════════ گذشته و امروز، در یک نمودار ═══════════════════
+//
+// «در رصد لحظه‌ای، نمودارهای تاریخی و روند گذشته نیز قابل رویت باشد، ولی
+// با رنگ یا شکلی متفاوت از آن قبلی‌ها.» و: «رصدگر لحظه‌ای در هر زمان از
+// روز در تایم معاملاتی که اجرا می‌شود، از شروع بازار تا آن لحظه را هم
+// نشان بدهد.»
+//
+// دو خواسته، یک ساختار: سریِ روزانه تا دیروز، و سریِ درون‌روزیِ امروز از
+// آغاز بازار تا همین لحظه، پشت سر هم روی یک محور.
+//
+// چرا الحاق و نه دو نمودار کنار هم: پرسشِ کاربر «امروز نسبت به روند
+// گذشته کجاست» است، و دو نمودار با دو محورِ مستقل دقیقاً همان مقایسه را
+// ناممکن می‌کنند.
+
+/**
+ * دنبالهٔ امروز را به سریِ روزانه می‌چسباند.
+ *
+ * نقطه‌های امروز `live: true` می‌گیرند تا نمودار بتواند شکل و رنگِ
+ * دیگری بدهد — همان تفکیکی که خواسته شد. مرزِ دو بخش در `liveFrom`
+ * می‌آید.
+ *
+ * نقطهٔ آخرِ تاریخچه در هر دو سری می‌ماند، وگرنه خطِ زنده از هوا شروع
+ * می‌شود و پیوستگی دیده نمی‌شود.
+ */
+export function joinLive(daily, intraday) {
+  const past = (daily?.points || []).filter((point) => !point.live);
+  const today = intraday?.points || [];
+  if (!today.length) return daily || { points: [], liveFrom: -1 };
+  const marked = today.map((point) => ({ ...point, live: true }));
+  const points = [...past, ...marked];
+  return {
+    ...daily,
+    points,
+    liveFrom: past.length,
+    // دانه‌بندی مخلوط است: تایم‌فریم روی چنین سری‌ای اعمال نمی‌شود، چون
+    // سطلِ هفتگیِ «سه روز و چهل دقیقه» عددی می‌داد که معنی ندارد.
+    grain: 'mixed',
+    day: intraday?.day,
+    stats: seriesStats(points),
+  };
+}
+
+/** آیا این سری، دنبالهٔ زنده دارد؟ */
+export const hasLiveTail = (series) => Number.isInteger(series?.liveFrom) && series.liveFrom >= 0
+  && (series?.points || []).some((point) => point.live);

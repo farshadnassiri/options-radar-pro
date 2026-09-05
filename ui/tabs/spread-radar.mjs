@@ -19,7 +19,7 @@
 //
 // همان قاعدهٔ بقیهٔ تب‌های تاریخ‌دار. فهرست نماد از خودِ بازه ساخته می‌شود.
 
-import { faDigits, fmt, signTone } from '/ui/fmt.mjs';
+import { faDigits, fmt } from '/ui/fmt.mjs';
 import { buildChain } from '/core/chain.mjs';
 import { byId } from '/strategies/catalog.mjs';
 import {
@@ -27,7 +27,9 @@ import {
 } from '/core/history.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
-import { DEFAULT_SCALE, GAP_SCALES, GAP_STRATEGY_IDS, gapNote, gapScale, measureGap } from '/core/spread-gap.mjs';
+import {
+  DEFAULT_SCALE, GAP_SCALES, GAP_STRATEGY_IDS, comboSymbolText, gapNote, gapScale, measureGap,
+} from '/core/spread-gap.mjs';
 import {
   GAP_TIMEFRAMES, gapVerdict, indexedPair, intradayGapSeries, resample, seriesStats, versusBase,
 } from '/core/spread-gap-series.mjs';
@@ -38,10 +40,12 @@ import {
 } from '/core/gap-alert.mjs';
 import { MOMENT_GRAINS, isIntradayGrain } from '/core/intraday-grid.mjs';
 import { chartGroup } from '/ui/chart-host.mjs';
+import { makeTable } from '/ui/table.mjs';
+import { RADAR_ALL_COLS, RADAR_COLS, symbolCell, toTableRow } from '/ui/radar-columns.mjs';
 import { mountSubtabs } from '/ui/subtabs.mjs';
 import {
-  coverageChart, distributionChart, fillBar, fillGauge, gapBandChart, gapPathChart, hourHeatmap,
-  indexedChart, rangeChart, sparkline, versusBaseChart, versusBaseScatter,
+  coverageChart, distributionChart, fillGauge, gapBandChart, gapPathChart, hourHeatmap,
+  indexedChart, rangeChart, versusBaseChart, versusBaseScatter,
 } from '/ui/gap-charts.mjs';
 import {
   NOTIFY_LABEL, askNotifyPermission, clearLog, deliver, metricText, notifyState, readLog, testDelivery,
@@ -61,9 +65,6 @@ const RULES_KEY = 'gap-alerts:rules';
 const GAP_DEFS = GAP_STRATEGY_IDS.map((id) => byId(id)).filter(Boolean);
 const GAP_GROUPS = [...new Set(GAP_DEFS.map((def) => def.group))];
 
-const pctCell = (value) => (finite(value)
-  ? `<span class="${signTone(value)}">${fmt.pct(value)}٪</span>` : '—');
-const moneyCell = (value) => (finite(value) ? fmt.money(value) : '—');
 
 function readRules() {
   try {
@@ -93,9 +94,9 @@ export async function mount(root, { state }) {
     <div id="gr-range" class="step-first" data-step="۱"></div>
     <div class="gap-form">
       <label class="step-next" data-step="۲">نماد پایه<select id="gr-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label>
-      <label>خانواده<select id="gr-family">
-        <option value="all">همهٔ خانواده‌های فاصله‌دار</option>
-        ${GAP_GROUPS.map((group) => `<option value="${esc(group)}">${esc(groupLabel(group))}</option>`).join('')}
+      <label>استراتژی<select id="gr-strategy">
+        <option value="all">همهٔ استراتژی‌های فاصله‌دار</option>
+        ${GAP_GROUPS.map((group) => `<optgroup label="${esc(groupLabel(group))}">${GAP_DEFS.filter((def) => def.group === group).map((def) => `<option value="${esc(def.id)}">${esc(def.name)}</option>`).join('')}</optgroup>`).join('')}
       </select></label>
       <label>مبنای قیمت<select id="gr-basis">
         <option value="CLOSE">قیمت پایانی</option>
@@ -106,12 +107,15 @@ export async function mount(root, { state }) {
         ${GAP_SCALES.map((row) => `<option value="${esc(row.id)}"${row.id === DEFAULT_SCALE ? ' selected' : ''}>${esc(row.label)}</option>`).join('')}
       </select></label>
       <label>تعداد واحد<input id="gr-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label>
+      <label>کمینه ارزش معاملهٔ هر پا<input id="gr-min-value" type="number" min="0" step="1000000" value="0" placeholder="ریال"></label>
+      <label>کمینه حجم معاملهٔ هر پا<input id="gr-min-volume" type="number" min="0" step="1" value="0" placeholder="قرارداد"></label>
       <button type="button" class="primary" id="gr-load">دریافت تاریخچه و ساخت فاصله‌ها</button>
       <button type="button" class="ghost" id="gr-stop" hidden>توقف دریافت و ساخت</button>
     </div>
     <div class="gap-data" id="gr-data" aria-live="polite"></div>
     <p class="gap-note" id="gr-scale-note"></p>
     <p class="gap-note">قیمت روزانه برای بررسی تاریخی است؛ آخرین معامله نیز تضمین اجرای هم‌زمان پاها نیست.</p>
+    <p class="gap-note">استراتژی را با نام خودش انتخاب کن؛ «همهٔ استراتژی‌ها» هر ${faDigits(String(GAP_DEFS.length))} ساختار فاصله‌دار را می‌سازد و ساختنش طول می‌کشد.</p>
     <p class="gap-note">فاصله فقط برای ساختارهایی معنی دارد که دست‌کم دو قیمت اعمال داشته باشند. تک‌پا و استرادل و کاوردکال در این تب نمی‌آیند — و این نبودن، نقص نیست.</p>
   </section>
 
@@ -123,27 +127,12 @@ export async function mount(root, { state }) {
       <div class="section-head">
         <div><p class="eyebrow">همهٔ ترکیب‌های فاصله‌دار</p><h2>فاصله در این لحظه</h2></div>
         <div class="gap-toolbar">
-          <label>مرتب بر<select id="gr-sort">
-            <option value="roomPct">بیشترین جای باقی‌مانده</option>
-            <option value="coveragePct">بیشترین پرشدگی</option>
-            <option value="upsidePct">بیشترین سود باقی‌مانده</option>
-            <option value="perDay">بیشترین سود روزانه</option>
-            <option value="rank">پایین‌ترین صدک تاریخی</option>
-            <option value="current">بزرگ‌ترین فاصله</option>
-          </select></label>
           <label class="check"><input type="checkbox" id="gr-live"> رصد زندهٔ بازار</label>
           <span id="gr-live-state" class="gap-live-state">خاموش</span>
         </div>
       </div>
       <p class="gap-note" id="gr-now-note">—</p>
-      <div class="gap-table-wrap"><table class="gap-table" id="gr-table">
-        <thead><tr>
-          <th>استراتژی</th><th>قیمت اعمال</th><th>سررسید</th>
-          <th>لنگر</th><th>تفاضل / جمعِ اکنون</th><th>پر شده / باقی‌مانده</th>
-          <th>سود باقی‌مانده</th><th>روزانه</th><th>صدک تاریخی</th><th>روند بازه</th>
-        </tr></thead>
-        <tbody id="gr-rows"></tbody>
-      </table></div>
+      <div id="gr-table" class="gap-grid"></div>
     </section>
     <div id="gr-alarm-host" class="gap-alarm-host" aria-live="assertive"></div>
   </div>
@@ -160,6 +149,7 @@ export async function mount(root, { state }) {
         </div>
       </div>
       <p class="gap-note" id="gr-grain-note"></p>
+      <div class="gap-ident" id="gr-ident" hidden></div>
       <p class="gap-verdict" id="gr-verdict">—</p>
     </section>
     <div class="gap-chart-grid">
@@ -188,10 +178,10 @@ export async function mount(root, { state }) {
       <div class="gap-form gap-rule-form">
         <label>دامنه<select id="gr-rule-scope">
           <option value="">همهٔ ترکیب‌های این نماد</option>
-          <option value="strategy">فقط یک خانواده</option>
+          <option value="strategy">فقط یک استراتژی</option>
           <option value="combo">فقط ترکیب انتخاب‌شده</option>
         </select></label>
-        <label id="gr-rule-strategy-wrap" hidden>خانواده<select id="gr-rule-strategy">${GAP_DEFS.map((def) => `<option value="${esc(def.id)}">${esc(def.name)}</option>`).join('')}</select></label>
+        <label id="gr-rule-strategy-wrap" hidden>استراتژی<select id="gr-rule-strategy">${GAP_DEFS.map((def) => `<option value="${esc(def.id)}">${esc(def.name)}</option>`).join('')}</select></label>
         <label>سنجه<select id="gr-rule-metric">${ALERT_METRICS.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
         <label>شرط<select id="gr-rule-op">${ALERT_OPS.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
         <label>آستانه<input id="gr-rule-value" type="number" step="any" value="0"></label>
@@ -222,7 +212,11 @@ export async function mount(root, { state }) {
   let rules = readRules();
   let prevSnapshots = {};
   let liveTimer = 0, livePrices = null, tapeByIns = null, tapeDate = 0;
-  let subtabs = null;
+  let subtabs = null, table = null;
+  // کلیدِ ترکیب‌هایی که در آخرین تیک، قیمت زنده داشتند. ستون «مظنهٔ زنده»
+  // از همین می‌آید — بی آن، ردیفی که قیمت زنده نگرفته با ردیفی که گرفته
+  // یک‌شکل دیده می‌شود و کاربر نمی‌داند کدام عدد کهنه است.
+  const liveKeys = new Set();
   let activeLoad = null, mounted = true, report = null, universeVersion = 0;
   const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 
@@ -292,7 +286,9 @@ export async function mount(root, { state }) {
     setStatus('انتخاب تغییر کرد؛ دریافت تاریخچه و ساخت فاصله‌ها را اجرا کن.');
   }
   baseSelect.addEventListener('change', invalidate);
-  $('gr-family').addEventListener('change', invalidate);
+  $('gr-strategy').addEventListener('change', invalidate);
+  $('gr-min-value').addEventListener('change', invalidate);
+  $('gr-min-volume').addEventListener('change', invalidate);
   $('gr-basis').addEventListener('change', invalidate);
   // مقیاس، خودِ عددها را عوض می‌کند (خام / ×اندازه / ×اندازه×تعداد)، پس
   // مثل مبنای قیمت، نتیجهٔ ساخته‌شده را باطل می‌کند. نسبت‌ها عوض
@@ -306,7 +302,6 @@ export async function mount(root, { state }) {
     const tail = meta.id === 'qty' ? ` تعداد فعلی: ${fmt.int(units())}.` : '';
     $('gr-scale-note').textContent = `${meta.hint}${tail} مقیاس فقط واحدِ نمایش را عوض می‌کند؛ «چند درصد پر شده» در هر سه مقیاس یک عدد است، چون هم فاصلهٔ اعمال و هم ارزش کنونی با یک ضریب بزرگ می‌شوند.`;
   }
-  $('gr-sort').addEventListener('change', paintTable);
 
   // ————————————————————————— ساخت فاصله‌ها —————————————————————————
 
@@ -339,7 +334,7 @@ export async function mount(root, { state }) {
     cancelLoad();
     const job = new AbortController(); activeLoad = job;
     const current = () => mounted && activeLoad === job && !job.signal.aborted;
-    const range = rangeUi.range, basis = $('gr-basis').value, family = $('gr-family').value;
+    const range = rangeUi.range, basis = $('gr-basis').value, strategy = $('gr-strategy').value;
     report = null; paintData();
     $('gr-load').disabled = true;
     $('gr-stop').hidden = false;
@@ -374,7 +369,7 @@ export async function mount(root, { state }) {
         setStatus('برای قراردادهای انتخابی قیمت معتبری در بازه دریافت نشد. این پیام تأیید نمی‌کند که معامله‌ای انجام نشده؛ جزئیات ابزارها و بازه را بررسی کن.', true); return;
       }
       $('gr-hero-tag').textContent = 'قیمت‌ها دریافت شد؛ در حال ساخت فاصله‌ها';
-      await buildRows({ range, basis, family, job, current });
+      await buildRows({ range, basis, strategy, job, current });
     } catch (error) {
       if (!current()) return;
       logError('spread-radar', error);
@@ -390,10 +385,16 @@ export async function mount(root, { state }) {
    * باشد و «فاصلهٔ اکنون»ِ یک بازهٔ گذشته یعنی فاصله در پایان همان بازه.
    * گرفتنِ امروز، عددی می‌داد که به بازهٔ انتخابی ربطی نداشت.
    */
-  async function buildRows({ range, basis, family, job, current }) {
-    const defs = GAP_DEFS.filter((def) => family === 'all' || def.group === family);
+  // کشویی خانواده برداشته شد و نام استراتژی جایش نشست — «Bull Call
+  // Spread» نه «اسپرد عمودی» — چون خانواده انتخابِ کسی نیست که دنبال یک
+  // ساختار مشخص است؛ انتخابِ «اسپرد عمودی» هشت استراتژی را با هم می‌ساخت
+  // که هیچ‌کدام خواسته نشده بود. خانواده حالا فقط برچسبِ optgroup است.
+  async function buildRows({ range, basis, strategy, job, current }) {
+    const defs = GAP_DEFS.filter((def) => strategy === 'all' || def.id === strategy);
     const result = await buildRadarHistory({ defs, ua, seriesByIns, range, basis, settings: state.settings,
       scale: $('gr-scale').value, units: units(),
+      minLegValue: Math.max(0, Number($('gr-min-value').value) || 0),
+      minLegVolume: Math.max(0, Number($('gr-min-volume').value) || 0),
       cancel: () => job.signal.aborted || !current(), yieldControl: nextFrame,
       onProgress: ({ done, total, name, combos }) => {
         if (current()) setStatus(`ساخت فاصله‌ها: ${fmt.int(done)} از ${fmt.int(total)} استراتژی بررسی شد · ${fmt.int(combos)} ترکیب آماده${name ? ` · ${name}` : ''}`);
@@ -408,7 +409,8 @@ export async function mount(root, { state }) {
     const windowNote = win && win.dropped
       ? ` · ${fmt.int(win.dropped)} سررسید از ${fmt.int(win.total)} بیرونِ پنجرهٔ «${fmt.int(win.minDays)} تا ${fmt.int(win.maxDays)} روز تا سررسید» نسبت به روز سنجش افتاد${win.farthest > win.maxDays ? `؛ دورترین سررسید ${fmt.int(win.farthest)} روز از روز سنجش فاصله دارد؛ برای بررسی آن «بیشینه روز تا سررسید» را در تنظیمات تغییر بده` : ''}`
       : '';
-    const breakdown = `${fmt.int(excluded.mark)} ترکیب فاقد قیمت روز سنجش · ${fmt.int(excluded.invalid)} ساختار بدون فاصلهٔ معتبر · ${fmt.int(win?.expired || 0)} سررسید در روز سنجش پایان یافته${windowNote}`;
+    const thinNote = excluded.thin ? ` · ${fmt.int(excluded.thin)} ترکیب زیر آستانهٔ ارزش یا حجم معاملهٔ پاها` : '';
+    const breakdown = `${fmt.int(excluded.mark)} ترکیب فاقد قیمت روز سنجش · ${fmt.int(excluded.invalid)} ساختار بدون فاصلهٔ معتبر · ${fmt.int(win?.expired || 0)} سررسید در روز سنجش پایان یافته${thinNote}${windowNote}`;
     if (!rows.length) {
       $('gr-hero-tag').textContent = 'قیمت‌ها بررسی شد؛ ترکیب قابل نمایش نیست';
       setStatus(`در روز سنجش و با قیود فعلی ترکیبی برای نمایش ساخته نشد؛ ${breakdown}. قیمت روز سنجش ابزارها را بررسی کن؛ سپس بازه، خانواده یا فیلترهای استراتژی را تغییر بده.`, true);
@@ -447,61 +449,73 @@ export async function mount(root, { state }) {
    */
   function paintKpis() {
     const room = rows.map((row) => row.gap.roomPct).filter(finite);
-    const best = (field) => rows
-      .filter((row) => finite(row.gap[field]))
-      .sort((a, b) => b.gap[field] - a.gap[field])[0] || null;
-    const topUpside = best('upsidePct'), topPer = best('perDay');
+    const best = (pick) => rows
+      .map((row) => ({ row, value: pick(row) }))
+      .filter((one) => finite(one.value))
+      .sort((a, b) => b.value - a.value)[0] || null;
+    const topReturn = best((row) => row.metrics?.returnPct);
+    const topPer = best((row) => row.metrics?.perDayPct);
     const cheap = rows.filter((row) => finite(row.verdict?.rank) && row.verdict.rank <= 20).length;
-    const which = (row) => (row ? `${row.def.name} · ${row.strikes.map((k) => fmt.money(k)).join('/')}` : '—');
+    const thin = rows.filter((row) => (row.metrics?.thinLegs || 0) > 0).length;
+    // نامِ ترکیب و نمادهایش، نه فقط عدد. بی آن، «۶۵۶۶٪» یک ادعای معلق
+    // است که خواننده نمی‌تواند بازبینی‌اش کند — و بی نامِ نماد، نمی‌تواند
+    // رویش سفارش بگذارد.
+    const which = (one) => (one
+      ? `${one.row.def.name} · ${comboSymbolText(one.row.legs)} · ${one.row.strikes.map((k) => fmt.money(k)).join('/')}`
+      : '—');
     const cards = [
-      ['ترکیب فاصله‌دار', fmt.int(rows.length), 'دست‌کم دو قیمت اعمال، ارزش خالص ناصفر، و قیمت کامل در بازه'],
-      ['میانهٔ جای باقی‌مانده', room.length ? `${fmt.pct(median(room))}٪` : '—', 'از فاصلهٔ اعمال، چقدر هنوز پر نشده. میانه است نه میانگین، تا یک ردیفِ پرت جابه‌جایش نکند.'],
-      ['بیشترین سود باقی‌مانده', topUpside ? `${fmt.pct(topUpside.gap.upsidePct)}٪` : '—', which(topUpside)],
-      ['بهترین سود روزانه', topPer ? `${fmt.pct(topPer.gap.perDay)}٪` : '—', which(topPer)],
+      ['ترکیب فاصله‌دار', fmt.int(rows.length), 'دست‌کم دو قیمت اعمال، ارزش خالص ناصفر، و قیمت کامل در روز سنجش'],
+      ['میانهٔ جای باقی‌مانده', room.length ? `${fmt.pct(median(room))}٪` : '—', 'از لنگرِ ساختاری، چقدر هنوز پر نشده. میانه است نه میانگین، تا یک ردیفِ پرت جابه‌جایش نکند.'],
+      ['بیشترین سود ٪', topReturn ? `${fmt.pct(topReturn.value)}٪` : '—', which(topReturn)],
+      ['بهترین بازده روزانه', topPer ? `${fmt.pct(topPer.value)}٪` : '—', which(topPer)],
       ['زیر صدک ۲۰', fmt.int(cheap), 'فاصله‌شان نزدیک کمینهٔ تاریخیِ خودشان است'],
+      ['پای بی‌معامله', fmt.int(thin), 'دست‌کم یک پایشان در روز سنجش ارزش معامله‌ای نداشت؛ روی کاغذ هستند و در بازار نه'],
     ];
     $('gr-kpis').innerHTML = cards.map(([label, value, hint]) => `<article class="gap-kpi"><b>${esc(label)}</b><strong>${value}</strong><small>${esc(hint)}</small></article>`).join('');
   }
 
-  function sortedRows() {
-    const by = $('gr-sort').value;
-    const pick = (row) => (by === 'rank' ? row.verdict?.rank : row.gap?.[by]);
-    return [...rows].sort((a, b) => {
-      const x = pick(a), y = pick(b);
-      if (!finite(x)) return 1;
-      if (!finite(y)) return -1;
-      // صدکِ پایین بهتر است؛ بقیه بالاتر بهتر.
-      return by === 'rank' ? x - y : y - x;
+  /**
+   * جدولِ «اکنون» — همان جدولِ مشترکِ برنامه، نه یکی مخصوصِ این تب.
+   *
+   * ═══ چرا `makeTable` و نه جدولِ دست‌ساز ═══
+   *
+   * خواسته این بود: «تمامی ایتمهای تاثیر گذار داخل جدول بیار و قابلیت
+   * حذف و اضافه داشته باشن … با الهام از سایر جداول برنامه.» آن جدول از
+   * قبل هست و چیزهایی دارد که جدولِ دست‌سازِ رادار نداشت: انتخاب و
+   * جابه‌جایی ستون با ذخیره در حافظهٔ مرورگر، مرتب‌سازی روی هر ستون،
+   * طیف رنگی از خودِ داده، خروجی اکسل، و مجازی‌سازی که پانصد ردیف را
+   * بی‌لکنت رسم می‌کند.
+   *
+   * تنها چیزی که کم داشت، سلولِ نگاره‌دار بود — نوار پرشدگی و
+   * اسپارک‌لاین. همان به `ui/table.mjs` اضافه شد تا بقیهٔ جدول‌ها هم
+   * بتوانند داشته باشند، نه اینکه رادار نسخهٔ خودش را نگه دارد.
+   */
+  function mountTable() {
+    if (table) return table;
+    table = makeTable($('gr-table'), RADAR_COLS, {
+      all: RADAR_ALL_COLS,
+      storeKey: 'gap-radar-cols',
+      sortKey: 'returnPct',
+      exportName: 'radar-gap',
+      // ردیفِ بلندتر از پیش‌فرض، چون نوار پرشدگی و اسپارک‌لاین در ۲۷
+      // پیکسل جا نمی‌شوند و مجازی‌سازی با ارتفاعِ نادرست، پیمایش را
+      // می‌شکند.
+      rowHeight: 52,
+      onPick: (flat) => {
+        if (!flat?.key) return;
+        $('gr-pick').value = flat.key;
+        paintHistory();
+        subtabs?.show?.('history');
+      },
     });
+    return table;
   }
 
   function paintTable() {
     if (!rows.length) return;
-    const list = sortedRows();
-    $('gr-now-note').textContent = `روز سنجش ${faDigits(historyDateLabel(dates.at(-1)))}؛ انتخاب قرارداد و پنجرهٔ سررسید بر مبنای همین روز است. مبنا: ${$('gr-basis').selectedOptions[0].textContent}. مبدأ مقایسهٔ هر ردیف، اولین روز با قیمت معتبر همهٔ پاها در بازه است؛ ورود واقعی شما نیست. قیمت روزانه، تضمین اجرای هم‌زمان پاها نیست.`;
-    $('gr-rows').innerHTML = list.map((row) => {
-      const gap = row.gap;
-      const values = row.series.points.map((point) => point.current);
-      return `<tr data-key="${esc(row.key)}"${livePrices ? ' class="live"' : ''}>
-        <td><b>${esc(row.def.name)}</b><small>${esc(row.gap.kindLabel)}</small><small>مبدأ مقایسه ${faDigits(historyDateLabel(row.entryDate))}</small></td>
-        <td class="num">${row.strikes.map((k) => fmt.money(k)).join(' / ')}</td>
-        <td>${faDigits(historyDateLabel(row.expiry))}<small>${finite(gap.daysLeft) ? `${fmt.int(gap.daysLeft)} روز` : ''}</small></td>
-        <td class="num">${moneyCell(gap.anchor)}<small>${esc(gap.anchorLabel)}</small></td>
-        <td class="num"><b>${moneyCell(gap.current)}</b><small>${gap.anchorSource === 'entry' ? 'جمع دو نرخ' : 'تفاضل دو نرخ'}</small></td>
-        <td>${fillBar(gap)}</td>
-        <td class="num">${pctCell(gap.upsidePct)}</td>
-        <td class="num">${pctCell(gap.perDay)}</td>
-        <td class="num">${finite(row.verdict?.rank) ? `${fmt.pct(row.verdict.rank)}٪<small>${esc(row.verdict.tone)}</small>` : '—'}</td>
-        <td class="spark-cell">${sparkline(values, { band: gap.anchor, label: `${row.def.name} — روند فاصله` })}</td>
-      </tr>`;
-    }).join('');
-    for (const tr of $('gr-rows').querySelectorAll('tr')) {
-      tr.addEventListener('click', () => {
-        $('gr-pick').value = tr.dataset.key;
-        paintHistory();
-        subtabs?.show?.('history');
-      });
-    }
+    const baseName = nameOf(ua);
+    mountTable().set(rows.map((row) => toTableRow(row, { baseName, live: livePrices ? !!liveKeys.has(row.key) : null })));
+    $('gr-now-note').textContent = `روز سنجش ${faDigits(historyDateLabel(dates.at(-1)))}؛ انتخاب قرارداد و پنجرهٔ سررسید بر مبنای همین روز است. مبنا: ${$('gr-basis').selectedOptions[0].textContent}. مبدأ مقایسهٔ هر ردیف، اولین روز با قیمت معتبر همهٔ پاها در بازه است؛ ورود واقعی شما نیست. قیمت روزانه، تضمین اجرای هم‌زمان پاها نیست. ستون‌ها را از دکمهٔ «ستون‌ها» کم و زیاد کن؛ انتخابت می‌ماند.`;
   }
 
   // ————————————————————————— زیرتب «تاریخچه» —————————————————————————
@@ -509,7 +523,9 @@ export async function mount(root, { state }) {
   function fillPicker() {
     const select = $('gr-pick');
     const keep = select.value;
-    select.innerHTML = sortedRows().map((row) => `<option value="${esc(row.key)}">${esc(row.def.name)} · ${row.strikes.map((k) => fmt.money(k)).join('/')} · ${faDigits(historyDateLabel(row.expiry))}</option>`).join('');
+    // نامِ نمادها در فهرست ترکیب هم می‌آید: «Bull Call Spread · خرید
+    // ضهرم۵۰ · فروش ضهرم۵۴» بی‌ابهام‌تر از فهرستی از قیمت‌های اعمال است.
+    select.innerHTML = rows.map((row) => `<option value="${esc(row.key)}">${esc(row.def.name)} · ${esc(comboSymbolText(row.legs))} · ${row.strikes.map((k) => fmt.money(k)).join('/')} · ${faDigits(historyDateLabel(row.expiry))}</option>`).join('');
     if (keep && rows.some((row) => row.key === keep)) select.value = keep;
   }
 
@@ -556,6 +572,12 @@ export async function mount(root, { state }) {
     const show = intraday ? shownSeries : resample(shownSeries, timeframe);
     const unitText = gapScale(row.gap.scale).unit;
     const isSum = row.gap.anchorSource === 'entry';
+
+    // شناسنامهٔ ترکیب، بالای هر ده نمودار. بی نامِ نماد، نمودارها متعلق به
+    // «یک اسپرد صعودی کال» بودند، نه به قراردادی که می‌شود سفارشش داد.
+    const ident = $('gr-ident');
+    ident.hidden = false;
+    ident.innerHTML = `<b>${esc(row.def.name)}</b>${symbolCell(row.legs)}<span>قیمت اعمال ${row.strikes.map((k) => fmt.money(k)).join(' / ')}</span><span>سررسید ${faDigits(historyDateLabel(row.expiry))}</span><span>نماد پایه ${esc(nameOf(ua))}</span>`;
 
     $('gr-verdict').textContent = `مبدأ مقایسه ${faDigits(historyDateLabel(row.entryDate))}؛ نخستین قیمت مشترک معتبر در بازه، نه ورود واقعی شما. ${gapNote(row.gap)} ${row.verdict?.ok ? `فاصله در صدک ⁨${fmt.pct(row.verdict.rank)}⁩ تاریخِ همین بازه است — ${row.verdict.tone}.` : ''}`;
 
@@ -724,7 +746,8 @@ export async function mount(root, { state }) {
         gap: row.gap, verdict: row.verdict,
         day: { low: stats.min, high: stats.max },
         basePrice: NaN,
-        label: `${row.def.name} · ${row.strikes.map((k) => fmt.money(k)).join('/')}`,
+        // اعلان بی نامِ نماد، خبری است که نمی‌شود رویش سفارش گذاشت.
+        label: `${row.def.name} · ${comboSymbolText(row.legs)} · ${row.strikes.map((k) => fmt.money(k)).join('/')}`,
         strategyId: row.def.id, strategyName: row.def.name,
       });
     }
@@ -766,7 +789,8 @@ export async function mount(root, { state }) {
       sound: $('gr-rule-sound').checked,
       strategyId: scope === 'strategy' ? $('gr-rule-strategy').value : '',
       comboKey: scope === 'combo' ? ($('gr-pick').value || '') : '',
-      label: scope === 'combo' ? (selectedRow()?.def.name || '') : '',
+      label: scope === 'combo' && selectedRow()
+        ? `${selectedRow().def.name} · ${comboSymbolText(selectedRow().legs)}` : '',
     });
     if (!built.ok) { $('gr-rule-hint').textContent = `هشدار ساخته نشد: ${built.why}`; return; }
     rules = [...rules, built.rule];

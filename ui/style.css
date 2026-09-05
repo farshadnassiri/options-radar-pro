@@ -3493,16 +3493,92 @@ button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
 .gap-skin .gap-table td small { display: block; color: var(--muted); font-size: .68rem; }
 .gap-skin .gap-table td.spark-cell { width: 100px; }
 
+/* نمادهای ترکیب — خرید و فروش در یک ستون، از هم جدا. */
+.gap-syms { display: flex; flex-direction: column; gap: 3px; }
+.gap-sym {
+  display: flex; align-items: baseline; gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-xs);
+  border-inline-start: 3px solid var(--muted);
+  background: var(--gap-tile);
+  white-space: nowrap;
+}
+.gap-sym[data-side="buy"] { border-inline-start-color: var(--gain); }
+.gap-sym[data-side="sell"] { border-inline-start-color: var(--loss); }
+.gap-sym i { font-style: normal; color: var(--muted); font-size: .66rem; }
+.gap-sym b { font-family: var(--mono); font-size: .74rem; }
+.gap-sym u { text-decoration: none; color: var(--muted); font-size: .66rem; }
+
+/* شناسنامهٔ ترکیبِ باز — بالای نمودارهای تاریخچه. */
+.gap-skin .gap-ident {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3);
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--gap-hair);
+  border-radius: var(--radius-sm);
+  background: var(--gap-tile);
+}
+.gap-skin .gap-ident .gap-syms { flex-direction: row; flex-wrap: wrap; }
+.gap-skin .gap-ident span { color: var(--muted); font-size: var(--fs-2xs); }
+
 .gap-skin .gap-hint { margin: 0 0 var(--space-3); color: var(--muted); font-size: var(--fs-2xs); line-height: var(--lh-normal); }
+
+/* ═══ سلول‌های نگاره‌دارِ جدول رادار ═══
+   «جداول ویژوال و رنگی و نمودار داخل جداول». هر سه سلولِ زیر در
+   ui/radar-columns.mjs ساخته می‌شوند و فقط اینجا شکل می‌گیرند. */
+td.rich { padding-block: var(--space-1); }
+.rad-dim { color: var(--muted); }
+.rad-boundless { font-style: normal; color: var(--warn); font-size: var(--fs-3xs); }
+
+.rad-risk { display: grid; gap: 2px; min-width: 96px; }
+.rad-risk span {
+  position: relative;
+  display: block;
+  height: 11px;
+  border-radius: var(--radius-xs);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.rad-risk span::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block: 0;
+  width: var(--w, 0%);
+  border-radius: inherit;
+}
+.rad-risk-gain::before { background: color-mix(in srgb, var(--gain) 55%, transparent); }
+.rad-risk-loss::before { background: color-mix(in srgb, var(--loss) 55%, transparent); }
+.rad-risk b {
+  position: relative;
+  font-size: var(--fs-3xs);
+  font-weight: 600;
+  padding-inline-start: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.gap-skin .gap-grid { margin-top: var(--space-3); }
+.gap-skin .gap-grid .tbl-body { max-height: 62vh; }
 
 .gap-skin .gap-chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
   gap: var(--space-4);
 }
 .gap-skin .gap-chart-wide { grid-column: 1 / -1; }
-.gap-skin .gap-chart { min-height: 260px; margin-top: var(--space-3); }
-.gap-skin .gap-chart-lg { min-height: 340px; }
+/* ── نمودارها بزرگ‌تر ──────────────────────────────────────────────────
+   گزارش صاحب پروژه: «نمودارها کوچک شده‌اند، بعضی‌ها نیاز دارن فضای
+   بیشتری داشته باشن.» ارتفاع پایه بالا رفت، و نمودارِ عریض — که دو خط و
+   ناحیهٔ میانشان دارد و بیشترین جزئیات را حمل می‌کند — ارتفاع خودش را
+   گرفت. ستون‌های شبکه هم پهن‌تر شدند تا محور افقی برچسب‌هایش را جا بدهد. */
+.gap-skin .gap-chart { min-height: 340px; margin-top: var(--space-3); }
+.gap-skin .gap-chart-lg { min-height: 440px; }
+.gap-skin .gap-chart-wide .gap-chart-lg { min-height: 520px; }
+@media (max-width: 900px) {
+  .gap-skin .gap-chart { min-height: 280px; }
+  .gap-skin .gap-chart-lg,
+  .gap-skin .gap-chart-wide .gap-chart-lg { min-height: 340px; }
+}
 
 .gap-skin .gap-rule-form { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
 .gap-skin .gap-alarm-actions { display: flex; gap: var(--space-3); margin-top: var(--space-4); flex-wrap: wrap; }

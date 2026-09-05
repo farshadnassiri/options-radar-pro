@@ -218,60 +218,92 @@ group('۲۱۸-د. فاصله، کامل — دو خانواده، دو لنگر'
     scaled.map((one) => one.scale).join(',') === 'raw,size,qty'
     && scaled[2].units === 5 && scaled[2].mult === 5000);
 
-  // ── لنگر موقعیتی ────────────────────────────────────────────────────
-  check('بیشینهٔ سود بدهکار: عرض منهای بهای ورود',
-    gap.maxProfit === 2400 && gap.maxLoss === -1600);
-  check('از آن بیشینه، ۸۰۰ گرفته شده یعنی یک‌سومش',
-    gap.gained === 800 && near(gap.filledPct, 100 / 3), `${gap.filledPct}٪`);
-  check('«درصد پر شدن ساختاری» و «درصد سودِ گرفته‌شده» یکی نیستند',
-    Math.abs(gap.coveragePct - gap.filledPct) > 20,
-    `ساختاری ${gap.coveragePct.toFixed(1)}٪ · موقعیتی ${gap.filledPct.toFixed(1)}٪`);
+  // ── بیشینهٔ سود و زیانِ «اگر همین حالا وارد شوی» ─────────────────────
+  //
+  // مبنا قیمتِ اکنون است نه قیمتِ روز ورود: کسی که امروز به این ردیف نگاه
+  // می‌کند، امروز وارد می‌شود. عرض ۴٬۰۰۰ و بهای امروز ۲٬۴۰۰ → سقفِ سود
+  // ۱٬۶۰۰ و سقفِ زیان همان ۲٬۴۰۰ی که می‌پردازی.
+  check('بیشینهٔ سود بدهکار: عرض منهای بهای امروز',
+    gap.maxProfit === 1600 && gap.maxLoss === -2400,
+    `${gap.maxProfit} / ${gap.maxLoss}`);
+  check('از مبدأ مقایسه ۸۰۰ حرکت کرده — نصفِ بیشینهٔ سودِ امروز',
+    gap.gained === 800 && near(gap.gainedPct, 50) && near(gap.filledPct, 50),
+    `${gap.gained} · ${gap.filledPct}٪`);
+  check('«درصد پر شدن ساختاری» و «درصد حرکت از مبدأ» یکی نیستند',
+    Math.abs(gap.coveragePct - gap.gainedPct) > 5,
+    `ساختاری ${gap.coveragePct.toFixed(1)}٪ · از مبدأ ${gap.gainedPct.toFixed(1)}٪`);
   check('سودِ باقی‌مانده بر سرمایهٔ همین لحظه است، نه سرمایهٔ روز ورود',
     gap.upside === 1600 && near(gap.upsidePct, (1600 / 2400) * 100), `${gap.upsidePct}٪`);
   check('و همان، تقسیم بر روزهای مانده',
     near(gap.perDay, gap.upsidePct / 30), `${gap.perDay}`);
 
-  // ═══ استرانگل: لنگر، جمعِ پرمیومِ ورود ═══
+  // ═══ استرانگل: لنگر ساختاری است، نه قیمتِ ورودِ خیالی ═══
   //
-  // «جمع دو تا قرارداد (که فروختیم) بیشینه سود، و هرچی در طول زمان این
-  // جمع کمتر بشه می‌شه سود استراتژی.»
+  // گزارش صاحب پروژه: «قسمت short strangle درست نمایش داده نمی‌شود؛
+  // اصولاً لنگر نداریم.» و درست بود. نسخهٔ پیشین جمعِ پرمیوم در نخستین
+  // روزِ بازه را «قیمت ورود» می‌گرفت — روزی که ورودِ کسی نبود — و رویش
+  // «چند درصد سودت را گرفته‌ای» می‌ساخت.
   //
-  // پس اینجا دهانهٔ اعمال سقفِ ارزش **نیست** — بستر است. لنگر، همان جمعی
-  // است که روز فروش گرفته‌ای. فروخته به ۹۰۰، اکنون ۷۰۰ → ۲۰۰ سود، یعنی
-  // ۲۲٫۲٪ از بیشینه.
+  // آنچه همیشه هست، دهانهٔ اعمال است. پس همان لنگر می‌شود و نسبت معنیِ
+  // روشنی می‌گیرد: پرمیومی که می‌گیری، چند درصدِ دهانه را می‌پوشاند.
   const short = measureGap({
     legs: STRANGLE, prices: { p46: 300, c56: 400 },
     strategyId: 'short-strangle', entry: 900, daysLeft: 45,
   });
   check('استرانگل فروش بستانکار تشخیص داده می‌شود و جمعش ۷۰۰ است',
     short.ok && short.side === 'credit' && short.current === 700);
-  check('لنگرش جمعِ پرمیومِ ورود است، نه دهانهٔ اعمال',
-    short.anchor === 900 && short.anchorSource === 'entry'
-    && short.anchorLabel === 'جمع پرمیوم ورود' && short.strikeGap === 10000,
-    `لنگر ${short.anchor} · دهانه ${short.strikeGap}`);
-  check('۲۰۰ از ۹۰۰ گرفته شده — یعنی ۲۲٫۲٪ از بیشینهٔ سود',
-    short.gained === 200 && near(short.coveragePct, (2 / 9) * 100), `${short.coveragePct}٪`);
-  check('و سودِ باقی‌مانده، خودِ جمعِ کنونی است — چون باید به صفر برسد',
-    short.room === 700 && short.upside === 700 && near(short.roomPct, 100 - ((2 / 9) * 100)));
-  check('برچسبِ دو درصد اینجا فرق می‌کند: «سودِ گرفته‌شده» و «ارزشی که باید آب شود»',
-    short.coverageLabel === 'سودِ گرفته‌شده' && short.roomLabel === 'ارزشی که باید آب شود');
+  check('لنگرش دهانهٔ اعمال است و همیشه هست — بی هیچ قیمت ورودی',
+    short.anchored === true && short.anchorSource === 'strike'
+    && short.anchor === 10000 && short.anchorLabel === 'دهانهٔ اعمال',
+    `لنگر ${short.anchor} · ${short.anchorLabel}`);
+  check('و نسبت یعنی «پرمیوم چند درصدِ دهانه را می‌پوشاند»',
+    near(short.coveragePct, 7) && short.coverageLabel === 'پوشش پرمیوم از دهانه'
+    && short.roomLabel === 'دهانهٔ بی‌پوشش', `${short.coveragePct}٪`);
+  check('ارزشِ ساختار جمعِ دو نرخ است، نه تفاضلشان',
+    short.combine === 'sum' && gap.combine === 'diff');
+  check('بیشینهٔ سودِ فروشنده همان بستانکارِ امروز است، و زیانش سقف ندارد',
+    short.maxProfit === 700 && short.maxLoss === -Infinity && short.unbounded === true);
+
+  // ── همان استرانگل، بی هیچ قیمت ورود ─────────────────────────────────
+  //
+  // این ادعا هستهٔ اصلاح است: ردیفی که هرگز وارد نشده‌ای باید کاملِ
+  // عددهایش را بدهد. پیش از این، `anchored: false` می‌شد و ستون لنگر و
+  // هر درصدی خالی می‌ماند — همان «درست نمایش داده نمی‌شود».
+  const anon = measureGap({ legs: STRANGLE, prices: { p46: 300, c56: 400 }, strategyId: 'short-strangle' });
+  check('استرانگلِ بی قیمت ورود هم لنگر و درصد دارد',
+    anon.ok && anon.anchored === true && anon.anchor === 10000
+    && near(anon.coveragePct, 7) && anon.maxProfit === 700,
+    `${anon.coveragePct}٪ از ${anon.anchor}`);
+  check('و چیزی که ورود لازم دارد، بی ورود ساخته نمی‌شود',
+    !Number.isFinite(anon.gained) && !Number.isFinite(anon.gainedPct));
+
+  // ── «هرچی این جمع کمتر بشه، سود استراتژی است» ───────────────────────
+  //
+  // خواستهٔ اصلی، به‌شکل یک ادعای یکنواختی. حالا در `gained` می‌آید — با
+  // نامِ خودش، نسبت به مبدأ مقایسه، نه به‌عنوان «سودِ گرفته‌شده».
+  const shrinking = [900, 700, 400, 100, 1].map((sum) => measureGap({
+    legs: STRANGLE, prices: { p46: sum / 2, c56: sum / 2 },
+    strategyId: 'short-strangle', entry: 900,
+  }));
+  check('هرچه جمع آب شود، سودِ دارندهٔ آن موقعیت یکنواخت بالا می‌رود',
+    shrinking.every((one, at) => at === 0 || one.gained > shrinking[at - 1].gained),
+    shrinking.map((one) => one.gained).join(' → '));
+  check('و در جمعِ برابرِ ورود، هنوز هیچ چیزی محقق نشده',
+    shrinking[0].gained === 0 && shrinking[0].underwater === false);
 
   // ═══ فروشندهٔ زیر آب ═══
   //
-  // اجرای مرورگر این را داد: استرانگلی که به ۲۱۵ فروخته شده و جمعش به
-  // ۷۱۷ رسیده — یعنی در زیان — «۳۳۳٪ سود باقی‌مانده» نشان می‌داد. سودِ
-  // فروشندهٔ استرانگل هرگز از خودِ بستانکارِ ورود بیشتر نمی‌شود، پس آن
-  // یک ادعای کاملاً غلط بود.
+  // استرانگلی که به ۹۰۰ فروخته شده و جمعش به ۱٬۵۰۵ رسیده در زیان است.
+  // این باید نامش را داشته باشد، نه اینکه با یک درصدِ مثبت پنهان بماند.
   const drowning = measureGap({
     legs: STRANGLE, prices: { p46: 800, c56: 705 },
     strategyId: 'short-strangle', entry: 900, daysLeft: 30,
   });
   check('جمعِ بزرگ‌تر از ورود یعنی زیان، و همین‌طور علامت می‌خورد',
     drowning.ok && drowning.current === 1505 && drowning.underwater === true
-    && drowning.gained < 0, `${drowning.gained}`);
-  check('و آن درصدِ بالای صد «سود» نامیده نمی‌شود',
-    drowning.roomLabel === 'ارزشی که باید آب شود' && drowning.roomPct > 100,
-    `${drowning.roomPct.toFixed(1)}٪ ${drowning.roomLabel}`);
+    && drowning.gained === -605, `${drowning.gained}`);
+  check('و هیچ‌جا «سود باقی‌مانده» برایش ساخته نمی‌شود',
+    !Number.isFinite(drowning.upsidePct) && !Number.isFinite(drowning.perDay));
   check('جملهٔ فارسی هم صریح می‌گوید موقعیت در زیان است',
     gapNote(drowning).includes('در زیان'), gapNote(drowning).slice(0, 110));
   // جمله با `textContent` نوشته می‌شود، پس هیچ نشانهٔ مارک‌داونی در آن
@@ -279,74 +311,37 @@ group('۲۱۸-د. فاصله، کامل — دو خانواده، دو لنگر'
   check('و هیچ ستارهٔ مارک‌داونی در متن نمانده',
     !/\*/.test(gapNote(drowning)) && !/\*/.test(gapNote(gap)) && !/\*/.test(gapNote(short)));
 
-  // ── لنگرِ ورودی، مخرجی برای «بازده» ندارد ───────────────────────────
+  // ── بازدهِ استرانگل مخرجِ خودش را دارد، جای دیگری ────────────────────
   //
   // سرمایهٔ فروشندهٔ استرانگل وجه تضمین است نه بستانکار. تقسیم بر
-  // بستانکار «۳۳۳٪ بازده» می‌داد برای موقعیتی که در زیان بود.
+  // بستانکار «۳۳۳٪ بازده» می‌داد برای موقعیتی که در زیان بود. اینجا
+  // ساخته نمی‌شود؛ `core/radar-metrics.mjs` آن را روی وجه تضمینِ واقعی
+  // می‌دهد.
   check('برای استرانگل، «سود باقی‌مانده بر سرمایه» ادعا نمی‌شود',
-    !Number.isFinite(short.upsidePct) && !Number.isFinite(short.perDay)
-    && short.upside === 700,
-    `upside ${short.upside} ریال، بی درصد`);
+    !Number.isFinite(short.upsidePct) && !Number.isFinite(short.perDay));
   check('ولی برای اسپرد می‌شود، چون سرمایهٔ درگیرش معلوم است',
     Number.isFinite(gap.upsidePct) && Number.isFinite(gap.perDay));
-  check('دهانهٔ اعمال حذف نمی‌شود؛ به‌عنوان بستر می‌ماند',
-    short.strikeGap === 10000 && short.strikes.join(',') === '46000,56000');
 
-  // ── هرچه جمع کمتر شود، سود بیشتر ────────────────────────────────────
-  //
-  // ادعای مستقیمِ خواستهٔ کاربر، به‌شکل یک ادعای یکنواختی.
-  const shrinking = [900, 700, 400, 100, 1].map((sum) => measureGap({
-    legs: STRANGLE, prices: { p46: sum / 2, c56: sum / 2 },
-    strategyId: 'short-strangle', entry: 900,
-  }).coveragePct);
-  check('هرچه جمع کمتر شود، درصدِ سودِ گرفته‌شده یکنواخت بالا می‌رود',
-    shrinking.every((value, at) => at === 0 || value > shrinking[at - 1]),
-    shrinking.map((value) => value.toFixed(1)).join(' → '));
-  check('و در جمعِ برابرِ ورود، هنوز هیچ سودی گرفته نشده',
-    near(shrinking[0], 0));
-
-  // ═══ استرانگلِ خرید: همه‌چیز وارونه ═══
-  //
-  // خواستهٔ کاربر دربارهٔ فروش بود، ولی خرید هم در کاتالوگ هست و آنجا
-  // پرمیوم را **داده‌ای**: سود از بیشتر شدنِ جمع می‌آید، نه کمتر شدنش.
-  // نسخهٔ اول هر دو را «فروخته» فرض می‌کرد و اجرای مرورگر نشانش داد —
-  // استرانگلی که ۲۱۵ خریده شده و ۷۱۷ است، «‎−۲۳۳٪ سود گرفته‌شده» می‌داد.
+  // ═══ استرانگلِ خرید: همان دهانه، جهتِ وارونه ═══
   const LONG_STRANGLE = STRANGLE.map((leg) => ({ ...leg, side: 'buy' }));
   const bought = measureGap({
     legs: LONG_STRANGLE, prices: { p46: 350, c56: 367 },
     strategyId: 'long-strangle', entry: 215,
   });
-  check('استرانگلِ خرید بدهکار است و سودش از بیشتر شدنِ جمع می‌آید',
+  check('استرانگلِ خرید بدهکار است و از مبدأ مقایسه ۵۰۲ به سودش رفته',
     bought.ok && bought.side === 'debit' && bought.current === 717 && bought.gained === 502,
     `${bought.current} از ${bought.entry}`);
-  check('و درصدش «نسبت به پرمیوم پرداختی» است، نه «سود گرفته‌شده»',
-    bought.coverageLabel === 'نسبت به پرمیوم پرداختی' && near(bought.coveragePct, (717 / 215) * 100),
-    `${bought.coveragePct.toFixed(1)}٪`);
+  check('برچسبش «بهای پرداختی از دهانه» است، نه «سود گرفته‌شده»',
+    bought.coverageLabel === 'بهای پرداختی از دهانه' && near(bought.coveragePct, 7.17),
+    `${bought.coveragePct.toFixed(2)}٪`);
+  check('و جهتش وارونهٔ فروش است: زیانش سقف دارد، سودش نه',
+    bought.maxLoss === -717 && bought.maxProfit === Infinity && bought.unbounded === true);
   check('هرگز عددِ منفیِ «سود گرفته‌شده» نمی‌دهد — همان اشکالی که دیده شد',
     bought.coveragePct > 0);
-  check('و چون سقفِ سود ندارد، «باقی‌مانده» ساخته نمی‌شود',
-    bought.unbounded === true && !Number.isFinite(bought.roomPct)
-    && !Number.isFinite(bought.maxProfit) && bought.maxLoss === -215);
 
-  // دو جهت، دو رفتار — و همین ادعا هر دو را با هم قفل می‌کند.
-  const grow = [215, 400, 717].map((sum) => measureGap({
-    legs: LONG_STRANGLE, prices: { p46: sum / 2, c56: sum / 2 },
-    strategyId: 'long-strangle', entry: 215,
-  }).coveragePct);
-  check('در خرید، بزرگ‌شدنِ جمع درصد را بالا می‌برد؛ در فروش، کوچک‌شدنش',
-    grow.every((value, at) => at === 0 || value > grow[at - 1])
-    && shrinking.every((value, at) => at === 0 || value > shrinking[at - 1]),
-    `خرید ${grow.map((v) => v.toFixed(0)).join('→')} · فروش ${shrinking.map((v) => v.toFixed(0)).join('→')}`);
-
-  // ── بی قیمت ورود، استرانگل لنگر ندارد ───────────────────────────────
-  const anon = measureGap({ legs: STRANGLE, prices: { p46: 300, c56: 400 }, strategyId: 'short-strangle' });
-  check('استرانگلِ بی قیمت ورود، جمعش را می‌دهد ولی درصدی نمی‌سازد',
-    anon.ok && anon.current === 700 && anon.anchored === false
-    && !Number.isFinite(anon.coveragePct) && anon.why.includes('لنگر'),
-    anon.why.slice(0, 40));
-  // و اسپرد برعکس: لنگرش ساختاری است و بی قیمت ورود هم کار می‌کند.
+  // و اسپرد بی قیمت ورود هم لنگر دارد، چون لنگرش از اول ساختاری بود.
   const anonSpread = measureGap({ legs: BULL, prices: { c50: 3200, c54: 800 }, strategyId: 'bull-call-spread' });
-  check('ولی اسپرد بی قیمت ورود هم لنگر دارد، چون لنگرش ساختاری است',
+  check('اسپرد بی قیمت ورود هم لنگر دارد و درصدش ساخته می‌شود',
     anonSpread.ok && anonSpread.anchored === true && near(anonSpread.coveragePct, 60)
     && !Number.isFinite(anonSpread.filledPct));
 
@@ -360,8 +355,9 @@ group('۲۱۸-د. فاصله، کامل — دو خانواده، دو لنگر'
   check('جملهٔ اسپرد از «تفاضل دو نرخ» حرف می‌زند و واحدش را می‌گوید',
     gapNote(gap).includes('تفاضل دو نرخ') && gapNote(gap).includes('پر شده')
     && gapNote(gap).includes('قیمت خام'), gapNote(gap));
-  check('و جملهٔ استرانگل از «جمع پرمیومِ ورود»',
-    gapNote(short).includes('جمع پرمیومِ ورود') && gapNote(short).includes('بیشینهٔ سود'),
+  check('و جملهٔ استرانگل از دهانه و از جمعِ پرمیوم حرف می‌زند، نه از تفاضل',
+    gapNote(short).includes('دهانهٔ اعمال') && gapNote(short).includes('جمعِ پرمیومی که می‌گیری')
+    && gapNote(short).includes('زیانش سقف ندارد') && !gapNote(short).includes('تفاضل'),
     gapNote(short));
 }
 

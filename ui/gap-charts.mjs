@@ -64,40 +64,22 @@ export function sparkline(values = [], { band = NaN, width = 92, height = 26, la
  */
 export function fillBar(gap) {
   if (!gap?.ok) return `<div class="gap-bar gap-bar-empty"><span>${esc(gap?.why || 'فاصله محاسبه نشد')}</span></div>`;
-  // بی لنگر، درصدی نیست. استرانگلِ بی قیمت ورود دقیقاً همین است: جمعِ
-  // کنونی سنجیده شده ولی «چند درصد از سود گرفته شده» جواب ندارد.
   if (!gap.anchored || !finite(gap.coveragePct)) {
     return `<div class="gap-bar gap-bar-empty"><span>${esc(gap.why || 'لنگری برای درصد نیست')}</span></div>`;
   }
   const filled = Math.max(0, Math.min(100, gap.coveragePct));
-  const over = gap.coveragePct > 100;
-  // ── ساختارِ بی‌سقف، نیمهٔ دومِ نوار را ندارد ────────────────────────
+  // ── چرا دیگر شاخهٔ «سقف ندارد» و «در زیان» ندارد ────────────────────
   //
-  // استرانگلِ خرید سقفِ سود ندارد — پایه می‌تواند هر قدر برود. نشان‌دادنِ
-  // «چند درصد مانده» برایش یعنی ساختنِ سقفی که وجود ندارد. نوار همان
-  // نسبت را نشان می‌دهد و صریح می‌گوید سقفی در کار نیست.
-  if (gap.unbounded) {
-    return `<div class="gap-bar unbounded" role="img" aria-label="${fmt.pct(gap.coveragePct)} درصد ${esc(gap.coverageLabel)}">
-      <b style="--fill:${Math.min(100, filled).toFixed(2)}%"></b>
-      <span class="gap-bar-filled">${fmt.pct(gap.coveragePct)}٪ ${esc(gap.coverageLabel)}</span>
-      <span class="gap-bar-room">سقف ندارد</span>
-    </div>`;
-  }
-  // برچسب از خودِ اندازه‌گیری می‌آید، نه ثابت. در اسپرد «پر شده / جا
-  // دارد» و در استرانگل «سودِ گرفته‌شده / سودِ باقی‌مانده» — یک نوار، دو
-  // معنی، و معنی باید نوشته شود.
+  // این نوار فقط یک چیز می‌گوید: نسبتِ ساختاری. از وقتی لنگرِ استرانگل هم
+  // ساختاری شد (دهانهٔ اعمال)، این نسبت برای هر خانواده‌ای هست و همیشه
+  // بین صفر و صد می‌ماند.
+  //
+  // «سود نامحدود» و «در زیان» ادعاهای موقعیتی‌اند و ستونِ خودشان را
+  // دارند — «حداکثر سود» و «حرکت از مبدأ». ریختنشان روی همین نوار، سه
+  // معنی را در یک شکل جمع می‌کرد و هیچ‌کدام خوانده نمی‌شد.
   const filledLabel = gap.coverageLabel || 'پر شده';
   const roomLabel = gap.roomLabel || 'باقی‌مانده';
-  // زیر آب: درصدِ منفی وسطِ ستونی از درصدهای مثبت گم می‌شود. رنگ و واژه
-  // هر دو لازم‌اند — رنگ برای دیدن، واژه برای خواندن با صفحه‌خوان.
-  const tone = gap.underwater ? ' underwater' : over ? ' over' : '';
-  if (gap.underwater) {
-    return `<div class="gap-bar underwater" role="img" aria-label="در زیان، ${fmt.pct(Math.abs(gap.coveragePct))} درصد از بیشینهٔ سود">
-      <b style="--fill:${Math.min(100, Math.abs(gap.coveragePct)).toFixed(2)}%"></b>
-      <span class="gap-bar-filled">در زیان · ${fmt.pct(gap.coveragePct)}٪</span>
-      <span class="gap-bar-room">${fmt.pct(gap.roomPct)}٪ ${esc(roomLabel)}</span>
-    </div>`;
-  }
+  const tone = gap.coveragePct > 100 ? ' over' : '';
   return `<div class="gap-bar${tone}" role="img" aria-label="${fmt.pct(gap.coveragePct)} درصد ${esc(filledLabel)}">
     <b style="--fill:${filled.toFixed(2)}%"></b>
     <span class="gap-bar-filled">${fmt.pct(gap.coveragePct)}٪ ${esc(filledLabel)}</span>
