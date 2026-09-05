@@ -22,6 +22,7 @@
 
 import { faDigits, fmt } from './fmt.mjs';
 import { alertMetric } from '../core/gap-alert.mjs';
+import { watchMetric } from '../core/watch-rule.mjs';
 
 const LOG_KEY = 'gap-alerts:log';
 const LOG_MAX = 200;
@@ -172,4 +173,62 @@ export function testDelivery({ host = null, sound = false } = {}) {
     label: 'آزمایش کانال هشدار', note: 'این یک هشدار آزمایشی است؛ هیچ شرطی برقرار نشده.',
     strategyName: '',
   }, { host, sound });
+}
+
+
+/**
+ * هشدارِ دیده‌بانِ شرطی — همان کانال‌ها، ولی برای قاعده‌ای با چند شرط.
+ *
+ * ═══ چرا `deliver` کافی نبود ═══
+ *
+ * آن یکی یک سنجه و یک آستانه دارد و متنش همان را می‌گوید. قاعدهٔ دیده‌بان
+ * چند شرط دارد که **همه** برقرار شده‌اند، و متنی که فقط یکی‌شان را بگوید
+ * به کاربر نمی‌گوید چرا این ترکیب انتخاب شد. پس هر شرط با عددِ دیده‌شده
+ * و آستانه‌ای که سنجیده شد می‌آید.
+ *
+ * آستانه هم چاپ می‌شود، نه فقط عدد: در شرطِ نسبی («۹۰٪ میانگین ۵ روز
+ * گذشته») خودِ آستانه در هر لحظه فرق می‌کند و بی آن، «۲٬۴۰۰» بی‌معنی است.
+ */
+export function deliverWatch(fired, { host = null, sound = false, now = new Date() } = {}) {
+  const title = fired.label || fired.ruleName || 'دیده‌بان شرطی';
+  const lines = (fired.parts || []).map((part) => {
+    const metric = watchMetric(part.metric);
+    const unit = metric?.unit === 'pct' ? '٪' : metric?.unit === 'day' ? ' روز'
+      : metric?.unit === 'num' || metric?.unit === 'int' ? '' : ' ریال';
+    const seen = Number.isFinite(part.value)
+      ? `${faDigits(Number(part.value).toLocaleString('fa-IR', { maximumFractionDigits: 2 }))}${unit}` : '—';
+    const gate = Number.isFinite(part.threshold)
+      ? `${faDigits(Number(part.threshold).toLocaleString('fa-IR', { maximumFractionDigits: 2 }))}${unit}` : '—';
+    return { label: metric?.label || part.metric, seen, gate, note: part.note };
+  });
+  const body = [
+    fired.ruleName,
+    ...lines.map((line) => `${line.label}: ${line.seen} (آستانه ${line.gate})`),
+  ].filter(Boolean).join('\n');
+  const row = {
+    at: now.getTime(), clock: now.toLocaleTimeString('fa-IR'),
+    ruleId: fired.ruleId, comboKey: fired.comboKey,
+    metric: lines[0]?.label || '', value: NaN, threshold: NaN,
+    title, note: body.replace(/\n/g, ' · '),
+  };
+
+  if (notifyState() === 'granted') {
+    try { new Notification(title, { body, tag: `watch-${fired.ruleId}`, renotify: true }); }
+    catch { /* مرورگر رد کرد؛ کارتِ زیر همچنان می‌آید */ }
+  }
+  if (host) {
+    const card = document.createElement('article');
+    card.className = 'gap-alarm-card';
+    card.setAttribute('role', 'alert');
+    card.innerHTML = `<header><b>${esc(title)}</b><time>${faDigits(row.clock)}</time></header>
+      <p>${esc(fired.ruleName || '')}</p>
+      <ul class="gap-alarm-parts">${lines.map((line) => `<li><span>${esc(line.label)}</span><strong>${esc(line.seen)}</strong><small>آستانه ${esc(line.gate)}</small></li>`).join('')}</ul>
+      <button type="button" class="gap-alarm-close" aria-label="بستن">×</button>`;
+    card.querySelector('.gap-alarm-close').addEventListener('click', () => card.remove());
+    host.prepend(card);
+    while (host.children.length > 6) host.lastElementChild.remove();
+  }
+  if (sound || fired.sound) beep();
+  writeLog([row, ...readLog()]);
+  return row;
 }

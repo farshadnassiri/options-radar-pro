@@ -38,15 +38,28 @@ const moneyCell = (row, value) => {
   return word ? `<i class="rad-boundless">${word}</i>` : esc(fmt.money(value));
 };
 
-/** نوارِ دوسویهٔ سود در برابر زیان — «بصری» بودنِ ستون، نه تزیینش. */
+/**
+ * نوارِ دوسویهٔ سود در برابر زیان — «بصری» بودنِ ستون، نه تزیینش.
+ *
+ * ═══ «نامحدود» درصد ندارد، ولی خالی هم نیست ═══
+ *
+ * فروشِ برهنه زیانِ نامحدود دارد، پس «حداکثر زیان ٪» مخرجی ندارد و
+ * `NaN` می‌شود. کشیدنِ «—» همان‌جا، ردیفی می‌ساخت که در نگاه اول
+ * بی‌ریسک به نظر می‌رسید — بدترین خطای ممکن در این ستون. پرچمِ
+ * `unlimitedLoss` از خودِ موتور می‌آید و واژه‌اش نوشته می‌شود.
+ */
 function riskBar(row) {
   const gain = row.returnPct, loss = row.lossPct;
-  if (!finite(gain) && !finite(loss)) return '<span class="rad-dim">—</span>';
+  const gainWord = row.unlimitedProfit ? 'نامحدود' : null;
+  const lossWord = row.unlimitedLoss ? 'نامحدود' : null;
+  if (!finite(gain) && !finite(loss) && !gainWord && !lossWord) return '<span class="rad-dim">—</span>';
   const span = Math.max(finite(gain) ? gain : 0, finite(loss) ? loss : 0) || 1;
-  const w = (value) => (finite(value) ? Math.min(100, (value / span) * 100).toFixed(1) : '0');
-  return `<div class="rad-risk" role="img" aria-label="سود ${fmt.pct(gain)} درصد در برابر زیان ${fmt.pct(loss)} درصد">
-    <span class="rad-risk-gain" style="--w:${w(gain)}%"><b>${finite(gain) ? `${fmt.pct(gain)}٪` : (boundless(gain) ? 'نامحدود' : '—')}</b></span>
-    <span class="rad-risk-loss" style="--w:${w(loss)}%"><b>${finite(loss) ? `${fmt.pct(loss)}٪` : (loss === Infinity ? 'نامحدود' : '—')}</b></span>
+  // نوارِ چیزی که سقف ندارد، پُر کشیده می‌شود: کوتاه‌کشیدنش یعنی «کم».
+  const w = (value, word) => (word ? '100' : finite(value) ? Math.min(100, (value / span) * 100).toFixed(1) : '0');
+  const text = (value, word) => (word || (finite(value) ? `${fmt.pct(value)}٪` : '—'));
+  return `<div class="rad-risk" role="img" aria-label="سود ${text(gain, gainWord)} در برابر زیان ${text(loss, lossWord)}">
+    <span class="rad-risk-gain" style="--w:${w(gain, gainWord)}%"><b>${esc(text(gain, gainWord))}</b></span>
+    <span class="rad-risk-loss${lossWord ? ' boundless' : ''}" style="--w:${w(loss, lossWord)}%"><b>${esc(text(loss, lossWord))}</b></span>
   </div>`;
 }
 
@@ -176,6 +189,7 @@ export function toTableRow(row, { baseName = '', live = null } = {}) {
     trendPct: finite(first) && first !== 0 && finite(last) ? ((last / first) - 1) * 100 : NaN,
     riskBar: finite(metrics.returnPct) ? metrics.returnPct : NaN,
     maxProfit: metrics.maxProfit, maxLoss: metrics.maxLoss,
+    unlimitedProfit: !!metrics.unlimitedProfit, unlimitedLoss: !!metrics.unlimitedLoss,
     returnPct: metrics.returnPct, lossPct: metrics.lossPct,
     rewardRisk: metrics.rewardRisk, perDayPct: metrics.perDayPct, monthlyPct: metrics.monthlyPct,
     upsidePct: gap.upsidePct, perDay: gap.perDay,

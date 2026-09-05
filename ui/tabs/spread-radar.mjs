@@ -31,7 +31,8 @@ import {
   DEFAULT_SCALE, GAP_SCALES, GAP_STRATEGY_IDS, comboSymbolText, gapNote, gapScale, measureGap,
 } from '/core/spread-gap.mjs';
 import {
-  GAP_TIMEFRAMES, gapVerdict, indexedPair, intradayGapSeries, resample, seriesStats, versusBase,
+  GAP_TIMEFRAMES, gapVerdict, indexedPair, intradayGapSeries, joinLive, resample, seriesStats,
+  versusBase,
 } from '/core/spread-gap-series.mjs';
 import { buildRadarHistory, radarDataReport } from '/core/radar-history.mjs';
 import {
@@ -39,6 +40,7 @@ import {
   normalizeRule, ruleNote,
 } from '/core/gap-alert.mjs';
 import { MOMENT_GRAINS, isIntradayGrain } from '/core/intraday-grid.mjs';
+import { tehranDateNumber } from '/core/live-day.mjs';
 import { chartGroup } from '/ui/chart-host.mjs';
 import { makeTable } from '/ui/table.mjs';
 import { RADAR_ALL_COLS, RADAR_COLS, symbolCell, toTableRow } from '/ui/radar-columns.mjs';
@@ -149,6 +151,7 @@ export async function mount(root, { state }) {
         </div>
       </div>
       <p class="gap-note" id="gr-grain-note"></p>
+      <p class="gap-note" id="gr-tail-note"></p>
       <div class="gap-ident" id="gr-ident" hidden></div>
       <p class="gap-verdict" id="gr-verdict">—</p>
     </section>
@@ -212,6 +215,17 @@ export async function mount(root, { state }) {
   let rules = readRules();
   let prevSnapshots = {};
   let liveTimer = 0, livePrices = null, tapeByIns = null, tapeDate = 0;
+  // ── دنبالهٔ زندهٔ امروز ────────────────────────────────────────────────
+  //
+  // «رصدگر لحظه‌ای در هر زمان از روز … از شروع بازار تا آن لحظه را هم
+  // نشان بدهد» و «نمودارهای تاریخی و روند گذشته نیز قابل رویت باشد، با
+  // رنگ یا شکلی متفاوت». هر دو یک ساختار می‌خواهند: سریِ روزانه تا
+  // دیروز، و ریزمعاملهٔ امروز از آغاز جلسه، پشت سر هم روی یک محور.
+  //
+  // فقط برای ترکیبِ باز در زیرتب تاریخچه گرفته می‌شود — نه برای هر ردیف
+  // جدول. ریزمعاملهٔ هر پا یک درخواست است و صد ترکیب یعنی دویست درخواست
+  // در هر تیک.
+  let liveSeries = null, liveTailKey = '', liveTailBusy = false;
   let subtabs = null, table = null;
   // کلیدِ ترکیب‌هایی که در آخرین تیک، قیمت زنده داشتند. ستون «مظنهٔ زنده»
   // از همین می‌آید — بی آن، ردیفی که قیمت زنده نگرفته با ردیفی که گرفته
@@ -569,7 +583,11 @@ export async function mount(root, { state }) {
     if (!row || !shownSeries) return;
     const timeframe = $('gr-timeframe').value;
     const intraday = isIntradayGrain(shownSeries.grain);
-    const show = intraday ? shownSeries : resample(shownSeries, timeframe);
+    // دنبالهٔ امروز فقط به سریِ روزانه می‌چسبد. روی سریِ درون‌روزی
+    // چسباندنش یعنی دو بار همان روز.
+    const tail = !intraday && liveSeries && liveTailKey === row.key ? liveSeries : null;
+    const base = intraday ? shownSeries : resample(shownSeries, timeframe);
+    const show = tail ? joinLive(base, tail) : base;
     const unitText = gapScale(row.gap.scale).unit;
     const isSum = row.gap.anchorSource === 'entry';
 
@@ -627,6 +645,37 @@ export async function mount(root, { state }) {
     return [...buckets.values()].map((row) => ({ day: row.day, hour: row.hour, value: row.sum / row.count }));
   }
 
+  /**
+   * ریزمعاملهٔ یک روز برای پاهای یک ترکیب، به‌علاوهٔ خودِ نماد پایه.
+   *
+   * پایه هم خواسته می‌شود، وگرنه نمودارهای «در برابر دارایی پایه» در
+   * دانه‌بندی درون‌روزی خالی می‌مانند — همان نموداری که پرسیده شد.
+   */
+  async function fetchTape(row, date) {
+    const legs = row.legs.filter((leg) => leg.kind !== 'underlying');
+    const wanted = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua?.ins ?? '')])].filter(Boolean);
+    const response = await fetch('/api/trades/batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: wanted.map((ins) => ({ ins, date: String(date) })) }),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
+    const byIns = {};
+    for (const ins of wanted) byIns[ins] = payload.items?.[`${date}:${ins}`]?.rows || [];
+    return byIns;
+  }
+
+  /** سریِ درون‌روزیِ یک ترکیب از نوارِ گرفته‌شده. */
+  function buildIntraday(row, byIns, date, grain) {
+    const series = intradayGapSeries({
+      legs: row.legs, tapeByIns: byIns, date, grain,
+      strategyId: row.def.id, entry: row.entry, expiry: row.expiry,
+      scale: $('gr-scale').value, units: units(), baseIns: String(ua?.ins ?? ''),
+    });
+    series.day = date;
+    return series;
+  }
+
   async function loadIntraday() {
     const row = selectedRow();
     if (!row) return;
@@ -635,26 +684,9 @@ export async function mount(root, { state }) {
     $('gr-grain-run').disabled = true;
     $('gr-grain-note').textContent = `دریافت ریزمعاملهٔ ${fmt.int(legs.length)} پا برای ${historyDateLabel(date)}…`;
     try {
-      // ریزمعاملهٔ خودِ نماد پایه هم خواسته می‌شود، وگرنه نمودارهای «در
-      // برابر دارایی پایه» در دانه‌بندی درون‌روزی خالی می‌مانند — همان
-      // نموداری که پرسیده شد.
-      const wanted = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua?.ins ?? '')])].filter(Boolean);
-      const requests = wanted.map((ins) => ({ ins, date: String(date) }));
-      const response = await fetch('/api/trades/batch', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requests }),
-      });
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
-      tapeByIns = {};
-      for (const ins of wanted) tapeByIns[ins] = payload.items?.[`${date}:${ins}`]?.rows || [];
+      tapeByIns = await fetchTape(row, date);
       tapeDate = date;
-      const series = intradayGapSeries({
-        legs: row.legs, tapeByIns, date, grain: $('gr-grain').value,
-        strategyId: row.def.id, entry: row.entry, expiry: row.expiry,
-        scale: $('gr-scale').value, units: units(), baseIns: String(ua?.ins ?? ''),
-      });
-      series.day = date;
+      const series = buildIntraday(row, tapeByIns, date, $('gr-grain').value);
       if (!series.points.length) {
         $('gr-grain-note').textContent = `در ${historyDateLabel(date)} هیچ لحظه‌ای نبود که همهٔ پاها قیمت داشته باشند. لحظهٔ ناقص با قیمت لحظهٔ قبل پر نمی‌شود.`;
         return;
@@ -684,8 +716,44 @@ export async function mount(root, { state }) {
   function stopLive() {
     if (liveTimer) clearInterval(liveTimer);
     liveTimer = 0; livePrices = null;
+    liveSeries = null; liveTailKey = '';
+    liveKeys.clear();
     const node = $('gr-live-state');
     if (node) node.textContent = 'خاموش';
+    const tail = $('gr-tail-note');
+    if (tail) tail.textContent = '';
+    if (rows.length) { paintTable(); paintHistory(); }
+  }
+
+  /**
+   * ریزمعاملهٔ **امروز** برای ترکیبِ باز، از آغاز جلسه تا همین لحظه.
+   *
+   * هر تیک از نو گرفته می‌شود چون نوار در طول روز بلندتر می‌شود؛ ولی
+   * فقط یک درخواست هم‌زمان، وگرنه تیک‌های ده‌ثانیه‌ای روی هم می‌افتند.
+   */
+  async function refreshLiveTail() {
+    const row = selectedRow();
+    if (!row || liveTailBusy) return;
+    const date = tehranDateNumber();
+    if (!date) return;
+    liveTailBusy = true;
+    try {
+      const byIns = await fetchTape(row, date);
+      const series = buildIntraday(row, byIns, date, $('gr-grain').value);
+      if (!series.points.length) {
+        liveSeries = null; liveTailKey = '';
+        $('gr-tail-note').textContent = `امروز ${faDigits(historyDateLabel(date))} هنوز لحظه‌ای نبوده که همهٔ پاهای این ترکیب معامله داشته باشند؛ نمودارها فقط روند گذشته را نشان می‌دهند.`;
+      } else {
+        liveSeries = series; liveTailKey = row.key;
+        $('gr-tail-note').textContent = `امروز ${faDigits(historyDateLabel(date))}: ${fmt.int(series.points.length)} لحظه از آغاز جلسه تا اکنون، با خط‌چین روی روند گذشته. ${fmt.int(series.missing)} لحظه چون دست‌کم یک پا معامله نداشت نقطه نساخت.`;
+      }
+      paintHistory();
+    } catch (error) {
+      // نبودِ نوارِ امروز، رصد زنده را نمی‌خواباند: قیمتِ مظنه هنوز
+      // می‌آید و جدول کار می‌کند. فقط دنبالهٔ نمودار نیست.
+      liveSeries = null; liveTailKey = '';
+      $('gr-tail-note').textContent = `ریزمعاملهٔ امروز دریافت نشد: ${error.message}`;
+    } finally { liveTailBusy = false; }
   }
 
   /**
@@ -711,6 +779,7 @@ export async function mount(root, { state }) {
       const covered = applyLive();
       $('gr-live-state').textContent = `روشن · ${fmt.int(covered)} ترکیب با قیمت زنده · ${faDigits(new Date(payload.at).toLocaleTimeString('fa-IR'))}`;
       runAlerts();
+      void refreshLiveTail();
     } catch (error) {
       $('gr-live-state').textContent = `دریافت زنده نشد: ${error.message}`;
     }
@@ -719,6 +788,7 @@ export async function mount(root, { state }) {
   /** فاصلهٔ هر ردیف را با قیمت زنده بازمی‌سازد. ردیفِ بی‌قیمتِ زنده دست‌نخورده می‌ماند. */
   function applyLive() {
     let covered = 0;
+    liveKeys.clear();
     for (const row of rows) {
       const legs = row.legs.filter((leg) => leg.kind !== 'underlying');
       if (!legs.every((leg) => finite(livePrices?.[String(leg.ins)]))) continue;
@@ -730,6 +800,7 @@ export async function mount(root, { state }) {
       if (!gap.ok) continue;
       row.gap = gap;
       row.verdict = gapVerdict(row.series, gap);
+      liveKeys.add(row.key);
       covered += 1;
     }
     paintKpis();
