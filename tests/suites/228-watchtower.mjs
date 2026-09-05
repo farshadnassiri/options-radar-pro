@@ -112,7 +112,25 @@ group('۲۲۸-د. رصد، و آنچه بی‌صدا نمی‌افتد');
   // «چند قاعده ذخیره می‌شود، اما فقط آخرین قاعده واقعاً رصد می‌شود.»
   check('همهٔ قاعده‌های فعال رصد می‌شوند، نه فقط آخرین ذخیره‌شده',
     src.includes('const activeRules = () => rules.filter((rule) => rule.enabled !== false)')
-    && src.includes('watchRules = active'));
+    && src.includes('watchRules = coverage.watched'));
+
+  // ── رگرسیون: «۸ قاعده» فقط وقتی نوشته می‌شود که هشت‌تا داده داشته باشند
+  //
+  // «رابط ۸ قاعده نشان داد، ولی حلقه فقط ۱۰۵ ترکیب مربوط به آخرین
+  // پیش‌نمایش را دریافت کرد؛ قواعد قبلیِ استراتژی‌های دیگر عملاً بدون
+  // داده ماندند.» قاعده ذخیره می‌شود ولی دامنه نه.
+  check('پوششِ هر قاعده روی ساختِ فعلی سنجیده می‌شود',
+    src.includes('ruleCoverage(active, builtDomain())') && src.includes('function builtDomain()') === false
+    && src.includes('const builtDomain = () => ({'));
+  check('و قاعده‌ای که در این ساخت ردیفی ندارد، صریح نام برده می‌شود',
+    src.includes('function coverageNote(') && src.includes('در این ساخت هیچ ردیفی ندارد و رصد نمی‌شود'));
+  check('نوارِ وضعیت «چند از چند» می‌نویسد، نه فقط «چند قاعده»',
+    src.includes('قاعده`;') && /\$\{fmt\.int\(coverage\.watched\.length\)\} از \$\{fmt\.int\(active\.length\)\}/.test(src)
+    && /\$\{fmt\.int\(watchRules\.length\)\} از \$\{fmt\.int\(activeRules\(\)\.length\)\}/.test(src));
+  check('و کارتِ هر قاعده هم می‌گوید رصد می‌شود یا داده ندارد',
+    src.includes('در این ساخت داده ندارد'));
+  check('راهِ رصدِ همه، یک دکمه است: دامنهٔ اجتماعِ قاعده‌ها',
+    src.includes('id="wt-scope-all"') && src.includes('ruleScopeUnion(active)'));
   check('و حذفِ قاعدهٔ فعال، رصد را واقعاً به‌روز می‌کند یا می‌خواباند',
     /data-act="drop"[\s\S]{0,700}if \(activeRules\(\)\.length\) startWatch\(\);[\s\S]{0,60}else \{ stopWatch\(\)/.test(src));
 
@@ -137,8 +155,9 @@ group('۲۲۸-د. رصد، و آنچه بی‌صدا نمی‌افتد');
   check('ترکیبِ بی‌قیمتِ زنده یا با پاهای ناهم‌زمان، با عددِ روزانه سنجیده نمی‌شود',
     src.includes('comboLiveQuote({ legs: row.legs, book, nowSec })')
     && src.includes('if (!quote.ok) {'));
-  check('و شمارِ پوشش‌داده‌شده و کنارگذاشته‌شده نوشته می‌شود، تا سقفِ ۲۴ بی‌صدا نماند',
-    src.includes('ترکیب با مظنهٔ هم‌زمان') && src.includes('ترکیب کنار گذاشته شد'));
+  check('و شمارِ پوشش‌داده‌شده و کنارگذاشته‌شده نوشته می‌شود، تا سقفِ سهمیه بی‌صدا نماند',
+    src.includes('مظنهٔ هم‌زمان') && src.includes('ترکیب کنار گذاشته شد')
+    && src.includes('ترکیب دارای عددِ زنده'));
 
   // ── رگرسیون: برچسبِ «زنده» فقط برای ردیفِ زنده ──────────────────────
   //
@@ -152,17 +171,44 @@ group('۲۲۸-د. رصد، و آنچه بی‌صدا نمی‌افتد');
   // «سود، زیان و بازده با قیمت زنده دوباره محاسبه نمی‌شوند … فاصله از
   // ۱٬۱۲۴ به ۲٬۲۴۸ رسید، اما حداکثر سود ٪ همچنان ۴۲۷٫۴۹٪ باقی ماند.»
   check('سود، زیان، بازده و وجه تضمین هم با قیمتِ زنده از نو ساخته می‌شوند',
-    src.includes('comboMetrics({ legs: row.legs, prices: book.prices'));
+    src.includes('comboMetrics({ legs: row.legs, prices, spot, rowByIns: {},'));
   check('و اسپاتِ زنده مبنای وجه تضمین می‌شود، نه اسپاتِ روز سنجش',
-    src.includes('const spot = num(book.prices[String(ua.ins)], row.spot);'));
+    src.includes('const spot = Number.isFinite(livedBase) && livedBase > 0 ? livedBase : (row.daily?.spot ?? row.spot);'));
   check('قیمتِ زندهٔ پایه به عکسِ شرط می‌رسد، تا شرطِ «قیمت نماد پایه» کار کند',
-    src.includes('basePrice: num(book.prices[String(ua.ins)], NaN)'));
+    src.includes('basePrice: livedBase,') && src.includes('const basePriceOf = (ins) =>'));
   check('«کف/سقف امروز» از دفترِ مشاهده‌های امروز می‌آید، نه از سریِ تاریخی',
     src.includes('day: dayRange.get(row.key)') && src.includes('dayRange.observe(row.key'));
 
   // ── رگرسیون: رصدِ زنده روی بازهٔ گذشته ──────────────────────────────
   check('رصد روی ساختِ یک بازهٔ گذشته روشن نمی‌شود',
     src.includes('function watchDayGate()') && src.includes('روی بازهٔ تاریخی روشن نمی‌شود'));
+  // «دروازهٔ بازهٔ تاریخی فقط هنگام شروع بررسی می‌شود» — بازه می‌تواند
+  // وسطِ رصد عوض شود.
+  check('و دروازه در هر تیک سنجیده می‌شود، نه فقط در شروع',
+    /async function pollWatch\(\)[\s\S]{0,900}const dayGate = watchDayGate\(\);[\s\S]{0,120}stopWatch\(\);/.test(src));
+  // «تغییر بازه هنگام روشن‌بودن دیده‌بان، رصد را متوقف نمی‌کند … وضعیت
+  // همچنان روشن · ۵ قاعده · ۲۸۰ ترکیب باقی ماند و دامنهٔ قبلی رصد شد.»
+  check('و هر تغییرِ دامنه یا بازه، رصدِ روشن را می‌خواباند',
+    /function stalePreview\([\s\S]{0,900}if \(watchTimer\) \{\n      stopWatch\(\);/.test(src));
+
+  // ── رگرسیون: نماد پایه در سهمیهٔ زنده ───────────────────────────────
+  //
+  // «دیده‌بان نماد پایه را در سهمیهٔ live-trades رزرو نمی‌کند … شرط
+  // ترکیبیِ پرشدگی ≥ ۳۰٪ و قیمت پایه ≥ ۰ … پس از شروع رصد هیچ نتیجه‌ای
+  // به شمار زنده اضافه نکرد.»
+  check('نمادهای پایه در سهمیهٔ زنده رزرو می‌شوند',
+    src.includes('reserve, score: priorityScore()')
+    && src.includes('Math.max(1, Math.floor(LIVE_INS_CAP / 3))'));
+  check('و شمارِ نمادهای پایهٔ زنده‌شده نوشته می‌شود',
+    src.includes('خانه از سهمیه برای نمادهای پایه رزرو شد'));
+
+  // ── رگرسیون: «ترتیب جدول» یعنی ترتیبِ دیده‌شدهٔ جدول ────────────────
+  check('اولویتِ «ترتیب جدول» از ترتیبِ واقعیِ جدول می‌آید، نه از ترتیب ساخت',
+    src.includes('function priorityScore()') && src.includes('listedOrderScore(table.get())'));
+
+  // ── رگرسیون: قیمت پایه در ستون جدول هم زنده است ────────────────────
+  check('ستونِ قیمت نماد پایه هم عددِ زنده می‌گیرد، نه عددِ روز سنجش',
+    src.includes('row.spot = spot;') && src.includes('row.spot = row.daily.spot;'));
 
   check('آتش‌کردن، شمارندهٔ قاعده را ذخیره می‌کند تا آرامش پس از بازخوانی هم کار کند',
     src.includes('watchRules = verdict.rules') && src.includes('saveRules(rules)'));

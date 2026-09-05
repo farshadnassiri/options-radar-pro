@@ -25,13 +25,19 @@ import { comboMetrics } from '../../core/radar-metrics.mjs';
 group('۲۳۰-الف. هشدار فقط روی ردیفِ زنده');
 {
   const src = readSrc('../ui/tabs/spread-radar.mjs');
-  check('حلقهٔ هشدار روی ردیف‌های دارای مظنهٔ زنده می‌چرخد، نه روی همهٔ ردیف‌ها',
-    src.includes('if (!liveKeys.has(row.key)) continue;'));
-  check('و بی رصدِ روشن یا بی ردیفِ زنده، اصلاً سنجیده نمی‌شود',
+  // با چرخشِ سهمیه، شرطِ «زنده بودن» تنگ‌تر هم شد: هشدار فقط روی
+  // ردیف‌هایی می‌نشیند که در **همین تیک** اندازه‌گیری شده‌اند، نه حتی
+  // ردیفی که عددِ زندهٔ تیکِ قبل را نگه داشته.
+  check('حلقهٔ هشدار روی ردیف‌های همین تیک می‌چرخد، نه روی همهٔ ردیف‌ها',
+    src.includes('if (!keys.has(row.key)) continue;')
+    && src.includes('runAlerts(applied.fresh_keys)'));
+  check('و بی رصدِ روشن یا بی ردیفِ تازه، اصلاً سنجیده نمی‌شود',
     src.includes('if (!rules.length || !liveTimer) return;')
-    && src.includes('if (!liveKeys.size) return;'));
+    && src.includes('if (!keys.size) return;'));
   check('«زنده» یعنی پاهای هم‌زمانِ قیمت‌دار، نه هر پاسخی که عددی داشت',
     src.includes('comboLiveQuote({ legs: row.legs, book: liveBook, nowSec })'));
+  check('و در منبعِ دفتر، سمتِ درستِ هر پا با عمقِ خواسته‌شده',
+    src.includes('comboBookQuote({ legs: row.legs, book: liveBook, minUnits: depth })'));
 }
 
 group('۲۳۰-ب. عددِ زنده، همه‌جا زنده');
@@ -40,7 +46,7 @@ group('۲۳۰-ب. عددِ زنده، همه‌جا زنده');
   // «سود، زیان و بازده با قیمت زنده دوباره محاسبه نمی‌شوند … فاصله از
   // ۱٬۱۲۴ به ۲٬۲۴۸ رسید، اما حداکثر سود ٪ همچنان ۴۲۷٫۴۹٪ باقی ماند.»
   check('سنجه‌های کامل هم با قیمتِ زنده از نو ساخته می‌شوند، نه فقط فاصله',
-    src.includes('comboMetrics({\n        legs: row.legs, prices: livePrices, spot, rowByIns: {},'));
+    src.includes('legs: row.legs, prices, spot, rowByIns: {},'));
   check('و ارزش و حجمِ معامله از تابلوی روزانه نگه داشته می‌شوند، چون مظنهٔ زنده آن‌ها را نمی‌دهد',
     src.includes('legValue: row.daily?.metrics?.legValue ?? metrics.legValue'));
   check('خاموش‌شدنِ رصد، عددِ روزِ سنجش را برمی‌گرداند',
@@ -51,7 +57,7 @@ group('۲۳۰-ب. عددِ زنده، همه‌جا زنده');
     src.includes('reserve: ua?.ins ? [String(ua.ins)] : []')
     && src.includes('basePrice: liveBase,'));
   check('و همان اسپاتِ زنده مبنای وجه تضمین می‌شود',
-    src.includes('const spot = Number.isFinite(liveBase) && liveBase > 0 ? liveBase : row.spot;'));
+    src.includes('const spot = Number.isFinite(liveBase) && liveBase > 0 ? liveBase : row.daily?.spot ?? row.spot;'));
 }
 
 group('۲۳۰-ج. رصدِ زنده روی بازهٔ گذشته روشن نمی‌شود');
@@ -223,4 +229,61 @@ group('۲۳۰-ی. یک تیکِ کامل، سرتاسر — از دفترِ مظ
     evaluateAlerts({ rules: [rule], snapshots: dead.snapshots, prev: {}, nowMs: 1000 }).fired.length === 0);
   check('ولی روی ترکیبِ زنده، همان شرط می‌زند — پس خاموشی از ناتوانی نیست',
     evaluateAlerts({ rules: [rule], snapshots: one.snapshots, prev: {}, nowMs: 1000 }).fired.length === 1);
+}
+
+group('۲۳۰-ک. آنچه رابط نشان می‌دهد، همان است که هشدار می‌سنجد');
+{
+  const src = readSrc('../ui/tabs/spread-radar.mjs');
+  // «در رادار، متن وضعیت قیمت زندهٔ اهرم را ۱۱۱٬۰۱۲ نشان داد، ولی ستون
+  // قیمت نماد پایه همچنان ۵۵٬۵۴۷ بود. هشدار رادار عدد زنده را می‌گیرد،
+  // اما جدول عدد تاریخی را نمایش می‌دهد.» دو عددِ متفاوت برای یک چیز،
+  // روی یک صفحه.
+  check('ستونِ قیمت نماد پایه هم عددِ زنده می‌گیرد',
+    src.includes('row.spot = spot;'));
+  check('و خاموش‌شدنِ رصد همان ستون را به عددِ روز سنجش برمی‌گرداند',
+    src.includes('spot: row.spot }') && src.includes('row.spot = row.daily.spot;'));
+
+  // «پس از تغییر بازه و ساخت ۷۸ ترکیب، تیک رصد زنده روشن ماند، وضعیت
+  // خاموش بود و توضیح همچنان اطلاعات اجرای قبلی با ۱۰۵ ترکیب را نشان
+  // می‌داد.» سه چیز باید با هم عوض شوند: تیک، وضعیت، توضیح.
+  check('توقفِ رصد، تیک را هم برمی‌دارد نه فقط وضعیت را',
+    /function stopLive\(\)[\s\S]{0,2000}box\.checked = false;/.test(src));
+  check('و توضیح را با ساختِ فعلی از نو می‌نویسد، نه با ساختِ قبلی',
+    /function stopLive\(\)[\s\S]{0,2000}note\.textContent = rows\.length \? livePriorityNote\(\) : '—';/.test(src));
+  check('ساختِ تازه، ردیف‌ها را پیش از توقفِ رصد خالی می‌کند',
+    /function hideResults\(\) \{[\s\S]{0,400}rows = \[\];\n    stopLive\(\);/.test(src));
+  check('و روشن‌شدن، تیک را صریح می‌گذارد تا با وضعیت یکی بماند',
+    /\$\('gr-live'\)\.checked = true;[\s\S]{0,120}روشن — هر ۱۰ ثانیه/.test(src));
+
+  // «اولویت ترتیب جدول واقعاً از مرتب‌سازی جدول پیروی نمی‌کند … هر ۲۴
+  // شناسهٔ درخواست زنده دقیقاً ثابت ماند.»
+  check('اولویتِ «ترتیب جدول» از دیدِ واقعیِ جدول می‌آید',
+    src.includes('function priorityScore()') && src.includes('listedOrderScore(table.get())'));
+  check('و همان امتیاز به برنامه‌ریزِ سهمیه داده می‌شود',
+    src.includes('score: priorityScore(),'));
+}
+
+group('۲۳۰-ل. دو منبعِ مظنه و چرخشِ سهمیه، در رابط');
+{
+  const radar = readSrc('../ui/tabs/spread-radar.mjs');
+  const watch = readSrc('../ui/tabs/watchtower.mjs');
+  for (const [name, src, prefix] of [['رادار', radar, 'gr'], ['دیده‌بان', watch, 'wt']]) {
+    check(`${name}: منبعِ مظنه انتخابی است — معامله یا دفترِ قابل اجرا`,
+      src.includes(`id="${prefix}-live-source"`) && src.includes('LIVE_SOURCES.map'));
+    check(`${name}: منبعِ دفتر از مسیرِ خودش گرفته می‌شود، با سقفِ بزرگ‌ترش`,
+      src.includes("source === 'book' ? '/api/books' : '/api/live-trades'")
+      && src.includes("liveSource($('" + prefix + "-live-source').value).id === 'book' ? BOOK_INS_CAP : LIVE_INS_CAP"));
+    check(`${name}: چرخشِ سهمیه هست و مکان‌نمایش از خودِ برنامه‌ریز می‌آید`,
+      src.includes(`id="${prefix}-live-rotate"`) && src.includes('plan.nextStart'));
+    check(`${name}: عددِ زندهٔ پوسیده به عددِ روز سنجش برمی‌گردد`,
+      src.includes('LIVE_KEEP_MS') && src.includes('row.liveAt = 0;'));
+    check(`${name}: و طولِ دورِ چرخش به کاربر گفته می‌شود`,
+      src.includes('یک دورِ کاملِ چرخش'));
+  }
+  // هشدار روی عددِ نگه‌داشته نمی‌نشیند — فقط روی اندازه‌گیریِ همین تیک.
+  check('در رادار، هشدار فقط روی ترکیب‌های همین تیک سنجیده می‌شود',
+    radar.includes('runAlerts(applied.fresh_keys)'));
+  check('و در دیده‌بان، عکسِ شرط فقط برای ترکیب‌های همین تیک ساخته می‌شود',
+    watch.includes('freshKeys.add(row.key);') && watch.includes('snapshots.push(watchSnapshot(row, {')
+    && !watch.includes('for (const { row, ua } of built) {\n        const quote = comboLiveQuote'));
 }

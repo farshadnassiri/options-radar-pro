@@ -23,10 +23,14 @@
 
 import { check, group } from '../harness.mjs';
 import {
-  DEFAULT_AGE_SEC, DEFAULT_SPREAD_SEC, LIVE_INS_CAP, LIVE_PRIORITIES,
-  comboLegIns, comboLiveQuote, livePriority, liveQuoteBook, planLiveQuotes,
+  BOOK_INS_CAP, DEFAULT_AGE_SEC, DEFAULT_SPREAD_SEC, LIVE_INS_CAP, LIVE_PRIORITIES, LIVE_SOURCES,
+  bookQuoteBook, comboBookQuote, comboLegIns, comboLiveQuote, listedOrderScore, livePriority,
+  liveQuoteBook, liveSource, planLiveQuotes,
 } from '../../core/live-quote.mjs';
 import { makeDayRange } from '../../core/day-range.mjs';
+import {
+  evaluateWatch, normalizeWatchRule, ruleCoverage, ruleScopeUnion, watchSnapshot,
+} from '../../core/watch-rule.mjs';
 
 /** ترکیبِ ساختگی: دو پا، با ارزش و حجمِ نازک‌ترین پا. */
 const combo = (key, a, b, { value = NaN, volume = NaN } = {}) => ({
@@ -160,4 +164,184 @@ group('۲۲۹-د. کف و سقفِ امروز، از خودِ امروز');
   book.reset(0);
   check('و خاموش‌شدنِ رصد، دفتر را پاک می‌کند',
     book.size === 0 && !Number.isFinite(book.get('a').high));
+}
+
+group('۲۲۹-ه. «ترتیب جدول» یعنی ترتیبِ دیده‌شدهٔ جدول');
+{
+  // «پس از تغییر مرتب‌سازی، ردیف اول از Bear Put به Bull Call تغییر کرد،
+  // اما هر ۲۴ شناسهٔ درخواست زنده دقیقاً ثابت ماند.» علتش این بود که
+  // `listed` به ترتیبِ آرایهٔ ساخت نگاه می‌کرد، نه به دیدِ جدول.
+  const rows = [combo('a', '1', '2'), combo('b', '3', '4'), combo('c', '5', '6')];
+  const plain = planLiveQuotes({ rows, cap: 2, priority: 'listed' });
+  check('بی دیدِ جدول، همان ترتیبِ ساخت می‌ماند',
+    plain.keys.join(',') === 'a');
+  // جدول روی ستونی مرتب شده و حالا «c» بالاست.
+  const sorted = planLiveQuotes({ rows, cap: 2, priority: 'listed',
+    score: listedOrderScore([{ key: 'c' }, { key: 'a' }, { key: 'b' }]) });
+  check('با دیدِ جدول، سهمیه از بالای همان ترتیب برداشته می‌شود',
+    sorted.keys.join(',') === 'c');
+  // ردیفی که در دید نیست (پالایه یا صفحه‌بندی) امتیاز ندارد و ته صف است.
+  const partial = planLiveQuotes({ rows, cap: 2, priority: 'listed',
+    score: listedOrderScore([{ key: 'b' }]) });
+  check('ردیفی که در دیدِ جدول نیست، ته صف می‌رود نه اول',
+    partial.keys.join(',') === 'b');
+  check('و دیدِ خالی، امتیازی نمی‌سازد تا ترتیبِ ساخت دست‌نخورده بماند',
+    listedOrderScore([]) === null);
+}
+
+group('۲۲۹-و. کدام قاعده در این ساخت داده دارد');
+{
+  const rule = (id, baseIns, strategyIds, extra = {}) => ({
+    id, enabled: true, name: id, baseIns, strategyIds, conditions: [], ...extra,
+  });
+  const rules = [
+    rule('همین‌جا', ['1'], ['bull']),
+    rule('نمادِ دیگر', ['9'], ['bull']),
+    rule('استراتژیِ دیگر', ['1'], ['bear']),
+    rule('بی‌قید', [], []),
+    rule('نصفه', ['1', '9'], ['bull']),
+    rule('خاموش', ['1'], ['bull'], { enabled: false }),
+    rule('ترکیبِ نام‌برده', [], [], { comboKey: 'bull::x' }),
+  ];
+  const one = ruleCoverage(rules, { baseIns: ['1'], strategyIds: ['bull'], keys: ['bull::y'] });
+  check('قاعده‌ای که نمادش یا استراتژی‌اش در ساخت نیست، رصد نمی‌شود',
+    one.watched.map((r) => r.id).join(',') === 'همین‌جا,بی‌قید,نصفه');
+  check('و علتِ هر کدام گفته می‌شود، نه اینکه بی‌صدا بیفتد',
+    one.dormant.length === 4
+    && one.dormant.some((d) => d.why.includes('نمادهایش'))
+    && one.dormant.some((d) => d.why.includes('استراتژی‌هایش'))
+    && one.dormant.some((d) => d.why === 'خاموش است')
+    && one.dormant.some((d) => d.why.includes('ترکیبِ نام‌بردهٔ این قاعده')));
+  check('قاعدهٔ نصفه رصد می‌شود ولی نصفه‌بودنش هم گزارش می‌شود',
+    one.partial.length === 1 && one.partial[0].rule.id === 'نصفه'
+    && one.partial[0].missingBases.join(',') === '9');
+  // فهرستِ خالی یعنی «قید نگذاشته‌ام» — همان قاعدهٔ `inScope`.
+  check('قاعدهٔ بی‌قید همه‌جا داده دارد',
+    one.watched.some((r) => r.id === 'بی‌قید'));
+
+  const union = ruleScopeUnion(rules.filter((r) => r.enabled && !r.comboKey && r.id !== 'بی‌قید'));
+  check('اجتماعِ دامنه‌ها، فهرستِ چیدنی برای «همهٔ قاعده‌ها» می‌دهد',
+    union.baseIns.sort().join(',') === '1,9' && union.strategyIds.sort().join(',') === 'bear,bull');
+  check('و قاعدهٔ بی‌قید صریح گفته می‌شود، چون «همهٔ بازار» ساختنی نیست',
+    ruleScopeUnion(rules).anyBase === true && ruleScopeUnion(rules).anyDef === true);
+}
+
+group('۲۲۹-ز. شرطِ «قیمت نماد پایه»، سرتاسر');
+{
+  // «شرط ترکیبیِ پرشدگی ≥ ۳۰٪ و قیمت پایه ≥ ۰ در پیش‌نمایش ۲۴۴ نتیجه
+  // داشت، اما پس از شروع رصد هیچ نتیجه‌ای به شمار زنده اضافه نکرد.»
+  // ریشه: نماد پایه در سهمیهٔ زنده رزرو نمی‌شد، پس `basePrice` در عکسِ
+  // زنده `NaN` می‌ماند و شرطِ «≥ ۰» — که همیشه برقرار است — هرگز
+  // برقرار نمی‌شد. این گروه همان زنجیره را می‌سازد.
+  const baseIns = '77';
+  const rows = [combo('a', '1', '2'), combo('b', '3', '4')];
+  const rule = normalizeWatchRule({
+    name: 'ترکیبی', baseIns: [baseIns], strategyIds: [],
+    conditions: [
+      { metric: 'coveragePct', op: 'ge', value: 30, ref: 'abs' },
+      { metric: 'basePrice', op: 'ge', value: 0, ref: 'abs' },
+    ],
+  });
+  check('قاعدهٔ ترکیبی ساخته می‌شود', rule.ok === true);
+
+  const plan = planLiveQuotes({ rows, cap: 6, priority: 'listed', reserve: [baseIns] });
+  check('نمادِ پایه در فهرستِ درخواستِ زنده هست',
+    plan.ins.includes(baseIns) && plan.keys.length === 2);
+
+  const items = { [baseIns]: { summary: { lastPrice: 111012, lastTime: 121500 } } };
+  for (const ins of ['1', '2', '3', '4']) items[ins] = { summary: { lastPrice: 900, lastTime: 121500 } };
+  const book = liveQuoteBook({ at: 1, items });
+
+  const snapshot = (withBase) => watchSnapshot({
+    key: 'a', def: { id: 'bull', name: 'Bull Call' }, strikes: [1, 2],
+    gap: { current: 900, coveragePct: 45, daysLeft: 30 }, metrics: {}, verdict: {},
+    series: { points: [] },
+  }, { baseIns, baseName: 'اهرم', basePrice: withBase ? book.prices[baseIns] : NaN });
+
+  const withBase = snapshot(true);
+  check('و قیمتش به عکسِ شرط می‌رسد — همان عددی که نوار وضعیت می‌گوید',
+    withBase.basePrice === 111012);
+  check('پس شرطِ ترکیبی برقرار می‌شود',
+    evaluateWatch({ rules: [rule.rule], snapshots: [withBase], prev: {}, nowMs: 1000 })
+      .matched.get(rule.rule.id).length === 1);
+  // و همان زنجیره بی رزروِ پایه، همان شکستِ گزارش‌شده را می‌دهد.
+  check('ولی بی رزروِ پایه، همان شرط صفر نتیجه می‌دهد — همان چیزی که گزارش دید',
+    evaluateWatch({ rules: [rule.rule], snapshots: [snapshot(false)], prev: {}, nowMs: 1000 })
+      .matched.get(rule.rule.id).length === 0);
+}
+
+group('۲۲۹-ح. چرخشِ سهمیه — تا ترکیبی برای همیشه بیرون نماند');
+{
+  // «سقف ۲۴ ابزار هنوز بدون چرخش است؛ در آزمون ۴۲۰ ترکیب، فقط ۲۸۲
+  // ترکیب سهمیه گرفتند و ۱۳۸ ترکیب با اولویت ثابت می‌توانند دائماً خارج
+  // از رصد بمانند.» «دائماً» کلمهٔ درستی بود.
+  const rows = [...Array(7)].map((_, at) => combo(`k${at}`, String(at * 2 + 1), String(at * 2 + 2)));
+  const noRotate = [];
+  for (let tick = 0; tick < 4; tick += 1) {
+    noRotate.push(planLiveQuotes({ rows, cap: 4, priority: 'listed', startAt: 0 }).keys.join(','));
+  }
+  check('بی چرخش، هر تیک همان دو ترکیبِ اول — و بقیه هیچ‌وقت',
+    new Set(noRotate).size === 1 && noRotate[0] === 'k0,k1');
+
+  const seen = new Set();
+  let cursor = 0, ticks = 0, cycle = 0;
+  while (ticks < 12 && seen.size < rows.length) {
+    const plan = planLiveQuotes({ rows, cap: 4, priority: 'listed', startAt: cursor });
+    for (const key of plan.keys) seen.add(key);
+    cycle = plan.cycleTicks;
+    cursor = plan.nextStart;
+    ticks += 1;
+  }
+  check('با چرخش، هر ترکیب بالاخره نوبت می‌گیرد',
+    seen.size === rows.length, `${ticks} تیک`);
+  check('و طولِ دورِ چرخش گفته می‌شود، تا کاربر بداند هر ترکیب هر چند تیک تازه می‌شود',
+    cycle === Math.ceil(rows.length / 2));
+  // صف نباید قفل شود: ترکیبی که هیچ‌وقت جا نمی‌شود، مکان‌نما را نگه ندارد.
+  const stuck = planLiveQuotes({
+    rows: [{ key: 'huge', legs: [...Array(9)].map((_, at) => ({ ins: `x${at}` })) }],
+    cap: 3, priority: 'listed', startAt: 0,
+  });
+  check('ترکیبی که هرگز جا نمی‌شود، صف را قفل نمی‌کند',
+    stuck.keys.length === 0 && stuck.nextStart === 0 && stuck.covered === 0);
+}
+
+group('۲۲۹-ط. مظنهٔ قابل اجرا — سمتِ درستِ هر پا');
+{
+  // «منبع فعلی آخرین معامله است، نه bid/ask قابل اجرا.» دفترِ سفارش
+  // هست: `/api/books` همان `BestLimits` را تا ۲۰۰ ابزار می‌دهد.
+  const book = bookQuoteBook({
+    1: { book: [{ level: 1, bid: 900, ask: 1000, bidQty: 50, askQty: 40 }] },
+    2: { book: [{ level: 1, bid: 300, ask: 340, bidQty: 20, askQty: 10 }] },
+    3: { book: [{ level: 1, bid: 0, ask: 500, bidQty: 0, askQty: 5 }] },
+    4: { error: 'x' },
+  });
+  check('دفتر، هر دو سمتِ سطح اول را با حجمشان می‌آورد',
+    book.books['1'].ask === 1000 && book.books['1'].bidQty === 50
+    && book.books['4'] === undefined);
+
+  const legs = [
+    { ins: '1', kind: 'call', side: 'buy', ratio: 1 },
+    { ins: '2', kind: 'call', side: 'sell', ratio: 1 },
+  ];
+  const quote = comboBookQuote({ legs, book });
+  // پای خریدنی از **عرضه** و پای فروختنی از **تقاضا** — یعنی بهای
+  // بازکردنِ همین موقعیت در همین جهت. سمتِ اشتباه، عددی می‌سازد که فقط
+  // در جهتِ عکس اجرا می‌شود.
+  check('پای خریدنی با بهترین عرضه و پای فروختنی با بهترین تقاضا قیمت می‌خورد',
+    quote.ok === true && quote.prices['1'] === 1000 && quote.prices['2'] === 300);
+  check('و عمقِ قابل اجرا از کوچک‌ترین سمتِ لازم می‌آید',
+    quote.units === 20);
+  check('پهنای دفتر هم گزارش می‌شود، چون سطح اولِ پهن، «قیمت» نیست',
+    Math.abs(quote.spreadPct - 12.5) < 1e-9);
+  check('قیدِ عمق، ترکیبی را که سطح اولش کم‌حجم است رد می‌کند',
+    comboBookQuote({ legs, book, minUnits: 30 }).ok === false);
+  // پایی که یک سمتش خالی است، در آن جهت اجرا نمی‌شود.
+  check('پایی که تقاضایی برای فروختن ندارد، ترکیب را باطل می‌کند',
+    comboBookQuote({ legs: [{ ins: '3', kind: 'call', side: 'sell', ratio: 1 }], book }).ok === false);
+  check('ولی همان پا در جهتِ خرید اجرا می‌شود',
+    comboBookQuote({ legs: [{ ins: '3', kind: 'call', side: 'buy', ratio: 1 }], book }).ok === true);
+  check('و پایی که اصلاً در سهمیهٔ دفتر نبود، ترکیب را باطل می‌کند',
+    comboBookQuote({ legs: [{ ins: '4', kind: 'call', side: 'buy', ratio: 1 }], book }).why.includes('سهمیهٔ دفتر'));
+  check('سقفِ دفتر بزرگ‌تر از سقفِ معامله است، چون یک درخواست بیشتر می‌گیرد',
+    BOOK_INS_CAP > LIVE_INS_CAP && LIVE_SOURCES.length === 2 && liveSource('nope').id === 'trade');
 }

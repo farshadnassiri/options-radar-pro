@@ -128,6 +128,27 @@ export function changedIds(prevRows, nextRows, key) {
   return out;
 }
 
+/**
+ * ارتفاعِ مبنای تازه، از ارتفاعِ اندازه‌گیری‌شدهٔ یک ردیفِ واقعی.
+ *
+ * ═══ چرا تابعِ جدا و چرا آستانه ═══
+ *
+ * مجازی‌سازی جای ردیف‌های بیرونِ قاب را با یک فاصله‌گذارِ هم‌ارتفاع پر
+ * می‌کند. تا امروز ارتفاع یک **حدس** بود که هر تب خودش می‌نوشت — رادار
+ * ۵۲ نوشته بود و ردیفِ واقعی ۷۷ پیکسل درمی‌آمد. نتیجه: نوار پیمایش دروغ
+ * می‌گفت، ردیف‌ها موقع اسکرول می‌پریدند، و ته جدول به آخر نمی‌رسید.
+ *
+ * آستانهٔ یک پیکسل هم لازم است: ارتفاعِ خوانده‌شده از `getBoundingClientRect`
+ * کسری است و در بزرگ‌نماییِ مرورگر کمی می‌لرزد. بی آستانه، هر رسم یک رسمِ
+ * دیگر می‌ساخت.
+ *
+ * خالص است تا بی‌نیاز از مرورگر آزمون شود.
+ */
+export function rowHeightFrom(current, measured) {
+  if (!Number.isFinite(measured) || !(measured > 0)) return current;
+  return Math.abs(measured - current) <= 1 ? current : measured;
+}
+
 /** انتخاب ستون هر جدول جدا می‌ماند، تا نمای تب سرمایه نمای تب یونانی را عوض نکند. */
 function loadPick(storeKey) {
   if (!storeKey) return null;
@@ -158,10 +179,22 @@ export function makeTable(host, cols, opts = {}) {
   const byKey = new Map(all.map((c) => [c.key, c]));
   const baseKeys = cols.map((c) => c.key);
   const columnPanelId = `table-columns-${++tableA11ySeq}`;
-  // ارتفاع ردیف، ثابتِ مجازی‌سازی است: جای ردیف‌های بیرونِ قاب با یک
-  // ردیفِ فاصله‌گذارِ هم‌ارتفاع پر می‌شود. جدولی که سلولِ نگاره‌دار دارد
-  // ردیفِ بلندتری می‌خواهد، وگرنه محاسبهٔ پیمایش با واقعیت نمی‌خواند.
-  const ROW_H = Math.max(20, Math.trunc(Number(opts.rowHeight) || DEFAULT_ROW_H));
+  // ── ارتفاع ردیف: اندازه گرفته می‌شود، فرض نمی‌شود ────────────────────
+  //
+  // گزارش صاحب پروژه: «جدول قابل خوندن نیست و به هم ریختگی ایجاد شده.»
+  // یکی از دو علتش همین بود. مجازی‌سازی جای ردیف‌های بیرونِ قاب را با یک
+  // ردیفِ فاصله‌گذارِ هم‌ارتفاع پر می‌کند، و ارتفاعش از این عدد می‌آمد.
+  // عدد یک **حدس** بود که در `spread-radar` روی ۵۲ نوشته شده بود، در
+  // حالی که ردیفِ واقعی — با دو نمادِ دوسطری و نوارها — ۷۷ پیکسل درمی‌آمد.
+  // پس فاصله‌گذار همیشه کوتاه‌تر از واقعیت بود: نوار پیمایش دروغ می‌گفت،
+  // ردیف‌ها موقع اسکرول می‌پریدند، و ته جدول به آخر نمی‌رسید.
+  //
+  // حدس، حالا فقط نقطهٔ شروع است. بعد از هر رسم، ارتفاعِ یک ردیفِ واقعی
+  // خوانده می‌شود و اگر با حدس نخواند، همان می‌شود ارتفاعِ مبنا و یک بار
+  // دیگر رسم می‌شود. با هر محتوایی — و با هر تغییرِ فونت یا ستون — درست
+  // درمی‌آید، بی آنکه هر تب عددِ خودش را نگه دارد.
+  let rowH = Math.max(20, Math.trunc(Number(opts.rowHeight) || DEFAULT_ROW_H));
+  let remeasuring = false;
 
   // انتخاب ذخیره‌شده فقط تا جایی معتبر است که ستون‌هایش هنوز وجود داشته باشند
   const saved = loadPick(opts.storeKey)?.filter((k) => byKey.has(k));
@@ -439,8 +472,18 @@ export function makeTable(host, cols, opts = {}) {
     if (!rg || !Number.isFinite(v)) return '';
     const [lo, hi] = rg;
     const t = (v - lo) / (hi - lo);
-    const [soft, strong] = HEAT[c.heat] || HEAT.prob;
-    return `background:color-mix(in srgb, var(${strong}) ${Math.round(t * 26)}%, var(${soft}) ${Math.round((1 - t) * 40)}%)`;
+    const [, strong] = HEAT[c.heat] || HEAT.prob;
+    // ── چرا این عددها این‌قدر کوچک‌اند ────────────────────────────────
+    //
+    // پیش از این سلولِ داغ تا ۲۶٪ رنگِ پررنگ روی ۴۰٪ رنگِ کم‌رنگ می‌گرفت،
+    // و **همزمان** کلِ ردیف هم تا ۲۴٪ رنگ می‌گرفت. دو لایه روی هم یعنی
+    // ستون‌های داغ در یک تختهٔ سبز و بنفش گم می‌شدند و متن رویشان کنتراست
+    // نداشت — همان «به هم ریختگی» که گزارش شد.
+    //
+    // رنگ اینجا فقط باید **ترتیب** را برساند، نه اینکه خودش دیده شود.
+    // یک لایهٔ کم‌جان روی زمینهٔ خودِ ردیف، همان کار را می‌کند و متن روی
+    // آن در هر دو پوسته خوانا می‌ماند.
+    return `background:color-mix(in srgb, var(${strong}) ${Math.round(t * 12)}%, transparent)`;
   }
 
   /** طیف ردیف بر پایهٔ ستون مرتب‌شده. `heatRamp` قاعده را دارد. */
@@ -514,8 +557,8 @@ export function makeTable(host, cols, opts = {}) {
     const shown = active();
     const top = body.scrollTop;
     const h = body.clientHeight || 400;
-    const first = Math.max(0, Math.floor(top / ROW_H) - OVER);
-    const last = Math.min(view.length, Math.ceil((top + h) / ROW_H) + OVER);
+    const first = Math.max(0, Math.floor(top / rowH) - OVER);
+    const last = Math.min(view.length, Math.ceil((top + h) / rowH) + OVER);
     const frag = document.createDocumentFragment();
 
     for (let i = first; i < last; i++) {
@@ -556,7 +599,7 @@ export function makeTable(host, cols, opts = {}) {
     tbody.innerHTML = '';
     if (first > 0) {
       const sp = document.createElement('tr');
-      sp.style.height = `${first * ROW_H}px`;
+      sp.style.height = `${first * rowH}px`;
       sp.innerHTML = `<td colspan="${shown.length}"></td>`;
       tbody.appendChild(sp);
     }
@@ -564,7 +607,7 @@ export function makeTable(host, cols, opts = {}) {
     const rest = view.length - last;
     if (rest > 0) {
       const sp = document.createElement('tr');
-      sp.style.height = `${rest * ROW_H}px`;
+      sp.style.height = `${rest * rowH}px`;
       sp.innerHTML = `<td colspan="${shown.length}"></td>`;
       tbody.appendChild(sp);
     }
@@ -577,6 +620,25 @@ export function makeTable(host, cols, opts = {}) {
       const msg = emptyMsg || 'ردیفی نمانده. نوار تشخیص بالا می‌گوید ترکیب‌ها کجا افتادند.';
       tbody.innerHTML = `<tr><td colspan="${shown.length}" style="padding:18px;color:var(--muted)">${msg}</td></tr>`;
     }
+    remeasure();
+  }
+
+  /**
+   * ارتفاعِ مبنا را از یک ردیفِ واقعی می‌گیرد.
+   *
+   * فقط وقتی دوباره رسم می‌کند که اختلاف بیش از یک پیکسل باشد، و `remeasuring`
+   * جلوی حلقهٔ بی‌پایان را می‌گیرد — رسمِ دوم هم اندازه می‌گیرد و باید بتواند
+   * بی آنکه رسمِ سوم را صدا بزند تمام شود.
+   */
+  function remeasure() {
+    if (remeasuring || !view.length) return;
+    const row = tbody.querySelector('tr[data-i]');
+    if (!row) return;
+    const next = rowHeightFrom(rowH, row.getBoundingClientRect().height);
+    if (next === rowH) return;
+    rowH = next;
+    remeasuring = true;
+    try { draw(); } finally { remeasuring = false; }
   }
 
   body.addEventListener('scroll', () => requestAnimationFrame(draw), { passive: true });
@@ -587,9 +649,9 @@ export function makeTable(host, cols, opts = {}) {
     activeIdx = activeIdx < 0
       ? (delta > 0 ? 0 : view.length - 1)
       : Math.min(view.length - 1, Math.max(0, activeIdx + delta));
-    const top = activeIdx * ROW_H;
+    const top = activeIdx * rowH;
     if (top < body.scrollTop) body.scrollTop = top;
-    else if (top + ROW_H > body.scrollTop + body.clientHeight) body.scrollTop = top + ROW_H - body.clientHeight;
+    else if (top + rowH > body.scrollTop + body.clientHeight) body.scrollTop = top + rowH - body.clientHeight;
     draw();
   }
 

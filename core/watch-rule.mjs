@@ -413,3 +413,81 @@ export function watchDistance(rule, snapshot) {
   if (!parts.length || parts.some((one) => !finite(one))) return NaN;
   return Math.max(...parts);
 }
+
+/**
+ * کدام قاعده‌ها واقعاً روی دامنهٔ ساخته‌شده داده دارند — و کدام‌ها ندارند.
+ *
+ * ═══ ایرادی که این تابع جوابش است ═══
+ *
+ * «قواعد دیده‌بان با دامنه‌های متفاوت واقعاً هم‌زمان رصد نمی‌شوند. رابط
+ * ۸ قاعده نشان داد، ولی حلقه فقط ۱۰۵ ترکیب مربوط به آخرین پیش‌نمایش را
+ * دریافت کرد؛ قواعد قبلیِ استراتژی‌های دیگر عملاً بدون داده ماندند.»
+ *
+ * درست بود، و ریشه‌اش عمیق‌تر از حلقه است: قاعده‌ها ذخیره می‌شوند ولی
+ * **دامنه** ذخیره نمی‌شود. ساختِ روی میز مالِ آخرین «ساخت و تطبیق» است و
+ * فقط ترکیب‌های همان نمادها و همان استراتژی‌ها را دارد. قاعده‌ای که برای
+ * نمادِ دیگری ساخته شده، در این ساخت **هیچ ردیفی ندارد** — نه اینکه
+ * ردیف‌هایش شرط را نداشته باشند.
+ *
+ * ساختنِ خودکارِ دامنهٔ اجتماعِ همهٔ قاعده‌ها هم جواب نیست: هر نماد یک
+ * دورِ کاملِ دریافت است و هشت قاعده روی هشت نماد یعنی دقایق انتظارِ
+ * ناخواسته. پس این تابع فقط **حقیقت را می‌گوید**: کدام قاعده داده دارد،
+ * کدام نصفه، و کدام هیچ. رابط با همین، هم وضعیتِ راست می‌نویسد و هم
+ * می‌تواند دامنهٔ اجتماع را به کاربر پیشنهاد بدهد.
+ *
+ * @param domain `{ baseIns, strategyIds, keys }` — آنچه واقعاً ساخته شده
+ * @returns `{ watched, partial, dormant }` — `watched` آن‌هایی که دست‌کم
+ *          یک ردیف در این ساخت دارند؛ `partial` زیرمجموعه‌ای از همان‌ها که
+ *          بخشی از دامنه‌شان بیرون مانده؛ `dormant` آن‌هایی که هیچ ندارند.
+ */
+export function ruleCoverage(rules = [], domain = {}) {
+  const bases = new Set((domain.baseIns || []).map((one) => String(one)));
+  const defs = new Set((domain.strategyIds || []).map((one) => String(one)));
+  const keys = new Set((domain.keys || []).map((one) => String(one)));
+  const watched = [], partial = [], dormant = [];
+  for (const rule of rules || []) {
+    if (!rule) continue;
+    if (rule.enabled === false) { dormant.push({ rule, why: 'خاموش است' }); continue; }
+    if (rule.comboKey) {
+      if (keys.has(String(rule.comboKey))) watched.push(rule);
+      else dormant.push({ rule, why: 'ترکیبِ نام‌بردهٔ این قاعده در ساختِ فعلی نیست' });
+      continue;
+    }
+    const wantBases = (rule.baseIns || []).map((one) => String(one));
+    const wantDefs = (rule.strategyIds || []).map((one) => String(one));
+    const missingBases = wantBases.filter((one) => !bases.has(one));
+    const missingDefs = wantDefs.filter((one) => !defs.has(one));
+    // فهرستِ خالی یعنی «قید نگذاشته‌ام» — همان قاعدهٔ `inScope`.
+    const noBase = wantBases.length > 0 && missingBases.length === wantBases.length;
+    const noDef = wantDefs.length > 0 && missingDefs.length === wantDefs.length;
+    if (noBase || noDef) {
+      dormant.push({ rule, why: noBase && noDef ? 'نه نمادش در این ساخت است نه استراتژی‌اش'
+        : noBase ? 'هیچ‌کدام از نمادهایش در این ساخت نیست'
+          : 'هیچ‌کدام از استراتژی‌هایش در این ساخت نیست' });
+      continue;
+    }
+    watched.push(rule);
+    if (missingBases.length || missingDefs.length) partial.push({ rule, missingBases, missingDefs });
+  }
+  return { watched, partial, dormant };
+}
+
+/**
+ * اجتماعِ دامنهٔ چند قاعده — برای دکمهٔ «دامنه را برای همهٔ قاعده‌ها بساز».
+ *
+ * `anyBase`/`anyDef` یعنی دست‌کم یک قاعده قیدی نگذاشته و عملاً همه‌چیز را
+ * می‌خواهد؛ رابط نمی‌تواند «همهٔ نمادهای بازار» را بسازد، پس این را
+ * می‌گوید به‌جای اینکه بی‌صدا کمتر بسازد.
+ */
+export function ruleScopeUnion(rules = []) {
+  const baseIns = new Set(), strategyIds = new Set();
+  let anyBase = false, anyDef = false;
+  for (const rule of rules || []) {
+    if (!rule || rule.enabled === false || rule.comboKey) continue;
+    const wantBases = (rule.baseIns || []).map((one) => String(one));
+    const wantDefs = (rule.strategyIds || []).map((one) => String(one));
+    if (!wantBases.length) anyBase = true; else for (const one of wantBases) baseIns.add(one);
+    if (!wantDefs.length) anyDef = true; else for (const one of wantDefs) strategyIds.add(one);
+  }
+  return { baseIns: [...baseIns], strategyIds: [...strategyIds], anyBase, anyDef };
+}
