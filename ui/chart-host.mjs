@@ -54,6 +54,9 @@ export function chartTokens() {
     panel: cssVar(style, '--panel'),
     panel2: cssVar(style, '--panel-2'),
     accent: cssVar(style, '--accent'),
+    // تُنِ دوم — برای سری‌ای که باید از سریِ اصلی جدا خوانده شود ولی
+    // «سود» یا «زیان» نیست: مثل دنبالهٔ زندهٔ امروز کنار روند گذشته.
+    accent2: cssVar(style, '--accent-2'),
     gain: cssVar(style, '--gain'),
     loss: cssVar(style, '--loss'),
     warn: cssVar(style, '--warn'),

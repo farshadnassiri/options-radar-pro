@@ -87,12 +87,45 @@ export function fillBar(gap) {
   </div>`;
 }
 
+/**
+ * سریِ گذشته و سریِ امروز را از هم جدا می‌کند.
+ *
+ * ═══ چرا دو سری و نه یکی ═══
+ *
+ * خواستهٔ صاحب پروژه: «در بررسی لایو بازار، نمودارهای تاریخی و روند
+ * گذشته نیز قابل رویت باشد، ولی با رنگ یا شکلی متفاوت از آن قبلی‌ها.»
+ *
+ * یک سریِ یکدست این را نمی‌دهد: دادهٔ روزانه و دادهٔ دقیقه‌ایِ امروز دو
+ * جنس‌اند — یکی بسته‌شده و قطعی، یکی در حال حرکت — و نشان‌دادنشان با یک
+ * خط، به خواننده می‌گوید هر دو یک اعتبار دارند.
+ *
+ * نقطهٔ مرزی در **هر دو** سری می‌آید، وگرنه خطِ زنده از هوا شروع می‌شود.
+ * جاهای دیگر `null` است و ECharts آن را رسم نمی‌کند.
+ */
+function splitLive(points, field = 'current') {
+  const at = points.findIndex((point) => point.live);
+  if (at < 0) return { past: points.map((point) => num(point[field])), live: null };
+  return {
+    past: points.map((point, i) => (i < at ? num(point[field]) : null)),
+    // یکی عقب‌تر شروع می‌شود تا دو خط به هم وصل شوند.
+    live: points.map((point, i) => (i >= at - 1 ? num(point[field]) : null)),
+  };
+}
+const num = (value) => (Number.isFinite(value) ? value : null);
+
 /** مسیر فاصله در طول زمان، با نوارِ سقفِ ساختاری. */
 export function gapPathChart(series, { anchor = NaN, title = '' } = {}) {
   return (echarts, tokens) => {
     const points = series?.points || [];
     if (!points.length) return null;
     const labels = points.map((point) => point.label);
+    const { past, live } = splitLive(points);
+    const cap = finite(anchor) ? {
+      silent: true, symbol: 'none',
+      label: { formatter: 'سقفِ ساختاری', color: tokens.muted, position: 'insideEndTop' },
+      lineStyle: { color: tokens.warn, type: 'dashed' },
+      data: [{ yAxis: anchor }],
+    } : undefined;
     return {
       title: title ? { text: title, left: 0, top: 0, textStyle: { fontSize: 12, color: tokens.muted } } : undefined,
       tooltip: {
@@ -113,18 +146,26 @@ export function gapPathChart(series, { anchor = NaN, title = '' } = {}) {
       dataZoom: [{ type: 'inside' }, { type: 'slider', bottom: 26, height: 16 }],
       series: [
         {
-          name: 'فاصلهٔ اکنون', type: 'line', smooth: false, symbol: 'none',
-          data: points.map((point) => point.current),
+          name: live ? 'روند گذشته — روزانه' : 'فاصلهٔ اکنون',
+          type: 'line', smooth: false, symbol: 'none',
+          data: past,
           lineStyle: { width: 2, color: tokens.accent },
           areaStyle: { color: tokens.accentSoft, opacity: .5 },
-          // خطِ سقف روی همین سری می‌نشیند تا در راهنما هم دیده شود.
-          markLine: finite(anchor) ? {
-            silent: true, symbol: 'none',
-            label: { formatter: 'سقفِ ساختاری', color: tokens.muted, position: 'insideEndTop' },
-            lineStyle: { color: tokens.warn, type: 'dashed' },
-            data: [{ yAxis: anchor }],
-          } : undefined,
+          markLine: live ? undefined : cap,
         },
+        // ── امروز، از شروع بازار ──────────────────────────────────────
+        //
+        // رنگِ دوم، خطِ نقطه‌چین، و نقطهٔ انتها: سه نشانهٔ جدا، چون رنگ به
+        // تنهایی برای کوررنگ کافی نیست.
+        ...(live ? [{
+          name: 'امروز — از شروع بازار',
+          type: 'line', smooth: false, symbol: 'none',
+          data: live,
+          lineStyle: { width: 2.5, color: tokens.accent2, type: 'dotted' },
+          itemStyle: { color: tokens.accent2 },
+          endLabel: { show: true, color: tokens.accent2, formatter: 'اکنون' },
+          markLine: cap,
+        }] : []),
       ],
     };
   };
@@ -304,6 +345,7 @@ export function gapBandChart(series, { mode = 'spread', anchor = NaN, anchorLabe
     const points = series?.points || [];
     if (!points.length || !points[0].legs?.length) return null;
     const labels = points.map((point) => point.label);
+    const liveAt = points.findIndex((point) => point.live);
     const names = points[0].legs.map((leg) => `${leg.side === 'sell' ? 'فروش' : 'خرید'} ${leg.name}`);
     const columns = points[0].legs.map((_, i) => points.map((point) => {
       const value = point.legs?.[i]?.scaled;
@@ -371,13 +413,24 @@ export function gapBandChart(series, { mode = 'spread', anchor = NaN, anchorLabe
           itemStyle: { color: tokens.accent },
           data: bandStack(roof, floor),
         },
+        // ── گذشته: خطِ پیوسته ─────────────────────────────────────────
+        //
+        // وقتی دنبالهٔ زنده هست، خطِ گذشته سرِ مرز تمام می‌شود و ادامه‌اش
+        // خط‌چینِ امروز است. کشیدنِ هر دو روی هم، دو خط از یک داده می‌داد.
         ...columns.map((column, i) => ({
           name: names[i], type: 'line', symbol: 'none',
           lineStyle: { width: 2, color: tokens.series[i % tokens.series.length] },
           itemStyle: { color: tokens.series[i % tokens.series.length] },
-          data: column,
+          data: liveAt < 0 ? column : column.map((value, at) => (at < liveAt ? value : null)),
           markLine: i === 0 ? marker : undefined,
         })),
+        // ── امروز: همان رنگ، خط‌چین ───────────────────────────────────
+        ...(liveAt >= 0 ? columns.map((column, i) => ({
+          name: `${names[i]} — امروز`, type: 'line', symbol: 'none',
+          lineStyle: { width: 2.5, color: tokens.series[i % tokens.series.length], type: 'dotted' },
+          itemStyle: { color: tokens.series[i % tokens.series.length] },
+          data: column.map((value, at) => (at >= liveAt - 1 ? value : null)),
+        })) : []),
       ],
     };
   };
