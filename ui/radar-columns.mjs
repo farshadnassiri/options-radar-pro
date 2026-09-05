@@ -57,9 +57,20 @@ function riskBar(row) {
   // نوارِ چیزی که سقف ندارد، پُر کشیده می‌شود: کوتاه‌کشیدنش یعنی «کم».
   const w = (value, word) => (word ? '100' : finite(value) ? Math.min(100, (value / span) * 100).toFixed(1) : '0');
   const text = (value, word) => (word || (finite(value) ? `${fmt.pct(value)}٪` : '—'));
+  // ── چرا عدد بیرونِ نوار است ─────────────────────────────────────────
+  //
+  // گزارش صاحب پروژه: «در قسمت‌هایی که نمودار به جدول اضافه کردی جدول
+  // قابل خوندن نیست.» عدد **داخلِ** نواری می‌نشست که `overflow: hidden`
+  // داشت و عرضش از خودِ درصد می‌آمد؛ پس نوارِ کوتاه، عددش را می‌برید و
+  // «۱۲٫۰۰٪» به «۰۰…» تبدیل می‌شد. رنگ هم می‌ماند و عدد نه — بدترین
+  // ترکیب: شکلی که چیزی نمی‌گوید و عددی که خوانده نمی‌شود.
+  //
+  // حالا هر سطر یک شبکهٔ دوستونی است: نوار کشسان، عدد با عرضِ خودش. عدد
+  // هیچ‌وقت بریده نمی‌شود چون داخلِ ناحیهٔ بریده‌شونده نیست.
+  const line = (kind, value, word) => `<span class="rad-risk-row ${kind}${word ? ' boundless' : ''}">
+      <s><i style="--w:${w(value, word)}%"></i></s><b>${esc(text(value, word))}</b></span>`;
   return `<div class="rad-risk" role="img" aria-label="سود ${text(gain, gainWord)} در برابر زیان ${text(loss, lossWord)}">
-    <span class="rad-risk-gain" style="--w:${w(gain, gainWord)}%"><b>${esc(text(gain, gainWord))}</b></span>
-    <span class="rad-risk-loss${lossWord ? ' boundless' : ''}" style="--w:${w(loss, lossWord)}%"><b>${esc(text(loss, lossWord))}</b></span>
+    ${line('gain', gain, gainWord)}${line('loss', loss, lossWord)}
   </div>`;
 }
 

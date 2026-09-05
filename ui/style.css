@@ -97,10 +97,14 @@
      می‌سازد که در کارت‌های کنار هم مثل خط دوم دیده می‌شود. */
   --shadow: 0 1px 3px rgba(0, 55, 112, .08), 0 8px 24px rgba(0, 55, 112, .08);
   --shadow-2xs: 0 1px 2px rgba(0, 55, 112, .06);
-  --shadow-xs: 0 1px 3px rgba(0, 55, 112, .08);
-  --shadow-sm: 0 1px 3px rgba(0, 55, 112, .08), 0 1px 2px rgba(0, 55, 112, .04);
-  --shadow-md: 0 8px 24px rgba(0, 55, 112, .08), 0 2px 6px rgba(0, 55, 112, .04);
-  --shadow-lg: 0 16px 40px rgba(0, 55, 112, .1), 0 4px 12px rgba(0, 55, 112, .05);
+  /* ——— سایه، فقط جایی که چیزی واقعاً «رو»ی چیزی است ———
+     در پوستهٔ مینیمال، جداکنندهٔ سطح‌ها خط است نه سایه. سایه فقط برای
+     چیزهای شناور می‌ماند — منوی بازشو، کارت هشدار، پنل ستون‌ها — و آنجا
+     هم نرم و بی‌رنگ. کارت و جدول با یک خطِ مویی از زمینه جدا می‌شوند. */
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: 0 4px 16px rgba(13, 37, 61, .07);
+  --shadow-lg: 0 10px 32px rgba(13, 37, 61, .1);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
   /* پله گردی سفت‌تر شد. گردی زیاد روی کنترل ریز، فضای داخلی را می‌خورد و
      کادر را «بادکرده» نشان می‌دهد؛ روی صفحه‌ای با ده‌ها کنترل، همان چند
@@ -111,17 +115,42 @@
      شکسته» نشان می‌دهد نه «شیشهٔ صیقلی». چون همهٔ اجزا از همین شش توکن
      می‌خوانند، این هفت خط کلِ زبانِ شکلیِ برنامه را جابه‌جا می‌کند و هیچ
      جزئی جا نمی‌ماند. */
-  --radius: 16px;
-  --radius-xs: 6px;
-  --radius-sm: 10px;
-  --radius-md: 13px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
+  /* ——— گردی، جمع‌تر از پوستهٔ شیشه‌ای ———
+     گردیِ زیاد لازمهٔ شیشه بود (لبهٔ تیز، شفافیت را «شکسته» نشان می‌داد).
+     روی سطحِ مات لازم نیست، و روی کنترلِ ریز فضای داخلی را می‌خورد. */
+  --radius: 10px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-pill: 9999px;
+  /* ——— گردیِ کنترل ———
+     دکمه پیش از این «قرص» بود. در پوستهٔ مینیمال، دکمهٔ قرصی با کادرِ
+     ورودیِ گوشه‌دار در یک نوار کنار هم نمی‌نشیند — دو زبانِ شکلی در یک
+     ردیف. یک توکن، تا هر دکمه‌ای یک‌جا عوض شود؛ نشان و برچسبِ وضعیت
+     همچنان قرص می‌مانند، چون آن‌ها دکمه نیستند. */
+  --radius-control: 6px;
   --transition-fast: .15s cubic-bezier(.4, 0, .2, 1);
   --transition-med: .25s cubic-bezier(.4, 0, .2, 1);
   --transition-smooth: .3s cubic-bezier(.16, 1, .3, 1);
-  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo,
+  /* ——— پشتهٔ عدد، فارسی‌اول ———
+     گزارش صاحب پروژه: «جدول قابل خوندن نیست و به هم ریختگی ایجاد شده.»
+     ریشه‌اش همین توکن بود. پشتهٔ قبلی با «JetBrains Mono» شروع می‌شد و
+     آن فونت حرف فارسی ندارد؛ مرورگر برای هر حرفِ نداشته به فونت بعدی
+     می‌افتد و پیوندِ خط فارسی می‌شکند — «باقی‌مانده» می‌شد «با قیما نده»،
+     دقیقاً همان خرابی‌ای که نگهبان ۵ سال‌ها پیش برای «ثانیه» ثبت کرده بود
+     و راهِ حلش (پشتیبانِ فارسی داشتن) کافی نبود: پشتیبان **آخرِ** صف بود.
+
+     هم‌عرضیِ رقم‌ها از فونت نمی‌آید، از `font-variant-numeric: tabular-nums`
+     می‌آید و وزیرمتن آن را دارد. پس ستون‌ها هم‌تراز می‌مانند و متنِ فارسیِ
+     کنارشان هم نمی‌شکند.
+
+     کد لاتین (`code`, `pre`) توکنِ خودش را دارد؛ آنجا متنِ فارسی نیست و
+     تک‌عرضیِ واقعی لازم است. */
+  --mono: Vazirmatn, "Vazirmatn RD", "IRANSansX", "IRANSans", Sahel, Shabnam,
+          Tahoma, "Segoe UI", system-ui, sans-serif;
+  --mono-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo,
           Vazirmatn, Tahoma, monospace;
   /* پشته فارسی: اول وزیرمتن، بعد فونت‌هایی که روی دستگاه‌های ایرانی واقعاً
      نصب‌اند. تاهوما پیش از Segoe UI می‌آید — پوشش فارسی Segoe UI ناقص است و
@@ -165,23 +194,33 @@
 
      شدتِ تاری یک توکن است چون روی سخت‌افزار ضعیف باید بشود پایینش آورد،
      و چون در پوستهٔ تیره عدد دیگری لازم دارد. */
-  --glass: color-mix(in srgb, #ffffff 62%, transparent);
-  --glass-2: color-mix(in srgb, #ffffff 44%, transparent);
-  --glass-edge: color-mix(in srgb, #0d253d 9%, transparent);
-  --glass-sheen: color-mix(in srgb, #ffffff 85%, transparent);
-  --glass-blur: 20px;
-  --glass-blur-lg: 32px;
+  /* ═══ از شیشه به کاغذ ═══
 
-  /* ——— نورِ محیط ———
-     سه لکهٔ رنگیِ بسیار کم‌رنگ پشت کل صفحه. کارشان زیبایی نیست: زمینهٔ
-     تخت، شیشه را نامرئی می‌کند — چیزی نیست که از پشتش دیده شود. با این
-     سه، هر سطحِ شیشه‌ای رنگِ زیرش را کمی می‌گیرد و عمق پیدا می‌کند. */
-  --ambient-1: color-mix(in srgb, #533afd 26%, transparent);
-  --ambient-2: color-mix(in srgb, #2c84ff 21%, transparent);
-  --ambient-3: color-mix(in srgb, #e54d97 17%, transparent);
+     درخواست صاحب پروژه: «ui سایت رو تغییر بده … المانهای جدید و مینیمال.»
 
-  /* درخششِ دکمهٔ اصلی و حلقهٔ تمرکز — هم‌رنگِ تأکید، نه خاکستری. */
-  --glow-accent: 0 6px 20px -6px color-mix(in srgb, #533afd 55%, transparent);
+     پوستهٔ پیشین شیشه‌ای بود: سطحِ نیمه‌شفاف، تاری پس‌زمینه، لبهٔ درخشان،
+     و سه لکهٔ رنگی پشت کل صفحه. روی یک صفحهٔ معرفی زیباست؛ روی صفحه‌ای که
+     تمامش جدول و عدد است سه هزینه دارد و هر سه را خودِ همین برنامه پرداخت
+     می‌کرد: پس‌زمینهٔ متغیرِ زیرِ متن، کنتراستِ ناپایدارِ عدد، و رنگی که
+     با رنگِ **داده** رقابت می‌کند.
+
+     پس این توکن‌ها نگه داشته شدند ولی خنثی: هیچ جزئی نمی‌شکند، ولی سطح
+     دیگر شیشه نیست — کاغذِ مات است. تاری صفر یعنی `backdrop-filter`
+     در همان ۱۱۶ نقطه بی‌اثر می‌ماند بی آنکه لازم باشد همه‌شان دست بخورند.
+
+     تنها رنگی که روی این صفحه معنی دارد، رنگِ داده است. */
+  --glass: var(--panel);
+  --glass-2: var(--panel);
+  --glass-edge: transparent;
+  --glass-sheen: transparent;
+  --glass-blur: 0px;
+  --glass-blur-lg: 0px;
+  --ambient-1: transparent;
+  --ambient-2: transparent;
+  --ambient-3: transparent;
+
+  /* دکمهٔ اصلی سایهٔ رنگی نمی‌گیرد؛ خودِ رنگش کافی است. */
+  --glow-accent: none;
 
   --lh-tight: 1.5;
   --lh-normal: 1.75;
@@ -234,26 +273,24 @@ body[data-theme="board"] {
   --bar-fill: #2c84ff;
   --shadow: 0 1px 3px rgba(0, 0, 0, .5), 0 12px 30px rgba(0, 0, 0, .4);
   --shadow-2xs: 0 1px 2px rgba(0, 0, 0, .4);
-  --shadow-xs: 0 1px 3px rgba(0, 0, 0, .4), 0 1px 2px rgba(0, 0, 0, .3);
-  --shadow-sm: 0 2px 5px rgba(0, 0, 0, .4), 0 1px 2px rgba(0, 0, 0, .3);
-  --shadow-md: 0 4px 14px -2px rgba(0, 0, 0, .5), 0 2px 6px -1px rgba(0, 0, 0, .35);
-  --shadow-lg: 0 12px 28px -4px rgba(0, 0, 0, .6), 0 6px 12px -2px rgba(0, 0, 0, .4);
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, .45);
+  --shadow-lg: 0 10px 32px rgba(0, 0, 0, .55);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
 
-  /* شیشه در پوستهٔ تیره وارونه است: سطح باید *تیره‌تر* از زمینه باشد نه
-     روشن‌تر، وگرنه شبیه لکهٔ نور می‌شود نه شیشه. لبه اما روشن می‌ماند —
-     همان‌جاست که ضخامت دیده می‌شود. تاری هم بیشتر است چون کنتراستِ زیر
-     سطح در تیره بالاتر است و کم‌تاری، متنِ پشت را خوانا نگه می‌دارد. */
-  --glass: color-mix(in srgb, #121a2e 94%, transparent);
-  --glass-2: color-mix(in srgb, #1b2440 82%, transparent);
-  --glass-edge: color-mix(in srgb, #f6f9fc 12%, transparent);
-  --glass-sheen: color-mix(in srgb, #f6f9fc 10%, transparent);
-  --glass-blur: 24px;
-  --glass-blur-lg: 38px;
-  --ambient-1: color-mix(in srgb, #665efd 34%, transparent);
-  --ambient-2: color-mix(in srgb, #2c84ff 26%, transparent);
-  --ambient-3: color-mix(in srgb, #e54d97 20%, transparent);
-  --glow-accent: 0 8px 26px -8px color-mix(in srgb, #665efd 70%, transparent);
+  /* پوستهٔ تیره هم مات است. تیره‌بودن خودش عمق می‌سازد؛ شیشه رویش فقط
+     کنتراستِ متن را بی‌ثبات می‌کرد. */
+  --glass: var(--panel);
+  --glass-2: var(--panel);
+  --glass-edge: transparent;
+  --glass-sheen: transparent;
+  --glass-blur: 0px;
+  --glass-blur-lg: 0px;
+  --ambient-1: transparent;
+  --ambient-2: transparent;
+  --ambient-3: transparent;
+  --glow-accent: none;
   --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238c9bb1' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
 }
 
@@ -278,7 +315,8 @@ html { direction: ltr; height: 100%; }
 body { direction: rtl; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
 
 b, strong { font-weight: 700; }
-code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
+code, pre { font-family: var(--mono-code); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
+.mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
@@ -337,8 +375,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 10px 20px;
   background: color-mix(in srgb, var(--panel) 88%, transparent);
-  backdrop-filter: blur(16px) saturate(1.8);
-  -webkit-backdrop-filter: blur(16px) saturate(1.8);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
   border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
   box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 4%, transparent);
 }
@@ -500,7 +538,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   position: absolute; z-index: 25; display: grid; gap: 5px; min-width: 180px; max-width: 270px;
   padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
   border-radius: var(--radius-md); background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(14px) saturate(1.6); -webkit-backdrop-filter: blur(14px) saturate(1.6);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
   box-shadow: var(--shadow-lg); pointer-events: none; font-size: var(--fs-xs);
 }
 .backtest-tip[hidden] { display: none; }
@@ -1282,8 +1320,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   border-radius: var(--radius-xl);
   border: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
   background: color-mix(in srgb, var(--panel) 65%, transparent);
-  backdrop-filter: blur(24px) saturate(1.8);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
   box-shadow: var(--shadow-lg);
   padding: 0 0 16px;
   overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; direction: ltr;
@@ -1316,8 +1354,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   display: flex; align-items: center; gap: 8px;
   padding: 10px 12px;
   background: color-mix(in srgb, var(--panel) 88%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border-bottom: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
 }
 .rail-search input {
@@ -1428,8 +1466,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   max-height: min(75vh, 480px);
   overflow-y: auto; overflow-x: hidden;
   background: color-mix(in srgb, var(--panel) 75%, transparent);
-  backdrop-filter: blur(24px) saturate(1.8);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
   border: 1px solid color-mix(in srgb, var(--sec, var(--line)) 40%, var(--line-soft));
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg), 0 16px 36px -4px color-mix(in srgb, var(--ink) 18%, transparent);
@@ -1675,7 +1713,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   display: grid; gap: 9px; margin: 0 0 14px; padding: 11px 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--line)); border-radius: 12px;
   background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: 0 8px 26px rgba(22, 32, 44, .14);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(var(--glass-blur));
 }
 .history-frozen[data-folded="1"] .frozen-facts,
 .history-frozen[data-folded="1"] .frozen-legs { display: none; }
@@ -1750,7 +1788,7 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   position: absolute; z-index: 25; width: max-content; max-width: 260px; display: grid; gap: 5px;
   padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(14px) saturate(1.6); -webkit-backdrop-filter: blur(14px) saturate(1.6);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
   box-shadow: var(--shadow-lg);
   color: var(--ink-2); font-size: var(--fs-xs); line-height: var(--lh-normal); pointer-events: none;
 }
@@ -1955,8 +1993,8 @@ code, .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums
   display: flex; flex-wrap: wrap; gap: 6px;
   padding: 10px; margin-bottom: 16px;
   background: color-mix(in srgb, var(--ground) 85%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   border: 1px solid var(--line-soft); border-radius: var(--radius-md);
 }
 .settings-card { scroll-margin-top: 108px; }
@@ -2067,8 +2105,8 @@ select:disabled, input:disabled {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: var(--control-h, 40px);
   background: var(--accent);
-  color: var(--on-accent); border: 1px solid transparent; border-radius: var(--radius-pill);
-  padding: 8px 20px; font: inherit; font-weight: 800; font-size: var(--fs-md); cursor: pointer;
+  color: var(--on-accent); border: 1px solid transparent; border-radius: var(--radius-control);
+  padding: 8px 18px; font: inherit; font-weight: 700; font-size: var(--fs-sm); cursor: pointer;
   box-shadow: none;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -2103,7 +2141,7 @@ select:disabled, input:disabled {
   min-height: var(--control-h-sm, 34px);
   background: var(--panel); border: 1px solid var(--line); color: var(--ink-2);
   box-shadow: none;
-  border-radius: var(--radius-pill); padding: 6px 14px; font: inherit; font-size: var(--fs-sm); font-weight: 700; cursor: pointer;
+  border-radius: var(--radius-control); padding: 6px 12px; font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ghost:hover { border-color: var(--accent); color: var(--accent-ink); background: var(--accent-soft); }
@@ -2123,8 +2161,8 @@ table.data th, table.data td {
 table.data thead th {
   position: sticky; top: 46px; z-index: 2;
   background: color-mix(in srgb, var(--panel-2) 94%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
   font-size: var(--fs-sm); font-weight: 800; color: var(--ink-2);
   border-bottom: 2px solid var(--line); cursor: pointer; user-select: none;
   transition: color var(--transition-fast), background var(--transition-fast);
@@ -2343,8 +2381,8 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
   position: absolute; z-index: 25; display: grid; gap: 6px; width: max-content; max-width: 260px;
   padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(14px) saturate(1.6);
-  -webkit-backdrop-filter: blur(14px) saturate(1.6);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
   box-shadow: var(--shadow-lg);
   color: var(--ink-2); font-size: var(--fs-xs); line-height: var(--lh-normal); pointer-events: none;
 }
@@ -2480,9 +2518,13 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 /* ——— طیف رنگی ردیف بر پایهٔ ستون مرتب‌شده ———
    شدت از `--heat-t` می‌آید که جاوااسکریپت روی خود ردیف می‌گذارد. رنگ در CSS
    می‌ماند تا با پوسته عوض شود، و عدد در جاوااسکریپت تا با داده. */
-.tbl-body tr[data-heat] { background: color-mix(in srgb, var(--accent) calc(var(--heat-t) * 20%), transparent); }
-.tbl-body tr[data-heat="gain"] { background: color-mix(in srgb, var(--gain) calc(var(--heat-t) * 24%), transparent); }
-.tbl-body tr[data-heat="loss"] { background: color-mix(in srgb, var(--loss) calc(var(--heat-t) * 24%), transparent); }
+/* ── ردیفِ داغ: یک ته‌رنگ، نه یک تختهٔ رنگی ───────────────────────────
+   رنگِ سراسریِ ردیف با رنگِ سلولِ داغ روی هم می‌افتاد و متن را می‌بلعید.
+   حالا هر دو لایه به یک‌چهارمِ شدتِ قبلی رفته‌اند: ترتیب همچنان دیده
+   می‌شود، ولی هیچ متنی روی رنگی که کنتراستش را نمی‌دانیم نمی‌نشیند. */
+.tbl-body tr[data-heat] { background: color-mix(in srgb, var(--accent) calc(var(--heat-t) * 6%), transparent); }
+.tbl-body tr[data-heat="gain"] { background: color-mix(in srgb, var(--gain) calc(var(--heat-t) * 6%), transparent); }
+.tbl-body tr[data-heat="loss"] { background: color-mix(in srgb, var(--loss) calc(var(--heat-t) * 6%), transparent); }
 .tbl-body tr[data-heat]:hover { background: var(--panel-2); }
 
 /* راهنمای طیف. بدون آن رنگ فقط تزیین است و کسی نمی‌داند کم یعنی چه. */
@@ -2515,9 +2557,9 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 }
 
 .tbl-tools {
-  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
-  border-bottom: 1px solid var(--line); background: var(--panel-2);
-  font-size: var(--fs-sm); color: var(--muted);
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+  font-size: var(--fs-xs); color: var(--muted);
 }
 .tbl-tools .sp { flex: 1; }
 .tbl-cols-btn b { font-family: var(--mono); font-size: var(--fs-xs); font-weight: 500; }
@@ -2547,7 +2589,7 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .col-opt[hidden], .col-group[hidden] { display: none; }
 .col-opt input { accent-color: var(--accent); }
 .col-opt span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tbl-body td { padding: 4px 8px; font-size: var(--fs-md); white-space: nowrap; border-bottom: 1px solid var(--line-soft); }
+.tbl-body td { padding: 7px 10px; font-size: var(--fs-sm); white-space: nowrap; border-bottom: 1px solid var(--line-soft); }
 /* رنگ سلول عددی منفی — قبلاً style این‌لاین بود که همیشه بر .stale td
    (زیر) برنده می‌شد، دقیقاً همان مشکل دورهای ۲۴/۳۰؛ اینجا با کلاس، سلول
    زیانِ همان ردیفی که کاربر باید کمتر از همه بهش اعتماد کند (مظنه کهنه)
@@ -2865,7 +2907,7 @@ td.gain, dd.gain { color: var(--gain); }
   min-width: 160px; max-width: 270px; padding: 10px 14px; transform: translateX(-50%);
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(14px) saturate(1.6); -webkit-backdrop-filter: blur(14px) saturate(1.6);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.6); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
   box-shadow: var(--shadow-lg); color: var(--ink-2); font-size: var(--fs-xs); pointer-events: none;
 }
 .live-market-tip b { color: var(--ink); font-family: var(--mono); }
@@ -3324,40 +3366,52 @@ button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
 .spark.down .spark-dot { fill: var(--loss); }
 .spark-band { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 3 3; opacity: .5; vector-effect: non-scaling-stroke; }
 
-/* ——— نوار پرشدگی: یک نوار با دو رنگ، چون دو درصد متمم هم‌اند ——— */
+/* ——— نوار پرشدگی: عدد بالا، نوار زیرش ———
+   پیش از این متن **روی** نوار می‌نشست و نوار پس‌زمینه‌اش بود. در عرض‌های
+   واقعیِ جدول دو برچسبِ فارسی به هم می‌رسیدند و کلمه وسطش می‌شکست. حالا
+   متن و نگاره دو سطرِ جدا هستند؛ هیچ متنی روی رنگِ متغیر نمی‌افتد. */
 .gap-bar {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  min-width: 148px;
-  padding: var(--space-1) var(--space-2);
-  border-radius: var(--radius-sm);
-  background: var(--panel-2);
-  overflow: hidden;
-  font-size: .74rem;
+  display: grid;
+  gap: 3px;
+  min-width: 96px;
   font-variant-numeric: tabular-nums;
 }
-.gap-bar > b {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-start: 0;
+.gap-bar-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: var(--space-2); min-width: 0;
+}
+.gap-bar-head b { flex: none; color: var(--ink); font-weight: 600; font-size: var(--fs-2xs); }
+/* متنِ دوم اول کوتاه می‌شود، نه عدد. `min-width: 0` لازم است وگرنه آیتمِ
+   فلکس به عرضِ محتوایش می‌ماند و به‌جای سه‌نقطه، از جعبه بیرون می‌زند. */
+.gap-bar-head i {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-style: normal;
+  font-size: var(--fs-3xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gap-bar > s {
+  display: block;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  overflow: hidden;
+  text-decoration: none;
+}
+.gap-bar > s > i {
+  display: block;
   width: var(--fill, 0%);
-  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
   transition: width var(--transition-med);
 }
-.gap-bar.over > b { background: color-mix(in srgb, var(--warn) 30%, transparent); }
-/* بی‌سقف: نوار پر می‌شود ولی نیمهٔ راستش ادعای «باقی‌مانده» ندارد. */
-.gap-bar.unbounded > b { background: color-mix(in srgb, var(--gain) 26%, transparent); }
-/* زیر آب: قرمز، تا در ستونی از درصدهای مثبت گم نشود. */
-.gap-bar.underwater > b { background: color-mix(in srgb, var(--loss) 28%, transparent); }
-.gap-bar.underwater .gap-bar-filled { color: var(--loss); }
-.gap-bar.unbounded .gap-bar-room { font-style: italic; }
-.gap-bar > span { position: relative; }
-.gap-bar-filled { color: var(--accent-ink); font-weight: 600; }
-.gap-bar-room { color: var(--muted); }
-.gap-bar-empty { color: var(--muted); justify-content: flex-start; }
+.gap-bar.over > s > i { background: var(--warn); }
+.gap-bar.over .gap-bar-head i { color: var(--warn); }
+.gap-bar-empty { color: var(--muted); font-size: var(--fs-3xs); }
 
 /* ——— کارت هشدار: کفِ تضمین‌شده وقتی اعلان مرورگر نیست ——— */
 .gap-alarm-host {
@@ -3530,39 +3584,47 @@ td.rich { padding-block: var(--space-1); }
 .rad-dim { color: var(--muted); }
 .rad-boundless { font-style: normal; color: var(--warn); font-size: var(--fs-3xs); }
 
-.rad-risk { display: grid; gap: 2px; min-width: 96px; }
-.rad-risk span {
-  position: relative;
-  display: block;
-  height: 11px;
-  border-radius: var(--radius-xs);
-  background: var(--panel-2);
-  overflow: hidden;
+/* ——— سود در برابر زیان: نوار کشسان، عدد بیرونِ آن ———
+   عدد پیش از این داخلِ نواری بود که `overflow: hidden` داشت و عرضش از
+   خودِ درصد می‌آمد؛ نوارِ کوتاه عددش را می‌برید و «۱۲٫۰۰٪» می‌شد «۰۰…».
+   دو ستون: نوار کشسان، عدد با عرضِ خودش و بیرون از ناحیهٔ بریده‌شونده. */
+.rad-risk { display: grid; gap: 3px; min-width: 104px; }
+.rad-risk-row {
+  display: grid;
+  grid-template-columns: 1fr max-content;
+  align-items: center;
+  gap: var(--space-2);
 }
-.rad-risk span::before {
-  content: '';
-  position: absolute;
-  inset-inline-start: 0;
-  inset-block: 0;
+.rad-risk-row > s {
+  display: block;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  overflow: hidden;
+  text-decoration: none;
+}
+.rad-risk-row > s > i {
+  display: block;
   width: var(--w, 0%);
+  height: 100%;
   border-radius: inherit;
 }
-.rad-risk-gain::before { background: color-mix(in srgb, var(--gain) 55%, transparent); }
-.rad-risk-loss::before { background: color-mix(in srgb, var(--loss) 55%, transparent); }
+.rad-risk-row.gain > s > i { background: var(--gain); }
+.rad-risk-row.loss > s > i { background: var(--loss); }
 /* زیانِ بی‌سقف: نوارِ راه‌راه، تا در یک نگاه از زیانِ «زیاد ولی محدود»
    جدا باشد — رنگ به تنهایی این تفاوت را نمی‌رساند. */
-.rad-risk-loss.boundless::before {
+.rad-risk-row.loss.boundless > s > i {
   background: repeating-linear-gradient(45deg,
-    color-mix(in srgb, var(--loss) 60%, transparent) 0 4px,
-    color-mix(in srgb, var(--loss) 22%, transparent) 4px 8px);
+    var(--loss) 0 3px,
+    color-mix(in srgb, var(--loss) 28%, transparent) 3px 6px);
 }
-.rad-risk b {
-  position: relative;
+.rad-risk-row > b {
   font-size: var(--fs-3xs);
   font-weight: 600;
-  padding-inline-start: var(--space-1);
   font-variant-numeric: tabular-nums;
 }
+.rad-risk-row.gain > b { color: var(--gain); }
+.rad-risk-row.loss > b { color: var(--loss); }
 
 .gap-skin .gap-grid { margin-top: var(--space-3); }
 .gap-skin .gap-grid .tbl-body { max-height: 62vh; }

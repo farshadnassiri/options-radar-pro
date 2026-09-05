@@ -63,9 +63,9 @@ export function sparkline(values = [], { band = NaN, width = 92, height = 26, la
  * جدا این را پنهان می‌کند. یک نوار با دو رنگ، خودش می‌گوید جمعشان صد است.
  */
 export function fillBar(gap) {
-  if (!gap?.ok) return `<div class="gap-bar gap-bar-empty"><span>${esc(gap?.why || 'فاصله محاسبه نشد')}</span></div>`;
+  if (!gap?.ok) return `<span class="gap-bar-empty">${esc(gap?.why || 'فاصله محاسبه نشد')}</span>`;
   if (!gap.anchored || !finite(gap.coveragePct)) {
-    return `<div class="gap-bar gap-bar-empty"><span>${esc(gap.why || 'لنگری برای درصد نیست')}</span></div>`;
+    return `<span class="gap-bar-empty">${esc(gap.why || 'لنگری برای درصد نیست')}</span>`;
   }
   const filled = Math.max(0, Math.min(100, gap.coveragePct));
   // ── چرا دیگر شاخهٔ «سقف ندارد» و «در زیان» ندارد ────────────────────
@@ -73,25 +73,28 @@ export function fillBar(gap) {
   // این نوار فقط یک چیز می‌گوید: نسبتِ ساختاری. از وقتی لنگرِ استرانگل هم
   // ساختاری شد (دهانهٔ اعمال)، این نسبت برای هر خانواده‌ای هست و همیشه
   // بین صفر و صد می‌ماند.
-  //
-  // «سود نامحدود» و «در زیان» ادعاهای موقعیتی‌اند و ستونِ خودشان را
-  // دارند — «حداکثر سود» و «حرکت از مبدأ». ریختنشان روی همین نوار، سه
-  // معنی را در یک شکل جمع می‌کرد و هیچ‌کدام خوانده نمی‌شد.
   const filledLabel = gap.coverageLabel || 'پر شده';
   const roomLabel = gap.roomLabel || 'باقی‌مانده';
   // ── وقتی از لنگر گذشته، «باقی‌مانده» عددِ منفی نیست ─────────────────
   //
   // در اجرای مرورگر دیده شد: استرانگلی که پرمیومش از دهانهٔ اعمال بزرگ‌تر
   // بود، «‎−۴۰٪ دهانهٔ بی‌پوشش» می‌داد. دهانهٔ بی‌پوششِ منفی چیزی نیست.
-  // آنچه واقعاً رخ داده این است که لنگر رد شده — و همان نوشته می‌شود.
   const over = gap.coveragePct > 100;
-  const room = over
-    ? `از ${esc(gap.anchorLabel || 'لنگر')} گذشته`
-    : `${fmt.pct(gap.roomPct)}٪ ${esc(roomLabel)}`;
-  return `<div class="gap-bar${over ? ' over' : ''}" role="img" aria-label="${fmt.pct(gap.coveragePct)} درصد ${esc(filledLabel)}">
-    <b style="--fill:${filled.toFixed(2)}%"></b>
-    <span class="gap-bar-filled">${fmt.pct(gap.coveragePct)}٪ ${esc(filledLabel)}</span>
-    <span class="gap-bar-room">${room}</span>
+  const room = over ? `از ${gap.anchorLabel || 'لنگر'} گذشته` : `${fmt.pct(gap.roomPct)}٪ ${roomLabel}`;
+  // ── چرا متن دیگر روی نوار نمی‌نشیند ─────────────────────────────────
+  //
+  // گزارش صاحب پروژه: «جدول قابل خوندن نیست و به هم ریختگی ایجاد شده.»
+  // دو برچسبِ فارسی در دو سرِ یک جعبهٔ ۱۴۸ پیکسلی می‌نشستند و پرشدگی هم
+  // پس‌زمینه‌شان بود؛ در عرض‌های واقعیِ جدول به هم می‌رسیدند و کلمه وسطش
+  // می‌شکست — «باقی‌مانده» می‌شد «با قیما نده».
+  //
+  // حالا دو سطرِ جدا: عددها روی خطِ خودشان، نوار زیرشان. نوار دیگر
+  // پس‌زمینهٔ متن نیست، پس هیچ متنی روی رنگِ متغیر نمی‌افتد و هیچ‌چیز
+  // نمی‌شکند. جملهٔ کامل در `title` می‌ماند برای وقتی که ستون تنگ است.
+  const title = `${fmt.pct(gap.coveragePct)}٪ ${filledLabel} · ${room}`;
+  return `<div class="gap-bar${over ? ' over' : ''}" title="${esc(title)}" role="img" aria-label="${esc(title)}">
+    <span class="gap-bar-head"><b>${fmt.pct(gap.coveragePct)}٪</b><i>${esc(room)}</i></span>
+    <s><i style="--fill:${filled.toFixed(2)}%"></i></s>
   </div>`;
 }
 
