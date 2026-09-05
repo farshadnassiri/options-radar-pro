@@ -40,7 +40,28 @@ group('۲۲۸-ب. سه گام، و تأییدِ کاربر وسطشان');
   // شرط لازمِ روشن‌شدن: هم شرطی گذاشته شده باشد، هم فهرستِ منطبق‌ها
   // ساخته شده باشد. یکی‌شان کافی نیست.
   check('و فقط با «شرط دارد و منطبقی پیدا شد» روشن می‌شود',
-    src.includes("$('wt-save').disabled = !(conditions.length && matched.length);"));
+    src.includes("$('wt-save').disabled = !(conditions.length && matched.length && previewFresh);"));
+  // ── رگرسیون: پیش‌نمایشِ کهنه، اجازهٔ رصد نمی‌دهد ────────────────────
+  //
+  // «تغییر شرط یا دامنه، نتیجهٔ پیش‌نمایش را باطل نمی‌کند. ابتدا شرطی
+  // ساختم که ۱۰۳ ترکیب داشت. سپس یک شرط ناممکن حداکثر سود ≥ ۱٬۰۰۰٬۰۰۰٪
+  // اضافه کردم؛ جدول همچنان همان ۱۰۳ ترکیب را منطبق نشان داد و اجازهٔ
+  // شروع رصد داد.»
+  check('هر تغییری در شرط یا دامنه، پیش‌نمایش را کهنه می‌کند',
+    src.includes('function stalePreview(')
+    && src.includes("stalePreview('شرط تازه اضافه شد')")
+    && src.includes("stalePreview('شرطی حذف شد')")
+    && src.includes("stalePreview('دامنه عوض شد')")
+    && src.includes("stalePreview('بازه عوض شد')"));
+  check('و فقط «ساخت و تطبیق» دوباره تازه‌اش می‌کند',
+    /previewFresh = true;[\s\S]{0,80}paintMatch/.test(src));
+  check('ذخیرهٔ قاعده روی پیش‌نمایشِ کهنه رد می‌شود، نه اینکه بی‌صدا انجام شود',
+    src.includes("if (!previewFresh) { setStatus('پیش‌نمایش کهنه است"));
+  // ── رگرسیون: بن‌بستِ «عبور از آستانه» ──────────────────────────────
+  check('پیش‌نمایش، شرطِ «عبور» را مثل «بودن» می‌سنجد تا بن‌بست نشود',
+    src.includes('previewCross: true'));
+  check('و همان‌جا می‌گوید چه کاری کرده، تا کاربر فکر نکند رصد هم همین‌قدر می‌زند',
+    src.includes('در این پیش‌نمایش مثل «آن‌سوی عدد بودن» سنجیده شد'));
   check('پیش از ساخت، سه قید صریح بررسی می‌شوند: نماد، استراتژی، و شرط',
     src.includes('دست‌کم یک نماد پایه انتخاب کن')
     && src.includes('دست‌کم یک استراتژی انتخاب کن')
@@ -71,17 +92,84 @@ group('۲۲۸-د. رصد، و آنچه بی‌صدا نمی‌افتد');
 {
   const src = readSrc('../ui/tabs/watchtower.mjs');
   check('رصد از موتور شرط می‌گذرد، نه از سنجشِ دستی',
-    src.includes('evaluateWatch({ rules: [watchRule]'));
+    src.includes('evaluateWatch({ rules: watchRules'));
   check('و «قبلی» را نگه می‌دارد، وگرنه شرطِ «عبور» هرگز آتش نمی‌کند',
     src.includes('prev: prevSnaps') && src.includes('prevSnaps = verdict.prev'));
-  // سقفِ ۲۴ ابزارِ `/api/live-trades` واقعی است. ترکیبی که پایش جا نشد،
-  // با عددِ روزانه سنجیده نمی‌شود — و همین باید دیده شود.
-  check('ترکیبِ بی‌قیمتِ زنده با عددِ روزانه سنجیده نمی‌شود',
-    src.includes("if (!legs.every((leg) => finite(prices[String(leg.ins)]))) continue;"));
-  check('و شمارِ پوشش‌داده‌شده نوشته می‌شود، تا سقفِ ۲۴ بی‌صدا نماند',
-    src.includes('ترکیب با قیمت زنده'));
+
+  // ── رگرسیون: کلِ دامنه رصد می‌شود، نه منطبق‌های پیش‌نمایش ───────────
+  //
+  // «فقط ترکیب‌هایی رصد می‌شوند که در پیش‌نمایش اولیه منطبق بوده‌اند.
+  // ترکیبی که هنگام ساخت زیر آستانه بوده و ده دقیقه بعد وارد محدودهٔ شرط
+  // شود، اصلاً بررسی نمی‌شود. این دقیقاً خلاف هدف پیدا کردن فرصت تازه
+  // است.» علتش این یک خط بود: `const pool = matched.length ? matched :
+  // built;`
+  check('استخرِ رصد، کلِ دامنه است — نه فهرستِ منطبق‌های پیش‌نمایش',
+    !src.includes('matched.length ? matched : built')
+    && src.includes('for (const { row, ua } of built)'));
+
+  // ── رگرسیون: همهٔ قاعده‌های فعال، نه فقط آخری ───────────────────────
+  //
+  // «چند قاعده ذخیره می‌شود، اما فقط آخرین قاعده واقعاً رصد می‌شود.»
+  check('همهٔ قاعده‌های فعال رصد می‌شوند، نه فقط آخرین ذخیره‌شده',
+    src.includes('const activeRules = () => rules.filter((rule) => rule.enabled !== false)')
+    && src.includes('watchRules = active'));
+  check('و حذفِ قاعدهٔ فعال، رصد را واقعاً به‌روز می‌کند یا می‌خواباند',
+    /data-act="drop"[\s\S]{0,700}if \(activeRules\(\)\.length\) startWatch\(\);[\s\S]{0,60}else \{ stopWatch\(\)/.test(src));
+
+  // ── رگرسیون: توقف، و درخواست‌هایی که روی هم می‌افتند ────────────────
+  //
+  // «رصد را هنگام یک پاسخ ۱۵ ثانیه‌ای متوقف کردم؛ پس از رسیدن پاسخ،
+  // وضعیت دوباره به روشن تغییر کرد» و «تیک هر ۱۰ ثانیه اجرا می‌شود، ولی
+  // قفل در حال دریافت یا لغو درخواست قبلی وجود ندارد.»
+  check('توقف، نسلِ رصد را عوض می‌کند و درخواستِ جاری را لغو',
+    src.includes('watchGen += 1') && src.includes('watchJob?.abort()')
+    && src.includes('signal: job.signal'));
+  check('و پاسخِ نسلِ خاموش‌شده نه نوار را عوض می‌کند نه جدول را',
+    src.includes('if (gen !== watchGen || !mounted) return;'));
+  check('تیکِ تازه روی پاسخِ نیامده سوار نمی‌شود',
+    src.includes('if (watchBusy) return;') && src.includes('watchBusy = true'));
+
+  // ── رگرسیون: «زنده» یعنی پاهای هم‌زمانِ قیمت‌دار ────────────────────
+  //
+  // «منبع زنده آخرین معاملهٔ هر پا است، نه قیمت قابل اجرا. زمان معاملهٔ
+  // پاها کنترل نمی‌شود … دو پا ممکن است در ساعت‌های متفاوت معامله شده
+  // باشند، ولی ترکیب زنده معرفی شود.»
+  check('ترکیبِ بی‌قیمتِ زنده یا با پاهای ناهم‌زمان، با عددِ روزانه سنجیده نمی‌شود',
+    src.includes('comboLiveQuote({ legs: row.legs, book, nowSec })')
+    && src.includes('if (!quote.ok) {'));
+  check('و شمارِ پوشش‌داده‌شده و کنارگذاشته‌شده نوشته می‌شود، تا سقفِ ۲۴ بی‌صدا نماند',
+    src.includes('ترکیب با مظنهٔ هم‌زمان') && src.includes('ترکیب کنار گذاشته شد'));
+
+  // ── رگرسیون: برچسبِ «زنده» فقط برای ردیفِ زنده ──────────────────────
+  //
+  // «در یک آزمون ۲۴۴ ترکیب در دامنه بود و فقط ۲۲۸ ترکیب پوشش زنده داشت،
+  // ولی جدول کل دامنه را با `live: true` نمایش می‌دهد.»
+  check('برچسبِ زنده از خودِ ردیف می‌آید، نه از یک `true` ثابت',
+    !src.includes('live: true') && src.includes('live: watchTimer ? liveKeys.has(row.key) : null'));
+
+  // ── رگرسیون: سنجه‌ها هم زنده می‌شوند، نه فقط فاصله ──────────────────
+  //
+  // «سود، زیان و بازده با قیمت زنده دوباره محاسبه نمی‌شوند … فاصله از
+  // ۱٬۱۲۴ به ۲٬۲۴۸ رسید، اما حداکثر سود ٪ همچنان ۴۲۷٫۴۹٪ باقی ماند.»
+  check('سود، زیان، بازده و وجه تضمین هم با قیمتِ زنده از نو ساخته می‌شوند',
+    src.includes('comboMetrics({ legs: row.legs, prices: book.prices'));
+  check('و اسپاتِ زنده مبنای وجه تضمین می‌شود، نه اسپاتِ روز سنجش',
+    src.includes('const spot = num(book.prices[String(ua.ins)], row.spot);'));
+  check('قیمتِ زندهٔ پایه به عکسِ شرط می‌رسد، تا شرطِ «قیمت نماد پایه» کار کند',
+    src.includes('basePrice: num(book.prices[String(ua.ins)], NaN)'));
+  check('«کف/سقف امروز» از دفترِ مشاهده‌های امروز می‌آید، نه از سریِ تاریخی',
+    src.includes('day: dayRange.get(row.key)') && src.includes('dayRange.observe(row.key'));
+
+  // ── رگرسیون: رصدِ زنده روی بازهٔ گذشته ──────────────────────────────
+  check('رصد روی ساختِ یک بازهٔ گذشته روشن نمی‌شود',
+    src.includes('function watchDayGate()') && src.includes('روی بازهٔ تاریخی روشن نمی‌شود'));
+
   check('آتش‌کردن، شمارندهٔ قاعده را ذخیره می‌کند تا آرامش پس از بازخوانی هم کار کند',
-    src.includes('watchRule = verdict.rules[0]') && src.includes('saveRules(rules)'));
+    src.includes('watchRules = verdict.rules') && src.includes('saveRules(rules)'));
+  check('موجِ بزرگ همه‌اش در دفترچه می‌ماند و صفحه را نمی‌بلعد',
+    src.includes("deliverBurst(verdict.fired, { host: $('wt-alarm-host'), scope: 'watch', kind: 'watch' })"));
+  check('و دفترچهٔ دیده‌بان از دفترچهٔ رادار جداست',
+    src.includes("readLog('watch')") && src.includes("clearLog('watch')"));
   check('و خروج از تب، حلقهٔ رصد را می‌بندد',
     /return \(\) => \{[\s\S]{0,160}stopWatch\(\)/.test(src));
 }

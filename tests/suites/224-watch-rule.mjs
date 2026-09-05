@@ -14,7 +14,7 @@ import { check, group, near } from '../harness.mjs';
 import {
   checkCondition, checkRule, conditionNote, evaluateWatch, inScope,
   normalizeCondition, normalizeWatchRule, referenceValue, thresholdOf,
-  watchRuleNote, watchSnapshot,
+  watchDistance, watchRuleNote, watchSnapshot,
 } from '../../core/watch-rule.mjs';
 
 /** عکسِ ساختگی یک ترکیب — فقط میدان‌هایی که شرط‌ها می‌خوانند. */
@@ -188,7 +188,65 @@ group('۲۲۴-ه. عکسِ ردیفِ رادار');
   check('عکس، هر سه خانوادهٔ سنجه را از یک ردیف برمی‌دارد',
     one.current === 2400 && one.returnPct === 45 && one.rank === 40 && one.basePrice === 54000);
   check('و تاریخچه‌اش را هم، تا آستانهٔ نسبی کار کند',
-    one.history.current.join(',') === '2000,2400' && one.dayLow === 2000 && one.dayHigh === 2400);
+    one.history.current.join(',') === '2000,2400');
+  // ── رگرسیون: «کف امروز» کفِ امروز است، نه کفِ بازه ──────────────────
+  //
+  // گزارش صاحب پروژه: «کف امروز و سقف امروز در واقع کف و سقف کل بازهٔ
+  // تاریخی‌اند. ریزمعامله‌های امروز وارد محاسبهٔ این دو مرجع نمی‌شوند.»
+  // درست بود: `Math.min`/`Math.max` روی نقاطِ سریِ **روزانهٔ بازه** اجرا
+  // می‌شد، پس شرطِ «۵٪ بالاتر از کف امروز» در عمل روی کفِ سه‌ماهه
+  // می‌نشست. حالا اگر دفترِ امروز داده نشود، عدد **نداریم** — و نداشتن،
+  // بهتر از عددِ اشتباه است.
+  check('بی دفترِ مشاهده‌های امروز، «کف/سقف امروز» عدد ندارد و از سریِ تاریخی پر نمی‌شود',
+    !Number.isFinite(one.dayLow) && !Number.isFinite(one.dayHigh));
+  const withDay = watchSnapshot(row, { baseIns: '9', baseName: 'اهرم', basePrice: 54000,
+    day: { low: 2350, high: 2500 } });
+  check('و با دفترِ امروز، همان عددهای امروز می‌آیند نه کمینه و بیشینهٔ بازه',
+    withDay.dayLow === 2350 && withDay.dayHigh === 2500);
   check('نامِ استراتژی و نماد پایه هم می‌آیند، چون متنِ هشدار بی آن‌ها معلق است',
     one.strategyName === 'Bull Call Spread' && one.baseName === 'اهرم');
+}
+
+group('۲۲۴-و. بن‌بستِ «عبور» در پیش‌نمایش');
+{
+  // گزارش صاحب پروژه: «ساخت شرط عبور از آستانه عملاً بن‌بست دارد. عملگر
+  // پیش‌فرض به مقدار قبلی نیاز دارد؛ در پیش‌نمایش مقدار قبلی وجود ندارد،
+  // پس صفر ترکیب منطبق می‌شود و دکمهٔ ذخیره و شروع رصد غیرفعال می‌ماند.»
+  //
+  // پیش‌نمایش یک سنجش است و عبور در یک سنجش **قابل مشاهده نیست**. پس در
+  // پیش‌نمایش «رد شد» مثل «آن‌سوی خط هست» سنجیده می‌شود، و زنگِ واقعی
+  // همچنان فقط در لحظهٔ عبور می‌زند.
+  const condition = { metric: 'current', op: 'crossUp', value: 2000, ref: 'abs', windowDays: 0 };
+  const snapshot = { key: 'k', current: 2400 };
+  const cold = checkCondition(condition, snapshot, null);
+  check('بی پیش‌نمایش، نخستین سنجش هیچ عبوری نمی‌بیند — و این درست است',
+    cold.held === false && cold.why.includes('سنجش قبلی'));
+  const preview = checkCondition(condition, snapshot, null, { previewCross: true });
+  check('در پیش‌نمایش، همان شرط روی همان عدد منطبق می‌شود',
+    preview.held === true && preview.preview === true);
+  const below = checkCondition(condition, { key: 'k', current: 1900 }, null, { previewCross: true });
+  check('و پیش‌نمایش، شرطِ برقرارنشده را برقرار نمی‌کند',
+    below.held === false);
+  // و مهم‌تر: پیش‌نمایش نباید به رصد نشت کند. با مقدارِ قبلیِ موجود،
+  // «عبور» همان عبورِ واقعی است.
+  const real = checkCondition(condition, snapshot, { current: 2100 }, { previewCross: true });
+  check('با وجودِ مقدارِ قبلی، عبور همان عبورِ واقعی است و نه «بودن»',
+    real.held === false && real.why === 'عبوری رخ نداد');
+}
+
+group('۲۲۴-ز. فاصله تا برقرار شدنِ قاعده — برای اولویتِ سهمیهٔ زنده');
+{
+  const rule = { id: 'r1', enabled: true, conditions: [
+    { metric: 'returnPct', op: 'ge', value: 40, ref: 'abs', windowDays: 0 },
+    { metric: 'lossPct', op: 'le', value: 20, ref: 'abs', windowDays: 0 },
+  ] };
+  check('ترکیبی که هر دو شرط را دارد، فاصله‌اش صفر است',
+    watchDistance(rule, { returnPct: 45, lossPct: 12 }) === 0);
+  // «و» است، پس بدترین شرط ملاک است نه بهترین.
+  const far = watchDistance(rule, { returnPct: 20, lossPct: 12 });
+  const close = watchDistance(rule, { returnPct: 38, lossPct: 12 });
+  check('و هرچه دورتر، عدد بزرگ‌تر — پس مرتب‌سازی صعودی یعنی نزدیک‌ترین اول',
+    far > close && close > 0);
+  check('سنجهٔ نداشته، فاصله نمی‌سازد؛ عددِ ساختگی جایش نمی‌نشیند',
+    !Number.isFinite(watchDistance(rule, { returnPct: NaN, lossPct: 12 })));
 }

@@ -98,8 +98,10 @@ export const WATCH_REFS = [
     hint: 'میانگینِ N روزِ پیش از امروز. خودِ امروز در میانگین نمی‌آید، وگرنه شرط به خودش نگاه می‌کند.' },
   { id: 'windowMin', label: '٪ از کمینهٔ N روز گذشته', window: true },
   { id: 'windowMax', label: '٪ از بیشینهٔ N روز گذشته', window: true },
-  { id: 'dayLow', label: '٪ از کف امروز', window: false },
-  { id: 'dayHigh', label: '٪ از سقف امروز', window: false },
+  { id: 'dayLow', label: '٪ از کفِ مشاهده‌شدهٔ امروز', window: false,
+    hint: 'کمترین مقداری که از آغاز رصدِ زندهٔ امروز دیده شده — نه کمینهٔ بازهٔ تاریخی. پیش از نخستین تیک، عدد ندارد و شرط برقرار نمی‌شود.' },
+  { id: 'dayHigh', label: '٪ از سقفِ مشاهده‌شدهٔ امروز', window: false,
+    hint: 'بیشترین مقداری که از آغاز رصدِ زندهٔ امروز دیده شده — نه بیشینهٔ بازهٔ تاریخی.' },
 ];
 
 const REF_BY_ID = new Map(WATCH_REFS.map((row) => [row.id, row]));
@@ -242,7 +244,7 @@ export function inScope(rule, snapshot) {
  * برگرداندنِ فقط درست/غلط کافی نبود: کاربری که شرط گذاشته و هیچ هشداری
  * نمی‌گیرد باید بتواند ببیند سنجه چند بود و آستانه چند شد.
  */
-export function checkCondition(condition, snapshot, prev = null) {
+export function checkCondition(condition, snapshot, prev = null, { previewCross = false } = {}) {
   const metric = watchMetric(condition?.metric);
   const op = alertOp(condition?.op);
   if (!metric || !op) return { held: false, why: 'شرط نامعتبر', value: NaN, threshold: NaN };
@@ -256,6 +258,23 @@ export function checkCondition(condition, snapshot, prev = null) {
   }
   if (op.needsPrev) {
     const before = num(prev?.[metric.id], NaN);
+    // ── بن‌بستِ پیش‌نمایش ────────────────────────────────────────────
+    //
+    // «ساخت شرط عبور از آستانه عملاً بن‌بست دارد: عملگر پیش‌فرض به مقدار
+    // قبلی نیاز دارد؛ در پیش‌نمایش مقدار قبلی وجود ندارد، پس صفر ترکیب
+    // منطبق می‌شود و دکمهٔ شروع رصد غیرفعال می‌ماند.»
+    //
+    // پیش‌نمایش یک سنجش است، نه دو؛ عبور در آن **قابل مشاهده نیست** و
+    // هیچ‌وقت هم نخواهد بود. پس در پیش‌نمایش — و فقط آنجا — «از این عدد
+    // رد شد» مثل «آن‌سوی این عدد هست» سنجیده می‌شود: کاربر می‌بیند
+    // قاعده روی چه چیزی می‌نشیند. زنگِ واقعی همچنان فقط در لحظهٔ عبور
+    // می‌زند، و `preview: true` این تفاوت را حمل می‌کند تا رابط بتواند
+    // بگوید چه چیزی نشان داده شده.
+    if (previewCross && !finite(before)) {
+      const held = op.id === 'crossUp' ? value >= threshold : value <= threshold;
+      return { held, preview: true, value, threshold,
+        why: held ? 'در پیش‌نمایش، «عبور» مثل «بودن» سنجیده شد' : 'شرط برقرار نیست' };
+    }
     if (!finite(before)) return { held: false, why: 'هنوز سنجش قبلی‌ای نیست تا عبور دیده شود', value, threshold };
     const crossed = op.id === 'crossUp'
       ? before < threshold && value >= threshold
@@ -267,9 +286,9 @@ export function checkCondition(condition, snapshot, prev = null) {
 }
 
 /** همهٔ شرط‌های یک قاعده روی یک ترکیب. «و» است، پس اولین ناکامی کافی است. */
-export function checkRule(rule, snapshot, prev = null) {
+export function checkRule(rule, snapshot, prev = null, { previewCross = false } = {}) {
   const parts = (rule?.conditions || []).map((condition) => ({
-    condition, ...checkCondition(condition, snapshot, prev),
+    condition, ...checkCondition(condition, snapshot, prev, { previewCross }),
   }));
   return { held: parts.length > 0 && parts.every((part) => part.held), parts };
 }
@@ -280,7 +299,7 @@ export function checkRule(rule, snapshot, prev = null) {
  * `nowMs` تزریق می‌شود تا آزمون بتواند ساعت را خودش بچرخاند؛
  * `Date.now()` داخل تابع یعنی آزمونِ زمان‌دار.
  */
-export function evaluateWatch({ rules = [], snapshots = [], prev = {}, nowMs = 0 } = {}) {
+export function evaluateWatch({ rules = [], snapshots = [], prev = {}, nowMs = 0, previewCross = false } = {}) {
   const fired = [];
   const matched = new Map();
   const touched = new Map();
@@ -289,7 +308,7 @@ export function evaluateWatch({ rules = [], snapshots = [], prev = {}, nowMs = 0
     const hits = [];
     for (const snapshot of snapshots) {
       if (!inScope(rule, snapshot)) continue;
-      const verdict = checkRule(rule, snapshot, prev[snapshot.key] || null);
+      const verdict = checkRule(rule, snapshot, prev[snapshot.key] || null, { previewCross });
       if (!verdict.held) continue;
       hits.push({ snapshot, parts: verdict.parts });
     }
@@ -325,13 +344,12 @@ export function evaluateWatch({ rules = [], snapshots = [], prev = {}, nowMs = 0
  * یک جا ساخته می‌شود چون هم حلقهٔ شرط می‌خواهدش و هم جدولِ پیش‌نمایش.
  * دو نسخهٔ جدا یعنی روزی شرط روی عددی آتش می‌کند که جدول نشانش نمی‌دهد.
  */
-export function watchSnapshot(row, { baseIns = '', baseName = '', basePrice = NaN } = {}) {
+export function watchSnapshot(row, { baseIns = '', baseName = '', basePrice = NaN, day = null } = {}) {
   const gap = row?.gap || {};
   const metrics = row?.metrics || {};
   const verdict = row?.verdict || {};
   const points = row?.series?.points || [];
   const column = (field) => points.map((point) => num(point[field], NaN));
-  const currents = column('current').filter(finite);
   return {
     key: row?.key || '', label: `${row?.def?.name || ''} · ${(row?.strikes || []).join('/')}`,
     strategyId: row?.def?.id || '', strategyName: row?.def?.name || '',
@@ -356,9 +374,42 @@ export function watchSnapshot(row, { baseIns = '', baseName = '', basePrice = Na
     legVolume: num(metrics.legVolume, NaN),
     basePrice: num(basePrice, NaN),
     daysLeft: num(gap.daysLeft, NaN),
-    dayLow: currents.length ? Math.min(...currents) : NaN,
-    dayHigh: currents.length ? Math.max(...currents) : NaN,
+    // ── کف و سقفِ امروز، از خودِ امروز ─────────────────────────────
+    //
+    // پیش از این `Math.min` و `Math.max` سریِ **روزانهٔ بازه** بود، و شرطِ
+    // «٪ از کف امروز» در عمل روی کفِ سه‌ماهه می‌نشست. حالا فقط از دفترِ
+    // مشاهده‌های امروز (`core/day-range.mjs`) می‌آید؛ نداشتنش `NaN` است و
+    // `NaN` یعنی شرط برقرار نمی‌شود — نه اینکه با عددِ تاریخی برقرار شود.
+    dayLow: num(day?.low, NaN),
+    dayHigh: num(day?.high, NaN),
     history: { current: column('current'), coveragePct: column('coveragePct'),
       roomPct: column('roomPct'), basePrice: column('basePrice') },
   };
+}
+
+
+/**
+ * چقدر مانده تا این قاعده روی این ترکیب برقرار شود — برای اولویتِ سهمیهٔ زنده.
+ *
+ * عددِ برگشتی «فاصلهٔ نسبی» است: صفر یعنی همین حالا برقرار است، و هرچه
+ * بزرگ‌تر، دورتر. مقایسه نسبی است نه ریالی، وگرنه شرطِ «حداکثر سود ۴۰٪»
+ * و شرطِ «فاصله ۳۰۰٬۰۰۰ ریال» با یک خط‌کش سنجیده می‌شدند.
+ *
+ * بدترین شرط ملاک است، نه بهترین: قاعده «و» است، پس ترکیبی نزدیک است که
+ * **همهٔ** شرط‌هایش نزدیک باشند.
+ */
+export function watchDistance(rule, snapshot) {
+  const parts = (rule?.conditions || []).map((condition) => {
+    const metric = watchMetric(condition?.metric);
+    if (!metric) return NaN;
+    const value = num(snapshot?.[metric.id], NaN);
+    const threshold = thresholdOf(condition, snapshot);
+    if (!finite(value) || !finite(threshold)) return NaN;
+    const scale = Math.max(Math.abs(threshold), 1);
+    const op = alertOp(condition.op)?.id;
+    const met = op === 'le' || op === 'crossDown' ? value <= threshold : value >= threshold;
+    return met ? 0 : Math.abs(value - threshold) / scale;
+  });
+  if (!parts.length || parts.some((one) => !finite(one))) return NaN;
+  return Math.max(...parts);
 }

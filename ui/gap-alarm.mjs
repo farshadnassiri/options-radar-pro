@@ -24,8 +24,23 @@ import { faDigits, fmt } from './fmt.mjs';
 import { alertMetric } from '../core/gap-alert.mjs';
 import { watchMetric } from '../core/watch-rule.mjs';
 
-const LOG_KEY = 'gap-alerts:log';
-const LOG_MAX = 200;
+// ═══ دفترچه: یکی برای هر تب، نه یکی مشترک ═══
+//
+// «دفترچهٔ رادار و دیده‌بان مشترک است و رخدادهای دو بخش مخلوط می‌شوند.»
+// دو تب، دو قاعدهٔ متفاوت، و دو پرسشِ متفاوت («کدام ترکیب از خطم رد شد»
+// در برابر «کدام فرصت وارد شرطم شد»). ریختنشان در یک دفتر یعنی «پاک کردن
+// دفترچه» در یکی، تاریخِ آن یکی را هم می‌برد.
+const LOG_KEYS = { radar: 'gap-alerts:log:radar', watch: 'gap-alerts:log:watch' };
+const logKey = (scope) => LOG_KEYS[String(scope ?? '')] || LOG_KEYS.radar;
+
+// یک شرطِ عمومی می‌تواند در یک تیک روی صدها ترکیب برقرار شود. سقفِ ۲۰۰
+// یعنی موجِ بزرگ، خودش را از دفتر بیرون می‌انداخت — دقیقاً همان رخدادی
+// که کاربر بعداً دنبالش می‌گردد. سقف بالا رفت و به‌ازای هر تب جداست، و
+// موج به‌جای صدها کارت، یک کارتِ جمع‌بندی می‌گیرد.
+const LOG_MAX = 1000;
+
+/** بیش از این کارت در یک موج روی صفحه نمی‌نشیند؛ بقیه در یک کارتِ جمع‌بندی می‌آیند. */
+const BURST_CARDS = 4;
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -101,18 +116,20 @@ function beep() {
 
 // ————————————————————————— دفترچه —————————————————————————
 
-export function readLog() {
-  try { return JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); }
-  catch { return []; }
+export function readLog(scope = 'radar') {
+  try {
+    const rows = JSON.parse(localStorage.getItem(logKey(scope)) || '[]');
+    return Array.isArray(rows) ? rows : [];
+  } catch { return []; }
 }
 
-export function writeLog(rows) {
-  try { localStorage.setItem(LOG_KEY, JSON.stringify(rows.slice(0, LOG_MAX))); }
+export function writeLog(rows, scope = 'radar') {
+  try { localStorage.setItem(logKey(scope), JSON.stringify(rows.slice(0, LOG_MAX))); }
   catch { /* حافظه پر یا قفل — دفترچه نداشتن، هشدار را از کار نمی‌اندازد */ }
 }
 
-export function clearLog() {
-  try { localStorage.removeItem(LOG_KEY); } catch { /* همان */ }
+export function clearLog(scope = 'radar') {
+  try { localStorage.removeItem(logKey(scope)); } catch { /* همان */ }
 }
 
 // ————————————————————————— رساندن —————————————————————————
@@ -123,7 +140,7 @@ export function clearLog() {
  * `host` جایی است که کارت درون‌صفحه می‌نشیند. اگر نباشد، فقط اعلان و صدا
  * می‌ماند — و همان‌طور که بالا گفته شد، آن دو تضمینی نیستند.
  */
-export function deliver(fired, { host = null, sound = false, now = new Date() } = {}) {
+export function deliver(fired, { host = null, sound = false, now = new Date(), scope = 'radar', card = true, log = true } = {}) {
   const metric = alertMetric(fired.metric);
   const title = fired.label || fired.strategyName || 'هشدار فاصله';
   const body = `${metric?.label || fired.metric}: ${metricText(fired.metric, fired.value)}\n${fired.note}`;
@@ -144,16 +161,16 @@ export function deliver(fired, { host = null, sound = false, now = new Date() } 
   }
 
   // ── کانال دو: کارت درون‌صفحه، کفِ تضمین‌شده ─────────────────────────
-  if (host) {
-    const card = document.createElement('article');
-    card.className = 'gap-alarm-card';
-    card.setAttribute('role', 'alert');
-    card.innerHTML = `<header><b>${esc(title)}</b><time>${faDigits(row.clock)}</time></header>
+  if (host && card) {
+    const node = document.createElement('article');
+    node.className = 'gap-alarm-card';
+    node.setAttribute('role', 'alert');
+    node.innerHTML = `<header><b>${esc(title)}</b><time>${faDigits(row.clock)}</time></header>
       <p>${esc(metric?.label || fired.metric)} — <strong>${metricText(fired.metric, fired.value)}</strong></p>
       <small>${esc(fired.note)}</small>
       <button type="button" class="gap-alarm-close" aria-label="بستن">×</button>`;
-    card.querySelector('.gap-alarm-close').addEventListener('click', () => card.remove());
-    host.prepend(card);
+    node.querySelector('.gap-alarm-close').addEventListener('click', () => node.remove());
+    host.prepend(node);
     // بیش از شش کارت روی هم، خودش نویز است.
     while (host.children.length > 6) host.lastElementChild.remove();
   }
@@ -161,18 +178,17 @@ export function deliver(fired, { host = null, sound = false, now = new Date() } 
   // ── کانال سه: صدا، فقط اگر خواسته شده ───────────────────────────────
   if (sound || fired.sound) beep();
 
-  const log = [row, ...readLog()];
-  writeLog(log);
+  if (log) writeLog([row, ...readLog(scope)], scope);
   return row;
 }
 
 /** آزمونِ کانال‌ها با یک هشدار ساختگی — تا کاربر پیش از رخداد بداند کار می‌کند. */
-export function testDelivery({ host = null, sound = false } = {}) {
+export function testDelivery({ host = null, sound = false, scope = 'radar' } = {}) {
   return deliver({
     ruleId: 'test', comboKey: '', metric: 'current', value: 700000, threshold: 700000,
     label: 'آزمایش کانال هشدار', note: 'این یک هشدار آزمایشی است؛ هیچ شرطی برقرار نشده.',
     strategyName: '',
-  }, { host, sound });
+  }, { host, sound, scope });
 }
 
 
@@ -189,7 +205,7 @@ export function testDelivery({ host = null, sound = false } = {}) {
  * آستانه هم چاپ می‌شود، نه فقط عدد: در شرطِ نسبی («۹۰٪ میانگین ۵ روز
  * گذشته») خودِ آستانه در هر لحظه فرق می‌کند و بی آن، «۲٬۴۰۰» بی‌معنی است.
  */
-export function deliverWatch(fired, { host = null, sound = false, now = new Date() } = {}) {
+export function deliverWatch(fired, { host = null, sound = false, now = new Date(), scope = 'watch', card = true, log = true } = {}) {
   const title = fired.label || fired.ruleName || 'دیده‌بان شرطی';
   const lines = (fired.parts || []).map((part) => {
     const metric = watchMetric(part.metric);
@@ -216,19 +232,69 @@ export function deliverWatch(fired, { host = null, sound = false, now = new Date
     try { new Notification(title, { body, tag: `watch-${fired.ruleId}`, renotify: true }); }
     catch { /* مرورگر رد کرد؛ کارتِ زیر همچنان می‌آید */ }
   }
-  if (host) {
-    const card = document.createElement('article');
-    card.className = 'gap-alarm-card';
-    card.setAttribute('role', 'alert');
-    card.innerHTML = `<header><b>${esc(title)}</b><time>${faDigits(row.clock)}</time></header>
+  if (host && card) {
+    const node = document.createElement('article');
+    node.className = 'gap-alarm-card';
+    node.setAttribute('role', 'alert');
+    node.innerHTML = `<header><b>${esc(title)}</b><time>${faDigits(row.clock)}</time></header>
       <p>${esc(fired.ruleName || '')}</p>
       <ul class="gap-alarm-parts">${lines.map((line) => `<li><span>${esc(line.label)}</span><strong>${esc(line.seen)}</strong><small>آستانه ${esc(line.gate)}</small></li>`).join('')}</ul>
       <button type="button" class="gap-alarm-close" aria-label="بستن">×</button>`;
-    card.querySelector('.gap-alarm-close').addEventListener('click', () => card.remove());
-    host.prepend(card);
+    node.querySelector('.gap-alarm-close').addEventListener('click', () => node.remove());
+    host.prepend(node);
     while (host.children.length > 6) host.lastElementChild.remove();
   }
   if (sound || fired.sound) beep();
-  writeLog([row, ...readLog()]);
+  if (log) writeLog([row, ...readLog(scope)], scope);
   return row;
+}
+
+/**
+ * یک **موج** هشدار — همه در دفترچه، چندتا روی صفحه، و یک جمع‌بندی.
+ *
+ * ═══ ایرادی که این تابع جوابش است ═══
+ *
+ * «یک شرط عمومی می‌تواند صدها اعلان هم‌زمان بسازد. کارت‌های صفحه به ۶
+ * مورد و دفترچه به ۲۰۰ مورد محدود است؛ بنابراین بخشی از رخدادهای یک موج
+ * بزرگ از دفترچه حذف می‌شود.»
+ *
+ * دو مسئلهٔ جدا بود و دو جواب دارد:
+ *
+ *   **دفترچه** حافظه است و نباید موج را ببلعد. حالا همهٔ ردیف‌ها در یک
+ *   نوشتن ذخیره می‌شوند (نه صدبار خواندن و نوشتنِ پشت‌سرهم) و سقف هر
+ *   دفتر به هزار رفته و بین دو تب مشترک نیست.
+ *
+ *   **صفحه** توجه است و موج، توجه را می‌کشد. صدها کارت یعنی هیچ‌کدام
+ *   خوانده نمی‌شود. پس چند کارتِ نخست می‌آید و بقیه در یک کارتِ
+ *   جمع‌بندی — که خودش می‌گوید چندتا بود و کجا کاملش هست.
+ *
+ * صدا هم یک بار پخش می‌شود، نه به تعداد ترکیب‌ها.
+ */
+export function deliverBurst(list = [], { host = null, sound = false, scope = 'radar', kind = 'gap', now = new Date() } = {}) {
+  const fired = Array.isArray(list) ? list : [];
+  if (!fired.length) return { shown: 0, logged: 0, rows: [] };
+  const send = kind === 'watch' ? deliverWatch : deliver;
+  const rows = [];
+  let shown = 0;
+  for (let at = 0; at < fired.length; at += 1) {
+    const card = at < BURST_CARDS;
+    if (card) shown += 1;
+    // اعلانِ مرورگر و صدا فقط با کارتِ اول‌ها؛ بقیه فقط ردیفِ دفترچه‌اند.
+    rows.push(send(fired[at], { host: card ? host : null, sound: sound && at === 0, scope, card, log: false, now }));
+  }
+  if (fired.length > BURST_CARDS && host) {
+    const more = fired.length - BURST_CARDS;
+    const node = document.createElement('article');
+    node.className = 'gap-alarm-card';
+    node.setAttribute('role', 'alert');
+    node.innerHTML = `<header><b>${esc(`و ${fmt.int(more)} ترکیب دیگر در همین لحظه`)}</b><time>${faDigits(now.toLocaleTimeString('fa-IR'))}</time></header>
+      <p>${esc(`این شرط در یک سنجش روی ${fmt.int(fired.length)} ترکیب برقرار شد. کارت‌ها به ${fmt.int(BURST_CARDS)} مورد محدود شده‌اند تا صفحه خوانا بماند؛ هر ${fmt.int(fired.length)} رخداد در دفترچهٔ همین تب ثبت شد.`)}</p>
+      <small>${esc('اگر موج بزرگ است، شرط را تنگ‌تر کن یا دامنه‌اش را به یک استراتژی محدود کن.')}</small>
+      <button type="button" class="gap-alarm-close" aria-label="بستن">×</button>`;
+    node.querySelector('.gap-alarm-close').addEventListener('click', () => node.remove());
+    host.prepend(node);
+    while (host.children.length > 6) host.lastElementChild.remove();
+  }
+  writeLog([...rows, ...readLog(scope)], scope);
+  return { shown, logged: rows.length, rows };
 }
