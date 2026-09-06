@@ -151,7 +151,16 @@ function sideQuote(r, sfx) {
     oiYday: r[`yesterdayOP_${sfx}`] == null ? NaN : n(r[`yesterdayOP_${sfx}`]),
     vol: n(r[`qTotTran5J_${sfx}`]), trades: n(r[`zTotTran_${sfx}`]),
     value: n(r[`qTotCap_${sfx}`]),
-    book: null, state: 'A', staleSec: 0,
+    // ═══ «نپرسیده‌ایم» با «تازه است» یکی نیست ═══
+    //
+    // گزارش صاحب پروژه: «ردیف‌های تقریبی، سطح اول سن مظنه را ۰ نشان
+    // می‌دهند، نه —.» علتش همین دو مقدار بود. مرحلهٔ یکِ اسکن هیچ
+    // درخواستی به `/api/infos` نمی‌زند؛ این دو فقط جای‌نگه‌دار بودند و
+    // مرحلهٔ دو رویشان می‌نوشت. ولی `staleSec: 0` یعنی «همین الان»، و
+    // `state: 'A'` یعنی «مجاز» — دو ادعای کامل دربارهٔ چیزی که اصلاً
+    // پرسیده نشده. حالا جای‌نگه‌دار «نمی‌دانم» است: عددش `NaN` و
+    // وضعیتش رشتهٔ خالی. مرحلهٔ دو هر دو را با عددِ واقعی پر می‌کند.
+    book: null, state: '', staleSec: NaN,
     depth: false,                  // آیا عمق کامل گرفته شده
   };
 }
@@ -177,7 +186,7 @@ export function buildChain(rows) {
         name: rawUaName && rawUaName !== uaIns ? rawUaName : 'دارایی پایه بدون نام',
         last: n(r.pDrCotVal_UA), close: n(r.pClosing_UA), yday: n(r.priceYesterday_UA),
         vol: n(r.qTotTran5J_UA), trades: n(r.zTotTran_UA), value: n(r.qTotCap_UA),
-        low: 0, high: 0, book: null, state: 'A', staleSec: 0, depth: false,
+        low: 0, high: 0, book: null, state: '', staleSec: NaN, depth: false,
         expiries: new Map(),
         contracts: 0,
       };

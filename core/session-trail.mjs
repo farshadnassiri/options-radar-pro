@@ -38,6 +38,7 @@
 import { num } from './num.mjs';
 import { grossCash, entryFees } from './payoff.mjs';
 import { markAt } from './intraday-mark.mjs';
+import { inIntradaySession, tradeSecond } from './backtest.mjs';
 import { momentLabel, momentsFor, normalizeGrain } from './intraday-grid.mjs';
 
 const NO_FEES = { buyStock: 0, sellStock: 0, option: 0 };
@@ -88,6 +89,44 @@ export function trailPoint(legs = [], tapeByIns = {}, second, { fees = NO_FEES, 
 }
 
 /**
+ * کارنامهٔ هر پا در جلسه — چند معامله، از کی تا کی.
+ *
+ * ═══ گزارشی که این تابع جوابش است ═══
+ *
+ * «برای Box Spread نمودار و فاصلهٔ پاها ساخته نمی‌شود و پیام «هیچ لحظه‌ای
+ * عدد کامل ندارد» می‌آید.»
+ *
+ * پیام درست بود ولی بن‌بست: باکس چهار پا دارد و اگر **یکی**شان امروز
+ * معامله نشده باشد، هیچ لحظه‌ای عددِ کامل ندارد. آنچه کم بود، جوابِ
+ * «کدام پا؟» — بی آن، خواننده نمی‌داند مشکل از برنامه است یا از بازار.
+ *
+ * پس ردِ جلسه دیگر فقط «شد / نشد» نمی‌گوید؛ کارنامهٔ هر پا را هم می‌دهد
+ * تا وقتی نمودار ساخته نمی‌شود، **علتش** روی صفحه باشد.
+ */
+export function legActivity(legs = [], tapeByIns = {}, { uaIns = '', until = Infinity } = {}) {
+  const cap = num(until, Infinity);
+  return (legs || []).map((leg, at) => {
+    const ins = String(leg?.ins || (leg?.kind === 'underlying' ? uaIns : '') || '');
+    let trades = 0, first = NaN, last = NaN;
+    for (const row of tapeByIns[ins] || []) {
+      const price = num(row?.price, NaN);
+      if (!(price > 0) || row?.canceled || !inIntradaySession(row.time)) continue;
+      const second = tradeSecond(row.time);
+      if (second > cap) continue;
+      trades += 1;
+      if (!Number.isFinite(first) || second < first) first = second;
+      if (!Number.isFinite(last) || second > last) last = second;
+    }
+    return {
+      index: at, ins,
+      name: leg?.name || (leg?.kind === 'underlying' ? 'سهم پایه' : `پای ${at + 1}`),
+      side: leg?.side || '', kind: leg?.kind || '',
+      trades, first, last, silent: trades === 0, known: !!ins,
+    };
+  });
+}
+
+/**
  * ردِ کاملِ جلسه با دانه‌بندی خواسته‌شده.
  *
  * `until` سقفِ زمان است: نقطه‌های بعد از «همین لحظه» ساخته نمی‌شوند، چون
@@ -103,10 +142,10 @@ export function sessionTrail({
   const points = moments.map((second) => trailPoint(legs, tapeByIns, second, { fees, uaIns }));
   const full = points.filter((point) => point.complete);
   const values = full.map((point) => point.netCash).filter(Number.isFinite);
-  const legIns = legs.map((leg) => String(leg?.ins || (leg?.kind === 'underlying' ? uaIns : '') || '')).filter(Boolean);
-  const silent = legIns.filter((ins) => !markAt(tapeByIns[ins] || [], cap === Infinity ? 1e9 : cap));
+  const legReport = legActivity(legs, tapeByIns, { uaIns, until: cap });
+  const silent = legReport.filter((leg) => leg.silent).map((leg) => leg.ins || leg.name);
   return {
-    grain: id, points, moments: moments.length,
+    grain: id, points, moments: moments.length, legReport,
     complete: full.length, gaps: points.length - full.length,
     first: full[0] || null, last: full.at(-1) || null,
     min: values.length ? Math.min(...values) : NaN,
@@ -121,9 +160,18 @@ export function trailNote(trail) {
   const fa = (value) => String(value).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
   if (!trail || !trail.points.length) return 'هنوز لحظه‌ای برای این جلسه نیست.';
   if (!trail.complete) {
-    return trail.silentLegs.length
-      ? `${fa(trail.silentLegs.length)} پا امروز هیچ معامله‌ای نداشته، پس ترکیب در هیچ لحظه‌ای عدد کامل ندارد.`
-      : 'در هیچ لحظه‌ای همهٔ پاها با هم قیمت نداشتند.';
+    // «کدام پا» را می‌گوید، نه فقط «چندتا». ترکیب چهارپا با یک پای
+    // بی‌معامله همین‌جا گیر می‌کند و بی نامِ آن پا، خواننده نمی‌داند
+    // مشکل از برنامه است یا از بازار.
+    const mute = (trail.legReport || []).filter((leg) => leg.silent);
+    if (mute.length) {
+      const names = mute.map((leg) => leg.name).join(' و ');
+      return `این ترکیب ${fa(trail.legReport.length)} پا دارد و ${fa(mute.length)} تای آن‌ها `
+        + `(${names}) امروز هیچ معامله‌ای نداشته. تا وقتی همهٔ پاها دست‌کم یک معامله نداشته باشند، `
+        + 'ترکیب در هیچ لحظه‌ای عددِ کامل ندارد — این محدودیتِ بازار است، نه خطای برنامه. '
+        + 'کارنامهٔ هر پا در جدول زیر است.';
+    }
+    return 'همهٔ پاها امروز معامله داشته‌اند، ولی هیچ‌کدام پیش از نخستین لحظهٔ این دانه‌بندی نبوده. دانهٔ ریزتری انتخاب کن.';
   }
   const parts = [`${fa(trail.complete)} لحظه از ${fa(trail.moments)} عددِ کامل دارد`];
   if (trail.gaps) parts.push(`${fa(trail.gaps)} لحظه شکاف است چون دست‌کم یک پا تا آن ساعت معامله نشده بود`);
