@@ -292,8 +292,21 @@ export function rowQuality(pricedLegs, opt = {}) {
   const assumed = pricedLegs.some((l) => l.exec?.assumedDepth);
   const allDepth = pricedLegs.every((l) => l.exec?.quality === 'depth' && !l.exec?.assumedDepth);
   const shortFill = pricedLegs.some((l) => num(l.exec?.short) > EPS);
-  const stale = pricedLegs.some((l) => num(l.quote?.staleSec) > staleSec);
-  const halted = pricedLegs.some((l) => l.quote?.state && !String(l.quote.state).toUpperCase().startsWith('A'));
+  // ═══ سنِ مظنه و وضعیت نماد: عدد، نه فقط پرچم ═══
+  //
+  // تا امروز این دو فقط پرچمِ متنی می‌ساختند و پرچم‌ها هم به ردیف
+  // نمی‌رسیدند. نتیجه‌اش این بود که نمادِ متوقف و نمادِ فعال در جدولِ
+  // «زنده» یک شکل داشتند و کاربر نمی‌توانست بر اساس تازگی مرتب یا فیلتر
+  // کند. حالا کهنه‌ترین سن و بدترین وضعیت هم برمی‌گردند.
+  //
+  // «نداشتن» با «صفر» یکی نیست: تابلو برای بعضی ابزارها اصلاً `staleSec`
+  // نمی‌دهد. عددِ نداشته `NaN` می‌ماند تا ستونش «—» شود، نه «تازه».
+  const ages = pricedLegs.map((l) => num(l.quote?.staleSec, NaN)).filter(Number.isFinite);
+  const staleSecMax = ages.length ? Math.max(...ages) : NaN;
+  const states = pricedLegs.map((l) => String(l.quote?.state || '').toUpperCase()).filter(Boolean);
+  const blocked = states.filter((state) => !state.startsWith('A'));
+  const stale = Number.isFinite(staleSecMax) && staleSecMax > staleSec;
+  const halted = blocked.length > 0;
   const flags = [];
   if (anyNone) flags.push('بی‌مظنه');
   if (shortFill) flags.push('عمق ناکافی');
@@ -305,5 +318,11 @@ export function rowQuality(pricedLegs, opt = {}) {
     label: anyNone ? 'غیرقابل اجرا' : allDepth ? 'دقیق برای حجم تو' : 'تقریبی، سطح اول',
     assumed,
     flags,
+    staleSecMax,
+    // وضعیتِ نمایشی، بدترینِ پاها: یک پای متوقف کلِ ترکیب را غیرقابل اجرا
+    // می‌کند، پس «همه مجازند» فقط وقتی درست است که هیچ پایی متوقف نباشد.
+    // وضعیتِ نداشته هم ادعا نمی‌سازد: نه «مجاز»، نه «متوقف».
+    stateLabel: !states.length ? '' : blocked.length ? `متوقف — ${blocked[0]}` : 'مجاز',
+    tradable: states.length ? blocked.length === 0 : null,
   };
 }

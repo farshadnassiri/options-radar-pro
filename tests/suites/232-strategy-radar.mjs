@@ -159,3 +159,62 @@ check('فیلتری که در نمایهٔ این استراتژی نیست، ا
 
 check('ورودی دست‌نخورده می‌ماند — فیلتر آرایهٔ تازه می‌دهد',
   rows.length === 3 && none.rows !== rows);
+
+group('۲۳۲ تازگیِ عدد — نمادِ متوقف نباید زنده به نظر برسد');
+
+// ═══ خواسته‌ای که این بخش جوابش است (بندِ ۵) ═══
+//
+// «هدف این قسمت اینه که موقعیتها را بتوانیم در سریعترین زمان ممکن رصد
+// کنیم و مشخصاتشون را بدونیم.»
+//
+// در جدولی که ادعایش «زنده» است، نمادِ متوقف و نمادِ فعال یک شکل داشتند:
+// `rowQuality` سن و وضعیت را می‌سنجید ولی فقط پرچمِ متنی می‌ساخت، و
+// پرچم‌ها هم به ردیف نمی‌رسیدند. حالا هر دو ستون دارند و مرتب و فیلتر
+// می‌شوند.
+
+const { rowQuality } = await import('../../core/exec.mjs');
+
+const leg = (staleSec, state, extra = {}) => ({
+  exec: { quality: 'depth', short: 0, ...extra },
+  quote: { ...(staleSec === undefined ? {} : { staleSec }), ...(state ? { state } : {}) },
+});
+
+const fresh = rowQuality([leg(3, 'A'), leg(9, 'A')], { staleSec: 900 });
+check('سنِ مظنه، کهنه‌ترینِ پاهاست نه میانگین', fresh.staleSecMax === 9);
+check('و وضعیت، وقتی همهٔ پاها مجازند، «مجاز» است',
+  fresh.stateLabel === 'مجاز' && fresh.tradable === true);
+
+const stopped = rowQuality([leg(3, 'A'), leg(5, 'I')], { staleSec: 900 });
+check('یک پای متوقف، کلِ ترکیب را متوقف می‌کند',
+  stopped.tradable === false && stopped.stateLabel.startsWith('متوقف'));
+check('و پرچمِ متنی‌اش هم سرِ جایش می‌ماند', stopped.flags.includes('نماد مجاز نیست'));
+
+// ═══ «نداشتن» با «صفر» یکی نیست ═══
+//
+// تابلو برای بعضی ابزارها اصلاً `staleSec` نمی‌دهد. اگر نبودش صفر خوانده
+// شود، ستون «تازه» نشان می‌دهد — بدترین خطای ممکن در ستونی که کارش
+// گفتنِ تازگی است.
+const silent = rowQuality([leg(undefined, ''), leg(undefined, '')], { staleSec: 900 });
+check('سنِ نداشته صفر نمی‌شود، `NaN` می‌ماند', !Number.isFinite(silent.staleSecMax));
+check('و وضعیتِ نداشته نه «مجاز» است نه «متوقف»',
+  silent.stateLabel === '' && silent.tradable === null);
+check('پایی که سن دارد و پایی که ندارد، سنِ همان یکی را می‌دهد',
+  rowQuality([leg(12, 'A'), leg(undefined, 'A')], { staleSec: 900 }).staleSecMax === 12);
+
+// ═══ ستون و فیلتر، در هر ۳۶ نمایه ═══
+check('«سنِ مظنه» و «وضعیت نماد» در دُمِ هر نمایه‌اند',
+  profiles.every(([, p]) => p.columns.includes('staleSecMax') && p.columns.includes('stateLabel')));
+check('و فیلترِ سقفِ سن و فیلترِ نمادِ مجاز هم در هر نمایه هست',
+  profiles.every(([, p]) => p.filters.some((f) => f.key === 'maxStaleSec')
+    && p.filters.some((f) => f.key === 'onlyTradable')));
+check('«سقف سنِ مظنه» با عملگرِ سقف کار می‌کند، نه کف',
+  passesFilter({ staleSecMax: 30 }, F('maxStaleSec'), 60).pass
+  && !passesFilter({ staleSecMax: 90 }, F('maxStaleSec'), 60).pass);
+// ردیفی که سنش را نمی‌داند، «تازه‌تر از ۶۰ ثانیه» را ثابت نکرده.
+check('ردیفِ بی‌سن از فیلترِ سن نمی‌گذرد و علتش «نداشتنِ داده» است',
+  passesFilter({ staleSecMax: NaN }, F('maxStaleSec'), 60).pass === false
+  && passesFilter({ staleSecMax: NaN }, F('maxStaleSec'), 60).missing === true);
+check('«فقط نمادِ مجاز» وضعیتِ نامعلوم را مجاز نمی‌شمارد',
+  passesFilter({ tradable: true }, F('onlyTradable'), true).pass === true
+  && passesFilter({ tradable: null }, F('onlyTradable'), true).pass === false
+  && passesFilter({ tradable: false }, F('onlyTradable'), true).pass === false);

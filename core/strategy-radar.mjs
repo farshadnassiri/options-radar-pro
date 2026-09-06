@@ -75,6 +75,8 @@ export const RADAR_FILTERS = [
   { key: 'maxSpreadWorstPct', label: 'سقف بدترین اسپرد پاها', unit: '٪', field: 'spreadWorstPct', cmp: 'lte' },
   { key: 'maxExecCost', label: 'سقف هزینه اجرا', unit: 'ریال', field: 'execCost', cmp: 'lte' },
   { key: 'minOiTotal', label: 'حداقل موقعیت باز', unit: 'قرارداد', field: 'oiTotal', cmp: 'gte' },
+  { key: 'maxStaleSec', label: 'سقف سنِ مظنه', unit: 'ثانیه', field: 'staleSecMax', cmp: 'lte' },
+  { key: 'onlyTradable', label: 'فقط نمادِ مجاز', unit: '', field: 'tradable', cmp: 'flag' },
   { key: 'onlyExecutable', label: 'فقط ردیف قابل اجرا', unit: '', field: 'executable', cmp: 'flag' },
   { key: 'onlyCredit', label: 'فقط بستانکار', unit: '', field: 'isCredit', cmp: 'flag' },
   { key: 'onlyOffsettable', label: 'فقط ردیفی که همین حالا بسته می‌شود', unit: '', field: 'offsettable', cmp: 'flag' },
@@ -110,7 +112,11 @@ export function filterLimit(value) {
 const HEAD = ['underlying', 'legNames', 'expiryLabel', 'strikes', 'days'];
 // و دُمِ مشترک: «می‌شود اجرا کرد؟ چقدر؟ چقدر می‌ارزد؟» — همان سؤالی که
 // تصمیم را از تحلیل جدا می‌کند.
-const TAIL = ['execCost', 'maxQty', 'binding', 'spreadWorstPct', 'qualityLabel', 'warn'];
+// «سنِ مظنه» و «وضعیت نماد» در دُمِ هر نمایه‌اند، نه در انتخابگرِ اختیاری:
+// در جدولی که ادعایش «زنده» است، نمادِ متوقف نباید عددِ زنده نشان بدهد و
+// کاربر باید بتواند تازگی را ببیند بی آنکه دنبالش بگردد.
+const TAIL = ['execCost', 'maxQty', 'binding', 'spreadWorstPct',
+  'staleSecMax', 'stateLabel', 'qualityLabel', 'warn'];
 
 const GROUP_PROFILES = {
   // ── تک‌پا: بهای ورود در برابر ارزش زمانی ──
@@ -121,7 +127,7 @@ const GROUP_PROFILES = {
       'popPct', 'delta', 'theta', 'thetaToCapitalPct', 'timeValue', 'timeValuePctCapital', 'intrinsic',
       'ivMeanPct', 'hvPct', 'ivHvSpreadPp', 'leverage', 'capital', 'valueTotal', 'legValue1', ...TAIL],
     filters: ['minRetMonthPct', 'minPopPct', 'maxBeDistPct', 'maxCapital', 'minDaysLeft', 'maxDaysLeft',
-      'minLegValue1', 'minMaxQty', 'maxSpreadWorstPct', 'minOiTotal', 'onlyExecutable'],
+      'minLegValue1', 'minMaxQty', 'maxSpreadWorstPct', 'minOiTotal', 'maxStaleSec', 'onlyTradable', 'onlyExecutable'],
   },
   // ── درآمدی: مثالِ خودِ صاحب پروژه ──
   income: {
@@ -134,7 +140,7 @@ const GROUP_PROFILES = {
       'valueTotal', 'legValue1', 'legValue2', ...TAIL],
     filters: ['minRetMonthPct', 'minRetStaticPct', 'minMaxProfit', 'minBeRoomPct', 'minPopPct',
       'maxMargin', 'maxCapital', 'minDaysLeft', 'maxDaysLeft', 'minLegValue1', 'minLegValue2',
-      'minMaxQty', 'maxSpreadWorstPct', 'noUnlimitedLoss', 'onlyExecutable'],
+      'minMaxQty', 'maxSpreadWorstPct', 'noUnlimitedLoss', 'maxStaleSec', 'onlyTradable', 'onlyExecutable'],
   },
   // ── عمودی: سود و زیان هر دو محدودند، پس نسبتشان معنی دارد ──
   vertical: {
@@ -147,7 +153,7 @@ const GROUP_PROFILES = {
       'valueTotal', 'legValue1', 'legValue2', ...TAIL],
     filters: ['minRewardRisk', 'minRetMaxPct', 'minRetMonthPct', 'minPopPct', 'minMaxProfit',
       'maxLossCap', 'maxMargin', 'minDaysLeft', 'maxDaysLeft', 'minLegValue1', 'minLegValue2',
-      'minMaxQty', 'maxSpreadWorstPct', 'onlyExecutable'],
+      'minMaxQty', 'maxSpreadWorstPct', 'maxStaleSec', 'onlyTradable', 'onlyExecutable'],
   },
   // ── تقویمی و مورب: دو سررسید، پس تتا و شکافِ تلاطم موضوع اصلی‌اند ──
   calendar: {
@@ -160,7 +166,7 @@ const GROUP_PROFILES = {
       'capital', 'margin', 'marginNet', 'valueTotal', 'legValue1', 'legValue2', ...TAIL],
     filters: ['minThetaToCapitalPct', 'minRetMonthPct', 'minIvHvSpreadPp', 'maxAbsDelta',
       'maxCapital', 'maxMargin', 'minDaysLeft', 'maxDaysLeft', 'minLegValue1', 'minLegValue2',
-      'minMaxQty', 'maxSpreadWorstPct', 'onlyExecutable'],
+      'minMaxQty', 'maxSpreadWorstPct', 'maxStaleSec', 'onlyTradable', 'onlyExecutable'],
   },
   // ── تلاطمی: دو سربه‌سری، و پهنای بینشان همان سؤال است ──
   vol: {
@@ -174,7 +180,7 @@ const GROUP_PROFILES = {
       'valueTotal', 'legValue1', 'legValue2', ...TAIL],
     filters: ['minIvHvSpreadPp', 'minBeWidthPct', 'minRetMonthPct', 'minPopPct', 'minVega',
       'maxAbsDelta', 'maxMargin', 'maxCapital', 'minDaysLeft', 'maxDaysLeft',
-      'minLegValue1', 'minLegValue2', 'minMaxQty', 'maxSpreadWorstPct', 'onlyExecutable'],
+      'minLegValue1', 'minLegValue2', 'minMaxQty', 'maxSpreadWorstPct', 'maxStaleSec', 'onlyTradable', 'onlyExecutable'],
   },
   // ── بال‌دار: چهار پا، پس هزینهٔ اجرا و پهنای سود موضوع اصلی‌اند ──
   wing: {
@@ -185,11 +191,12 @@ const GROUP_PROFILES = {
       'retMaxPct', 'retMonthPct', 'popPct', 'staticPnl',
       'capital', 'margin', 'marginNet', 'delta', 'gamma', 'theta', 'vega',
       'valueTotal', 'legValue1', 'legValue2', 'legValue3', 'legValue4',
-      'execCost', 'costCrossing', 'maxQty', 'binding', 'spreadWorstPct', 'qualityLabel', 'warn'],
+      'execCost', 'costCrossing', 'maxQty', 'binding', 'spreadWorstPct',
+      'staleSecMax', 'stateLabel', 'qualityLabel', 'warn'],
     filters: ['minRewardRisk', 'minMaxProfit', 'maxLossCap', 'minRetMaxPct', 'minPopPct',
       'maxExecCost', 'maxCapital', 'maxMargin', 'minDaysLeft', 'maxDaysLeft',
       'minLegValue1', 'minLegValue2', 'minLegValue3', 'minLegValue4',
-      'minMaxQty', 'maxSpreadWorstPct', 'onlyExecutable'],
+      'minMaxQty', 'maxSpreadWorstPct', 'maxStaleSec', 'onlyTradable', 'onlyExecutable'],
   },
   // ── نسبتی: پای برهنه یعنی وجه تضمین و ریسک لنگ‌زدن ──
   ratio: {
@@ -202,7 +209,7 @@ const GROUP_PROFILES = {
       'valueTotal', 'legValue1', 'legValue2', 'legValue3', ...TAIL],
     filters: ['minRetMonthPct', 'minPopPct', 'minRewardRisk', 'maxMargin', 'maxMarginNet',
       'maxAbsDelta', 'maxCapital', 'minDaysLeft', 'maxDaysLeft',
-      'minLegValue1', 'minLegValue2', 'minMaxQty', 'maxSpreadWorstPct', 'onlyExecutable'],
+      'minLegValue1', 'minLegValue2', 'minMaxQty', 'maxSpreadWorstPct', 'maxStaleSec', 'onlyTradable', 'onlyExecutable'],
   },
   // ── پوششی: هزینهٔ بیمه در برابر کفِ زیان ──
   hedge: {
@@ -215,7 +222,7 @@ const GROUP_PROFILES = {
       'valueTotal', 'legValue1', 'legValue2', ...TAIL],
     filters: ['maxLossCap', 'minBeRoomPct', 'minRetMonthPct', 'maxCapital',
       'minDaysLeft', 'maxDaysLeft', 'minLegValue1', 'minLegValue2',
-      'minMaxQty', 'maxSpreadWorstPct', 'onlyExecutable'],
+      'minMaxQty', 'maxSpreadWorstPct', 'maxStaleSec', 'onlyTradable', 'onlyExecutable'],
   },
   // ── آربیتراژ: سود قطعی است یا نیست؛ هزینهٔ اجرا همه‌چیز است ──
   arb: {
@@ -226,10 +233,10 @@ const GROUP_PROFILES = {
       'capital', 'margin', 'marginNet', 'delta',
       'execCost', 'execCostPctCapital', 'costCommission', 'costCrossing', 'costSlippage', 'costFunding',
       'valueTotal', 'legValue1', 'legValue2', 'legValue3',
-      'maxQty', 'binding', 'spreadWorstPct', 'qualityLabel', 'warn'],
+      'maxQty', 'binding', 'spreadWorstPct', 'staleSecMax', 'stateLabel', 'qualityLabel', 'warn'],
     filters: ['minRetAnnPct', 'minMaxProfit', 'maxExecCost', 'maxCapital', 'maxMargin',
       'minDaysLeft', 'maxDaysLeft', 'minLegValue1', 'minLegValue2',
-      'minMaxQty', 'maxSpreadWorstPct', 'onlyExecutable', 'onlyOffsettable'],
+      'minMaxQty', 'maxSpreadWorstPct', 'maxStaleSec', 'onlyTradable', 'onlyExecutable', 'onlyOffsettable'],
   },
 };
 
