@@ -28,7 +28,14 @@ import { mountSubtabs } from '/ui/subtabs.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { HISTORY_CHAIN_BASES } from '/core/history-chain.mjs';
-import { historyDates, runHistoryScan } from '/ui/strategy-history.mjs';
+import { historyDates, liveTapeFor, runHistoryScan } from '/ui/strategy-history.mjs';
+import { MOMENT_GRAINS } from '/core/intraday-grid.mjs';
+import { sessionTrail, trailNote } from '/core/session-trail.mjs';
+import { gapPathChart } from '/ui/gap-charts.mjs';
+// نامِ تازه، نه از سرِ سلیقه: داخلِ `showDetail` تابعِ محلیِ `mountChart`
+// نمودارِ سود و زیان را سوار می‌کند و همین نام را دارد. دو `mountChart`
+// در یک فایل، خطایی می‌سازد که فقط در زمان اجرا دیده می‌شود.
+import { mountChart as mountEcharts } from '/ui/chart-host.mjs';
 import { logError } from '/ui/errlog.mjs';
 
 /** dEven عددی (مثلاً ۲۰۲۶۰۱۰۱) به تاریخ شمسی خوانا. */
@@ -188,6 +195,27 @@ export async function mount(root, { tab, state, api }) {
           <span id="h-status" class="picker-sum" role="status" aria-live="polite">اول نماد پایه را انتخاب کن.</span>
         </div>
         <p class="note" id="h-note"></p>
+      </section>
+    </div>
+
+    <div data-panel="trail">
+      <section class="card">
+        <h3>ردِ جلسه — یک ترکیب، از بازگشایی تا حالا</h3>
+        <p class="note">ردیفی را از جدول انتخاب کن، بعد اینجا ببین بهای بازکردنِ همان ترکیب امروز چه مسیری رفته. فقط برای یک ترکیب، چون ریزمعاملهٔ هر پا یک درخواست جداست.</p>
+        <div class="grid">
+          <div class="field">
+            <label for="t-grain">دانه‌بندی</label>
+            <select id="t-grain">${MOMENT_GRAINS.filter((g) => g.minutes > 0).map((g) => `<option value="${g.id}"${g.id === 'm30' ? ' selected' : ''}>${g.label}</option>`).join('')}</select>
+          </div>
+        </div>
+        <div class="bar" style="margin-top:12px">
+          <button class="btn" id="t-run" disabled>مسیر امروز را بکش</button>
+          <span class="sp"></span>
+          <span id="t-status" class="picker-sum" role="status" aria-live="polite">هنوز ردیفی انتخاب نشده.</span>
+        </div>
+        <div id="t-chart" style="margin-top:12px;min-height:340px"></div>
+        <p class="note" id="t-note"></p>
+        <div id="t-table"></div>
       </section>
     </div>
 
@@ -625,6 +653,8 @@ export async function mount(root, { tab, state, api }) {
 
     // نمودار بعد از نشستن قالب سوار می‌شود، چون به اندازه واقعی قاب نیاز دارد
     mountChart();
+    // ردیفِ تازه یعنی ردِ جلسهٔ تازه — دکمه‌اش همین‌جا زنده می‌شود.
+    trailReady();
 
     // ——— ماشین زمان (قلم پ-۴ بک‌لاگ) ———
     const tmWrap = root.querySelector('#tm-wrap');
@@ -862,6 +892,7 @@ export async function mount(root, { tab, state, api }) {
       // پانل جزئیاتِ ردیفِ زندهٔ قبلی روی دادهٔ روزِ دیگر معنی ندارد.
       picked = null;
       root.querySelector('#detail-card').style.display = 'none';
+      trailReady();
       hNote.textContent = [out.note, out.universeNote].filter(Boolean).join(' — ');
       hSetStatus(`${historyDateLabel(hDate)} — ${fmt.int(rows.length)} ردیف.`);
       setStatus(`جدول از ${historyDateLabel(hDate)} ساخته شد — ${fmt.int(rows.length)} ردیف.`);
@@ -880,6 +911,89 @@ export async function mount(root, { tab, state, api }) {
   hRun.addEventListener('click', runHistory);
   hBasis.addEventListener('change', () => { if (rows.length && hDate) runHistory(); });
 
+  // ——— ردِ جلسه: یک ترکیب، از بازگشایی تا حالا (بندِ ۱۰) ———
+  //
+  // ورودی‌اش ردیفِ انتخاب‌شدهٔ همان جدول است، پس «این ترکیب امروز چه
+  // کرده» ادامهٔ همان کلیکی است که جزئیات را باز کرد — نه چیدنِ دوباره.
+  // ارتفاعِ صریحِ `#t-chart` در قالب بالا حدس نیست: `mountChart` بومِ
+  // echarts را به اندازهٔ ظرف می‌سازد و ظرفِ بی‌ارتفاع بومِ صفر می‌دهد —
+  // نموداری که کشیده می‌شود ولی دیده نمی‌شود. قاعده‌های `.gap-chart` به
+  // پوستهٔ `gap-skin` محدودند و به این تب نمی‌رسند.
+  const tGrain = root.querySelector('#t-grain');
+  const tRun = root.querySelector('#t-run');
+  const tStatus = root.querySelector('#t-status');
+  const tNote = root.querySelector('#t-note');
+  const tTable = root.querySelector('#t-table');
+  let tBusy = false;
+
+  /** دکمه فقط وقتی زنده است که ردیفی انتخاب شده و کدهایش را داریم. */
+  function trailReady() {
+    const ok = !!picked && (picked.legIns || []).length > 0;
+    tRun.disabled = !ok || tBusy;
+    if (!picked) tStatus.textContent = 'هنوز ردیفی انتخاب نشده — از جدول یکی را کلیک کن.';
+    else if (!ok) tStatus.textContent = 'این ردیف کد ابزارِ پا ندارد، پس نوارِ معامله‌اش خوانده نمی‌شود.';
+    else tStatus.textContent = `${picked.underlying} — ${picked.legsText}`;
+  }
+
+  async function runTrail() {
+    if (tBusy || !picked) return;
+    const row = picked;
+    tBusy = true;
+    tRun.disabled = true;
+    const label = tRun.textContent;
+    tRun.textContent = 'در حال خواندن نوار…';
+    tStatus.textContent = 'در حال گرفتن ریزمعاملهٔ پاها…';
+    try {
+      const codes = [...(row.legIns || [])];
+      if (row.uaIns) codes.push(String(row.uaIns));
+      const { tape, at, errors } = await liveTapeFor(codes);
+      // سقفِ زمان، ساعتِ همین لحظه است نه پایان جلسه: ستونی که هنوز
+      // نرسیده، ستونِ خالی است نه ستونِ بی‌معامله، و خطِ صافِ تا انتهای
+      // روز را خواننده «بازار تکان نخورد» می‌خواند.
+      const now = new Date(at || Date.now());
+      const until = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+      const fees = { buyStock: s().feeBuyStock, sellStock: s().feeSellStock, option: s().feeOption };
+      const trail = sessionTrail({
+        legs: row.__legs || [], tapeByIns: tape, grain: tGrain.value,
+        fees, uaIns: String(row.uaIns || ''), until,
+      });
+      const points = trail.points.map((point) => ({ label: point.label, current: point.netCash }));
+      await mountEcharts(root.querySelector('#t-chart'),
+        gapPathChart({ points }, { title: `نقد خالصِ ورود — ${row.legsText}` }),
+        { empty: 'هیچ لحظه‌ای عددِ کامل ندارد.' });
+      const failed = Object.keys(errors || {});
+      tNote.textContent = [
+        trailNote(trail),
+        failed.length ? `${fmt.int(failed.length)} پا نوارِ معامله‌اش خوانده نشد.` : '',
+      ].filter(Boolean).join(' ');
+      const rowsHtml = trail.points.filter((point) => point.complete).map((point) => `
+        <tr><td>${point.label}</td><td class="n">${fmt.money(point.netCash)}</td>
+        <td class="n">${fmt.int(Math.round(point.maxAgeSec / 60))}</td>
+        <td class="n">${fmt.int(Math.round(point.spanSec / 60))}</td></tr>`).join('');
+      tTable.innerHTML = rowsHtml ? `
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">لحظه‌های دارای عددِ کامل</h4>
+        <table class="mini">
+          <thead><tr><th>ساعت</th><th>نقد خالص</th>
+            <th>سنِ کهنه‌ترین پا <span class="unit">دقیقه</span></th>
+            <th>فاصلهٔ پاها <span class="unit">دقیقه</span></th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>` : '';
+      tStatus.textContent = trail.complete
+        ? `${fmt.int(trail.complete)} لحظهٔ کامل از ${fmt.int(trail.moments)} — تغییر ${fmt.money(trail.change)}`
+        : 'در هیچ لحظه‌ای همهٔ پاها با هم قیمت نداشتند.';
+    } catch (error) {
+      logError('ردِ جلسهٔ استراتژی', error);
+      tStatus.textContent = `خواندن نوار ناموفق: ${error.message}`;
+    } finally {
+      tBusy = false;
+      tRun.textContent = label;
+      trailReady();
+    }
+  }
+
+  tRun.addEventListener('click', runTrail);
+  trailReady();
+
   // ——— نوار زیرتب: کدام منبع جدول را می‌سازد ———
   //
   // رفتن به «رصد تاریخی» رصدِ زنده را می‌خواباند. بی این، حلقه چند ثانیه
@@ -887,6 +1001,7 @@ export async function mount(root, { tab, state, api }) {
   mountSubtabs(root.querySelector('#modes'), [
     { id: 'live', label: 'رصد زنده', hint: 'تابلوی همین حالا، با نوسازی دوره‌ای' },
     { id: 'history', label: 'رصد تاریخی', hint: 'همان ستون‌ها، با قیمتِ یک روزِ گذشته' },
+    { id: 'trail', label: 'ردِ جلسه', hint: 'یک ترکیب، از بازگشایی تا همین لحظه' },
   ], {
     root,
     onChange: (id) => {
@@ -894,6 +1009,7 @@ export async function mount(root, { tab, state, api }) {
         if (auto.checked) { auto.checked = false; armTimer(); setStatus('رصد زنده خوابید — جدول حالا از تاریخ ساخته می‌شود.'); }
         refreshHistoryDates();
       }
+      if (id === 'trail') trailReady();
     },
   });
 

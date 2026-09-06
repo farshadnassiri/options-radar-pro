@@ -117,3 +117,23 @@ export async function runHistoryScan({ def, uaIns, date, basis = 'CLOSE', settin
     archived: universe.archived === true,
   };
 }
+
+/**
+ * نوارِ معاملهٔ امروزِ چند ابزار — برای ردِ جلسهٔ یک ترکیب.
+ *
+ * سقفِ `/api/live-trades` بیست‌وچهار کد است و همین سقف، همان مرزی است که
+ * این قابلیت را «یک ترکیب» نگه می‌دارد نه «کلِ جدول»: چهار پا به‌علاوهٔ
+ * نماد پایه، یک درخواست. برای چند ده ترکیب، صد و اندی درخواست می‌شد.
+ */
+export async function liveTapeFor(codes = [], { fetcher } = {}) {
+  const list = [...new Set(codes.map((code) => String(code || '')).filter(Boolean))].slice(0, 24);
+  if (!list.length) return { at: 0, tape: {}, errors: {} };
+  const payload = await asJson(`/api/live-trades?ins=${list.join(',')}`, fetcher);
+  const tape = {};
+  const errors = {};
+  for (const [ins, box] of Object.entries(payload.items || {})) {
+    tape[ins] = Array.isArray(box?.rows) ? box.rows : [];
+    if (box?.error) errors[ins] = box.error;
+  }
+  return { at: payload.at ?? 0, tape, errors };
+}
