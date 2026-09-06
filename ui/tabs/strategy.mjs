@@ -21,7 +21,7 @@ import { fmt, faNum, faDigits, coverageInfo, signTone, ltr, offsetCell } from '/
 import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
-import { canHandoff, handoffPlan, handoffButtonHtml, goHandoff } from '/ui/handoff.mjs';
+import { handoffPlan, goHandoff, strategyLinkPlan, strategyLinkTargets } from '/ui/handoff.mjs';
 import { mountScenarioPanel } from '/ui/scenario-panel.mjs';
 import { runScan, onChain, pushRows, chainState } from '/ui/scanner.mjs';
 import { mountSubtabs } from '/ui/subtabs.mjs';
@@ -532,7 +532,10 @@ export async function mount(root, { tab, state, api }) {
           <span>بیشترین سود: ${fmt.money(an.maxProfit)}</span>
           <span>بیشترین زیان: <b style="color:${Number.isFinite(an.maxLoss) ? 'inherit' : 'var(--loss)'}">${fmt.money(an.maxLoss)}</b></span>
         </div>
-        <div class="detail-actions">${canHandoff(r) ? handoffButtonHtml() : ''}</div>
+        <!-- نوارِ پیوند: هر مقصد در صفحهٔ جدا باز می‌شود، پس جدولِ زنده
+             پشتِ سر می‌ماند و کاربر جای خودش را از دست نمی‌دهد. -->
+        <div class="detail-actions">${strategyLinkTargets(r, { strategyId: def.id }).map((item) => `
+          <button class="ghost" type="button" data-link="${item.to}" title="${item.why}">${item.label}</button>`).join('')}</div>
         <div id="cmp-picker"></div>
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">قیمت و عمق هر پا</h4>
         <table class="mini">
@@ -642,14 +645,23 @@ export async function mount(root, { tab, state, api }) {
       units: unitsOf(r),
     });
 
-    // ——— انتقال به بک‌تست ———
-    root.querySelector('#to-backtest')?.addEventListener('click', () => {
-      goHandoff(state, handoffPlan(r, {
-        from: 'strategy', strategyId: def.id, strategyName: def.name,
-        units: unitsOf(r),
-        entryBasis: 'LAST', exitBasis: 'LAST',
-      }));
-    });
+    // ——— پیوند به بقیهٔ برنامه ———
+    //
+    // بک‌تست نقشهٔ خودش را دارد (تاریخ و مبنای ورود و خروج)، بقیه نقشهٔ
+    // مشترک را. هر دو از یک مسیر بیرون می‌روند تا رفتارِ «صفحهٔ جدا» یکی
+    // بماند.
+    for (const button of root.querySelectorAll('[data-link]')) {
+      button.addEventListener('click', () => {
+        const to = button.dataset.link;
+        const plan = to === 'backtest'
+          ? handoffPlan(r, {
+            from: 'strategy', strategyId: def.id, strategyName: def.name,
+            units: unitsOf(r), entryBasis: 'LAST', exitBasis: 'LAST',
+          })
+          : strategyLinkPlan(r, { to, strategyId: def.id, strategyName: def.name, units: unitsOf(r) });
+        if (plan) goHandoff(state, plan, to);
+      });
+    }
 
     // نمودار بعد از نشستن قالب سوار می‌شود، چون به اندازه واقعی قاب نیاز دارد
     mountChart();
