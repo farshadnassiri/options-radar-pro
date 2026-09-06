@@ -82,7 +82,9 @@ group('۵۱. نوار پیوند به بقیهٔ برنامه');
       { kind: 'call', side: 'sell', strike: 22000, ins: 'c2' },
     ],
     retMonthPct: 12.5, retMaxPct: 30, rewardRisk: 2.5,
-    maxProfit: 5e6, maxLoss: -2e6, maxLossPct: -40, days: 33, S: 9500,
+    // زیان در موتور **اندازه** است (`analyzePayoff().maxLoss` مثبت
+    // برمی‌گردد و برای فروشِ برهنه `Infinity` می‌شود).
+    maxProfit: 5e6, maxLoss: 2e6, maxLossPct: 40, days: 33, S: 9500,
   };
   // `bull-call-spread` در `GAP_STRATEGY_IDS` هست، پس هر دو مقصد را می‌گیرد.
   const targets = strategyLinkTargets(rowLink, { strategyId: 'bull-call-spread' }).map((item) => item.to);
@@ -140,11 +142,14 @@ group('۵۱. نوار پیوند به بقیهٔ برنامه');
   // آستانه = عددِ همین لحظه. قاعده‌ای با آستانهٔ صفر همان لحظه شلیک می‌کند
   // و کاربر باید همه‌اش را دستی عوض کند.
   check('آستانهٔ هر شرط، عددِ همین ردیف است', byMetric.monthlyPct.value === 12.5 && byMetric.returnPct.value === 30);
-  // زیان در موتور منفی است و در دیده‌بان اندازه؛ نگاشتِ حدسی شرطی می‌ساخت
-  // که وارونه عمل می‌کرد.
-  check('زیان با قدرمطلق و با عملگرِ سقف می‌رود، نه با عددِ منفی و کف',
+  // جهتِ شرط از خودِ سنجه می‌آید: بازده هرچه بیشتر بهتر، زیان هرچه کمتر.
+  // اگر همه با `ge` می‌رفتند، قاعدهٔ زیان وارونه عمل می‌کرد.
+  check('زیان با عملگرِ سقف می‌رود، نه کف',
     byMetric.maxLoss.value === 2e6 && byMetric.maxLoss.op === 'le'
     && byMetric.lossPct.value === 40 && byMetric.lossPct.op === 'le');
+  check('و علامتِ منفیِ غیرمنتظره هم آستانه را منفی نمی‌کند',
+    watchConditionsFrom({ ...rowLink, maxLoss: -2e6 })
+      .find((one) => one.metric === 'maxLoss').value === 2e6);
   check('سنجهٔ بی‌عدد شرط نمی‌سازد',
     !watchConditionsFrom({ ...rowLink, retMonthPct: NaN }).some((one) => one.metric === 'monthlyPct'));
   check('«نامحدود» هم شرط نمی‌سازد — با هیچ آستانه‌ای سنجیده نمی‌شود',

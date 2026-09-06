@@ -41,7 +41,7 @@ const LEG_COLUMN = /^(legValue|legIv|legdelta|leggamma|legvega|legtheta|legrho)(
 // `cmp`:
 //   gte  عدد ردیف باید دست‌کم این‌قدر باشد
 //   lte  عدد ردیف باید حداکثر این‌قدر باشد
-//   absLte  قدرمطلقِ عدد ردیف باید حداکثر این‌قدر باشد (زیان منفی است)
+//   absLte  قدرمطلقِ عدد ردیف باید حداکثر این‌قدر باشد
 //   flag  فیلترِ بله/خیر روی یک پرچمِ ردیف
 //   notFlag  وارونهٔ آن
 
@@ -321,6 +321,10 @@ export function passesFilter(row, filter, value) {
   if (limit === null) return { pass: true, missing: false };
   const raw = Number(row?.[filter.field]);
   // «نامحدود» عددِ نداشته نیست؛ یک واقعیتِ سنجیدنی است.
+  //
+  // زیانِ نامحدود در این موتور `+Infinity` است، نه منفی — چون زیان همه‌جا
+  // **اندازه** نوشته می‌شود. هر دو سو اینجا سنجیده می‌شوند، ولی آن یکی
+  // محافظ است نه حالتِ واقعی.
   if (raw === Infinity || raw === -Infinity) {
     if (filter.cmp === 'gte') return { pass: raw === Infinity, missing: false };
     if (filter.cmp === 'lte') return { pass: raw === -Infinity, missing: false };

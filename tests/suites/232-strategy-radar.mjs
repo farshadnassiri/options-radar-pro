@@ -89,7 +89,12 @@ check('«حداقل» یعنی بزرگ‌تر یا مساوی', passesFilter({ 
   && !passesFilter({ maxProfit: 99 }, F('minMaxProfit'), 100).pass);
 check('«سقف» یعنی کوچک‌تر یا مساوی', passesFilter({ margin: 100 }, F('maxMargin'), 100).pass
   && !passesFilter({ margin: 101 }, F('maxMargin'), 100).pass);
-check('سقفِ زیان روی قدرمطلق می‌نشیند، چون زیان منفی نوشته می‌شود',
+// زیان در این موتور **اندازه** است (عدد مثبت). `absLte` هر دو علامت را
+// یکسان می‌سنجد، پس ورودیِ غیرمنتظرهٔ منفی هم نتیجهٔ درست می‌دهد.
+check('سقفِ زیان، زیانِ بزرگ‌تر از سقف را می‌اندازد',
+  passesFilter({ maxLoss: 80 }, F('maxLossCap'), 100).pass
+  && !passesFilter({ maxLoss: 120 }, F('maxLossCap'), 100).pass);
+check('و با علامتِ منفیِ غیرمنتظره هم همان جواب را می‌دهد',
   passesFilter({ maxLoss: -80 }, F('maxLossCap'), 100).pass
   && !passesFilter({ maxLoss: -120 }, F('maxLossCap'), 100).pass);
 check('فیلترِ خاموش (مقدارِ نبوده) هیچ ردیفی را نمی‌اندازد',
@@ -111,9 +116,11 @@ check('ولی صفرِ نوشته‌شده یک شرطِ واقعی است',
 // فروشِ برهنه زیانِ نامحدود دارد. اگر `-Infinity` مثل `NaN` رفتار کند،
 // «سقف زیان ۱۰۰» آن ردیف را با علتِ «داده ندارد» می‌انداخت — در حالی که
 // داده دارد و همان داده می‌گوید نباید بگذرد.
+// فروشِ برهنه `maxLoss: Infinity` می‌دهد — مثبت، چون زیان اندازه است.
 check('زیانِ نامحدود از سقفِ زیان رد نمی‌شود، و «بی‌داده» هم شمرده نمی‌شود',
-  passesFilter({ maxLoss: -Infinity }, F('maxLossCap'), 1e12).pass === false
-  && passesFilter({ maxLoss: -Infinity }, F('maxLossCap'), 1e12).missing === false);
+  passesFilter({ maxLoss: Infinity }, F('maxLossCap'), 1e12).pass === false
+  && passesFilter({ maxLoss: Infinity }, F('maxLossCap'), 1e12).missing === false
+  && passesFilter({ maxLoss: -Infinity }, F('maxLossCap'), 1e12).pass === false);
 check('سودِ نامحدود از هر «حداقل سود»ی می‌گذرد',
   passesFilter({ maxProfit: Infinity }, F('minMaxProfit'), 1e12).pass);
 check('و پرچمِ زیان نامحدود، فیلترِ وارونهٔ خودش را دارد',

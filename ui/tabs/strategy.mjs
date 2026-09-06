@@ -11,6 +11,7 @@
 import { byId } from '/strategies/catalog.mjs';
 import { COLUMNS, columnsForStrategy } from '/core/evaluate.mjs';
 import { analyzePayoff, scenarioGrid } from '/core/payoff.mjs';
+import { manualCompare, manualNote } from '/core/manual-price.mjs';
 import { analyzeMixed, isSingleExpiry } from '/core/mixed.mjs';
 import { timeMachine } from '/core/timemachine.mjs';
 import { priceQuantile } from '/core/bs.mjs';
@@ -456,10 +457,13 @@ export async function mount(root, { tab, state, api }) {
   let chart = null;
   let chartRange = null; // بازه زوم/پن چارت، برای نگه داشتن روی رفرش پیوسته همان ردیف
   let compareIds = new Set(); // موقعیت‌های مقایسه‌ای تیک‌خورده، برای همین ردیف انتخاب‌شده
+  // قیمتِ دستیِ هر پا برای ردیفِ انتخاب‌شده. با عوض شدن ردیف پاک می‌شود:
+  // «۶۰۰ ریال» برای پای یک ترکیب، برای ترکیب دیگر معنی ندارد.
+  let manualPrices = {};
   function showDetail(r) {
     const sameRow = picked && picked.id === r.id;
     if (chart) chartRange = chart.view();
-    if (!sameRow) compareIds = new Set();
+    if (!sameRow) { compareIds = new Set(); manualPrices = {}; }
     picked = r;
     const card = root.querySelector('#detail-card');
     card.style.display = '';
@@ -482,7 +486,7 @@ export async function mount(root, { tab, state, api }) {
       return { pct, S: S2, pnl: an.at(S2) };
     });
 
-    const legRows = r.legPrices.map((l) => `
+    const legRows = r.legPrices.map((l, at) => `
       <tr>
         <td>${l.side === 'sell' ? 'فروش' : 'خرید'} ${l.kind === 'underlying' ? 'سهم' : (l.kind === 'call' ? 'کال' : 'پوت')}</td>
         <td class="n">${l.strike ? fmt.money(l.strike) : '—'}</td>
@@ -493,6 +497,8 @@ export async function mount(root, { tab, state, api }) {
         <td class="n">${fmt.int(l.filled)}</td>
         <td class="n">${fmt.int(l.short)}</td>
         <td>${l.source || '—'}</td>
+        <td class="n"><input type="number" step="any" min="0" class="manual-price" data-leg="${at}"
+          value="${manualPrices[at] ?? ''}" placeholder="—" style="width:7rem"></td>
       </tr>`).join('');
 
     const costRows = r.costRows.map((c) => `
@@ -539,9 +545,10 @@ export async function mount(root, { tab, state, api }) {
         <div id="cmp-picker"></div>
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">قیمت و عمق هر پا</h4>
         <table class="mini">
-          <thead><tr><th>پا</th><th>اعمال</th><th>قیمت اجرا</th><th>میانه</th><th>اسپرد ٪</th><th>افت ٪</th><th>پرشده</th><th>کمبود</th><th>منبع</th></tr></thead>
+          <thead><tr><th>پا</th><th>اعمال</th><th>قیمت اجرا</th><th>میانه</th><th>اسپرد ٪</th><th>افت ٪</th><th>پرشده</th><th>کمبود</th><th>منبع</th><th>قیمت دستی</th></tr></thead>
           <tbody>${legRows}</tbody>
         </table>
+        <div id="manual-out"></div>
       </div>
       <div>
         <dl class="kv">
@@ -637,6 +644,53 @@ export async function mount(root, { tab, state, api }) {
       });
     }
     renderCmpPicker();
+
+    // ——— قیمت دستی: «اگر بتوانم این پا را با این قیمت بگیرم» ———
+    //
+    // نتیجه **کنارِ** عددِ بازار می‌نشیند، نه جایش. اگر جایگزین می‌شد،
+    // چند دقیقه بعد کسی نمی‌دانست کدام عدد از بازار آمده و کدام را خودش
+    // تایپ کرده.
+    const manualOut = root.querySelector('#manual-out');
+    function drawManual() {
+      const cmp = manualCompare(r.__legs || [], manualPrices, { fees });
+      // ── جهتِ «بهتر»، سطر به سطر ────────────────────────────────────
+      //
+      // `signTone(b - a)` برای «نقد خالص» و «بیشترین سود» درست است، ولی
+      // برای «بیشترین زیان» وارونه: موتور زیان را **اندازه** می‌نویسد
+      // (عدد مثبت)، پس کم‌شدنش خبرِ خوب است و با تفاضلِ خام قرمز
+      // درمی‌آمد. عکس گرفتن همین را نشان داد.
+      const line = (label, pick, { money = true, lowerIsBetter = false } = {}) => {
+        const a = pick(cmp.base), b = pick(cmp.manual);
+        const text = (value) => (money ? fmt.money(value) : (Number.isFinite(value) ? fmt.num(value) : '—'));
+        const delta = lowerIsBetter ? a - b : b - a;
+        return `<tr><td>${label}</td><td class="n">${text(a)}</td>
+          <td class="n ${cmp.anyManual ? signTone(delta) : ''}">${text(b)}</td></tr>`;
+      };
+      const beText = (side) => (side.breakevens.length ? side.breakevens.map((b) => fmt.money(b)).join(' , ') : '—');
+      manualOut.innerHTML = `
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">اگر با قیمت دستی پر شود</h4>
+        <table class="mini">
+          <thead><tr><th>سنجه</th><th>با قیمت بازار</th><th>با قیمت تو</th></tr></thead>
+          <tbody>
+            ${line('نقد خالص', (x) => x.netCash)}
+            ${line('بیشترین سود', (x) => x.maxProfit)}
+            ${line('بیشترین زیان', (x) => x.maxLoss, { lowerIsBetter: true })}
+            ${line('سود به زیان', (x) => x.rewardRisk, { money: false })}
+            <tr><td>سربه‌سری</td><td class="n">${beText(cmp.base)}</td>
+              <td class="n">${beText(cmp.manual)}</td></tr>
+          </tbody>
+        </table>
+        <p class="note"${cmp.anyManual ? ' style="color:var(--warn)"' : ''}>${manualNote(cmp)}</p>`;
+    }
+    drawManual();
+    for (const input of root.querySelectorAll('.manual-price')) {
+      input.addEventListener('input', (event) => {
+        const at = Number(event.target.dataset.leg);
+        const raw = event.target.value;
+        if (raw === '') delete manualPrices[at]; else manualPrices[at] = raw;
+        drawManual();
+      });
+    }
 
     // ——— سناریو، حساسیت، عمق دفتر ———
     disposeScen?.();
