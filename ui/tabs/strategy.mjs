@@ -24,6 +24,12 @@ import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE }
 import { canHandoff, handoffPlan, handoffButtonHtml, goHandoff } from '/ui/handoff.mjs';
 import { mountScenarioPanel } from '/ui/scenario-panel.mjs';
 import { runScan, onChain, pushRows, chainState } from '/ui/scanner.mjs';
+import { mountSubtabs } from '/ui/subtabs.mjs';
+import { mountDateWheel } from '/ui/datewheel.mjs';
+import { historyDateLabel } from '/core/history.mjs';
+import { HISTORY_CHAIN_BASES } from '/core/history-chain.mjs';
+import { historyDates, runHistoryScan } from '/ui/strategy-history.mjs';
+import { logError } from '/ui/errlog.mjs';
 
 /** dEven عددی (مثلاً ۲۰۲۶۰۱۰۱) به تاریخ شمسی خوانا. */
 function jalaliFromDEven(dEven) {
@@ -136,13 +142,19 @@ export async function mount(root, { tab, state, api }) {
         : `<span class="tag warn">اجرا در تابلو ممکن نیست</span> ${def.infeasibleWhy}`}</p>
     </div>
 
-    <div class="split">
-      <section class="card">
-        <h3>نماد پایه</h3>
-        <p class="note">انتخابی، نه تایپی. جست‌وجو فقط فهرست را کوتاه می‌کند.</p>
-        <div id="pick"></div>
-      </section>
+    <section class="card">
+      <h3>نماد پایه</h3>
+      <p class="note">انتخابی، نه تایپی. جست‌وجو فقط فهرست را کوتاه می‌کند. همین انتخاب، هم رصد زنده را می‌سازد و هم رصد تاریخی.</p>
+      <div id="pick"></div>
+    </section>
 
+    <!-- زیرتب‌ها فقط **منبع** جدول را عوض می‌کنند، نه خودِ جدول.
+         شاخص‌ها، فیلترها، جدول و پانل جزئیات پایین‌تر مشترک‌اند و همان
+         ستون‌ها را دارند — وگرنه «همان جدول، تاریخ دیگر» ادعای توخالی
+         می‌شد و دو عدد از دو مسیر با هم مقایسه می‌شدند. -->
+    <div id="modes"></div>
+
+    <div data-panel="live">
       <section class="card">
         <h3>کنترل اسکن</h3>
         <p class="note">حجم من، مقیاس کل ردیف است: هر عدد ریالی جدول، نمودار و پنل جزئیات برای همین تعداد قرارداد حساب می‌شود — نه یک دست. مبنای قیمت و حالت اجرا روی قیمت اجرای هر پا اثر می‌گذارند.</p>
@@ -156,6 +168,26 @@ export async function mount(root, { tab, state, api }) {
           <span id="status" class="picker-sum" role="status" aria-live="polite"></span>
         </div>
         <div class="scan-progress" id="progress" style="display:none"><div class="scan-progress-fill" id="progress-fill"></div></div>
+      </section>
+    </div>
+
+    <div data-panel="history">
+      <section class="card">
+        <h3>رصد تاریخی</h3>
+        <p class="note">همان ستون‌ها، همان محاسبه — با قیمتِ یک روزِ گذشته. دفترِ سفارشِ گذشته وجود ندارد، پس اعداد این حالت مرجع‌اند و ادعای اجرا ندارند.</p>
+        <div class="grid">
+          <div class="field">
+            <label for="h-basis">مبنای قیمت آن روز</label>
+            <select id="h-basis">${HISTORY_CHAIN_BASES.map(([key, label], at) => `<option value="${key}"${at === 1 ? ' selected' : ''}>${label}</option>`).join('')}</select>
+          </div>
+        </div>
+        <div id="h-dates" style="margin-top:12px"></div>
+        <div class="bar" style="margin-top:12px">
+          <button class="btn" id="h-run" disabled>جدول همان روز را بساز</button>
+          <span class="sp"></span>
+          <span id="h-status" class="picker-sum" role="status" aria-live="polite">اول نماد پایه را انتخاب کن.</span>
+        </div>
+        <p class="note" id="h-note"></p>
       </section>
     </div>
 
@@ -190,8 +222,19 @@ export async function mount(root, { tab, state, api }) {
     </section>`;
 
   // ——— انتخابگر ———
+  // اشاره‌گر به تازه‌سازی فهرست روزهای تاریخی. جدا از خودِ تابع است چون
+  // انتخابگر می‌تواند همان لحظهٔ ساخت رویداد بدهد، و تابعِ واقعی پایین‌تر
+  // — کنار بقیهٔ رصدِ تاریخی — تعریف می‌شود.
+  let refreshDates = null;
   const picker = makePicker(root.querySelector('#pick'), {
-    onChange: () => { setStatus(); if (auto.checked) run(); },
+    onChange: () => {
+      setStatus();
+      if (auto.checked) run();
+      // فهرست روزهای تاریخی مالِ همان نماد است؛ با عوض شدن انتخاب باید
+      // دور ریخته شود، وگرنه کاربر روزی را می‌بیند که برای نمادِ قبلی
+      // داده داشت.
+      refreshDates?.();
+    },
   });
   if (chainState.list.length) picker.setList(chainState.list);
   const offChain = onChain((cs) => picker.setList(cs.list));
@@ -736,6 +779,122 @@ export async function mount(root, { tab, state, api }) {
   // اشتراک عکس لحظه‌ای فقط تا وقتی این تب باز است
   const offWatch = api.subscribeWatch((w) => {
     pushRows(w, !w.changed);
+  });
+
+  // ——— رصد تاریخی: همان جدول، تاریخِ دیگر (بندِ ۸) ———
+  //
+  // انتخابگرِ نماد مشترک است، پس «همین ترکیبی که زنده می‌بینم، سه هفته
+  // پیش چه شکلی بود» یک کلیک است نه چیدنِ دوبارهٔ همه‌چیز. آنچه عوض
+  // می‌شود فقط منبعِ قیمت است؛ ستون‌ها، فیلترها و پانل جزئیات همان‌اند.
+  const hBasis = root.querySelector('#h-basis');
+  const hStatus = root.querySelector('#h-status');
+  const hNote = root.querySelector('#h-note');
+  const hRun = root.querySelector('#h-run');
+  const hDates = root.querySelector('#h-dates');
+  let hDate = 0;
+  let hLoadedFor = '';
+  let hBusy = false;
+
+  const hSetStatus = (text) => { hStatus.textContent = text; };
+
+  /**
+   * روزهای قابل انتخاب، از سری روزانهٔ خودِ نماد پایه.
+   *
+   * تقویمِ کامل نمی‌سازیم: روزی که نماد داده ندارد، انتخابش کاربر را به
+   * جدولِ خالی می‌برد بی آنکه بداند چرا.
+   */
+  async function refreshHistoryDates() {
+    const key = picker.selected()[0];
+    if (!key) {
+      hLoadedFor = ''; hDate = 0; hRun.disabled = true;
+      hDates.innerHTML = '';
+      hSetStatus('اول نماد پایه را انتخاب کن.');
+      return;
+    }
+    if (hLoadedFor === key) return;
+    hLoadedFor = key;
+    hDate = 0;
+    hRun.disabled = true;
+    hSetStatus('در حال گرفتن روزهای موجود…');
+    try {
+      const dates = await historyDates(key);
+      if (hLoadedFor !== key) return;                 // انتخاب وسط راه عوض شد
+      mountDateWheel(hDates, dates, dates.at(-1) ?? null, (date) => {
+        hDate = Number(date) || 0;
+        hRun.disabled = !hDate;
+        if (hDate) hSetStatus(`روز انتخاب‌شده: ${historyDateLabel(hDate)}`);
+      }, { empty: 'این نماد در بازهٔ اخیر روزِ داده‌داری ندارد.' });
+      hDate = dates.at(-1) ?? 0;
+      hRun.disabled = !hDate;
+      hSetStatus(dates.length
+        ? `${fmt.int(dates.length)} روز داده‌دار — روزی را انتخاب کن.`
+        : 'برای این نماد روزی با داده پیدا نشد.');
+    } catch (error) {
+      if (hLoadedFor !== key) return;
+      hLoadedFor = '';
+      logError('روزهای تاریخی استراتژی', error);
+      hSetStatus(`گرفتن روزها ناموفق: ${error.message}`);
+    }
+  }
+
+  async function runHistory() {
+    if (hBusy) return;
+    const key = picker.selected()[0];
+    if (!key || !hDate) { hSetStatus('نماد و روز را انتخاب کن.'); return; }
+    hBusy = true;
+    hRun.disabled = true;
+    const label = hRun.textContent;
+    hRun.textContent = 'در حال ساخت…';
+    hSetStatus(`در حال ساخت جدول ${historyDateLabel(hDate)}…`);
+    table.setLoading(true);
+    if (!hasScanned) { hasScanned = true; table.setEmptyMessage(null); }
+    try {
+      const out = await runHistoryScan({
+        def, uaIns: key, date: hDate, basis: hBasis.value, settings: s(), qty,
+      });
+      rows = out.rows || [];
+      funnelBar(root.querySelector('#funnel'), out.funnel);
+      const keepSort = table.sortKey();
+      table.set(visibleRows());
+      table.sortBy(keepSort);
+      drawKpis();
+      drawFilterReport();
+      // پانل جزئیاتِ ردیفِ زندهٔ قبلی روی دادهٔ روزِ دیگر معنی ندارد.
+      picked = null;
+      root.querySelector('#detail-card').style.display = 'none';
+      hNote.textContent = [out.note, out.universeNote].filter(Boolean).join(' — ');
+      hSetStatus(`${historyDateLabel(hDate)} — ${fmt.int(rows.length)} ردیف.`);
+      setStatus(`جدول از ${historyDateLabel(hDate)} ساخته شد — ${fmt.int(rows.length)} ردیف.`);
+    } catch (error) {
+      table.setLoading(false);
+      logError('رصد تاریخی استراتژی', error);
+      hSetStatus(`ساخت جدول ناموفق: ${error.message}`);
+    } finally {
+      hBusy = false;
+      hRun.disabled = !hDate;
+      hRun.textContent = label;
+    }
+  }
+
+  refreshDates = () => { hLoadedFor = ''; refreshHistoryDates(); };
+  hRun.addEventListener('click', runHistory);
+  hBasis.addEventListener('change', () => { if (rows.length && hDate) runHistory(); });
+
+  // ——— نوار زیرتب: کدام منبع جدول را می‌سازد ———
+  //
+  // رفتن به «رصد تاریخی» رصدِ زنده را می‌خواباند. بی این، حلقه چند ثانیه
+  // بعد جدولِ تاریخی را با دادهٔ امروز پاک می‌کرد و کاربر نمی‌فهمید چرا.
+  mountSubtabs(root.querySelector('#modes'), [
+    { id: 'live', label: 'رصد زنده', hint: 'تابلوی همین حالا، با نوسازی دوره‌ای' },
+    { id: 'history', label: 'رصد تاریخی', hint: 'همان ستون‌ها، با قیمتِ یک روزِ گذشته' },
+  ], {
+    root,
+    onChange: (id) => {
+      if (id === 'history') {
+        if (auto.checked) { auto.checked = false; armTimer(); setStatus('رصد زنده خوابید — جدول حالا از تاریخ ساخته می‌شود.'); }
+        refreshHistoryDates();
+      }
+    },
   });
 
   setStatus();
