@@ -24,7 +24,7 @@ import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
-import { handoffRange } from '/ui/handoff.mjs';
+import { handoffRange, handoffEntryDate } from '/ui/handoff.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { chart, LEG_COLORS } from '/ui/track-chart.mjs';
@@ -1070,11 +1070,28 @@ export async function mount(root, { state }) {
 
     await loadHistory({ requiredIns: plan.legIns });
     if (!entryDates.length) return;
-    // «خودکار» یعنی ردیف زنده تاریخ نداشت. بلندترین بازهٔ موجودِ همین ترکیب
-    // برداشته می‌شود: قدیمی‌ترین روزِ دارای ترکیب معتبر. حدس‌زدن یک بازهٔ
-    // ثابت از تب مبدأ، بازه‌ای می‌ساخت که ممکن است برای این قرارداد وجود
-    // نداشته باشد.
-    const wantEntry = plan.entryDate === 'auto' ? entryDates[0] : plan.entryDate;
+    // ═══ «خودکار» یعنی روزی که **همین** ترکیب در آن هست ═══
+    //
+    // گزارش صاحب پروژه: ترکیبِ +۶۸۰۰۰/−۷۴۰۰۰ فرستاده شد و آزمایشگاه
+    // ۱۶۰۰۰/۱۸۰۰۰ را انتخاب کرد.
+    //
+    // ریشه اینجا بود: `entryDates[0]` قدیمی‌ترین روزی است که **هر**
+    // ترکیبی از این استراتژی اجراپذیر بوده — نه روزی که این ترکیب وجود
+    // دارد. (`requiredIns` فقط خطای دریافت را می‌سنجید، نه بودنِ قرارداد
+    // در آن روز.) قراردادهای تازه‌سررسید در آن روزِ قدیمی هنوز باز
+    // نشده‌اند، پس تطبیق شکست می‌خورد و کشویی روی نخستین ترکیبِ آن روز
+    // می‌ماند.
+    //
+    // حالا از **تازه‌ترین** روز به عقب می‌گردیم و نخستین روزی را
+    // برمی‌داریم که همهٔ پاهای فرستاده‌شده در آن قیمت دارند. برای ردیفی
+    // که همین حالا زنده است، همین درست هم هست: «این ترکیب، همان‌طور که
+    // امروز هست». اگر هیچ روزی پیدا نشد، رفتار قبلی می‌ماند و بندِ
+    // «بازسازی نشد» خودش را می‌گوید.
+    // قاعده در `ui/handoff.mjs` است تا این تب و رصد یونانی دو رفتار
+    // نداشته باشند؛ صفر یعنی «هیچ روزی همهٔ پاها را ندارد».
+    const autoEntry = handoffEntryDate(plan, entryDates,
+      (ins, date) => Number.isFinite(historyPrice(rowAt(ins, date), plan.entryBasis || 'LAST')));
+    const wantEntry = plan.entryDate === 'auto' ? (autoEntry || entryDates[0]) : plan.entryDate;
     const entryReady = entryDates.includes(wantEntry);
     if (entryReady) entryWheel.select(wantEntry);
     else skipped.push(`روز ورود ${dateLabel(plan.entryDate)} برای این استراتژی ترکیب قابل اجرا ندارد`);
@@ -1097,7 +1114,27 @@ export async function mount(root, { state }) {
         $('bt-combo').value = String(exactIndex);
         $('bt-combo-count').textContent = `${fmt.int(combos.length)} ترکیب · موقعیت دقیق تحلیل تاریخی افزوده شد`;
         renderCombo();
-      } else skipped.push(`ترکیب «${plan.comboName}» با داده معتبر این روز بازسازی نشد`);
+      } else {
+        // ═══ ترکیبِ پیدانشده، انتخابِ غلط نمی‌گذارد ═══
+        //
+        // گزارش صاحب پروژه: «از Bull Call Spread اهرم با پاهای
+        // +۶۸۰۰۰/−۷۴۰۰۰ … آزمایشگاه ترکیب ۱۶۰۰۰/۱۸۰۰۰ را انتخاب کرد.»
+        //
+        // تا امروز فقط یک بند به `skipped` اضافه می‌شد و کشویی روی
+        // پیش‌فرضِ `refreshCombos` — یعنی نخستین ترکیبِ آن روز — می‌ماند.
+        // نتیجه‌اش بدترین حالت بود: ترکیبی **دیگر** با ظاهری کاملاً
+        // معتبر انتخاب‌شده می‌نشست و بندِ توضیح به‌راحتی از چشم می‌افتاد.
+        // حالا کشویی روی گزینه‌ای می‌رود که ترکیب نیست، پس `renderCombo`
+        // پانل را خالی می‌کند و هیچ عددی برای ترکیبِ اشتباه ساخته
+        // نمی‌شود.
+        const placeholder = document.createElement('option');
+        placeholder.value = 'none';
+        placeholder.textContent = 'ترکیبِ منتقل‌شده در این روز نیست — یکی را انتخاب کن';
+        $('bt-combo').insertBefore(placeholder, $('bt-combo').firstChild);
+        $('bt-combo').value = 'none';
+        renderCombo();
+        skipped.push(`ترکیب «${plan.comboName}» با داده معتبر این روز بازسازی نشد، پس هیچ ترکیبی انتخاب نشد`);
+      }
     }
 
     const wantExit = plan.exitDate === 'auto' ? exitDates.at(-1) : plan.exitDate;

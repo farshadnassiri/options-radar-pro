@@ -30,6 +30,7 @@ import { mountDateWheel } from '/ui/datewheel.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { HISTORY_CHAIN_BASES } from '/core/history-chain.mjs';
 import { historyDates, liveTapeFor, runHistoryScan } from '/ui/strategy-history.mjs';
+import { isHistoricalRow } from '/core/history-chain.mjs';
 import { MOMENT_GRAINS } from '/core/intraday-grid.mjs';
 import { sessionTrail, trailNote } from '/core/session-trail.mjs';
 import { gapPathChart } from '/ui/gap-charts.mjs';
@@ -123,6 +124,20 @@ export async function mount(root, { tab, state, api }) {
   // همین‌ها را بشمارند نه کلِ اسکن را: کارتی که «۸۰ ردیف قابل اجرا»
   // می‌گوید در حالی که جدول دوازده ردیف دارد، دو حرفِ متفاوت است.
   let shown = [];
+  // ═══ بلیتِ داده — کدام درخواست حق دارد روی جدول بنویسد ═══
+  //
+  // گزارش صاحب پروژه: «رصد زنده را روشن کردم و فوراً به رصد تاریخی رفتم…
+  // اسکنِ درحال‌اجرا بعداً تمام شد و جدول را با ۲۱ ردیف زنده عوض کرد.»
+  //
+  // خاموش‌کردنِ کنترلِ زنده کافی نبود، چون درخواستی که **قبلاً** رفته
+  // همچنان در راه بود. مسئله ترتیب نیست، مالکیت است: هر نویسنده هنگام
+  // شروع یک شماره می‌گیرد و پیش از هر نوشتن می‌سنجد که هنوز آخرین
+  // نویسنده است. درخواستِ کهنه بی‌صدا کنار می‌رود — و چون هر دو سو
+  // (زنده و تاریخی) بلیت می‌گیرند، مسابقهٔ وارونه هم بسته است.
+  let dataTicket = 0;
+  let dataSource = 'live';
+  const takeTicket = (source) => { dataSource = source; return ++dataTicket; };
+  const holdsTicket = (ticket) => ticket === dataTicket;
   let busy = false;
   let hasScanned = false;
   const NOT_SCANNED_MSG = 'هنوز اسکن نزدی — نماد را انتخاب کن و دکمه اسکن را بزن.';
@@ -299,9 +314,25 @@ export async function mount(root, { tab, state, api }) {
     const node = w.querySelector(`#c-${key}`);
     node.addEventListener('change', () => {
       const v = kind === 'bool' ? node.checked : kind === 'num' ? Number(node.value) : node.value;
-      if (key === 'qty') qty = Math.max(1, v);
-      else overrides[key] = v;
-      if (auto.checked) run(); else setStatus('تنظیم عوض شد — اسکن را بزن.');
+      let fixed = '';
+      if (key === 'qty') {
+        // ═══ صفر قرارداد، موقعیت نیست ═══
+        //
+        // گزارش صاحب پروژه: «کنترل حجم من مقدار ۰ را معتبر پذیرفت و
+        // اسکن را اجرا کرد، ولی خروجی مانند یک قرارداد عدد داشت.»
+        // `Math.max(1, v)` عدد را درست می‌کرد ولی **کادر** روی صفر
+        // می‌ماند: کاربر ۰ می‌دید و اعدادِ یک قرارداد. حالا کادر هم به
+        // همان عددی برمی‌گردد که واقعاً حساب شده.
+        qty = Math.max(1, Math.trunc(v) || 1);
+        if (String(node.value) !== String(qty)) {
+          node.value = String(qty);
+          fixed = 'حجم دست‌کم یک قرارداد است — به یک برگردانده شد.';
+        }
+      } else overrides[key] = v;
+      // پیامِ اصلاح نباید با پیامِ عمومی پاک شود: کاربر صفر نوشته و باید
+      // بداند چرا کادر یک شد، نه فقط اینکه «تنظیم عوض شد».
+      if (auto.checked) run();
+      else setStatus(fixed || 'تنظیم عوض شد — اسکن را بزن.');
     });
   }
 
@@ -493,16 +524,29 @@ export async function mount(root, { tab, state, api }) {
       return { pct, S: S2, pnl: an.at(S2) };
     });
 
+    // ═══ ردیفِ تاریخی، خانوادهٔ دفتر را اصلاً نمی‌کشد ═══
+    //
+    // «میانه»، «اسپرد»، «افت»، «پرشده» و «کمبود» همه از دفتر سفارش
+    // می‌آیند و دفترِ گذشته وجود ندارد. `underlyingQuote` وقتی دفتر
+    // ندارد `bid` و `ask` را برابرِ قیمت می‌گذارد (فرضِ پرچم‌دارِ مرحلهٔ
+    // یک)، و چون در گذشته مرحلهٔ دومی نیست آن فرض هرگز اصلاح نمی‌شود —
+    // روی صفحه می‌شد «اسپرد ۰٪»، یعنی ادعای بازارِ دوطرفهٔ کامل برای
+    // روزی که دفترش نبوده. حالا این ستون‌ها در حالت تاریخی ساخته
+    // نمی‌شوند، نه اینکه «—» بگیرند: ستونی که معنی ندارد نباید جا بگیرد.
+    const past = isHistoricalRow(r);
+    const bookCols = past ? '' : '<th>میانه</th><th>اسپرد ٪</th><th>افت ٪</th><th>پرشده</th><th>کمبود</th>';
     const legRows = r.legPrices.map((l, at) => `
       <tr>
         <td>${l.side === 'sell' ? 'فروش' : 'خرید'} ${l.kind === 'underlying' ? 'سهم' : (l.kind === 'call' ? 'کال' : 'پوت')}</td>
         <td class="n">${l.strike ? fmt.money(l.strike) : '—'}</td>
+        <td class="n">${l.endDate ? faDigits(historyDateLabel(l.endDate)) : '—'}</td>
+        <td class="n">${Number.isFinite(l.days) ? fmt.int(l.days) : '—'}</td>
         <td class="n">${fmt.money(l.price)}</td>
-        <td class="n">${fmt.money(l.mid)}</td>
+        ${past ? '' : `<td class="n">${fmt.money(l.mid)}</td>
         <td class="n">${Number.isFinite(l.spreadPct) ? faNum(l.spreadPct.toFixed(1)) : '—'}</td>
         <td class="n">${Number.isFinite(l.slipPct) ? faNum(l.slipPct.toFixed(2)) : '—'}</td>
         <td class="n">${fmt.int(l.filled)}</td>
-        <td class="n">${fmt.int(l.short)}</td>
+        <td class="n">${fmt.int(l.short)}</td>`}
         <td>${l.source || '—'}</td>
         <td class="n"><input type="number" step="any" min="0" class="manual-price" data-leg="${at}"
           value="${manualPrices[at] ?? ''}" placeholder="—" style="width:7rem"></td>
@@ -552,21 +596,31 @@ export async function mount(root, { tab, state, api }) {
         <div id="cmp-picker"></div>
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">قیمت و عمق هر پا</h4>
         <table class="mini">
-          <thead><tr><th>پا</th><th>اعمال</th><th>قیمت اجرا</th><th>میانه</th><th>اسپرد ٪</th><th>افت ٪</th><th>پرشده</th><th>کمبود</th><th>منبع</th><th>قیمت دستی</th></tr></thead>
+          <!-- سررسید و روزِ مانده **هر پا**: در تقویمی و مورب دو پا دو
+               سررسید دارند و سرستونِ واحدِ جدول فقط نزدیک را می‌گوید. -->
+          <thead><tr><th>پا</th><th>اعمال</th><th>سررسید</th><th>روز</th><th>قیمت اجرا</th>${bookCols}<th>منبع</th><th>قیمت دستی</th></tr></thead>
           <tbody>${legRows}</tbody>
         </table>
+        ${past ? `<p class="note" style="color:var(--warn)">این ردیف از رصد تاریخیِ ${faDigits(historyDateLabel(r.historyDate))} است. دفترِ سفارشِ آن روز وجود ندارد، پس میانه، اسپرد، افت مظنه و عمق برایش ساخته نمی‌شوند — نه اینکه صفر باشند.</p>` : ''}
         <div id="manual-out"></div>
       </div>
       <div>
         <dl class="kv">
           <dt>جهت نقدی</dt><dd>${r.cashLabel}</dd>
           <dt>نقد خالص</dt><dd>${fmt.money(r.netCash)}</dd>
+          ${past ? `
+          <dt>اگر همین حالا ببندی — دفتر سفارش</dt>
+          <dd><span class="tag warn">در گذشته معنی ندارد</span></dd>
+          <dt>اگر با آخرین معاملهٔ ${faDigits(historyDateLabel(r.historyDate))} تسویه کنی <span class="unit">مرجع</span></dt>
+          <dd class="${signTone(r.settleLastPnl)}">${fmt.money(r.settleLastPnl)}</dd>
+          <dt>اگر با قیمت پایانیِ ${faDigits(historyDateLabel(r.historyDate))} تسویه کنی <span class="unit">مرجع</span></dt>
+          <dd class="${signTone(r.settleClosePnl)}">${fmt.money(r.settleClosePnl)}</dd>` : `
           <dt>اگر همین حالا ببندی — دفتر سفارش</dt>
           <dd>${offsetCell(r)}</dd>
           <dt>اگر با آخرین معامله تسویه کنی <span class="unit">مرجع</span></dt>
           <dd class="${signTone(r.settleLastPnl)}">${fmt.money(r.settleLastPnl)}</dd>
           <dt>اگر با قیمت پایانی تسویه کنی <span class="unit">مرجع</span></dt>
-          <dd class="${signTone(r.settleClosePnl)}">${fmt.money(r.settleClosePnl)}</dd>
+          <dd class="${signTone(r.settleClosePnl)}">${fmt.money(r.settleClosePnl)}</dd>`}
           <dt>سرمایه درگیر</dt><dd>${fmt.money(r.capital)}</dd>
           <dt>مبنای سرمایه</dt><dd>${r.capitalLabel}</dd>
           <dt>وجه تضمین</dt><dd>${fmt.money(r.margin)}</dd>
@@ -591,8 +645,11 @@ export async function mount(root, { tab, state, api }) {
             <tr><td>هزینه فرصت وجه تضمین</td><td class="n" colspan="3">${fmt.money(r.costFunding)}</td></tr></tbody>
         </table>
 
+        ${past ? `
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">سقف حجم</h4>
+        <p class="note">سقف حجم از عمقِ دفتر می‌آید و دفترِ گذشته وجود ندارد، پس برای ردیف تاریخی ساخته نمی‌شود.</p>` : `
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">سقف حجم — مقید به ${r.binding}</h4>
-        <table class="mini"><tbody>${limitRows}</tbody></table>
+        <table class="mini"><tbody>${limitRows}</tbody></table>`}
 
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">سناریو در سررسید</h4>
         <table class="mini">
@@ -795,6 +852,7 @@ export async function mount(root, { tab, state, api }) {
     if (busy) return;
     const keys = picker.selected();
     if (!keys.length) { setStatus('نمادی انتخاب نشده'); return; }
+    const ticket = takeTicket('live');
     busy = true;
     runBtn.disabled = true;
     runBtn.textContent = 'در حال اسکن…';
@@ -806,6 +864,9 @@ export async function mount(root, { tab, state, api }) {
       await runScan({
         defId: def.id, uaKeys: keys, settings: s(), qty,
         onStage: (stage, res) => {
+          // بلیت باطل شده — کاربر رفته سراغ منبع دیگری. نتیجهٔ این اسکن
+          // دیگر مالِ چیزی که روی صفحه است نیست، پس نوشته نمی‌شود.
+          if (!holdsTicket(ticket)) return;
           if (res.error) { setStatus(`خطا: ${res.error}`); setProgress(null); table.setLoading(false); return; }
           if (stage === 'one') {
             rows = res.rows;
@@ -856,8 +917,10 @@ export async function mount(root, { tab, state, api }) {
       busy = false;
       runBtn.disabled = false;
       runBtn.textContent = 'اسکن';
-      if (progressWrap.style.display !== 'none') setProgress(100);
-      setTimeout(() => setProgress(null), 400);
+      if (holdsTicket(ticket)) {
+        if (progressWrap.style.display !== 'none') setProgress(100);
+        setTimeout(() => setProgress(null), 400);
+      } else setProgress(null);
     }
   }
 
@@ -925,7 +988,7 @@ export async function mount(root, { tab, state, api }) {
       mountDateWheel(hDates, dates, dates.at(-1) ?? null, (date) => {
         hDate = Number(date) || 0;
         hRun.disabled = !hDate;
-        if (hDate) hSetStatus(`روز انتخاب‌شده: ${historyDateLabel(hDate)}`);
+        if (hDate) hSetStatus(`روز انتخاب‌شده: ${faDigits(historyDateLabel(hDate))}`);
       }, { empty: 'این نماد در بازهٔ اخیر روزِ داده‌داری ندارد.' });
       hDate = dates.at(-1) ?? 0;
       hRun.disabled = !hDate;
@@ -944,17 +1007,21 @@ export async function mount(root, { tab, state, api }) {
     if (hBusy) return;
     const key = picker.selected()[0];
     if (!key || !hDate) { hSetStatus('نماد و روز را انتخاب کن.'); return; }
+    const ticket = takeTicket('history');
     hBusy = true;
     hRun.disabled = true;
     const label = hRun.textContent;
     hRun.textContent = 'در حال ساخت…';
-    hSetStatus(`در حال ساخت جدول ${historyDateLabel(hDate)}…`);
+    hSetStatus(`در حال ساخت جدول ${faDigits(historyDateLabel(hDate))}…`);
     table.setLoading(true);
     if (!hasScanned) { hasScanned = true; table.setEmptyMessage(null); }
     try {
       const out = await runHistoryScan({
         def, uaIns: key, date: hDate, basis: hBasis.value, settings: s(), qty,
       });
+      // همان قاعدهٔ بلیت، این بار در جهت وارونه: اگر کاربر وسطِ ساختِ
+      // جدولِ تاریخی به رصد زنده برگشته و اسکن زده، این نتیجه کهنه است.
+      if (!holdsTicket(ticket)) { hSetStatus('جدولِ تاریخی کنار گذاشته شد — منبعِ جدول عوض شده بود.'); return; }
       rows = out.rows || [];
       funnelBar(root.querySelector('#funnel'), out.funnel);
       const keepSort = table.sortKey();
@@ -967,12 +1034,14 @@ export async function mount(root, { tab, state, api }) {
       root.querySelector('#detail-card').style.display = 'none';
       trailReady();
       hNote.textContent = [out.note, out.universeNote].filter(Boolean).join(' — ');
-      hSetStatus(`${historyDateLabel(hDate)} — ${fmt.int(rows.length)} ردیف.`);
-      setStatus(`جدول از ${historyDateLabel(hDate)} ساخته شد — ${fmt.int(rows.length)} ردیف.`);
+      hSetStatus(`${faDigits(historyDateLabel(hDate))} — ${fmt.int(rows.length)} ردیف.`);
+      setStatus(`جدول از ${faDigits(historyDateLabel(hDate))} ساخته شد — ${fmt.int(rows.length)} ردیف.`);
     } catch (error) {
-      table.setLoading(false);
-      logError('رصد تاریخی استراتژی', error);
-      hSetStatus(`ساخت جدول ناموفق: ${error.message}`);
+      if (holdsTicket(ticket)) {
+        table.setLoading(false);
+        logError('رصد تاریخی استراتژی', error);
+        hSetStatus(`ساخت جدول ناموفق: ${error.message}`);
+      }
     } finally {
       hBusy = false;
       hRun.disabled = !hDate;
@@ -1019,7 +1088,7 @@ export async function mount(root, { tab, state, api }) {
     try {
       const codes = [...(row.legIns || [])];
       if (row.uaIns) codes.push(String(row.uaIns));
-      const { tape, at, errors } = await liveTapeFor(codes);
+      const { tape, at, errors, market } = await liveTapeFor(codes);
       // سقفِ زمان، ساعتِ همین لحظه است نه پایان جلسه: ستونی که هنوز
       // نرسیده، ستونِ خالی است نه ستونِ بی‌معامله، و خطِ صافِ تا انتهای
       // روز را خواننده «بازار تکان نخورد» می‌خواند.
@@ -1035,8 +1104,21 @@ export async function mount(root, { tab, state, api }) {
         gapPathChart({ points }, { title: `نقد خالصِ ورود — ${row.legsText}` }),
         { empty: 'هیچ لحظه‌ای عددِ کامل ندارد.' });
       const failed = Object.keys(errors || {});
+      // ═══ بازارِ بسته، «پای بی‌معامله» نیست ═══
+      //
+      // گزارش صاحب پروژه: «برای همهٔ ۳۶ استراتژی … نتیجه همیشه هیچ لحظه‌ای
+      // عدد کامل ندارد بود. کارنامهٔ پاها صفر معامله نشان داد.» — آزمون
+      // در بازارِ بسته انجام شده بود. جملهٔ «این پا امروز معامله نشده»
+      // آنجا غلط نیست ولی گمراه‌کننده است: محدودیتِ ساعت را به حسابِ
+      // نقدشوندگیِ نماد می‌گذارد. حالا وضعیتِ بازار همراه نوار می‌آید و
+      // وقتی هیچ پایی معامله ندارد و بازار هم باز نیست، همان گفته می‌شود.
+      const allMute = (trail.legReport || []).length > 0
+        && (trail.legReport || []).every((leg) => leg.silent);
+      const closedNote = market && market.open === false && allMute
+        ? `بازار باز نیست${market.why ? ` — ${market.why}` : ''}. ردِ جلسه از ریزمعاملهٔ **امروز** ساخته می‌شود، پس تا جلسهٔ بعد عددی ندارد؛ این به نقدشوندگیِ این ترکیب ربطی ندارد.`
+        : '';
       tNote.textContent = [
-        trailNote(trail),
+        closedNote || trailNote(trail),
         failed.length ? `${fmt.int(failed.length)} پا نوارِ معامله‌اش خوانده نشد.` : '',
       ].filter(Boolean).join(' ');
       // ── کارنامهٔ هر پا: همیشه، نه فقط وقتی نمودار ساخته شد ──────────
@@ -1078,9 +1160,11 @@ export async function mount(root, { tab, state, api }) {
       const mute = (trail.legReport || []).filter((leg) => leg.silent);
       tStatus.textContent = trail.complete
         ? `${fmt.int(trail.complete)} لحظهٔ کامل از ${fmt.int(trail.moments)} — تغییر ${fmt.money(trail.change)}`
-        : mute.length
-          ? `${fmt.int(mute.length)} پا امروز معامله نشده (${mute.map((leg) => leg.name).join('، ')}) — جدول زیر را ببین.`
-          : 'در هیچ لحظه‌ای همهٔ پاها با هم قیمت نداشتند.';
+        : closedNote
+          ? 'بازار باز نیست — ردِ جلسه در جلسهٔ بعد عدد می‌گیرد.'
+          : mute.length
+            ? `${fmt.int(mute.length)} پا امروز معامله نشده (${mute.map((leg) => leg.name).join('، ')}) — جدول زیر را ببین.`
+            : 'در هیچ لحظه‌ای همهٔ پاها با هم قیمت نداشتند.';
     } catch (error) {
       logError('ردِ جلسهٔ استراتژی', error);
       tStatus.textContent = `خواندن نوار ناموفق: ${error.message}`;
@@ -1106,8 +1190,18 @@ export async function mount(root, { tab, state, api }) {
     root,
     onChange: (id) => {
       if (id === 'history') {
-        if (auto.checked) { auto.checked = false; armTimer(); setStatus('رصد زنده خوابید — جدول حالا از تاریخ ساخته می‌شود.'); }
+        // بلیت را همین‌جا باطل می‌کنیم، نه هنگام ساختِ جدولِ تاریخی:
+        // اسکنی که از قبل در راه است باید **از همین لحظه** حق نوشتن را
+        // از دست بدهد، وگرنه تا رسیدن نتیجه‌اش پنجره‌ای باز می‌ماند.
+        takeTicket('history');
+        if (auto.checked) { auto.checked = false; armTimer(); }
+        setStatus(busy
+          ? 'رصد زنده خوابید — اسکنِ در جریان کنار گذاشته می‌شود و جدول از تاریخ ساخته می‌شود.'
+          : 'رصد زنده خوابید — جدول حالا از تاریخ ساخته می‌شود.');
         refreshHistoryDates();
+      }
+      if (id === 'live' && dataSource !== 'live') {
+        setStatus('جدول هنوز از رصد تاریخی است — «اسکن» را بزن تا با تابلوی امروز ساخته شود.');
       }
       if (id === 'trail') trailReady();
     },

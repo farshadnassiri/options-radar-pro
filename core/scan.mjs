@@ -180,7 +180,11 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
         legs.push({
           kind: t.kind, side: t.side, ratio: t.ratio, strike: K, size: sz.size,
           sizeAssumed: sz.assumed,
-          days: ex.days, price: 0, ins: q.ins, name: q.name, exp: t.exp, slot: t.slot,
+          // سررسیدِ **همین پا**، نه سررسیدِ نزدیکِ ترکیب. در تقویمی و مورب
+          // دو پا دو سررسید دارند و `ctx.endDate` فقط نزدیک را می‌گوید؛
+          // بی این، معامله‌گر نمی‌داند کدام پا مالِ کدام سررسید است.
+          days: ex.days, endDate: ex.endDate,
+          price: 0, ins: q.ins, name: q.name, exp: t.exp, slot: t.slot,
         });
         quotes.push(q);
       }

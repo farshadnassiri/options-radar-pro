@@ -30,6 +30,9 @@ import { COLUMNS } from './evaluate.mjs';
 
 const COLUMN_KEYS = new Set(COLUMNS.map((column) => column.key));
 
+/** سقفِ ستون‌های ارزشِ پا در قرارداد ستونیِ موتور (`LEG_VALUE_SLOTS`). */
+const LEG_VALUE_MAX = 4;
+
 /** ستونِ پا (`legValue3`) وقتی استراتژی سه پا ندارد، فقط پهنا می‌گیرد. */
 const LEG_COLUMN = /^(legValue|legIv|legdelta|leggamma|legvega|legtheta|legrho)(\d+)$/;
 
@@ -159,7 +162,9 @@ const GROUP_PROFILES = {
   calendar: {
     note: 'دو سررسید. سؤال اصلی: پای نزدیک چقدر سریع‌تر آب می‌رود، و تلاطمِ دو سررسید چقدر با هم فرق دارد.',
     sortKey: 'thetaToCapitalPct',
-    columns: [...HEAD, 'cashLabel', 'netCash', 'maxProfit', 'maxLoss', 'retMaxPct', 'retMonthPct',
+    // «سررسید پاها» و «روز مانده پاها» اینجا در نمای پیش‌فرض‌اند، نه در
+    // انتخابگر: ترکیبِ دوسررسیدی با یک تاریخ قابل ساختن و رول‌کردن نیست.
+    columns: [...HEAD, 'expiryList', 'daysList', 'cashLabel', 'netCash', 'maxProfit', 'maxLoss', 'retMaxPct', 'retMonthPct',
       'theta', 'thetaToCapitalPct', 'vega', 'gamma', 'delta',
       'legIv1', 'legIv2', 'ivMeanPct', 'hvPct', 'ivHvSpreadPp', 'sigmaUse',
       'legtheta1', 'legtheta2', 'legvega1', 'legvega2',
@@ -294,7 +299,39 @@ export function radarProfile(def) {
   const lastBe = columns.reduce((at, key, i) => (/^be/.test(key) ? i : at), -1);
   if (lastBe >= 0 && !columns.includes('beStatus')) columns.splice(lastBe + 1, 0, 'beStatus');
 
-  const filters = (override.filters || base.filters)
+  // ═══ ستونِ ارزشِ پا، به تعدادِ پاهای واقعی — نه به تعدادِ نوشته‌شده ═══
+  //
+  // گزارش صاحب پروژه: «جدول باکس چهار پای جدا دارد، ولی کارت فیلتر فقط
+  // پای ۱ و پای ۲ را ارائه می‌کند.» فهرست‌های نمایه دستی نوشته شده بودند
+  // و باکس چهار پا دارد. بریدنِ پای اضافه از قبل قاعده بود؛ **افزودنِ**
+  // پای جامانده نبود. حالا هر دو قاعده‌اند: اگر نمایه ستونِ ارزشِ پایی
+  // دارد، تا آخرین پای همان استراتژی کامل می‌شود.
+  const lastLegValue = columns.reduce((at, key, i) => (/^legValue\d+$/.test(key) ? i : at), -1);
+  if (lastLegValue >= 0) {
+    const have = new Set(columns.filter((key) => /^legValue\d+$/.test(key)));
+    const add = [];
+    for (let n = 1; n <= Math.min(legs, LEG_VALUE_MAX); n += 1) {
+      const key = `legValue${n}`;
+      if (!have.has(key) && COLUMN_KEYS.has(key)) add.push(key);
+    }
+    if (add.length) columns.splice(lastLegValue + 1, 0, ...add);
+  }
+
+  // همان قاعده برای فیلترها: نمایه‌ای که «حداقل ارزش معاملات پای ۱» دارد،
+  // برای هر پای موجودِ همان استراتژی هم می‌گیرد.
+  const wantedFilters = [...(override.filters || base.filters)];
+  const lastLegFilter = wantedFilters.reduce((at, key, i) => (/^minLegValue\d+$/.test(key) ? i : at), -1);
+  if (lastLegFilter >= 0) {
+    const have = new Set(wantedFilters.filter((key) => /^minLegValue\d+$/.test(key)));
+    const add = [];
+    for (let n = 1; n <= Math.min(legs, LEG_VALUE_MAX); n += 1) {
+      const key = `minLegValue${n}`;
+      if (!have.has(key) && FILTER_BY_KEY.has(key)) add.push(key);
+    }
+    if (add.length) wantedFilters.splice(lastLegFilter + 1, 0, ...add);
+  }
+
+  const filters = wantedFilters
     .filter((key) => {
       const filter = FILTER_BY_KEY.get(key);
       if (!filter) { unknown.push(key); return false; }
