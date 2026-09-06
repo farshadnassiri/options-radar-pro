@@ -86,9 +86,26 @@ group('۵۱. نوار پیوند به بقیهٔ برنامه');
   };
   // `bull-call-spread` در `GAP_STRATEGY_IDS` هست، پس هر دو مقصد را می‌گیرد.
   const targets = strategyLinkTargets(rowLink, { strategyId: 'bull-call-spread' }).map((item) => item.to);
+  // این ادعا عمداً فهرستِ سخت‌کدشده دارد: مقصدِ تازه فقط وقتی اضافه
+  // می‌شود که پذیرشِ `state.handoff` در `mount` آن تب نوشته شده باشد، و
+  // این خط همان قرارداد را قفل می‌کند. اگر مقصدی اضافه شد و اینجا
+  // نیامد، یعنی پذیرشش هم بررسی نشده.
+  const ACCEPTING = ['backtest', 'watchtower', 'greeks-watch', 'spread-radar'];
   check('هر مقصدِ فهرست، تبی است که نقشه را می‌پذیرد',
-    STRATEGY_LINK_TARGETS.every((item) => ['backtest', 'watchtower'].includes(item.to)));
-  check('ردیف کامل، هر دو مقصد را می‌گیرد', targets.join(',') === 'backtest,watchtower');
+    STRATEGY_LINK_TARGETS.every((item) => ACCEPTING.includes(item.to)));
+  check('ردیفِ ساختارِ فاصله‌دار، هر چهار مقصد را می‌گیرد',
+    targets.join(',') === 'backtest,watchtower,greeks-watch,spread-radar');
+  // پذیرش، ادعای متنی نیست ولی تنها چیزی است که بی مرورگر سنجیدنی است:
+  // هر تبِ مقصد باید در منبعش شناسهٔ خودش را از `state.handoff` بخواند.
+  for (const [file, to] of [
+    ['../ui/tabs/backtest.mjs', 'backtest'],
+    ['../ui/tabs/watchtower.mjs', 'watchtower'],
+    ['../ui/tabs/greeks-watch.mjs', 'greeks-watch'],
+    ['../ui/tabs/spread-radar.mjs', 'spread-radar'],
+  ]) {
+    check(`تبِ «${to}» نقشهٔ خودش را از state برمی‌دارد`,
+      readSrc(file).includes(`state.handoff?.to === '${to}'`));
+  }
   check('ردیف بی‌شناسهٔ قرارداد، مقصدِ بک‌تست نمی‌گیرد',
     !strategyLinkTargets({ ...rowLink, __legs: [{ kind: 'call', side: 'buy', ins: '' }] },
       { strategyId: 'bull-call-spread' }).some((x) => x.to === 'backtest'));
@@ -98,11 +115,18 @@ group('۵۱. نوار پیوند به بقیهٔ برنامه');
   // بی این شرط، دکمه ساخته می‌شد و تیکِ استراتژی روی هیچ چک‌باکسی
   // نمی‌نشست — قاعده‌ای با دامنهٔ خالی، که کاربر آن را «شرطم برقرار نشد»
   // می‌خواند.
-  check('استراتژیِ بیرون از دامنهٔ دیده‌بان، دکمهٔ دیده‌بان نمی‌گیرد',
-    !strategyLinkTargets(rowLink, { strategyId: 'covered-call' }).some((x) => x.to === 'watchtower')
-    && strategyLinkTargets(rowLink, { strategyId: 'covered-call' }).some((x) => x.to === 'backtest'));
-  check('و هر شناسه‌ای که دکمهٔ دیده‌بان می‌گیرد، واقعاً در فهرست آن تب هست',
-    GAP_STRATEGY_IDS.every((id) => strategyLinkTargets(rowLink, { strategyId: id }).some((x) => x.to === 'watchtower')));
+  const covered = strategyLinkTargets(rowLink, { strategyId: 'covered-call' }).map((x) => x.to);
+  check('استراتژیِ بیرون از دامنهٔ فاصله، نه دکمهٔ دیده‌بان می‌گیرد نه رادار فاصله',
+    !covered.includes('watchtower') && !covered.includes('spread-radar'));
+  check('ولی آزمایشگاه و رصد یونانی را می‌گیرد، چون آن دو ساختارِ فاصله‌دار نمی‌خواهند',
+    covered.includes('backtest') && covered.includes('greeks-watch'));
+  check('رصد یونانی نقشه‌اش پرچمِ زنده دارد — مبدأ ردیفِ زنده است، نه روزِ بسته‌شده',
+    strategyLinkPlan(rowLink, { to: 'greeks-watch' }).live === true);
+  check('و هر شناسهٔ فاصله‌دار، هم دیده‌بان می‌گیرد هم رادار فاصله',
+    GAP_STRATEGY_IDS.every((id) => {
+      const list = strategyLinkTargets(rowLink, { strategyId: id }).map((x) => x.to);
+      return list.includes('watchtower') && list.includes('spread-radar');
+    }));
   // ردیفی که هیچ سنجهٔ مشترکی با دیده‌بان ندارد، قاعده‌ای هم نمی‌سازد؛
   // دکمه‌اش نباید ساخته شود.
   const bare = { uaIns: '77', __legs: [{ kind: 'call', side: 'buy', ins: 'c1' }] };

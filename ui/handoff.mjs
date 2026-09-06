@@ -217,6 +217,10 @@ export const STRATEGY_LINK_TARGETS = [
     why: 'همین ترکیب را روی تاریخ بیازما — بازه، پاها و حجم از همین ردیف می‌روند.' },
   { to: 'watchtower', label: '🔔 دیده‌بان شرطی',
     why: 'برای همین ترکیب قاعده بگذار؛ شرط با عددِ همین لحظه پیش‌پر می‌شود.' },
+  { to: 'greeks-watch', label: '📐 رصد یونانی و تلاطم',
+    why: 'پنج حساسیت و دو تلاطمِ همین پاها، در طول عمرشان.' },
+  { to: 'spread-radar', label: '📏 رادار فاصله',
+    why: 'فاصلهٔ همین ساختار در طول تاریخ — چقدر پر شده و چقدر مانده.' },
 ];
 
 /**
@@ -292,6 +296,11 @@ export function strategyLinkPlan(row, { to, strategyId = '', strategyName = '', 
       conditions: watchConditionsFrom(row),
     };
   }
+  // رصد یونانی از قبل نقشه می‌پذیرد (`applyPlan` در تبِ خودش). دو چیز
+  // اضافه می‌شود: `live` چون مبدأ ردیفِ **زنده** است و بی آن مقصد فقط تا
+  // آخرین روزِ بسته‌شده می‌رود؛ و `entryDate` که ردیف زنده ندارد، پس
+  // فرستاده نمی‌شود و مقصد خودش روزِ ایجاد را انتخاب می‌کند.
+  if (to === 'greeks-watch') return { ...base, live: true };
   return base;
 }
 
@@ -316,6 +325,12 @@ export function strategyLinkTargets(row, { strategyId = '' } = {}) {
   return STRATEGY_LINK_TARGETS.filter((item) => {
     if (item.to === 'backtest') return canHandoff(row);
     if (item.to === 'watchtower') return WATCHABLE.has(id) && watchConditionsFrom(row).length > 0;
+    // رصد یونانی ترکیب را از روی **کد قراردادِ** پاها پیدا می‌کند
+    // (`pickPlanCombo`)، پس ردیفِ بی‌کد به آن نمی‌رسد.
+    if (item.to === 'greeks-watch') return canHandoff(row);
+    // رادار فاصله فقط ساختارهای فاصله‌دار را می‌سازد — همان فهرستی که
+    // دیده‌بان هم از آن تغذیه می‌شود — و ترکیب را از کدِ پاها پیدا می‌کند.
+    if (item.to === 'spread-radar') return WATCHABLE.has(id) && canHandoff(row);
     return true;
   });
 }

@@ -730,7 +730,18 @@ export async function mount(root, { state }) {
   }
 
   function applyPlan(plan) {
-    if (!plan?.uaIns || !chain.has(String(plan.uaIns))) return;
+    // نقشه‌ای که نمادش در این بازه نیست، بی‌صدا رد نمی‌شود.
+    //
+    // تا امروز `return` خالی بود: کاربر از تب دیگری دکمه می‌زد، صفحهٔ تازه
+    // بالا می‌آمد و **هیچ اتفاقی نمی‌افتاد** — نه انتخابی، نه پیامی. حالا
+    // نقشه پاک می‌شود (وگرنه با هر بارگذاری دوباره تلاش می‌کند) و علتش
+    // گفته می‌شود.
+    if (!plan?.uaIns) { pendingPlan = null; return; }
+    if (!chain.has(String(plan.uaIns))) {
+      pendingPlan = null;
+      setStatus(`«${plan.uaName || plan.uaIns}» در این بازه نیست؛ بازه را عوض کن یا نماد را دستی انتخاب کن.`, true);
+      return;
+    }
     $('gw-base').value = String(plan.uaIns);
     if (plan.strategyId && CATALOG.some((def) => def.id === plan.strategyId)) $('gw-strategy').value = plan.strategyId;
     if (plan.units) $('gw-units').value = String(Math.max(1, Math.trunc(Number(plan.units) || 1)));
