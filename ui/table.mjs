@@ -673,6 +673,13 @@ export function makeTable(host, cols, opts = {}) {
     setEmptyMessage(text) { emptyMsg = text || null; draw(); },
     get() { return view; },
     sortBy(key) { if (byKey.has(key)) { sortKey = key; sortDir = -1; } apply(); },
+    // ستونی که همین حالا جدول با آن مرتب است.
+    //
+    // رصدِ زنده بی این، ترتیبِ کاربر را هر تیک پاک می‌کرد: معامله‌گر روی
+    // «فاصله تا سربه‌سری» می‌نشست و چند ثانیه بعد، بی‌آنکه چیزی کلیک کند،
+    // جدول به مبنای رتبه‌بندیِ تنظیمات برمی‌گشت. حالا فراخوان می‌تواند
+    // همان را دوباره بگذارد.
+    sortKey() { return sortKey; },
     setColumns(next) { setKeys(next); },
     columns() { return [...keys]; },
     redraw: draw,

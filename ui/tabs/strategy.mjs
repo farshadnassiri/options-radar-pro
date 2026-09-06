@@ -15,6 +15,7 @@ import { analyzeMixed, isSingleExpiry } from '/core/mixed.mjs';
 import { timeMachine } from '/core/timemachine.mjs';
 import { priceQuantile } from '/core/bs.mjs';
 import { gregorianToJalali } from '/core/jalali.mjs';
+import { radarProfile, applyRadarFilters, filterLimit, isFlagFilter } from '/core/strategy-radar.mjs';
 import { makeTable, funnelBar, changedIds } from '/ui/table.mjs';
 import { fmt, faNum, faDigits, coverageInfo, signTone, ltr, offsetCell } from '/ui/fmt.mjs';
 import { makePicker } from '/ui/picker.mjs';
@@ -33,6 +34,8 @@ function jalaliFromDEven(dEven) {
   return faDigits(`${jy}/${String(jm).padStart(2, '0')}/${String(jd).padStart(2, '0')}`);
 }
 
+// نمای «رصد» اینجا نیست: برای هر استراتژی از `core/strategy-radar.mjs`
+// ساخته می‌شود و مختصِ خودش است. بقیهٔ نماها مشترک‌اند و برای همه یکی.
 const VIEWS = {
   // نمای خلاصه، ترتیبِ خواندن یک ردیف است: چه چیزی، چند روز، چقدر نقد،
   // سربه‌سری کجاست و چقدر با آن فاصله داریم، سود و زیان و درصدهایشان، و بعد
@@ -92,11 +95,29 @@ export async function mount(root, { tab, state, api }) {
   let disposeScen = null;
   let rows = [];
   let picked = null;
-  let view = 'خلاصه';
+  // نمایهٔ رادارِ همین استراتژی — ستون‌های آغازین، مرتب‌سازی و فیلترهایی
+  // که برای این ساختار معنی دارند. کاورد کال با «بازده ایستا» شروع
+  // می‌شود و پروانه با «سود به زیان»؛ هیچ‌کدام کدِ جدا ندارند.
+  const profile = radarProfile(def);
+  const VIEWS_HERE = { رصد: profile.columns, ...VIEWS };
+  let view = 'رصد';
+  // مقدارِ هر فیلتر: عدد برای فیلترِ عددی، `true` برای پرچمی. کلیدِ
+  // نبوده یعنی خاموش، پس فیلترِ دست‌نخورده هیچ ردیفی را نمی‌اندازد.
+  const filterValues = {};
+  let filterReport = { dropped: 0, missing: 0 };
+  // ردیف‌هایی که پس از فیلتر واقعاً روی جدول‌اند. شاخص‌های کلیدی باید
+  // همین‌ها را بشمارند نه کلِ اسکن را: کارتی که «۸۰ ردیف قابل اجرا»
+  // می‌گوید در حالی که جدول دوازده ردیف دارد، دو حرفِ متفاوت است.
+  let shown = [];
   let busy = false;
   let hasScanned = false;
   const NOT_SCANNED_MSG = 'هنوز اسکن نزدی — نماد را انتخاب کن و دکمه اسکن را بزن.';
   let qty = s().qtyDefault;
+  // دورهٔ نوسازیِ رصدِ زنده، ثانیه — انتخابِ کاربر، نه عددِ سخت‌کدشده.
+  // پیش از این `watchIntervalSec * 3` بود و هیچ‌جا دیده نمی‌شد؛ کسی که
+  // می‌خواست تندتر یا کندتر ببیند، راهی نداشت. کف ۵ ثانیه است چون هر
+  // نوسازی یک اسکنِ دومرحله‌ای کامل است و تندتر از آن یعنی صف درخواست.
+  let refreshSec = Math.max(5, Math.round(s().watchIntervalSec * 3) || 15);
   // حجم یک ردیف، همان حجمی است که هنگام اسکنِ آن ردیف در کنترل بوده و در
   // خود ردیف ثبت شده. پنل جزئیات و انتقال به بک‌تست باید همان را ادامه
   // دهند، نه `qtyDefault` تنظیمات — وگرنه کاربر حجم را ۳۰۰ می‌کند، جدول
@@ -128,7 +149,9 @@ export async function mount(root, { tab, state, api }) {
         <div class="grid" id="ctrl"></div>
         <div class="bar" style="margin-top:12px">
           <button class="btn" id="run">اسکن</button>
-          <label class="field row" style="margin:0"><input type="checkbox" id="auto"> <label for="auto">اسکن پیوسته</label></label>
+          <label class="field row" style="margin:0"><input type="checkbox" id="auto"> <label for="auto">رصد زنده</label></label>
+          <span class="field row" style="margin:0;flex-wrap:nowrap"><label for="c-refresh" style="white-space:nowrap">دوره — ثانیه</label>
+            <input type="number" id="c-refresh" min="5" max="600" step="5" style="width:5rem"></span>
           <span class="sp"></span>
           <span id="status" class="picker-sum" role="status" aria-live="polite"></span>
         </div>
@@ -141,6 +164,16 @@ export async function mount(root, { tab, state, api }) {
       <h3>نوار تشخیص</h3>
       <p class="note">ترکیب‌هایی که افتادند، اینجا شمرده می‌شوند. خالی بودن جدول در بازار ایران خطای برنامه نیست، واقعیت نقدشوندگی است.</p>
       <div id="funnel"></div>
+    </section>
+
+    <section class="card" id="filters-card">
+      <div class="section-head">
+        <div><p class="eyebrow">پارامترهای همین استراتژی</p><h3>فیلتر جدول</h3></div>
+        <button class="ghost" type="button" id="filters-clear">پاک کردن همه</button>
+      </div>
+      <p class="note">${profile.note}</p>
+      <div class="grid" id="filters"></div>
+      <p class="note" id="filters-report" role="status" aria-live="polite"></p>
     </section>
 
     <div class="bar" style="margin-bottom:8px">
@@ -210,7 +243,7 @@ export async function mount(root, { tab, state, api }) {
 
   // ——— نماها ———
   const viewsHost = root.querySelector('#views');
-  for (const name of Object.keys(VIEWS)) {
+  for (const name of Object.keys(VIEWS_HERE)) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'chip';
@@ -242,23 +275,94 @@ export async function mount(root, { tab, state, api }) {
   const colsAll = columnsForStrategy(def);
 
   function buildTable() {
-    const wanted = view === 'همه' ? VIEWS[view] : VIEWS[view].filter(fitsLegs);
+    const wanted = view === 'همه' ? VIEWS_HERE[view] : VIEWS_HERE[view].filter(fitsLegs);
     const cols = wanted.map((k) => colsAll.find((c) => c.key === k)).filter(Boolean);
+    // نمای «رصد» با معیارِ خودِ همان استراتژی مرتب می‌شود، نه با مبنای
+    // رتبه‌بندیِ عمومیِ تنظیمات: کاورد کال با بازده ایستا، پروانه با سود
+    // به زیان، آربیتراژ با بازده سالانه.
     table = makeTable(root.querySelector('#table'), cols, {
-      sortKey: s().rankBy, onPick: showDetail,
+      sortKey: view === 'رصد' ? profile.sortKey : s().rankBy, onPick: showDetail,
       // نما نقطه شروع است، نه قفس: هر ستون دیگری از قرارداد ستونی مشترک را
       // می‌شود اضافه یا کم کرد، و انتخاب هر استراتژی و هر نما جدا می‌ماند.
       // `colsAll` همان قرارداد مشترک است با سرستون پاهای همین استراتژی، تا
       // انتخابگر هم همان نامی را نشان بدهد که روی جدول می‌نشیند.
       all: colsAll, storeKey: `${def.id}:${view}`,
     });
-    table.set(rows);
+    table.set(visibleRows());
     if (!hasScanned) table.setEmptyMessage(NOT_SCANNED_MSG);
   }
+
+  // ——— فیلترهای مختصِ همین استراتژی ———
+  //
+  // فیلتر روی **نتیجهٔ اسکن** می‌نشیند، نه روی درخواست: عوض‌کردنش دوباره
+  // شبکه نمی‌خواهد و جدول همان لحظه کوچک و بزرگ می‌شود. چیزی که ورودیِ
+  // اسکن است (بازهٔ روز، پنجرهٔ قیمت اعمال، …) بالا در «کنترل اسکن» مانده.
+  function visibleRows() {
+    const out = applyRadarFilters(rows, filterValues, profile.filters);
+    filterReport = { dropped: out.dropped, missing: out.missing };
+    shown = out.rows;
+    return shown;
+  }
+
+  const reportEl = root.querySelector('#filters-report');
+  function drawFilterReport() {
+    const on = profile.filters.filter((f) => (isFlagFilter(f) ? filterValues[f.key] === true
+      : filterLimit(filterValues[f.key]) !== null));
+    if (!on.length) { reportEl.textContent = 'هیچ فیلتری روشن نیست — همهٔ ردیف‌های اسکن نمایش داده می‌شوند.'; return; }
+    // «چند تا افتاد» کافی نیست: ردیفی که عددِ فیلترشده را **ندارد** هم
+    // می‌افتد، و اگر جدا شمرده نشود، خالی‌بودنِ جدول با «شرط سخت گذاشتم»
+    // اشتباه گرفته می‌شود در حالی که مسئله نبودِ داده است.
+    const miss = filterReport.missing
+      ? ` — از این‌ها ${fmt.int(filterReport.missing)} ردیف چون این عدد را اصلاً ندارند، نه چون شرط را رد کردند`
+      : '';
+    reportEl.textContent = `${fmt.int(on.length)} فیلتر روشن؛ ${fmt.int(filterReport.dropped)} ردیف از ${fmt.int(rows.length)} افتاد${miss}.`;
+  }
+
+  function repaint() {
+    table.set(visibleRows());
+    drawKpis();
+    drawFilterReport();
+  }
+
+  const filtersHost = root.querySelector('#filters');
+  for (const f of profile.filters) {
+    const w = document.createElement('div');
+    w.className = isFlagFilter(f) ? 'field row' : 'field';
+    const id = `f-${f.key}`;
+    if (isFlagFilter(f)) {
+      w.innerHTML = `<input type="checkbox" id="${id}"><label for="${id}">${f.label}</label>`;
+    } else {
+      w.innerHTML = `<label for="${id}">${f.label}${f.unit ? ` <span class="unit">${f.unit}</span>` : ''}</label>`
+        + `<input type="number" id="${id}" step="any" placeholder="بدون شرط">`;
+    }
+    filtersHost.appendChild(w);
+    w.querySelector(`#${id}`).addEventListener('input', (e) => {
+      if (isFlagFilter(f)) {
+        if (e.target.checked) filterValues[f.key] = true; else delete filterValues[f.key];
+      } else {
+        // کادرِ خالی یعنی «شرطی نگذاشتم»، نه «حداقل صفر» — همان قاعده‌ای
+        // که `filterLimit` نگه می‌دارد و اینجا هم از همان می‌آید تا دو
+        // تعریفِ متفاوت از «خاموش» نداشته باشیم.
+        const v = filterLimit(e.target.value);
+        if (v === null) delete filterValues[f.key]; else filterValues[f.key] = v;
+      }
+      repaint();
+    });
+  }
+  root.querySelector('#filters-clear').addEventListener('click', () => {
+    for (const key of Object.keys(filterValues)) delete filterValues[key];
+    for (const node of filtersHost.querySelectorAll('input')) {
+      if (node.type === 'checkbox') node.checked = false; else node.value = '';
+    }
+    repaint();
+  });
+
   buildTable();
+  drawFilterReport();
 
   // ——— شاخص‌های کلیدی ———
   function drawKpis() {
+    const rows = shown;
     const ok = rows.filter((r) => Number.isFinite(r.retMonthPct));
     const best = ok[0];
     const med = (arr) => (arr.length ? arr.slice().sort((a, b) => a - b)[Math.floor(arr.length / 2)] : NaN);
@@ -560,8 +664,9 @@ export async function mount(root, { tab, state, api }) {
           if (stage === 'one') {
             rows = res.rows;
             funnelBar(root.querySelector('#funnel'), res.funnel);
-            table.set(rows);
+            table.set(visibleRows());
             drawKpis();
+            drawFilterReport();
             setStatus(`مرحله یک در ${fmt.int(res.ms)} میلی‌ثانیه — ${fmt.int(res.total)} ردیف، ${fmt.int(rows.length)} نمایش. مرحله دو…`);
             setProgress(50);
           } else {
@@ -573,9 +678,16 @@ export async function mount(root, { tab, state, api }) {
             const changed = changedIds(lastFullRows, rows, s().rankBy);
             for (const r of rows) r.__flash = changed.has(r.id);
             // افت مظنه رتبه‌ها را زیر و رو می‌کند، پس دوباره مرتب می‌شود
-            table.set(rows);
-            table.sortBy(s().rankBy);
+            // — ولی با **همان ستونی که کاربر رویش نشسته**، نه با مبنای
+            // رتبه‌بندیِ تنظیمات. پیش از این هر تیکِ رصدِ زنده ترتیب را
+            // پس می‌گرفت: کسی که روی «فاصله تا سربه‌سری» مرتب کرده بود،
+            // چند ثانیه بعد بی‌آنکه چیزی کلیک کند سر از «بازده ماهانه»
+            // درمی‌آورد.
+            const keepSort = table.sortKey();
+            table.set(visibleRows());
+            table.sortBy(keepSort);
             drawKpis();
+            drawFilterReport();
             if (picked) { const f = byId2.get(picked.id); if (f) showDetail(f); }
             setStatus(`مرحله دو کامل — عمق ${fmt.int(res.asked || 0)} نماد گرفته شد. ${fmt.int(rows.length)} ردیف.`);
             setProgress(100);
@@ -604,9 +716,21 @@ export async function mount(root, { tab, state, api }) {
   }
 
   runBtn.addEventListener('click', run);
-  auto.addEventListener('change', () => {
+  const refreshEl = root.querySelector('#c-refresh');
+  refreshEl.value = String(refreshSec);
+  const armTimer = () => {
     clearInterval(timer);
-    if (auto.checked) { run(); timer = setInterval(run, Math.max(10, s().watchIntervalSec * 3) * 1000); }
+    if (auto.checked) timer = setInterval(run, refreshSec * 1000);
+  };
+  refreshEl.addEventListener('change', () => {
+    const v = Math.round(Number(refreshEl.value));
+    refreshSec = Number.isFinite(v) ? Math.min(600, Math.max(5, v)) : refreshSec;
+    refreshEl.value = String(refreshSec);
+    armTimer();
+  });
+  auto.addEventListener('change', () => {
+    if (auto.checked) run();
+    armTimer();
   });
 
   // اشتراک عکس لحظه‌ای فقط تا وقتی این تب باز است
