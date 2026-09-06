@@ -950,6 +950,51 @@ export async function mount(root, { state }) {
     onApply: (range) => { stalePreview('بازه عوض شد'); return loadUniverseForRange(range); } });
   await loadUniverseForRange(rangeUi.range);
 
+  // ——— پیوند از تبِ استراتژی (بندهای ۴ و ۱۱) ———
+  //
+  // نقشه **بعد** از بارگذاری فهرست نمادها برداشته می‌شود، نه پیش از آن:
+  // تیکِ نماد پایه روی چک‌باکسی می‌نشیند که تا آن لحظه ساخته نشده.
+  //
+  // و اگر نمادِ نقشه در این بازه نباشد، بی‌صدا رد نمی‌شود. قاعده‌ای که
+  // دامنه‌اش خالی است هیچ ردیفی ندارد — نه اینکه شرطش برقرار نشود — و
+  // همین تفاوت، درسِ دو نوبت پیش بود.
+  if (state.handoff?.to === 'watchtower') {
+    const plan = state.handoff;
+    state.handoff = null;
+    applyStrategyLink(plan);
+  }
+
+  function applyStrategyLink(plan) {
+    const built = (plan.conditions || [])
+      .map((one) => normalizeCondition(one))
+      .filter((one) => one.ok)
+      .map((one) => one.condition);
+    if (!built.length) { setStatus('پیوند رسید ولی هیچ شرطِ معتبری همراهش نبود.', true); return; }
+    conditions = built;
+    $('wt-name').value = plan.ruleName || '';
+    let defFound = false;
+    for (const box of root.querySelectorAll('[data-def]')) {
+      box.checked = box.dataset.def === plan.strategyId;
+      if (box.checked) defFound = true;
+    }
+    let baseFound = false;
+    for (const box of root.querySelectorAll('[data-base]')) {
+      box.checked = box.dataset.base === String(plan.uaIns || '');
+      if (box.checked) baseFound = true;
+    }
+    paintConds();
+    paintCounts();
+    stalePreview('پیوند از تب استراتژی');
+    // دو نقصِ دامنه، دو جملهٔ متفاوت — چون دو کارِ متفاوت لازم دارند.
+    const missing = [];
+    if (!defFound) missing.push(`استراتژی «${plan.strategyName || plan.strategyId}» در فهرست این تب نیست`);
+    if (!baseFound) missing.push(`«${plan.uaName || 'نماد پایه'}» در این بازه نیست`);
+    setStatus(missing.length
+      ? `${fmt.int(built.length)} شرط پیش‌پر شد، ولی دامنه کامل نشد: ${missing.join(' و ')}. تا دامنه چیده نشود، قاعده هیچ ردیفی ندارد.`
+      : `از «${plan.strategyName || 'تب استراتژی'}» آمد — ${fmt.int(built.length)} شرط با عددِ همان لحظه پیش‌پر شد. یکی را نگه دار و بقیه را پاک کن، بعد «ساخت و تطبیق» را بزن.`,
+    missing.length > 0);
+  }
+
   return () => {
     mounted = false;
     cancelLoad();

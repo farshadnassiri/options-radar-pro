@@ -15,6 +15,8 @@
 // می‌ساخت که ممکن است برای این قرارداد اصلاً وجود نداشته باشد.
 
 import { normalizeHistoryDate } from '../core/history.mjs';
+import { watchMetric } from '../core/watch-rule.mjs';
+import { GAP_STRATEGY_IDS } from '../core/spread-gap.mjs';
 
 /** بازهٔ مقصد پیش از گرفتن فهرست قراردادها از تاریخ‌های مبدأ تعیین می‌شود. */
 export function handoffRange(plan) {
@@ -191,4 +193,145 @@ export function goHandoff(state, plan, tab = 'backtest') {
   state.handoff = plan;
   location.hash = tab;
   return false;
+}
+
+// ═══════════════ پیوندِ یک ردیفِ استراتژی به بقیهٔ برنامه ═══════════════
+//
+// خواستهٔ صاحب پروژه (بندهای ۴ و ۱۱): «یک گزینه وجود داشته باشه که
+// استراتژی مشخص شده را لینک کنه به قسمت ازمایشگاه یا رصد زنده … لینک در
+// صفحه مجزا باز بشه.»
+//
+// مسیرِ بازکردن از قبل بود (`openHandoffPage`) و مسیریابِ `ui/app.mjs` هر
+// شناسهٔ تبی را می‌پذیرد. آنچه نبود، **قراردادِ مشترک** بود: هر مقصد
+// می‌خواست چیز دیگری بداند و `handoffPlan` فقط بک‌تست را می‌شناخت.
+//
+// ═══ فقط مقصدی که واقعاً می‌پذیرد ═══
+//
+// فهرست زیر «آرزو» نیست. هر ردیفش تبی است که در `mount` خودش
+// `state.handoff` را می‌خواند و روی نقشه می‌نشیند. دکمه‌ای که به جایی
+// نرسد بدتر از نبودِ دکمه است — همان قاعده‌ای که `ui/subtabs.mjs` دارد.
+// مقصد تازه، وقتی اضافه می‌شود که پذیرشش نوشته شده باشد.
+
+export const STRATEGY_LINK_TARGETS = [
+  { to: 'backtest', label: '🔬 آزمایشگاه آپشن',
+    why: 'همین ترکیب را روی تاریخ بیازما — بازه، پاها و حجم از همین ردیف می‌روند.' },
+  { to: 'watchtower', label: '🔔 دیده‌بان شرطی',
+    why: 'برای همین ترکیب قاعده بگذار؛ شرط با عددِ همین لحظه پیش‌پر می‌شود.' },
+  { to: 'greeks-watch', label: '📐 رصد یونانی و تلاطم',
+    why: 'پنج حساسیت و دو تلاطمِ همین پاها، در طول عمرشان.' },
+  { to: 'spread-radar', label: '📏 رادار فاصله',
+    why: 'فاصلهٔ همین ساختار در طول تاریخ — چقدر پر شده و چقدر مانده.' },
+];
+
+/**
+ * سنجه‌های دیده‌بان که معادلِ مستقیم در ردیفِ موتور دارند.
+ *
+ * ═══ چرا نگاشتِ صریح، نه حدس ═══
+ *
+ * نامِ ستونِ موتور و نامِ سنجهٔ دیده‌بان یکی نیستند، و **جهتِ شرط** هم از
+ * خودِ سنجه درمی‌آید نه از نامش: «بازده ماهانه» هرچه بیشتر بهتر، و
+ * «حداکثر زیان» هرچه کمتر. هر دو در موتور و در دیده‌بان **اندازه**اند
+ * (عدد مثبت؛ زیانِ نامحدود `Infinity` است)، پس `abs` اینجا محافظ است نه
+ * تبدیل — و عملگر است که باید وارونه شود، نه علامت.
+ */
+const WATCH_FROM_ROW = [
+  { metric: 'monthlyPct', key: 'retMonthPct' },
+  { metric: 'returnPct', key: 'retMaxPct' },
+  { metric: 'rewardRisk', key: 'rewardRisk' },
+  { metric: 'maxProfit', key: 'maxProfit' },
+  // زیان در هر دو سو اندازه است؛ `abs` فقط محافظِ ورودیِ غیرمنتظره است.
+  { metric: 'maxLoss', key: 'maxLoss', abs: true },
+  { metric: 'lossPct', key: 'maxLossPct', abs: true },
+  { metric: 'beWidthPct', key: 'beWidthPct' },
+  { metric: 'daysLeft', key: 'days' },
+  { metric: 'basePrice', key: 'S' },
+];
+
+/**
+ * شرط‌های پیشنهادی برای یک ردیف — با آستانهٔ **عددِ همین لحظه**.
+ *
+ * چرا عددِ همین لحظه: قاعده‌ای که آستانه‌اش صفر باشد، همان لحظه شلیک
+ * می‌کند و کاربر باید همه‌اش را دستی عوض کند. آستانه‌ای که برابرِ وضع
+ * فعلی است، جمله‌اش این می‌شود: «خبرم کن وقتی دست‌کم به‌خوبیِ حالا شد» —
+ * که نقطهٔ شروعِ معناداری است، نه عددِ ساختگی.
+ *
+ * ردیفی که عددِ یک سنجه را ندارد، شرطِ آن سنجه را هم نمی‌سازد. «نامحدود»
+ * هم شرط نمی‌سازد: با هیچ آستانه‌ای سنجیده نمی‌شود.
+ */
+export function watchConditionsFrom(row) {
+  const out = [];
+  for (const item of WATCH_FROM_ROW) {
+    if (!watchMetric(item.metric)) continue;
+    const raw = Number(row?.[item.key]);
+    if (!Number.isFinite(raw)) continue;
+    const value = item.abs ? Math.abs(raw) : raw;
+    // «حداکثر زیان» هرچه کمتر بهتر، پس شرطش سقف است نه کف.
+    const op = item.metric === 'maxLoss' || item.metric === 'lossPct' ? 'le' : 'ge';
+    out.push({ metric: item.metric, op, value: Number(value.toFixed(4)), ref: 'abs' });
+  }
+  return out;
+}
+
+/**
+ * نقشهٔ پیوندِ یک ردیفِ زنده به یک تبِ دیگر.
+ *
+ * مثل `handoffPlan`، هیچ عددِ **نتیجه**‌ای منتقل نمی‌شود مگر آنجا که خودش
+ * ورودیِ مقصد است: آستانهٔ شرطِ دیده‌بان عددی است که کاربر می‌خواهد
+ * بگذارد، نه ادعایی که مقصد باید بازتولیدش کند.
+ */
+export function strategyLinkPlan(row, { to, strategyId = '', strategyName = '', units = 1 } = {}) {
+  if (!row || !STRATEGY_LINK_TARGETS.some((item) => item.to === to)) return null;
+  const base = {
+    to, from: 'strategy',
+    uaIns: String(row.uaIns || ''), uaName: String(row.underlying || 'نماد پایه'),
+    strategyId: String(strategyId || row.strategyId || ''),
+    strategyName: String(strategyName || row.strategy || ''),
+    legIns: legIns(row),
+    comboName: String(row.legsText || ''),
+    units: Math.max(1, Math.trunc(Number(units) || 1)),
+  };
+  if (to === 'watchtower') {
+    return {
+      ...base,
+      ruleName: [base.strategyName, base.uaName, base.comboName].filter(Boolean).join(' — '),
+      conditions: watchConditionsFrom(row),
+    };
+  }
+  // رصد یونانی از قبل نقشه می‌پذیرد (`applyPlan` در تبِ خودش). دو چیز
+  // اضافه می‌شود: `live` چون مبدأ ردیفِ **زنده** است و بی آن مقصد فقط تا
+  // آخرین روزِ بسته‌شده می‌رود؛ و `entryDate` که ردیف زنده ندارد، پس
+  // فرستاده نمی‌شود و مقصد خودش روزِ ایجاد را انتخاب می‌کند.
+  if (to === 'greeks-watch') return { ...base, live: true };
+  return base;
+}
+
+// دیده‌بان شرطی فقط استراتژی‌های فاصله‌دار را در دامنه‌اش دارد
+// (`GAP_STRATEGY_IDS`). این محدودیتِ خودِ آن تب است، نه انتخابِ اینجا.
+const WATCHABLE = new Set(GAP_STRATEGY_IDS);
+
+/**
+ * کدام مقصدها برای این ردیف واقعاً کار می‌کنند.
+ *
+ * ═══ چرا استراتژی هم شرط است ═══
+ *
+ * دیده‌بان شرطی فهرست استراتژی‌هایش را از `GAP_STRATEGY_IDS` می‌سازد و
+ * کاورد کال در آن نیست. بی این شرط، دکمه ساخته می‌شد، صفحه باز می‌شد،
+ * شرط‌ها پیش‌پر می‌شدند — و تیکِ استراتژی روی هیچ چک‌باکسی نمی‌نشست، چون
+ * چک‌باکسش وجود نداشت. قاعده‌ای که دامنه‌اش خالی است هیچ ردیفی ندارد، و
+ * کاربر آن را «شرطم برقرار نشد» می‌خواند. همان درسِ دو نوبت پیش.
+ */
+export function strategyLinkTargets(row, { strategyId = '' } = {}) {
+  if (!row?.uaIns) return [];
+  const id = String(strategyId || row.strategyId || '');
+  return STRATEGY_LINK_TARGETS.filter((item) => {
+    if (item.to === 'backtest') return canHandoff(row);
+    if (item.to === 'watchtower') return WATCHABLE.has(id) && watchConditionsFrom(row).length > 0;
+    // رصد یونانی ترکیب را از روی **کد قراردادِ** پاها پیدا می‌کند
+    // (`pickPlanCombo`)، پس ردیفِ بی‌کد به آن نمی‌رسد.
+    if (item.to === 'greeks-watch') return canHandoff(row);
+    // رادار فاصله فقط ساختارهای فاصله‌دار را می‌سازد — همان فهرستی که
+    // دیده‌بان هم از آن تغذیه می‌شود — و ترکیب را از کدِ پاها پیدا می‌کند.
+    if (item.to === 'spread-radar') return WATCHABLE.has(id) && canHandoff(row);
+    return true;
+  });
 }

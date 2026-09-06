@@ -473,6 +473,10 @@ export function evaluate({ legs, quotes, ctx }) {
 
     // سلامت
     quality: quality.level, qualityLabel: quality.label, executable,
+    // تازگیِ عدد و وضعیت نماد — ستون‌دار، چون در جدولِ «زنده» تفاوتِ
+    // نمادِ متوقف با نمادِ فعال باید دیده و مرتب و فیلتر شود.
+    staleSecMax: quality.staleSecMax, stateLabel: quality.stateLabel,
+    tradable: quality.tradable, dataFlags: quality.flags,
     sizeAssumed, sizeMixed,
     contractSizes: [...new Set(priced.map((l) => num(l.size)))],
     warn: [...new Set(warn)],
@@ -800,6 +804,11 @@ export const COLUMNS = [
   { key: 'maxQty', label: 'سقف قرارداد', fmt: 'int', group: 'اجرا' },
   { key: 'binding', label: 'قید مقیدکننده', fmt: 'text', group: 'اجرا' },
   { key: 'qualityLabel', label: 'کیفیت داده', fmt: 'text', group: 'سلامت' },
+  // کمتر بهتر است، پس رنگِ داغش وارونه می‌نشیند — مثل بقیهٔ ستون‌هایی که
+  // «هزینه» را نشان می‌دهند.
+  { key: 'staleSecMax', label: 'سنِ مظنه', unit: 'ثانیه', fmt: 'int', group: 'سلامت', heat: 'loss' },
+  { key: 'stateLabel', label: 'وضعیت نماد', fmt: 'text', group: 'سلامت' },
+  { key: 'dataFlags', label: 'نشان‌های داده', fmt: 'list', group: 'سلامت' },
   { key: 'warn', label: 'هشدار', fmt: 'list', group: 'سلامت' },
 ];
 

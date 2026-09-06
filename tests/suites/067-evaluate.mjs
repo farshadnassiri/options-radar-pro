@@ -112,8 +112,12 @@ group('۶۶. ارزش معاملات هر پا');
   // ستون «پای ۴» یک اسپرد دوپا همیشه «—» است و فقط پهنا می‌گیرد.
   check('ستون‌های پا به تعداد پاهای همان استراتژی بریده می‌شوند',
     /legValue\(\\d\+\)/.test(stratSrc66) && stratSrc66.includes('Number(m[1]) <= legCount'));
+  // نمای «همه» یعنی «هر ستونی که هست»، پس بریده نمی‌شود. نامِ شیء نماها
+  // با آمدنِ نمای «رصد» عوض شد (`VIEWS_HERE` = نمای مختصِ استراتژی +
+  // نماهای مشترک)، ولی قاعده همان است. رفتارِ بریدنِ ستونِ پا حالا در
+  // دستهٔ ۲۳۲ روی تابعِ خالصِ `radarProfile` سنجیده می‌شود، نه روی متن.
   check('ولی نمای «همه» بریده نمی‌شود',
-    stratSrc66.includes("view === 'همه' ? VIEWS[view] : VIEWS[view].filter(fitsLegs)"));
+    stratSrc66.includes("view === 'همه' ? VIEWS_HERE[view] : VIEWS_HERE[view].filter(fitsLegs)"));
   // «اضافه و حذف» همان انتخابگر ستون است: هر جدولی که `all` بگیرد پنل دارد.
   check('هر دو جدول انتخابگر ستون دارند، پس ستون‌ها اضافه و حذف می‌شوند',
     /all: colsAll, storeKey/.test(stratSrc66) && /all: COLUMNS, storeKey/.test(topSrc66));

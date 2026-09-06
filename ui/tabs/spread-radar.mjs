@@ -88,6 +88,14 @@ function saveRules(rules) {
 }
 
 export async function mount(root, { state }) {
+  // نقشهٔ پیوند از تب استراتژی. سه مرحله دارد و هر سه ناهم‌زمان‌اند:
+  // فهرست نمادها → ساخت فاصله‌ها → انتخاب همان ترکیب. پس تا مرحلهٔ آخر
+  // نگه داشته می‌شود و بعد پاک، وگرنه هر بارگذاری دوباره اجرایش می‌کند.
+  let pendingPlan = state.handoff?.to === 'spread-radar' ? state.handoff : null;
+  // `fillBases` با هر به‌روزرسانیِ پیشرونده صدا زده می‌شود، نه یک بار.
+  // بی این پرچم، نقشه چند بار دریافت را می‌زد.
+  let planStarted = false;
+  if (pendingPlan) state.handoff = null;
   root.classList.add('gap-skin');
   root.innerHTML = `
   <section class="gap-hero">
@@ -288,6 +296,7 @@ export async function mount(root, { state }) {
       baseSelect.appendChild(option);
     }
     if (keep && chain.has(keep)) baseSelect.value = keep;
+    if (pendingPlan && !planStarted) { planStarted = true; applyPlanBase(pendingPlan); return; }
     if (!activeLoad && !rows.length) {
       setStatus(`${fmt.int(chain.size)} نماد پایه آمادهٔ انتخاب است؛ جزئیات پوشش کل بازار زیر بازه قرار دارد.`);
       $('gr-hero-tag').textContent = 'فهرست قراردادها آماده است';
@@ -376,6 +385,48 @@ export async function mount(root, { state }) {
       <p>${esc(baseText)} · ${fmt.int(report.ready)} قرارداد دارای قیمت در بازه · ${fmt.int(report.failed)} قرارداد با خطای دریافت</p>
       <p>قیمت ابتدای بازه ${dateText(report.dates[0])}: ${fmt.int(report.entryReady)} قرارداد · قیمت سنجش ${dateText(report.dates.at(-1))}: ${fmt.int(report.markReady)} قرارداد. نداشتن قیمت ابتدای بازه مانع نمایش قرارداد تازه نیست.</p>
       ${problem.length ? `<details><summary>علت کمبود داده، به تفکیک ابزار (${fmt.int(problem.length)})</summary><div class="gap-table-wrap"><table class="gap-table"><thead><tr><th>ابزار</th><th>وضعیت</th><th>قیمت ابتدای بازه</th><th>قیمت سنجش</th></tr></thead><tbody>${problem.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(reasons[item.status])}${item.error ? `<details><summary>جزئیات خطای دریافت</summary><span>${esc(item.error)}</span></details>` : ''}</td><td>${item.entry && item.status !== 'error' ? 'دارد' : 'ندارد'}</td><td>${item.mark && item.status !== 'error' ? 'دارد' : 'ندارد'}</td></tr>`).join('')}</tbody></table></div></details>` : ''}`;
+  }
+
+  // ————————————————————————— پیوند از تب استراتژی —————————————————————————
+  //
+  // نقشه، نماد و استراتژی را می‌چیند و خودش دریافت را می‌زند. دو جای
+  // شکست، دو جملهٔ متفاوت دارند و هیچ‌کدام بی‌صدا نیست:
+  //   ۱ نماد در این بازه نیست  → بازه باید عوض شود
+  //   ۲ استراتژی فاصله‌دار نیست → این تب اصلاً نمی‌سازدش
+  function applyPlanBase(plan) {
+    if (!chain.has(String(plan.uaIns || ''))) {
+      pendingPlan = null;
+      setStatus(`«${plan.uaName || plan.uaIns}» در این بازه نیست؛ بازه را عوض کن یا نماد را دستی انتخاب کن.`, true);
+      return;
+    }
+    const id = String(plan.strategyId || '');
+    if (id && !GAP_DEFS.some((def) => def.id === id)) {
+      pendingPlan = null;
+      setStatus(`«${plan.strategyName || id}» استراتژی فاصله‌دار نیست، پس این تب نمی‌سازدش. نماد چیده شد؛ استراتژی دیگری انتخاب کن.`, true);
+      baseSelect.value = String(plan.uaIns);
+      return;
+    }
+    baseSelect.value = String(plan.uaIns);
+    if (id) $('gr-strategy').value = id;
+    if (plan.units) { $('gr-units').value = String(Math.max(1, Math.trunc(Number(plan.units) || 1))); paintScaleNote(); }
+    setStatus(`از تب استراتژی آمد — ${nameOf(chain.get(String(plan.uaIns)))}؛ در حال دریافت تاریخچه…`);
+    void loadEverything();
+  }
+
+  /** ترکیبِ فرستاده‌شده را از روی کدِ قراردادِ پاها پیدا می‌کند، نه از روی کلید. */
+  function applyPlanCombo(plan) {
+    const want = new Set((plan.legIns || []).map(String));
+    const found = want.size ? rows.find((row) => {
+      const have = new Set((row.legs || []).filter((leg) => leg.kind !== 'underlying').map((leg) => String(leg.ins)));
+      return have.size === want.size && [...want].every((ins) => have.has(ins));
+    }) : null;
+    if (!found) {
+      setStatus(`${fmt.int(rows.length)} ترکیب ساخته شد، ولی ترکیبِ فرستاده‌شده بینشان نبود — شاید در این بازه هر دو پایش قیمت ندارد. از فهرست یکی را انتخاب کن.`, true);
+      return;
+    }
+    $('gr-pick').value = found.key;
+    paintHistory();
+    subtabs?.show?.('history');
   }
 
   async function loadEverything() {
@@ -486,6 +537,7 @@ export async function mount(root, { state }) {
     paintHistory();
     paintRules();
     paintLog();
+    if (pendingPlan) { const plan = pendingPlan; pendingPlan = null; applyPlanCombo(plan); }
   }
 
   function mountRadarTabs() {
