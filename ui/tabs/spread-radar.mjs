@@ -736,7 +736,7 @@ export async function mount(root, { state }) {
     for (const point of series.points) {
       const hour = Math.floor((point.second || 0) / 3600);
       const key = `${series.day || tapeDate}|${hour}`;
-      const bucket = buckets.get(key) || { day: historyDateLabel(tapeDate), hour: `${hour}:۰۰`, sum: 0, count: 0 };
+      const bucket = buckets.get(key) || { day: faDigits(historyDateLabel(tapeDate)), hour: `${hour}:۰۰`, sum: 0, count: 0 };
       bucket.sum += point.current; bucket.count += 1;
       buckets.set(key, bucket);
     }
@@ -780,13 +780,13 @@ export async function mount(root, { state }) {
     const date = Number($('gr-day').value);
     const legs = row.legs.filter((leg) => leg.kind !== 'underlying');
     $('gr-grain-run').disabled = true;
-    $('gr-grain-note').textContent = `دریافت ریزمعاملهٔ ${fmt.int(legs.length)} پا برای ${historyDateLabel(date)}…`;
+    $('gr-grain-note').textContent = `دریافت ریزمعاملهٔ ${fmt.int(legs.length)} پا برای ${faDigits(historyDateLabel(date))}…`;
     try {
       tapeByIns = await fetchTape(row, date);
       tapeDate = date;
       const series = buildIntraday(row, tapeByIns, date, $('gr-grain').value);
       if (!series.points.length) {
-        $('gr-grain-note').textContent = `در ${historyDateLabel(date)} هیچ لحظه‌ای نبود که همهٔ پاها قیمت داشته باشند. لحظهٔ ناقص با قیمت لحظهٔ قبل پر نمی‌شود.`;
+        $('gr-grain-note').textContent = `در ${faDigits(historyDateLabel(date))} هیچ لحظه‌ای نبود که همهٔ پاها قیمت داشته باشند. لحظهٔ ناقص با قیمت لحظهٔ قبل پر نمی‌شود.`;
         return;
       }
       $('gr-grain-note').textContent = `${fmt.int(series.points.length)} لحظه ساخته شد · ${fmt.int(series.missing)} لحظه چون دست‌کم یک پا معامله نداشت نقطه نساخت.`;

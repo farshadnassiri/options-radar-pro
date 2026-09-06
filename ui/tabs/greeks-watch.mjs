@@ -35,7 +35,7 @@ import { chart, LEG_COLORS } from '/ui/track-chart.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
-import { takeHandoff } from '/ui/handoff.mjs';
+import { takeHandoff, handoffEntryDate } from '/ui/handoff.mjs';
 import { logError } from '/ui/errlog.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -340,8 +340,20 @@ export async function mount(root, { state }) {
         .map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
       if (!entryDates.length) throw new Error('برای نماد پایه تاریخچه‌ای برنگشت');
       $('gw-work').hidden = false;
-      entryWheel = mountDateWheel($('gw-entry-date'), entryDates,
-        entryDates[Math.max(0, entryDates.length - 10)], () => refreshCombos(),
+      // ═══ روزِ ایجاد، وقتی نقشه‌ای در راه است ═══
+      //
+      // پیش‌فرضِ «ده روز مانده به آخر» برای ورودِ دستی خوب است، ولی وقتی
+      // ترکیبی از تب دیگری فرستاده شده، آن روز ممکن است روزی باشد که
+      // این قراردادها اصلاً در آن باز نبوده‌اند — و آن‌وقت `pickPlanCombo`
+      // ترکیب را پیدا نمی‌کند. گزارش صاحب پروژه دقیقاً همین بود.
+      //
+      // پس اگر نقشه‌ای هست، از تازه‌ترین روز به عقب می‌گردیم و نخستین
+      // روزی را برمی‌داریم که همهٔ پاهای فرستاده‌شده در آن قیمت دارند.
+      // قاعده مشترک با آزمایشگاه است و در `ui/handoff.mjs` نوشته شده.
+      const startDay = handoffEntryDate(pendingPlan, entryDates, (ins, date) => (seriesByIns[ins] || [])
+        .some((row) => normalizeHistoryDate(row.date) === date && Number(row.close) > 0))
+        || entryDates[Math.max(0, entryDates.length - 10)];
+      entryWheel = mountDateWheel($('gw-entry-date'), entryDates, startDay, () => refreshCombos(),
         { empty: 'روز معاملاتی پیدا نشد.' });
       paintParams();
       refreshCombos();
@@ -724,7 +736,20 @@ export async function mount(root, { state }) {
       const have = new Set(combo.legs.filter((leg) => leg.kind !== 'underlying').map((leg) => String(leg.ins)));
       return have.size === want.size && [...want].every((ins) => have.has(ins));
     });
-    if (at < 0) { setStatus('ترکیب فرستاده‌شده در این روز پیدا نشد؛ خودت انتخابش کن.', true); return; }
+    if (at < 0) {
+      // انتخابِ غلط بدتر از انتخابِ نبوده است. تا امروز کشویی روی
+      // پیش‌فرضِ خودش می‌ماند و کاربر ترکیبِ دیگری را «منتقل‌شده»
+      // می‌خواند — گزارشِ صاحب پروژه دقیقاً همین بود. حالا کشویی روی
+      // گزینه‌ای می‌رود که ترکیب نیست.
+      const select = $('gw-combo');
+      const placeholder = document.createElement('option');
+      placeholder.value = 'none';
+      placeholder.textContent = 'ترکیبِ منتقل‌شده در این روز نیست — یکی را انتخاب کن';
+      select.insertBefore(placeholder, select.firstChild);
+      select.value = 'none';
+      setStatus(`ترکیبِ «${plan.comboName || 'منتقل‌شده'}» در این روز ساخته نشد، پس هیچ ترکیبی انتخاب نشد؛ خودت یکی را بردار.`, true);
+      return;
+    }
     $('gw-combo').value = String(at);
     runReplay();
   }

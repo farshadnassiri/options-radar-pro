@@ -385,6 +385,16 @@ export function evaluate({ legs, quotes, ctx }) {
     // ۲۳ روز مانده می‌توانند دو سررسید متفاوت باشند، و «روز» این را نمی‌گوید.
     expiry: num(ctx.endDate),
     expiryLabel: ctx.endDate ? historyDateLabel(ctx.endDate) : '',
+    // ═══ هر سررسیدِ ترکیب، نه فقط نزدیک‌ترین ═══
+    //
+    // گزارش صاحب پروژه: «Calendar و Diagonal در جدول فقط یک تاریخ سررسید
+    // و یک روز دارند.» `expiryLabel` عمداً سررسیدِ نزدیک است (مبنای
+    // «روز مانده»)، ولی ترکیبِ دوسررسیدی با یک تاریخ قابل ساختن نیست.
+    // این ستون همهٔ سررسیدهای متمایز را به ترتیب می‌دهد.
+    expiryList: [...new Set(priced.map((l) => num(l.endDate, 0)).filter((d) => d > 0))]
+      .sort((a, b) => a - b).map((d) => historyDateLabel(d)),
+    daysList: [...new Set(priced.map((l) => num(l.days, NaN)).filter(Number.isFinite))]
+      .sort((a, b) => a - b),
     // نام قراردادِ هر پا، همان‌طور که در تابلو و سامانهٔ کارگزار نوشته می‌شود
     // (مثل «طهرم7058»). این شناسه است نه عدد؛ رقمش عمداً فارسی نمی‌شود.
     legNames: priced.map((l) => l.name || '').filter(Boolean),
@@ -401,6 +411,9 @@ export function evaluate({ legs, quotes, ctx }) {
       slipPct: num(l.exec?.slipPct),
       filled: num(l.exec?.filled), short: num(l.exec?.short), levels: num(l.exec?.levels),
       spreadPct: spreadPct(l.quote || {}), mid: midOf(l.quote || {}), sigma: l.sigma,
+      // سررسید و روزِ مانده‌ی خودِ همین پا. پای سهم سررسید ندارد و صفر
+      // می‌ماند — «ندارد»، نه «امروز».
+      endDate: num(l.endDate, 0), days: num(l.days, NaN),
     })),
 
     // جریان نقد
@@ -706,6 +719,10 @@ export const COLUMNS = [
   { key: 'qty', label: 'حجم من (قرارداد)', fmt: 'int', group: 'هویت' },
   { key: 'assetClassLabel', label: 'نوع دارایی پایه — مبنای نرخ کارمزد', fmt: 'text', group: 'هویت' },
   { key: 'expiryLabel', label: 'تاریخ سررسید', fmt: 'text', group: 'هویت' },
+  // در تقویمی و مورب، «تاریخ سررسید» فقط نزدیک را می‌گوید. این ستون هر
+  // دو را می‌دهد و برای ترکیبِ تک‌سررسید همان یکی است.
+  { key: 'expiryList', label: 'سررسید پاها', fmt: 'list', group: 'هویت' },
+  { key: 'daysList', label: 'روز مانده پاها', fmt: 'list', group: 'هویت' },
   { key: 'strikes', label: 'قیمت اعمال', fmt: 'list', group: 'هویت' },
   { key: 'legNames', label: 'نام قرارداد پاها', fmt: 'sym', group: 'هویت' },
   { key: 'cashLabel', label: 'جهت نقدی', fmt: 'text', group: 'جریان نقد' },

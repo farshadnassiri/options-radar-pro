@@ -127,7 +127,7 @@ export async function runHistoryScan({ def, uaIns, date, basis = 'CLOSE', settin
  */
 export async function liveTapeFor(codes = [], { fetcher } = {}) {
   const list = [...new Set(codes.map((code) => String(code || '')).filter(Boolean))].slice(0, 24);
-  if (!list.length) return { at: 0, tape: {}, errors: {} };
+  if (!list.length) return { at: 0, tape: {}, errors: {}, market: null };
   const payload = await asJson(`/api/live-trades?ins=${list.join(',')}`, fetcher);
   const tape = {};
   const errors = {};
@@ -135,5 +135,7 @@ export async function liveTapeFor(codes = [], { fetcher } = {}) {
     tape[ins] = Array.isArray(box?.rows) ? box.rows : [];
     if (box?.error) errors[ins] = box.error;
   }
-  return { at: payload.at ?? 0, tape, errors };
+  // وضعیت بازار همراه می‌آید تا «هنوز جلسه‌ای نبوده» با «این پا معامله
+  // نشده» اشتباه نشود — دو جملهٔ کاملاً متفاوت با یک ظاهر.
+  return { at: payload.at ?? 0, tape, errors, market: payload.market || null };
 }

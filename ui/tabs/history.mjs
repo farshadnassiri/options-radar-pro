@@ -35,7 +35,7 @@ const displayName = (entity, fallback = 'بدون نام') => {
   const name = String(entity?.name || '').trim();
   return name && name !== String(entity?.ins || '') ? name : fallback;
 };
-const contractLabel = (c) => `${displayName(c, 'قرارداد اختیار')} — ${c.kind === 'call' ? 'اختیار خرید' : 'اختیار فروش'} — اعمال ${fmt.int(c.strike)} — سررسید ${historyDateLabel(c.expiry)}`;
+const contractLabel = (c) => `${displayName(c, 'قرارداد اختیار')} — ${c.kind === 'call' ? 'اختیار خرید' : 'اختیار فروش'} — اعمال ${fmt.int(c.strike)} — سررسید ${faDigits(historyDateLabel(c.expiry))}`;
 const legLabel = (leg, index) => `${faDigits(index + 1)}. ${leg.side === 'buy' ? 'خرید' : 'فروش'} ${leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'دارایی پایه'} × ${faDigits(leg.ratio)}`;
 const valueLabel = (value, estimated = false) => `${estimated ? '≈ ' : ''}${fmt.money(value)}`;
 // تلاطم نبوده «—» می‌ماند؛ صفر یعنی «تلاطم صفر» که ادعای دیگری است.
@@ -445,10 +445,10 @@ export async function mount(root, { state }) {
     const title = label || def?.name || 'ترکیب انتخاب‌شده';
     const entryMethod = Object.keys(args?.manualEntry || {}).length ? 'دستی هر پا' : basisName(args?.entryBasis);
     const facts = [
-      ['تاریخ ورود', `${historyDayName(replay.startDate)} ${historyDateLabel(replay.startDate)}`, ''],
+      ['تاریخ ورود', `${historyDayName(replay.startDate)} ${faDigits(historyDateLabel(replay.startDate))}`, ''],
       // اگر روز خروج همان روز جاریِ چسبانده‌شده باشد، کاربر باید بداند این
       // عدد هنوز نهایی نیست — همان‌جا که تاریخ را می‌خواند، نه ده سطر پایین‌تر.
-      ['تاریخ خروج', `${historyDayName(replay.endDate)} ${historyDateLabel(replay.endDate)}${liveDate && Number(replay.endDate) === liveDate ? ' · لحظه‌ای، بسته‌نشده' : ''}`, ''],
+      ['تاریخ خروج', `${historyDayName(replay.endDate)} ${faDigits(historyDateLabel(replay.endDate))}${liveDate && Number(replay.endDate) === liveDate ? ' · لحظه‌ای، بسته‌نشده' : ''}`, ''],
       ['مدت نگهداری', last ? `${fmt.int(last.holdingDays)} روز تقویمی · ${fmt.int(summary.validDays)} روز معتبر` : '—', ''],
       ['تعداد واحد', fmt.int(args?.units || 1), ''],
       ['مبنای ورود / خروج', `${entryMethod} / ${basisName(args?.exitBasis)}`, ''],
@@ -462,7 +462,7 @@ export async function mount(root, { state }) {
       const kind = leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'دارایی پایه';
       const side = leg.side === 'buy' ? 'خرید' : 'فروش';
       const strike = leg.kind === 'underlying' ? '—' : fmt.int(leg.strike);
-      const expiry = leg.expiry ? historyDateLabel(leg.expiry) : '—';
+      const expiry = leg.expiry ? faDigits(historyDateLabel(leg.expiry)) : '—';
       const exitPrice = last?.perLeg?.[index]?.exitPrice;
       return `<article class="frozen-leg">
         <b>${faDigits(index + 1)}. ${esc(side)} ${esc(kind)} · ${esc(displayName(leg, `پای ${faDigits(index + 1)}`))}</b>
@@ -620,7 +620,7 @@ export async function mount(root, { state }) {
       const isBlocked = expiryBlocked(blocked, ua.ins, expiry.endDate);
       const label = document.createElement('label');
       if (isBlocked) label.classList.add('expiry-blocked');
-      label.innerHTML = `<input type="checkbox" value="${date}" data-history-expiry${isBlocked ? ' disabled' : ' checked'}><span>${historyDateLabel(date)}</span><small>${isBlocked ? 'سقف موقعیت پر — کنار گذاشته شد' : `${fmt.int(expiry.days)} روز · ${fmt.int(expiry.strikeList?.length || 0)} قیمت اعمال`}</small>`;
+      label.innerHTML = `<input type="checkbox" value="${date}" data-history-expiry${isBlocked ? ' disabled' : ' checked'}><span>${faDigits(historyDateLabel(date))}</span><small>${isBlocked ? 'سقف موقعیت پر — کنار گذاشته شد' : `${fmt.int(expiry.days)} روز · ${fmt.int(expiry.strikeList?.length || 0)} قیمت اعمال`}</small>`;
       label.querySelector('input').addEventListener('change', () => {
         paintExpirySummary();
         // عوض‌شدن انتخاب سررسید، تاریخچه بارگذاری‌شده را باطل می‌کند و کارت
@@ -793,7 +793,7 @@ export async function mount(root, { state }) {
   function paintRange() {
     if (!dates.length) return;
     const start = rangeStart(), end = rangeEnd();
-    $('h-range-label').textContent = `${historyDayName(start)} ${historyDateLabel(start)} تا ${historyDayName(end)} ${historyDateLabel(end)}`;
+    $('h-range-label').textContent = `${historyDayName(start)} ${faDigits(historyDateLabel(start))} تا ${historyDayName(end)} ${faDigits(historyDateLabel(end))}`;
     const startRow = (seriesByIns[String(ua?.ins)] || []).find((r) => Number(r.date) === start);
     if (startRow) {
       const official = Number(startRow.value) || 0;
@@ -1176,7 +1176,7 @@ export async function mount(root, { state }) {
     const key = matrixMode === 'daily' ? 'dailyReturnPct' : 'returnPct';
     const vals = [...map.values()].map((c) => Math.abs(c[key])).filter(Number.isFinite);
     const max = Math.max(...vals, 1);
-    $('h-return-matrix').innerHTML = `<table class="rolling-table return-matrix"><thead><tr><th>ورود \ خروج</th>${shown.map((d) => `<th title="${historyDateLabel(d)}">${historyDateLabel(d).slice(5)}</th>`).join('')}</tr></thead><tbody>${shown.map((entry) => `<tr><th>${historyDateLabel(entry)}</th>${shown.map((exit) => {
+    $('h-return-matrix').innerHTML = `<table class="rolling-table return-matrix"><thead><tr><th>ورود \ خروج</th>${shown.map((d) => `<th title="${faDigits(historyDateLabel(d))}">${faDigits(historyDateLabel(d).slice(5))}</th>`).join('')}</tr></thead><tbody>${shown.map((entry) => `<tr><th>${faDigits(historyDateLabel(entry))}</th>${shown.map((exit) => {
       const c = map.get(`${entry}|${exit}`), value = c?.[key];
       if (!c || exit < entry) return '<td class="matrix-empty"></td>';
       const label = matrixMode === 'daily' ? 'تغییر همان روز' : 'بازده انباشته';
@@ -1204,7 +1204,7 @@ export async function mount(root, { state }) {
     const { selected, best, worst, firstProfit, path } = detail;
     const selectedDailyPnl = detail.tradingDays === 0 ? selected.netPnl : selected.pnlDelta;
     const metrics = [
-      ['ورود → خروج', `${historyDateLabel(entryDate)} ← ${historyDateLabel(exitDate)}`],
+      ['ورود → خروج', `${faDigits(historyDateLabel(entryDate))} ← ${faDigits(historyDateLabel(exitDate))}`],
       ['مدت', `${fmt.int(detail.tradingDays)} روز معاملاتی · ${fmt.int(detail.calendarDays)} روز تقویمی`],
       ['بازده/سود خروج', `${fmt.pct(selected.returnPct)} · ${fmt.money(selected.netPnl)}`],
       ['تغییر همان روز', `${fmt.pct(detail.capital > 0 ? (selectedDailyPnl / detail.capital) * 100 : NaN)} · ${fmt.money(selectedDailyPnl)}`],
@@ -1216,7 +1216,7 @@ export async function mount(root, { state }) {
       ['کل کارمزد ورود و خروج', fmt.money(selected.totalFees)],
     ];
     host.hidden = false;
-    host.innerHTML = `<div class="section-head"><div><p class="eyebrow">جزئیات خانه انتخاب‌شده</p><h3>${historyDateLabel(entryDate)} تا ${historyDateLabel(exitDate)}</h3></div><button type="button" class="ghost" data-close-detail>بستن</button></div><div class="trade-detail-kpis">${metrics.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div><div class="history-chart" data-trade-path></div><div class="history-table-wrap"><table class="history-table"><thead><tr><th>تاریخ</th><th>روز</th><th>پایه</th><th>بازده پایه</th><th>سود خالص</th><th>بازده انباشته</th><th>تغییر همان روز</th><th>افت از قله</th><th>قیمت/اثر هر پا</th></tr></thead><tbody>${path.map((r, index) => { const daily = index === 0 ? r.netPnl : r.pnlDelta; return `<tr><td>${r.dateLabel}</td><td>${r.dayName}</td><td>${fmt.money(r.baseClose)}</td><td class="${signTone(r.baseCumulativePct)}">${fmt.pct(r.baseCumulativePct)}</td><td class="${signTone(r.netPnl)}">${fmt.money(r.netPnl)}</td><td class="${signTone(r.returnPct)}">${fmt.pct(r.returnPct)}</td><td class="${signTone(daily)}">${fmt.money(daily)}</td><td class="${signTone(r.drawdown)}">${fmt.money(r.drawdown)}</td><td>${r.perLeg.map((leg, i) => `${faDigits(i + 1)}: ${fmt.money(leg.exitPrice)} / ${fmt.money(leg.netPnl)}`).join('<br>')}</td></tr>`; }).join('')}</tbody></table></div>`;
+    host.innerHTML = `<div class="section-head"><div><p class="eyebrow">جزئیات خانه انتخاب‌شده</p><h3>${faDigits(historyDateLabel(entryDate))} تا ${faDigits(historyDateLabel(exitDate))}</h3></div><button type="button" class="ghost" data-close-detail>بستن</button></div><div class="trade-detail-kpis">${metrics.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div><div class="history-chart" data-trade-path></div><div class="history-table-wrap"><table class="history-table"><thead><tr><th>تاریخ</th><th>روز</th><th>پایه</th><th>بازده پایه</th><th>سود خالص</th><th>بازده انباشته</th><th>تغییر همان روز</th><th>افت از قله</th><th>قیمت/اثر هر پا</th></tr></thead><tbody>${path.map((r, index) => { const daily = index === 0 ? r.netPnl : r.pnlDelta; return `<tr><td>${r.dateLabel}</td><td>${r.dayName}</td><td>${fmt.money(r.baseClose)}</td><td class="${signTone(r.baseCumulativePct)}">${fmt.pct(r.baseCumulativePct)}</td><td class="${signTone(r.netPnl)}">${fmt.money(r.netPnl)}</td><td class="${signTone(r.returnPct)}">${fmt.pct(r.returnPct)}</td><td class="${signTone(daily)}">${fmt.money(daily)}</td><td class="${signTone(r.drawdown)}">${fmt.money(r.drawdown)}</td><td>${r.perLeg.map((leg, i) => `${faDigits(i + 1)}: ${fmt.money(leg.exitPrice)} / ${fmt.money(leg.netPnl)}`).join('<br>')}</td></tr>`; }).join('')}</tbody></table></div>`;
     lineChart(host.querySelector('[data-trade-path]'), path, [
       { key: 'returnPct', label: 'بازده انباشته', color: '#0b6e6b' },
       { key: 'baseCumulativePct', label: 'بازده پایه', color: '#7254a3' },
@@ -1382,8 +1382,8 @@ export async function mount(root, { state }) {
       ['دارایی پایه', displayName(ua, 'دارایی پایه')],
       ['مبنای قیمت ورود', basisName(rollingArgs.entryBasis)],
       ['مبنای قیمت خروج', basisName(rollingArgs.exitBasis)],
-      ['شروع بررسی', `${historyDayName(rollingArgs.startDate)} ${historyDateLabel(rollingArgs.startDate)}`],
-      ['پایان بررسی', `${historyDayName(rollingArgs.endDate)} ${historyDateLabel(rollingArgs.endDate)}`],
+      ['شروع بررسی', `${historyDayName(rollingArgs.startDate)} ${faDigits(historyDateLabel(rollingArgs.startDate))}`],
+      ['پایان بررسی', `${historyDayName(rollingArgs.endDate)} ${faDigits(historyDateLabel(rollingArgs.endDate))}`],
       ['تعداد واحد', rollingArgs.units],
       ['حداقل ارزش پایه', liquidity.minBaseValue || 0],
       ['حداقل حجم پایه', liquidity.minBaseVolume || 0],

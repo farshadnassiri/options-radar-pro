@@ -909,7 +909,11 @@ async function handle(req, res) {
       };
       const items = Object.fromEntries(await Promise.all(codes.map(one)));
       res.setHeader('Cache-Control', 'no-store');
-      return sendJson(res, 200, { at: Date.now(), count: codes.length, items });
+      // وضعیت بازار همراه نوار می‌رود، و این تزیین نیست: نوارِ خالی در
+      // بازارِ بسته یعنی «هنوز جلسه‌ای نبوده»، و در بازارِ باز یعنی «این
+      // ابزار معامله نشده». مصرف‌کننده بی این دو را از هم جدا نمی‌کند و
+      // محدودیتِ ساعت را به حسابِ نقدشوندگیِ نماد می‌گذارد.
+      return sendJson(res, 200, { at: Date.now(), count: codes.length, market: marketOpen(), items });
     }
 
     // داشبورد وسعت بازار پایه از اولین معامله امروز تا همین لحظه. نوار همه

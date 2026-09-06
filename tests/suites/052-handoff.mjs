@@ -4,7 +4,7 @@
 
 import { check, group, readSrc } from '../harness.mjs';
 import {
-  STRATEGY_LINK_TARGETS, canHandoff, goHandoff, handoffPlan,
+  STRATEGY_LINK_TARGETS, canHandoff, goHandoff, handoffEntryDate, handoffPlan,
   strategyLinkPlan, strategyLinkTargets, watchConditionsFrom,
 } from '../../ui/handoff.mjs';
 import { normalizeCondition } from '../../core/watch-rule.mjs';
@@ -52,9 +52,17 @@ group('۵۱. انتقال ترکیب زنده به بک‌تست');
   }
 
   const btSrc51 = readSrc('../ui/tabs/backtest.mjs');
-  check('مقصد، تاریخ خودکار را به بلندترین بازهٔ موجود ترجمه می‌کند',
-    btSrc51.includes("plan.entryDate === 'auto' ? entryDates[0]")
+  // ═══ «خودکار» یعنی روزی که همین ترکیب در آن هست ═══
+  //
+  // پیش از این `entryDates[0]` بود — قدیمی‌ترین روزِ دارای **هر** ترکیبِ
+  // اجراپذیر. قراردادهای تازه در آن روز باز نبودند، پس تطبیق شکست
+  // می‌خورد و کشویی روی ترکیبِ دیگری می‌ماند. قاعده حالا مشترک است و
+  // رفتارش پایین‌تر سنجیده می‌شود.
+  check('مقصد، تاریخ خودکار را از قاعدهٔ مشترک می‌گیرد',
+    btSrc51.includes('handoffEntryDate(plan, entryDates')
     && btSrc51.includes("plan.exitDate === 'auto' ? exitDates.at(-1)"));
+  check('رصد یونانی هم از همان قاعده استفاده می‌کند، نه نسخهٔ دوم',
+    readSrc('../ui/tabs/greeks-watch.mjs').includes('handoffEntryDate(pendingPlan, entryDates'));
   // «برترین موقعیت‌ها» هنوز دکمهٔ تکی دارد. تب استراتژی از دکمهٔ تکی به
   // نوارِ پیوند رفت، پس همان ادعا آنجا با **رفتارِ** `strategyLinkTargets`
   // سنجیده می‌شود، نه با متنِ منبع — پایین‌تر، در بخشِ «نوار پیوند».
@@ -73,6 +81,32 @@ group('۵۱. انتقال ترکیب زنده به بک‌تست');
 //
 // آنچه سنجیده می‌شود: هیچ دکمه‌ای به مقصدی که نمی‌پذیرد ساخته نمی‌شود، و
 // آستانه‌های پیش‌پر از عددِ **همین ردیف** می‌آیند نه از صفر.
+group('۵۱. روزِ ورودِ نقشهٔ خودکار');
+{
+  // گزارش صاحب پروژه: ترکیبِ +۶۸۰۰۰/−۷۴۰۰۰ فرستاده شد و آزمایشگاه
+  // ۱۶۰۰۰/۱۸۰۰۰ را انتخاب کرد. ریشه: روزِ ورود **پیش از** دانستنِ ترکیب
+  // انتخاب می‌شد.
+  const dates = [20260101, 20260102, 20260103, 20260104];
+  // قراردادهای تازه فقط از روز سوم باز شده‌اند — همان چیزی که تطبیق را
+  // در روزِ قدیمی می‌شکست.
+  const priced = (ins, date) => (ins === 'new1' || ins === 'new2' ? date >= 20260103 : true);
+  const plan = { legIns: ['new1', 'new2'] };
+  check('تازه‌ترین روزی که همهٔ پاها در آن قیمت دارند برداشته می‌شود',
+    handoffEntryDate(plan, dates, priced) === 20260104);
+  check('نه قدیمی‌ترین روزِ فهرست — همان چیزی که ترکیبِ اشتباه می‌ساخت',
+    handoffEntryDate(plan, dates, priced) !== dates[0]);
+  check('روزی که فقط یکی از پاها را دارد، انتخاب نمی‌شود',
+    handoffEntryDate(plan, [20260101, 20260102], priced) === 0);
+  check('نقشهٔ بی‌پا یا فهرستِ خالی، صفر می‌دهد — فراخوان به پیش‌فرضش برمی‌گردد',
+    handoffEntryDate({ legIns: [] }, dates, priced) === 0
+    && handoffEntryDate(plan, [], priced) === 0
+    && handoffEntryDate(null, dates, priced) === 0);
+  // `hasPrice` باید صریحاً `true` بدهد؛ مقدارِ صادق‌نما کافی نیست، وگرنه
+  // یک `undefined` بی‌سروصدا روزِ غلط را قبول می‌کرد.
+  check('پاسخِ غیرِ true از `hasPrice` قبول نمی‌شود',
+    handoffEntryDate(plan, dates, () => 1) === 0);
+}
+
 group('۵۱. نوار پیوند به بقیهٔ برنامه');
 {
   const rowLink = {
