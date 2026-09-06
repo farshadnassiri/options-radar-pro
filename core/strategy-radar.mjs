@@ -283,6 +283,17 @@ export function radarProfile(def) {
     if (leg && Number(leg[2]) > legs) continue;
     if (!columns.includes(key)) columns.push(key);
   }
+  // ═══ «وضعیت سربه‌سری» کنارِ خودِ سربه‌سری می‌نشیند ═══
+  //
+  // گزارش صاحب پروژه: «فاصله تا سربه‌سری بعضی ردیف‌ها — می‌ماند.» عدد
+  // درست بود (ترکیبی که در هیچ قیمتی سود نمی‌دهد سربه‌سری ندارد)، ولی
+  // خطِ تیرهٔ ساکت جوابِ «چرا» را نمی‌داد. این ستون همان‌جا می‌نشیند که
+  // سؤال ساخته می‌شود — نه در انتخابگرِ اختیاری.
+  //
+  // قاعده است نه فهرست، تا نمایهٔ تازه هم خودبه‌خود بگیردش.
+  const lastBe = columns.reduce((at, key, i) => (/^be/.test(key) ? i : at), -1);
+  if (lastBe >= 0 && !columns.includes('beStatus')) columns.splice(lastBe + 1, 0, 'beStatus');
+
   const filters = (override.filters || base.filters)
     .filter((key) => {
       const filter = FILTER_BY_KEY.get(key);

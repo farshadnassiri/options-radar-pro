@@ -381,13 +381,20 @@ export async function mount(root, { tab, state, api }) {
     const on = profile.filters.filter((f) => (isFlagFilter(f) ? filterValues[f.key] === true
       : filterLimit(filterValues[f.key]) !== null));
     if (!on.length) { reportEl.textContent = 'هیچ فیلتری روشن نیست — همهٔ ردیف‌های اسکن نمایش داده می‌شوند.'; return; }
-    // «چند تا افتاد» کافی نیست: ردیفی که عددِ فیلترشده را **ندارد** هم
-    // می‌افتد، و اگر جدا شمرده نشود، خالی‌بودنِ جدول با «شرط سخت گذاشتم»
-    // اشتباه گرفته می‌شود در حالی که مسئله نبودِ داده است.
-    const miss = filterReport.missing
-      ? ` — از این‌ها ${fmt.int(filterReport.missing)} ردیف چون این عدد را اصلاً ندارند، نه چون شرط را رد کردند`
-      : '';
-    reportEl.textContent = `${fmt.int(on.length)} فیلتر روشن؛ ${fmt.int(filterReport.dropped)} ردیف از ${fmt.int(rows.length)} افتاد${miss}.`;
+    // ═══ عددِ صفر هم باید نوشته شود ═══
+    //
+    // گزارش صاحب پروژه: «گزارش فیلتر تعداد ردیف‌های افتاده به‌خاطر
+    // نداشتن داده را نمی‌گوید.» تا امروز این بند فقط وقتی چاپ می‌شد که
+    // عددش صفر نبود — پس خواننده نمی‌توانست بفهمد «هیچ ردیفی به‌خاطر
+    // نبودِ داده نیفتاد» یا «اصلاً شمرده نشده». دو حالتِ کاملاً متفاوت،
+    // یک ظاهر. حالا همیشه هر دو عدد نوشته می‌شوند.
+    const missing = filterReport.missing;
+    const why = filterReport.dropped === 0
+      ? 'هیچ ردیفی نیفتاد'
+      : `${fmt.int(filterReport.dropped - missing)} ردیف چون شرط را رد کردند و `
+        + `${fmt.int(missing)} ردیف چون این عدد را اصلاً ندارند`;
+    reportEl.textContent = `${fmt.int(on.length)} فیلتر روشن؛ از ${fmt.int(rows.length)} ردیف `
+      + `${fmt.int(filterReport.dropped)} تا افتاد — ${why}.`;
   }
 
   function repaint() {
@@ -1032,21 +1039,48 @@ export async function mount(root, { tab, state, api }) {
         trailNote(trail),
         failed.length ? `${fmt.int(failed.length)} پا نوارِ معامله‌اش خوانده نشد.` : '',
       ].filter(Boolean).join(' ');
+      // ── کارنامهٔ هر پا: همیشه، نه فقط وقتی نمودار ساخته شد ──────────
+      //
+      // ترکیب چهارپا با یک پای بی‌معامله هیچ نقطهٔ کاملی ندارد. تا امروز
+      // خروجی‌اش یک جملهٔ بن‌بست بود؛ حالا این جدول می‌گوید **کدام** پا
+      // ساکت است، تا خواننده بداند مشکل از بازار است نه از برنامه.
+      const clock = (second) => (Number.isFinite(second)
+        ? faDigits(`${String(Math.floor(second / 3600)).padStart(2, '0')}:${String(Math.floor((second % 3600) / 60)).padStart(2, '0')}`)
+        : '—');
+      // کلاسِ رنگ روی **سلول** می‌نشیند نه روی ردیف: قاعدهٔ عمومیِ پوسته
+      // `td.loss` است (`ui/style.css`)، پس `class="loss"` روی `<tr>`
+      // بی‌اثر بود. رنگ هم تنها نشانه نیست — واژه هم نوشته می‌شود، چون
+      // رنگ به تنهایی برای کوررنگ کافی نیست.
+      const legHtml = (trail.legReport || []).map((leg) => `
+        <tr>
+          <td>${leg.name}</td><td class="n">${fmt.int(leg.trades)}</td>
+          <td class="n">${clock(leg.first)}</td><td class="n">${clock(leg.last)}</td>
+          <td class="${leg.silent ? 'loss' : ''}">${leg.silent ? '<b>امروز معامله نشده</b>' : 'فعال'}</td></tr>`).join('');
       const rowsHtml = trail.points.filter((point) => point.complete).map((point) => `
         <tr><td>${point.label}</td><td class="n">${fmt.money(point.netCash)}</td>
         <td class="n">${fmt.int(Math.round(point.maxAgeSec / 60))}</td>
         <td class="n">${fmt.int(Math.round(point.spanSec / 60))}</td></tr>`).join('');
-      tTable.innerHTML = rowsHtml ? `
+      tTable.innerHTML = `
+        ${legHtml ? `
+        <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">کارنامهٔ هر پا در جلسهٔ امروز</h4>
+        <table class="mini">
+          <thead><tr><th>پا</th><th>تعداد معامله</th><th>اولین</th><th>آخرین</th><th>وضعیت</th></tr></thead>
+          <tbody>${legHtml}</tbody>
+        </table>` : ''}
+        ${rowsHtml ? `
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">لحظه‌های دارای عددِ کامل</h4>
         <table class="mini">
           <thead><tr><th>ساعت</th><th>نقد خالص</th>
             <th>سنِ کهنه‌ترین پا <span class="unit">دقیقه</span></th>
             <th>فاصلهٔ پاها <span class="unit">دقیقه</span></th></tr></thead>
           <tbody>${rowsHtml}</tbody>
-        </table>` : '';
+        </table>` : ''}`;
+      const mute = (trail.legReport || []).filter((leg) => leg.silent);
       tStatus.textContent = trail.complete
         ? `${fmt.int(trail.complete)} لحظهٔ کامل از ${fmt.int(trail.moments)} — تغییر ${fmt.money(trail.change)}`
-        : 'در هیچ لحظه‌ای همهٔ پاها با هم قیمت نداشتند.';
+        : mute.length
+          ? `${fmt.int(mute.length)} پا امروز معامله نشده (${mute.map((leg) => leg.name).join('، ')}) — جدول زیر را ببین.`
+          : 'در هیچ لحظه‌ای همهٔ پاها با هم قیمت نداشتند.';
     } catch (error) {
       logError('ردِ جلسهٔ استراتژی', error);
       tStatus.textContent = `خواندن نوار ناموفق: ${error.message}`;

@@ -345,7 +345,12 @@ export function evaluate({ legs, quotes, ctx }) {
   // ——— ۱۰. ریسک لنگ‌زدن ———
   const legging = leggingRisk(priced);
 
+  // چرا سربه‌سری ندارد — پیش از ساختِ هشدارها، چون یکی از هشدارها همین است.
+  const beStatus = breakevenStatus(payoff);
   const warn = [...quality.flags];
+  // ردیفی که در هیچ قیمتی سود نمی‌دهد، باید داد بزند. تا امروز فقط ستون
+  // سربه‌سری‌اش «—» می‌شد و بقیهٔ ستون‌ها عادی به نظر می‌رسیدند.
+  if (beStatus.alwaysLoss) warn.push('در هیچ قیمتی سود نمی‌دهد');
   // اندازه قرارداد در هر عدد پولی ضرب می‌شود. اگر از مشخصات قرارداد نیامده
   // باشد، یا پاهای یک ترکیب روی دو اندازه متفاوت باشند، ردیف باید بگوید —
   // وگرنه عددی که ۱۰٪ غلط است دقیقاً شبیه عددی است که درست است.
@@ -410,6 +415,7 @@ export function evaluate({ legs, quotes, ctx }) {
     // سود و زیان
     breakevens: payoff.breakevens,
     ...breakevenMetrics(payoff.breakevens, S),
+    beStatus: beStatus.label, beNone: beStatus.id !== 'has',
     singleExpiry, payoffApprox: !!payoff.approx, horizonDays: payoff.horizonDays ?? days,
     maxProfit: payoff.maxProfit, maxLoss: payoff.maxLoss,
     maxLossPct: retMaxLoss, rewardRisk,
@@ -537,6 +543,38 @@ export const BE_SLOTS = 4;
 
 /** ترتیب یونانی‌ها در ستون‌ها. همان ترتیب `GREEKS` در `core/greeks-track.mjs`. */
 const GREEK_KEYS = ['delta', 'gamma', 'vega', 'theta', 'rho'];
+
+/**
+ * چرا این ردیف سربه‌سری ندارد.
+ *
+ * ═══ گزارشی که این تابع جوابش است ═══
+ *
+ * «فاصله تا سربه‌سری بعضی ردیف‌ها «—» می‌ماند.»
+ *
+ * عدد درست بود، سکوت غلط. کاورد کالِ عمیقاً در سود با پرمیوم ناچیز
+ * **در هیچ قیمتی** سود نمی‌دهد؛ منحنی سود و زیانش صفر را قطع نمی‌کند و
+ * سربه‌سری واقعاً وجود ندارد. ولی ردیفی که ذاتاً زیان‌ده است نباید با
+ * یک خط تیرهٔ ساکت از جدول رد شود — همان‌قدر خبر است که «زیان نامحدود».
+ *
+ * سه حالتِ بی‌سربه‌سری، سه معنیِ کاملاً متفاوت دارند و اینجا از هم جدا
+ * می‌شوند. حالت چهارم — «نامعلوم» — وقتی است که خودِ سود و زیان عدد
+ * ندارد؛ آن‌وقت هیچ ادعایی نمی‌شود.
+ */
+export function breakevenStatus({ breakevens = [], maxProfit = NaN, maxLoss = NaN } = {}) {
+  const list = (Array.isArray(breakevens) ? breakevens : []).filter((b) => ok(b) && b > 0);
+  if (list.length) {
+    return { id: 'has', count: list.length, label: `${list.length} نقطه`, alwaysLoss: false };
+  }
+  // سودِ سقف‌دار و منفی: منحنی هرگز بالای صفر نمی‌رود.
+  if (ok(maxProfit) && maxProfit < 0) {
+    return { id: 'alwaysLoss', count: 0, label: 'ندارد — در هیچ قیمتی سود نمی‌دهد', alwaysLoss: true };
+  }
+  // زیانِ سقف‌دار و صفر یا منفی: منحنی هرگز زیر صفر نمی‌رود.
+  if (ok(maxLoss) && maxLoss <= 0) {
+    return { id: 'alwaysProfit', count: 0, label: 'ندارد — در هیچ قیمتی زیان نمی‌دهد', alwaysLoss: false };
+  }
+  return { id: 'unknown', count: 0, label: 'نامعلوم', alwaysLoss: false };
+}
 
 export function breakevenMetrics(bes, S) {
   const list = (Array.isArray(bes) ? bes : []).filter((b) => ok(b) && b > 0).sort((a, b) => a - b);
@@ -698,6 +736,9 @@ export const COLUMNS = [
   { key: 'beNear', label: 'نزدیک‌ترین سربه‌سری', fmt: 'money', group: 'سود و زیان' },
   { key: 'beDistPct', label: 'فاصله تا سربه‌سری ٪', fmt: 'pct', group: 'سود و زیان' },
   { key: 'beRoomPct', label: 'حاشیه امن ٪', fmt: 'pct', group: 'سود و زیان', heat: 'prob' },
+  // چرا ستونِ سربه‌سری خالی است. بی این، «—» و «سربه‌سری ندارد چون همیشه
+  // زیان‌ده است» روی صفحه یک شکل‌اند.
+  { key: 'beStatus', label: 'وضعیت سربه‌سری', fmt: 'text', group: 'سود و زیان' },
   { key: 'beLow', label: 'سربه‌سری پایین', fmt: 'money', group: 'سود و زیان' },
   { key: 'beHigh', label: 'سربه‌سری بالا', fmt: 'money', group: 'سود و زیان' },
   { key: 'beWidthPct', label: 'پهنای سربه‌سری ٪', fmt: 'pct', group: 'سود و زیان' },
