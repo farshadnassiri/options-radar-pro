@@ -98,10 +98,29 @@ export function resolvePrice(quote, side, opt = {}) {
   const qty = num(opt.qty, 1);
   const q = quote || {};
 
-  const ref = (v, label, simultaneous = true) => ({
+  const none = (simultaneous = true) => ({
+    price: 0, source: 'بی‌مظنه', quality: 'none', executable: false, simultaneous,
+    filled: 0, short: qty, levels: 0, slipPct: NaN, top: 0, full: false,
+  });
+
+  // ═══ «قیمت پایانیِ صفر» یعنی قیمت پایانی نداریم ═══
+  //
+  // مبنای دفتر سفارش این را از اول درست می‌کرد: پیش از ادعای مرجع، `ref > 0`
+  // را می‌سنجید. چهار مبنای مرجع نمی‌سنجیدند، و `num(undefined)` صفر است —
+  // پس برای قراردادی که آن روز اصلاً قیمتی نداشت، ردیف می‌نوشت
+  // «قیمت پایانی: ۰» و همان صفر مبنای نقد خالص و بیشترین سود می‌شد.
+  //
+  // در رصدِ زنده پنهان بود چون مبنای پیش‌فرض دفتر است. در رصدِ تاریخی هر چهار
+  // مبنا مرجع‌اند و `showUnexecutable` هم اجباراً روشن است، پس دقیقاً همان‌جا
+  // بیرون زد: قراردادی که دریافتش ۵۰۲ خورده بود، با قیمتِ صفر وارد محاسبه
+  // می‌شد و «بیشترین سود ۱۳۸٬۸۳۸» می‌ساخت.
+  //
+  // صفر قیمت نیست. نداشتن قیمت، همان `بی‌مظنه` است — همان چیزی که مسیرِ دفتر
+  // برایش برچسب داشت.
+  const ref = (v, label, simultaneous = true) => (num(v) > 0 ? {
     price: num(v), source: label, quality: 'reference', executable: false,
     simultaneous, filled: 0, short: qty, levels: 0, slipPct: NaN, top: num(v), full: false,
-  });
+  } : none(simultaneous));
 
   if (basis === 'LAST') return ref(q.last, 'آخرین معامله');
   if (basis === 'CLOSE') return ref(q.close, 'قیمت پایانی');
@@ -137,10 +156,7 @@ export function resolvePrice(quote, side, opt = {}) {
         filled: 0, short: qty, levels: 0, slipPct: NaN, top: ref, full: false,
       };
     }
-    return {
-      price: 0, source: 'بی‌مظنه', quality: 'none', executable: false, simultaneous: true,
-      filled: 0, short: qty, levels: 0, slipPct: NaN, top: 0, full: false,
-    };
+    return none();
   }
   return {
     price: w.vwap,

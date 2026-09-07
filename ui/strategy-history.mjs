@@ -112,6 +112,11 @@ export async function runHistoryScan({ def, uaIns, date, basis = 'CLOSE', settin
   return {
     ...result, built, basis: used,
     note: historyChainNote(built, used),
+    // ناقص‌بودنِ جدول یک پرچمِ صریح است، نه چیزی که مصرف‌کننده از دلِ
+    // `built` دربیاورد: «آن روز معامله نشد» تمام است، «نگرفتیم» با اسکنِ
+    // دوباره درست می‌شود، و رابط باید بتواند این دو را جدا نشان بدهد.
+    incomplete: (built.legsFailed || 0) + (built.basesFailed || 0) > 0,
+    failedCount: (built.legsFailed || 0) + (built.basesFailed || 0),
     universeNote: universe.note || '',
     asOf: universe.asOf ?? null,
     archived: universe.archived === true,

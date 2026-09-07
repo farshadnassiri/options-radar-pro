@@ -75,6 +75,9 @@ const FUNNEL_KEYS = ['built', 'noQuote', 'refBasis', 'noDepth', 'filtered', 'kep
  */
 export function unexecutableReason(row) {
   const q = (row.legPrices || []).map((l) => l.quality);
+  // ترتیب عمدی است و دست‌نخورده ماند: «مبنای مرجع» تنظیم کاربر است، پس بر
+  // «بی‌مظنه» می‌چربد. در عمل هم ردیفی که پای `none` دارد اصلاً به اینجا
+  // نمی‌رسد — دروازهٔ صریحِ `scan` پیش‌تر آن را در سطل `noQuote` می‌شمارد.
   if (q.some((x) => x === 'reference')) return 'refBasis';
   if (q.some((x) => x === 'none')) return 'noQuote';
   return 'noDepth';
@@ -269,6 +272,17 @@ export function scan({ def, chain, uaKeys, settings, sigmaByUa = {}, sigmaSource
       } catch { continue; }
       funnel.evaluated += 1;
 
+      // ═══ پایی که قیمت ندارد، ردیف نمی‌سازد — حتی در حالت مطالعه ═══
+      //
+      // `showUnexecutable` دربارهٔ **اجراپذیری** است، نه دربارهٔ بودنِ قیمت:
+      // «ببین چه ترکیبی هست و چرا اجرا نمی‌شود». ردیفی که یک پایش هیچ قیمتی
+      // ندارد، جوابِ آن سؤال نیست؛ عددهایش از صفر ساخته می‌شوند و صفر قیمت
+      // نیست. در رصدِ تاریخی که این کلید اجباراً روشن است، همین ردیف‌ها
+      // «بیشترین سود» عددی نشان می‌دادند که هیچ معامله‌ای پشتش نبود.
+      //
+      // حذفِ بی‌صدا نیست: در سطلِ `noQuote` شمرده می‌شود و نوار قیف نشانش
+      // می‌دهد.
+      if ((row.legPrices || []).some((leg) => leg.quality === 'none')) { funnel.noQuote += 1; continue; }
       if (!row.executable && !s.showUnexecutable) { funnel[unexecutableReason(row)] += 1; continue; }
       if (!passesFilters(row, s)) { funnel.filtered += 1; continue; }
 
