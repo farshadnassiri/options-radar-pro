@@ -232,7 +232,27 @@ export async function mount(root, { state }) {
     const index = Number($('bt-combo').value);
     manualEntry = {}; manualExit = {};
     legs = combos[index]?.legs || null;
-    if (!legs) { $('bt-legs').innerHTML = '<p class="empty-note">ترکیب معتبری برای این روز و مبنای قیمت نیست.</p>'; return; }
+    if (!legs) {
+      $('bt-legs').innerHTML = '<p class="empty-note">ترکیب معتبری برای این روز و مبنای قیمت نیست.</p>';
+      // ═══ ترکیب که رفت، چرخِ خروجِ ترکیبِ قبلی هم باید برود ═══
+      //
+      // گزارش ۱۴۰۵/۰۶/۱۶: «تب باز نشد — Cannot read properties of null
+      // (reading 'map')». مسیرش این بود: تحویل، ترکیبِ منتقل‌شده را در آن
+      // روز پیدا نمی‌کرد، کشویی روی گزینهٔ «نیست» می‌رفت و `legs` صفر
+      // می‌شد — ولی `exitDates` و `exitWheel` هنوز مالِ ترکیبِ **قبلی**
+      // بودند. چند خط بعد `exitWheel.select(...)` صدا زده می‌شد، بازخوردش
+      // `paintSnapshots()` را می‌خواند، و آن روی `legs` که حالا `null` بود
+      // `.map` می‌زد.
+      //
+      // خروجِ زودهنگام، حالتِ کهنه را پاک نمی‌کند مگر صریح پاکش کنی. پس
+      // همین‌جا پاک می‌شود: نه فهرستِ روزِ خروجی می‌ماند، نه چرخی که
+      // بازخوردش به ترکیبِ رفته اشاره کند.
+      exitDates = [];
+      exitWheel = mountDateWheel($('bt-exit-date'), [], null, () => {},
+        { empty: 'اول یک ترکیب معتبر انتخاب کن.' });
+      paintSnapshots();
+      return;
+    }
     const entryDate = Number($('bt-entry-date').dataset.value), basis = entryRail.dataset.value || 'LAST';
     $('bt-legs').innerHTML = legs.map((leg, index) => {
       const row = rowAt(leg.ins, entryDate), market = historyMarketMetrics(row);
@@ -1137,8 +1157,11 @@ export async function mount(root, { state }) {
       }
     }
 
+    // بی ترکیب، روز سنجش هم معنی ندارد — و بندِ «ترکیب بازسازی نشد» بالاتر
+    // خودش دلیل را گفته، پس اینجا جملهٔ دومی اضافه نمی‌شود.
     const wantExit = plan.exitDate === 'auto' ? exitDates.at(-1) : plan.exitDate;
-    if (exitDates.includes(wantExit)) exitWheel.select(wantExit);
+    if (!legs) { /* بند بالا گفته چرا */ }
+    else if (exitDates.includes(wantExit)) exitWheel.select(wantExit);
     else skipped.push(`روز سنجش ${dateLabel(plan.exitDate)} برای همه پاها قیمت کامل ندارد`);
 
     // قیمت دستی تحلیل تاریخی، ورودی محاسبه است نه نتیجه؛ پس همراه همان پای

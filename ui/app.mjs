@@ -302,6 +302,25 @@ async function tickHealth() {
       worst ? `بیشترین خطا: ${worst.family} — ${fmt.int(worst.errors)} از ${fmt.int(worst.requests)} درخواست` : '',
     ].filter(Boolean).join('\n');
 
+    // ═══ سکوتِ خطرناک: بازار باز، خطا صفر، عکس چهار دقیقه کهنه ═══
+    //
+    // گزارش بازآزماییِ ۱۴۰۵/۰۶/۱۶: پس از بازکردن هم‌زمان مقصدهای تاریخی،
+    // `watchAgeSec` به ۲۹۰ ثانیه رسید در حالی که `paused=false` و
+    // `watchConsecutiveFails=0` بود. هیچ شمارنده‌ای دروغ نمی‌گفت؛ فقط
+    // هیچ‌کدام این سؤال را نمی‌پرسیدند. حالا سرور خودش حکم می‌دهد و اینجا
+    // نشان داده می‌شود — چون کسی که می‌خواهد سفارش بگذارد باید بداند عددِ
+    // روی صفحه مالِ کِی است.
+    const stale = el('h-stale');
+    stale.toggleAttribute('hidden', !h.watchStale);
+    if (h.watchStale) {
+      // عددِ نداشته جملهٔ سوراخ می‌سازد: «عکس تابلو — ثانیه کهنه است». دو
+      // حالت است، نه یکی، و هرکدام جملهٔ خودش را دارد.
+      stale.textContent = Number.isFinite(h.watchAgeSec)
+        ? `عکس تابلو ${fmt.int(h.watchAgeSec)} ثانیه کهنه است`
+        : 'هنوز عکسی از تابلو گرفته نشده';
+      stale.title = h.watchStaleWhy || '';
+    }
+
   } catch {
     const m = el('h-market');
     m.textContent = 'سرور در دسترس نیست';
