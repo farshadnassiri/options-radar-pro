@@ -24,7 +24,10 @@ import { check, group, readSrc } from '../harness.mjs';
 import { strategyLegSnapshots } from '../../core/history.mjs';
 import { watchHealth, watchStaleLimitSec } from '../../core/watch-health.mjs';
 import { makeJobQueue } from '../../server/job-queue.mjs';
-import { writeJsonAtomic, writeJsonAtomicSync } from '../../server/atomic-json.mjs';
+import {
+  writeJsonAtomic, writeJsonAtomicSync,
+  retryRename, retryRenameSync, isLockError, RETRY_DELAYS_MS,
+} from '../../server/atomic-json.mjs';
 
 group('۲۳۹ P1‑۱ — پیوندِ آزمایشگاه، تب را از کار نمی‌اندازد');
 
@@ -174,13 +177,19 @@ check('پروندهٔ موقتی جا نمی‌ماند',
 // همان الگوی گزارش: یکی می‌نویسد، دیگری هم‌زمان می‌خواند. با
 // `fs.writeFile` مستقیم، بعضی خواندن‌ها «JSON خراب» می‌دادند. اینجا هیچ‌کدام
 // نباید بدهد — یا نسخهٔ قبلی، یا نسخهٔ تازه، هیچ‌وقت نیمه.
-let torn = 0, reads = 0;
+let torn = 0, ioFail = 0, reads = 0;
 const writer = (async () => {
   for (let i = 0; i < 25; i += 1) await writeJsonAtomic(file, { ...big, round: i });
 })();
 const reader = (async () => {
   for (let i = 0; i < 400; i += 1) {
-    try { JSON.parse(await fsp.readFile(file, 'utf8')); } catch { torn += 1; }
+    try { JSON.parse(await fsp.readFile(file, 'utf8')); }
+    catch (e) {
+      // «نیمهٔ فایل» با «نشد بازش کنم» یکی نیست. اولی ایرادِ همین اصلاح است،
+      // دومی ایرادِ سکو — و اگر هر دو یک شمارنده داشته باشند، قرمزِ CI
+      // نمی‌گوید کدامش بوده.
+      if (e instanceof SyntaxError) torn += 1; else ioFail += 1;
+    }
     reads += 1;
     await new Promise((r) => setImmediate(r));
   }
@@ -188,12 +197,56 @@ const reader = (async () => {
 await Promise.all([writer, reader]);
 const faTest = (n) => String(n).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
 check(`هیچ خواندنی نیمه‌کاره نبود — ${faTest(reads)} خواندن روی ۲۵ نوشتن`, torn === 0);
+check(`و هیچ خواندنی هم شکست نخورد — ${faTest(ioFail)} خطای ورودی/خروجی`, ioFail === 0);
 
 writeJsonAtomicSync(file, { rows: [], sync: true });
 check('نسخهٔ همگام هم همان قرارداد را دارد',
   JSON.parse(await fsp.readFile(file, 'utf8')).sync === true
   && (await fsp.readdir(dir)).filter((name) => name.endsWith('.tmp')).length === 0);
 await fsp.rm(dir, { recursive: true, force: true });
+
+// ═══ درسی که CI ویندوز داد ═══
+//
+// job ویندوز روی همین اصلاح قرمز شد:
+//   EPERM: operation not permitted, rename '….tmp' -> '…\\option-roster.json'
+//
+// در POSIX تغییرِ نام روی پروندهٔ بازِ خواننده مشکلی ندارد؛ در ویندوز
+// `MoveFileEx` با EPERM برمی‌گردد. دروازهٔ لینوکسی این را نمی‌دید — و کدی که
+// فقط روی یک سکو اجرا می‌شود و فقط آنجا آزمون دارد، عملاً بی‌آزمون است. پس
+// حلقهٔ تلاش از خودِ نوشتن جدا شد تا اینجا هم سنجیده شود.
+const lockErr = (code) => Object.assign(new Error(`${code}: قفل`), { code });
+check('خطای قفلِ ویندوز شناخته می‌شود',
+  ['EPERM', 'EACCES', 'EBUSY'].every((code) => isLockError(lockErr(code)) === true));
+check('و خطای واقعی با آن اشتباه نمی‌شود',
+  isLockError(lockErr('ENOENT')) === false && isLockError(null) === false);
+
+let tries = 0;
+const napped = [];
+const ok3 = await retryRename(
+  () => { tries += 1; if (tries < 3) throw lockErr('EPERM'); return 'شد'; },
+  { sleep: async (ms) => { napped.push(ms); } });
+check('قفلِ گذرا با تلاشِ دوباره باز می‌شود', ok3 === 'شد' && tries === 3);
+check('و فاصله‌ها بالا می‌روند، نه چرخهٔ سوزان',
+  napped.length === 2 && napped[0] < napped[1] && RETRY_DELAYS_MS.length >= 10);
+
+let hardTries = 0;
+let thrown = null;
+await retryRename(() => { hardTries += 1; throw lockErr('ENOENT'); }, { sleep: async () => {} })
+  .catch((e) => { thrown = e; });
+check('خطای غیرقفلی همان اول بالا می‌رود — بودجه هدر نمی‌شود',
+  thrown?.code === 'ENOENT' && hardTries === 1);
+
+let forever = 0;
+let gaveUp = null;
+await retryRename(() => { forever += 1; throw lockErr('EBUSY'); }, { sleep: async () => {} })
+  .catch((e) => { gaveUp = e; });
+check('و قفلِ همیشگی هم بی‌نهایت تلاش نمی‌شود — خطای اصلی بالا می‌رود',
+  gaveUp?.code === 'EBUSY' && forever === RETRY_DELAYS_MS.length + 1);
+
+let syncTries = 0;
+check('نسخهٔ همگام هم همان حلقه را دارد',
+  retryRenameSync(() => { syncTries += 1; if (syncTries < 2) throw lockErr('EBUSY'); return 'شد'; },
+    { sleep: () => {} }) === 'شد' && syncTries === 2);
 
 check('سرور هیچ نوشتنِ JSON غیراتمیکی ندارد',
   !/fs\.writeFile\(/.test(serverSrc));
