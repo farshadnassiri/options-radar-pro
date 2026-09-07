@@ -37,6 +37,7 @@ import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
 import { decisionDashboardSnapshot } from '../core/decision-dashboard.mjs';
+import { makeUpstreamTally } from '../core/upstream-tally.mjs';
 import {
   validIns, validCompactDate, historicalTradesPath, historicalPath, HISTORICAL_KINDS,
   validSessionId, parseInsList, safeStaticPath, readBody, BodyTooLarge,
@@ -110,6 +111,10 @@ const stat = {
   watchTicks: 0, watchRows: 0, lastWatchAt: null, lastWatchMs: 0, watchConsecutiveFails: 0,
   queueDepth: 0, inflight: 0, clients: 0, paused: false, pauseReason: '',
 };
+
+// بارِ بالادست به تفکیکِ سرویس — «۲۰۸۲ درخواست» را به «کدام سرویس» تبدیل
+// می‌کند. سیاستی اعمال نمی‌کند، فقط می‌شمارد.
+const tally = makeUpstreamTally();
 
 const errlog = createLog();
 
@@ -213,7 +218,7 @@ async function fetchUpstream(url) {
 async function get(pathname, ttlSec, priority = 5) {
   const url = `${S.baseUrl}${pathname}`;
   const hit = cache.get(url);
-  if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; return hit.data; }
+  if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; tally.cacheHit(pathname); return hit.data; }
   if (inflight.has(url)) return inflight.get(url);
 
   const p = (async () => {
@@ -221,6 +226,7 @@ async function get(pathname, ttlSec, priority = 5) {
     for (let attempt = 0; attempt <= S.retries; attempt++) {
       try {
         stat.requests += 1;
+        tally.request(pathname);
         const data = await schedule(() => fetchUpstream(url), priority);
         cache.set(url, { at: Date.now(), data });
         evictOldest(cache, S.maxCacheEntries);
@@ -228,9 +234,20 @@ async function get(pathname, ttlSec, priority = 5) {
       } catch (e) {
         lastErr = e;
         stat.errors += 1;
+        tally.error(pathname);
         stat.lastError = `${e.name}: ${e.message}`;
         stat.lastErrorAt = Date.now();
-        errlog.push({ level: 'error', where: `بالادست ${path}`, message: stat.lastError, detail: `تلاش ${attempt + 1} از ${S.retries + 1}` });
+        // ═══ `path` ماژولِ node بود، نه مسیرِ درخواست ═══
+        //
+        // گزارش عملیاتیِ ۱۴۰۵/۰۶/۱۶: «دفتر خطا محل را به‌شکل بی‌فایده
+        // «بالادست [object Object]» ثبت می‌کند و endpoint معیوب را نشان
+        // نمی‌دهد.» در ۱۵۷ خطای HTTP 502 هیچ‌کدام نگفتند کدام سرویس افتاده.
+        //
+        // نامِ پارامتر `pathname` است و `path` بالای همین فایل ماژولِ
+        // `node:path` — قالب‌بندی رشته‌ای هیچ خطایی نمی‌دهد و بی‌صدا
+        // `[object Object]` می‌نویسد. `url` کامل ثبت می‌شود تا پرس‌وجوی
+        // دقیقاً شکست‌خورده قابل بازسازی باشد.
+        errlog.push({ level: 'error', where: `بالادست ${pathname}`, message: stat.lastError, detail: `تلاش ${attempt + 1} از ${S.retries + 1} — ${url}` });
         if (attempt < S.retries) await sleep(300 * 2 ** attempt);
       }
     }
@@ -257,7 +274,7 @@ function cachedAt(pathname) {
 async function getFresh(pathname, ttlSec = 2, priority = 2) {
   const key = `fresh:${pathname}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; return hit.data; }
+  if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; tally.cacheHit(pathname); return hit.data; }
   if (inflight.has(key)) return inflight.get(key);
 
   const pending = (async () => {
@@ -265,6 +282,7 @@ async function getFresh(pathname, ttlSec = 2, priority = 2) {
     for (let attempt = 0; attempt <= S.retries; attempt++) {
       try {
         stat.requests += 1;
+        tally.request(pathname);
         const join = pathname.includes('?') ? '&' : '?';
         const url = `${S.baseUrl}${pathname}${join}_=${Date.now()}`;
         const data = await schedule(() => fetchUpstream(url), priority);
@@ -274,8 +292,12 @@ async function getFresh(pathname, ttlSec = 2, priority = 2) {
       } catch (e) {
         lastErr = e;
         stat.errors += 1;
+        tally.error(pathname);
         stat.lastError = `${e.name}: ${e.message}`;
         stat.lastErrorAt = Date.now();
+        // این مسیر تا امروز هیچ‌چیز در دفتر خطا نمی‌نوشت: خطای «عکس تازه»
+        // فقط در شمارندهٔ کل می‌نشست و کاربرِ مرورگر هیچ ردی از آن نمی‌دید.
+        errlog.push({ level: 'error', where: `بالادست ${pathname}`, message: stat.lastError, detail: `تلاش ${attempt + 1} از ${S.retries + 1} — عکس تازه` });
         if (attempt < S.retries) await sleep(300 * 2 ** attempt);
       }
     }
@@ -874,6 +896,9 @@ async function handle(req, res) {
         avgUpstreamMs: stat.upstreamCount ? Math.round(stat.upstreamMsTotal / stat.upstreamCount) : 0,
         cacheSize: cache.size, watchAgeSec: watch.at ? Math.round((Date.now() - watch.at) / 1000) : null,
         settingsWatchIntervalSec: S.watchIntervalSec,
+        // بار به تفکیکِ سرویس، تا گزارشِ بعدی به‌جای «۲۰۸۲ درخواست» بگوید
+        // کدام سرویس آن را خورده و کدام‌یک خطا داده.
+        byEndpoint: tally.snapshot(12), worstEndpoint: tally.worstError(),
       });
     }
 

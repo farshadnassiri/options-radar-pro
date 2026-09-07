@@ -570,6 +570,32 @@ group('۱۰. چیدمان آزمون سبد کپی نمی‌شود');
   const guardHarnessSrc = fs.readFileSync(path.join(ROOT, 'tests/harness.mjs'), 'utf8');
   check('harness ابزار ادعا مانده، نه انبار چیدمان',
     !/portfolioFixture|createPortfolioMission/.test(guardHarnessSrc));
+
+  // ═══ ماژول را داخل رشته نریز ═══
+  //
+  // گزارش عملیاتیِ ۱۴۰۵/۰۶/۱۶: «دفتر خطا محل را به‌شکل بی‌فایده «بالادست
+  // [object Object]» ثبت می‌کند.» در `server/server.mjs` نامِ ماژولِ
+  // `node:path` داخل رشتهٔ الگویی نشسته بود، در حالی که نام پارامترِ مسیر
+  // `pathname` است.
+  //
+  // این خطا هیچ استثنایی نمی‌اندازد و هیچ آزمونی را قرمز نمی‌کند: فقط ۱۵۷
+  // خطای ۵۰۲ ثبت می‌شود که هیچ‌کدام نمی‌گویند کدام سرویس افتاده. تنها راهِ
+  // گرفتنش، خواندنِ خودِ رشته است.
+  //
+  // قاعده در همان فایل بسته می‌شود: نامی که در این فایل از یک ماژولِ
+  // `node:` وارد شده، داخل رشتهٔ الگویی نمی‌نشیند.
+  const nodeImport = /import\s+(?:(\w+)|\*\s+as\s+(\w+))\s+from\s+['"]node:[^'"]+['"]/g;
+  const moduleInString = [];
+  for (const file of sources) {
+    const text = fs.readFileSync(file, 'utf8');
+    const names = new Set();
+    for (const m of text.matchAll(nodeImport)) names.add(m[1] || m[2]);
+    for (const name of names) {
+      if (new RegExp(`\\$\\{\\s*${name}\\s*\\}`).test(text)) moduleInString.push(`${rel(file)}:${name}`);
+    }
+  }
+  check('ماژولِ node داخل رشتهٔ الگویی نمی‌نشیند — [object Object] نمی‌شود',
+    moduleInString.length === 0, moduleInString.join(' ،') || 'هیچ‌کدام');
 }
 
 // ═══════════════════════════ گزارش ═══════════════════════════

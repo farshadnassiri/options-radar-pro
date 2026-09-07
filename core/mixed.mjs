@@ -50,7 +50,7 @@ export function analyzeMixed(legs, netCash, opt = {}) {
   // نمودار «امروز» (نه سررسید) کنار نمودار اصلی لازم دارد.
   const horizon = Number.isFinite(opt.horizonDays) ? opt.horizonDays : Math.min(...optLegs.map((l) => num(l.days, 0)));
 
-  const value = (S) => {
+  const value = (S, feeSet = fees) => {
     let v = num(netCash, 0);
     let sharesAfter = 0;
     for (const l of legs) {
@@ -62,17 +62,17 @@ export function analyzeMixed(legs, netCash, opt = {}) {
         const intr = intrinsic(l.kind, S, K);
         v += qy * intr;
         if (intr > 0) {
-          v -= Math.abs(qy) * K * num(fees.exercise);
+          v -= Math.abs(qy) * K * num(feeSet.exercise);
           sharesAfter += l.kind === 'call' ? qy : -qy;
         }
       } else {
         // پای زنده: با قیمت نظری بسته می‌شود، پس کارمزد معامله می‌دهد
         const px = bsPrice(l.kind, S, K, daysLeft / yearDays, r, q, sigma(l));
-        v += qy * px - Math.abs(qy) * px * num(fees.option);
+        v += qy * px - Math.abs(qy) * px * num(feeSet.option);
       }
     }
     if (Math.abs(sharesAfter) > EPS) {
-      const f = sharesAfter > 0 ? num(fees.sellStock) : num(fees.buyStock);
+      const f = sharesAfter > 0 ? num(feeSet.sellStock) : num(feeSet.buyStock);
       v -= Math.abs(sharesAfter) * S * f;
     }
     return v;
@@ -123,8 +123,35 @@ export function analyzeMixed(legs, netCash, opt = {}) {
 
   const slopeRight = slopeAt(farUp);
   const slopeLeft = slopeAt(farDn);
-  const unlimitedProfit = slopeRight > flat;
-  const unlimitedLoss = slopeRight < -flat;
+
+  // ——— بی‌کرانی، ساختاری خوانده می‌شود نه عددی ———
+  //
+  // «زیان نامحدود» ادعای در معرض بودن است: در قیمت‌های بالا چند سهم روی دست
+  // می‌ماند. کارمزدِ تسویه هم متناسب با قیمت است و شیب می‌سازد، ولی آن شیب
+  // هزینه است نه در معرض بودن — و بی‌کران‌کننده نیست.
+  //
+  // اندازه‌گیریِ عددیِ شیب این دو را از هم جدا نمی‌کند. تقویمیِ خرید شیبِ
+  // ساختاریِ صفر دارد (یک کال فروخته، یک کال خریده) ولی شیبِ عددی‌اش
+  // ‎−(کارمزد خرید سهم + کارمزد اختیار)‎ است: کوچک، منفی و ماندگار. با آستانهٔ
+  // ۱e−۶ همین بس بود که **هر** ردیف تقویمی «زیان نامحدود» شود، از رتبه‌بندی
+  // بیفتد و در KPI ریسک‌دار شمرده شود — گزارش عملیاتیِ ۱۴۰۵/۰۶/۱۶ هر چهار
+  // ردیف Calendar Call را دقیقاً همین‌طور دید.
+  //
+  // پس شیبِ حد را از خودِ پاها می‌خوانیم، دقیق و بی‌کارمزد: وقتی S به بی‌نهایت
+  // می‌رود هر کال شیب ۱ می‌گیرد، هر پوت صفر، و پایه ۱. پای زندهٔ بلک-شولز هم
+  // همین حد را دارد، پس افق در این حساب اثری ندارد.
+  const structuralSlopeUp = legs.reduce((sum, l) => {
+    const qy = signedQty(l);
+    if (l.kind === 'underlying') return sum + qy;
+    return sum + (l.kind === 'call' ? qy : 0);
+  }, 0);
+  const unlimitedProfit = structuralSlopeUp > flat;
+  const unlimitedLoss = structuralSlopeUp < -flat;
+
+  // کارمزدهای متناسب با قیمت، تنها جمله‌های بی‌کرانِ تابع‌اند. برای خواندنِ
+  // «حدِ سمت راست» کنار گذاشته می‌شوند؛ کارمزد اعمال متناسب با قیمت اعمال است
+  // و کراندار می‌ماند، پس سر جایش است.
+  const limitFees = { ...fees, buyStock: 0, sellStock: 0, option: 0 };
 
   // ——— شبکه جست‌وجو: پنجره رسم به‌علاوه دو دنباله ———
   //
@@ -175,12 +202,17 @@ export function analyzeMixed(legs, netCash, opt = {}) {
     if (v < maxLoss) { maxLoss = v; atMaxLoss = S; }
   };
   for (const p of scan) {
-    // دنباله بالا فقط وقتی نامزد است که تابع از آن سمت کراندار باشد
-    if (p.S > hi && (unlimitedProfit || unlimitedLoss)) continue;
+    // دنبالهٔ بالا برای یافتن سربه‌سری و بازهٔ سود ساخته شده، نه برای بیشینه و
+    // کمینه. آن نقاط در قیمت‌هایی‌اند که هیچ معامله‌گری نمی‌بیند (ده انحراف
+    // معیار دورتر) و عددِ کارمزدشان به‌جای «بیشترین زیان» می‌نشست.
+    if (p.S > hi) continue;
     consider(p.S, p.pnl);
   }
   consider(farDn, value(farDn));
-  if (!unlimitedProfit && !unlimitedLoss) consider(farUp, value(farUp));
+  // حدِ سمت راست فقط وقتی نامزد است که ساختار از آن سمت کراندار باشد، و
+  // بدون کارمزدِ متناسب با قیمت خوانده می‌شود — همان کارمزدی که بالاتر
+  // بی‌کرانی نساخت، اینجا هم نباید عدد بسازد.
+  if (!unlimitedProfit && !unlimitedLoss) consider(farUp, value(farUp, limitFees));
 
   // ——— بازه‌های سود، برای احتمال سود ———
   //

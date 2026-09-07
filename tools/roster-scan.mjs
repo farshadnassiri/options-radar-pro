@@ -109,8 +109,11 @@ async function main() {
     days: want,
     existing: rows,
     scannedDays: scanned,
-    get: async (path) => {
-      const out = await getJson(`${base}${path}`);
+    // نام `path` نیست، چون `node:path` بالای همین فایل وارد شده و سایه‌انداختن
+    // روی آن دقیقاً همان اشتباهی را نامرئی می‌کند که در دفتر خطای سرور
+    // «بالادست [object Object]» نوشت.
+    get: async (pathname) => {
+      const out = await getJson(`${base}${pathname}`);
       await sleep(delay);
       return out;
     },

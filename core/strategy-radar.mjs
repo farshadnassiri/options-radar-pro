@@ -84,6 +84,10 @@ export const RADAR_FILTERS = [
   { key: 'onlyCredit', label: 'فقط بستانکار', unit: '', field: 'isCredit', cmp: 'flag' },
   { key: 'onlyOffsettable', label: 'فقط ردیفی که همین حالا بسته می‌شود', unit: '', field: 'offsettable', cmp: 'flag' },
   { key: 'noUnlimitedLoss', label: 'زیان نامحدود را کنار بگذار', unit: '', field: 'unlimitedLoss', cmp: 'notFlag' },
+  // ردیفِ مشکوک به‌خودی‌خود ته جدول می‌رود؛ این تیک کاملاً پنهانش می‌کند.
+  // دو چیزِ متفاوت‌اند: «صدر را نگیرد» تصمیمِ برنامه است، «اصلاً نبینمش»
+  // تصمیمِ کاربر.
+  { key: 'noSuspect', label: 'ردیفِ غیرقابل اتکا را کنار بگذار', unit: '', field: 'suspect', cmp: 'notFlag' },
 ];
 
 const FILTER_BY_KEY = new Map(RADAR_FILTERS.map((filter) => [filter.key, filter]));
@@ -339,6 +343,14 @@ export function radarProfile(def) {
       return !leg || Number(leg[2]) <= legs;
     })
     .map((key) => FILTER_BY_KEY.get(key));
+  // ═══ فیلترِ اعتبار روی هر نمایه هست، بی استثنا ═══
+  //
+  // قاعده است نه فهرست: هیچ استراتژی‌ای نیست که کاربرش نخواهد بتواند
+  // ردیفِ «بازده ماهانه دو میلیون درصد» را از جدول بیرون بگذارد. اگر به
+  // فهرست‌های بالا سپرده می‌شد، نمایهٔ بعدی از قلم می‌افتاد.
+  if (!filters.some((filter) => filter.key === 'noSuspect')) {
+    filters.push(FILTER_BY_KEY.get('noSuspect'));
+  }
   const sortKey = override.sortKey || base.sortKey;
   return {
     group, legs, columns, filters, unknown,

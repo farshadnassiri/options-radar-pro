@@ -28,6 +28,7 @@ import {
 import { bsGreeks, bsPrice, impliedVol, probBelow } from './bs.mjs';
 import { analyzeMixed, isSingleExpiry } from './mixed.mjs';
 import { historyDateLabel } from './history.mjs';
+import { rowTrust } from './row-trust.mjs';
 
 /** بازه‌هایی از قیمت پایه که در آن‌ها سود می‌کنی. مبنای احتمال سود. */
 export function profitRegions(an) {
@@ -372,6 +373,14 @@ export function evaluate({ legs, quotes, ctx }) {
   if (num(s.retWarnMonthPct, 0) > 0 && ok(retMax)
     && (retMax * basis.monthDays) / days > s.retWarnMonthPct) warn.push('بازده نامتعارف');
 
+  // ═══ ردیفی که عددش را نمی‌شود مبنای سفارش کرد ═══
+  //
+  // هشدار داشتن کافی نبود: ردیفِ «بازده ماهانه ۲٬۰۲۶٬۳۹۶٪» با هشدارِ کامل،
+  // باز هم رتبهٔ اول جدول را می‌گرفت. `suspect` همان هشدار را به حکم تبدیل
+  // می‌کند تا مرتب‌سازی و شاخص‌ها بتوانند رویش تصمیم بگیرند — بی آنکه ردیف
+  // از جدول حذف شود.
+  const trust = rowTrust(warn);
+
   return {
     // هویت
     strategy: ctx.def?.name || 'ترکیب دستی',
@@ -499,6 +508,8 @@ export function evaluate({ legs, quotes, ctx }) {
     sizeAssumed, sizeMixed,
     contractSizes: [...new Set(priced.map((l) => num(l.size)))],
     warn: [...new Set(warn)],
+    suspect: trust.suspect, suspectWhy: trust.reasons,
+    suspectFlags: trust.reasons.map((x) => x.flag),
 
     // برای نمودار — پاهای قیمت‌خورده، بدون شیء تابع‌دار
     payoff,
@@ -868,6 +879,8 @@ export const COLUMNS = [
   { key: 'stateLabel', label: 'وضعیت نماد', fmt: 'text', group: 'سلامت' },
   { key: 'dataFlags', label: 'نشان‌های داده', fmt: 'list', group: 'سلامت' },
   { key: 'warn', label: 'هشدار', fmt: 'list', group: 'سلامت' },
+  { key: 'suspect', label: 'عددش قابل اتکا نیست', fmt: 'bool', group: 'سلامت' },
+  { key: 'suspectFlags', label: 'چرا قابل اتکا نیست', fmt: 'list', group: 'سلامت' },
 ];
 
 const LEG_KIND_FA = { call: 'کال', put: 'پوت', underlying: 'سهم' };
