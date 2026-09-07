@@ -117,11 +117,27 @@ export function historyMarketMetrics(row) {
   return { volume, trades, value: estimated, valueEstimated: official <= 0 && estimated > 0 };
 }
 
-/** عکس قیمت و معاملات هر پای استراتژی در یک روز؛ پایه فقط اگر خودش پا باشد می‌آید. */
+/**
+ * عکس قیمت و معاملات هر پای استراتژی در یک روز؛ پایه فقط اگر خودش پا باشد
+ * می‌آید.
+ *
+ * ═══ چرا `legs = []` کافی نبود ═══
+ *
+ * مقدارِ پیش‌فرضِ پارامتر فقط وقتی می‌نشیند که آرگومان `undefined` باشد.
+ * `ui/tabs/backtest.mjs` عمداً `legs` را **`null`** می‌گذارد تا بگوید «هیچ
+ * ترکیبی انتخاب نشده»، و آن `null` مستقیم از این امضا رد می‌شد و روی
+ * `.map` می‌ترکید — گزارش ۱۴۰۵/۰۶/۱۶: «تب باز نشد — Cannot read properties
+ * of null (reading 'map')»، یعنی یک تبِ کاملاً از کار افتاده به‌خاطر یک
+ * حالتِ کاملاً عادی.
+ *
+ * «هیچ پایی» یک وضعیتِ درست است، نه خطا. آرایهٔ خالی برمی‌گردد و لایهٔ
+ * نمایش خودش «ترکیب معتبر انتخاب کن» می‌نویسد.
+ */
 export function strategyLegSnapshots(legs = [], seriesByIns = {}, date) {
+  const list = Array.isArray(legs) ? legs : [];
   const target = normalizeHistoryDate(date);
   const indexes = new Map(Object.entries(seriesByIns || {}).map(([ins, rows]) => [String(ins), indexHistory(rows)]));
-  return legs.map((leg, index) => {
+  return list.map((leg, index) => {
     const row = indexes.get(String(leg.ins))?.get(target);
     return {
       index, ins: String(leg.ins), name: leg.name, kind: leg.kind, side: leg.side,

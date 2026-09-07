@@ -38,6 +38,9 @@ import {
 } from '../core/live-market.mjs';
 import { decisionDashboardSnapshot } from '../core/decision-dashboard.mjs';
 import { makeUpstreamTally } from '../core/upstream-tally.mjs';
+import { writeJsonAtomic } from './atomic-json.mjs';
+import { watchHealth } from '../core/watch-health.mjs';
+import { makeJobQueue } from './job-queue.mjs';
 import {
   validIns, validCompactDate, historicalTradesPath, historicalPath, HISTORICAL_KINDS,
   validSessionId, parseInsList, safeStaticPath, readBody, BodyTooLarge,
@@ -97,7 +100,7 @@ async function loadSettings() {
 async function saveSettings(next) {
   S = sanitize(next);
   await fs.mkdir(path.dirname(SETTINGS_FILE), { recursive: true });
-  await fs.writeFile(SETTINGS_FILE, JSON.stringify(S, null, 2), 'utf8');
+  await writeJsonAtomic(SETTINGS_FILE, S, { space: 2 });
   return S;
 }
 
@@ -154,41 +157,46 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ————————————————————————————————— صف با سقف هم‌زمانی —————————————————————————————————
 
-const queue = [];
-let running = 0;
-
-function schedule(fn, priority = 5) {
-  return new Promise((resolve, reject) => {
-    queue.push({ fn, priority, resolve, reject });
-    queue.sort((a, b) => a.priority - b.priority);
-    stat.queueDepth = queue.length;
-    pump();
-  });
-}
-
-async function pump() {
-  if (running >= S.concurrency || !queue.length) return;
-  const job = queue.shift();
-  stat.queueDepth = queue.length;
-  running += 1;
-  stat.inflight = running;
-  try {
+// صف در `server/job-queue.mjs` است، نه اینجا: ایرادِ گرسنگیِ حلقهٔ زنده یک
+// ایرادِ ترتیب بود، و ترتیب را فقط وقتی می‌شود سنجید که از شبکه جدا باشد.
+// سطل ژتون بیرون می‌ماند و از `beforeRun` تزریق می‌شود.
+const jobs = makeJobQueue({
+  concurrency: () => S.concurrency,
+  beforeRun: async () => {
     const wait = takeToken();
     if (wait > 0) { stat.rateWaits += 1; await sleep(wait); takeToken(); }
-    job.resolve(await job.fn());
-  } catch (e) {
-    job.reject(e);
-  } finally {
-    running -= 1;
-    stat.inflight = running;
-    pump();
-  }
-}
+  },
+  onChange: (depth, running) => { stat.queueDepth = depth; stat.inflight = running; },
+});
+
+const schedule = (fn, priority = 5, ticket = null) => jobs.push(fn, priority, ticket);
+
+/**
+ * ═══ وارونگیِ اولویت، از راهِ ادغامِ درخواستِ در پرواز ═══
+ *
+ * گزارش بازآزماییِ ۱۴۰۵/۰۶/۱۶: «پس از بازکردن هم‌زمان آزمایشگاه، رصد یونانی
+ * و رادار فاصله … `watchTicks` روی ۹۰ ثابت ماند و `watchAgeSec` از ۱۶۳ به
+ * ۲۹۰ ثانیه رسید» — با `paused=false` و بدون هیچ خطایی.
+ *
+ * `/Instrument/GetInstrumentOptionMarketWatch/0` چهار صدازننده دارد: حلقهٔ
+ * زندهٔ دیده‌بان با اولویت ۱، و سه مسیرِ تاریخی/دفتری با اولویت ۴. اگر یکی
+ * از آن سه اول برسد، کارش با اولویت ۴ **ته صف** می‌نشیند و در `inflight`
+ * ثبت می‌شود. حلقهٔ زنده که چند لحظه بعد همان نشانی را می‌خواهد، به قاعدهٔ
+ * ادغام همان وعده را می‌گیرد — و با آن، جای صفِ اولویتِ ۴ را هم به ارث
+ * می‌برد. اولویتِ ۱ روی کاغذ می‌ماند و در عمل پشتِ صدها درخواستِ تاریخی
+ * می‌ایستد.
+ *
+ * ادغام درست است و نباید برداشته شود (وگرنه چند تب سهمیهٔ بالادست را چند
+ * برابر می‌کنند). آنچه غلط بود، به ارث نبردنِ **اولویت** است: وقتی صاحبِ
+ * عجول‌تری به یک کارِ هنوز-شروع‌نشده می‌پیوندد، آن کار باید عجلهٔ او را
+ * بگیرد. کارِ در حالِ اجرا جابه‌جا نمی‌شود — آنجا صف معنی ندارد.
+ */
+const boostTicket = (ticket, priority) => jobs.boost(ticket, priority);
 
 // ————————————————————————————————— کش و ادغام درخواست در پرواز —————————————————————————————————
 
 const cache = new Map();     // url -> { at, data }
-const inflight = new Map();  // url -> Promise
+const inflight = new Map();  // url -> { promise, ticket }
 
 async function fetchUpstream(url) {
   const ac = new AbortController();
@@ -219,15 +227,21 @@ async function get(pathname, ttlSec, priority = 5) {
   const url = `${S.baseUrl}${pathname}`;
   const hit = cache.get(url);
   if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; tally.cacheHit(pathname); return hit.data; }
-  if (inflight.has(url)) return inflight.get(url);
+  // پیوستن به درخواستِ در پرواز، عجلهٔ صدازنندهٔ تازه را هم با خودش می‌برد.
+  const held = inflight.get(url);
+  if (held) { boostTicket(held.ticket, priority); return held.promise; }
 
+  const ticket = { priority, job: null };
   const p = (async () => {
     let lastErr;
     for (let attempt = 0; attempt <= S.retries; attempt++) {
       try {
         stat.requests += 1;
         tally.request(pathname);
-        const data = await schedule(() => fetchUpstream(url), priority);
+        // اولویت از بلیت خوانده می‌شود نه از پارامتر: ممکن است بین دو تلاش
+        // صدازنندهٔ عجول‌تری پیوسته باشد، و تلاشِ بعدی باید عجلهٔ او را داشته
+        // باشد نه عجلهٔ صدازنندهٔ اول را.
+        const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket);
         cache.set(url, { at: Date.now(), data });
         evictOldest(cache, S.maxCacheEntries);
         return data;
@@ -254,7 +268,7 @@ async function get(pathname, ttlSec, priority = 5) {
     throw lastErr;
   })().finally(() => inflight.delete(url));
 
-  inflight.set(url, p);
+  inflight.set(url, { promise: p, ticket });
   return p;
 }
 
@@ -275,8 +289,10 @@ async function getFresh(pathname, ttlSec = 2, priority = 2) {
   const key = `fresh:${pathname}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; tally.cacheHit(pathname); return hit.data; }
-  if (inflight.has(key)) return inflight.get(key);
+  const joined = inflight.get(key);
+  if (joined) { boostTicket(joined.ticket, priority); return joined.promise; }
 
+  const ticket = { priority, job: null };
   const pending = (async () => {
     let lastErr;
     for (let attempt = 0; attempt <= S.retries; attempt++) {
@@ -285,7 +301,7 @@ async function getFresh(pathname, ttlSec = 2, priority = 2) {
         tally.request(pathname);
         const join = pathname.includes('?') ? '&' : '?';
         const url = `${S.baseUrl}${pathname}${join}_=${Date.now()}`;
-        const data = await schedule(() => fetchUpstream(url), priority);
+        const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket);
         cache.set(key, { at: Date.now(), data });
         evictOldest(cache, S.maxCacheEntries);
         return data;
@@ -304,7 +320,7 @@ async function getFresh(pathname, ttlSec = 2, priority = 2) {
     throw lastErr;
   })().finally(() => inflight.delete(key));
 
-  inflight.set(key, pending);
+  inflight.set(key, { promise: pending, ticket });
   return pending;
 }
 
@@ -411,6 +427,16 @@ function broadcast(event, payload) {
   for (const res of clients) { try { res.write(msg); } catch { clients.delete(res); } }
 }
 
+/**
+ * مهلتِ یک دورِ دیده‌بان: بدترین حالتِ `get` (همهٔ تلاش‌ها با عقب‌نشینی) به‌علاوهٔ
+ * حاشیه‌ای برای صف. از فاصلهٔ خودِ حلقه هم کوتاه‌تر نمی‌شود.
+ */
+function watchDeadlineMs() {
+  const perTry = num(S.timeoutMs, 9000);
+  const backoff = 300 * (2 ** Math.max(0, num(S.retries, 2)) - 1);
+  return Math.max(20000, perTry * (num(S.retries, 2) + 1) + backoff + 8000);
+}
+
 /** @returns {boolean} موفق بود یا نه — بازار بسته هم موفق حساب می‌شود، عقب‌نشینی نمی‌خواهد */
 async function watchTick() {
   const gate = marketOpen();
@@ -420,7 +446,21 @@ async function watchTick() {
 
   const t0 = Date.now();
   try {
-    const js = await get('/Instrument/GetInstrumentOptionMarketWatch/0', S.ttlWatchSec, 1);
+    // ═══ مهلتِ خودِ حلقه، جدا از مهلتِ هر درخواست ═══
+    //
+    // `get` سه تلاش دارد و هر تلاش `timeoutMs`، ولی می‌تواند به درخواستی
+    // بپیوندد که خودش پشتِ صف است. با ارثِ اولویت آن صف دیگر بی‌انتها نیست،
+    // ولی حلقهٔ زنده نباید امیدش را به هیچ ضمانتِ بیرونی ببندد: اگر یک دور
+    // در این مهلت برنگشت، رهایش می‌کنیم و دورِ بعد را می‌زنیم.
+    //
+    // درخواست پشتِ سر لغو نمی‌شود؛ اگر بعداً برسد در کش می‌نشیند و دورِ بعد
+    // مجانی از آن استفاده می‌کند. آنچه لغو می‌شود **انتظارِ** ماست، نه کار.
+    const js = await Promise.race([
+      get('/Instrument/GetInstrumentOptionMarketWatch/0', S.ttlWatchSec, 1),
+      sleep(watchDeadlineMs()).then(() => {
+        throw new Error(`دور دیده‌بان در ${Math.round(watchDeadlineMs() / 1000)} ثانیه برنگشت`);
+      }),
+    ]);
     const rows = firstList(js);
     const next = new Map();
     const changed = [];
@@ -465,8 +505,7 @@ async function archiveToday(rows) {
   try { await fs.access(file); archivedDay = day; return; } catch { /* هنوز نیست */ }
   const body = makeArchive(day, rows, { at: Date.now() });
   if (!body.count) return;
-  await fs.mkdir(ARCHIVE_DIR, { recursive: true });
-  await fs.writeFile(file, JSON.stringify(body), 'utf8');
+  await writeJsonAtomic(file, body);
   archivedDay = day;
   log(`بایگانی دیده‌بان ${day} نوشته شد — ${body.count} ردیف`);
 }
@@ -591,8 +630,9 @@ async function writeRoster(rows, days, { from = 0, to = 0, scan = null } = {}) {
     scannedTo: hi.length ? Math.max(...hi) : 0,
     scan: scan || old?.scan || null,
   });
-  await fs.mkdir(path.dirname(ROSTER_FILE), { recursive: true });
-  await fs.writeFile(ROSTER_FILE, JSON.stringify(body), 'utf8');
+  // اتمیک، چون همین پرونده را `readRoster` هم‌زمان می‌خواند و نیمهٔ فایل
+  // «JSON خراب» می‌دهد نه «هنوز آماده نیست».
+  await writeJsonAtomic(ROSTER_FILE, body);
   rosterCache = { mtime: (await fs.stat(ROSTER_FILE)).mtimeMs, rows: body.rows, file: body };
   return body;
 }
@@ -837,12 +877,34 @@ function rosterUniverseNote(built, wanted) {
   return `${head} ${faNum(built.lostBases.length)} نماد پایه در تابلوی امروز نبود و کدشان به دست نیامد، پس قراردادهایشان در این فهرست نیستند: ${built.lostBases.slice(0, 8).join('، ')}.${price}`;
 }
 
+/**
+ * حکمِ تازگیِ همین لحظه. `/api/health` و حلقه هر دو از همین‌جا می‌خوانند تا
+ * دو جا دو حرف نزنند.
+ */
+const watchNow = () => watchHealth({
+  open: marketOpen().open, at: watch.at, intervalSec: S.watchIntervalSec,
+});
+
 async function watchLoop() {
   let fails = 0;
+  // ═══ کهنگی هم خبر است، حتی وقتی خطایی نیست ═══
+  //
+  // لبه‌ای اعلام می‌شود نه هر دور: هشداری که هر پنج ثانیه تکرار شود، چند
+  // دقیقه بعد دیگر دیده نمی‌شود.
+  let wasStale = false;
   for (;;) {
     const ok = await watchTick();
     fails = ok ? 0 : fails + 1;
     stat.watchConsecutiveFails = fails;
+    const health = watchNow();
+    if (health.stale && !wasStale) {
+      logErr('تازگی دیده‌بان', new Error(health.why), 'warn');
+      broadcast('trouble', { at: Date.now(), message: health.why, stale: true, ageSec: health.ageSec });
+    } else if (!health.stale && wasStale) {
+      log(`عکس تابلو دوباره تازه شد — ${health.ageSec} ثانیه`);
+      broadcast('recovered', { at: Date.now(), ageSec: health.ageSec });
+    }
+    wasStale = health.stale;
     await sleep(watchBackoffSec(Math.max(2, S.watchIntervalSec), fails) * 1000);
   }
 }
@@ -890,12 +952,16 @@ async function handle(req, res) {
   try {
     if (p === '/api/health') {
       const gate = marketOpen();
+      const fresh = watchNow();
       return sendJson(res, 200, {
         ok: true, upSec: Math.round((Date.now() - stat.started) / 1000),
         market: gate, ...stat,
         avgUpstreamMs: stat.upstreamCount ? Math.round(stat.upstreamMsTotal / stat.upstreamCount) : 0,
-        cacheSize: cache.size, watchAgeSec: watch.at ? Math.round((Date.now() - watch.at) / 1000) : null,
+        cacheSize: cache.size, watchAgeSec: fresh.ageSec,
         settingsWatchIntervalSec: S.watchIntervalSec,
+        // «کهنه» با «خراب» یکی نیست و تا امروز هیچ‌کدام از دیگری جدا نبودند:
+        // خطا صفر بود چون خطایی نبود، ولی عکس چهار دقیقه جا مانده بود.
+        watchStale: fresh.stale, watchStaleWhy: fresh.why, watchLimitSec: fresh.limitSec,
         // بار به تفکیکِ سرویس، تا گزارشِ بعدی به‌جای «۲۰۸۲ درخواست» بگوید
         // کدام سرویس آن را خورده و کدام‌یک خطا داده.
         byEndpoint: tally.snapshot(12), worstEndpoint: tally.worstError(),
@@ -1481,8 +1547,7 @@ async function handle(req, res) {
       if (req.method === 'PUT') {
         const list = JSON.parse(await readBody(req, MAX_BODY) || '[]');
         if (!Array.isArray(list)) return sendJson(res, 400, { error: 'فهرست لازم است' });
-        await fs.mkdir(path.dirname(file), { recursive: true });
-        await fs.writeFile(file, JSON.stringify(list, null, 2), 'utf8');
+        await writeJsonAtomic(file, list, { space: 2 });
         log(`موقعیت‌ها ذخیره شد — ${list.length} ردیف`);
         return sendJson(res, 200, list);
       }
@@ -1612,8 +1677,7 @@ async function handle(req, res) {
           return sendJson(res, 400, { error: 'بدنهٔ جلسه لازم است' });
         }
         if (body.id !== id) return sendJson(res, 400, { error: 'شناسهٔ بدنه با شناسهٔ درخواست یکی نیست' });
-        await fs.mkdir(path.dirname(file), { recursive: true });
-        await fs.writeFile(file, JSON.stringify(body, null, 2), 'utf8');
+        await writeJsonAtomic(file, body, { space: 2 });
         log(`جلسهٔ برکت ذخیره شد — ${id}`);
         return sendJson(res, 200, { ok: true, id });
       }

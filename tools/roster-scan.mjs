@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { tradingDays } from '../core/roster-scan.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
 import { readJsonSafe } from '../core/json-safe.mjs';
+import { writeJsonAtomicSync } from '../server/atomic-json.mjs';
 import { makeRosterFile, missingDays, rosterCoverage, rosterHealth } from '../core/option-roster.mjs';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -123,11 +124,11 @@ async function main() {
       console.log(`  ${STAGE[p.stage]} ${fa(p.done)}/${fa(p.total)} · قرارداد ${fa(p.rows)}`);
     },
     onCheckpoint: (state) => {
-      fs.writeFileSync(CHECKPOINT, JSON.stringify({ rows: state.rows, scanned: state.scanned }), 'utf8');
+      writeJsonAtomicSync(CHECKPOINT, { rows: state.rows, scanned: state.scanned });
     },
   });
   rows = result.rows;
-  fs.writeFileSync(CHECKPOINT, JSON.stringify({ rows, scanned: result.scanned }), 'utf8');
+  writeJsonAtomicSync(CHECKPOINT, { rows, scanned: result.scanned });
 
   if (!rows.length) {
     console.error('هیچ قراردادی به دست نیامد — پروندهٔ خالی نوشته نمی‌شود.');
@@ -154,7 +155,9 @@ async function main() {
     process.exit(1);
   }
 
-  fs.writeFileSync(ROSTER_FILE, JSON.stringify(body), 'utf8');
+  // اتمیک: سرور همین پرونده را زیر دستِ ما می‌خواند. نوشتنِ مستقیم، خوانندهٔ
+  // هم‌زمان را با «Unterminated string in JSON» روبه‌رو می‌کرد.
+  writeJsonAtomicSync(ROSTER_FILE, body);
   const coverage = rosterCoverage(rows);
 
   console.log(`\nدفتر نوشته شد: data/option-roster.json`);
