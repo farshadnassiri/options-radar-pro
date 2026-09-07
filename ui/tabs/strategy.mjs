@@ -1075,7 +1075,12 @@ export async function mount(root, { tab, state, api }) {
       root.querySelector('#detail-card').style.display = 'none';
       trailReady();
       hNote.textContent = [out.note, out.universeNote].filter(Boolean).join(' — ');
-      hSetStatus(`${faDigits(historyDateLabel(hDate))} — ${fmt.int(rows.length)} ردیف.`);
+      // جدولی که به‌خاطر خطای بالادست ناقص است، لحنِ خنثی نمی‌گیرد. جملهٔ
+      // صداقت خودش دلیل را می‌گوید؛ رنگ کاری می‌کند که خوانده شود.
+      hNote.style.color = out.incomplete ? 'var(--warn)' : '';
+      hSetStatus(out.incomplete
+        ? `${faDigits(historyDateLabel(hDate))} — ${fmt.int(rows.length)} ردیف، ناقص: ${fmt.int(out.failedCount)} قرارداد دریافت نشد.`
+        : `${faDigits(historyDateLabel(hDate))} — ${fmt.int(rows.length)} ردیف.`);
       setStatus(`جدول از ${faDigits(historyDateLabel(hDate))} ساخته شد — ${fmt.int(rows.length)} ردیف.`);
     } catch (error) {
       if (holdsTicket(ticket)) {

@@ -43,11 +43,30 @@ group('۱۹. نوار تشخیص، علت واقعی افتادن را می‌گ
     base.funnel.refBasis === 0 && base.funnel.noDepth === 0);
 
   // ——— علت یک: مبنای قیمت مرجع ———
-  for (const basis of ['CLOSE', 'LAST', 'LOW', 'HIGH']) {
+  //
+  // فقط دو مبنایی که این چیدمان واقعاً عددشان را دارد: `pClosing` و
+  // `pDrCotVal`. کمترین و بیشترین قیمت روز در مرحلهٔ یک اصلاً نمی‌آیند
+  // (`sideQuote` صفرشان می‌گذارد و مرحلهٔ دو پرشان می‌کند).
+  for (const basis of ['CLOSE', 'LAST']) {
     const r = runScan(market(100), { priceBasis: basis });
     check(`مبنای ${basis} در سطل «مبنای مرجع» می‌افتد، نه «عمق ناکافی»`,
       r.funnel.refBasis === r.funnel.built && r.funnel.noDepth === 0 && r.funnel.kept === 0,
       `مرجع ${r.funnel.refBasis} از ${r.funnel.built}`);
+  }
+
+  // ═══ مبنایی که عددش را ندارد، «مرجع» نیست — «بی‌مظنه» است ═══
+  //
+  // تا امروز `LOW` و `HIGH` هم در سطل «مبنای مرجع» می‌افتادند، ولی به دلیلِ
+  // غلط: `num(undefined)` صفر است و `resolvePrice` صفر را قیمت می‌پذیرفت،
+  // پس ردیف با «کمترین قیمت روز: ۰» ساخته می‌شد. صفر قیمت نیست.
+  for (const basis of ['LOW', 'HIGH']) {
+    const r = runScan(market(100), { priceBasis: basis });
+    check(`مبنای ${basis} که در مرحلهٔ یک عدد ندارد، «بی‌مظنه» شمرده می‌شود`,
+      r.funnel.noQuote === r.funnel.built && r.funnel.kept === 0,
+      `بی‌مظنه ${r.funnel.noQuote} از ${r.funnel.built}`);
+    const shownLow = runScan(market(100), { priceBasis: basis, showUnexecutable: true });
+    check(`و «نمایش غیرقابل اجرا» هم برشان نمی‌گرداند — قیمت ندارند، نه اینکه اجرا نشوند`,
+      shownLow.funnel.kept === 0 && shownLow.funnel.noQuote === shownLow.funnel.built);
   }
 
   // با روشن کردن نمایش غیرقابل اجرا، همان ترکیب‌ها برمی‌گردند

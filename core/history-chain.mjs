@@ -97,13 +97,35 @@ function fillSide(out, sfx, row) {
  */
 export function priceHistoryRows(rows = [], dailyByIns = {}, date = 0) {
   const want = normalizeHistoryDate(date);
+  const boxOf = (ins) => dailyByIns?.[String(ins ?? '')];
   const seriesOf = (ins) => {
-    const box = dailyByIns?.[String(ins ?? '')];
+    const box = boxOf(ins);
     return Array.isArray(box) ? box : (box?.rows || []);
+  };
+  // ═══ «آن روز معامله نشد» با «نتوانستیم بگیریمش» یکی نیست ═══
+  //
+  // نکتهٔ عملیاتیِ گزارشِ ۱۴۰۵/۰۶/۱۶: «بالادست TSETMC در این بازه ۶۵ خطای
+  // HTTP 502 داد؛ ۶۱ مورد مربوط به تاریخچهٔ روزانه بود … ممکن است پوشش
+  // تاریخی را موقتاً ناقص کنند.»
+  //
+  // `/api/dailies` برای قراردادی که دریافتش شکست خورده `rows: []` به‌علاوهٔ
+  // `error` می‌دهد. تا امروز فقط `rows` خوانده می‌شد، پس آن قرارداد دقیقاً
+  // شبیه قراردادی می‌شد که آن روز اصلاً معامله نشده — و جملهٔ صداقت
+  // می‌نوشت «۱۸۰ از ۲۰۰ پا قیمت داشت»، که خواننده آن را واقعیتِ بازار
+  // می‌خواند نه خرابیِ شبکه.
+  //
+  // تفاوتشان برای معامله‌گر عملی است: «معامله نشده» تمام است و تغییر
+  // نمی‌کند؛ «نگرفتیم» با اسکنِ دوباره درست می‌شود.
+  const errorOf = (ins) => {
+    const box = boxOf(ins);
+    if (!box || Array.isArray(box)) return '';
+    return String(box.error || box.fallbackError || '');
   };
   const out = [];
   const missingLegs = new Set();
   const missingBases = new Set();
+  const failedLegs = new Set();
+  const failedBases = new Set();
   let legsPriced = 0, legsTotal = 0;
   for (const row of Array.isArray(rows) ? rows : []) {
     const next = { ...row, historyDate: want };
@@ -117,7 +139,11 @@ export function priceHistoryRows(rows = [], dailyByIns = {}, date = 0) {
       next.qTotCap_UA = num(uaRow.value, 0);
       next.__uaLow = num(uaRow.low, 0);
       next.__uaHigh = num(uaRow.high, 0);
-    } else if (row.uaInsCode) missingBases.add(String(row.uaInsCode));
+    } else if (row.uaInsCode) {
+      const ua = String(row.uaInsCode);
+      missingBases.add(ua);
+      if (errorOf(ua)) failedBases.add(ua);
+    }
     for (const sfx of ['C', 'P']) {
       const ins = String(row[`insCode_${sfx}`] ?? '');
       if (!ins) continue;
@@ -127,7 +153,12 @@ export function priceHistoryRows(rows = [], dailyByIns = {}, date = 0) {
         legsPriced += 1;
         next[`__low_${sfx}`] = num(dayRow.low, 0);
         next[`__high_${sfx}`] = num(dayRow.high, 0);
-      } else missingLegs.add(ins);
+      } else {
+        missingLegs.add(ins);
+        // خطا فقط وقتی شمرده می‌شود که ردیفِ آن روز هم نداریم: اگر قیمت پر
+        // شد، خطای مسیرِ دوم اهمیتی ندارد و شمردنش هشدارِ کاذب است.
+        if (errorOf(ins)) failedLegs.add(ins);
+      }
     }
     out.push(next);
   }
@@ -136,6 +167,9 @@ export function priceHistoryRows(rows = [], dailyByIns = {}, date = 0) {
     legsPriced, legsTotal, legsMissing: missingLegs.size,
     basesMissing: missingBases.size,
     missingLegIns: [...missingLegs], missingBaseIns: [...missingBases],
+    // زیرمجموعهٔ «نداشته‌ها» که نداشتنشان تقصیرِ بازار نیست.
+    legsFailed: failedLegs.size, basesFailed: failedBases.size,
+    failedLegIns: [...failedLegs], failedBaseIns: [...failedBases],
   };
 }
 
@@ -188,7 +222,16 @@ export function historyChainNote(built, basis) {
   const parts = [`${fa(built.legsPriced)} از ${fa(built.legsTotal)} پا قیمتِ همان روز را داشت`];
   if (built.basesMissing) parts.push(`${fa(built.basesMissing)} نماد پایه آن روز قیمت ندارد، پس ترکیب‌هایشان ساخته نمی‌شود`);
   parts.push(`مبنا: ${label}`);
-  return `${parts.join(' · ')}. دفتر سفارشِ گذشته وجود ندارد، پس این اعداد مرجع‌اند و ادعای اجرا ندارند.`;
+  const tail = 'دفتر سفارشِ گذشته وجود ندارد، پس این اعداد مرجع‌اند و ادعای اجرا ندارند.';
+  // ═══ ناقص‌بودنِ جدول، جملهٔ خودش را دارد ═══
+  //
+  // این بند از بقیه جدا می‌ماند و آخر می‌آید، چون حرفِ دیگری می‌زند: بقیهٔ
+  // جمله دربارهٔ **بازارِ آن روز** است، این یکی دربارهٔ **همین اجرا**.
+  const failed = num(built.legsFailed, 0) + num(built.basesFailed, 0);
+  if (!failed) return `${parts.join(' · ')}. ${tail}`;
+  return `${parts.join(' · ')}. ${tail} ⚠ ${fa(failed)} قرارداد از این تعداد،`
+    + ' آن روز بی‌معامله نبوده — دریافتشان از بالادست شکست خورد. این جدول ناقص است'
+    + ' و اسکنِ دوباره می‌تواند کامل‌ترش کند.';
 }
 
 /**
