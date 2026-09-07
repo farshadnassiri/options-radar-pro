@@ -25,6 +25,7 @@
 
 import { num } from './num.mjs';
 import { analyzePayoff, entryFees, grossCash } from './payoff.mjs';
+import { analyzeMixed, isSingleExpiry } from './mixed.mjs';
 
 const NO_FEES = { buyStock: 0, sellStock: 0, option: 0 };
 
@@ -59,11 +60,29 @@ export function manualLegs(legs = [], prices = {}) {
   return { legs: out, changed };
 }
 
-/** خلاصهٔ مالیِ یک مجموعه پای قیمت‌خورده. */
-function summarize(legs, fees) {
+/**
+ * خلاصهٔ مالیِ یک مجموعه پای قیمت‌خورده.
+ *
+ * ═══ چرا انتخابِ موتور اینجا هم تکرار می‌شود ═══
+ *
+ * `evaluate.mjs` برای ترکیبِ چند-سررسیدی موتور مخلوط را صدا می‌زند، چون موتور
+ * تکه‌ای-خطی فروش و خرید یک قیمت اعمال را در دو سررسید مختلف روی هم صفر
+ * می‌کند. اینجا اگر همان انتخاب تکرار نشود، دو بخشِ **یک صفحه** برای یک
+ * ترکیب دو جواب می‌دهند: جدول «بیشترین سود ۱۶٬۲۰۳» و همین کادر «بیشترین سود
+ * منفی ۱۰۰٬۴۲۰» — گزارش عملیاتیِ ۱۴۰۵/۰۶/۱۶ روی Calendar Call دقیقاً همین را
+ * دید، و بدتر اینکه بدون واردکردنِ هیچ قیمتِ دستی دیده شد، چون ستونِ «با قیمت
+ * بازار» هم از همین‌جا می‌آید.
+ *
+ * پس انتخاب موتور یک قاعده است نه دو: هر جا پاها هم‌سررسید نیستند، موتور
+ * مخلوط. `market` همان بافتاری است که موتور مخلوط لازم دارد؛ نبودنش یعنی
+ * پیش‌فرض‌های خودِ موتور، نه عددِ ساختگی.
+ */
+function summarize(legs, fees, market = {}) {
   const gross = grossCash(legs);
   const netCash = gross - entryFees(legs, fees);
-  const payoff = analyzePayoff(legs, netCash, { fees });
+  const payoff = isSingleExpiry(legs)
+    ? analyzePayoff(legs, netCash, { fees })
+    : analyzeMixed(legs, netCash, { ...market, fees });
   const reward = Number.isFinite(payoff.maxProfit) && Number.isFinite(payoff.maxLoss)
     && Math.abs(payoff.maxLoss) > 0
     ? payoff.maxProfit / Math.abs(payoff.maxLoss)
@@ -74,6 +93,8 @@ function summarize(legs, fees) {
     maxProfit: payoff.maxProfit, maxLoss: payoff.maxLoss,
     rewardRisk: reward,
     approx: payoff.approx === true,
+    unlimitedProfit: payoff.unlimitedProfit === true,
+    unlimitedLoss: payoff.unlimitedLoss === true,
   };
 }
 
@@ -89,10 +110,10 @@ function summarize(legs, fees) {
  * `anyManual: false` یعنی هیچ پایی دست نخورده — و آن‌وقت دو ستون عمداً
  * یکی‌اند، نه اینکه تفاوتی ساختگی نشان داده شود.
  */
-export function manualCompare(legs = [], prices = {}, { fees = NO_FEES } = {}) {
+export function manualCompare(legs = [], prices = {}, { fees = NO_FEES, market = {} } = {}) {
   const applied = manualLegs(legs, prices);
-  const base = summarize(legs, fees);
-  const manual = applied.changed.length ? summarize(applied.legs, fees) : base;
+  const base = summarize(legs, fees, market);
+  const manual = applied.changed.length ? summarize(applied.legs, fees, market) : base;
   return {
     base, manual,
     legs: applied.legs,

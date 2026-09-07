@@ -121,8 +121,27 @@ export async function runScan({ defId, uaKeys, settings, qty, onStage }) {
   onStage?.('one', one);
 
   // ——— مرحله دو: عمق برای کاندیداهای برتر ———
+  //
+  // ═══ اسکنی که تمام می‌شود، باید بگوید تمام شد ═══
+  //
+  // گزارش عملیاتیِ ۱۴۰۵/۰۶/۱۶ روی Covered Put و Reversal: «درست توضیح دادند
+  // که همهٔ ترکیب‌ها به نبودِ مظنه یا فیلتر خورده‌اند و جدول خالی است، اما
+  // وضعیت روی «مرحله یک… مرحله دو…» و نوار پیشرفت باز ماند … از دید کاربر
+  // شبیه اسکنِ نیمه‌تمام است.»
+  //
+  // علتش همین دو خطِ `return one` بود: وقتی کاندیدایی نمی‌ماند، تابع بی‌صدا
+  // برمی‌گشت و مرحلهٔ دو **هرگز اعلام نمی‌شد**. جملهٔ آخری که روی صفحه
+  // می‌ماند وعدهٔ «مرحله دو…» بود؛ وعده‌ای که هیچ‌وقت بسته نمی‌شد.
+  //
+  // پس هر مسیرِ خروج مرحلهٔ دو را اعلام می‌کند — حتی وقتی اجرا نشده — و
+  // `skipped` می‌گوید چرا. اعلام‌نکردن همان «نتیجهٔ صفر» را شبیه «هنوز در
+  // حال کار» می‌کرد، و آن دو حالت برای کسی که منتظر فرصت است یکی نیستند.
+  const endEarly = (skipped) => {
+    onStage?.('two', { rows: one.rows, funnel: one.funnel, asked: 0, skipped });
+    return one;
+  };
   const top = one.rows.slice(0, settings.maxDepthSymbols);
-  if (!top.length) return one;
+  if (!top.length) return endEarly('هیچ ردیفی از مرحله یک نگذشت');
 
   const codes = new Set();
   for (const r of top) {
@@ -130,7 +149,7 @@ export async function runScan({ defId, uaKeys, settings, qty, onStage }) {
     if (r.uaIns) codes.add(r.uaIns);
   }
   const list = [...codes].slice(0, 180);
-  if (!list.length) return one;
+  if (!list.length) return endEarly('ردیف‌های مرحله یک نماد قابل استعلامی ندارند');
 
   try {
     const q = list.join(',');

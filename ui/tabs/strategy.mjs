@@ -12,6 +12,7 @@ import { byId } from '/strategies/catalog.mjs';
 import { COLUMNS, columnsForStrategy } from '/core/evaluate.mjs';
 import { analyzePayoff, scenarioGrid } from '/core/payoff.mjs';
 import { manualCompare, manualNote } from '/core/manual-price.mjs';
+import { bestTrusted, isSuspect, suspectNote } from '/core/row-trust.mjs';
 import { analyzeMixed, isSingleExpiry } from '/core/mixed.mjs';
 import { timeMachine } from '/core/timemachine.mjs';
 import { priceQuantile } from '/core/bs.mjs';
@@ -260,6 +261,7 @@ export async function mount(root, { tab, state, api }) {
 
     <section class="card" id="detail-card" style="margin-top:16px;display:none">
       <h3 id="detail-title">جزئیات ردیف</h3>
+      <p class="note" id="detail-trust" style="display:none;color:var(--warn)"></p>
       <div class="detail" id="detail"></div>
       <div id="scen-wrap"></div>
       <div id="tm-wrap" style="margin-top:16px"></div>
@@ -385,6 +387,12 @@ export async function mount(root, { tab, state, api }) {
     // به زیان، آربیتراژ با بازده سالانه.
     table = makeTable(root.querySelector('#table'), cols, {
       sortKey: view === 'رصد' ? profile.sortKey : s().rankBy, onPick: showDetail,
+      // ═══ ردیفی که عددش قابل اتکا نیست، صدر را نمی‌گیرد ═══
+      //
+      // گزارش عملیاتیِ ۱۴۰۵/۰۶/۱۶: Long Put دو روزه با «بازده ماهانه
+      // ۲٬۰۲۶٬۳۹۶٪» رتبهٔ اول بود، با هشدارِ کامل کنارش. هشدار دیده
+      // می‌شد و کار خودش را نمی‌کرد. حذفش نمی‌کنیم — ته جدول می‌نشیند.
+      demote: isSuspect,
       // نما نقطه شروع است، نه قفس: هر ستون دیگری از قرارداد ستونی مشترک را
       // می‌شود اضافه یا کم کرد، و انتخاب هر استراتژی و هر نما جدا می‌ماند.
       // `colsAll` همان قرارداد مشترک است با سرستون پاهای همین استراتژی، تا
@@ -473,13 +481,24 @@ export async function mount(root, { tab, state, api }) {
   // ——— شاخص‌های کلیدی ———
   function drawKpis() {
     const rows = shown;
-    const ok = rows.filter((r) => Number.isFinite(r.retMonthPct));
-    const best = ok[0];
+    // ═══ شاخص‌ها ردیفِ مشکوک را نمی‌خوانند ═══
+    //
+    // «بهترین بازده ماهانه ۲٬۰۲۶٬۳۹۶٪» یک عدد نیست، یک خطاست — و روی
+    // کارتِ بالای صفحه بدتر از داخل جدول است، چون آنجا هیچ هشداری کنارش
+    // نمی‌نشیند. میانه هم همین‌طور: یک ردیفِ نامتعارف میانه را کج می‌کند.
+    // خودِ ردیف‌ها سر جایشان‌اند و شمرده هم می‌شوند، فقط جدا.
+    const trusted = rows.filter((r) => !isSuspect(r));
+    const suspects = rows.length - trusted.length;
+    const ok = trusted.filter((r) => Number.isFinite(r.retMonthPct));
+    const best = bestTrusted(trusted, 'retMonthPct');
     const med = (arr) => (arr.length ? arr.slice().sort((a, b) => a - b)[Math.floor(arr.length / 2)] : NaN);
     const medMonth = med(ok.map((r) => r.retMonthPct));
+    // «قابل اجرا» یعنی هم می‌شود واردش شد هم می‌شود از آن بیرون آمد.
+    // ردیفی که سمت خروجش خالی است، ورودش هم بی‌معنی است.
     const items = [
-      ['ردیف قابل اجرا', fmt.int(rows.filter((r) => r.executable).length), `از ${fmt.int(rows.length)}`, ''],
-      ['بهترین بازده ماهانه', best ? `${fmt.pct(best.retMonthPct)}٪` : '—', best?.underlying || '', best ? signTone(best.retMonthPct) : ''],
+      ['ردیف قابل اجرا', fmt.int(trusted.filter((r) => r.executable).length), `از ${fmt.int(rows.length)}`, ''],
+      ['غیرقابل اتکا', fmt.int(suspects), suspects ? 'رتبه نمی‌گیرد' : 'ردیف', suspects ? 'warn' : ''],
+      ['بهترین بازده ماهانه', best ? `${fmt.pct(best.retMonthPct)}٪` : '—', best?.underlying || (suspects ? 'همه غیرقابل اتکا' : ''), best ? signTone(best.retMonthPct) : ''],
       ['میانه بازده ماهانه', `${fmt.pct(medMonth)}٪`, '', signTone(medMonth)],
       ['میانه احتمال سود', `${fmt.pct(med(rows.map((r) => r.popPct).filter(Number.isFinite)))}٪`, '', ''],
       ['میانه هزینه اجرا', fmt.money(med(rows.map((r) => r.execCost).filter(Number.isFinite))), `${fmt.int(def.legs.length)} پا`, ''],
@@ -506,6 +525,12 @@ export async function mount(root, { tab, state, api }) {
     const card = root.querySelector('#detail-card');
     card.style.display = '';
     root.querySelector('#detail-title').textContent = `${r.underlying} — ${r.legsText}`;
+    // چرا این ردیف ته جدول بود — همان‌جا که کاربر بازش می‌کند، نه در
+    // فهرستِ هشدارها که باید دنبالش بگردد.
+    const trustEl = root.querySelector('#detail-trust');
+    const trustText = suspectNote(r);
+    trustEl.style.display = trustText ? '' : 'none';
+    trustEl.textContent = trustText;
 
     const fees = { buyStock: s().feeBuyStock, sellStock: s().feeSellStock, option: s().feeOption, exercise: s().feeExercise };
     const single = isSingleExpiry(r.__legs);
@@ -716,7 +741,13 @@ export async function mount(root, { tab, state, api }) {
     // تایپ کرده.
     const manualOut = root.querySelector('#manual-out');
     function drawManual() {
-      const cmp = manualCompare(r.__legs || [], manualPrices, { fees });
+      // بافتارِ موتورِ مخلوط، همان که خطِ نمودار بالاتر می‌گیرد. بدونِ آن،
+      // ترکیبِ چند-سررسیدی در این کادر با موتورِ تکه‌ای-خطی حساب می‌شد و
+      // عددش با جدول و نمودارِ همین صفحه نمی‌خواند.
+      const cmp = manualCompare(r.__legs || [], manualPrices, {
+        fees,
+        market: { spot: r.S, sigma: r.sigmaUse, rFree: s().rFree, divYield: s().divYield, yearDays: s().dayCountYear },
+      });
       // ── جهتِ «بهتر»، سطر به سطر ────────────────────────────────────
       //
       // `signTone(b - a)` برای «نقد خالص» و «بیشترین سود» درست است، ولی
@@ -725,7 +756,13 @@ export async function mount(root, { tab, state, api }) {
       // درمی‌آمد. عکس گرفتن همین را نشان داد.
       const line = (label, pick, { money = true, lowerIsBetter = false } = {}) => {
         const a = pick(cmp.base), b = pick(cmp.manual);
-        const text = (value) => (money ? fmt.money(value) : (Number.isFinite(value) ? fmt.num(value) : '—'));
+        // بی‌نهایت عدد نیست ولی «نداشته» هم نیست: زیانِ نامحدودِ یک ترکیب
+        // خبر است، و اگر مثل NaN «—» شود، خطرناک‌ترین ردیف بی‌صداترین می‌شود.
+        const text = (value) => {
+          if (value === Infinity) return 'نامحدود';
+          if (value === -Infinity) return 'نامحدود';
+          return money ? fmt.money(value) : (Number.isFinite(value) ? fmt.num(value) : '—');
+        };
         const delta = lowerIsBetter ? a - b : b - a;
         return `<tr><td>${label}</td><td class="n">${text(a)}</td>
           <td class="n ${cmp.anyManual ? signTone(delta) : ''}">${text(b)}</td></tr>`;
@@ -896,7 +933,11 @@ export async function mount(root, { tab, state, api }) {
             drawKpis();
             drawFilterReport();
             if (picked) { const f = byId2.get(picked.id); if (f) showDetail(f); }
-            setStatus(`مرحله دو کامل — عمق ${fmt.int(res.asked || 0)} نماد گرفته شد. ${fmt.int(rows.length)} ردیف.`);
+            // «کامل» فقط وقتی نوشته می‌شود که واقعاً اجرا شده باشد. اسکنی که
+            // کاندیدایی نداشت هم تمام شده، ولی تمام‌شدنش خبرِ دیگری است.
+            setStatus(res.skipped
+              ? `اسکن تمام شد — مرحله دو اجرا نشد: ${res.skipped}. ${fmt.int(rows.length)} ردیف.`
+              : `مرحله دو کامل — عمق ${fmt.int(res.asked || 0)} نماد گرفته شد. ${fmt.int(rows.length)} ردیف.`);
             setProgress(100);
             lastFullRows = rows;
             clearTimeout(flashTimer);

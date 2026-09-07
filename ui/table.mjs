@@ -236,6 +236,9 @@ export function makeTable(host, cols, opts = {}) {
   let loading = false;
   let emptyMsg = null;
   let sortKey = opts.sortKey && byKey.has(opts.sortKey) ? opts.sortKey : keys[0];
+  // ردیف‌هایی که در هر مرتب‌سازی آخر می‌نشینند. اختیاری است و بدونش جدول
+  // دقیقاً مثل قبل رفتار می‌کند، پس تب‌هایی که این مفهوم را ندارند دست‌نخورده‌اند.
+  const demote = typeof opts.demote === 'function' ? opts.demote : null;
   let sortDir = -1;
   const ranges = new Map();
   // ردیف برجسته صفحه‌کلید — قبلاً جدول فقط با کلیک ماوس باز می‌شد؛ کاربر
@@ -528,6 +531,16 @@ export function makeTable(host, cols, opts = {}) {
     const dir = sortDir;
     const k = sortKey;
     view = [...rows].sort((a, b) => {
+      // ═══ لایهٔ اول: اعتبار، بعد عدد ═══
+      //
+      // ردیفی که خودِ عددش قابل اتکا نیست نباید صدر جدول را بگیرد — چه
+      // صعودی مرتب شود چه نزولی. پس این لایه جهت‌ناپذیر است: بحث ترتیبِ
+      // بزرگ و کوچک نیست، بحث این است که آن عدد اصلاً خوانده نشود.
+      // میزبان تصمیم می‌گیرد چه چیزی پایین برود؛ جدول فقط جا را نگه می‌دارد.
+      if (demote) {
+        const d = (demote(a) ? 1 : 0) - (demote(b) ? 1 : 0);
+        if (d) return d;
+      }
       const x = a[k], y = b[k];
       const xn = typeof x === 'number', yn = typeof y === 'number';
       if (xn || yn) {

@@ -294,7 +294,13 @@ async function tickHealth() {
     const errWrap = el('h-err-wrap');
     errWrap.toggleAttribute('hidden', !h.errors);
     el('h-err').textContent = fmt.int(h.errors);
-    errWrap.title = h.lastError || 'خطایی ثبت نشده';
+    // «کدام سرویس» کنارِ «چند خطا». پیش از این فقط آخرین پیام بود، و پیامِ
+    // «HTTP 502» بدونِ نامِ سرویس هیچ کاری با آدم نمی‌کند.
+    const worst = h.worstEndpoint;
+    errWrap.title = [
+      h.lastError || 'خطایی ثبت نشده',
+      worst ? `بیشترین خطا: ${worst.family} — ${fmt.int(worst.errors)} از ${fmt.int(worst.requests)} درخواست` : '',
+    ].filter(Boolean).join('\n');
 
   } catch {
     const m = el('h-market');
@@ -549,6 +555,16 @@ function openSubmenu(sec, headEl) {
     b.addEventListener('click', (e) => {
       e.stopPropagation();
       open(t.id);
+      // ═══ پنل کارش تمام شده، پس می‌رود ═══
+      //
+      // گزارش عملیاتیِ ۱۴۰۵/۰۶/۱۶: «بعد از انتخاب استراتژی، پنل گروه خودکار
+      // بسته نمی‌شود و وسط صفحه باقی می‌ماند. در تست، کلیک روی «اسکن» به
+      // دکمهٔ Naked Put زیر پنل برخورد کرد و استراتژی عوض شد.»
+      //
+      // بستنِ با کلیکِ بیرون این را نمی‌گرفت: کلیک روی خودِ دکمهٔ تب «بیرون»
+      // نیست، پس پنل باز می‌ماند و روی کنترل‌های همان تبی می‌نشست که تازه باز
+      // کرده بود — پنلی که راهِ رسیدن به مقصد است، جلوی مقصد ایستاده بود.
+      closeSubmenu();
     });
     listEl.appendChild(b);
   }
