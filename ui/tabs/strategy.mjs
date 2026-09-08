@@ -16,6 +16,7 @@ import { bestTrusted, isSuspect, suspectNote } from '/core/row-trust.mjs';
 import { analyzeMixed, isSingleExpiry } from '/core/mixed.mjs';
 import { timeMachine } from '/core/timemachine.mjs';
 import { priceQuantile } from '/core/bs.mjs';
+import { tehranSecondOfDay } from '/core/live-quote.mjs';
 import { gregorianToJalali } from '/core/jalali.mjs';
 import { radarProfile, applyRadarFilters, filterLimit, isFlagFilter } from '/core/strategy-radar.mjs';
 import { makeTable, funnelBar, changedIds } from '/ui/table.mjs';
@@ -1115,9 +1116,24 @@ export async function mount(root, { tab, state, api }) {
   let tBusy = false;
 
   /** دکمه فقط وقتی زنده است که ردیفی انتخاب شده و کدهایش را داریم. */
-  function trailReady() {
+  /**
+   * دکمه را باز و بسته می‌کند و پیامِ **بی‌کاری** را می‌نویسد.
+   *
+   * ═══ چرا `keepStatus` ═══
+   *
+   * گزارش ۱۴۰۵/۰۶/۱۷: «نتیجه‌ای مثل «۷ لحظهٔ کامل از ۷ …» ساخته می‌شود، اما
+   * در `finally` دوباره `trailReady()` اجرا می‌شود و متن نتیجه را با نام
+   * ترکیب جایگزین می‌کند.» یعنی حتی با نمودارِ درست، خلاصهٔ نتیجه ناپدید
+   * می‌شد.
+   *
+   * دو کارِ این تابع از هم جدا شدند: قفلِ دکمه همیشه لازم است، ولی نوشتنِ
+   * پیام فقط وقتی که پیامی برای گفتن **نیست**. پس از یک اجرا — چه موفق چه
+   * ناموفق — پیامِ همان اجرا می‌ماند.
+   */
+  function trailReady({ keepStatus = false } = {}) {
     const ok = !!picked && (picked.legIns || []).length > 0;
     tRun.disabled = !ok || tBusy;
+    if (keepStatus) return;
     if (!picked) tStatus.textContent = 'هنوز ردیفی انتخاب نشده — از جدول یکی را کلیک کن.';
     else if (!ok) tStatus.textContent = 'این ردیف کد ابزارِ پا ندارد، پس نوارِ معامله‌اش خوانده نمی‌شود.';
     else tStatus.textContent = `${picked.underlying} — ${picked.legsText}`;
@@ -1138,8 +1154,23 @@ export async function mount(root, { tab, state, api }) {
       // سقفِ زمان، ساعتِ همین لحظه است نه پایان جلسه: ستونی که هنوز
       // نرسیده، ستونِ خالی است نه ستونِ بی‌معامله، و خطِ صافِ تا انتهای
       // روز را خواننده «بازار تکان نخورد» می‌خواند.
-      const now = new Date(at || Date.now());
-      const until = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+      //
+      // ═══ ساعتِ تهران، نه ساعتِ ماشینِ کاربر ═══
+      //
+      // گزارش ۱۴۰۵/۰۶/۱۷: «ساعت سیستم ۰۳:۳۹، ساعت تهران ۱۳:۰۹، شروع جلسه
+      // ۰۹:۰۰ … برنامه سقف زمانی را ۰۳:۳۹ تشخیص می‌دهد؛ یعنی قبل از شروع
+      // بازار.» نتیجه‌اش صفر لحظه، و هر دو پا «امروز معامله نشده» — در
+      // حالی که تابلو هزاران ریزمعامله داشت.
+      //
+      // `getHours()` ساعتِ محلیِ مرورگر را می‌دهد. کلِ این موتور روی
+      // «ثانیهٔ جلسهٔ تهران» کار می‌کند، پس هر مرورگری بیرون از +۰۳:۳۰
+      // پنجرهٔ اشتباه می‌گرفت — و روی ماشینِ عقب‌تر، پنجره‌ای پیش از
+      // بازگشایی. `tehranSecondOfDay` از قبل برای همین بود و اینجا صدا
+      // زده نمی‌شد.
+      //
+      // مبنا `at` است — مهرِ زمانِ خودِ پاسخِ سرور — و فقط اگر نبود، ساعتِ
+      // این ماشین. ساعتِ سرور به بازار نزدیک‌تر است تا ساعتِ مرورگر.
+      const until = tehranSecondOfDay(at || Date.now());
       const fees = { buyStock: s().feeBuyStock, sellStock: s().feeSellStock, option: s().feeOption };
       const trail = sessionTrail({
         legs: row.__legs || [], tapeByIns: tape, grain: tGrain.value,
@@ -1217,7 +1248,8 @@ export async function mount(root, { tab, state, api }) {
     } finally {
       tBusy = false;
       tRun.textContent = label;
-      trailReady();
+      // پیامِ همین اجرا می‌ماند — نه نتیجه، نه خطا، هیچ‌کدام پاک نمی‌شوند.
+      trailReady({ keepStatus: true });
     }
   }
 
