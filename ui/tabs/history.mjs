@@ -1,6 +1,6 @@
 import { CATALOG, GROUPS, byId } from '/strategies/catalog.mjs';
 import {
-  buildChain, comboContractSize, blockedExpirySet, expiryBlocked,
+  buildChain, comboContractSize, legContractSize, blockedExpirySet, expiryBlocked,
 } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
@@ -9,6 +9,7 @@ import {
   holdingPeriodProfile, replayTradeDetail,
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
+import { defaultLegIns, manualLegProblem } from '/ui/history-legs.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
@@ -276,6 +277,7 @@ export async function mount(root, { state }) {
     <section class="card" id="h-legs-card" hidden>
       <div class="section-head"><div><p class="eyebrow">حالت دستی</p><h2>پاهای موقعیت</h2></div><span>قیمت دستی می‌تواند بیرون از بازه معامله آن روز باشد.</span></div>
       <div id="h-legs" class="history-leg-grid"></div>
+      <p class="note" id="h-legs-note" style="color:var(--warn)" hidden></p>
     </section>
 
     <section id="h-results" hidden>
@@ -467,7 +469,7 @@ export async function mount(root, { state }) {
       return `<article class="frozen-leg">
         <b>${faDigits(index + 1)}. ${esc(side)} ${esc(kind)} · ${esc(displayName(leg, `پای ${faDigits(index + 1)}`))}</b>
         <span>اعمال <strong>${strike}</strong></span><span>سررسید <strong>${expiry}</strong></span>
-        <span>اندازه <strong>${fmt.int(leg.size || 1)}</strong></span>
+        <span>اندازه <strong>${fmt.int(leg.size)}</strong>${leg.sizeAssumed ? ' <small>فرضی</small>' : ''}</span>
         <span>نسبت کل <strong>${fmt.num(leg.ratio)}</strong></span><span>ورود <strong>${fmt.money(leg.price)}</strong></span>
         <span>خروج <strong>${Number.isFinite(exitPrice) ? fmt.money(exitPrice) : '—'}</strong></span>
       </article>`;
@@ -802,6 +804,18 @@ export async function mount(root, { state }) {
     } else $('h-base-liquidity').textContent = 'برای روز شروع داده نقدشوندگی موجود نیست.';
   }
 
+  /** فهرستِ انتخابِ کاربر، به شکلی که قاعده‌های `ui/history-legs.mjs` می‌خواهند. */
+  function chosenLegs() {
+    const def = byId(strategySelect.value);
+    const out = [];
+    (def?.legs || []).forEach((t, index) => {
+      if (t.kind === 'underlying') return;
+      const ins = root.querySelector(`select[data-leg="${index}"]`)?.value;
+      if (ins) out.push({ ins: String(ins), slot: t.slot, exp: t.exp });
+    });
+    return out;
+  }
+
   function buildLegControls() {
     const def = byId(strategySelect.value);
     const host = $('h-legs');
@@ -822,12 +836,30 @@ export async function mount(root, { state }) {
         const select = document.createElement('select');
         select.dataset.leg = String(index);
         select.setAttribute('aria-label', `قرارداد پای ${index + 1}`);
-        for (const c of contracts.filter((x) => x.kind === leg.kind)) {
+        const list = contracts.filter((x) => x.kind === leg.kind);
+        for (const c of list) {
           const option = document.createElement('option');
           option.value = c.ins;
           option.textContent = contractLabel(c);
           select.appendChild(option);
         }
+        // ═══ دو پای یک اسپرد، پیش‌فرض یک قرارداد نمی‌گیرند ═══
+        //
+        // گزارش ۱۴۰۵/۰۶/۱۷: «دو انتخابگر پای Bull Call Spread به‌صورت
+        // پیش‌فرض یک قرارداد یکسان را انتخاب می‌کنند … این حالت از نظر
+        // ساختار اسپرد هم معتبر نیست.»
+        //
+        // علتش این بود که هر دو انتخابگر همان فهرست را می‌گرفتند و هیچ
+        // پیش‌فرضی نمی‌خورد، پس هر دو روی گزینهٔ اول می‌نشستند. خودِ
+        // استراتژی جواب را دارد: `slot` می‌گوید این پا کدام قیمت اعمال است
+        // (موتور هم با `set[t.slot - 1]` همین را می‌خواند). پس پیش‌فرض،
+        // `slot`اُمین قیمتِ اعمالِ متمایز است.
+        //
+        // و از میان قراردادهای دارای قیمت انتخاب می‌شود، وگرنه اولین اجرا
+        // روی قراردادی می‌افتد که آن بازه هیچ قیمتی ندارد — همان چیزی که
+        // گزارش دید.
+        const wanted = defaultLegIns(list, leg, (ins) => (seriesByIns[ins] || []).length > 0);
+        if (wanted) select.value = wanted;
         wrap.appendChild(select);
       }
       const price = document.createElement('input');
@@ -840,6 +872,22 @@ export async function mount(root, { state }) {
       host.appendChild(wrap);
     });
     $('h-legs-card').hidden = modeSelect.value !== 'manual';
+    // علت را همان‌جا که انتخاب می‌شود می‌گوید، نه بعد از زدنِ دکمه.
+    for (const select of host.querySelectorAll('select[data-leg]')) {
+      select.addEventListener('change', paintLegProblem);
+    }
+    paintLegProblem();
+  }
+
+  /** پیامِ زیر کارتِ پاها، و قفلِ دکمهٔ اجرا وقتی ساختار معتبر نیست. */
+  function paintLegProblem() {
+    const box = $('h-legs-note');
+    if (!box) return;
+    const problem = modeSelect.value === 'manual'
+      ? manualLegProblem(byId(strategySelect.value)?.legs || [], chosenLegs()) : '';
+    box.textContent = problem;
+    box.hidden = !problem;
+    if (dates.length) runBtn.disabled = !!problem;
   }
 
   function manualLegs() {
@@ -860,7 +908,26 @@ export async function mount(root, { state }) {
     return def.legs.map((t, index) => {
       if (t.kind === 'underlying') return { kind: 'underlying', side: t.side, ratio: t.ratio, size, ins: String(ua.ins), name: ua.name, expiry: nearestExpiry };
       const found = optionLegs.find((x) => x.index === index)?.contract;
-      return found ? { ...found, side: t.side, ratio: t.ratio, slot: t.slot, exp: t.exp } : null;
+      if (!found) return null;
+      // ═══ اندازهٔ صفرِ آرشیو، همه‌چیز را صفر می‌کرد ═══
+      //
+      // گزارش ۱۴۰۵/۰۶/۱۷: «سرمایه ۰، جریان نقدی ۰، نتیجه تمام روزها ۰ و
+      // دلتا/گاما/وگا/تتا/رو موقعیت همگی ۰، با اینکه قیمت و یونانی هر پا
+      // معتبر و غیرصفر است.»
+      //
+      // قراردادهای آرشیوی گاهی `size: 0` دارند. `signedQty` اندازه را در
+      // نسبت ضرب می‌کند، پس صفر از همان‌جا در کلِ جریان نقد و جمعِ یونانی‌ها
+      // پخش می‌شود. پای **سهم** از اول `comboContractSize` می‌گرفت؛ پای
+      // اختیار با همان صفر رد می‌شد — و مسیرِ خودکارِ موتور
+      // (`core/history.mjs`) از اول درست بود، فقط این مسیرِ دستی نبود.
+      //
+      // `assumed` هم نگه داشته می‌شود: اندازه‌ای که از پیش‌فرض آمده ممکن است
+      // برای سریِ تعدیل‌شده غلط باشد و ردیف باید نشان‌دار بماند.
+      const sz = legContractSize(found.size, state.settings.contractSize);
+      return {
+        ...found, side: t.side, ratio: t.ratio, slot: t.slot, exp: t.exp,
+        size: sz.size, sizeAssumed: sz.assumed,
+      };
     }).filter(Boolean);
   }
 
@@ -1314,6 +1381,10 @@ export async function mount(root, { state }) {
     $('h-auto-card').hidden = true;
     try {
       if (modeSelect.value === 'manual') {
+        // ساختارِ غلط پیش از هر محاسبه‌ای جلو گرفته می‌شود، با علتِ روشن —
+        // نه اینکه موتور عددی بسازد که معنی ندارد.
+        const problem = manualLegProblem(byId(strategySelect.value)?.legs || [], chosenLegs());
+        if (problem) throw new Error(problem);
         const legs = manualLegs();
         if (legs.length !== byId(strategySelect.value).legs.length) throw new Error('برای همه پاها قرارداد انتخاب نشده است');
         const manual = manualPrices();

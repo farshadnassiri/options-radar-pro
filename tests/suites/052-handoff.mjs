@@ -156,8 +156,15 @@ group('۵۱. نوار پیوند به بقیهٔ برنامه');
     !covered.includes('watchtower') && !covered.includes('spread-radar'));
   check('ولی آزمایشگاه و رصد یونانی را می‌گیرد، چون آن دو ساختارِ فاصله‌دار نمی‌خواهند',
     covered.includes('backtest') && covered.includes('greeks-watch'));
-  check('رصد یونانی نقشه‌اش پرچمِ زنده دارد — مبدأ ردیفِ زنده است، نه روزِ بسته‌شده',
-    strategyLinkPlan(rowLink, { to: 'greeks-watch' }).live === true);
+  // پرچمِ زنده مالِ **ردیفِ زنده** است، نه مالِ مقصد. این ادعا زمانی نوشته
+  // شد که تبِ استراتژی فقط ردیفِ زنده داشت و همان‌جا هم درست بود؛ با آمدنِ
+  // زیرتبِ «رصد تاریخی» دیگر کافی نیست. حالتِ تاریخی در دستهٔ ۲۴۲ است.
+  check('رصد یونانی برای ردیفِ زنده پرچمِ زنده می‌گیرد',
+    strategyLinkPlan(rowLink, { to: 'greeks-watch' }).live === true
+    && strategyLinkPlan(rowLink, { to: 'greeks-watch' }).entryDate === undefined);
+  check('و برای ردیفِ تاریخی نمی‌گیرد — به‌جایش روزِ همان ردیف را می‌برد',
+    strategyLinkPlan({ ...rowLink, historyDate: 20260906, historyBasis: 'CLOSE' },
+      { to: 'greeks-watch' }).live === false);
   check('و هر شناسهٔ فاصله‌دار، هم دیده‌بان می‌گیرد هم رادار فاصله',
     GAP_STRATEGY_IDS.every((id) => {
       const list = strategyLinkTargets(rowLink, { strategyId: id }).map((x) => x.to);

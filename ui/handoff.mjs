@@ -15,6 +15,7 @@
 // می‌ساخت که ممکن است برای این قرارداد اصلاً وجود نداشته باشد.
 
 import { normalizeHistoryDate } from '../core/history.mjs';
+import { HISTORY_BASIS_KEYS } from '../core/history-chain.mjs';
 import { watchMetric } from '../core/watch-rule.mjs';
 import { GAP_STRATEGY_IDS } from '../core/spread-gap.mjs';
 
@@ -42,7 +43,33 @@ export function canHandoff(row) {
  * قابل تغییر نگه می‌دارد. هیچ عددِ *نتیجه*‌ای منتقل نمی‌شود — همان قاعده‌ای
  * که بالا آمد.
  */
+/**
+ * مهرِ تاریخیِ یک ردیف — تاریخ و مبنایی که عددهایش از آن ساخته شده‌اند.
+ *
+ * ═══ چرا لازم شد ═══
+ *
+ * گزارش ۱۴۰۵/۰۶/۱۷: «ردیف رصد تاریخی هنگام انتقال، تاریخ مبدأ را از دست
+ * می‌دهد … مبدأ ۱۴۰۵/۰۶/۱۵ بود ولی مقصد ۱۴۰۵/۰۶/۱۶ را انتخاب کرد. فقط یک
+ * نقطه باقی ماند و نمودارها ساخته نشدند.»
+ *
+ * نقشهٔ انتقال از روزی نوشته شده بود که تبِ استراتژی فقط ردیفِ **زنده**
+ * داشت: `entryDate` همیشه `auto` و مقصدِ یونانی همیشه `live: true`. آن فرض
+ * در کامنتِ خودش هم صریح نوشته شده بود — و وقتی زیرتبِ «رصد تاریخی» ساخته
+ * شد، بی‌صدا غلط شد. ردیف تاریخ را داشت (`runHistoryScan` روی هر ردیف
+ * `historyDate` و `historyBasis` می‌گذارد) و مقصدها هم تاریخِ صریح را
+ * می‌پذیرند؛ فقط وسط، کسی آن را نمی‌فرستاد.
+ *
+ * `null` یعنی ردیف زنده است و رفتارِ `auto` سرِ جایش می‌ماند.
+ */
+export function historyStamp(row) {
+  const date = normalizeHistoryDate(row?.historyDate);
+  if (!(date > 0)) return null;
+  const basis = String(row?.historyBasis || '');
+  return { date, basis: HISTORY_BASIS_KEYS.has(basis) ? basis : '' };
+}
+
 export function handoffPlan(row, opt = {}) {
+  const stamp = historyStamp(row);
   return {
     to: 'backtest', from: opt.from || 'strategy',
     uaIns: String(row.uaIns), uaName: row.underlying || 'نماد پایه',
@@ -50,11 +77,17 @@ export function handoffPlan(row, opt = {}) {
     strategyName: row.strategy || opt.strategyName || '',
     legIns: legIns(row),
     comboName: row.legsText || '',
-    entryDate: 'auto', exitDate: 'auto',
-    entryBasis: opt.entryBasis || 'LAST',
-    exitBasis: opt.exitBasis || 'LAST',
+    // ردیفِ تاریخی روزِ خودش را می‌برد. روزِ **خروج** همچنان `auto` است:
+    // ردیفِ مبدأ یک روز است و انتخابِ روزِ سنجش کارِ مقصد است.
+    entryDate: stamp ? stamp.date : 'auto',
+    exitDate: 'auto',
+    // و با همان مبنایی که عددهای مبدأ از آن ساخته شدند، وگرنه دو صفحه دو
+    // عدد می‌گویند برای یک ترکیب و یک روز.
+    entryBasis: stamp?.basis || opt.entryBasis || 'LAST',
+    exitBasis: stamp?.basis || opt.exitBasis || 'LAST',
     units: Math.max(1, Math.trunc(Number(opt.units) || 1)),
-    live: opt.live === true,
+    // «زنده» و «تاریخی» با هم جمع نمی‌شوند.
+    live: stamp ? false : opt.live === true,
   };
 }
 
@@ -281,6 +314,7 @@ export function watchConditionsFrom(row) {
  */
 export function strategyLinkPlan(row, { to, strategyId = '', strategyName = '', units = 1 } = {}) {
   if (!row || !STRATEGY_LINK_TARGETS.some((item) => item.to === to)) return null;
+  const stamp = historyStamp(row);
   const base = {
     to, from: 'strategy',
     uaIns: String(row.uaIns || ''), uaName: String(row.underlying || 'نماد پایه'),
@@ -289,6 +323,9 @@ export function strategyLinkPlan(row, { to, strategyId = '', strategyName = '', 
     legIns: legIns(row),
     comboName: String(row.legsText || ''),
     units: Math.max(1, Math.trunc(Number(units) || 1)),
+    // ردیفِ تاریخی روزش را با خودش می‌برد؛ ردیفِ زنده چیزی برای بردن ندارد
+    // و مقصد خودش انتخاب می‌کند.
+    ...(stamp ? { entryDate: stamp.date, ...(stamp.basis ? { entryBasis: stamp.basis } : {}) } : {}),
   };
   if (to === 'watchtower') {
     return {
@@ -297,11 +334,11 @@ export function strategyLinkPlan(row, { to, strategyId = '', strategyName = '', 
       conditions: watchConditionsFrom(row),
     };
   }
-  // رصد یونانی از قبل نقشه می‌پذیرد (`applyPlan` در تبِ خودش). دو چیز
-  // اضافه می‌شود: `live` چون مبدأ ردیفِ **زنده** است و بی آن مقصد فقط تا
-  // آخرین روزِ بسته‌شده می‌رود؛ و `entryDate` که ردیف زنده ندارد، پس
-  // فرستاده نمی‌شود و مقصد خودش روزِ ایجاد را انتخاب می‌کند.
-  if (to === 'greeks-watch') return { ...base, live: true };
+  // رصد یونانی از قبل نقشه می‌پذیرد (`applyPlan` در تبِ خودش). `live` فقط
+  // برای ردیفِ **زنده** درست است — بی آن مقصد تا آخرین روزِ بسته‌شده
+  // می‌رود، که برای ردیف زنده کم است و برای ردیف تاریخی غلط. ردیف تاریخی
+  // به‌جایش `entryDate` را از `base` می‌برد.
+  if (to === 'greeks-watch') return { ...base, live: !stamp };
   return base;
 }
 
