@@ -25,6 +25,7 @@ import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
 import { handoffRange, handoffEntryDate } from '/ui/handoff.mjs';
+import { clipDates, comboEntryDates, fastPathCodes } from '/ui/backtest-fastpath.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { chart, LEG_COLORS } from '/ui/track-chart.mjs';
@@ -107,7 +108,7 @@ export async function mount(root, { state }) {
     <div class="bt-panel" data-panel="bt-setup">
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود</h2></div><span>فقط روز دارای ترکیب معتبر</span></div><div id="bt-entry-date"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ خروج آزمایشی</h2></div><span>فقط روز دارای قیمت همه پاها</span></div><div id="bt-exit-date"></div></section></div>
-    <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><div id="bt-legs" class="backtest-legs"></div></section>
+    <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><p class="note" id="bt-fast-note" hidden></p><div id="bt-legs" class="backtest-legs"></div></section>
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت پاها در روز ایجاد</h2></div><span>هر کارت یک پای استراتژی</span></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت پاها در روز خروج</h2></div><span>همان قراردادهای ترکیب</span></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
     <section class="card backtest-runbar"><p id="bt-run-note">برای هر ثانیهٔ معامله بین ۹:۰۰ تا ۱۲:۳۰، آخرین قیمت مشاهده‌شده تمام پاها روی یک خط زمانی مشترک قرار می‌گیرد. این ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.</p><div class="backtest-run-actions"><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button><button type="button" class="ghost" id="bt-live">رصد زنده موقعیت از ورود تاریخی</button></div></section>
@@ -355,9 +356,21 @@ export async function mount(root, { state }) {
     paintManualNotes();
   }
 
+  /** روزهای سریِ پایه، بریده به بازهٔ انتخابیِ کاربر. */
+  function baseDatesInRange() {
+    const all = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean);
+    // ═══ روزی که کاربر انتخاب نکرده، سنجیده نمی‌شود ═══
+    //
+    // گزارش ۱۴۰۵/۰۶/۱۷: «با وجود انتخاب بازه یک‌ساله، برنامه ۱۱۲۵ روز را
+    // بررسی می‌کند، درحالی‌که در رابط فقط ۳۱۱ روز داخل بازه دیده می‌شود.»
+    // سریِ هر قرارداد از روزِ اولش می‌آید و این درست است؛ آنچه غلط بود،
+    // سنجیدنِ همه‌اش بود.
+    return clipDates(all, rangeUi?.range || null);
+  }
+
   async function findExecutableDates() {
     const def = byId(strategySelect.value), basis = entryRail.dataset.value || 'LAST';
-    const baseDates = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean);
+    const baseDates = baseDatesInRange();
     const found = [];
     for (let index = 0; index < baseDates.length; index++) {
       const date = baseDates[index];
@@ -368,24 +381,67 @@ export async function mount(root, { state }) {
     return found;
   }
 
+  /**
+   * ═══ مسیرِ تند: وقتی می‌دانیم دنبالِ کدام ترکیبیم ═══
+   *
+   * انتقالِ زنده `legIns` را با خودش می‌آورد، پس پرسش «چه ترکیب‌هایی ممکن
+   * است» نیست؛ «**این** ترکیب کدام روزها قیمت دارد» است. آن یکی ۳۵۵ نماد و
+   * ۲۵۴ هزار ارزیابی می‌خواست، این یکی سه نماد و یک پیمایشِ خطی.
+   *
+   * فهرستِ کاملِ ترکیب‌ها حذف نشده — با دکمهٔ «همهٔ ترکیب‌ها» یا با عوض‌کردنِ
+   * نماد و استراتژی ساخته می‌شود.
+   */
+  let fastPath = false;
+
+  /**
+   * جملهٔ صداقتِ مسیرِ تند، به‌علاوهٔ راهِ بیرون‌آمدن از آن.
+   *
+   * پنهان‌کردنِ اینکه فهرست کامل نیست، همان «حالتِ شکست شبیه نتیجهٔ معتبر»
+   * است: کاربر باید بداند چرا فقط یک ترکیب می‌بیند و چطور بقیه را بیاورد.
+   */
+  function paintFastPathNote() {
+    const box = $('bt-fast-note');
+    if (!box) return;
+    box.hidden = !fastPath;
+    if (!fastPath) return;
+    box.innerHTML = 'برای سرعت، فقط تاریخچهٔ همین ترکیب گرفته شد. '
+      + '<button type="button" class="ghost" id="bt-load-all">همهٔ ترکیب‌های این نماد را بارگیری کن</button>';
+    box.querySelector('#bt-load-all').addEventListener('click', () => loadHistory());
+  }
+
   async function loadHistory({ requiredIns = [] } = {}) {
     entryDates = [];
     ua = chain.get(baseSelect.value);
     if (!ua) { setStatus('ابتدا نماد پایه را انتخاب کن.', true); return; }
     contracts = flattenActiveContracts(ua, state.settings.blockedExpiries);
-    const codes = [...new Set([String(ua.ins), ...contracts.map((contract) => String(contract.ins))])];
+    const wanted = requiredIns.map(String).filter(Boolean);
+    fastPath = wanted.length > 0;
+    const codes = fastPath
+      ? fastPathCodes(ua.ins, wanted)
+      : [...new Set([String(ua.ins), ...contracts.map((contract) => String(contract.ins))])];
     $('bt-load').disabled = true; setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
     try {
       const loaded = await loadHistoricalDailies(codes, ua.ins);
       seriesByIns = loaded.seriesByIns;
-      const failed = [String(ua.ins), ...requiredIns.map(String)].filter((ins) => loaded.errors[ins]);
+      const failed = [String(ua.ins), ...wanted].filter((ins) => loaded.errors[ins]);
       if (failed.length) throw new Error(`دریافت تاریخچه ناموفق بود: ${failed.map((ins) => `${nameOf(contracts.find((contract) => String(contract.ins) === ins) || ua)}: ${loaded.errors[ins]}`).join('؛ ')}`);
-      entryDates = await findExecutableDates();
-      if (!entryDates.length) throw new Error('با این نماد و استراتژی روز قابل‌اجرایی پیدا نشد');
+      entryDates = fastPath
+        ? comboEntryDates(wanted, baseDatesInRange(),
+          (ins, date) => Number.isFinite(historyPrice(rowAt(ins, date), entryRail.dataset.value || 'LAST')))
+        : await findExecutableDates();
+      if (!entryDates.length) {
+        throw new Error(fastPath
+          ? 'این ترکیب در بازهٔ انتخابی هیچ روزی قیمتِ کامل ندارد — بازه را بازتر کن یا «همهٔ ترکیب‌ها» را بزن.'
+          : 'با این نماد و استراتژی روز قابل‌اجرایی پیدا نشد');
+      }
       $('bt-work').hidden = false;
       const selected = entryDates[Math.max(0, entryDates.length - 10)];
       entryWheel = mountDateWheel($('bt-entry-date'), entryDates, selected, () => refreshCombos(), { empty: 'روز قابل‌اجرا پیدا نشد.' });
-      refreshCombos(); setStatus(`${fmt.int(entryDates.length)} روز قابل اجرا آماده است.`);
+      refreshCombos();
+      paintFastPathNote();
+      setStatus(fastPath
+        ? `${fmt.int(entryDates.length)} روز برای همین ترکیب آماده است — بی معطلیِ کلِ زنجیره.`
+        : `${fmt.int(entryDates.length)} روز قابل اجرا آماده است.`);
     } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); } finally { $('bt-load').disabled = false; }
   }
 
