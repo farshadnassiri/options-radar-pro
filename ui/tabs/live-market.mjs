@@ -82,7 +82,10 @@ function chartSample(points, limit = 1600) {
   return out;
 }
 
-export function liveChart(host, series, { valueFmt = fmt.pct, unit = 'درصد', zeroFloor = false } = {}) {
+export function liveChart(host, series, {
+  valueFmt = fmt.pct, unit = 'درصد', zeroFloor = false,
+  note = 'هر خط فقط از نقطه‌های معتبر همان جلسه ساخته می‌شود؛ فاصلهٔ خالی درون‌یابی نمی‌شود.',
+} = {}) {
   const usable = series.map((item) => ({ ...item, points: chartSample(item.points.filter((point) => Number.isFinite(point.value) && Number.isFinite(point.second))) }))
     .filter((item) => item.points.length);
   if (!usable.length) {
@@ -111,12 +114,13 @@ export function liveChart(host, series, { valueFmt = fmt.pct, unit = 'درصد',
   }).join('');
   const paths = usable.map((item) => {
     const d = item.points.map((point, index) => `${index ? 'L' : 'M'}${X(point.second).toFixed(1)},${Y(point.value).toFixed(1)}`).join(' ');
-    return `<path class="live-market-series" style="--series:${item.color}" d="${d}"/>`;
+    const last = item.points.at(-1);
+    return `<path class="live-market-series" style="--series:${item.color}" d="${d}"/><circle class="live-market-series-end" style="--series:${item.color}" cx="${X(last.second).toFixed(1)}" cy="${Y(last.value).toFixed(1)}" r="4"/>`;
   }).join('');
   const legend = usable.map((item) => `<span style="--series:${item.color}"><i></i>${esc(item.label)}</span>`).join('');
   host.innerHTML = `<div class="live-market-legend">${legend}</div><div class="live-market-chart-stage"><svg viewBox="0 0 ${W} ${H}" tabindex="0" aria-label="نمودار زنده بازار">
     ${grid}${axes}${paths}<line class="live-market-cursor" x1="0" x2="0" y1="${P.t}" y2="${H - P.b}" hidden/>
-  </svg><div class="live-market-tip" hidden></div></div><p class="note">محور عمودی: ${unit}. هر خط از اولین معامله همان نماد در پاسخ امروز ساخته می‌شود.</p>`;
+  </svg><div class="live-market-tip" hidden></div></div><p class="note">محور عمودی: ${unit}. ${esc(note)}</p>`;
   const svg = host.querySelector('svg'), cursor = host.querySelector('.live-market-cursor'), tip = host.querySelector('.live-market-tip');
   svg.addEventListener('pointermove', (event) => {
     const box = svg.getBoundingClientRect();
