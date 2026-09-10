@@ -1,9 +1,11 @@
 import { buildChain, legContractSize } from '/core/chain.mjs';
 import { flattenActiveContracts, historyDateLabel, indexHistory, normalizeHistoryDate } from '/core/history.mjs';
 import { analyzeDailyOpenView, analyzeIntradayOpenView, relationMatrix } from '/core/open-view.mjs';
+import { liveDayOf } from '/core/live-day.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
 import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { applyLiveScope, scopeOptionsMarkup, SCOPE_LIVE } from '/ui/live-scope.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -190,10 +192,11 @@ export async function mount(root, { state }) {
     ivLoPct: (Number.isFinite(state.settings.ivLo) ? state.settings.ivLo : 0.01) * 100,
     ivHiPct: (Number.isFinite(state.settings.ivHi) ? state.settings.ivHi : 5) * 100,
   };
-  root.innerHTML = `<section class="open-view-hero"><div><p class="eyebrow">نقشه انتظارات بازار اختیار</p><h1>نگاه باز</h1><p>سربه‌سر و نوسان ضمنی همه کال‌ها و پوت‌های یک نماد، جدا برای هر سررسید و با وزن ارزش معامله.</p></div><span>روزانه → جزئیات هر روز</span></section>
+  root.innerHTML = `<section class="open-view-hero"><div><p class="eyebrow">نقشه انتظارات بازار اختیار</p><h1>نگاه باز</h1><p>سربه‌سر و نوسان ضمنی همه کال‌ها و پوت‌های یک نماد، جدا برای هر سررسید و با وزن ارزش معامله.</p></div><span>چندروزه ← درون‌روزی ← لحظه‌ای</span></section>
   <section class="card open-view-controls"><div class="section-head"><div><p class="eyebrow">مرحله اول</p><h2>نماد و دامنه تحلیل روزانه</h2></div><b id="ov-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
     <div id="ov-range" class="step-first" data-step="۱"></div>
-    <div class="open-view-form"><label class="step-next" data-step="۲">نماد پایه<select id="ov-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label>مبنای روزانه<select id="ov-basis"><option value="CLOSE">قیمت پایانی</option><option value="LAST">آخرین معامله</option><option value="FIRST">اولین معامله</option></select></label><label>از تاریخ<select id="ov-from" disabled></select></label><label>تا تاریخ<select id="ov-to" disabled></select></label><label>سررسید انتخابی<select id="ov-expiry" disabled><option value="">پس از دریافت انتخاب می‌شود</option></select></label><button type="button" class="primary" id="ov-load">دریافت تاریخچه روزانه</button><button type="button" class="ghost" id="ov-excel" disabled>خروجی جامع Excel</button></div>
+    <div class="open-view-form"><label class="step-next" data-step="۲">نماد پایه<select id="ov-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label>دامنه داده<select id="ov-scope">${scopeOptionsMarkup()}</select></label><label>مبنای روزانه<select id="ov-basis"><option value="CLOSE">قیمت پایانی</option><option value="LAST">آخرین معامله</option><option value="FIRST">اولین معامله</option></select></label><label>از تاریخ<select id="ov-from" disabled></select></label><label>تا تاریخ<select id="ov-to" disabled></select></label><label>سررسید انتخابی<select id="ov-expiry" disabled><option value="">پس از دریافت انتخاب می‌شود</option></select></label><button type="button" class="primary" id="ov-load">ساخت نگاه چندروزه</button><button type="button" class="ghost" id="ov-excel" disabled>خروجی جامع Excel</button></div>
+    <p id="ov-live-note" class="note">حالت بسته فقط روزهای نهایی را می‌سازد؛ حالت «تا همین لحظه» ردیف امروز را فقط در جلسه معتبر بازار اضافه می‌کند.</p>
     <div class="open-view-model-settings"><div><p class="eyebrow">فرض‌های مدل بلک–شولز</p><h3>پارامترهای محاسبه نوسان ضمنی</h3><small id="ov-iv-current">—</small></div><div class="open-view-model-grid"><label>نرخ بدون ریسک سالانه ٪<input id="ov-rfree" type="number" min="0" max="200" step="0.1" value="${initialModel.rFreePct}"></label><label>بازده نقدی سالانه ٪<input id="ov-divyield" type="number" min="0" max="100" step="0.1" value="${initialModel.divYieldPct}"></label><label>روزهای سال<input id="ov-year-days" type="number" min="1" max="1000" step="1" value="${initialModel.yearDays}"></label><label>کمینه IV ٪<input id="ov-iv-lo" type="number" min="0.01" max="999" step="0.1" value="${initialModel.ivLoPct}"></label><label>بیشینه IV ٪<input id="ov-iv-hi" type="number" min="0.02" max="1000" step="1" value="${initialModel.ivHiPct}"></label></div><button type="button" class="ghost" id="ov-apply-iv">اعمال پارامترها</button></div>
     <p class="portfolio-note">برای دیدن فرمول، وزن هر قرارداد و نمودار ریز همان روز، روی ردیف روز کلیک کن. قیمت یا ارزش گمشده با مشاهده قبلی پر نمی‌شود.</p>
   </section>
@@ -205,7 +208,7 @@ export async function mount(root, { state }) {
       <div id="ov-day-formulas" class="open-view-formula-grid"></div>
       <div class="section-head open-view-contract-head"><div><h3>قراردادها و سهم هرکدام در شاخص</h3><p>رنگ هر خانه متناسب با وزن همان قرارداد در سمت کال یا پوت است.</p></div><span id="ov-day-contract-count">—</span></div>
       <div id="ov-day-contracts" class="history-table-wrap"></div>
-      <div class="open-view-intraday-controls"><div><p class="eyebrow">ریز همان روز</p><h3>تایم‌فریم نمودارهای روز انتخاب‌شده</h3></div><label>بازه زمانی<select id="ov-day-interval"><option value="5">۵ دقیقه</option><option value="15" selected>۱۵ دقیقه</option><option value="30">۳۰ دقیقه</option><option value="60">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="ov-day-intraday">محاسبه ریز این روز</button><b id="ov-day-status" role="status" aria-live="polite">هنوز محاسبه نشده است.</b></div>
+      <div class="open-view-intraday-controls"><div><p class="eyebrow">درون‌روزی و لحظه‌ای</p><h3>ساخت نمودار از ریزمعامله واقعی</h3></div><label>منبع زمان<select id="ov-day-source"><option value="history">روز تاریخی انتخاب‌شده</option><option value="live">امروز تا همین لحظه</option></select></label><label>بازه زمانی<select id="ov-day-interval"><option value="5">۵ دقیقه</option><option value="15" selected>۱۵ دقیقه</option><option value="30">۳۰ دقیقه</option><option value="60">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="ov-day-intraday">محاسبه ریز این روز</button><b id="ov-day-status" role="status" aria-live="polite">هنوز محاسبه نشده است.</b></div>
       <div class="open-view-chart-grid"><section><div class="section-head"><h3>پایه و سربه‌سر در طول روز</h3><span id="ov-day-timeframe">—</span></div><div id="ov-day-price" class="open-view-chart"><p class="empty-note">تایم‌فریم را انتخاب و محاسبه را اجرا کن.</p></div></section><section><div class="section-head"><h3>فاصله درصدی از دو شاخص</h3><span>همان سطل زمانی</span></div><div id="ov-day-gap" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section><div class="section-head"><h3>شاخص اعمال وزنی در طول روز</h3><span>همان سطل زمانی</span></div><div id="ov-day-strike" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section><div class="section-head"><h3>پریمیوم وزنی در طول روز</h3><span>درصدی از قیمت پایه</span></div><div id="ov-day-premium" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section class="open-view-wide-card"><div class="section-head"><h3>IV وزنی در طول روز</h3><span>وزن ریزمعامله هر قرارداد</span></div><div id="ov-day-iv" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section></div>
     </section>
     <p class="history-caveat">این شاخص از معاملات مشاهده‌شده ساخته می‌شود و قیمت قابل اجرای هم‌زمان نیست. IV مدل بلک–شولز است و دامنه نوسان، توقف نماد و پرش قیمت را مدل نمی‌کند.</p>
@@ -213,8 +216,9 @@ export async function mount(root, { state }) {
 
   const $ = (id) => root.querySelector(`#${id}`);
   const status = $('ov-status'), baseSelect = $('ov-base');
-  let chain = new Map(), ua = null, contracts = [], seriesByIns = {}, daily = null, intraday = null;
+  let chain = new Map(), ua = null, contracts = [], closedSeriesByIns = {}, seriesByIns = {}, daily = null, intraday = null;
   let dailyRelations = [], intradayRelations = [], selectedDate = 0;
+  let liveRefreshBusy = false, lastLiveRefreshAt = 0, disposed = false;
   const tradeCache = new Map(), hiddenSeries = new Set();
   const setStatus = (text, bad = false) => { status.textContent = text; status.className = bad ? 'loss' : ''; };
   const inputNumber = (id) => Number(toEnDigits($(id).value));
@@ -250,13 +254,39 @@ export async function mount(root, { state }) {
   function paintIntraday() {
     if (!intraday) return;
     const minutes = Number($('ov-day-interval').value);
-    $('ov-day-timeframe').textContent = `${faDigits(minutes)} دقیقه`;
+    $('ov-day-timeframe').textContent = $('ov-day-source').value === 'live'
+      ? `${faDigits(minutes)} دقیقه · قیمت آخرین معامله هر سطل`
+      : `${faDigits(minutes)} دقیقه · میانگین موزون معاملات هر سطل`;
     const priceExtra = (row) => `<span>فاصله پایه تا کال: <strong>${fmt.pct(row.callBreakevenGapPct)}٪</strong></span><span>فاصله پایه از پوت: <strong>${fmt.pct(row.putBreakevenGapPct)}٪</strong></span>`;
     chart($('ov-day-price'), intraday.rows, SERIES_PRICE, { intraday: true, yLabel: 'قیمت (ریال)', extra: priceExtra });
     chart($('ov-day-gap'), intraday.rows, SERIES_GAP_INTRADAY, { percent: true, intraday: true, yLabel: 'فاصله (درصد)' });
     chart($('ov-day-strike'), intraday.rows, SERIES_STRIKE_INTRADAY, { intraday: true, yLabel: 'قیمت اعمال (ریال)' });
     chart($('ov-day-premium'), intraday.rows, SERIES_PREMIUM_INTRADAY, { percent: true, intraday: true, yLabel: 'پریمیوم (٪ پایه)' });
     chart($('ov-day-iv'), intraday.rows, SERIES_IV_INTRADAY, { percent: true, intraday: true, yLabel: 'نوسان ضمنی (درصد)' });
+  }
+
+  function paintLiveDetail(date) {
+    const row = intraday?.rows?.at(-1);
+    if (!row) {
+      $('ov-day-title').textContent = 'امروز تا همین لحظه';
+      $('ov-day-base').textContent = 'هنوز معامله معتبری برای ساخت سطل زنده نرسیده است.';
+      $('ov-day-formulas').innerHTML = '<p class="empty-note">بدون معامله واقعی، شاخص لحظه‌ای ساخته نمی‌شود.</p>';
+      $('ov-day-contract-count').textContent = '۰ قرارداد در تازه‌ترین سطل';
+      $('ov-day-contracts').innerHTML = '<p class="empty-note">قرارداد معامله‌شده‌ای در این تایم‌فریم نیست.</p>';
+      return;
+    }
+    const items = intraday.contractRows.filter((item) => item.date === date && item.second === row.second && item.expiry === selectedExpiry());
+    $('ov-day-title').textContent = `امروز تا ${clock(row.second)}`;
+    $('ov-day-base').innerHTML = `تازه‌ترین سطل زنده · پایه ${fmt.money(row.basePrice)} · تغییر <span class="${signTone(row.baseChangePct)}">${fmt.pct(row.baseChangePct)}٪</span>`;
+    const cards = [
+      ['سربه‌سر کال', weightedFormula(items, 'call', 'breakeven'), 'gain'],
+      ['سربه‌سر پوت', weightedFormula(items, 'put', 'breakeven'), 'loss'],
+      ['IV کال', weightedFormula(items, 'call', 'iv'), 'cmp1'],
+      ['IV پوت', weightedFormula(items, 'put', 'iv'), 'cmp4'],
+    ];
+    $('ov-day-formulas').innerHTML = cards.map(([label, result, tone], index) => `<article class="open-view-formula ${tone}"><span>${label}</span><b>${index < 2 ? fmt.money(result.value) : `${fmt.pct(result.value)}٪`}</b><code>تازه‌ترین قیمت معامله × وزن ارزش واقعی</code><small>${fmt.int(result.count)} قرارداد · مجموع ارزش ${fmt.money(result.total)}</small></article>`).join('');
+    $('ov-day-contract-count').textContent = `${fmt.int(items.length)} قرارداد در تازه‌ترین سطل`;
+    $('ov-day-contracts').innerHTML = contractTable(items);
   }
 
   function paintDayDetail() {
@@ -308,6 +338,18 @@ export async function mount(root, { state }) {
     paintDaily(); setStatus(`${fmt.int(viewRows().length)} روز برای سررسید ${dateLabel(selectedExpiry())} محاسبه شد؛ برای ریزمحاسبه روی هر روز کلیک کن.`);
   }
 
+  async function applySelectedScope() {
+    seriesByIns = closedSeriesByIns;
+    if ($('ov-scope').value !== SCOPE_LIVE) {
+      $('ov-live-note').textContent = 'فقط روزهای بسته‌شده و نهایی در نمودار چندروزه هستند.';
+      return;
+    }
+    $('ov-live-note').textContent = 'در حال افزودن عکس معتبر امروز به نمودار چندروزه…';
+    const result = await applyLiveScope(closedSeriesByIns);
+    seriesByIns = result.series;
+    $('ov-live-note').textContent = result.note;
+  }
+
   async function loadDaily() {
     ua = chain.get(baseSelect.value);
     if (!ua) { setStatus('ابتدا نماد پایه را انتخاب کن.', true); return; }
@@ -317,12 +359,13 @@ export async function mount(root, { state }) {
         const sized = legContractSize(contract.size, state.settings.contractSize);
         return { ...contract, size: sized.size, sizeAssumed: sized.assumed };
       });
-      const codes = [String(ua.ins), ...contracts.map((contract) => String(contract.ins))]; seriesByIns = {};
+      const codes = [String(ua.ins), ...contracts.map((contract) => String(contract.ins))]; closedSeriesByIns = {};
       for (const group of chunks(codes, 100)) {
         const response = await fetch(`/api/dailies?ins=${encodeURIComponent(group.join(','))}&n=0`), payload = await response.json();
         if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
-        for (const [ins, result] of Object.entries(payload)) seriesByIns[ins] = result.rows || [];
+        for (const [ins, result] of Object.entries(payload)) closedSeriesByIns[ins] = result.rows || [];
       }
+      await applySelectedScope();
       const dates = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
       if (!dates.length) throw new Error('برای نماد پایه تاریخچه‌ای دریافت نشد');
       const options = dates.map((date) => `<option value="${date}">${dateLabel(date)}</option>`).join('');
@@ -335,12 +378,27 @@ export async function mount(root, { state }) {
   async function loadDayIntraday() {
     if (!daily || !selectedDate) return;
     const dayStatus = $('ov-day-status'), minutes = Number($('ov-day-interval').value), viewContracts = contractsInView();
+    const live = $('ov-day-source').value === 'live';
     const cacheKey = `${selectedDate}:${selectedExpiry()}`;
     const model = settings(); if (!model) return;
-    $('ov-day-intraday').disabled = true; dayStatus.textContent = 'در حال دریافت ریزمعامله‌های همین روز…';
+    $('ov-day-intraday').disabled = true;
+    dayStatus.textContent = live ? 'در حال دریافت همه ریزمعامله‌های امروز تا این لحظه…' : 'در حال دریافت ریزمعامله‌های همین روز…';
     try {
-      let tradesByKey = tradeCache.get(cacheKey);
-      if (!tradesByKey) {
+      let analysisDate = selectedDate, tradesByKey = live ? null : tradeCache.get(cacheKey);
+      if (live) {
+        const ids = [String(ua.ins), ...viewContracts.map((contract) => String(contract.ins))];
+        const parts = await Promise.all(chunks(ids, 24).map(async (group) => {
+          const response = await fetch(`/api/live-trades?ins=${encodeURIComponent(group.join(','))}`, { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
+          return payload;
+        }));
+        const day = liveDayOf(parts[0]?.market, parts[0]?.at);
+        if (!day.ok) throw new Error(`عکس بازار به امروز قابل انتساب نیست${day.why ? `؛ ${day.why}` : ''}`);
+        analysisDate = day.date;
+        const items = Object.assign({}, ...parts.map((part) => part.items || {}));
+        tradesByKey = Object.fromEntries(Object.entries(items).map(([ins, item]) => [`${analysisDate}:${ins}`, item.rows || []]));
+      } else if (!tradesByKey) {
         const requests = [{ ins: String(ua.ins), date: String(selectedDate) }];
         const optionIndexes = new Map(viewContracts.map((contract) => [String(contract.ins), indexHistory(seriesByIns[String(contract.ins)] || [])]));
         for (const contract of viewContracts) {
@@ -351,20 +409,47 @@ export async function mount(root, { state }) {
         if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
         tradesByKey = Object.fromEntries(Object.entries(payload.items || {}).map(([key, item]) => [key, item.rows || []])); tradeCache.set(cacheKey, tradesByKey);
       }
-      intraday = analyzeIntradayOpenView({ ua, contracts: viewContracts, dates: [selectedDate], tradesByKey, intervalMinutes: minutes, settings: model });
+      intraday = analyzeIntradayOpenView({
+        ua, contracts: viewContracts, dates: [analysisDate], tradesByKey, intervalMinutes: minutes,
+        settings: model, priceBasis: live ? 'latest' : 'vwap',
+      });
       intradayRelations = relationMatrix(intraday.rows); paintIntraday();
-      dayStatus.textContent = `${fmt.int(intraday.rows.length)} سطل ${faDigits(minutes)} دقیقه‌ای ساخته شد.`;
+      if (live) paintLiveDetail(analysisDate);
+      dayStatus.textContent = live
+        ? `${fmt.int(intraday.rows.length)} سطل زنده ${faDigits(minutes)} دقیقه‌ای از تازه‌ترین معامله‌ها ساخته شد.`
+        : `${fmt.int(intraday.rows.length)} سطل ${faDigits(minutes)} دقیقه‌ای ساخته شد.`;
     } catch (error) { dayStatus.textContent = errorText(error, 'ریزمعامله دریافت نشد.'); }
     finally { $('ov-day-intraday').disabled = false; }
   }
 
+  async function refreshLiveViews() {
+    if (disposed || liveRefreshBusy || !daily) return;
+    if ($('ov-scope').value !== SCOPE_LIVE && $('ov-day-source').value !== 'live') return;
+    liveRefreshBusy = true;
+    try {
+      if ($('ov-scope').value === SCOPE_LIVE) { await applySelectedScope(); computeDaily(); }
+      if ($('ov-day-source').value === 'live') await loadDayIntraday();
+      lastLiveRefreshAt = Date.now();
+    } finally { liveRefreshBusy = false; }
+  }
+
   $('ov-load').addEventListener('click', loadDaily);
+  $('ov-scope').addEventListener('change', async () => {
+    if (!Object.keys(closedSeriesByIns).length) return;
+    await applySelectedScope(); computeDaily();
+  });
   $('ov-basis').addEventListener('change', () => { if (daily) computeDaily(); });
   $('ov-from').addEventListener('change', () => { if (daily) computeDaily(); });
   $('ov-to').addEventListener('change', () => { if (daily) computeDaily(); });
   $('ov-expiry').addEventListener('change', () => { selectedDate = viewRows().at(-1)?.date || 0; dailyRelations = relationMatrix(viewRows()); resetIntraday(); paintDaily(); });
   $('ov-apply-iv').addEventListener('click', () => { const model = settings(); if (!model) return; if (daily) computeDaily(); else setStatus('پارامترهای IV ثبت شد؛ پس از دریافت تاریخچه اعمال می‌شود.'); });
   $('ov-day-interval').addEventListener('change', resetIntraday);
+  $('ov-day-source').addEventListener('change', () => {
+    resetIntraday();
+    const live = $('ov-day-source').value === 'live';
+    $('ov-day-intraday').textContent = live ? 'به‌روزرسانی لحظه‌ای' : 'محاسبه ریز این روز';
+    if (!live) paintDayDetail();
+  });
   $('ov-day-intraday').addEventListener('click', loadDayIntraday);
   $('ov-daily-table').addEventListener('click', (event) => {
     const row = event.target.closest('[data-day]'); if (!row) return;
@@ -376,7 +461,7 @@ export async function mount(root, { state }) {
     const row = event.target.closest('[data-day]'); if (!row) return; event.preventDefault(); row.click();
   });
   $('ov-excel').addEventListener('click', () => downloadOpenViewExcel({ ua, daily, intraday, dailyRelations, intradayRelations, basis: $('ov-basis').value, intervalMinutes: Number($('ov-day-interval').value), selectedExpiry: selectedExpiry() }));
-  baseSelect.addEventListener('change', () => { ua = chain.get(baseSelect.value) || null; daily = null; intraday = null; selectedDate = 0; tradeCache.clear(); $('ov-report').hidden = true; $('ov-excel').disabled = true; });
+  baseSelect.addEventListener('change', () => { ua = chain.get(baseSelect.value) || null; daily = null; intraday = null; selectedDate = 0; closedSeriesByIns = {}; seriesByIns = {}; tradeCache.clear(); $('ov-report').hidden = true; $('ov-excel').disabled = true; });
 
   // ——— فهرست قراردادها از **بازه** می‌آید، نه از تابلوی امروز ———
   //
@@ -407,4 +492,11 @@ export async function mount(root, { state }) {
 
   rangeUi = mountHistoryRange($('ov-range'), { onApply: (range) => loadUniverseForRange(range) });
   await loadUniverseForRange(rangeUi.range);
+  return {
+    updateLive() {
+      if (Date.now() - lastLiveRefreshAt < 12_000 || root.offsetParent === null) return;
+      refreshLiveViews();
+    },
+    dispose() { disposed = true; rangeJob?.stop(); },
+  };
 }

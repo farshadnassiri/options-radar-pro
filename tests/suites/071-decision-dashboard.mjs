@@ -35,6 +35,12 @@ group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دا�
     snap70.contracts.length === 4 && snap70.expiries.length === 2 && snap70.marketExpiries.length === 2);
   check('رهبر ارزش کل بازار از داده واقعی و با ترتیب نزولی می‌آید',
     snap70.contracts[0].ins === '113' && snap70.contracts[0].value === 7000);
+  check('آخرین معامله و پایانی قرارداد دو درصد مستقل نسبت به دیروز دارند',
+    snap70.contracts.find((row) => row.ins === '111').tradeLast === 120
+    && near(snap70.contracts.find((row) => row.ins === '111').changePct, 20)
+    && near(snap70.contracts.find((row) => row.ins === '111').closeChangePct, 15));
+  check('آخرین معامله واقعی پایه جدا از قیمت برگشتی پایانی نگه داشته می‌شود',
+    snap70.underlyings[0].tradeLast === 1050 && near(snap70.underlyings[0].closeChangePct, 4));
   check('تجمیع سررسید ارزش کال و پوت را جدا نگه می‌دارد',
     snap70.expiries[0].value === 13500 && snap70.expiries[0].callValue === 7000 && snap70.expiries[0].putValue === 6500);
   check('چهار دامنه بازار، پایه، سررسید و قرارداد دقیق فیلتر می‌شوند',

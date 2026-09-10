@@ -237,9 +237,10 @@ export function analyzeDailyOpenView({
   return { rows: enrichChanges(rows, 5), expiryRows: enrichExpiryChanges(expiryRows, 5), contractRows, settings: cfg };
 }
 
-function bucketTrades(trades, intervalMinutes, size = 1) {
+function bucketTrades(trades, intervalMinutes, size = 1, priceBasis = 'vwap') {
   const width = Math.max(1, Math.trunc(num(intervalMinutes, 15))) * 60;
   const buckets = new Map();
+  let order = 0;
   for (const trade of trades || []) {
     if (trade?.canceled || !inIntradaySession(trade?.time)) continue;
     const price = num(trade.price, NaN), quantity = Math.max(0, num(trade.quantity));
@@ -250,15 +251,28 @@ function bucketTrades(trades, intervalMinutes, size = 1) {
     const bucketSecond = Math.min(second, INTRADAY_END_SECOND - 1);
     const startSecond = INTRADAY_START_SECOND + Math.floor((bucketSecond - INTRADAY_START_SECOND) / width) * width;
     if (startSecond > INTRADAY_END_SECOND) continue;
-    const state = buckets.get(startSecond) || { amount: 0, quantity: 0, trades: 0, unknownCancel: false };
+    const state = buckets.get(startSecond) || {
+      amount: 0, quantity: 0, trades: 0, unknownCancel: false,
+      latestPrice: NaN, latestSecond: -1, latestOrder: -1,
+    };
     state.amount += price * quantity;
     state.quantity += quantity;
     state.trades += 1;
     state.unknownCancel ||= trade.canceledKnown === false;
+    // در نمای زنده «قیمت لحظه» باید آخرین معامله واقعی همان سطل باشد؛
+    // ارزش همچنان جمع دقیق همه معاملات است تا وزن شاخص عوض نشود.
+    if (second > state.latestSecond || (second === state.latestSecond && order > state.latestOrder)) {
+      state.latestPrice = price;
+      state.latestSecond = second;
+      state.latestOrder = order;
+    }
     buckets.set(startSecond, state);
+    order += 1;
   }
   return new Map([...buckets].map(([second, state]) => [second, {
-    second, price: state.quantity > 0 ? state.amount / state.quantity : NaN,
+    second, price: priceBasis === 'latest'
+      ? state.latestPrice
+      : (state.quantity > 0 ? state.amount / state.quantity : NaN),
     value: state.amount * Math.max(0, num(size)), volume: state.quantity,
     trades: state.trades, unknownCancel: state.unknownCancel,
   }]));
@@ -266,18 +280,18 @@ function bucketTrades(trades, intervalMinutes, size = 1) {
 
 /** شاخص درون‌روزی چند روز، روی سطل انتخابی؛ هیچ قیمت بین سطل‌ها حمل نمی‌شود. */
 export function analyzeIntradayOpenView({
-  ua, contracts = [], dates = [], tradesByKey = {}, intervalMinutes = 15, settings = {},
+  ua, contracts = [], dates = [], tradesByKey = {}, intervalMinutes = 15, settings = {}, priceBasis = 'vwap',
 } = {}) {
   const cfg = settingsOf(settings);
   const rows = [], expiryRows = [], contractRows = [];
   const normalizedDates = [...new Set(dates.map(normalizeHistoryDate).filter(Boolean))].sort((a, b) => a - b);
 
   for (const date of normalizedDates) {
-    const baseBuckets = bucketTrades(tradesByKey[`${date}:${ua?.ins}`] || [], intervalMinutes, 1);
+    const baseBuckets = bucketTrades(tradesByKey[`${date}:${ua?.ins}`] || [], intervalMinutes, 1, priceBasis);
     const optionBuckets = new Map();
     for (const contract of contracts) {
       optionBuckets.set(String(contract.ins), bucketTrades(
-        tradesByKey[`${date}:${contract.ins}`] || [], intervalMinutes, contract.size,
+        tradesByKey[`${date}:${contract.ins}`] || [], intervalMinutes, contract.size, priceBasis,
       ));
     }
     const seconds = [...new Set([...optionBuckets.values()].flatMap((map) => [...map.keys()]))].sort((a, b) => a - b);

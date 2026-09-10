@@ -83,6 +83,17 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
   check('ابهام وضعیت ابطال تا خروجی حفظ می‌شود', intraday64.rows[0].unknownCancel === true);
   check('ریز هر قرارداد و هر سررسید برای حسابرسی نگه داشته می‌شود', intraday64.contractRows.length === 4 && intraday64.expiryRows.length === 2);
   check('میانگین ۵روزه با پنج سطل درون‌روزی اشتباه نمی‌شود', !('callBreakevenGapPctMa5' in intraday64.expiryRows[0]));
+  const liveIntraday64 = analyzeIntradayOpenView({
+    ua: ua64, contracts: [contracts64[0]], dates: [20240101], intervalMinutes: 15, priceBasis: 'latest',
+    tradesByKey: {
+      '20240101:1': [trade(90100, 100, 100), trade(91000, 110, 100)],
+      '20240101:11': [trade(90200, 10, 2), trade(90300, 14, 1)],
+    }, settings: { rFree: 0.2, yearDays: 365 },
+  });
+  check('نمای زنده قیمت آخرین معامله هر سطل را می‌گیرد، نه VWAP را',
+    near(liveIntraday64.rows[0].basePrice, 110) && near(liveIntraday64.rows[0].callBreakeven, 114));
+  check('در نمای زنده وزن ارزش هنوز جمع واقعی همه معاملات است',
+    liveIntraday64.rows[0].callValue === 34000);
 
   const corr = pearson([{ a: 1, b: 2 }, { a: 2, b: 4 }, { a: 3, b: 6 }], 'a', 'b');
   check('همبستگی پیرسون همراه تعداد نمونه محاسبه می‌شود', near(corr.value, 1) && corr.samples === 3);
@@ -115,4 +126,12 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
   check('جدول روزانه و جزئیات روز از ردیف‌های همان سررسید می‌خوانند', ui64.includes('dailyTable(rows, selectedDate)') && ui64.includes('item.expiry === selectedExpiry()'));
   check('ریزمعامله فقط قراردادهای سررسید انتخابی را دریافت می‌کند', ui64.includes('contractsInView()') && ui64.includes('contracts: viewContracts'));
   check('پارامترهای مدل IV در خود نگاه باز قابل تنظیم‌اند', ['ov-rfree', 'ov-divyield', 'ov-year-days', 'ov-iv-lo', 'ov-iv-hi', 'ov-apply-iv'].every((id) => ui64.includes(id)) && ui64.includes('toEnDigits'));
+  check('نگاه باز، دامنه روزهای بسته و تا همین لحظه را با مسیر مشترک دارد',
+    ui64.includes('id="ov-scope"') && ui64.includes('scopeOptionsMarkup') && ui64.includes('applyLiveScope'));
+  check('ریز روز بین تاریخی و امروز زنده عوض می‌شود و سقف درخواست رعایت می‌شود',
+    ui64.includes('id="ov-day-source"') && ui64.includes("chunks(ids, 24)")
+    && ui64.includes("priceBasis: live ? 'latest' : 'vwap'") && ui64.includes('liveDayOf'));
+  check('چرخه رفرش داشبورد، نگاه باز زنده را بدون نصب دوباره تازه می‌کند',
+    liveDashboard64.includes('openViewController?.updateLive?.(payload)')
+    && liveDashboard64.includes('openViewController?.dispose?.()'));
 }

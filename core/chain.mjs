@@ -333,8 +333,13 @@ export function underlyingList(chain, opt = {}) {
     .map((u) => {
       const iv = atmIv(u, rFree, divYield, yearDays);
       return {
-        ins: u.ins, name: u.name, last: u.last || u.close, close: u.close, yday: u.yday,
+        ins: u.ins, name: u.name, last: u.last || u.close,
+        // `last` قدیمی برای سازگاری در نبود معامله به پایانی برمی‌گردد؛
+        // نمای لحظه‌ای به فیلد صریح زیر نیاز دارد تا آن دو را اشتباه نگیرد.
+        tradeLast: u.last > 0 ? u.last : NaN,
+        close: u.close, yday: u.yday,
         changePct: (u.last || u.close) > 0 && u.yday > 0 ? (((u.last || u.close) / u.yday) - 1) * 100 : NaN,
+        closeChangePct: u.close > 0 && u.yday > 0 ? ((u.close / u.yday) - 1) * 100 : NaN,
         expiries: u.expiryList.length,
         nearestDays: u.expiryList[0]?.days ?? null,
         // گردش خودِ نماد پایه، جدا از گردش زنجیره اختیارش. تا امروز خوانده
