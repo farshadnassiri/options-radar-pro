@@ -769,7 +769,7 @@ export async function mount(root, { state, api }) {
   let payload = { universe: { underlyings: [], expiries: [], marketExpiries: [], contracts: [] }, timeline: [], snapshot: { rows: [] } };
   let activeMode = DASHBOARD_MODES[0].id;
   const activeViews = Object.fromEntries(DASHBOARD_MODES.filter((mode) => mode.views.length).map((mode) => [mode.id, mode.views[0][0]]));
-  let loading = false, paused = false, timer = null, nextAt = 0, tape = [], openViewMounted = false;
+  let loading = false, paused = false, timer = null, nextAt = 0, tape = [], openViewMounted = false, openViewController = null;
   const openViewBaseSync = createOpenViewBaseSyncGate();
   let intervalSec = Math.max(5, Math.min(60, Number(localStorage.getItem('options-radar:dashboard-interval')) || Number(state.settings.watchIntervalSec) || 15));
   $('dd-interval').value = String(intervalSec);
@@ -850,7 +850,7 @@ export async function mount(root, { state, api }) {
     const host = root.querySelector('[data-mode-panel="volatility"] [data-open-view-host]');
     if (!openViewMounted) {
       host.innerHTML = '<p class="empty-note">در حال آماده‌سازی تحلیل چندروزه…</p>';
-      const mod = await import('/ui/tabs/open-view.mjs'); await mod.mount(host, { state }); openViewMounted = true;
+      const mod = await import('/ui/tabs/open-view.mjs'); openViewController = await mod.mount(host, { state }); openViewMounted = true;
     }
     // تیک خودکار دوباره به `paintView` می‌رسد، اما حق ندارد انتخاب مستقلی را
     // که کاربر داخل «نگاه باز» انجام داده با نماد بالای داشبورد جایگزین کند.
@@ -1149,7 +1149,7 @@ export async function mount(root, { state, api }) {
     try {
       const response = await fetch('/api/live-dashboard', { cache: 'no-store' }), next = await response.json();
       if (!response.ok || next.error) throw new Error(next.error || `HTTP ${response.status}`);
-      payload = next; fillSelectors(true); await marketExplorer.setUniverse(payload.universe, true, payload); await fetchTape(); await paintView();
+      payload = next; fillSelectors(true); openViewController?.updateLive?.(payload); await marketExplorer.setUniverse(payload.universe, true, payload); await fetchTape(); await paintView();
       marketPulse.update(payload, pulseBaseBooks);
       const bookRequest = ++pulseBookRequest;
       fetchBaseBooks(payload.universe).then((books) => {
@@ -1209,6 +1209,7 @@ export async function mount(root, { state, api }) {
   return () => {
     clearTimeout(timer); clearInterval(countdown);
     pulseBookRequest += 1;
+    openViewController?.dispose?.();
     marketExplorer.dispose();
     for (const dispose of embedded.values()) { try { dispose?.(); } catch { /* برچیدن نباید بترکد */ } }
   };
