@@ -170,6 +170,72 @@ export function dashboardScope(snapshot, scope = {}) {
 }
 
 // ————————————————————————————————————————————————————————————————
+// نقشهٔ بازار — یک ورودی ساده برای رفتن از کل بازار تا یک قرارداد
+
+// رنگ خانه همیشه جهتِ آخرین معاملهٔ نماد پایه را می‌گوید؛ اندازه اما سؤال
+// کاربر است و می‌تواند بین گردش کال، پوت، کل اختیار، خودِ پایه و درصد تغییر
+// عوض شود. جدا نگه‌داشتن این دو معنا مهم است: خانهٔ بزرگ لزوماً مثبت نیست.
+// ————————————————————————————————————————————————————————————————
+
+export const MARKET_MAP_METRICS = [
+  { key: 'callValue', label: 'ارزش معاملات کال', format: 'money' },
+  { key: 'putValue', label: 'ارزش معاملات پوت', format: 'money' },
+  { key: 'value', label: 'جمع ارزش کال و پوت', format: 'money' },
+  { key: 'uaValue', label: 'ارزش معاملات نماد پایه', format: 'money' },
+  { key: 'volume', label: 'حجم معاملات اختیار', format: 'int' },
+  { key: 'changePct', label: 'درصد آخرین معامله پایه', format: 'pct' },
+];
+
+const mapMetric = (key) => MARKET_MAP_METRICS.some((item) => item.key === key) ? key : 'value';
+
+/**
+ * ردیف‌های نقشه با وزن ترسیمی.
+ *
+ * مقدار صفر یا نامعلوم حذف نمی‌شود، چون خواستهٔ نقشه «همهٔ نمادهای پایه»
+ * است. یک کف بسیار کوچک فقط برای قابل‌کلیک ماندن خانه می‌گذاریم؛ مقدار
+ * واقعی جدا می‌ماند و در راهنما همان صفر/نامعلوم نمایش داده می‌شود.
+ */
+export function marketMapRows(snapshot = {}, metric = 'value') {
+  const key = mapMetric(metric);
+  const rows = (snapshot.underlyings || []).map((row) => {
+    const raw = Number(row[key]);
+    const metricValue = Number.isFinite(raw) ? raw : NaN;
+    const sizeValue = key === 'changePct' ? Math.abs(metricValue) : Math.max(0, metricValue);
+    return { ...row, metric: key, metricValue, sizeValue };
+  });
+  const max = Math.max(0, ...rows.map((row) => Number.isFinite(row.sizeValue) ? row.sizeValue : 0));
+  const floor = max > 0 ? max * 0.002 : 1;
+  return rows.map((row) => ({ ...row, mapWeight: row.sizeValue > 0 ? row.sizeValue : floor }));
+}
+
+/** جمع‌بندی بازار از همان عکس واحد؛ هیچ درخواست یا برآورد تازه‌ای ندارد. */
+export function marketMapSummary(snapshot = {}) {
+  const underlyings = snapshot.underlyings || [];
+  const contracts = snapshot.contracts || [];
+  const sum = (rows, key) => rows.reduce((total, row) => {
+    const value = Number(row[key]);
+    return total + (Number.isFinite(value) ? value : 0);
+  }, 0);
+  const knownDirection = underlyings.filter((row) => Number.isFinite(Number(row.changePct)));
+  return {
+    underlyings: underlyings.length,
+    baseTraded: underlyings.filter((row) => Number(row.uaVolume) > 0 || Number(row.uaTrades) > 0 || Number(row.uaValue) > 0).length,
+    contracts: contracts.length,
+    tradedContracts: contracts.filter((row) => Number(row.volume) > 0 || Number(row.trades) > 0 || Number(row.value) > 0).length,
+    twoSided: contracts.filter((row) => Number(row.bid) > 0 && Number(row.ask) > 0).length,
+    positiveBases: knownDirection.filter((row) => Number(row.changePct) > 0).length,
+    negativeBases: knownDirection.filter((row) => Number(row.changePct) < 0).length,
+    flatBases: knownDirection.filter((row) => Number(row.changePct) === 0).length,
+    callValue: sum(underlyings, 'callValue'),
+    putValue: sum(underlyings, 'putValue'),
+    optionValue: sum(underlyings, 'value'),
+    underlyingValue: sum(underlyings, 'uaValue'),
+    optionVolume: sum(underlyings, 'volume'),
+    openInterest: sum(underlyings, 'oi'),
+  };
+}
+
+// ————————————————————————————————————————————————————————————————
 // تابلوی اختیارهای پرمعامله
 //
 // خواسته کاربر: بخشی از داشبورد که اختیارهای پرمعامله را بدهد، با سنجه

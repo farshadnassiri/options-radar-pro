@@ -12,6 +12,7 @@ import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { createOpenViewBaseSyncGate } from '/ui/open-view-selection.mjs';
+import { mountLiveMarketMap } from '/ui/live-market-map.mjs';
 
 // شش اسلات، و بدون چرخش. اسلات هفتم یعنی رنگی که با یکی از شش تای قبلی
 // اشتباه گرفته می‌شود؛ سریِ هفتم باید در «بقیه» جمع شود، نه رنگ تازه بگیرد.
@@ -755,10 +756,12 @@ function tapeRows(tape) {
 
 export async function mount(root, { state, api }) {
   root.innerHTML = `<section class="live-dashboard-hero"><div><p class="eyebrow">مرکز تصمیم‌گیری زنده بازار اختیار</p><h1>داشبورد معاملاتی لحظه‌ای</h1><p>هر جدول و نمودار از عکس واقعی بازار و معاملات امروز بازسازی می‌شود. درصد تغییر، آخرین قیمت را فقط با قیمت پایانی دیروز مقایسه می‌کند.</p></div><div><button type="button" class="ghost" id="dd-refresh">به‌روزرسانی اکنون</button><button type="button" class="ghost" id="dd-pause">توقف خودکار</button><span id="dd-status" role="status">در انتظار نخستین عکس…</span></div></section>
+    <div id="dd-market-explorer"></div>
+    <details class="decision-advanced"><summary><span><b>تحلیل‌های تکمیلی و همه نماهای قبلی</b><small>دامنه تخصصی، ۶۸ نمودار و جدول، دیده‌بان زنجیره و برترین موقعیت‌ها</small></span><i>باز کردن</i></summary><div class="decision-advanced-body">
     <section class="card decision-toolbar"><div class="decision-refresh-control"><label for="dd-interval">زمان به‌روزرسانی</label><input id="dd-interval" type="range" min="5" max="60" step="5"><output id="dd-interval-label"></output></div><div class="decision-scope-controls"><label>دامنه<select id="dd-scope"><option value="market">کل بازار</option><option value="underlying">یک نماد پایه</option><option value="expiry">یک سررسید از پایه</option><option value="contract">یک قرارداد از سررسید</option></select></label><label>نماد پایه<select id="dd-underlying"></select></label><label>سررسید<select id="dd-expiry"></select></label><label>قرارداد<select id="dd-contract"></select></label></div><p id="dd-scope-note" class="note">کل بازار اختیار</p></section>
     <div class="decision-shell"><aside class="decision-mode-rail" aria-label="حالت‌های تصمیم‌گیری">${DASHBOARD_MODES.map((mode, index) => `<button type="button" data-mode="${mode.id}" aria-pressed="${index === 0}"><b>${mode.title}</b><small>${mode.hint}</small><span>${mode.mod ? 'تب کامل' : `${fmt.int(mode.views.length)} نما`}</span></button>`).join('')}</aside><main class="decision-main">${DASHBOARD_MODES.map((mode, modeIndex) => mode.mod
       ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
-      : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</main></div>`;
+      : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</main></div></div></details>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
   let payload = { universe: { underlyings: [], expiries: [], marketExpiries: [], contracts: [] }, timeline: [], snapshot: { rows: [] } };
@@ -794,6 +797,22 @@ export async function mount(root, { state, api }) {
     const level = $('dd-scope').value;
     $('dd-underlying').disabled = level === 'market'; $('dd-expiry').disabled = !['expiry', 'contract'].includes(level); $('dd-contract').disabled = level !== 'contract';
   }
+
+  const marketExplorer = mountLiveMarketMap($('dd-market-explorer'), {
+    contractColumns: COLS_CONTRACT,
+    onScopeChange: async (pick) => {
+      $('dd-scope').value = pick.level;
+      fillSelectors(false);
+      if ([...$('dd-underlying').options].some((option) => option.value === pick.uaIns)) $('dd-underlying').value = pick.uaIns;
+      fillSelectors(true);
+      if ([...$('dd-expiry').options].some((option) => option.value === pick.endDate)) $('dd-expiry').value = pick.endDate;
+      fillSelectors(true);
+      if ([...$('dd-contract').options].some((option) => option.value === pick.contractIns)) $('dd-contract').value = pick.contractIns;
+      fillSelectors(true);
+      if (pick.level === 'contract') await fetchTape();
+      await paintView();
+    },
+  });
 
   function scopeLabel(scoped) {
     const pick = selected(), ua = payload.universe.underlyings.find((row) => String(row.ins) === pick.uaIns), contract = activeContract();
@@ -1106,7 +1125,7 @@ export async function mount(root, { state, api }) {
     try {
       const response = await fetch('/api/live-dashboard', { cache: 'no-store' }), next = await response.json();
       if (!response.ok || next.error) throw new Error(next.error || `HTTP ${response.status}`);
-      payload = next; fillSelectors(true); await fetchTape(); await paintView();
+      payload = next; fillSelectors(true); await marketExplorer.setUniverse(payload.universe, true, payload); await fetchTape(); await paintView();
       $('dd-status').textContent = `${faClock(new Date(next.at || Date.now()))} · ${fmt.int(next.universe?.contracts?.length || 0)} قرارداد · ${fmt.int(next.traded || 0)} پایه معامله‌شده`;
     } catch (error) {
       $('dd-status').textContent = `به‌روزرسانی ناموفق: ${error.message}`; logError('داشبورد تصمیم‌گیری', error);
@@ -1158,6 +1177,7 @@ export async function mount(root, { state, api }) {
   paintInterval(); await refresh();
   return () => {
     clearTimeout(timer); clearInterval(countdown);
+    marketExplorer.dispose();
     for (const dispose of embedded.values()) { try { dispose?.(); } catch { /* برچیدن نباید بترکد */ } }
   };
 }
