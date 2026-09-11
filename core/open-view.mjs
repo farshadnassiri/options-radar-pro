@@ -25,6 +25,34 @@ export const OPEN_VIEW_RELATIONS = [
   ['putValue', 'ارزش پوت'],
 ];
 
+/**
+ * پاسخ دسته‌ای نوار زنده را برای موتور درون‌روزی آماده می‌کند.
+ * خطای یک قرارداد، دادهٔ سالم بقیه را دور نمی‌ریزد؛ خطای پایه جدا گزارش
+ * می‌شود چون نمودارهای IV و فاصله بدون قیمت واقعی پایه کامل نیستند.
+ */
+export function liveTradeBatch(items = {}, date = 0, baseIns = '') {
+  const tradesByKey = {};
+  let failed = 0, trades = 0, tradedInstruments = 0, first = Infinity, last = -Infinity;
+  for (const [ins, item] of Object.entries(items || {})) {
+    const rows = Array.isArray(item?.rows) ? item.rows : [];
+    if (item?.error) failed += 1;
+    tradesByKey[`${date}:${ins}`] = rows;
+    trades += rows.length;
+    if (rows.length) tradedInstruments += 1;
+    for (const row of rows) {
+      const second = tradeSecond(row?.time);
+      if (!Number.isFinite(second)) continue;
+      first = Math.min(first, second); last = Math.max(last, second);
+    }
+  }
+  return {
+    tradesByKey, failed, trades, tradedInstruments,
+    first: Number.isFinite(first) ? first : NaN,
+    last: Number.isFinite(last) ? last : NaN,
+    baseFailed: Boolean(items?.[String(baseIns)]?.error),
+  };
+}
+
 export function optionBreakeven(kind, strike, premium) {
   const k = num(strike, NaN), p = num(premium, NaN);
   if (!(k > 0) || !(p > 0)) return NaN;

@@ -188,6 +188,11 @@ export const MARKET_MAP_METRICS = [
   { key: 'changePct', label: 'درصد آخرین معامله پایه', format: 'pct' },
 ];
 
+/** فیلتر نمایشی زنجیره؛ دادهٔ سمت پنهان حذف نمی‌شود و در universe می‌ماند. */
+export function filterContractsBySide(rows = [], side = 'all') {
+  return (rows || []).filter((row) => side === 'all' || row.kind === side);
+}
+
 const mapMetric = (key) => MARKET_MAP_METRICS.some((item) => item.key === key) ? key : 'value';
 
 /**

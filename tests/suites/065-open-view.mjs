@@ -4,7 +4,7 @@
 
 import { check, near, group, readSrc } from '../harness.mjs';
 import {
-  analyzeDailyOpenView, analyzeIntradayOpenView, movingAverage, optionBreakeven, pearson, relationMatrix, weightedMean,
+  analyzeDailyOpenView, analyzeIntradayOpenView, liveTradeBatch, movingAverage, optionBreakeven, pearson, relationMatrix, weightedMean,
 } from '../../core/open-view.mjs';
 import { toEnDigits } from '../../ui/fmt.mjs';
 import { buildOpenViewWorkbook } from '../../ui/open-view-export.mjs';
@@ -94,6 +94,14 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
     near(liveIntraday64.rows[0].basePrice, 110) && near(liveIntraday64.rows[0].callBreakeven, 114));
   check('در نمای زنده وزن ارزش هنوز جمع واقعی همه معاملات است',
     liveIntraday64.rows[0].callValue === 34000);
+  const partialLive64 = liveTradeBatch({
+    1: { rows: [trade(90100, 100, 10)] },
+    11: { rows: [trade(90200, 10, 2)] },
+    12: { rows: [], error: 'upstream' },
+  }, 20240101, '1');
+  check('خطای یک قرارداد نوار سالم بقیه را دور نمی‌ریزد',
+    partialLive64.failed === 1 && !partialLive64.baseFailed && partialLive64.trades === 2
+    && partialLive64.tradedInstruments === 2 && partialLive64.first === 32460 && partialLive64.last === 32520);
 
   const corr = pearson([{ a: 1, b: 2 }, { a: 2, b: 4 }, { a: 3, b: 6 }], 'a', 'b');
   check('همبستگی پیرسون همراه تعداد نمونه محاسبه می‌شود', near(corr.value, 1) && corr.samples === 3);
@@ -131,6 +139,13 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
   check('ریز روز بین تاریخی و امروز زنده عوض می‌شود و سقف درخواست رعایت می‌شود',
     ui64.includes('id="ov-day-source"') && ui64.includes("chunks(ids, 24)")
     && ui64.includes("priceBasis: live ? 'latest' : 'vwap'") && ui64.includes('liveDayOf'));
+  check('نمای زنده پیش‌فرض است، خودکار تازه می‌شود و از نخستین سطل هم نمودار می‌سازد',
+    ui64.includes('<option value="live" selected>') && ui64.includes('await loadDayIntraday()')
+    && ui64.includes('open-view-single-point') && !ui64.includes('rows.length < 2'));
+  const css64 = readSrc('../ui/style.css');
+  check('کادر اطلاعات نمودار هنگام هاور بالاتر از کارت‌های همسایه می‌آید',
+    css64.includes('.open-view-chart-grid > section:hover')
+    && css64.includes('.open-view-chart-stage:hover') && css64.includes('z-index: 40'));
   check('چرخه رفرش داشبورد، نگاه باز زنده را بدون نصب دوباره تازه می‌کند',
     liveDashboard64.includes('openViewController?.updateLive?.(payload)')
     && liveDashboard64.includes('openViewController?.dispose?.()'));

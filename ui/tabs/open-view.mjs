@@ -1,6 +1,6 @@
 import { buildChain, legContractSize } from '/core/chain.mjs';
 import { flattenActiveContracts, historyDateLabel, normalizeHistoryDate } from '/core/history.mjs';
-import { analyzeDailyOpenView, analyzeIntradayOpenView, relationMatrix } from '/core/open-view.mjs';
+import { analyzeDailyOpenView, analyzeIntradayOpenView, liveTradeBatch, relationMatrix } from '/core/open-view.mjs';
 import { liveDayOf } from '/core/live-day.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
 import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
@@ -82,7 +82,7 @@ function chart(host, sourceRows, series, {
 } = {}) {
   const visible = series.filter((item) => !hiddenSeries.has(item.key));
   const rows = sourceRows.filter((row) => visible.some((item) => Number.isFinite(row[item.key])));
-  if (rows.length < 2) { host.innerHTML = '<p class="empty-note">برای رسم نمودار دست‌کم دو مشاهده معتبر لازم است.</p>'; return; }
+  if (!rows.length) { host.innerHTML = '<p class="empty-note">هنوز مشاهده معتبر برای رسم نمودار نرسیده است.</p>'; return; }
   const bars = visible.filter((item) => item.kind === 'bar'), lines = visible.filter((item) => item.kind !== 'bar');
   const values = rows.flatMap((row) => visible.map((item) => row[item.key]).filter(Number.isFinite));
   let low = Math.min(...values), high = Math.max(...values);
@@ -91,7 +91,9 @@ function chart(host, sourceRows, series, {
   const padding = (high - low) * 0.08; low -= padding; high += padding;
   const W = 920, H = 330, L = 96, R = 26, T = 25, B = 62;
   const plotWidth = W - L - R;
-  const x = (index) => bars.length ? L + ((index + 0.5) / rows.length) * plotWidth : L + (index / Math.max(1, rows.length - 1)) * plotWidth;
+  const x = (index) => bars.length || rows.length === 1
+    ? L + ((index + 0.5) / rows.length) * plotWidth
+    : L + (index / (rows.length - 1)) * plotWidth;
   const y = (value) => T + ((high - value) / (high - low)) * (H - T - B);
   const ticks = Array.from({ length: 5 }, (_, index) => low + ((high - low) * index) / 4);
   const axis = (value) => percent ? `${fmt.pct(value)}٪` : fmt.money(value);
@@ -115,6 +117,11 @@ function chart(host, sourceRows, series, {
     });
     return `<path fill="none" stroke="${item.color}"${item.dashed ? ' stroke-dasharray="7 5"' : ''} d="${d.trim()}"/>`;
   }).join('');
+  // اولین سطل یک مسیر خطی نمی‌سازد، اما خودش داده معتبر است. نقطهٔ مستقل
+  // باعث می‌شود نمودار از اولین معامله واقعاً دیده شود، نه از سطل دوم.
+  const pointMarks = rows.length === 1 ? lines.map((item) => Number.isFinite(rows[0][item.key])
+    ? `<circle class="open-view-single-point" cx="${x(0)}" cy="${y(rows[0][item.key])}" r="5" fill="${item.color}"/>`
+    : '').join('') : '';
   const xIndexes = [...new Set([0, Math.floor((rows.length - 1) / 2), rows.length - 1])];
   const legend = series.map((item) => {
     const off = hiddenSeries.has(item.key);
@@ -130,7 +137,7 @@ function chart(host, sourceRows, series, {
     ${ticks.map((value) => `<line x1="${L}" x2="${W - R}" y1="${y(value)}" y2="${y(value)}" class="portfolio-grid"/><text x="${L - 9}" y="${y(value) + 4}" text-anchor="end">${axis(value)}</text>`).join('')}
     ${xIndexes.map((index) => `<text x="${x(index)}" y="${H - 24}" text-anchor="middle">${label(rows[index])}</text>`).join('')}
     <text class="axis-title" transform="translate(16 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle">${esc(yLabel)}</text>
-    ${columns}${paths}<g class="portfolio-cursor" hidden><line y1="${T}" y2="${H - B}"/><g></g></g><rect class="portfolio-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
+    ${columns}${paths}${pointMarks}<g class="portfolio-cursor" hidden><line y1="${T}" y2="${H - B}"/><g></g></g><rect class="portfolio-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
   </svg><div class="backtest-tip" hidden></div></div>`;
   const svg = host.querySelector('svg'), cursor = host.querySelector('.portfolio-cursor'), tip = host.querySelector('.backtest-tip');
   svg.addEventListener('pointermove', (event) => {
@@ -208,7 +215,7 @@ export async function mount(root, { state }) {
       <div id="ov-day-formulas" class="open-view-formula-grid"></div>
       <div class="section-head open-view-contract-head"><div><h3>قراردادها و سهم هرکدام در شاخص</h3><p>رنگ هر خانه متناسب با وزن همان قرارداد در سمت کال یا پوت است.</p></div><span id="ov-day-contract-count">—</span></div>
       <div id="ov-day-contracts" class="history-table-wrap"></div>
-      <div class="open-view-intraday-controls"><div><p class="eyebrow">درون‌روزی و لحظه‌ای</p><h3>ساخت نمودار از ریزمعامله واقعی</h3></div><label>منبع زمان<select id="ov-day-source"><option value="history">روز تاریخی انتخاب‌شده</option><option value="live">امروز تا همین لحظه</option></select></label><label>بازه زمانی<select id="ov-day-interval"><option value="5">۵ دقیقه</option><option value="15" selected>۱۵ دقیقه</option><option value="30">۳۰ دقیقه</option><option value="60">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="ov-day-intraday">محاسبه ریز این روز</button><b id="ov-day-status" role="status" aria-live="polite">هنوز محاسبه نشده است.</b></div>
+      <div class="open-view-intraday-controls"><div><p class="eyebrow">درون‌روزی و لحظه‌ای</p><h3>ساخت نمودار از ریزمعامله واقعی</h3></div><label>منبع زمان<select id="ov-day-source"><option value="live" selected>امروز؛ از اولین معامله تا اکنون</option><option value="history">روز تاریخی انتخاب‌شده</option></select></label><label>بازه زمانی<select id="ov-day-interval"><option value="5">۵ دقیقه</option><option value="15" selected>۱۵ دقیقه</option><option value="30">۳۰ دقیقه</option><option value="60">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="ov-day-intraday">به‌روزرسانی لحظه‌ای</button><b id="ov-day-status" role="status" aria-live="polite">پس از دریافت تاریخچه، نوار امروز خودکار ساخته می‌شود.</b></div>
       <div class="open-view-chart-grid"><section><div class="section-head"><h3>پایه و سربه‌سر در طول روز</h3><span id="ov-day-timeframe">—</span></div><div id="ov-day-price" class="open-view-chart"><p class="empty-note">تایم‌فریم را انتخاب و محاسبه را اجرا کن.</p></div></section><section><div class="section-head"><h3>فاصله درصدی از دو شاخص</h3><span>همان سطل زمانی</span></div><div id="ov-day-gap" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section><div class="section-head"><h3>شاخص اعمال وزنی در طول روز</h3><span>همان سطل زمانی</span></div><div id="ov-day-strike" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section><div class="section-head"><h3>پریمیوم وزنی در طول روز</h3><span>درصدی از قیمت پایه</span></div><div id="ov-day-premium" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section><section class="open-view-wide-card"><div class="section-head"><h3>IV وزنی در طول روز</h3><span>وزن ریزمعامله هر قرارداد</span></div><div id="ov-day-iv" class="open-view-chart"><p class="empty-note">هنوز محاسبه نشده است.</p></div></section></div>
     </section>
     <p class="history-caveat">این شاخص از معاملات مشاهده‌شده ساخته می‌شود و قیمت قابل اجرای هم‌زمان نیست. IV مدل بلک–شولز است و دامنه نوسان، توقف نماد و پرش قیمت را مدل نمی‌کند.</p>
@@ -217,7 +224,7 @@ export async function mount(root, { state }) {
   const $ = (id) => root.querySelector(`#${id}`);
   const status = $('ov-status'), baseSelect = $('ov-base');
   let chain = new Map(), ua = null, contracts = [], closedSeriesByIns = {}, seriesByIns = {}, daily = null, intraday = null;
-  let dailyRelations = [], intradayRelations = [], selectedDate = 0;
+  let dailyRelations = [], intradayRelations = [], selectedDate = 0, intradayRequest = 0;
   let liveRefreshBusy = false, lastLiveRefreshAt = 0, disposed = false;
   const tradeCache = new Map(), hiddenSeries = new Set();
   const setStatus = (text, bad = false) => { status.textContent = text; status.className = bad ? 'loss' : ''; };
@@ -242,6 +249,7 @@ export async function mount(root, { state }) {
   settings(false);
 
   function resetIntraday() {
+    intradayRequest += 1;
     intraday = null; intradayRelations = [];
     $('ov-day-status').textContent = 'هنوز محاسبه نشده است.'; $('ov-day-timeframe').textContent = '—';
     $('ov-day-price').innerHTML = '<p class="empty-note">تایم‌فریم را انتخاب و محاسبه را اجرا کن.</p>';
@@ -371,15 +379,18 @@ export async function mount(root, { state }) {
       const options = dates.map((date) => `<option value="${date}">${dateLabel(date)}</option>`).join('');
       $('ov-from').innerHTML = options; $('ov-to').innerHTML = options; $('ov-from').disabled = false; $('ov-to').disabled = false;
       $('ov-from').value = String(dates[Math.max(0, dates.length - 20)]); $('ov-to').value = String(dates.at(-1)); computeDaily();
+      if ($('ov-day-source').value === 'live') await loadDayIntraday();
     } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); }
     finally { $('ov-load').disabled = false; }
   }
 
   async function loadDayIntraday() {
-    if (!daily || !selectedDate) return;
+    if (!daily || !selectedDate) { $('ov-day-status').textContent = 'ابتدا تاریخچه نماد و یک سررسید را آماده کن.'; return; }
     const dayStatus = $('ov-day-status'), minutes = Number($('ov-day-interval').value), viewContracts = contractsInView();
     const live = $('ov-day-source').value === 'live';
     const cacheKey = `${selectedDate}:${selectedExpiry()}`;
+    const request = ++intradayRequest, requestedExpiry = selectedExpiry();
+    let marketCoverage = null;
     const model = settings(); if (!model) return;
     $('ov-day-intraday').disabled = true;
     dayStatus.textContent = live ? 'در حال دریافت همه ریزمعامله‌های امروز تا این لحظه…' : 'در حال دریافت ریزمعامله‌های همین روز…';
@@ -397,8 +408,14 @@ export async function mount(root, { state }) {
         if (!day.ok) throw new Error(`عکس بازار به امروز قابل انتساب نیست${day.why ? `؛ ${day.why}` : ''}`);
         analysisDate = day.date;
         const items = Object.assign({}, ...parts.map((part) => part.items || {}));
-        if (Object.values(items).some((item) => item.error)) throw new Error('دریافت ریزمعامله برخی نمادها ناموفق بود؛ دوباره به‌روزرسانی کن.');
-        tradesByKey = Object.fromEntries(Object.entries(items).map(([ins, item]) => [`${analysisDate}:${ins}`, item.rows || []]));
+        const batch = liveTradeBatch(items, analysisDate, ua.ins);
+        if (batch.baseFailed) throw new Error('ریزمعامله نماد پایه دریافت نشد؛ نمودارهای وابسته به پایه قابل ساخت نیستند.');
+        tradesByKey = batch.tradesByKey;
+        if (request !== intradayRequest || requestedExpiry !== selectedExpiry() || $('ov-day-source').value !== 'live') return;
+        marketCoverage = {
+          failed: batch.failed, trades: batch.trades,
+          tradedInstruments: batch.tradedInstruments, requested: ids.length, first: batch.first, last: batch.last,
+        };
       } else if (!tradesByKey) {
         const requests = [{ ins: String(ua.ins), date: String(selectedDate) }];
         for (const contract of viewContracts) {
@@ -411,19 +428,23 @@ export async function mount(root, { state }) {
         tradesByKey = Object.fromEntries(Object.entries(payload.items || {}).map(([key, item]) => [key, item.rows || []]));
         if (Object.values(tradesByKey).some((rows) => rows.length)) tradeCache.set(cacheKey, tradesByKey);
       }
+      if (request !== intradayRequest || requestedExpiry !== selectedExpiry()) return;
       intraday = analyzeIntradayOpenView({
         ua, contracts: viewContracts, dates: [analysisDate], tradesByKey, intervalMinutes: minutes,
         settings: model, priceBasis: live ? 'latest' : 'vwap',
       });
       intradayRelations = relationMatrix(intraday.rows); paintIntraday();
       if (live) paintLiveDetail(analysisDate);
+      const coverage = live && marketCoverage
+        ? ` · ${fmt.int(marketCoverage.trades)} ریزمعامله در ${fmt.int(marketCoverage.tradedInstruments)} از ${fmt.int(marketCoverage.requested)} ابزار${Number.isFinite(marketCoverage.first) ? ` · ${clock(marketCoverage.first)} تا ${clock(marketCoverage.last)}` : ''}${marketCoverage.failed ? ` · خطای ${fmt.int(marketCoverage.failed)} ابزار` : ''}`
+        : '';
       dayStatus.textContent = !intraday.rows.length
         ? 'برای این تاریخ و سررسید ریزمعامله معتبر دریافت نشد؛ تاریخ، سررسید و وضعیت منبع داده را بررسی کن.'
         : live
-        ? `${fmt.int(intraday.rows.length)} سطل زنده ${faDigits(minutes)} دقیقه‌ای از تازه‌ترین معامله‌ها ساخته شد.`
+        ? `${fmt.int(intraday.rows.length)} سطل زنده ${faDigits(minutes)} دقیقه‌ای از اولین معامله تا اکنون ساخته شد${coverage}.`
         : `${fmt.int(intraday.rows.length)} سطل ${faDigits(minutes)} دقیقه‌ای ساخته شد.`;
-    } catch (error) { dayStatus.textContent = errorText(error, 'ریزمعامله دریافت نشد.'); }
-    finally { $('ov-day-intraday').disabled = false; }
+    } catch (error) { if (request === intradayRequest) dayStatus.textContent = errorText(error, 'ریزمعامله دریافت نشد.'); }
+    finally { if (request === intradayRequest) $('ov-day-intraday').disabled = false; }
   }
 
   async function refreshLiveViews() {
@@ -445,19 +466,26 @@ export async function mount(root, { state }) {
   $('ov-basis').addEventListener('change', () => { if (daily) computeDaily(); });
   $('ov-from').addEventListener('change', () => { if (daily) computeDaily(); });
   $('ov-to').addEventListener('change', () => { if (daily) computeDaily(); });
-  $('ov-expiry').addEventListener('change', () => { selectedDate = viewRows().at(-1)?.date || 0; dailyRelations = relationMatrix(viewRows()); resetIntraday(); paintDaily(); });
+  $('ov-expiry').addEventListener('change', async () => {
+    selectedDate = viewRows().at(-1)?.date || 0; dailyRelations = relationMatrix(viewRows()); resetIntraday(); paintDaily();
+    if ($('ov-day-source').value === 'live') await loadDayIntraday();
+  });
   $('ov-apply-iv').addEventListener('click', () => { const model = settings(); if (!model) return; if (daily) computeDaily(); else setStatus('پارامترهای IV ثبت شد؛ پس از دریافت تاریخچه اعمال می‌شود.'); });
-  $('ov-day-interval').addEventListener('change', resetIntraday);
-  $('ov-day-source').addEventListener('change', () => {
+  $('ov-day-interval').addEventListener('change', async () => {
+    resetIntraday();
+    if ($('ov-day-source').value === 'live') await loadDayIntraday();
+  });
+  $('ov-day-source').addEventListener('change', async () => {
     resetIntraday();
     const live = $('ov-day-source').value === 'live';
     $('ov-day-intraday').textContent = live ? 'به‌روزرسانی لحظه‌ای' : 'محاسبه ریز این روز';
-    if (!live) paintDayDetail();
+    if (live) await loadDayIntraday(); else paintDayDetail();
   });
   $('ov-day-intraday').addEventListener('click', loadDayIntraday);
   $('ov-daily-table').addEventListener('click', (event) => {
     const row = event.target.closest('[data-day]'); if (!row) return;
     const next = Number(row.dataset.day); if (next !== selectedDate) { selectedDate = next; resetIntraday(); paintDaily(); }
+    if ($('ov-day-source').value === 'live') void loadDayIntraday();
     $('ov-day-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
   $('ov-daily-table').addEventListener('keydown', (event) => {

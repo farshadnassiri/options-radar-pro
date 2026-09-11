@@ -13,7 +13,7 @@ for (const row of [
   const nodes = points.map((p) => ({ dataset: { point: p.key }, classList: { toggle() {}, remove() {} } }));
   const button = {
     classList: { add() {} },
-    querySelector: (key) => key === 'svg' ? { getBoundingClientRect: () => ({ left: 0, top: 0, width: 600, height: 160 }) } : readout,
+    querySelector: (key) => key === 'svg' ? { getBoundingClientRect: () => ({ left: 0, top: 0, width: 600, height: 132 }) } : readout,
     querySelectorAll: () => nodes,
     addEventListener: (event, handler) => { handlers[event] = handler; },
   };

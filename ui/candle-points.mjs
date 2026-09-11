@@ -8,7 +8,9 @@ export function candlePoints(row) {
   const x = (value) => high > low ? 30 + ((value - low) / (high - low)) * 540 : 300;
   return Object.entries(labels).map(([key, label], index) => ({
     key, label, value: Number(row[key]), x: x(Number(row[key])),
-    y: [54, 24, 84, 114, high === low ? 140 : 54][index],
+    // پنج خط کوتاه همچنان قیمت‌های برابر را جدا می‌کنند، اما ارتفاع فشرده
+    // است تا هر قرارداد به یک کارت بلند و کشیده تبدیل نشود.
+    y: [48, 22, 70, 94, high === low ? 116 : 48][index],
   }));
 }
 
@@ -20,10 +22,10 @@ export function mountCandlePoints(button, row) {
   const points = candlePoints(row), first = points[1], last = points[2];
   const left = Math.min(first.x, last.x), width = Math.max(2, Math.abs(last.x - first.x));
   button.classList.add('candle-point-track');
-  button.innerHTML = `<svg viewBox="0 0 600 160" preserveAspectRatio="none" aria-hidden="true">
-    <line class="candle-wick" x1="${points[0].x}" x2="${points[4].x}" y1="54" y2="54"/>
-    <rect class="candle-real-body" x="${left}" y="44" width="${width}" height="20" rx="3"/>
-    ${points.map((p) => `<g class="candle-price-point" data-point="${p.key}"><line x1="${p.x}" x2="${p.x}" y1="54" y2="${p.y}"/><circle cx="${p.x}" cy="${p.y}" r="5"/><text x="${p.x}" y="${p.y - 11}" text-anchor="${p.x < 70 ? 'start' : p.x > 530 ? 'end' : 'middle'}">${p.label}</text></g>`).join('')}
+  button.innerHTML = `<svg viewBox="0 0 600 132" preserveAspectRatio="none" aria-hidden="true">
+    <line class="candle-wick" x1="${points[0].x}" x2="${points[4].x}" y1="48" y2="48"/>
+    <rect class="candle-real-body" x="${left}" y="40" width="${width}" height="16" rx="3"/>
+    ${points.map((p) => `<g class="candle-price-point" data-point="${p.key}"><line x1="${p.x}" x2="${p.x}" y1="48" y2="${p.y}"/><circle cx="${p.x}" cy="${p.y}" r="4.5"/><text x="${p.x}" y="${p.y - 9}" text-anchor="${p.x < 70 ? 'start' : p.x > 530 ? 'end' : 'middle'}">${p.label}</text></g>`).join('')}
   </svg><span class="candle-point-readout" aria-live="polite">روی نقاط کندل حرکت کن · با کلیدهای جهت بین قیمت‌ها جابه‌جا شو</span>`;
   const output = button.querySelector('.candle-point-readout');
   let active = null;
@@ -36,7 +38,7 @@ export function mountCandlePoints(button, row) {
   button.addEventListener('pointermove', (event) => {
     const rect = button.querySelector('svg').getBoundingClientRect();
     const target = event.target.closest?.('[data-point]');
-    show(points.find((p) => p.key === target?.dataset.point) || nearestCandlePoint(points, (event.clientX - rect.left) * 600 / rect.width, (event.clientY - rect.top) * 160 / rect.height));
+    show(points.find((p) => p.key === target?.dataset.point) || nearestCandlePoint(points, (event.clientX - rect.left) * 600 / rect.width, (event.clientY - rect.top) * 132 / rect.height));
   });
   button.addEventListener('focus', () => show(active || last));
   button.addEventListener('keydown', (event) => {

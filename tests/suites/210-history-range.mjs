@@ -2,7 +2,8 @@
 
 import { check, group, readSrc } from '../harness.mjs';
 import {
-  DEFAULT_PRESET, RANGE_PRESETS, buildLine, calendarDays, presetRange, rangeLabel, todayCompact,
+  DEFAULT_PRESET, RANGE_PRESETS, buildLine, calendarDays, comparableContractWindow,
+  presetRange, rangeLabel, todayCompact, tradingDatesInRange,
 } from '../../core/history-range.mjs';
 import { makeRosterFile, missingDays, rosterCovers } from '../../core/option-roster.mjs';
 
@@ -27,6 +28,28 @@ group('۲۱۰-الف. بازه‌های آماده');
   check('مرز ماه درست رد می‌شود', calendarDays(20260227, 20260302).length === 4);
   check('برچسب بازه جلالی و با رقم فارسی است',
     /^[۰-۹]{4}\/[۰-۹]{2}\/[۰-۹]{2} تا [۰-۹]{4}\/[۰-۹]{2}\/[۰-۹]{2}$/.test(rangeLabel(y1)), rangeLabel(y1));
+  check('روزهای آزمون فقط داخل بازه می‌مانند و از نخستین تا آخرین مرتب‌اند',
+    tradingDatesInRange([20260909, 20260724, 20260725, 20260801, 20260910, 20260725],
+      { from: 20260725, to: 20260909 }).join(',') === '20260725,20260801,20260909');
+
+  // نمونهٔ واقعی فزر: نسل اول در ۳ مرداد قیمت دارد و تا ۲۵ مرداد زنده است؛
+  // نسل دوم در ۱۸ شهریور قیمت دارد ولی در روز ورود هنوز معامله نشده بود.
+  const tape = {
+    // بالادست پس از سررسید هم آخرین قیمت را حمل کرده؛ قابل استفاده نیست.
+    oldCall: { 20260725: 10, 20260816: 14, 20260909: 14 },
+    nextCall: { 20260909: 22 },
+  };
+  const expiry = { oldCall: 20260816, nextCall: 20261001 };
+  const comparable = comparableContractWindow({
+    dates: [20260725, 20260816, 20260909],
+    contractIns: ['oldCall', 'nextCall'],
+    baseHasPrice: () => true,
+    contractHasPrice: (ins, date) => Number.isFinite(tape[ins]?.[date]),
+    contractUsable: (ins, date) => expiry[ins] >= date,
+  });
+  check('خروج از آخرین روزِ دارای قرارداد مشترک می‌آید، نه انتهای تقویمیِ خالی',
+    comparable.entry === 20260725 && comparable.exit === 20260816
+    && comparable.exits.join(',') === '20260725,20260816', JSON.stringify(comparable));
 }
 
 group('۲۱۰-ب. جملهٔ پیشرفتِ ساخت');
