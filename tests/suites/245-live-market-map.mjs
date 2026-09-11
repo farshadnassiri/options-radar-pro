@@ -2,7 +2,7 @@
 
 import { check, near, group, readSrc } from '../harness.mjs';
 import {
-  MARKET_MAP_METRICS, marketMapRows, marketMapSummary,
+  filterContractsBySide, MARKET_MAP_METRICS, marketMapRows, marketMapSummary,
 } from '../../core/decision-dashboard.mjs';
 
 group('۲۴۵. نقشهٔ بازار و کاوش زنجیره');
@@ -35,6 +35,11 @@ check('جمع‌بندی بازار، ارزش کال و پوت و خود پای
   && summary245.optionValue === 1000 && summary245.underlyingValue === 5000);
 check('قرارداد معامله‌شده و مظنه دوطرفه از خود قرارداد شمرده می‌شوند',
   summary245.tradedContracts === 2 && summary245.twoSided === 1 && summary245.contracts === 3);
+const sides245 = [{ kind: 'call', ins: '1' }, { kind: 'put', ins: '2' }];
+check('زنجیره می‌تواند کال، پوت یا هر دو را بدون دست‌زدن به منبع جدا کند',
+  filterContractsBySide(sides245, 'all').length === 2
+  && filterContractsBySide(sides245, 'call')[0].ins === '1'
+  && filterContractsBySide(sides245, 'put')[0].ins === '2');
 
 const mapUi245 = readSrc('../ui/live-market-map.mjs');
 const dashboard245 = readSrc('../ui/tabs/live-market-dashboard.mjs');
@@ -56,6 +61,9 @@ check('بازه امروز به کندل تعاملی تبدیل شده و در�
 check('زنجیره از کاتالوگ ستون مشترک استفاده می‌کند و انتخاب قرارداد دارد',
   mapUi245.includes('contractColumns.filter') && mapUi245.includes('onPick: (row) => selectContract(row.ins)')
   && dashboard245.includes('contractColumns: COLS_CONTRACT'));
+check('زنجیره سه انتخاب مستقل هر دو، کال و پوت دارد',
+  ['all', 'call', 'put'].every((side) => mapUi245.includes(`data-lmm-chain-side="${side}"`))
+  && mapUi245.includes('filterContractsBySide(contracts(), chainSide)'));
 check('نقشه نمای اصلی است و همه نماهای قبلی پشت بخش تکمیلی حفظ شده‌اند',
   dashboard245.indexOf('id="dd-market-explorer"') < dashboard245.indexOf('class="decision-advanced"')
   && dashboard245.includes('DASHBOARD_MODES.map') && dashboard245.includes('mountLiveMarketMap'));

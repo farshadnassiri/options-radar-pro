@@ -56,6 +56,41 @@ export function calendarDays(from, to) {
 
 export const rangeLabel = ({ from, to }) => `${faDigits(expiryLabel(from))} تا ${faDigits(expiryLabel(to))}`;
 
+/** روزهای معاملاتی واقعیِ سری که داخل بازه انتخابی کاربر می‌مانند. */
+export function tradingDatesInRange(dates = [], range = {}) {
+  const from = num(range.from, 0), to = num(range.to, 0);
+  if (!(from > 0) || !(to >= from)) return [];
+  return [...new Set((dates || []).map((value) => Math.trunc(num(value, 0)))
+    .filter((value) => value >= from && value <= to))].sort((a, b) => a - b);
+}
+
+/**
+ * نخستین روز ورود و آخرین روز خروجی را برمی‌گرداند که دست‌کم یک قرارداد
+ * واقعاً در هر دو روز قیمت دارد. صرفِ داشتن قیمت نماد پایه کافی نیست: در
+ * بازه‌هایی که یک نسل قرارداد سررسید و نسل بعدی تازه فهرست می‌شود، دو مرز
+ * تقویمی می‌توانند هیچ قرارداد مشترکی نداشته باشند.
+ */
+export function comparableContractWindow({
+  dates = [], contractIns = [], preferredEntry = 0, preferredExit = 0,
+  baseHasPrice = () => false, contractHasPrice = () => false,
+  contractUsable = () => true,
+} = {}) {
+  const ordered = [...new Set((dates || []).map((value) => Math.trunc(num(value, 0))).filter(Boolean))]
+    .sort((a, b) => a - b);
+  const instruments = [...new Set((contractIns || []).map(String).filter(Boolean))];
+  const entries = ordered.filter((date) => baseHasPrice(date, 'entry')
+    && instruments.some((ins) => contractUsable(ins, date) && contractHasPrice(ins, date, 'entry')));
+  const wantedEntry = Math.trunc(num(preferredEntry, 0));
+  const entry = entries.includes(wantedEntry) ? wantedEntry : (entries[0] || 0);
+  const entered = instruments.filter((ins) => entry && contractUsable(ins, entry)
+    && contractHasPrice(ins, entry, 'entry'));
+  const exits = ordered.filter((date) => date >= entry && baseHasPrice(date, 'exit')
+    && entered.some((ins) => contractUsable(ins, date) && contractHasPrice(ins, date, 'exit')));
+  const wantedExit = Math.trunc(num(preferredExit, 0));
+  const exit = exits.includes(wantedExit) ? wantedExit : (exits.at(-1) || 0);
+  return { entries, entry, exits, exit, entered };
+}
+
 /** ورود مستقیمِ تاریخ شمسی؛ تبدیل رفت‌وبرگشت، روز نامعتبر را رد می‌کند. */
 export function parseJalaliRange(fromText, toText, maxDate = todayCompact()) {
   const parse = (text) => {

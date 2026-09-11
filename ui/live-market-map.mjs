@@ -5,7 +5,7 @@ import { mountCandlePoints } from './candle-points.mjs';
 import { makeTable } from './table.mjs';
 import { mountChart, chartFormat } from './chart-host.mjs';
 import { historyDateLabel } from '../core/history.mjs';
-import { MARKET_MAP_METRICS, marketMapRows, marketMapSummary } from '../core/decision-dashboard.mjs';
+import { filterContractsBySide, MARKET_MAP_METRICS, marketMapRows, marketMapSummary } from '../core/decision-dashboard.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'\"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;',
@@ -53,7 +53,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       <div class="lmm-expiry-step" data-lmm-expiry-step hidden><div class="lmm-step-head"><h3>سررسیدها</h3><span>هر سررسید، آمار مستقل و زنجیره خودش را دارد.</span></div><div class="lmm-expiries" data-lmm-expiries></div></div>
       <div class="lmm-expiry-info" data-lmm-expiry-info></div>
       <section class="lmm-day-range" data-lmm-day-range hidden><div class="lmm-step-head"><div><h3>کندل قیمت امروز قراردادها</h3><span>سایه: کمترین تا بیشترین · بدنه: اولین تا آخرین · لوزی: قیمت پایانی</span></div><div class="lmm-range-sort" data-lmm-range-sort role="group" aria-label="مرتب‌سازی نمودار کندلی روزانه"></div></div><div data-lmm-range-status class="note"></div><div data-lmm-range-chart></div></section>
-      <div class="lmm-chain-step" data-lmm-chain-step hidden><div class="lmm-step-head"><h3>زنجیره قرارداد</h3><span>روی «ستون‌ها» بزن تا هر داده‌ای را اضافه یا حذف کنی؛ روی ردیف بزن تا جزئیات قرارداد باز شود.</span></div><div data-lmm-chain></div></div>
+      <div class="lmm-chain-step" data-lmm-chain-step hidden><div class="lmm-step-head"><div><h3>زنجیره قرارداد</h3><span data-lmm-chain-count>کال و پوت این سررسید</span></div><div class="lmm-chain-kind" data-lmm-chain-kind role="group" aria-label="نوع قراردادهای زنجیره"><button type="button" data-lmm-chain-side="all">هر دو</button><button type="button" data-lmm-chain-side="call">فقط کال</button><button type="button" data-lmm-chain-side="put">فقط پوت</button></div></div><p class="note">روی «ستون‌ها» بزن تا هر داده‌ای را اضافه یا حذف کنی؛ روی ردیف بزن تا جزئیات قرارداد باز شود.</p><div data-lmm-chain></div></div>
       <div class="lmm-contract-detail" data-lmm-contract-detail></div>
     </section>`;
 
@@ -78,6 +78,8 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   if (!CONTRACT_MAP_METRICS.some((item) => item.key === contractMetric)) contractMetric = 'value';
   let rangeSort = localStorage.getItem('options-radar:day-range-sort') || 'value';
   if (!['value', 'volume', 'oi'].includes(rangeSort)) rangeSort = 'value';
+  let chainSide = localStorage.getItem('options-radar:market-map-chain-side') || 'all';
+  if (!['all', 'call', 'put'].includes(chainSide)) chainSide = 'all';
   let uaIns = '', endDate = '', contractIns = '', mapHandle = null, rangeRequest = 0;
   let marketContext = {};
   const rangeCache = new Map();
@@ -94,6 +96,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   const underlyings = () => universe.underlyings || [];
   const expiries = () => (universe.expiries || []).filter((row) => String(row.uaIns) === uaIns).sort((a, b) => Number(a.days) - Number(b.days));
   const contracts = () => (universe.contracts || []).filter((row) => String(row.uaIns) === uaIns && String(row.endDate) === endDate);
+  const visibleContracts = () => filterContractsBySide(contracts(), chainSide);
   const selectedUa = () => underlyings().find((row) => String(row.ins) === uaIns);
   const selectedExpiry = () => expiries().find((row) => String(row.endDate) === endDate);
   const selectedContract = () => contracts().find((row) => String(row.ins) === contractIns);
@@ -172,9 +175,18 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       ${stat('IV وزنی', Number.isFinite(ex.ivPct) ? `${fmt.pct(ex.ivPct)}٪` : '—', `میانه فاصله مظنه ${fmt.pct(ex.spreadPct)}٪`)}
     </div>`;
     chainStep.hidden = false;
-    chainTable.set(contracts().map(contractRow));
+    paintChain();
     paintContract();
     loadDailyRanges();
+  }
+
+  function paintChain() {
+    const rows = visibleContracts();
+    root.querySelectorAll('[data-lmm-chain-side]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.lmmChainSide === chainSide)));
+    root.querySelector('[data-lmm-chain-count]').textContent = chainSide === 'all'
+      ? `${fmt.int(rows.length)} قرارداد کال و پوت`
+      : `${fmt.int(rows.length)} قرارداد ${chainSide === 'call' ? 'کال' : 'پوت'}`;
+    chainTable.set(rows.map(contractRow));
   }
 
   function paintContract() {
@@ -385,6 +397,13 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   expiryRail.addEventListener('click', (event) => {
     const button = event.target.closest('[data-lmm-expiry]');
     if (button) selectExpiry(button.dataset.lmmExpiry);
+  });
+  root.querySelector('[data-lmm-chain-kind]').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-lmm-chain-side]');
+    if (!button) return;
+    chainSide = button.dataset.lmmChainSide;
+    localStorage.setItem('options-radar:market-map-chain-side', chainSide);
+    paintChain();
   });
 
   return {

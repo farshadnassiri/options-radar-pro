@@ -10,6 +10,7 @@ import {
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { comparableContractWindow, tradingDatesInRange } from '/core/history-range.mjs';
 import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { SETTINGS_CHANGED_EVENT } from '/ui/settings-sync.mjs';
@@ -565,15 +566,25 @@ export async function mount(root, { state, api }) {
 
   function refreshDates() {
     const entryBasis = entryRail.dataset.value || 'LAST', exitBasis = exitRail.dataset.value || 'LAST';
-    const entries = baseDates.filter((date) => Number.isFinite(historyPrice(rowAt(ua.ins, date), entryBasis)));
-    const oldEntry = Number($('pb-entry-date').dataset.value);
-    const entry = entries.includes(oldEntry) ? oldEntry : entries[Math.max(0, entries.length - 8)];
-    const exits = baseDates.filter((date) => date >= entry && Number.isFinite(historyPrice(rowAt(ua.ins, date), exitBasis)));
-    const oldExit = Number($('pb-exit-date').dataset.value);
-    const exit = exits.includes(oldExit) ? oldExit : exits[Math.min(exits.length - 1, 5)];
+    const contracts = flattenActiveContracts(ua, state.settings.blockedExpiries);
+    const contractByIns = new Map(contracts.map((contract) => [String(contract.ins), contract]));
+    const window = comparableContractWindow({
+      dates: baseDates,
+      contractIns: contracts.map((contract) => contract.ins),
+      preferredEntry: Number($('pb-entry-date').dataset.value),
+      preferredExit: Number($('pb-exit-date').dataset.value),
+      baseHasPrice: (date, side) => Number.isFinite(historyPrice(rowAt(ua.ins, date), side === 'entry' ? entryBasis : exitBasis)),
+      contractHasPrice: (ins, date, side) => Number.isFinite(historyPrice(rowAt(ins, date), side === 'entry' ? entryBasis : exitBasis)),
+      // منبع روزانه برای قرارداد سررسیدشده گاهی آخرین قیمت را با حجم صفر
+      // تا روزهای بعد تکرار می‌کند. آن ردیف قیمت تازه نیست و موتور هم نتیجه
+      // را در روزی پس از سررسید نمی‌پذیرد؛ تقویم باید همان قاعده را داشته باشد.
+      contractUsable: (ins, date) => (contractByIns.get(String(ins))?.expiry || 0) >= date,
+    });
+    const { entries, entry, exits, exit } = window;
     mountDateWheel($('pb-entry-date'), entries, entry, () => refreshDates(), { empty: 'روز دارای قیمت پایه پیدا نشد.' });
     mountDateWheel($('pb-exit-date'), exits, exit, (date) => { $('pb-exit-market').textContent = marketText(date); }, { empty: 'روز دارای قیمت پایه پیدا نشد.' });
     $('pb-entry-market').textContent = marketText(entry); $('pb-exit-market').textContent = marketText(exit);
+    return window;
   }
 
   /**
@@ -670,10 +681,17 @@ export async function mount(root, { state, api }) {
           // روز جاری پس از فهرست بسته‌شده می‌نشیند، نه به‌جای آن. اگر نچسبد،
           // همان سری‌های بسته‌شده برمی‌گردند و رفتار دقیقاً قبلی می‌ماند.
           await applyScope();
-          baseDates = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
-          if (!baseDates.length) throw new Error('برای نماد پایه تاریخچه‌ای دریافت نشد');
-          $('pb-work').hidden = false; refreshDates();
-          setStatus(`${fmt.int(baseDates.length)} روز معاملاتی آماده است.`);
+          baseDates = tradingDatesInRange(
+            (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)),
+            rangeUi.range,
+          );
+          if (!baseDates.length) throw new Error('برای نماد پایه در بازه انتخابی روز معاملاتی قیمت‌دار دریافت نشد');
+          $('pb-work').hidden = false;
+          const window = refreshDates();
+          const clipped = window.exit && window.exit < rangeUi.range.to;
+          setStatus(clipped
+            ? `${fmt.int(baseDates.length)} روز معاملاتی داخل بازه آماده است؛ پایان آزمون روی ${faDigits(historyDateLabel(window.exit))} قرار گرفت، چون پس از آن هیچ قراردادِ روز ورود قیمت مشترک ندارد.`
+            : `${fmt.int(baseDates.length)} روز معاملاتی داخل بازه آماده است؛ ورود روی نخستین روز و سنجش روی آخرین روز قابل‌مقایسه قرار گرفت.`);
         } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); }
       } while (historyReloadRequested);
     } finally {
