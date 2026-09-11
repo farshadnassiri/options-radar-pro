@@ -3025,20 +3025,24 @@ td.gain, dd.gain { color: var(--gain); }
 .lmm-range-stats .loss, .lmm-range-popover .loss { color: var(--loss); }
 .lmm-range-track { position: relative; display: block; width: auto; height: 30px; margin-inline: 9px; padding: 0; border: 0; background: none; color: inherit; cursor: crosshair; }
 .lmm-range-track:focus-visible { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: var(--radius-sm); }
-.lmm-range-track i { position: absolute; display: block; }
-.lmm-range-rail { inset-inline: 0; top: 14px; height: 3px; border-radius: 2px; background: var(--line-strong); opacity: .75; }
-.lmm-range-body { inset-inline-start: var(--range-left); top: 7px; width: var(--range-width); height: 17px; border: 2px solid color-mix(in srgb, var(--on-accent) 70%, transparent); border-radius: 3px; background: var(--accent); box-shadow: var(--shadow-xs); }
-.lmm-range-list article.gain .lmm-range-body { background: var(--gain); }
-.lmm-range-list article.loss .lmm-range-body { background: var(--loss); }
-.lmm-range-first, .lmm-range-last { top: 7px; inset-inline-start: var(--range-at); width: 3px; height: 17px; transform: translateX(50%); background: var(--ink); }
-.lmm-range-last { width: 11px; height: 11px; top: 10px; border: 2px solid var(--on-accent); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--panel); }
-.lmm-range-close { top: 10px; inset-inline-start: var(--range-at); width: 10px; height: 10px; transform: translateX(50%) rotate(45deg); background: var(--warn); box-shadow: 0 0 0 2px var(--panel); }
-.lmm-range-popover { position: absolute; z-index: 8; inset-block-end: calc(100% + 8px); left: var(--tip-at, 50%); display: grid; gap: 4px; min-width: 265px; padding: 9px 11px; transform: translateX(-50%) translateY(5px); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); box-shadow: var(--shadow-lg); color: var(--ink-2); font-size: var(--fs-xs); text-align: start; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity var(--motion-fast), transform var(--motion-fast); }
-.lmm-range-popover b { color: var(--ink); }
-.lmm-range-popover small { color: var(--muted); }
-.lmm-range-track:hover .lmm-range-popover, .lmm-range-track:focus-visible .lmm-range-popover, .lmm-range-track[aria-expanded="true"] .lmm-range-popover { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
 .lmm-range-list article footer { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; color: var(--muted); font-size: var(--fs-3xs); text-align: center; }
 .decision-advanced { margin-top: 18px; }
+.lmm-range-track.candle-point-track { height: auto; min-height: 156px; margin: 0; min-width: 0; border-radius: 12px; background: var(--panel-2); overflow: hidden; }
+.candle-point-track svg { display: block; width: 100%; height: 115px; direction: ltr; }
+.candle-wick { stroke: var(--muted); stroke-width: 2; }
+.candle-real-body { fill: var(--accent); stroke: var(--accent); stroke-width: 2; }
+.gain .candle-real-body { fill: color-mix(in srgb, var(--gain) 18%, var(--panel)); stroke: var(--gain); }
+.loss .candle-real-body { fill: var(--loss); stroke: var(--loss); }
+.candle-price-point line { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.candle-price-point circle { fill: var(--panel); stroke: var(--accent); stroke-width: 2; transition: r .15s, fill .15s; }
+.candle-price-point text { fill: var(--muted); font: 12px var(--sans); }
+.candle-point-track:hover circle, .candle-point-track:focus-visible circle { r: 7; }
+.candle-price-point.is-active circle { r: 9; fill: var(--accent); stroke: var(--on-accent); stroke-width: 3; }
+.candle-price-point.is-active text { fill: var(--ink); font-weight: 800; }
+.candle-point-readout { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 5px 12px; min-height: 36px; padding: 4px 8px; border-top: 1px solid var(--line-soft); font-size: var(--fs-xs); color: var(--muted); }
+.candle-point-readout strong { color: var(--ink); }
+.candle-point-readout .gain { color: var(--gain); }
+.candle-point-readout .loss { color: var(--loss); }
 .decision-advanced > summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 17px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-2xs); cursor: pointer; list-style: none; }
 .decision-advanced > summary::-webkit-details-marker { display: none; }
 .decision-advanced > summary span { display: grid; gap: 4px; }

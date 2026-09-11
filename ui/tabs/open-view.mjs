@@ -1,5 +1,5 @@
 import { buildChain, legContractSize } from '/core/chain.mjs';
-import { flattenActiveContracts, historyDateLabel, indexHistory, normalizeHistoryDate } from '/core/history.mjs';
+import { flattenActiveContracts, historyDateLabel, normalizeHistoryDate } from '/core/history.mjs';
 import { analyzeDailyOpenView, analyzeIntradayOpenView, relationMatrix } from '/core/open-view.mjs';
 import { liveDayOf } from '/core/live-day.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
@@ -397,17 +397,19 @@ export async function mount(root, { state }) {
         if (!day.ok) throw new Error(`عکس بازار به امروز قابل انتساب نیست${day.why ? `؛ ${day.why}` : ''}`);
         analysisDate = day.date;
         const items = Object.assign({}, ...parts.map((part) => part.items || {}));
+        if (Object.values(items).some((item) => item.error)) throw new Error('دریافت ریزمعامله برخی نمادها ناموفق بود؛ دوباره به‌روزرسانی کن.');
         tradesByKey = Object.fromEntries(Object.entries(items).map(([ins, item]) => [`${analysisDate}:${ins}`, item.rows || []]));
       } else if (!tradesByKey) {
         const requests = [{ ins: String(ua.ins), date: String(selectedDate) }];
-        const optionIndexes = new Map(viewContracts.map((contract) => [String(contract.ins), indexHistory(seriesByIns[String(contract.ins)] || [])]));
         for (const contract of viewContracts) {
-          const row = optionIndexes.get(String(contract.ins))?.get(selectedDate);
-          if ((Number(row?.value) > 0 || Number(row?.vol) > 0) && contract.size > 0) requests.push({ ins: String(contract.ins), date: String(selectedDate) });
+          // داده روزانه ناقص، دلیل حذف درخواست ریزمعامله نیست.
+          if (contract.size > 0 && normalizeHistoryDate(contract.expiry) >= selectedDate) requests.push({ ins: String(contract.ins), date: String(selectedDate) });
         }
         const response = await fetch('/api/trades/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests }) }), payload = await response.json();
         if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
-        tradesByKey = Object.fromEntries(Object.entries(payload.items || {}).map(([key, item]) => [key, item.rows || []])); tradeCache.set(cacheKey, tradesByKey);
+        if (Object.values(payload.items || {}).some((item) => item.error)) throw new Error('دریافت ریزمعامله برخی نمادها ناموفق بود؛ این وضعیت به معنی نبود معامله نیست.');
+        tradesByKey = Object.fromEntries(Object.entries(payload.items || {}).map(([key, item]) => [key, item.rows || []]));
+        if (Object.values(tradesByKey).some((rows) => rows.length)) tradeCache.set(cacheKey, tradesByKey);
       }
       intraday = analyzeIntradayOpenView({
         ua, contracts: viewContracts, dates: [analysisDate], tradesByKey, intervalMinutes: minutes,
@@ -415,7 +417,9 @@ export async function mount(root, { state }) {
       });
       intradayRelations = relationMatrix(intraday.rows); paintIntraday();
       if (live) paintLiveDetail(analysisDate);
-      dayStatus.textContent = live
+      dayStatus.textContent = !intraday.rows.length
+        ? 'برای این تاریخ و سررسید ریزمعامله معتبر دریافت نشد؛ تاریخ، سررسید و وضعیت منبع داده را بررسی کن.'
+        : live
         ? `${fmt.int(intraday.rows.length)} سطل زنده ${faDigits(minutes)} دقیقه‌ای از تازه‌ترین معامله‌ها ساخته شد.`
         : `${fmt.int(intraday.rows.length)} سطل ${faDigits(minutes)} دقیقه‌ای ساخته شد.`;
     } catch (error) { dayStatus.textContent = errorText(error, 'ریزمعامله دریافت نشد.'); }

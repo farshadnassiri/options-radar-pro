@@ -51,7 +51,7 @@ check('نمودار بازه، هر پنج قیمت و سه مبنای مرتب�
   ['کمینه', 'اولین', 'آخرین', 'پایانی', 'بیشینه'].every((label) => mapUi245.includes(label))
   && ['value', 'volume', 'oi'].every((key) => mapUi245.includes(`'${key}'`)));
 check('بازه امروز به کندل تعاملی تبدیل شده و درصد آخرین و پایانی را جدا نشان می‌دهد',
-  mapUi245.includes('کندل قیمت امروز قراردادها') && mapUi245.includes("addEventListener('pointermove'")
+  mapUi245.includes('کندل قیمت امروز قراردادها') && mapUi245.includes('mountCandlePoints')
   && mapUi245.includes('آخرین ${fmt.pct(lastPct)}٪') && mapUi245.includes('پایانی ${fmt.pct(closePct)}٪'));
 check('زنجیره از کاتالوگ ستون مشترک استفاده می‌کند و انتخاب قرارداد دارد',
   mapUi245.includes('contractColumns.filter') && mapUi245.includes('onPick: (row) => selectContract(row.ins)')
