@@ -1,6 +1,7 @@
 // مسیر اصلی رصد لحظه‌ای: نقشهٔ بازار ← نماد پایه ← سررسید ← قرارداد.
 
 import { fmt, faDigits } from './fmt.mjs';
+import { mountCandlePoints } from './candle-points.mjs';
 import { makeTable } from './table.mjs';
 import { mountChart, chartFormat } from './chart-host.mjs';
 import { historyDateLabel } from '../core/history.mjs';
@@ -293,8 +294,6 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     });
   }
 
-  const clamp = (value) => Math.max(0, Math.min(100, value));
-  const rangePosition = (value, low, high) => high > low ? clamp(((value - low) / (high - low)) * 100) : 50;
   const pctVsYday = (value, yday) => Number(value) > 0 && Number(yday) > 0 ? ((Number(value) / Number(yday)) - 1) * 100 : NaN;
 
   function paintDailyRanges() {
@@ -313,14 +312,11 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       .sort((a, b) => Number(b[rangeSort]) - Number(a[rangeSort]) || a.name.localeCompare(b.name, 'fa'));
     rangeStatus.textContent = `${fmt.int(rows.length)} قرارداد دارای بازه معتبر از ${fmt.int(contracts().length)} قرارداد · مرتب بر ${labels[rangeSort]}`;
     if (!rows.length) { rangeChart.innerHTML = '<p class="empty-note">بالادست برای قراردادهای این سررسید بازه معتبر امروز برنگرداند.</p>'; return; }
-    rangeChart.innerHTML = `<div class="lmm-range-legend"><span><i class="rail"></i>سایه کمترین تا بیشترین</span><span><i class="body"></i>بدنه اولین تا آخرین</span><span><i class="last"></i>آخرین</span><span><i class="close"></i>پایانی</span><small>موس را روی هر کندل حرکت بده تا همه قیمت‌ها دیده شوند؛ کلیک، جزئیات را باز نگه می‌دارد.</small></div><div class="lmm-range-list">${rows.map((row) => {
+    rangeChart.innerHTML = `<div class="lmm-range-legend"><span>سایه: کمینه تا بیشینه</span><span>بدنه: اولین تا آخرین</span><span>نقاط: پنج قیمت مستقل</span><small>موس را روی هر کندل حرکت بده تا همه قیمت‌ها دیده شوند؛ کلیک، جزئیات را باز نگه می‌دارد.</small></div><div class="lmm-range-list">${rows.map((row) => {
       const low = Number(row.low), high = Number(row.high), first = Number(row.first), last = Number(row.last), close = Number(row.close);
-      const firstAt = rangePosition(first, low, high), lastAt = rangePosition(last, low, high), closeAt = rangePosition(close, low, high);
-      const left = Math.min(firstAt, lastAt), width = Math.max(2, Math.abs(lastAt - firstAt));
       const rankValue = rangeSort === 'value' ? fmt.money(row.value) : fmt.int(row[rangeSort]);
-      const change = first > 0 ? ((last / first) - 1) * 100 : NaN;
       const lastPct = pctVsYday(last, row.yday), closePct = pctVsYday(close, row.yday);
-      return `<article class="${tone(last - first)}" data-lmm-range-card="${esc(row.ins)}"><header><button type="button" data-lmm-range-contract="${esc(row.ins)}"><b>${esc(row.name)}</b><small>${kindLabel(row.kind)} · اعمال ${fmt.money(row.strike)}</small></button><div class="lmm-range-stats"><strong>${rankValue}</strong><span class="${tone(lastPct)}">آخرین ${fmt.pct(lastPct)}٪</span><span class="${tone(closePct)}">پایانی ${fmt.pct(closePct)}٪</span></div></header><button type="button" class="lmm-range-track" data-lmm-range-focus="${esc(row.ins)}" aria-expanded="false" aria-label="کندل روزانه ${esc(row.name)}؛ تغییر آخرین ${fmt.pct(lastPct)} درصد و پایانی ${fmt.pct(closePct)} درصد"><i class="lmm-range-rail"></i><i class="lmm-range-body" style="--range-left:${left.toFixed(2)}%;--range-width:${width.toFixed(2)}%"></i><i class="lmm-range-first" style="--range-at:${firstAt.toFixed(2)}%"></i><i class="lmm-range-last" style="--range-at:${lastAt.toFixed(2)}%"></i><i class="lmm-range-close" style="--range-at:${closeAt.toFixed(2)}%"></i><span class="lmm-range-popover"><b>${fmt.pct(change)}٪ از اولین تا آخرین</b><small>کمینه ${fmt.money(low)} · بیشینه ${fmt.money(high)}</small><small>اولین ${fmt.money(first)} · آخرین ${fmt.money(last)} · پایانی ${fmt.money(close)}</small><small><i class="${tone(lastPct)}">آخرین ${fmt.pct(lastPct)}٪</i> · <i class="${tone(closePct)}">پایانی ${fmt.pct(closePct)}٪</i> نسبت به دیروز</small></span></button><footer><span>کمینه ${fmt.money(low)}</span><span>اولین ${fmt.money(first)}</span><span>آخرین ${fmt.money(last)}</span><span>پایانی ${fmt.money(close)}</span><span>بیشینه ${fmt.money(high)}</span></footer></article>`;
+      return `<article class="${tone(last - first)}" data-lmm-range-card="${esc(row.ins)}"><header><button type="button" data-lmm-range-contract="${esc(row.ins)}"><b>${esc(row.name)}</b><small>${kindLabel(row.kind)} · اعمال ${fmt.money(row.strike)}</small></button><div class="lmm-range-stats"><strong>${rankValue}</strong><span class="${tone(lastPct)}">آخرین ${fmt.pct(lastPct)}٪</span><span class="${tone(closePct)}">پایانی ${fmt.pct(closePct)}٪</span></div></header><button type="button" class="lmm-range-track" data-lmm-range-focus="${esc(row.ins)}" aria-expanded="false" aria-label="کندل روزانه ${esc(row.name)}؛ تغییر آخرین ${fmt.pct(lastPct)} درصد و پایانی ${fmt.pct(closePct)} درصد"></button><footer><span>کمینه ${fmt.money(low)}</span><span>اولین ${fmt.money(first)}</span><span>آخرین ${fmt.money(last)}</span><span>پایانی ${fmt.money(close)}</span><span>بیشینه ${fmt.money(high)}</span></footer></article>`;
     }).join('')}</div>`;
     rangeChart.querySelectorAll('[data-lmm-range-contract]').forEach((button) => button.addEventListener('click', () => selectContract(button.dataset.lmmRangeContract)));
     rangeChart.querySelectorAll('[data-lmm-range-focus]').forEach((button) => button.addEventListener('click', () => {
@@ -328,11 +324,9 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       rangeChart.querySelectorAll('[data-lmm-range-focus]').forEach((item) => item.setAttribute('aria-expanded', 'false'));
       button.setAttribute('aria-expanded', String(!expanded));
     }));
-    rangeChart.querySelectorAll('[data-lmm-range-focus]').forEach((button) => button.addEventListener('pointermove', (event) => {
-      const box = button.getBoundingClientRect();
-      const at = box.width > 0 ? clamp(((event.clientX - box.left) / box.width) * 100) : 50;
-      button.style.setProperty('--tip-at', `${Math.max(18, Math.min(82, at)).toFixed(1)}%`);
-    }));
+    rangeChart.querySelectorAll('[data-lmm-range-focus]').forEach((button) => {
+      mountCandlePoints(button, rows.find((row) => String(row.ins) === button.dataset.lmmRangeFocus));
+    });
   }
 
   async function loadDailyRanges() {

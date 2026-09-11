@@ -72,7 +72,7 @@ check('نبض بعد از نقشه و پیش از نماهای قدیمی نصب
   && dashboard246.includes('/api/books?ins=') && dashboard246.includes('PULSE_BOOK_INTERVAL_MS'));
 check('نمودار بازه با کلیک باز می‌ماند و هر پنج قیمت را در جزئیات می‌گوید',
   rangeUi246.includes('data-lmm-range-focus') && rangeUi246.includes('aria-expanded="false"')
-  && rangeUi246.includes('lmm-range-popover')
+  && rangeUi246.includes('mountCandlePoints')
   && ['کمینه', 'اولین', 'آخرین', 'پایانی', 'بیشینه'].every((label) => rangeUi246.includes(label)));
 check('نمودارهای روند نقطهٔ انتهایی و راهنمای تعاملی دارند',
   chartUi246.includes('live-market-series-end') && chartUi246.includes("addEventListener('pointermove'"));
