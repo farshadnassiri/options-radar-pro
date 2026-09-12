@@ -6,7 +6,7 @@ import {
   STATUS_ACTIVE, STATUS_EXPIRED, STATUS_PENDING,
   compactOf, contractSide, contractStatus, daysApart, expandJalaliYear, expiryLabel,
   makeRosterFile, mergeRoster, normalizeFa, parseContractName, parseExpiry, pickUniverseSource,
-  rangeSummary, rosterAt, rosterChainRows, rosterCoverage, rosterInRange,
+  rangeSummary, repairRosterBaseNames, rosterAt, rosterChainRows, rosterCoverage, rosterInRange,
   rosterIntake, rosterNote, rosterRow, statusLabel,
 } from '../../core/option-roster.mjs';
 
@@ -55,6 +55,17 @@ group('۲۰۷-الف. خواندن نام قرارداد');
     parseContractName('اختیارخ اهرم-42,000-1404/04/08')?.strike === 42000);
   check('رقم فارسی هم خوانده می‌شود',
     parseContractName('اختیارخ اهرم-۴۲۰۰۰-۱۴۰۴/۰۴/۰۸')?.strike === 42000);
+  check('حرف تِ ابتدای پایهٔ عادی حذف نمی‌شود',
+    parseContractName('اختیارخ توان-12000-1405/07/26')?.base === 'توان'
+    && parseContractName('اختیارف توان-12000-1405/07/26')?.base === 'توان'
+    && parseContractName('اختیارف تپسی-12000-1405/07/26')?.base === 'تپسی');
+  check('نشان جداگانهٔ ت در فروش تبعی از نام پایه کنار می‌رود',
+    parseContractName('اختیارف ت کگل-2440-1406/01/08')?.base === 'کگل'
+    && parseContractName('اختیارف ت.کگل-2440-1406/01/08')?.base === 'کگل'
+    && parseContractName('اختیارخ ت فخوز-7137-1398/11/28')?.base === 'فخوز'
+    && parseContractName('اختیارخ.ت.ومهان-4311-1401/10/03')?.base === 'ومهان');
+  check('جداکنندهٔ نرم TSETMC مانع تشخیص نشان تعدیل نمی‌شود',
+    parseContractName('اختیارف ت­ خودرو-1803-1402/09/04')?.base === 'خودرو');
 
   // ── نامِ بریده: هیچ عددی حدس زده نمی‌شود ────────────────────────────
   //
@@ -105,6 +116,21 @@ group('۲۰۷-ب. ردیف دفتر و ادغام');
   check('متادیتای خالی جای پرشده را نمی‌گیرد', merged[0].symbol === 'ضالف');
   check('ادغام دو دفتر مستقل، جمعشان می‌شود',
     mergeRoster([older], [{ ...older, ins: 'Y' }]).length === 2);
+  const staleBase = { ...older, ins: 'T', name: 'اختیارخ توان-100-1404/03/11', base: 'وان' };
+  check('دفتر ساخته‌شده با پارسر قدیمی هنگام ادغام ترمیم می‌شود',
+    mergeRoster([staleBase], [])[0]?.base === 'توان');
+  const repairedBases = repairRosterBaseNames([
+    staleBase,
+    { ...older, ins: 'P', name: 'اختیارف تپسی-100-1404/03/11', base: 'پسی' },
+    { ...older, ins: 'U', name: 'نام بریده', base: 'دست‌نخورده' },
+  ]);
+  check('ترمیم دسته‌ای همه پایه‌های قابل‌اثبات را برمی‌گرداند و نام بریده را عوض نمی‌کند',
+    repairedBases.fixed === 2
+    && repairedBases.rows[0].base === 'توان'
+    && repairedBases.rows[1].base === 'تپسی'
+    && repairedBases.rows[2].base === 'دست‌نخورده');
+  check('دفتر بی‌ردیف به آرایهٔ خالی امن تبدیل می‌شود',
+    repairRosterBaseNames(null).rows.length === 0);
 
   const file = makeRosterFile([older, newer], { scannedFrom: 20250101, scannedTo: 20250520, at: 7 });
   check('پروندهٔ دفتر نسخه، شمار و بازهٔ اسکن دارد',
@@ -180,6 +206,12 @@ group('۲۰۷-د. زنجیره از دفتر — بدون قیمت، با برچ
   check('کال بی‌جفت، ردیفِ بی‌پوت می‌سازد',
     chain.find((r) => r.strikePrice === 2000).insCode_P === '');
   check('کد نماد پایه از نگاشت درمی‌آید', pair.uaInsCode === '900001' && pair.baseKnown === true);
+  const spellingMismatch = rosterChainRows([
+    { ...rows[0], base: 'جوانه.ک', name: 'اختیارخ جوانه.ک-1000-1404/03/11' },
+    { ...rows[1], base: 'جوانه.ک', name: 'اختیارف جوانه.ک-1000-1404/03/11' },
+  ], { baseIndex: new Map([['جوانه کوچک', '700001'], ['contract:c1', '700001'], ['contract:p1', '700001']]), at: 20250401 });
+  check('اختلاف نگارش نام پایه با شناسهٔ دقیق قرارداد نماد را حذف نمی‌کند',
+    spellingMismatch[0]?.uaInsCode === '700001' && spellingMismatch[0]?.baseKnown === true);
   check('پایهٔ ناشناخته کدِ ساختگی نمی‌گیرد',
     rosterChainRows(rows, { baseIndex: new Map(), at: 20250401 })[0].baseKnown === false);
   check('سررسید به شکل جلالیِ تابلو برمی‌گردد', pair.endDate === 14040311, String(pair.endDate));

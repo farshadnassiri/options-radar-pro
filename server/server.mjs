@@ -27,7 +27,7 @@ import {
 import {
   contractStatus, makeRosterFile, missingDays, normalizeFa,
   pickUniverseSource, rangeSummary, rosterAt, rosterChainRows, rosterCoverage,
-  rosterCovers, rosterHealth, rosterInRange, rosterNote,
+  repairRosterBaseNames, rosterCovers, rosterHealth, rosterInRange, rosterNote,
 } from '../core/option-roster.mjs';
 import { tradingDays } from '../core/roster-scan.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
@@ -555,7 +555,9 @@ async function readRoster() {
   if (stamp === rosterCache.mtime && rosterCache.file) return rosterCache;
   try {
     const file = JSON.parse(await fs.readFile(ROSTER_FILE, 'utf8'));
-    rosterCache = { mtime: stamp, rows: Array.isArray(file?.rows) ? file.rows : [], file };
+    const repaired = repairRosterBaseNames(file?.rows);
+    if (repaired.fixed) log(`دفتر قراردادها — نام پایهٔ ${repaired.fixed} ردیف قدیمی هنگام خواندن ترمیم شد`);
+    rosterCache = { mtime: stamp, rows: repaired.rows, file };
   } catch (e) {
     log(`دفتر قراردادها خوانده نشد: ${e.message}`);
     rosterCache = { mtime: stamp, rows: [], file: null };
@@ -582,6 +584,13 @@ function baseIndexFrom(rows) {
     for (const key of [row?.lval30_UA, row?.lVal18AFC_UA]) {
       const name = normalizeFa(key);
       if (name && !index.has(name)) index.set(name, ins);
+    }
+    // نگاشت نام برای قراردادهای منقضی لازم است؛ برای قرارداد حاضر در
+    // تابلو، خودِ شناسه شاهد قطعی است و اختلاف نگارشی نام پایه را دور
+    // می‌زند. رشتهٔ خالی عمداً کلید نمی‌شود.
+    for (const contract of [row?.insCode_C, row?.insCode_P]) {
+      const code = String(contract ?? '').trim();
+      if (code) index.set(`contract:${code}`, ins);
     }
   }
   return index;
