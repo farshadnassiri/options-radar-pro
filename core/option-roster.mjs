@@ -64,7 +64,7 @@ export function normalizeFa(value) {
   return String(value)
     .replace(FA_DIGITS, (d) => FA_MAP[d] ?? d)
     .replace(/ي/g, 'ی').replace(/ك/g, 'ک').replace(/ۀ/g, 'ه')
-    .replace(/[‌​﻿ـ]/g, ' ')
+    .replace(/[­‌​﻿ـ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -217,7 +217,14 @@ export function parseContractName(name) {
   const strike = Number(strikeText);
   if (!(strike > 0)) return null;
 
-  const base = body.slice(0, at).replace(/^اختیار\s*[خف]\s*\.?\s*(?:ت\s*\.?)?\s*/, '').trim();
+  const label = body.slice(0, at);
+  let base = label.replace(/^اختیار\s*[خف]\s*\.?\s*/, '').trim();
+  // «ت» فقط وقتی نشانِ قرارداد تعدیل‌شده/تبعی است که یک واژهٔ جدا پس از
+  // «اختیارخ/ف» باشد. این نشان در هر دو سمت دیده می‌شود (`اختیارخ ت` و
+  // `اختیارف ت`). نسخهٔ پیشین جداکننده را اختیاری گرفته بود و حرف اولِ
+  // هر پایه‌ای مثل «توان» و «تپسی» را می‌خورد: «توان» به «وان» تبدیل
+  // می‌شد و چون چنین پایه‌ای در تابلو نبود، کل نماد از فهرست کنار می‌رفت.
+  base = base.replace(/^ت(?:\s*\.\s*|\s+)/, '').trim();
   if (!base) return null;
 
   return { base, strike, expiry };
@@ -409,6 +416,25 @@ export function repairRoster(rows = [], truth = []) {
 }
 
 /**
+ * ترمیم نام پایه در دفترهایی که با نسخهٔ قدیمیِ پارسر ذخیره شده‌اند.
+ *
+ * نام کامل قرارداد منبع حقیقت است. ردیفی که نامش بریده و ناخواناست
+ * دست‌نخورده می‌ماند؛ فقط اختلافی عوض می‌شود که پارسر بتواند دوباره و
+ * کامل از خود نام اثباتش کند.
+ */
+export function repairRosterBaseNames(rows = []) {
+  let fixed = 0;
+  const list = Array.isArray(rows) ? rows : [];
+  const repaired = list.map((row) => {
+    const parsed = parseContractName(row?.name);
+    if (!parsed || parsed.base === row?.base) return row;
+    fixed += 1;
+    return { ...row, base: parsed.base };
+  });
+  return fixed ? { rows: repaired, fixed } : { rows: list, fixed: 0 };
+}
+
+/**
  * دوقلوهایی که **جلوی ادغام را می‌گیرند**.
  *
  * ═══ چرا قاعده در هسته است و نه در ابزار ═══
@@ -427,8 +453,14 @@ export function blockingTwins(existing = [], incoming = [], { repair = false } =
 
 export function mergeRoster(existing = [], incoming = []) {
   const byIns = new Map();
-  const put = (row) => {
-    if (!row?.ins) return;
+  const put = (source) => {
+    if (!source?.ins) return;
+    // دفترِ روی دیسک ممکن است با پارسر قدیمی ساخته شده باشد. فقط اصلاح
+    // پارسر برای کاربر کافی نیست: `base` غلطِ ذخیره‌شده در ادغام پر است
+    // و هرگز با مقدار تازه جایگزین نمی‌شود. نامِ کامل قرارداد منبع حقیقت
+    // است؛ هرجا دوباره قابل‌خواندن باشد، پایه همان‌جا ترمیم می‌شود تا
+    // فایل موجود هم بی‌نیاز از پاک‌کردن و ساختِ دستی قابل استفاده باشد.
+    const row = repairRosterBaseNames([source]).rows[0];
     const old = byIns.get(row.ins);
     if (!old) { byIns.set(row.ins, { ...row }); return; }
     // `num` تزیین نیست: ردیفی که میدانِ تاریخ ندارد `undefined` می‌دهد و
@@ -685,7 +717,15 @@ export function rosterChainRows(rows = [], { baseIndex = new Map(), at = 0 } = {
   const asOf = compactOf(at) || num(at, 0);
   const out = [];
   for (const g of groups.values()) {
-    const baseIns = String(baseIndex.get(g.base) ?? baseIndex.get(normalizeFa(g.base)) ?? '');
+    // نام پایه در دو مسیر بازار همیشه هم‌شکل نیست («جوانه.ک» در نام
+    // قرارداد، «جوانه کوچک» در تابلو). وقتی خودِ قرارداد در تابلو هست،
+    // شناسهٔ قرارداد → شناسهٔ پایه تطبیق دقیق‌تر و بی‌حدس است؛ تطبیق نام
+    // فقط برای قراردادهای تاریخی‌ای می‌ماند که دیگر در تابلوی امروز نیستند.
+    const baseIns = String(baseIndex.get(`contract:${g.call?.ins || ''}`)
+      ?? baseIndex.get(`contract:${g.put?.ins || ''}`)
+      ?? baseIndex.get(g.base)
+      ?? baseIndex.get(normalizeFa(g.base))
+      ?? '');
     const jalali = expiryLabel(g.expiry);
     const parts = jalali === '—' ? null : jalali.split('/').map(Number);
     const endDate = parts ? parts[0] * 10000 + parts[1] * 100 + parts[2] : 0;
@@ -709,6 +749,48 @@ export function rosterChainRows(rows = [], { baseIndex = new Map(), at = 0 } = {
     });
   }
   return out.sort((a, b) => (a.expiryGregorian - b.expiryGregorian) || (a.strikePrice - b.strikePrice));
+}
+
+/**
+ * کامل‌کردن نگاشت شناسهٔ پایه از خودِ شناسهٔ قراردادها.
+ *
+ * سه شاهد به‌ترتیب استفاده می‌شوند: `uaIns` رسمیِ ذخیره‌شده، قراردادِ
+ * حاضر در تابلوی امروز، و در آخر lookup مشخصات رسمی برای یک نماینده از هر
+ * پایهٔ هنوز ناشناخته. lookup تزریق می‌شود تا هسته شبکه نزند و رفتار آن
+ * بدون اینترنت آزمون‌پذیر بماند.
+ */
+export async function completeRosterBaseIndex(rows = [], baseIndex = new Map(), lookup = async () => '') {
+  const index = new Map(baseIndex instanceof Map ? baseIndex : []);
+  const ordinary = (Array.isArray(rows) ? rows : []).filter((row) => row?.side === SIDE_CALL || row?.side === SIDE_PUT);
+  const bind = (row, uaIns) => {
+    const base = normalizeFa(row?.base);
+    const ins = String(uaIns ?? '').trim();
+    if (!base || !ins) return false;
+    if (!index.has(base)) index.set(base, ins);
+    const contract = String(row?.ins ?? '').trim();
+    if (contract) index.set(`contract:${contract}`, ins);
+    return true;
+  };
+
+  // اگر یکی از قراردادهای همان پایه امروز در تابلوست، ID پایهٔ دقیقش
+  // نگاشت نام را هم کامل می‌کند تا قراردادهای منقضیِ همان پایه جا نمانند.
+  for (const row of ordinary) {
+    bind(row, row.uaIns
+      || index.get(`contract:${String(row.ins ?? '').trim()}`)
+      || index.get(normalizeFa(row.base)));
+  }
+
+  const representatives = new Map();
+  for (const row of ordinary) {
+    const base = normalizeFa(row.base);
+    if (base && !index.has(base) && !representatives.has(base)) representatives.set(base, row);
+  }
+  const resolved = await Promise.all([...representatives.values()].map(async (row) => {
+    try { return [row, await lookup(row)]; }
+    catch { return [row, '']; }
+  }));
+  for (const [row, uaIns] of resolved) bind(row, uaIns);
+  return index;
 }
 
 /** فاصلهٔ روز بین دو تاریخ فشردهٔ میلادی. */
