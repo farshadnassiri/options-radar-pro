@@ -25,12 +25,13 @@ import {
   makeArchive, chainRowsFrom, archiveNote, archiveBoardDownNote, archiveQuality, archiveName, validArchiveDate,
 } from '../core/watch-archive.mjs';
 import {
-  contractStatus, makeRosterFile, missingDays, normalizeFa,
+  completeRosterBaseIndex, contractStatus, makeRosterFile, missingDays, normalizeFa,
   pickUniverseSource, rangeSummary, rosterAt, rosterChainRows, rosterCoverage,
   repairRosterBaseNames, rosterCovers, rosterHealth, rosterInRange, rosterNote,
 } from '../core/option-roster.mjs';
 import { tradingDays } from '../core/roster-scan.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
+import { infoPath, instrumentInfo, optionSpec, optionSpecPath } from '../core/roster-catalog.mjs';
 import { readJsonSafe } from '../core/json-safe.mjs';
 import { tehranDateNumber } from '../core/live-day.mjs';
 import {
@@ -596,6 +597,21 @@ function baseIndexFrom(rows) {
   return index;
 }
 
+/**
+ * ID پایه برای قراردادی که دیگر در دیده‌بان امروز نیست.
+ *
+ * فقط یک قرارداد از هر پایه پرسیده می‌شود (`completeRosterBaseIndex` این
+ * سقف را اعمال می‌کند). هر دو پاسخ در کش متادیتای سرور می‌نشینند، پس
+ * بازکردن دوبارهٔ تب شبکه را تکرار نمی‌کند.
+ */
+async function officialBaseId(row) {
+  const info = instrumentInfo(await get(infoPath(row.ins), Math.max(60, S.ttlMetaSec), 4));
+  if (info?.uaIns) return info.uaIns;
+  const iid = String(row?.id || info?.id || '').trim();
+  if (!iid) return '';
+  return optionSpec(await get(optionSpecPath(iid), Math.max(60, S.ttlMetaSec), 4))?.uaIns || '';
+}
+
 // ——————————————————————— ساختِ خودکار دفتر ———————————————————————
 //
 // نخستین نسخه، ساختِ دفتر را به دو دستور ترمینال سپرده بود. صاحب پروژه
@@ -803,7 +819,7 @@ async function rosterRangeUniverse(from, to, boardRows) {
   const live = rosterInRange(rows, from, to);
   if (!live.length) return { rows: [], coverage, contracts: 0, lostBases: [], summary: rangeSummary(rows, from, to) };
 
-  const index = baseIndexFrom(boardRows);
+  const index = await completeRosterBaseIndex(live, baseIndexFrom(boardRows), officialBaseId);
   const chain = rosterChainRows(live, { baseIndex: index, at: from });
   const life = new Map();
   for (const row of live) life.set(row.ins, row);
@@ -837,7 +853,7 @@ async function rosterUniverse(date, boardRows, { hasArchive = false } = {}) {
 
   const live = rosterAt(rows, wanted);
   if (!live.length) return null;
-  const index = baseIndexFrom(boardRows);
+  const index = await completeRosterBaseIndex(live, baseIndexFrom(boardRows), officialBaseId);
   const chain = rosterChainRows(live, { baseIndex: index, at: wanted });
   const known = chain.filter((row) => row.baseKnown);
   const lost = [...new Set(chain.filter((row) => !row.baseKnown).map((row) => row.lval30_UA))];

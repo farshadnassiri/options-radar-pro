@@ -4,7 +4,7 @@ import { check, group } from '../harness.mjs';
 import {
   ROSTER_VERSION, SIDE_CALL, SIDE_PUT, SIDE_TABAEE,
   STATUS_ACTIVE, STATUS_EXPIRED, STATUS_PENDING,
-  compactOf, contractSide, contractStatus, daysApart, expandJalaliYear, expiryLabel,
+  compactOf, completeRosterBaseIndex, contractSide, contractStatus, daysApart, expandJalaliYear, expiryLabel,
   makeRosterFile, mergeRoster, normalizeFa, parseContractName, parseExpiry, pickUniverseSource,
   rangeSummary, repairRosterBaseNames, rosterAt, rosterChainRows, rosterCoverage, rosterInRange,
   rosterIntake, rosterNote, rosterRow, statusLabel,
@@ -212,6 +212,16 @@ group('۲۰۷-د. زنجیره از دفتر — بدون قیمت، با برچ
   ], { baseIndex: new Map([['جوانه کوچک', '700001'], ['contract:c1', '700001'], ['contract:p1', '700001']]), at: 20250401 });
   check('اختلاف نگارش نام پایه با شناسهٔ دقیق قرارداد نماد را حذف نمی‌کند',
     spellingMismatch[0]?.uaInsCode === '700001' && spellingMismatch[0]?.baseKnown === true);
+  let lookups = 0;
+  const completedIndex = await completeRosterBaseIndex([
+    ...rows.slice(0, 2),
+    { ...rows[0], ins: 'old1', base: 'قدیمی', name: 'اختیارخ قدیمی-1000-1404/03/11' },
+    { ...rows[1], ins: 'old2', base: 'قدیمی', name: 'اختیارف قدیمی-1000-1404/03/11' },
+  ], new Map([['contract:c1', '900001']]), async (row) => { lookups += 1; return row.base === 'قدیمی' ? '800001' : ''; });
+  check('ID قرارداد حاضر، نگاشت نام پایه و قراردادهای دیگرش را کامل می‌کند',
+    completedIndex.get('اهرم') === '900001' && completedIndex.get('contract:p1') === '900001');
+  check('برای هر پایهٔ تاریخی ناشناخته فقط یک مشخصات رسمی خواسته می‌شود',
+    completedIndex.get('قدیمی') === '800001' && lookups === 1);
   check('پایهٔ ناشناخته کدِ ساختگی نمی‌گیرد',
     rosterChainRows(rows, { baseIndex: new Map(), at: 20250401 })[0].baseKnown === false);
   check('سررسید به شکل جلالیِ تابلو برمی‌گردد', pair.endDate === 14040311, String(pair.endDate));

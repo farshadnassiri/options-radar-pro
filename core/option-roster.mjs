@@ -751,6 +751,48 @@ export function rosterChainRows(rows = [], { baseIndex = new Map(), at = 0 } = {
   return out.sort((a, b) => (a.expiryGregorian - b.expiryGregorian) || (a.strikePrice - b.strikePrice));
 }
 
+/**
+ * کامل‌کردن نگاشت شناسهٔ پایه از خودِ شناسهٔ قراردادها.
+ *
+ * سه شاهد به‌ترتیب استفاده می‌شوند: `uaIns` رسمیِ ذخیره‌شده، قراردادِ
+ * حاضر در تابلوی امروز، و در آخر lookup مشخصات رسمی برای یک نماینده از هر
+ * پایهٔ هنوز ناشناخته. lookup تزریق می‌شود تا هسته شبکه نزند و رفتار آن
+ * بدون اینترنت آزمون‌پذیر بماند.
+ */
+export async function completeRosterBaseIndex(rows = [], baseIndex = new Map(), lookup = async () => '') {
+  const index = new Map(baseIndex instanceof Map ? baseIndex : []);
+  const ordinary = (Array.isArray(rows) ? rows : []).filter((row) => row?.side === SIDE_CALL || row?.side === SIDE_PUT);
+  const bind = (row, uaIns) => {
+    const base = normalizeFa(row?.base);
+    const ins = String(uaIns ?? '').trim();
+    if (!base || !ins) return false;
+    if (!index.has(base)) index.set(base, ins);
+    const contract = String(row?.ins ?? '').trim();
+    if (contract) index.set(`contract:${contract}`, ins);
+    return true;
+  };
+
+  // اگر یکی از قراردادهای همان پایه امروز در تابلوست، ID پایهٔ دقیقش
+  // نگاشت نام را هم کامل می‌کند تا قراردادهای منقضیِ همان پایه جا نمانند.
+  for (const row of ordinary) {
+    bind(row, row.uaIns
+      || index.get(`contract:${String(row.ins ?? '').trim()}`)
+      || index.get(normalizeFa(row.base)));
+  }
+
+  const representatives = new Map();
+  for (const row of ordinary) {
+    const base = normalizeFa(row.base);
+    if (base && !index.has(base) && !representatives.has(base)) representatives.set(base, row);
+  }
+  const resolved = await Promise.all([...representatives.values()].map(async (row) => {
+    try { return [row, await lookup(row)]; }
+    catch { return [row, '']; }
+  }));
+  for (const [row, uaIns] of resolved) bind(row, uaIns);
+  return index;
+}
+
 /** فاصلهٔ روز بین دو تاریخ فشردهٔ میلادی. */
 export function daysApart(a, b) {
   const pa = splitCompact(a), pb = splitCompact(b);
