@@ -9,8 +9,10 @@ import {
   filterContractsBySide, MARKET_MAP_METRICS, marketMapRows, marketMapSummary,
   contractBreakeven, breakevenGap, breakevenGapPct, EQUAL_MAP_METRIC,
   twoSidedChain, chainSideMax, contractAnalytics,
+  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT,
 } from '../core/decision-dashboard.mjs';
 import { shouldFetchRange } from './live-dashboard-scope.mjs';
+import { busyBlock } from './busy.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'\"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;',
@@ -57,13 +59,13 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       <div class="section-head lmm-head"><div><p class="eyebrow">نمای اصلی رصد لحظه‌ای</p><h2 data-lmm-map-title>نقشه بازار اختیار</h2><p data-lmm-map-note>اندازه خانه از سنجه انتخابی می‌آید؛ رنگ، جهت آخرین معامله نماد پایه نسبت به پایانی دیروز است.</p></div>
         <div class="lmm-map-controls"><div class="lmm-map-modes" role="group" aria-label="سطح نقشه"><button type="button" data-lmm-map-mode="underlyings">نمادهای پایه</button><button type="button" data-lmm-map-mode="contracts">قراردادهای نماد انتخابی</button></div><div class="lmm-metrics" data-lmm-metrics role="group" aria-label="مبنای اندازه خانه‌های نقشه"></div></div>
       </div>
-      <div class="lmm-map" data-lmm-map role="img" aria-label="نقشه همه نمادهای پایه"></div>
+      <div class="lmm-map" data-lmm-map role="img" aria-label="نقشه همه نمادهای پایه">${busyBlock('در حال دریافت عکس بازار برای ساخت نقشه…', { lines: 4 })}</div>
       <div class="lmm-map-foot"><span><i class="loss"></i>منفی</span><span><i class="flat"></i>بدون تغییر</span><span><i class="gain"></i>مثبت</span><b data-lmm-selected>برای ورود به زنجیره، یک نماد را انتخاب کن.</b></div>
     </section>
-    <section class="card lmm-summary" data-lmm-summary aria-label="اطلاعات کلی بازار"></section>
+    <section class="card lmm-summary" data-lmm-summary aria-label="اطلاعات کلی بازار">${busyBlock('در حال دریافت جمع‌بندی بازار…', { lines: 2 })}</section>
     <section class="card lmm-explorer" data-lmm-explorer>
       <div class="section-head"><div><p class="eyebrow">مسیر تصمیم</p><h2 data-lmm-title>یک نماد را از نقشه انتخاب کن</h2></div><span data-lmm-scope-note>نماد ← سررسید ← قرارداد</span></div>
-      <div class="lmm-underlying" data-lmm-underlying></div>
+      <div class="lmm-underlying" data-lmm-underlying>${busyBlock('در حال دریافت نمادهای پایه…', { lines: 3 })}</div>
       <div class="lmm-expiry-step" data-lmm-expiry-step hidden><div class="lmm-step-head"><h3>سررسیدها</h3><span>هر سررسید، آمار مستقل و زنجیره خودش را دارد.</span></div><div class="lmm-expiries" data-lmm-expiries></div></div>
       <div class="lmm-expiry-info" data-lmm-expiry-info></div>
       <section class="lmm-day-range" data-lmm-day-range hidden><div class="lmm-step-head"><div><h3>کندل قیمت امروز قراردادها</h3><span>سایه: کمترین تا بیشترین · بدنه: اولین تا آخرین · لوزی: قیمت پایانی</span></div><div class="lmm-range-sort" data-lmm-range-sort role="group" aria-label="مرتب‌سازی نمودار کندلی روزانه"></div></div><div data-lmm-range-status class="note"></div><div data-lmm-range-chart></div></section>
@@ -159,7 +161,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     if (!ua) {
       root.querySelector('[data-lmm-title]').textContent = 'داده‌ای برای انتخاب نماد پایه نیست';
       root.querySelector('[data-lmm-selected]').textContent = 'هنوز عکس معتبر بازار دریافت نشده است.';
-      underlyingHost.innerHTML = '<p class="empty-note">پس از دریافت عکس بازار، همه نمادهای پایه اینجا ظاهر می‌شوند.</p>';
+      underlyingHost.innerHTML = busyBlock('در انتظار نخستین عکس بازار؛ پس از دریافت، همه نمادهای پایه اینجا ظاهر می‌شوند.', { lines: 3 });
       expiryStep.hidden = true; chainStep.hidden = true; expiryInfo.innerHTML = ''; pairedHost.innerHTML = ''; chainTable.set([]);
       return;
     }
@@ -206,7 +208,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       : `${fmt.int(rows.length)} قرارداد ${chainSide === 'call' ? 'کال' : 'پوت'}`;
     const paired = chainLayout === 'paired';
     root.querySelector('[data-lmm-chain-note]').textContent = paired
-      ? 'کال و پوتِ هر قیمت اعمال روی یک ردیف. خانه‌های پررنگ «در سود»اند، نوار زیر موقعیت باز سنگینی تعهد را نشان می‌دهد، و خط‌چین جای قیمت جاری پایه است. تلاطم و دلتای «آخرین معامله» مشاهده‌ای‌اند و ممکن است با قیمت پایه هم‌زمان نباشند؛ ستون‌های «اجرایی» از میانه مظنه می‌آیند. ستون «علت نبود تلاطم» می‌گوید چرا خانه‌ای خالی است.'
+      ? 'کال و پوتِ هر قیمت اعمال روی یک ردیف. خانه‌های پررنگ «در سود»اند، نوار زیر موقعیت باز سنگینی تعهد را نشان می‌دهد، و خط‌چین جای قیمت جاری پایه است. روی هر سرستون بزن تا با همان ستون مرتب شود — چون هر ردیف دو مقدار دارد، سرستونِ سمت کال با کال مرتب می‌کند و سمت پوت با پوت؛ خط قیمت جاری فقط در ترتیب «قیمت اعمال» معنی دارد و در بقیه نمایش داده نمی‌شود. تلاطم و دلتای «آخرین معامله» مشاهده‌ای‌اند و ممکن است با قیمت پایه هم‌زمان نباشند؛ ستون‌های «اجرایی» از میانه مظنه می‌آیند.'
       : 'روی «ستون‌ها» بزن تا هر داده‌ای را اضافه یا حذف کنی؛ روی ردیف بزن تا همان قرارداد دامنهٔ تحلیل شود.';
     pairedHost.hidden = !paired;
     chainHost.hidden = paired;
@@ -339,34 +341,84 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     pairedBtn.setAttribute('aria-expanded', String(next));
   }
 
+  // ── مرتب‌سازی: حالت، و ذخیره‌اش ───────────────────────────────────
+  let pairedSort = readPairedSort();
+  function readPairedSort() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('options-radar:market-map-paired-sort') || 'null');
+      if (saved && typeof saved.key === 'string') return { ...PAIRED_SORT_DEFAULT, ...saved };
+    } catch { /* انتخاب همین نشست می‌ماند */ }
+    return { ...PAIRED_SORT_DEFAULT };
+  }
+  function setPairedSort(key, side) {
+    const same = pairedSort.key === key && pairedSort.side === side;
+    // کلیک دوم روی همان سرستون، جهت را برمی‌گرداند. ستون تازه با جهتی
+    // شروع می‌شود که سؤالش را جواب می‌دهد: اعمال از کم به زیاد (نردبان)،
+    // بقیه از زیاد به کم (رهبران).
+    pairedSort = same
+      ? { ...pairedSort, dir: pairedSort.dir < 0 ? 1 : -1 }
+      : { key, side, dir: key === 'strike' ? 1 : -1 };
+    try { localStorage.setItem('options-radar:market-map-paired-sort', JSON.stringify(pairedSort)); }
+    catch { /* بی‌اهمیت */ }
+    paintChain();
+  }
+  const sortMark = (key, side) => (pairedSort.key === key && pairedSort.side === side
+    ? `<i class="lmm-sort-mark">${pairedSort.dir < 0 ? '▼' : '▲'}</i>` : '');
+  const headCell = (label, key, side, extra = '') => `<th${extra}><button type="button" class="lmm-sort-btn" data-lmm-sort-key="${esc(key)}" data-lmm-sort-side="${side || ''}" title="${esc(label)}">${esc(label)}${sortMark(key, side)}</button></th>`;
+
   function paintPairedChain(rows) {
     const spot = Number(contracts().find((row) => Number(row.spot) > 0)?.spot);
     const chain = twoSidedChain(rows, spot);
     if (!chain.rows.length) { pairedHost.innerHTML = '<p class="empty-note">برای این سررسید قرارداد معتبری در عکس بازار نیست.</p>'; return; }
     const oiMax = chainSideMax(chain.rows, 'oi');
     const cols = pairedCols();
-    const head = cols.map((item) => `<th title="${esc(item.label)}">${esc(item.label)}</th>`);
-    const spotRow = `<tr class="lmm-paired-spot"><td colspan="${cols.length * 2 + 3}"><span><b>قیمت جاری پایه ${fmt.money(chain.spot)}</b></span></td></tr>`;
-    const lines = chain.rows.map((rung, index) => {
-      const lead = index === chain.spotIndex ? spotRow : '';
-      const pick = (row) => row ? ` data-lmm-paired-pick="${esc(row.ins)}"` : '';
-      const picked = (row) => row && String(row.ins) === contractIns ? ' is-picked' : '';
-      return `${lead}<tr class="lmm-paired-row">
-        <td class="lmm-paired-edge${rung.callItm ? ' is-itm' : ''}${picked(rung.call)}"${pick(rung.call)}>${rung.call ? esc(rung.call.name) : '—'}</td>
-        ${pairedCells(rung.call, 'call', oiMax, rung.callItm)}
-        <th class="lmm-paired-strike" scope="row">${fmt.money(rung.strike)}</th>
-        ${pairedCells(rung.put, 'put', oiMax, rung.putItm)}
-        <td class="lmm-paired-edge${rung.putItm ? ' is-itm' : ''}${picked(rung.put)}"${pick(rung.put)}>${rung.put ? esc(rung.put.name) : '—'}</td>
-      </tr>`;
+    // ── فقط سمتی که کاربر خواسته ──────────────────────────────────────
+    //
+    // تا امروز در حالت «فقط کال»، ستون‌های پوت با «—» پر می‌شدند: نصف عرض
+    // جدول، خرجِ چیزی که صریحاً کنار گذاشته شده بود.
+    const sides = pairedSides(chainSide);
+    const both = sides.length === 2;
+    // خط قیمت جاری فقط در نردبانِ اعمال معنی دارد: در هر ترتیب دیگری،
+    // «بین دو اعمالِ در بر گیرنده» جایی ندارد.
+    const ladder = pairedSort.key === 'strike';
+    const width = cols.length * sides.length + sides.length + 1;
+    const spotRow = `<tr class="lmm-paired-spot"><td colspan="${width}"><span><b>قیمت جاری پایه ${fmt.money(chain.spot)}</b></span></td></tr>`;
+    const ordered = sortPairedChain(chain.rows, pairedSort);
+    // در ترتیب نردبانی، خط قیمت جاری سرِ جای خودش می‌ماند؛ محاسبه دوباره
+    // انجام می‌شود چون ممکن است ترتیب نزولی باشد.
+    const spotAt = !ladder || !Number.isFinite(chain.spot) ? -1
+      : pairedSort.dir < 0
+        ? ordered.findIndex((row) => row.strike < chain.spot)
+        : ordered.findIndex((row) => row.strike > chain.spot);
+
+    const edge = (row, itm) => `<td class="lmm-paired-edge${itm ? ' is-itm' : ''}${row && String(row.ins) === contractIns ? ' is-picked' : ''}"${row ? ` data-lmm-paired-pick="${esc(row.ins)}"` : ''}>${row ? esc(row.name) : '—'}</td>`;
+    const lines = ordered.map((rung, index) => {
+      const lead = index === spotAt ? spotRow : '';
+      const call = `${edge(rung.call, rung.callItm)}${pairedCells(rung.call, 'call', oiMax, rung.callItm)}`;
+      const put = `${pairedCells(rung.put, 'put', oiMax, rung.putItm)}${edge(rung.put, rung.putItm)}`;
+      const strikeCell = `<th class="lmm-paired-strike" scope="row">${fmt.money(rung.strike)}</th>`;
+      const body = both ? `${call}${strikeCell}${put}`
+        : sides[0] === 'call' ? `${call}${strikeCell}` : `${strikeCell}${put}`;
+      return `${lead}<tr class="lmm-paired-row">${body}</tr>`;
     }).join('');
+
+    const callHead = [`<th>قرارداد</th>`, ...[...cols].reverse().map((item) => headCell(item.label, item.key, 'call'))].join('');
+    const putHead = [...cols.map((item) => headCell(item.label, item.key, 'put')), `<th>قرارداد</th>`].join('');
+    const strikeHead = headCell('قیمت اعمال', 'strike', null, ' class="lmm-paired-strike"');
+    const sideBanner = both
+      ? `<tr class="lmm-paired-sides"><th colspan="${cols.length + 1}">اختیار خرید (کال)</th><th class="lmm-paired-strike">قیمت اعمال</th><th colspan="${cols.length + 1}">اختیار فروش (پوت)</th></tr>`
+      : `<tr class="lmm-paired-sides"><th colspan="${width}">${sides[0] === 'call' ? 'اختیار خرید (کال)' : 'اختیار فروش (پوت)'} · قیمت اعمال</th></tr>`;
+    const headRow = both ? `${callHead}${strikeHead}${putHead}`
+      : sides[0] === 'call' ? `${callHead}${strikeHead}` : `${strikeHead}${putHead}`;
+
     pairedHost.innerHTML = `<table class="lmm-paired">
-      <thead>
-        <tr class="lmm-paired-sides"><th colspan="${cols.length + 1}">اختیار خرید (کال)</th><th class="lmm-paired-strike">قیمت اعمال</th><th colspan="${cols.length + 1}">اختیار فروش (پوت)</th></tr>
-        <tr><th>قرارداد</th>${[...head].reverse().join('')}<th class="lmm-paired-strike"></th>${head.join('')}<th>قرارداد</th></tr>
-      </thead>
+      <thead>${sideBanner}<tr>${headRow}</tr></thead>
       <tbody>${lines}</tbody>
     </table>`;
     pairedHost.querySelectorAll('[data-lmm-paired-pick]').forEach((cell) => cell.addEventListener('click', () => selectContract(cell.dataset.lmmPairedPick)));
+    pairedHost.querySelectorAll('[data-lmm-sort-key]').forEach((button) => button.addEventListener('click', () => {
+      setPairedSort(button.dataset.lmmSortKey, button.dataset.lmmSortSide || null);
+    }));
   }
 
   const currentMetrics = () => mapMode === 'contracts' ? CONTRACT_MAP_METRICS : MARKET_MAP_METRICS;
@@ -530,7 +582,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     }
     const request = ++rangeRequest;
     rangeStatus.textContent = `در حال دریافت بازه واقعی امروز برای ${fmt.int(ids.length)} قرارداد…`;
-    rangeChart.innerHTML = '<div class="skeleton" style="height:180px"></div>';
+    rangeChart.innerHTML = busyBlock(`در حال دریافت کمینه/بیشینهٔ امروز برای ${fmt.int(ids.length)} قرارداد…`, { lines: 4 });
     try {
       const chunks = [];
       for (let index = 0; index < ids.length; index += 180) chunks.push(ids.slice(index, index + 180));

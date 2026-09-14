@@ -3,6 +3,7 @@ import { flattenActiveContracts, historyDateLabel, normalizeHistoryDate } from '
 import { analyzeDailyOpenView, analyzeIntradayOpenView, liveTradeBatch, relationMatrix } from '/core/open-view.mjs';
 import { liveDayOf } from '/core/live-day.mjs';
 import { liveBaseList, liveOpenViewContracts } from '/core/decision-dashboard.mjs';
+import { busyBlock } from '/ui/busy.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
 import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
@@ -400,7 +401,7 @@ export async function mount(root, { state }) {
     const expiries = fillExpiriesFromContracts();
     if (!expiries.length) { $('ov-report').hidden = true; setStatus('برای این نماد سررسید فعالی در فهرست نیست.', true); return; }
     $('ov-report').hidden = false; $('ov-day-detail').hidden = false; $('ov-excel').disabled = false;
-    setStatus(`${fmt.int(contracts.length)} قرارداد فعال در ${fmt.int(expiries.length)} سررسید؛ نمای لحظه‌ای از ریزمعامله‌های امروز ساخته می‌شود.`);
+    setStatus(`${fmt.int(contracts.length)} قرارداد فعال در ${fmt.int(expiries.length)} سررسید؛ در حال ساخت نمای لحظه‌ای از ریزمعامله‌های امروز…`);
     await loadDayIntraday();
   }
 
@@ -447,6 +448,11 @@ export async function mount(root, { state }) {
     const model = settings(); if (!model) return;
     $('ov-day-intraday').disabled = true;
     dayStatus.textContent = live ? 'در حال دریافت همه ریزمعامله‌های امروز تا این لحظه…' : 'در حال دریافت ریزمعامله‌های همین روز…';
+    // پنج نمودار درون‌روزی تا رسیدن داده خالی می‌ماندند و کاربر نمی‌دانست
+    // کاری در جریان است یا چیزی نیامده.
+    for (const id of ['ov-day-price', 'ov-day-gap', 'ov-day-strike', 'ov-day-premium', 'ov-day-iv']) {
+      $(id).innerHTML = busyBlock(dayStatus.textContent, { lines: 3 });
+    }
     try {
       let analysisDate = selectedDate, tradesByKey = live ? null : tradeCache.get(cacheKey);
       if (live) {

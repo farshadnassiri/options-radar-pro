@@ -6,7 +6,10 @@
 import { check, near, group, readSrc } from '../harness.mjs';
 import { impliedVolWhy, bsPrice } from '../../core/bs.mjs';
 import { liveIvAt, liveQuoteIvSet, IV_WHY_LABEL } from '../../core/live-market.mjs';
-import { liveBaseList, liveOpenViewContracts, mergeUnderlyingTrades, contractAnalytics } from '../../core/decision-dashboard.mjs';
+import {
+  liveBaseList, liveOpenViewContracts, mergeUnderlyingTrades, contractAnalytics,
+  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT,
+} from '../../core/decision-dashboard.mjs';
 import { dashboardClock } from '../../core/watch-health.mjs';
 
 group('۲۴۸. ممیزی رصد زنده — فهرست لحظه‌ای، گردش پایه، علت تلاطم و ساعت');
@@ -186,3 +189,81 @@ check('۸. نوار وضعیت هر دو زمان را می‌گوید و کهن
 check('۳ و ۴ و ۷ ستون خودشان را دارند',
   ['ivMidPct', 'ivBidPct', 'ivAskPct', 'ivWhyText', 'pricedToday', 'deltaMid', 'theoreticalFloor', 'floorGap']
     .every((key) => dash248.includes(`col('${key}'`)));
+
+// ————————————————————————————————————————————————————————————————
+// گزارش ۱۴۰۵/۰۶/۲۵: نشانهٔ بارگذاری، مرتب‌سازی زنجیره، و فیلتر یک‌سمته.
+// ————————————————————————————————————————————————————————————————
+group('۲۴۸-ب. بارگذاری، مرتب‌سازی زنجیره و نمایش یک‌سمته');
+
+// ردیفِ بی‌پوت عمداً **کم‌ترین** قیمت اعمال را دارد: اگر قاعدهٔ «خالی آخر»
+// نباشد، بازگشتِ خودکار به ترتیب اعمال آن را اول می‌نشاند و ادعا می‌گیردش.
+// با یک ردیفِ بی‌پوتِ بزرگ‌ترین‌اعمال، آزمون تصادفاً سبز می‌ماند.
+const ladder248 = [
+  { strike: 100, call: { ins: 'c100', oi: 5, name: 'ک۱۰۰' }, put: { ins: 'p100', oi: 9, name: 'پ۱۰۰' } },
+  { strike: 120, call: { ins: 'c120', oi: 50, name: 'ک۱۲۰' }, put: { ins: 'p120', oi: 2, name: 'پ۱۲۰' } },
+  { strike: 80, call: { ins: 'c80', oi: 1, name: 'ک۸۰' }, put: { ins: 'p80', oi: 3, name: 'پ۸۰' } },
+  { strike: 60, call: { ins: 'c60', oi: 4, name: 'ک۶۰' }, put: null },
+];
+const order248 = (opt) => sortPairedChain(ladder248, opt).map((row) => row.strike).join(',');
+
+check('پیش‌فرض همان نردبان اعمال است', order248(PAIRED_SORT_DEFAULT) === '60,80,100,120');
+check('نردبان در هر دو جهت کار می‌کند',
+  order248({ key: 'strike', dir: -1 }) === '120,100,80,60');
+// ═══ هر ردیف دو مقدار دارد؛ سمت، بخشی از دستور است ═══
+check('مرتب‌سازی بر یک ستون، سمتِ خواسته‌شده را می‌خواند',
+  order248({ key: 'oi', side: 'call', dir: -1 }) === '120,100,60,80'
+  && order248({ key: 'oi', side: 'put', dir: -1 }) === '100,80,120,60');
+// ردیفی که در آن سمت قرارداد ندارد نباید بالای قراردادهای واقعی بنشیند —
+// نه در صعودی، نه در نزولی.
+check('ردیف بدون قرارداد در آن سمت، در هر دو جهت آخر می‌ماند',
+  order248({ key: 'oi', side: 'put', dir: 1 }) === '120,80,100,60'
+  && order248({ key: 'oi', side: 'put', dir: -1 }) === '100,80,120,60');
+check('بدون سمت، هر کلیدی به نردبان اعمال برمی‌گردد',
+  order248({ key: 'oi', side: null, dir: 1 }) === '60,80,100,120');
+check('برابری با قیمت اعمال شکسته می‌شود تا ترتیب پایدار بماند',
+  sortPairedChain([
+    { strike: 120, call: { oi: 7 } }, { strike: 80, call: { oi: 7 } }, { strike: 100, call: { oi: 7 } },
+  ], { key: 'oi', side: 'call', dir: -1 }).map((row) => row.strike).join(',') === '80,100,120');
+check('ستون متنی هم مرتب می‌شود، نه اینکه خالی شمرده شود',
+  sortPairedChain(ladder248, { key: 'name', side: 'put', dir: 1 }).at(-1).put === null);
+
+check('فیلتر سمت، فهرست سمت‌های رسم‌شدنی را می‌دهد',
+  pairedSides('call').join() === 'call' && pairedSides('put').join() === 'put'
+  && pairedSides('all').join() === 'call,put' && pairedSides('نامعلوم').join() === 'call,put');
+
+const mapD248 = readSrc('../ui/live-market-map.mjs');
+const dashD248 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+const ovD248 = readSrc('../ui/tabs/open-view.mjs');
+const cssD248 = readSrc('../ui/style.css');
+const busy248 = readSrc('../ui/busy.mjs');
+
+check('۳. سمتِ کنارگذاشته‌شده اصلاً ستون نمی‌گیرد، نه اینکه با «—» پر شود',
+  mapD248.includes('const sides = pairedSides(chainSide);')
+  && mapD248.includes("sides[0] === 'call' ? `${call}${strikeCell}` : `${strikeCell}${put}`"));
+check('۲. هر سرستون دکمهٔ مرتب‌سازی است و سمتش را حمل می‌کند',
+  mapD248.includes('data-lmm-sort-key=') && mapD248.includes('data-lmm-sort-side=')
+  && mapD248.includes("localStorage.setItem('options-radar:market-map-paired-sort'"));
+// خط قیمت جاری «بین دو اعمالِ در بر گیرنده» است؛ در ترتیب دیگری جایی ندارد
+// و کشیدنش یعنی ادعای غلط.
+check('۲. خط قیمت جاری فقط در ترتیب نردبانی کشیده می‌شود',
+  mapD248.includes("const ladder = pairedSort.key === 'strike';")
+  && mapD248.includes('const spotAt = !ladder || !Number.isFinite(chain.spot) ? -1'));
+check('۱. نشانهٔ بارگذاری هم اسکلت دارد هم نوار در جریان',
+  busy248.includes('export function busyBlock(') && busy248.includes('export function attachBusyBar(')
+  && cssD248.includes('.busy-spin {') && cssD248.includes('.skeleton-bar {')
+  && cssD248.includes('@keyframes busy-sheen'));
+// اسکلتِ بی‌قاعدهٔ CSS سال‌ها نامرئی بود؛ این ادعا همان را می‌گیرد.
+check('۱. کاربرد قدیمی `.skeleton` هم قاعدهٔ دیدنی گرفت',
+  cssD248.includes('.skeleton:empty {'));
+check('۱. داشبورد پیش از نخستین عکس، اسکلت نشان می‌دهد نه صفحهٔ خالی',
+  dashD248.includes("busyBlock('در حال دریافت نخستین عکس بازار")
+  // اسکلت باید جایی بنشیند که تا رسیدن داده زنده می‌ماند؛ میزبان کاوشگر
+  // بلافاصله با قالب خودِ نقشه بازنویسی می‌شود، پس اسکلتش آنجا بی‌فایده بود.
+  && !dashD248.includes('<div id="dd-market-explorer">${busyBlock')
+  && mapD248.includes("data-lmm-map role=\"img\" aria-label=\"نقشه همه نمادهای پایه\">${busyBlock(")
+  && dashD248.includes("attachBusyBar(root.querySelector('.dd-tabbar')")
+  && dashD248.includes('busyBar?.busy(true);') && dashD248.includes('busyBar?.busy(false);'));
+check('۱. نمودارهای درون‌روزی نگاه باز هم حین دریافت خالی نمی‌مانند',
+  ovD248.includes("for (const id of ['ov-day-price', 'ov-day-gap', 'ov-day-strike', 'ov-day-premium', 'ov-day-iv'])"));
+check('۱. نشانهٔ بارگذاری حرکت را برای کاربرِ حساس خاموش می‌کند',
+  cssD248.includes('@media (prefers-reduced-motion: reduce)') && cssD248.includes('.busy-spin, .skeleton-bar'));
