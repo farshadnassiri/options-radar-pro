@@ -5,7 +5,11 @@ import { mountCandlePoints } from './candle-points.mjs';
 import { makeTable } from './table.mjs';
 import { mountChart, chartFormat } from './chart-host.mjs';
 import { historyDateLabel } from '../core/history.mjs';
-import { filterContractsBySide, MARKET_MAP_METRICS, marketMapRows, marketMapSummary } from '../core/decision-dashboard.mjs';
+import {
+  filterContractsBySide, MARKET_MAP_METRICS, marketMapRows, marketMapSummary,
+  contractBreakeven, breakevenGap, breakevenGapPct,
+} from '../core/decision-dashboard.mjs';
+import { shouldFetchRange } from './live-dashboard-scope.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'\"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;',
@@ -33,11 +37,15 @@ function contractRow(row) {
   return {
     ...row, title: row.name, kindLabel: kindLabel(row.kind),
     expiryText: row.endDate ? dateLabel(row.endDate) : '',
+    // سربه‌سر و فاصله‌اش، از همان قاعده‌ای که تابلوی پرمعامله می‌خواند.
+    breakeven: contractBreakeven(row),
+    breakevenGap: breakevenGap(row),
+    breakevenGapPct: breakevenGapPct(row),
   };
 }
 
 /** سوارکردن کاوشگر؛ خروجی scope فقط برای همگام‌کردن تحلیل‌های قدیمی است. */
-export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns = [] } = {}) {
+export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns = [], isVisible = () => true } = {}) {
   root.innerHTML = `
     <section class="card lmm-map-card">
       <div class="section-head lmm-head"><div><p class="eyebrow">نمای اصلی رصد لحظه‌ای</p><h2 data-lmm-map-title>نقشه بازار اختیار</h2><p data-lmm-map-note>اندازه خانه از سنجه انتخابی می‌آید؛ رنگ، جهت آخرین معامله نماد پایه نسبت به پایانی دیروز است.</p></div>
@@ -346,8 +354,18 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     rangeSection.hidden = !ids.length;
     if (!ids.length) return;
     paintDailyRanges();
-    const cached = rangeCache.get(key);
-    if (cached?.items && Date.now() - cached.at < 30000) { paintDailyRanges(); return; }
+    // ── بازهٔ روزانه فقط وقتی دیده می‌شود ─────────────────────────────
+    //
+    // گزارش صاحب پروژه: «هر جا نیازی نیست دوباره شروع به دریافت دیتای
+    // نمادهای دیگر یا تاریخ‌های دیگر نکن.» این تابع تا امروز در هر تیکِ
+    // خودکار (۵ تا ۶۰ ثانیه) صدا زده می‌شد و برای هر سررسید تا سه درخواست
+    // `infos` می‌فرستاد — حتی وقتی کاربر روی تب دیگری بود و هیچ کندلی روی
+    // صفحه نبود. قاعده‌اش در `live-dashboard-scope.mjs` خالص و آزمون‌شدنی
+    // است، نه اینجا داخل بستار.
+    if (!shouldFetchRange({ visible: isVisible(), cached: rangeCache.get(key), now: Date.now() })) {
+      paintDailyRanges();
+      return;
+    }
     const request = ++rangeRequest;
     rangeStatus.textContent = `در حال دریافت بازه واقعی امروز برای ${fmt.int(ids.length)} قرارداد…`;
     rangeChart.innerHTML = '<div class="skeleton" style="height:180px"></div>';
@@ -413,6 +431,8 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       normalizeSelection(preserve); paintSummary(); paintUnderlying(); paintMapMode(); await paintMap();
     },
     selection: () => ({ uaIns, endDate, contractIns }),
+    // برگشت به تب نقشه: همان‌جا که دوباره دیده می‌شود، اگر کهنه بود تازه شود.
+    refreshRanges: () => loadDailyRanges(),
     dispose() { mapHandle?.dispose(); },
   };
 }

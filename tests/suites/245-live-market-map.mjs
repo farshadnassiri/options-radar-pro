@@ -64,6 +64,10 @@ check('زنجیره از کاتالوگ ستون مشترک استفاده می�
 check('زنجیره سه انتخاب مستقل هر دو، کال و پوت دارد',
   ['all', 'call', 'put'].every((side) => mapUi245.includes(`data-lmm-chain-side="${side}"`))
   && mapUi245.includes('filterContractsBySide(contracts(), chainSide)'));
-check('نقشه نمای اصلی است و همه نماهای قبلی پشت بخش تکمیلی حفظ شده‌اند',
-  dashboard245.indexOf('id="dd-market-explorer"') < dashboard245.indexOf('class="decision-advanced"')
+// «تحلیل‌های تکمیلی» دیگر یک `<details>` بسته نیست: هر شش حالت هم‌ردیف نقشه
+// در نوار تب نشسته‌اند. نقشه همچنان تب نخست است و هیچ نمایی حذف نشده.
+check('نقشه تب نخست است و همه نماهای قبلی هم‌ردیفش تب شده‌اند',
+  !dashboard245.includes('class="decision-advanced"')
+  && dashboard245.includes('class="dd-tabbar" role="tablist"')
+  && /DASHBOARD_MODES = \[\n\s*\{ id: 'explorer'/.test(dashboard245)
   && dashboard245.includes('DASHBOARD_MODES.map') && dashboard245.includes('mountLiveMarketMap'));

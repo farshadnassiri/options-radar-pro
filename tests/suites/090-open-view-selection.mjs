@@ -17,8 +17,10 @@ group('۸۹. مالکیت انتخاب نماد در نگاه باز');
   check('مجوز صریح هم فقط یک بار مصرف می‌شود', gate89.consume() === false);
 
   const dash89 = readSrc('../ui/tabs/live-market-dashboard.mjs');
-  check('فقط رویداد انتخاب نماد مجوز همگام‌سازی می‌خواهد',
-    /\$\('dd-underlying'\)\.addEventListener\('change'[\s\S]*?openViewBaseSync\.request\(\)/.test(dash89)
+  // انتخاب نماد از کشوی داشبورد به نقشه منتقل شد؛ مجوز همچنان فقط وقتی
+  // ساخته می‌شود که نماد **واقعاً** عوض شده باشد، نه در هر رویداد نقشه.
+  check('فقط عوض‌شدن نماد روی نقشه مجوز همگام‌سازی می‌خواهد',
+    /if \(String\(pick\.uaIns\) !== lastUaIns\) \{[\s\S]*?openViewBaseSync\.request\(\); \}/.test(dash89)
     && (dash89.match(/openViewBaseSync\.request\(\)/g) || []).length === 1);
   check('رسم نگاه باز پیش از نوشتن انتخاب، مجوز را مصرف می‌کند',
     /if \(!openViewBaseSync\.consume\(\)\) return;[\s\S]*?base\.value = value/.test(dash89));

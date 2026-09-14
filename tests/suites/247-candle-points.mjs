@@ -1,5 +1,5 @@
 import { check, group } from '../harness.mjs';
-import { candlePoints, nearestCandlePoint, mountCandlePoints } from '../../ui/candle-points.mjs';
+import { CANDLE_VIEW, candleDomain, candleGeometry, candlePoints, dayPositionPct, nearestCandlePoint, mountCandlePoints } from '../../ui/candle-points.mjs';
 import { fmt } from '../../ui/fmt.mjs';
 
 group('۲۴۷. انتخاب نقاط کندل افقی');
@@ -13,7 +13,7 @@ for (const row of [
   const nodes = points.map((p) => ({ dataset: { point: p.key }, classList: { toggle() {}, remove() {} } }));
   const button = {
     classList: { add() {} },
-    querySelector: (key) => key === 'svg' ? { getBoundingClientRect: () => ({ left: 0, top: 0, width: 600, height: 132 }) } : readout,
+    querySelector: (key) => key === 'svg' ? { getBoundingClientRect: () => ({ left: 0, top: 0, width: CANDLE_VIEW.width, height: CANDLE_VIEW.height }) } : readout,
     querySelectorAll: () => nodes,
     addEventListener: (event, handler) => { handlers[event] = handler; },
   };
