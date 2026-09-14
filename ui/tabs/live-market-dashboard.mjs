@@ -12,6 +12,7 @@ import {
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { dashboardClock } from '/core/watch-health.mjs';
 import { createOpenViewBaseSyncGate } from '/ui/open-view-selection.mjs';
 import { mountLiveMarketMap } from '/ui/live-market-map.mjs';
 import { SCOPE_LEVELS, resolveScope, needsTape } from '/ui/live-dashboard-scope.mjs';
@@ -231,7 +232,20 @@ const COLS_CONTRACT = [
   col('oiYday', 'موقعیت باز دیروز', 'int', { group: 'تعهد انباشته' }),
   col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain', sign: true }),
   col('oiChangePct', 'تغییر موقعیت باز ٪', 'pct', { group: 'تعهد انباشته', heat: 'gain', sign: true }),
-  col('ivPct', 'تلاطم ضمنی ٪', 'pct', { group: 'تلاطم', base: true }),
+  col('ivPct', 'تلاطم ضمنی ٪ — آخرین معامله', 'pct', { group: 'تلاطم', base: true }),
+  // ── تلاطم مشاهده‌ای و تلاطم اجرایی، کنار هم ─────────────────────────
+  //
+  // ممیزی ۱۴۰۵/۰۶/۲۴: تلاطم از آخرین معامله ساخته می‌شد و آن معامله
+  // لزوماً هم‌زمان با قیمت پایه نیست. مظنه این مشکل را ندارد — دفتر سفارش
+  // همین حالاست. هیچ‌کدام جای دیگری را پر نمی‌کند؛ هر دو ستون خودشان را
+  // دارند و فاصله‌شان خودش خبر است.
+  col('ivMidPct', 'تلاطم اجرایی ٪ — میانه مظنه', 'pct', { group: 'تلاطم', base: true }),
+  col('ivBidPct', 'تلاطم مظنه خرید ٪', 'pct', { group: 'تلاطم' }),
+  col('ivAskPct', 'تلاطم مظنه فروش ٪', 'pct', { group: 'تلاطم' }),
+  col('ivWhyText', 'علت نبود تلاطم', 'text', { group: 'تلاطم', base: true }),
+  col('theoreticalFloor', 'کف نظری قیمت', 'money', { group: 'تلاطم' }),
+  col('floorGap', 'فاصله قیمت از کف نظری', 'money', { group: 'تلاطم', sign: true }),
+  col('pricedToday', 'قیمت از معامله امروز', 'bool', { group: 'تلاطم' }),
   col('turnoverRatio', 'گردش به موقعیت باز', 'num', { group: 'گردش امروز' }),
   // ── چهار دستهٔ تازه ───────────────────────────────────────────────
   //
@@ -241,7 +255,8 @@ const COLS_CONTRACT = [
   //
   // یونانی‌ها از همان `ivPct` ستون بالا ساخته می‌شوند، نه از حلِ دوباره؛
   // پس ستون تلاطم و ستون دلتا همیشه با هم می‌خوانند.
-  col('delta', 'دلتا', 'num', { group: 'یونانی', base: true, sign: true }),
+  col('delta', 'دلتا — از آخرین معامله', 'num', { group: 'یونانی', base: true, sign: true }),
+  col('deltaMid', 'دلتای اجرایی — از میانه مظنه', 'num', { group: 'یونانی', base: true, sign: true }),
   col('gamma', 'گاما', 'small', { group: 'یونانی' }),
   col('theta', 'تتا (ریال در روز)', 'num', { group: 'یونانی', sign: true }),
   col('vega', 'وگا (هر ۱٪ تلاطم)', 'num', { group: 'یونانی' }),
@@ -824,6 +839,7 @@ export async function mount(root, { state, api }) {
     rFree: Number(state.settings.rFree) || 0,
     divYield: Number(state.settings.divYield) || 0,
     yearDays: Number(state.settings.dayCountYear) > 0 ? Number(state.settings.dayCountYear) : 365,
+    ivLo: Number(state.settings.ivLo) > 0 ? Number(state.settings.ivLo) : 0.01,
   });
   let payload = { universe: { underlyings: [], expiries: [], marketExpiries: [], contracts: [] }, timeline: [], snapshot: { rows: [] } };
   let activeMode = DASHBOARD_MODES[0].id;
@@ -903,6 +919,10 @@ export async function mount(root, { state, api }) {
     if (!openViewMounted) {
       host.innerHTML = '<p class="empty-note">در حال آماده‌سازی تحلیل چندروزه…</p>';
       const mod = await import('/ui/tabs/open-view.mjs'); openViewController = await mod.mount(host, { state }); openViewMounted = true;
+      // نمای لحظه‌ای فهرست نمادش را از همین عکس می‌گیرد. بدون این خط، تا
+      // تیک بعدی (تا ۶۰ ثانیه) انتخابگر خالی می‌ماند و کاربر فکر می‌کند
+      // چیزی بار نشده.
+      openViewController?.updateLive?.(payload);
     }
     // تیک خودکار دوباره به `paintView` می‌رسد، اما حق ندارد انتخاب مستقلی را
     // که کاربر داخل «نگاه باز» انجام داده با نماد بالای داشبورد جایگزین کند.
@@ -1153,8 +1173,8 @@ export async function mount(root, { state, api }) {
     // جدول‌ها نمونه ماندگار دارند، پس فقط وقتی نما جدول نیست پاک می‌شوند.
     if (!tabular) { for (const entry of tables.values()) entry.el.remove(); host.innerHTML = ''; }
     if (view[2] === 'open-view') { await syncOpenView(); return; }
-    if (view[2] === 'donut') { breadthDonut(host, scopedBreadth(scoped)); return; }
-    if (view[2] === 'breadth') { breadthBars(host, scopedBreadth(scoped)); return; }
+    if (view[2] === 'donut') { breadthDonut(host, scopedBreadth(scoped), { unit: 'قرارداد' }); return; }
+    if (view[2] === 'breadth') { breadthBars(host, scopedBreadth(scoped), { unit: 'قرارداد' }); return; }
     if (view[2] === 'timeline') { paintTimeline(host, view, scoped); return; }
     if (tabular) { paintTable(host, view, scoped); return; }
     if (paintStructural(host, view, scoped)) return;
@@ -1194,7 +1214,15 @@ export async function mount(root, { state, api }) {
       payload = next; openViewController?.updateLive?.(payload);
       await marketExplorer.setUniverse(payload.universe, true, payload);
       paintLevels(); await fetchTape(); await paintView();
-      $('dd-status').textContent = `${faClock(new Date(next.at || Date.now()))} · ${fmt.int(next.universe?.contracts?.length || 0)} قرارداد · ${fmt.int(next.traded || 0)} پایه معامله‌شده`;
+      // دو زمان، دو ادعا. «عکس» زمانی است که تابلو خوانده شده و «دریافت»
+      // زمانی که پاسخ رسیده؛ پیش از این فقط دومی نشان داده می‌شد و رابط
+      // هر پنج ثانیه ادعا می‌کرد داده تازه است.
+      const clock = dashboardClock({ snapshotAt: next.snapshotAt, at: next.at });
+      const stamp = clock.unknown
+        ? 'زمان عکس نامعلوم'
+        : `عکس ${faClock(new Date(clock.snapshotAt))} · ${faDigits(clock.ageSec)} ثانیه پیش`;
+      $('dd-status').textContent = `${stamp} · دریافت ${faClock(new Date(clock.at || Date.now()))} · ${fmt.int(next.universe?.contracts?.length || 0)} قرارداد · ${fmt.int(next.traded || 0)} پایه معامله‌شده`;
+      $('dd-status').className = clock.stale ? 'loss' : '';
     } catch (error) {
       $('dd-status').textContent = `به‌روزرسانی ناموفق: ${error.message}`; logError('داشبورد تصمیم‌گیری', error);
     } finally { loading = false; $('dd-refresh').disabled = false; schedule(); }

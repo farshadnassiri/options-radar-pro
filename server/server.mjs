@@ -37,7 +37,7 @@ import { tehranDateNumber } from '../core/live-day.mjs';
 import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
-import { decisionDashboardSnapshot } from '../core/decision-dashboard.mjs';
+import { decisionDashboardSnapshot, mergeUnderlyingTrades } from '../core/decision-dashboard.mjs';
 import { makeUpstreamTally } from '../core/upstream-tally.mjs';
 import { writeJsonAtomic } from './atomic-json.mjs';
 import { watchHealth } from '../core/watch-health.mjs';
@@ -1066,8 +1066,18 @@ async function handle(req, res) {
       const timeline = marketBreadthTimeline(instruments, tradesByIns, { bucketSeconds: 60 });
       res.setHeader('Cache-Control', 'no-store');
       return sendJson(res, 200, {
-        at: Date.now(), count: instruments.length, traded: snapshot.traded,
-        failed, snapshot, timeline, universe: decisionDashboardSnapshot(sourceRows, S),
+        // ── دو زمان، نه یکی ───────────────────────────────────────────
+        //
+        // ممیزی: «ساعت بالای داشبورد هر ۵ ثانیه تازه می‌شود، حتی وقتی عکس
+        // زنجیره چند دقیقه قدیمی است.» درست بود: `at` زمانِ پاسخ است، نه
+        // زمانِ عکس. حالا هر دو می‌روند و رابط می‌تواند سن واقعی را بگوید.
+        at: Date.now(), snapshotAt: watch.at || null,
+        count: instruments.length, traded: snapshot.traded,
+        failed, snapshot, timeline,
+        // گردش واقعی پایه‌ها همین‌جا به عکس زنجیره برمی‌گردد؛ پیش از این
+        // جدا گرفته می‌شد و هیچ‌وقت ادغام نمی‌شد، پس «ارزش خود پایه» در کل
+        // رابط صفر بود.
+        universe: mergeUnderlyingTrades(decisionDashboardSnapshot(sourceRows, S), observed),
       });
     }
 

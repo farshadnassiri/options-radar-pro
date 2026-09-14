@@ -61,3 +61,30 @@ export function watchHealth({ open = false, at = 0, now = Date.now(), intervalSe
       + ` و سقف قابل قبول ${fa(limitSec)} ثانیه است. عددهای روی صفحه به همان اندازه کهنه‌اند.`,
   };
 }
+
+/**
+ * جملهٔ وضعیت داشبورد: زمانِ **عکس**، سنش، و زمانِ دریافتِ پاسخ.
+ *
+ * ممیزی ۱۴۰۵/۰۶/۲۴، ردیف ۸: «ساعت بالای داشبورد هر ۵ ثانیه تازه می‌شود،
+ * حتی وقتی بازار بسته و عکس زنجیره چند دقیقه قدیمی است.» ساعتِ نمایش‌داده
+ * زمانِ پاسخِ سرور بود، نه زمانِ عکس — یعنی رابط هر پنج ثانیه ادعا می‌کرد
+ * داده تازه است در حالی که فقط درخواست تازه بود.
+ *
+ * دو زمان دو چیزند و هر دو باید دیده شوند. سن از **عکس** حساب می‌شود، نه
+ * از پاسخ. بدون زمان عکس، هیچ سنی ادعا نمی‌شود.
+ */
+export function dashboardClock({ snapshotAt, at, now = Date.now(), staleSec = 120 } = {}) {
+  const snap = Number(snapshotAt);
+  const got = Number(at);
+  const hasSnap = Number.isFinite(snap) && snap > 0;
+  const ageSec = hasSnap ? Math.max(0, Math.round((now - snap) / 1000)) : null;
+  return {
+    snapshotAt: hasSnap ? snap : null,
+    at: Number.isFinite(got) && got > 0 ? got : null,
+    ageSec,
+    // «کهنه» فقط وقتی ادعا می‌شود که زمان عکس را داشته باشیم؛ نداشتنش
+    // یعنی نمی‌دانیم، نه اینکه تازه است.
+    stale: ageSec === null ? false : ageSec >= staleSec,
+    unknown: !hasSnap,
+  };
+}
