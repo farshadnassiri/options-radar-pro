@@ -7,7 +7,7 @@ import { liveOptionTape, liveReferenceTape, marketBreadthSnapshot } from '/core/
 import {
   dashboardScope, activeOptionsBoard, moneynessDistribution, BOARD_METRICS,
   strikeLadder, maxPain, termStructure,
-  contractBreakeven, breakevenGap, breakevenGapPct,
+  contractBreakeven, breakevenGap, breakevenGapPct, contractAnalytics,
 } from '/core/decision-dashboard.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
@@ -232,6 +232,28 @@ const COLS_CONTRACT = [
   col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain', sign: true }),
   col('oiChangePct', 'تغییر موقعیت باز ٪', 'pct', { group: 'تعهد انباشته', heat: 'gain', sign: true }),
   col('ivPct', 'تلاطم ضمنی ٪', 'pct', { group: 'تلاطم', base: true }),
+  col('turnoverRatio', 'گردش به موقعیت باز', 'num', { group: 'گردش امروز' }),
+  // ── چهار دستهٔ تازه ───────────────────────────────────────────────
+  //
+  // خواستهٔ صاحب پروژه: «همه چیز در تمامی موضوعات؛ چیزی جا نمونه.» تابلو
+  // ارزش و حجم و موقعیت باز را خودش می‌دهد؛ این‌ها همان چیزهایی‌اند که
+  // معامله‌گر اختیار **پیش از زدن دکمه** روی کاغذ حساب می‌کند.
+  //
+  // یونانی‌ها از همان `ivPct` ستون بالا ساخته می‌شوند، نه از حلِ دوباره؛
+  // پس ستون تلاطم و ستون دلتا همیشه با هم می‌خوانند.
+  col('delta', 'دلتا', 'num', { group: 'یونانی', base: true, sign: true }),
+  col('gamma', 'گاما', 'small', { group: 'یونانی' }),
+  col('theta', 'تتا (ریال در روز)', 'num', { group: 'یونانی', sign: true }),
+  col('vega', 'وگا (هر ۱٪ تلاطم)', 'num', { group: 'یونانی' }),
+  col('rho', 'رو (هر ۱٪ نرخ)', 'num', { group: 'یونانی' }),
+  col('probItmPct', 'احتمال در سود در سررسید ٪', 'pct', { group: 'یونانی', heat: 'gain' }),
+  col('leverage', 'اهرم ساده', 'num', { group: 'اهرم و فرسایش' }),
+  col('effectiveLeverage', 'اهرم مؤثر (دلتا × اهرم)', 'num', { group: 'اهرم و فرسایش', base: true }),
+  col('timeValuePerDay', 'فرسایش روزانه ریال', 'money', { group: 'اهرم و فرسایش' }),
+  col('timeDecayPctPerDay', 'فرسایش روزانه ٪ پریمیوم', 'pct', { group: 'اهرم و فرسایش', heat: 'loss' }),
+  col('timeValueAnnualPct', 'ارزش زمانی سالانه ٪ پایه', 'pct', { group: 'اهرم و فرسایش' }),
+  col('staticReturnPct', 'بازده اگر پایه تکان نخورد ٪', 'pct', { group: 'بازده', base: true, heat: 'gain', sign: true }),
+  col('premiumPctStrike', 'پریمیوم ٪ قیمت اعمال', 'pct', { group: 'بازده' }),
 ];
 
 const COLS_UNDERLYING = [
@@ -550,7 +572,7 @@ function colsFor(kindKey) {
 
 // ردیف خام را به چیزی تبدیل می‌کند که جدول مشترک بتواند مرتب و صادر کند:
 // یک ستون عنوانِ متنی، و متن سررسید به‌جای عدد خام تاریخ.
-function decorate(rows, kindKey) {
+function decorate(rows, kindKey, greekParams = {}) {
   return rows.map((row) => ({
     ...row,
     title: kindKey === 'expiries' ? dateLabel(row.endDate) : rowName(row),
@@ -560,7 +582,8 @@ function decorate(rows, kindKey) {
     // ردیف گروهی سربه‌سر ندارد: سربه‌سرِ «همه کال‌ها» عددی است که هیچ
     // قراردادی ندارد. پس فقط ردیفی که خودش یک قرارداد است این سه را می‌گیرد.
     ...(row.kind === 'call' || row.kind === 'put'
-      ? { breakeven: contractBreakeven(row), breakevenGap: breakevenGap(row), breakevenGapPct: breakevenGapPct(row) }
+      ? { breakeven: contractBreakeven(row), breakevenGap: breakevenGap(row), breakevenGapPct: breakevenGapPct(row),
+        ...contractAnalytics(row, greekParams) }
       : {}),
   }));
 }
@@ -795,6 +818,13 @@ export async function mount(root, { state, api }) {
         : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</div>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
+  // یونانی‌ها با همان فرض‌هایی حساب می‌شوند که بقیهٔ برنامه؛ نه با عدد
+  // سرخود، وگرنه دلتای این تب با دلتای «رصد یونانی» نمی‌خواند.
+  const greekParams = () => ({
+    rFree: Number(state.settings.rFree) || 0,
+    divYield: Number(state.settings.divYield) || 0,
+    yearDays: Number(state.settings.dayCountYear) > 0 ? Number(state.settings.dayCountYear) : 365,
+  });
   let payload = { universe: { underlyings: [], expiries: [], marketExpiries: [], contracts: [] }, timeline: [], snapshot: { rows: [] } };
   let activeMode = DASHBOARD_MODES[0].id;
   const activeViews = Object.fromEntries(DASHBOARD_MODES.filter((mode) => mode.views.length).map((mode) => [mode.id, mode.views[0][0]]));
@@ -842,6 +872,7 @@ export async function mount(root, { state, api }) {
 
   const marketExplorer = mountLiveMarketMap($('dd-market-explorer'), {
     contractColumns: COLS_CONTRACT,
+    greekParams,
     isVisible: explorerVisible,
     onScopeChange: async (pick) => {
       if (String(pick.uaIns) !== lastUaIns) { lastUaIns = String(pick.uaIns); openViewBaseSync.request(); }
@@ -945,9 +976,9 @@ export async function mount(root, { state, api }) {
       else if (!tape?.length) empty = 'برای قرارداد انتخابی ریزمعامله معتبر دریافت نشده است.';
       rows = tapeRows(tape);
     } else if (view[2] === 'expiry-leaders') {
-      cols = COLS_CONTRACT; rows = decorate(expiryLeaders(scoped), 'contracts');
+      cols = COLS_CONTRACT; rows = decorate(expiryLeaders(scoped), 'contracts', greekParams());
     } else {
-      cols = colsFor(kindKey); rows = decorate(ranked(view, scoped, 400), kindKey);
+      cols = colsFor(kindKey); rows = decorate(ranked(view, scoped, 400), kindKey, greekParams());
     }
     const table = tableFor(host, `${view[2]}:${kindKey}`, cols, `${kindKey}`);
     table.setEmptyMessage(empty || 'در دامنه انتخابی داده معتبر برای این نما نیست.');

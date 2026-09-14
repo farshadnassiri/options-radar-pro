@@ -6,7 +6,7 @@
 import { check, near, group, readSrc } from '../harness.mjs';
 import {
   contractBreakeven, breakevenGap, breakevenGapPct, activeOptionsBoard,
-  marketMapRows, EQUAL_MAP_METRIC, twoSidedChain, chainSideMax,
+  marketMapRows, EQUAL_MAP_METRIC, twoSidedChain, chainSideMax, contractAnalytics,
 } from '../../core/decision-dashboard.mjs';
 import { SCOPE_LEVELS, resolveScope, needsTape, shouldFetchRange } from '../../ui/live-dashboard-scope.mjs';
 import { candleDomain, candleGeometry, candlePoints, dayPositionPct } from '../../ui/candle-points.mjs';
@@ -200,3 +200,79 @@ check('۴. نمای «همان جدول، مرتب بر ستون دیگر» در
   !dashB246.includes("'value-bars'") && !dashB246.includes("'volume-bars'")
   && !dashB246.includes("'gainers-bars'") && !dashB246.includes("'iv-bars'")
   && !dashB246.includes("'bar-asc'"));
+
+// ————————————————————————————————————————————————————————————————
+// دور سوم گزارش: ستون‌های انتخابی زنجیرهٔ دوطرفه و سنجه‌های تازهٔ قرارداد.
+// ————————————————————————————————————————————————————————————————
+group('۲۴۶-پ. سنجه‌های قرارداد و انتخابگر ستون زنجیره');
+
+const P246 = { rFree: 0.3, divYield: 0, yearDays: 365 };
+const itm246 = { kind: 'call', strike: 2000, last: 180, spot: 2100, days: 30, ivPct: 45, oi: 500, volume: 250 };
+const a246 = contractAnalytics(itm246, P246);
+
+check('یونانی‌ها از همان تلاطم ردیف ساخته می‌شوند و در دامنهٔ معتبرند',
+  a246.delta > 0 && a246.delta < 1 && a246.gamma > 0 && a246.vega > 0 && a246.theta < 0);
+// دلتای پوت هم‌اعمال باید منفی باشد — علامت، خودش یک ادعاست.
+check('دلتای پوت منفی است و دلتای کال مثبت',
+  contractAnalytics({ ...itm246, kind: 'put' }, P246).delta < 0);
+
+// ═══ اهرم ساده و اهرم مؤثر یکی نیستند ═══
+// اهرم ساده می‌گوید یک قرارداد چند برابر خودِ سهم را کنترل می‌کند؛ مؤثر
+// همان را در دلتا می‌زند، یعنی «یک درصد حرکت پایه چند درصد روی پریمیوم».
+check('اهرم ساده نسبت قیمت پایه به پریمیوم است',
+  near(a246.leverage, 2100 / 180, 1e-9));
+check('اهرم مؤثر همان اهرم ضربدر قدرمطلق دلتا است',
+  near(a246.effectiveLeverage, a246.leverage * Math.abs(a246.delta), 1e-9)
+  && a246.effectiveLeverage < a246.leverage);
+
+// ارزش ذاتی ۱۰۰، پریمیوم ۱۸۰ ← اگر پایه تکان نخورد، ۸۰ از ۱۸۰ می‌سوزد.
+check('بازده سناریوی بی‌حرکت از ارزش ذاتی همان سمت می‌آید',
+  near(a246.staticReturnPct, ((100 - 180) / 180) * 100, 1e-9));
+// و اختیار بی‌ارزشِ ذاتی، دقیقاً ‎−۱۰۰‎ — نه عددی نزدیک به آن.
+check('اختیار خارج از سود در سناریوی بی‌حرکت دقیقاً همه‌چیز را می‌بازد',
+  contractAnalytics({ ...itm246, strike: 2500 }, P246).staticReturnPct === -100);
+
+// فرسایش عددیِ ساده باید با تتای مدل هم‌جهت و هم‌مرتبه باشد — اگر یکی از
+// این دو روزی خراب شود، این ادعا می‌گیردش.
+check('فرسایش روزانه با تتای مدل هم‌مرتبه است',
+  near(a246.timeValuePerDay, 80 / 30, 1e-9) && Math.abs(a246.timeValuePerDay + a246.theta) < 1);
+check('گردش به موقعیت باز، حجم امروز تقسیم بر تعهد انباشته است',
+  near(a246.turnoverRatio, 0.5, 1e-9));
+
+// ═══ ورودی که نیست، عدد نمی‌سازد ═══
+const blank246 = contractAnalytics({ kind: 'call', strike: 2000, last: 0, spot: 0, days: 0, ivPct: NaN }, P246);
+check('بی‌پریمیوم و بی‌تلاطم، هیچ ستونی عدد نمی‌سازد',
+  ['delta', 'gamma', 'leverage', 'effectiveLeverage', 'timeValuePerDay', 'staticReturnPct', 'turnoverRatio']
+    .every((key) => Number.isNaN(blank246[key])));
+check('ردیف بدون سمت (گروه یا سررسید) یونانی نمی‌گیرد',
+  Number.isNaN(contractAnalytics({ strike: 2000, last: 180, spot: 2100, days: 30, ivPct: 45 }, P246).delta));
+
+// ————— انتخابگر ستون —————
+const mapC246 = readSrc('../ui/live-market-map.mjs');
+const dashC246 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+
+check('زنجیرهٔ دوطرفه از همان کاتالوگ ستونِ جدول تخت می‌خواند، نه فهرست جدا',
+  mapC246.includes('const PAIRED_CATALOG = contractColumns.filter(')
+  && !mapC246.includes('const PAIRED_COLS = ['));
+check('ستون‌هایی که در چیدمان قرینه معنی ندارند کنار گذاشته شده‌اند',
+  mapC246.includes("const PAIRED_SKIP = new Set(['title', 'kindLabel', 'strike', 'expiryText', 'uaName'])"));
+check('انتخاب ستون ذخیره می‌شود و «همه» و «نمای آماده» دارد',
+  mapC246.includes("localStorage.setItem('options-radar:market-map-paired-cols'")
+  && mapC246.includes("data-paired-act=\"all\"") && mapC246.includes("data-paired-act=\"base\""));
+// ترتیب نمایش از کاتالوگ می‌آید نه از ترتیب تیک‌زدن، وگرنه دو بار
+// عوض‌کردن یک ستون کل جدول را جابه‌جا می‌کند.
+check('ترتیب ستون‌ها از کاتالوگ می‌آید، نه از ترتیب تیک‌زدن',
+  mapC246.includes('const pairedCols = () => PAIRED_CATALOG.filter((item) => pairedKeys.includes(item.key))'));
+check('زنجیره بدون ستون ممکن نیست',
+  mapC246.includes('else if (pairedKeys.length === 1) { box.checked = true; return; }'));
+
+const NEW_COLS = ['delta', 'gamma', 'theta', 'vega', 'rho', 'probItmPct', 'leverage', 'effectiveLeverage',
+  'timeValuePerDay', 'timeDecayPctPerDay', 'timeValueAnnualPct', 'staticReturnPct', 'premiumPctStrike', 'turnoverRatio'];
+check('هر چهارده سنجهٔ تازه ستون خودش را در کاتالوگ دارد',
+  NEW_COLS.every((key) => dashC246.includes(`col('${key}'`)),
+  NEW_COLS.filter((key) => !dashC246.includes(`col('${key}'`)).join('، '));
+check('گاما با قالب «کوچک» نوشته می‌شود تا در ستون صفر نشود',
+  dashC246.includes("col('gamma', 'گاما', 'small'"));
+check('یونانی‌ها با فرض‌های خودِ کاربر ساخته می‌شوند، نه عدد سرخود',
+  dashC246.includes('const greekParams = () => ({')
+  && dashC246.includes('yearDays: Number(state.settings.dayCountYear) > 0'));
