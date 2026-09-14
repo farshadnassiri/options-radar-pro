@@ -63,9 +63,14 @@ group('۶۹. داشبورد تجمعی بازار و رصد زنده موقعی�
   check('داشبورد دایره‌ای، میله‌ای و سه مسیر تجمعی را در کاتالوگ تصمیم نگه می‌دارد',
     ui69.includes("'breadth-donut'") && ui69.includes("'breadth-bars'")
     && ui69.includes("'breadth-pct'") && ui69.includes("'breadth-net'") && ui69.includes("'base-volume-path'"));
-  check('انتخاب قرارداد دقیقاً از پایه به سررسید و سپس قرارداد می‌رود',
-    ui69.includes('id="dd-underlying"') && ui69.includes('id="dd-expiry"')
-    && ui69.includes('id="dd-contract"') && ui69.includes('fillSelectors'));
+  // این ادعا تا ۱۴۰۵/۰۶/۲۳ سه کشوی جداگانه را قفل کرده بود — یعنی دقیقاً
+  // همان دوباره‌پرسیدنی که صاحب پروژه خواست برداشته شود. نقشه حالا تنها
+  // منبع انتخاب است، پس ادعا هم همان را قفل می‌کند: نه کشوی موازی بماند،
+  // نه دامنه از جای دیگری خوانده شود.
+  check('نماد و سررسید فقط یک بار و روی نقشه انتخاب می‌شوند',
+    !ui69.includes('id="dd-underlying"') && !ui69.includes('id="dd-expiry"')
+    && !ui69.includes('id="dd-contract"') && !ui69.includes('fillSelectors')
+    && ui69.includes('resolveScope(scopeLevel, marketExplorer.selection())'));
   check('دامنه قرارداد فقط پایه و همان قرارداد را برای ریزمعامله می‌گیرد',
     ui69.includes('`${pick.uaIns},${contract.ins}`')
     && ui69.includes('liveOptionTape({ trades: optionRows') && ui69.includes('tape ='));

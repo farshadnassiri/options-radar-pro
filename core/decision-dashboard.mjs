@@ -275,6 +275,27 @@ export function contractBreakeven(row) {
 }
 
 /**
+ * فاصلهٔ قیمت جاری پایه تا سربه‌سرِ همان قرارداد — به ریال، از دید همان سمت.
+ *
+ * علامت مشترک نمی‌گیرد. کال وقتی به سربه‌سر می‌رسد که پایه **بالا** برود و
+ * پوت وقتی **پایین** بیاید؛ اگر هر دو را با یک تفاضلِ خام بنویسیم، یکی از
+ * دو سمت در ستون وارونه دیده می‌شود و خریدارِ پوت فکر می‌کند از سربه‌سر رد
+ * شده در حالی که تازه دور شده است. پس در هر دو سمت، **مثبت یعنی هنوز
+ * نرسیده‌ایم** و منفی یعنی قیمت جاری از سربه‌سر گذشته است.
+ */
+export function breakevenGap(row) {
+  const breakeven = contractBreakeven(row), spot = Number(row.spot);
+  if (!Number.isFinite(breakeven) || !(spot > 0)) return NaN;
+  return row.kind === 'put' ? spot - breakeven : breakeven - spot;
+}
+
+/** همان فاصله، بر حسب درصدِ قیمت جاری پایه — تنها شکلی که بین دو نماد قابل مقایسه است. */
+export function breakevenGapPct(row) {
+  const gap = breakevenGap(row), spot = Number(row.spot);
+  return Number.isFinite(gap) && spot > 0 ? (gap / spot) * 100 : NaN;
+}
+
+/**
  * تابلوی اختیارهای پرمعامله و شاخص سربه‌سر هر سررسید.
  *
  * `side` یکی از `both` / `call` / `put`. تفکیک، فقط فیلتر نیست: سربه‌سر کال و
@@ -299,9 +320,8 @@ export function activeOptionsBoard(contracts = [], { metric = 'value', side = 'b
         // فاصله از دید همان سمت خوانده می‌شود: کال باید بالا برود تا به
         // سربه‌سر برسد، پوت باید پایین بیاید. با یک علامت مشترک، دو سمت
         // در یک ستون وارونه دیده می‌شوند.
-        breakevenGapPct: Number.isFinite(breakeven) && spot > 0
-          ? (row.kind === 'put' ? (1 - breakeven / spot) : (breakeven / spot - 1)) * 100
-          : NaN,
+        breakevenGap: breakevenGap(row),
+        breakevenGapPct: breakevenGapPct(row),
         moneynessPct: Number.isFinite(Number(row.strike)) && spot > 0
           ? ((Number(row.strike) / spot) - 1) * 100 : NaN,
         rank: Number(row[key]) || 0,

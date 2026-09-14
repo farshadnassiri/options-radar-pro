@@ -7,13 +7,14 @@ import { liveOptionTape, liveReferenceTape, marketBreadthSnapshot } from '/core/
 import {
   dashboardScope, activeOptionsBoard, moneynessDistribution, BOARD_METRICS,
   strikeLadder, maxPain, termStructure,
+  contractBreakeven, breakevenGap, breakevenGapPct,
 } from '/core/decision-dashboard.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { createOpenViewBaseSyncGate } from '/ui/open-view-selection.mjs';
 import { mountLiveMarketMap } from '/ui/live-market-map.mjs';
-import { mountLiveMarketPulse } from '/ui/live-market-pulse.mjs';
+import { SCOPE_LEVELS, resolveScope, needsTape } from '/ui/live-dashboard-scope.mjs';
 
 // شش اسلات، و بدون چرخش. اسلات هفتم یعنی رنگی که با یکی از شش تای قبلی
 // اشتباه گرفته می‌شود؛ سریِ هفتم باید در «بقیه» جمع شود، نه رنگ تازه بگیرد.
@@ -150,7 +151,18 @@ const EMBEDDED_MODES = [
   { id: 'top', title: 'برترین موقعیت‌ها', hint: 'غربال روی کل کاتالوگ استراتژی', mod: '/ui/tabs/top.mjs' },
 ];
 
+// ————— تب‌بندی صفحه —————
+//
+// خواسته صاحب پروژه: «صفحه را تب‌بندی کن» و «تمام قسمت‌های این بخش را
+// یکپارچه کن». پیش از این صفحه سه لایه ناوبری داشت: نقشه بالای صفحه، یک
+// `<details>` به نام «تحلیل‌های تکمیلی» که باید باز می‌شد، و داخلش یک ریل
+// عمودی با شش حالت. سه لایه برای یک انتخاب.
+//
+// حالا هر شش حالت و خودِ نقشه، **هم‌ردیف** در یک نوار تب‌اند. نقشه تب نخست
+// است چون مسیر اصلی تصمیم از آنجا شروع می‌شود و انتخابش، دامنهٔ همه تب‌های
+// دیگر را هم می‌سازد.
 export const DASHBOARD_MODES = [
+  { id: 'explorer', title: 'نقشه و زنجیره', hint: 'نقشه بازار، سررسید، کندل روزانه و زنجیره', views: [], explorer: true },
   { id: 'pulse', title: 'نبض و جهت بازار', hint: 'وسعت، روند و تغییر نسبت به دیروز', views: pulseViews },
   { id: 'liquidity', title: 'نقدینگی و سررسید', hint: 'ارزش، حجم، موقعیت باز و تمرکز', views: liquidityViews },
   { id: 'volatility', title: 'تلاطم و انتظارات', hint: 'IV لحظه‌ای و تحلیل نگاه باز', views: volatilityViews },
@@ -191,9 +203,18 @@ const COLS_CONTRACT = [
   col('last', 'آخرین', 'money', { group: 'قیمت', base: true }),
   col('close', 'پایانی', 'money', { group: 'قیمت' }),
   col('yday', 'پایانی دیروز', 'money', { group: 'قیمت' }),
-  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت', base: true, heat: 'gain' }),
+  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت', base: true, heat: 'gain', sign: true }),
   col('premiumPctSpot', 'پریمیوم ٪ قیمت پایه', 'pct', { group: 'قیمت' }),
-  col('moneynessPct', 'فاصله اعمال از پایه ٪', 'pct', { group: 'قیمت' }),
+  col('moneynessPct', 'فاصله اعمال از پایه ٪', 'pct', { group: 'قیمت', sign: true }),
+  // ── سربه‌سر، در خودِ زنجیره ──────────────────────────────────────────
+  //
+  // تا امروز سربه‌سر فقط در تابلوی «اختیارهای پرمعامله» بود، یعنی کاربر
+  // برای عددی که پیش از هر خرید لازم دارد باید از زنجیره بیرون می‌رفت.
+  // هر دو از `breakevenGap*` در `core/decision-dashboard.mjs` می‌آیند تا
+  // زنجیره و تابلو دو عدد متفاوت نگویند.
+  col('breakeven', 'سربه‌سر', 'money', { group: 'سربه‌سر', base: true }),
+  col('breakevenGap', 'فاصله تا سربه‌سر', 'money', { group: 'سربه‌سر', sign: true }),
+  col('breakevenGapPct', 'فاصله تا سربه‌سر ٪', 'pct', { group: 'سربه‌سر', base: true, heat: 'loss', sign: true }),
   col('intrinsic', 'ارزش ذاتی هر سهم', 'money', { group: 'قیمت' }),
   col('intrinsicPctSpot', 'ارزش ذاتی ٪ قیمت پایه', 'pct', { group: 'قیمت' }),
   col('timeValue', 'ارزش زمانی هر سهم', 'money', { group: 'قیمت' }),
@@ -209,8 +230,8 @@ const COLS_CONTRACT = [
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
   col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
   col('oiYday', 'موقعیت باز دیروز', 'int', { group: 'تعهد انباشته' }),
-  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
-  col('oiChangePct', 'تغییر موقعیت باز ٪', 'pct', { group: 'تعهد انباشته', heat: 'gain' }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain', sign: true }),
+  col('oiChangePct', 'تغییر موقعیت باز ٪', 'pct', { group: 'تعهد انباشته', heat: 'gain', sign: true }),
   col('ivPct', 'تلاطم ضمنی ٪', 'pct', { group: 'تلاطم', base: true }),
 ];
 
@@ -219,7 +240,7 @@ const COLS_UNDERLYING = [
   col('last', 'آخرین', 'money', { group: 'قیمت پایه', base: true }),
   col('close', 'پایانی', 'money', { group: 'قیمت پایه' }),
   col('yday', 'پایانی دیروز', 'money', { group: 'قیمت پایه' }),
-  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت پایه', base: true, heat: 'gain' }),
+  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت پایه', base: true, heat: 'gain', sign: true }),
   col('contracts', 'قرارداد', 'int', { group: 'اندازه تابلو', base: true }),
   col('strikes', 'قیمت اعمال', 'int', { group: 'اندازه تابلو' }),
   col('expiries', 'سررسید', 'int', { group: 'اندازه تابلو', base: true }),
@@ -248,7 +269,7 @@ const COLS_UNDERLYING = [
   col('putTrades', 'تعداد معامله پوت', 'int', { group: 'گردش امروز' }),
   col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
   col('oiYday', 'موقعیت باز دیروز', 'int', { group: 'تعهد انباشته' }),
-  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain', sign: true }),
   col('oiChangePct', 'تغییر موقعیت باز ٪', 'pct', { group: 'تعهد انباشته' }),
   col('callOi', 'موقعیت باز کال', 'int', { group: 'تعهد انباشته' }),
   col('callOiPct', 'سهم کال از موقعیت باز ٪', 'pct', { group: 'تعهد انباشته' }),
@@ -276,7 +297,7 @@ const COLS_EXPIRY = [
   col('negativePct', 'منفی ٪', 'pct', { group: 'جهت', heat: 'loss' }),
   col('unchanged', 'بدون تغییر', 'int', { group: 'جهت' }),
   col('unchangedPct', 'بدون تغییر ٪', 'pct', { group: 'جهت' }),
-  col('changePct', 'تغییر وزنی ٪', 'pct', { group: 'جهت', base: true, heat: 'gain' }),
+  col('changePct', 'تغییر وزنی ٪', 'pct', { group: 'جهت', base: true, heat: 'gain', sign: true }),
   col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('callVolume', 'حجم کال', 'int', { group: 'گردش امروز' }),
   col('callVolumePct', 'سهم کال از حجم ٪', 'pct', { group: 'گردش امروز' }),
@@ -292,7 +313,7 @@ const COLS_EXPIRY = [
   col('putTrades', 'تعداد معامله پوت', 'int', { group: 'گردش امروز' }),
   col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
   col('oiYday', 'موقعیت باز دیروز', 'int', { group: 'تعهد انباشته' }),
-  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain', sign: true }),
   col('oiChangePct', 'تغییر موقعیت باز ٪', 'pct', { group: 'تعهد انباشته', heat: 'gain' }),
   col('callOi', 'موقعیت باز کال', 'int', { group: 'تعهد انباشته' }),
   col('callOiPct', 'سهم کال از موقعیت باز ٪', 'pct', { group: 'تعهد انباشته' }),
@@ -312,7 +333,7 @@ const COLS_GROUP = [
   col('contractCount', 'قرارداد', 'int', { group: 'اندازه', base: true }),
   col('tradedContracts', 'قرارداد معامله‌شده', 'int', { group: 'اندازه' }),
   col('tradedPct', 'قرارداد معامله‌شده ٪', 'pct', { group: 'اندازه' }),
-  col('changePct', 'تغییر وزنی ٪', 'pct', { group: 'جهت', base: true, heat: 'gain' }),
+  col('changePct', 'تغییر وزنی ٪', 'pct', { group: 'جهت', base: true, heat: 'gain', sign: true }),
   col('positive', 'مثبت', 'int', { group: 'جهت' }),
   col('positivePct', 'مثبت ٪', 'pct', { group: 'جهت', heat: 'gain' }),
   col('negative', 'منفی', 'int', { group: 'جهت' }),
@@ -334,7 +355,7 @@ const COLS_GROUP = [
   col('putTrades', 'تعداد معامله پوت', 'int', { group: 'گردش امروز' }),
   col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
   col('oiYday', 'موقعیت باز دیروز', 'int', { group: 'تعهد انباشته' }),
-  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain', sign: true }),
   col('oiChangePct', 'تغییر موقعیت باز ٪', 'pct', { group: 'تعهد انباشته', heat: 'gain' }),
   col('callOi', 'موقعیت باز کال', 'int', { group: 'تعهد انباشته' }),
   col('callOiPct', 'سهم کال از موقعیت باز ٪', 'pct', { group: 'تعهد انباشته' }),
@@ -354,7 +375,7 @@ const COLS_TAPE = [
   col('days', 'روز مانده', 'int', { group: 'شناسه' }),
   col('timeText', 'زمان', 'text', { group: 'معامله', base: true }),
   col('price', 'قیمت', 'money', { group: 'معامله', base: true }),
-  col('changeFromFirstPct', 'تغییر از اولین معامله ٪', 'pct', { group: 'معامله', heat: 'gain' }),
+  col('changeFromFirstPct', 'تغییر از اولین معامله ٪', 'pct', { group: 'معامله', heat: 'gain', sign: true }),
   col('quantity', 'حجم', 'int', { group: 'معامله', base: true }),
   col('value', 'ارزش', 'money', { group: 'معامله', base: true, heat: 'gain' }),
   col('cumulativeVolume', 'حجم تجمعی', 'int', { group: 'تجمعی', base: true }),
@@ -479,7 +500,7 @@ const COLS_BOARD = [
   col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز', base: true }),
   col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
-  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain' }),
+  col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain', sign: true }),
   col('oiYday', 'موقعیت باز دیروز', 'int', { group: 'تعهد انباشته' }),
   col('oiChangePct', 'تغییر موقعیت باز ٪', 'pct', { group: 'تعهد انباشته', heat: 'gain' }),
   col('sharePct', 'سهم از سنجه ٪', 'pct', { group: 'تمرکز', base: true, heat: 'gain' }),
@@ -537,6 +558,11 @@ function decorate(rows, kindKey) {
     kindLabel: row.kind ? kindLabel(row.kind) : '',
     expiryText: row.endDate ? dateLabel(row.endDate) : '',
     contractCount: row.contracts ?? row.contractCount,
+    // ردیف گروهی سربه‌سر ندارد: سربه‌سرِ «همه کال‌ها» عددی است که هیچ
+    // قراردادی ندارد. پس فقط ردیفی که خودش یک قرارداد است این سه را می‌گیرد.
+    ...(row.kind === 'call' || row.kind === 'put'
+      ? { breakeven: contractBreakeven(row), breakevenGap: breakevenGap(row), breakevenGapPct: breakevenGapPct(row) }
+      : {}),
   }));
 }
 
@@ -757,13 +783,17 @@ function tapeRows(tape) {
 
 export async function mount(root, { state, api }) {
   root.innerHTML = `<section class="live-dashboard-hero"><div><p class="eyebrow">مرکز تصمیم‌گیری زنده بازار اختیار</p><h1>داشبورد معاملاتی لحظه‌ای</h1><p>هر جدول و نمودار از عکس واقعی بازار و معاملات امروز بازسازی می‌شود. درصد تغییر، آخرین قیمت را فقط با قیمت پایانی دیروز مقایسه می‌کند.</p></div><div><button type="button" class="ghost" id="dd-refresh">به‌روزرسانی اکنون</button><button type="button" class="ghost" id="dd-pause">توقف خودکار</button><span id="dd-status" role="status">در انتظار نخستین عکس…</span></div></section>
-    <div id="dd-market-explorer"></div>
-    <div id="dd-market-pulse"></div>
-    <details class="decision-advanced"><summary><span><b>تحلیل‌های تکمیلی و همه نماهای قبلی</b><small>دامنه تخصصی، ۶۸ نمودار و جدول، دیده‌بان زنجیره و برترین موقعیت‌ها</small></span><i>باز کردن</i></summary><div class="decision-advanced-body">
-    <section class="card decision-toolbar"><div class="decision-refresh-control"><label for="dd-interval">زمان به‌روزرسانی</label><input id="dd-interval" type="range" min="5" max="60" step="5"><output id="dd-interval-label"></output></div><div class="decision-scope-controls"><label>دامنه<select id="dd-scope"><option value="market">کل بازار</option><option value="underlying">یک نماد پایه</option><option value="expiry">یک سررسید از پایه</option><option value="contract">یک قرارداد از سررسید</option></select></label><label>نماد پایه<select id="dd-underlying"></select></label><label>سررسید<select id="dd-expiry"></select></label><label>قرارداد<select id="dd-contract"></select></label></div><p id="dd-scope-note" class="note">کل بازار اختیار</p></section>
-    <div class="decision-shell"><aside class="decision-mode-rail" aria-label="حالت‌های تصمیم‌گیری">${DASHBOARD_MODES.map((mode, index) => `<button type="button" data-mode="${mode.id}" aria-pressed="${index === 0}"><b>${mode.title}</b><small>${mode.hint}</small><span>${mode.mod ? 'تب کامل' : `${fmt.int(mode.views.length)} نما`}</span></button>`).join('')}</aside><main class="decision-main">${DASHBOARD_MODES.map((mode, modeIndex) => mode.mod
-      ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
-      : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</main></div></div></details>`;
+    <nav class="dd-tabbar" role="tablist" aria-label="بخش‌های رصد زنده بازار">${DASHBOARD_MODES.map((mode, index) => `<button type="button" role="tab" data-mode="${mode.id}" aria-selected="${index === 0}" aria-pressed="${index === 0}"><b>${mode.title}</b><small>${mode.hint}</small></button>`).join('')}</nav>
+    <section class="card decision-toolbar" id="dd-toolbar" hidden>
+      <div class="decision-scope-live"><div><p class="eyebrow">دامنه تحلیل</p><p class="note" id="dd-scope-note">کل بازار اختیار</p></div><div class="decision-level-switch" role="group" aria-label="سطح دامنه">${SCOPE_LEVELS.map(([key, label], index) => `<button type="button" data-dd-level="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div></div>
+      <p class="note dd-scope-hint">انتخاب از همان نقشه و زنجیرهٔ تب نخست خوانده می‌شود؛ اینجا دوباره نماد و سررسید نمی‌پرسیم. برای عوض‌کردن نماد به تب «نقشه و زنجیره» برگرد.</p>
+      <div class="decision-refresh-control"><label for="dd-interval">زمان به‌روزرسانی</label><input id="dd-interval" type="range" min="5" max="60" step="5"><output id="dd-interval-label"></output></div>
+    </section>
+    <div class="decision-main">${DASHBOARD_MODES.map((mode, modeIndex) => mode.explorer
+      ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div id="dd-market-explorer"></div></section>`
+      : mode.mod
+        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
+        : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</div>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
   let payload = { universe: { underlyings: [], expiries: [], marketExpiries: [], contracts: [] }, timeline: [], snapshot: { rows: [] } };
@@ -771,72 +801,64 @@ export async function mount(root, { state, api }) {
   const activeViews = Object.fromEntries(DASHBOARD_MODES.filter((mode) => mode.views.length).map((mode) => [mode.id, mode.views[0][0]]));
   let loading = false, paused = false, timer = null, nextAt = 0, tape = [], openViewMounted = false, openViewController = null;
   const openViewBaseSync = createOpenViewBaseSyncGate();
+  let lastUaIns = '';
   let intervalSec = Math.max(5, Math.min(60, Number(localStorage.getItem('options-radar:dashboard-interval')) || Number(state.settings.watchIntervalSec) || 15));
   $('dd-interval').value = String(intervalSec);
 
-  const selected = () => ({ level: $('dd-scope').value, uaIns: $('dd-underlying').value, endDate: $('dd-expiry').value, contractIns: $('dd-contract').value });
-  const activeContract = () => payload.universe.contracts.find((row) => String(row.ins) === $('dd-contract').value);
+  // ── یک انتخاب، نه دو ────────────────────────────────────────────────
+  //
+  // گزارش صاحب پروژه: «بعضاً نیاز هست که تاریخ و نماد دوباره انتخاب بشن.»
+  // درست بود: چهار کشوی `dd-underlying`/`dd-expiry`/`dd-contract` عیناً
+  // همان چیزی را می‌پرسیدند که کاربر یک قدم قبل روی نقشه انتخاب کرده بود،
+  // و چون دو منبع حقیقت وجود داشت، هر ناهمگامی یعنی تحلیل‌ها روی نمادی
+  // ساخته می‌شدند که کاربر نگاهش نمی‌کرد.
+  //
+  // حالا **نقشه تنها منبع انتخاب است**. از این صفحه فقط یک چیز باقی مانده
+  // که نقشه نمی‌گوید: کاربر می‌خواهد تحلیل روی کل بازار باشد یا روی همان
+  // نماد/سررسید/قرارداد. همان یک چیز، نوار سطح است — و هیچ نام و تاریخی
+  // دوباره پرسیده نمی‌شود.
+  let scopeLevel = localStorage.getItem('options-radar:dashboard-scope-level') || 'market';
+  if (!SCOPE_LEVELS.some(([key]) => key === scopeLevel)) scopeLevel = 'market';
+  const selected = () => resolveScope(scopeLevel, marketExplorer.selection());
+  const activeContract = () => payload.universe.contracts.find((row) => String(row.ins) === selected().contractIns);
   const modeOf = () => DASHBOARD_MODES.find((mode) => mode.id === activeMode);
   const viewOf = () => (modeOf()?.views || []).find((view) => view[0] === activeViews[activeMode]);
+  const explorerVisible = () => activeMode === 'explorer';
 
   function paintInterval() {
     $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه`;
     $('dd-interval').setAttribute('aria-valuetext', `${faDigits(intervalSec)} ثانیه`);
   }
 
-  function fillSelectors(preserve = true) {
-    const before = selected(), underlyings = payload.universe.underlyings || [];
-    $('dd-underlying').innerHTML = underlyings.map((row) => `<option value="${esc(row.ins)}">${esc(row.name)} · تغییر ${fmt.pct(row.changePct)}٪</option>`).join('');
-    if (preserve && underlyings.some((row) => String(row.ins) === before.uaIns)) $('dd-underlying').value = before.uaIns;
-    const uaIns = $('dd-underlying').value;
-    const expiries = (payload.universe.expiries || []).filter((row) => String(row.uaIns) === uaIns).sort((a, b) => a.days - b.days);
-    $('dd-expiry').innerHTML = expiries.map((row) => `<option value="${row.endDate}">${dateLabel(row.endDate)} · ${fmt.int(row.days)} روز</option>`).join('');
-    if (preserve && expiries.some((row) => String(row.endDate) === before.endDate)) $('dd-expiry').value = before.endDate;
-    const endDate = $('dd-expiry').value;
-    const contracts = (payload.universe.contracts || []).filter((row) => String(row.uaIns) === uaIns && String(row.endDate) === endDate);
-    $('dd-contract').innerHTML = contracts.map((row) => `<option value="${esc(row.ins)}">${esc(row.name)} · ${kindLabel(row.kind)} · ${fmt.money(row.strike)}</option>`).join('');
-    if (preserve && contracts.some((row) => String(row.ins) === before.contractIns)) $('dd-contract').value = before.contractIns;
-    const level = $('dd-scope').value;
-    $('dd-underlying').disabled = level === 'market'; $('dd-expiry').disabled = !['expiry', 'contract'].includes(level); $('dd-contract').disabled = level !== 'contract';
+  // سطحی که انتخاب فعلی پشتیبانی نمی‌کند، خاموش می‌ماند: دکمه‌ای که کار
+  // نمی‌کند بدتر از دکمه‌ای است که نیست.
+  function paintLevels() {
+    const pick = selected(), sel = marketExplorer.selection();
+    const reach = { market: true, underlying: !!sel.uaIns, expiry: !!(sel.uaIns && sel.endDate), contract: !!(sel.uaIns && sel.endDate && sel.contractIns) };
+    root.querySelectorAll('[data-dd-level]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.ddLevel === pick.level));
+      button.disabled = !reach[button.dataset.ddLevel];
+    });
   }
 
   const marketExplorer = mountLiveMarketMap($('dd-market-explorer'), {
     contractColumns: COLS_CONTRACT,
+    isVisible: explorerVisible,
     onScopeChange: async (pick) => {
-      $('dd-scope').value = pick.level;
-      fillSelectors(false);
-      if ([...$('dd-underlying').options].some((option) => option.value === pick.uaIns)) $('dd-underlying').value = pick.uaIns;
-      fillSelectors(true);
-      if ([...$('dd-expiry').options].some((option) => option.value === pick.endDate)) $('dd-expiry').value = pick.endDate;
-      fillSelectors(true);
-      if ([...$('dd-contract').options].some((option) => option.value === pick.contractIns)) $('dd-contract').value = pick.contractIns;
-      fillSelectors(true);
-      if (pick.level === 'contract') await fetchTape();
+      if (String(pick.uaIns) !== lastUaIns) { lastUaIns = String(pick.uaIns); openViewBaseSync.request(); }
+      // انتخاب روی نقشه، سطح را هم بالا می‌برد — ولی هیچ‌وقت پایین نمی‌آورد:
+      // کسی که روی «کل بازار» ایستاده و فقط نماد عوض می‌کند، منتظر نیست
+      // تحلیلش ناگهان به یک نماد محدود شود.
+      const order = SCOPE_LEVELS.map(([key]) => key);
+      if (order.indexOf(pick.level) > order.indexOf(scopeLevel)) {
+        scopeLevel = pick.level;
+        localStorage.setItem('options-radar:dashboard-scope-level', scopeLevel);
+      }
+      paintLevels();
+      await fetchTape();
       await paintView();
     },
   });
-  const marketPulse = mountLiveMarketPulse($('dd-market-pulse'));
-  let pulseBookRequest = 0;
-  let pulseBaseBooks = {};
-  let pulseBaseBooksAt = 0;
-  let pulseBookPending = null;
-  const PULSE_BOOK_INTERVAL_MS = 30_000;
-
-  async function fetchBaseBooks(universe) {
-    if (Date.now() - pulseBaseBooksAt < PULSE_BOOK_INTERVAL_MS) return pulseBaseBooks;
-    if (pulseBookPending) return pulseBookPending;
-    const codes = (universe?.underlyings || []).map((row) => String(row.ins || '')).filter((code) => /^\d+$/.test(code));
-    if (!codes.length) return {};
-    pulseBookPending = (async () => {
-      const response = await fetch(`/api/books?ins=${encodeURIComponent(codes.join(','))}`, { cache: 'no-store' });
-      const data = await response.json();
-      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-      pulseBaseBooks = data;
-      pulseBaseBooksAt = Date.now();
-      return pulseBaseBooks;
-    })();
-    try { return await pulseBookPending; } finally { pulseBookPending = null; }
-  }
 
   function scopeLabel(scoped) {
     const pick = selected(), ua = payload.universe.underlyings.find((row) => String(row.ins) === pick.uaIns), contract = activeContract();
@@ -854,9 +876,9 @@ export async function mount(root, { state, api }) {
     }
     // تیک خودکار دوباره به `paintView` می‌رسد، اما حق ندارد انتخاب مستقلی را
     // که کاربر داخل «نگاه باز» انجام داده با نماد بالای داشبورد جایگزین کند.
-    // این مجوز فقط در ورود نخست یا رویداد صریح `dd-underlying` مصرف می‌شود.
+    // این مجوز فقط در ورود نخست یا وقتی کاربر روی نقشه نماد عوض کرده مصرف می‌شود.
     if (!openViewBaseSync.consume()) return;
-    const base = host.querySelector('#ov-base'), value = $('dd-underlying').value;
+    const base = host.querySelector('#ov-base'), value = selected().uaIns;
     if (base && value && base.value !== value && [...base.options].some((option) => option.value === value)) {
       base.value = value; base.dispatchEvent(new Event('change'));
     }
@@ -1106,6 +1128,11 @@ export async function mount(root, { state, api }) {
 
   async function paintView() {
     const mode = modeOf();
+    // نوار دامنه فقط بالای تب‌هایی می‌آید که واقعاً دامنه می‌خواهند. روی
+    // نقشه و روی دو تب ادغام‌شده، کنترلی که هیچ کاری نمی‌کند نمایش داده
+    // نمی‌شود.
+    $('dd-toolbar').hidden = !mode?.views?.length;
+    if (mode?.explorer) { paintLevels(); return; }
     if (mode?.mod) { await mountEmbedded(mode); return; }
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
     if (!panel || !view) return;
@@ -1126,9 +1153,16 @@ export async function mount(root, { state, api }) {
     host.innerHTML = barChart(ranked(view, scoped, 16), view[4]);
   }
 
+  // ریزمعامله فقط برای نمایی که آن را نشان می‌دهد.
+  //
+  // پیش از این هر تیکِ خودکار یک `live-trades` می‌زد، حتی وقتی کاربر روی
+  // نقشه بود؛ روی بازهٔ ۵ ثانیه‌ای یعنی ۷۲۰ درخواست در ساعت برای داده‌ای که
+  // هیچ‌جا رسم نمی‌شد.
   async function fetchTape() {
+    const pick = selected();
+    if (!needsTape(pick.level, viewOf()?.[2])) { tape = []; return; }
     tape = [];
-    const contract = activeContract(), pick = selected(); if (!contract || pick.level !== 'contract') return;
+    const contract = activeContract(); if (!contract) return;
     try {
       const response = await fetch(`/api/live-trades?ins=${encodeURIComponent(`${pick.uaIns},${contract.ins}`)}`, { cache: 'no-store' });
       const data = await response.json(); if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
@@ -1149,14 +1183,9 @@ export async function mount(root, { state, api }) {
     try {
       const response = await fetch('/api/live-dashboard', { cache: 'no-store' }), next = await response.json();
       if (!response.ok || next.error) throw new Error(next.error || `HTTP ${response.status}`);
-      payload = next; fillSelectors(true); openViewController?.updateLive?.(payload); await marketExplorer.setUniverse(payload.universe, true, payload); await fetchTape(); await paintView();
-      marketPulse.update(payload, pulseBaseBooks);
-      const bookRequest = ++pulseBookRequest;
-      fetchBaseBooks(payload.universe).then((books) => {
-        if (bookRequest === pulseBookRequest) marketPulse.update(payload, books);
-      }).catch((error) => {
-        if (bookRequest === pulseBookRequest) logError('دفتر سفارش پایه‌های نبض بازار', error);
-      });
+      payload = next; openViewController?.updateLive?.(payload);
+      await marketExplorer.setUniverse(payload.universe, true, payload);
+      paintLevels(); await fetchTape(); await paintView();
       $('dd-status').textContent = `${faClock(new Date(next.at || Date.now()))} · ${fmt.int(next.universe?.contracts?.length || 0)} قرارداد · ${fmt.int(next.traded || 0)} پایه معامله‌شده`;
     } catch (error) {
       $('dd-status').textContent = `به‌روزرسانی ناموفق: ${error.message}`; logError('داشبورد تصمیم‌گیری', error);
@@ -1165,22 +1194,29 @@ export async function mount(root, { state, api }) {
 
   root.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', async () => {
     activeMode = button.dataset.mode;
-    root.querySelectorAll('[data-mode]').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+    root.querySelectorAll('[data-mode]').forEach((item) => {
+      item.setAttribute('aria-pressed', String(item === button));
+      item.setAttribute('aria-selected', String(item === button));
+    });
     root.querySelectorAll('[data-mode-panel]').forEach((panel) => { panel.hidden = panel.dataset.modePanel !== activeMode; });
+    // برگشت به نقشه یعنی بخش کندل دوباره دیده می‌شود؛ همان‌جا اگر کهنه شده
+    // باشد تازه می‌شود — نه در هر تیکِ پس‌زمینه.
+    if (activeMode === 'explorer') await marketExplorer.refreshRanges();
+    await fetchTape();
     await paintView();
   }));
   root.querySelectorAll('[data-view]').forEach((button) => button.addEventListener('click', async () => {
     const panel = button.closest('[data-mode-panel]'), mode = panel.dataset.modePanel; activeViews[mode] = button.dataset.view;
     panel.querySelectorAll('[data-view]').forEach((item) => item.setAttribute('aria-pressed', String(item === button)));
+    // نمای تازه ممکن است ریزمعامله بخواهد یا نخواهد؛ همین‌جا تصمیم گرفته می‌شود.
+    await fetchTape();
     await paintView();
   }));
-  $('dd-scope').addEventListener('change', async () => { fillSelectors(true); await fetchTape(); await paintView(); });
-  $('dd-underlying').addEventListener('change', async () => {
-    openViewBaseSync.request();
-    fillSelectors(true); await fetchTape(); await paintView();
-  });
-  $('dd-expiry').addEventListener('change', async () => { fillSelectors(true); await fetchTape(); await paintView(); });
-  $('dd-contract').addEventListener('change', async () => { await fetchTape(); await paintView(); });
+  root.querySelectorAll('[data-dd-level]').forEach((button) => button.addEventListener('click', async () => {
+    scopeLevel = button.dataset.ddLevel;
+    localStorage.setItem('options-radar:dashboard-scope-level', scopeLevel);
+    paintLevels(); await fetchTape(); await paintView();
+  }));
   root.querySelectorAll('#dd-board-metric').forEach((select) => {
     select.value = boardMetric;
     select.addEventListener('change', async () => {
@@ -1205,10 +1241,9 @@ export async function mount(root, { state, api }) {
   const countdown = setInterval(() => {
     if (!paused && nextAt > Date.now() && !loading) $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه · نوبت بعد ${faDigits(Math.ceil((nextAt - Date.now()) / 1000))} ثانیه`;
   }, 1000);
-  paintInterval(); await refresh();
+  paintInterval(); paintLevels(); await refresh();
   return () => {
     clearTimeout(timer); clearInterval(countdown);
-    pulseBookRequest += 1;
     openViewController?.dispose?.();
     marketExplorer.dispose();
     for (const dispose of embedded.values()) { try { dispose?.(); } catch { /* برچیدن نباید بترکد */ } }
