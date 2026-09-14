@@ -1,5 +1,5 @@
 // مجموعه داشبوردهای تصمیم‌گیری زنده بازار.
-// سه تب عمودی، هر کدام بیست نمای تنبل دارند و انتخاب دامنه در همه مشترک است.
+// نوار تب صفحه؛ هر حالت چند نمای تنبل دارد و انتخاب دامنه در همه مشترک است.
 
 import { fmt, faDigits, faClock } from '/ui/fmt.mjs';
 import { makeTable } from '/ui/table.mjs';
@@ -42,19 +42,31 @@ const timeLabel = (value) => {
 // و جایش سنجه‌هایی نشست که از **ساختار** زنجیره درمی‌آیند نه از رتبه‌بندی
 // یک ستون: نردبان اعمال، بیشترین درد، ساختار زمانی تلاطم، چولگی، و توزیع.
 //
+// ── دور دوم، ۱۴۰۵/۰۶/۲۳ ──────────────────────────────────────────────
+//
+// گزارش صاحب پروژه: «برخی از این ۲۰ تا کاربردی نیستن از نگاه یک معامله‌گر.»
+// درست بود — دور اول جفت‌ها را برداشت ولی **میله‌های رتبه‌ای** ماندند، و
+// آن‌ها دقیقاً همان چیزی‌اند که یک کلیک روی سرستون جدول می‌دهد:
+// «رهبران ارزش/حجم/موقعیت باز/تغییر»، «بیشترین رشد/افت»، «تمرکز ارزش و
+// موقعیت باز روی سررسیدها» و «رهبران تلاطم» — هشت نما که هیچ‌کدام چیزی
+// اضافه بر مرتب‌سازی نمی‌گفتند.
+//
+// کنارشان سه دستهٔ دیگر رفتند: نمودارهای **دوستونی** (ارزش/حجم/IV کال در
+// برابر پوت) که دو عدد را به نموداری تبدیل می‌کردند که جدول گروه کاملش را
+// دارد؛ جدول‌هایی که همان جدول با یک فیلتر بودند (تلاطم کال، تلاطم پوت)؛
+// و دو تکراری آشکار — «لبخند تلاطم» تابلو که عیناً نمای تب تلاطم است، و
+// «خالص وسعت» که همان روند درصد مثبت و منفی است با مقیاس دیگر.
+//
+// ۶۸ نما شد ۵۰. هیچ سؤالی بی‌جواب نماند؛ فقط هر سؤال یک جواب دارد.
+//
 // ستون چهارم (`kind`) شکل نما را می‌گوید و پنجمی، منبع ردیف.
 const pulseViews = [
   ['breadth-donut', 'دایره جهت بازار', 'donut', 'contracts', 'changePct'],
   ['breadth-bars', 'میله قدرت جهت‌ها', 'breadth', 'contracts', 'changePct'],
   ['breadth-pct', 'روند درصد مثبت و منفی', 'timeline', 'timeline', 'positivePct'],
-  ['breadth-net', 'روند خالص وسعت', 'timeline', 'timeline', 'breadth'],
   ['base-volume-path', 'حجم تجمعی پایه‌ها', 'timeline', 'timeline', 'cumulativeVolume'],
   ['base-change-table', 'تغییر همه پایه‌ها', 'table', 'underlyings', 'changePct'],
   ['contract-change-table', 'تغییر همه قراردادها', 'table', 'contracts', 'changePct'],
-  ['gainers-bars', 'بیشترین رشد', 'bar', 'contracts', 'changePct'],
-  ['losers-bars', 'بیشترین افت', 'bar-asc', 'contracts', 'changePct'],
-  ['direction-value', 'ارزش به تفکیک جهت', 'bar', 'directions', 'value'],
-  ['direction-volume', 'حجم به تفکیک جهت', 'bar', 'directions', 'volume'],
   ['direction-table', 'جدول جهت‌ها', 'table', 'directions', 'value'],
   ['calls-change', 'جهت اختیار خرید', 'table', 'calls', 'changePct'],
   ['puts-change', 'جهت اختیار فروش', 'table', 'puts', 'changePct'],
@@ -70,15 +82,8 @@ const liquidityViews = [
   ['contract-value-table', 'تابلوی قراردادها', 'table', 'contracts', 'value'],
   ['base-value-table', 'تابلوی نمادهای پایه', 'table', 'underlyings', 'value'],
   ['expiry-value-table', 'تابلوی سررسیدها', 'table', 'expiries', 'value'],
-  ['value-bars', 'رهبران ارزش', 'bar', 'contracts', 'value'],
-  ['volume-bars', 'رهبران حجم', 'bar', 'contracts', 'volume'],
-  ['oi-bars', 'رهبران موقعیت باز', 'bar', 'contracts', 'oi'],
-  ['oi-change-bars', 'بیشترین تغییر موقعیت باز', 'bar', 'contracts', 'oiChange'],
-  ['expiry-value-bars', 'تمرکز ارزش روی سررسیدها', 'bar', 'expiries', 'value'],
-  ['expiry-oi-bars', 'تمرکز موقعیت باز روی سررسیدها', 'bar', 'expiries', 'oi'],
   ['high-value-expiry', 'رهبر ارزش هر سررسید', 'expiry-leaders', 'contracts', 'value'],
-  ['call-put-value', 'ارزش کال و پوت', 'bar', 'sides', 'value'],
-  ['call-put-volume', 'حجم کال و پوت', 'bar', 'sides', 'volume'],
+  ['call-put-table', 'کال در برابر پوت', 'table', 'sides', 'value'],
   ['strike-ladder', 'نردبان موقعیت باز روی اعمال', 'ladder-oi', 'contracts', 'oi'],
   ['strike-ladder-volume', 'نردبان حجم روی اعمال', 'ladder-volume', 'contracts', 'volume'],
   ['max-pain', 'بیشترین درد هر سررسید', 'max-pain', 'contracts', 'oi'],
@@ -93,8 +98,6 @@ const volatilityViews = [
   ['iv-table', 'تابلوی تلاطم قراردادها', 'table', 'contracts', 'ivPct'],
   ['iv-expiry-table', 'تلاطم به تفکیک سررسید', 'table', 'expiries', 'ivPct'],
   ['iv-strike-table', 'تلاطم به تفکیک اعمال', 'table', 'strikes', 'ivPct'],
-  ['iv-bars', 'رهبران تلاطم', 'bar', 'contracts', 'ivPct'],
-  ['iv-sides', 'تلاطم کال در برابر پوت', 'bar', 'sides', 'ivPct'],
   ['iv-smile', 'لبخند تلاطم روی فاصله اعمال', 'iv-smile', 'contracts', 'ivPct'],
   ['iv-term', 'ساختار زمانی تلاطم', 'term-structure', 'contracts', 'ivPct'],
   ['iv-skew', 'چولگی پوت منهای کال هر سررسید', 'term-skew', 'contracts', 'ivPct'],
@@ -106,8 +109,6 @@ const volatilityViews = [
   ['pc-volume-expiry', 'نسبت حجم پوت به کال', 'bar', 'expiries', 'putCallVolume'],
   ['pc-strike-ladder', 'نسبت پوت به کال روی هر اعمال', 'ladder-pc', 'contracts', 'oi'],
   ['oi-change-table', 'تغییر موقعیت باز قراردادها', 'table', 'contracts', 'oiChange'],
-  ['call-iv-table', 'تلاطم اختیار خرید', 'table', 'calls', 'ivPct'],
-  ['put-iv-table', 'تلاطم اختیار فروش', 'table', 'puts', 'ivPct'],
   ['iv-tape', 'IV ریزمعامله قرارداد', 'tape', 'contracts', 'ivPct'],
   ['open-view-history', 'نگاه باز چندروزه', 'open-view', 'contracts', 'ivPct'],
 ];
@@ -127,13 +128,11 @@ const BOARD_SIDES = [['both', 'هر دو'], ['call', 'اختیار خرید'], [
 
 const boardViews = [
   ['board-table', 'تابلوی پرمعامله', 'board-rows'],
-  ['board-share', 'سهم هر قرارداد از سنجه', 'board-share'],
   ['board-expiry-table', 'سربه‌سر وزنی هر سررسید', 'board-expiries'],
   ['board-expiry-gap', 'فاصله سربه‌سر از قیمت جاری', 'board-gap'],
   ['board-band', 'باند سربه‌سر پوت تا کال', 'board-band'],
   ['board-moneyness', 'توزیع روی فاصله از قیمت جاری', 'board-moneyness'],
   ['board-scatter', 'اعمال در برابر سربه‌سر', 'board-scatter'],
-  ['board-smile', 'لبخند تلاطم ضمنی روی اعمال', 'board-smile'],
 ];
 
 // دو تب پایه که در همین تب ادغام شدند.
@@ -1004,15 +1003,6 @@ export async function mount(root, { state, api }) {
     }
     for (const entry of tables.values()) entry.el.remove();
 
-    if (view[2] === 'board-share') {
-      const rows = board.rows.slice(0, 16).map((row) => ({ ...row,
-        label: `${rowName(row)} · ${kindLabel(row.kind)}`, total: Number(row[board.metric]) || 0,
-        call: row.kind === 'call' ? Number(row[board.metric]) || 0 : 0,
-        put: row.kind === 'put' ? Number(row[board.metric]) || 0 : 0, contracts: 1 }));
-      host.innerHTML = stackedBars(rows, { label: `سهم هر قرارداد از ${metricLabel}`,
-        formatter: board.metric === 'value' ? fmt.money : fmt.int });
-      return;
-    }
     if (view[2] === 'board-gap') {
       const rows = board.expiries.slice(0, 16).flatMap((row) => [
         { label: `${row.uaName} · ${dateLabel(row.endDate)} · کال`, value: row.callGapPct },
@@ -1035,19 +1025,12 @@ export async function mount(root, { state, api }) {
       host.innerHTML = `<p class="note">هر سطل، فاصله قیمت اعمال از قیمت جاری پایه است. سطل‌ها ثابت‌اند تا دو نماد و دو روز با هم مقایسه شوند.</p>${stackedBars(moneynessDistribution(scoped.contracts || [], board.metric), { label: `توزیع ${metricLabel}`, formatter: board.metric === 'value' ? fmt.money : fmt.int })}`;
       return;
     }
-    if (view[2] === 'board-scatter') {
-      const spot = board.rows.find((row) => Number(row.spot) > 0)?.spot;
-      host.innerHTML = `<p class="note">هر نقطه یک قرارداد از تابلو. خط‌های چین، قیمت جاری پایه‌اند؛ نقطه بالای خط افقی یعنی سربه‌سر بالاتر از قیمت امروز.</p>${scatterChart(board.rows.map((row) => ({
-        x: Number(row.strike), y: Number(row.breakeven), kind: row.kind,
-        label: `${rowName(row)} · اعمال ${fmt.money(row.strike)} · سربه‌سر ${fmt.money(row.breakeven)}`,
-      })), { xLabel: 'قیمت اعمال', yLabel: 'سربه‌سر', marker: Number(spot) })}`;
-      return;
-    }
-    // لبخند تلاطم: IV در برابر فاصله اعمال از قیمت جاری
-    host.innerHTML = `<p class="note">لبخند تلاطم: نوسان ضمنی هر قرارداد در برابر فاصله اعمالش از قیمت جاری. صفر یعنی نزدیک پول.</p>${scatterChart(board.rows.map((row) => ({
-      x: Number(row.moneynessPct), y: Number(row.ivPct), kind: row.kind,
-      label: `${rowName(row)} · فاصله ${fmt.pct(row.moneynessPct)}٪ · IV ${fmt.pct(row.ivPct)}٪`,
-    })), { xLabel: 'فاصله اعمال از قیمت جاری ٪', yLabel: 'تلاطم ضمنی ٪', marker: NaN })}`;
+    // آخرین نمای تابلو: اعمال در برابر سربه‌سر.
+    const spot = board.rows.find((row) => Number(row.spot) > 0)?.spot;
+    host.innerHTML = `<p class="note">هر نقطه یک قرارداد از تابلو. خط‌های چین، قیمت جاری پایه‌اند؛ نقطه بالای خط افقی یعنی سربه‌سر بالاتر از قیمت امروز.</p>${scatterChart(board.rows.map((row) => ({
+      x: Number(row.strike), y: Number(row.breakeven), kind: row.kind,
+      label: `${rowName(row)} · اعمال ${fmt.money(row.strike)} · سربه‌سر ${fmt.money(row.breakeven)}`,
+    })), { xLabel: 'قیمت اعمال', yLabel: 'سربه‌سر', marker: Number(spot) })}`;
   }
 
   // نماهایی که از ساختار زنجیره می‌آیند، نه از رتبه‌بندی یک ستون.
@@ -1115,12 +1098,6 @@ export async function mount(root, { state, api }) {
         x: Number(row[xKey]), y: Number(row[yKey]), kind: row.kind,
         label: `${row.name} · ${xLabel} ${fmt.num(row[xKey])} · ${yLabel} ${fmt.num(row[yKey])}`,
       })), { xLabel, yLabel, marker: NaN });
-      return true;
-    }
-    if (kind === 'bar-asc') {
-      const rows = [...(rowsFor(view, scoped))].filter((row) => Number.isFinite(row[view[4]]))
-        .sort((a, b) => a[view[4]] - b[view[4]]).slice(0, 16);
-      host.innerHTML = barChart(rows, view[4]);
       return true;
     }
     return false;

@@ -77,7 +77,20 @@ group('۷۶. نماهای سه حالت و سنجه‌های ساختاری');
     .map((m) => ({ id: m[1], kind: m[2], source: m[3], metric: m[4] }));
   const lists = { pulseViews: viewsOf('pulseViews'), liquidityViews: viewsOf('liquidityViews'), volatilityViews: viewsOf('volatilityViews') };
   for (const [name, views] of Object.entries(lists)) {
-    check(`${name} هنوز بیست نما دارد`, views.length === 20, `${views.length}`);
+    // عدد ثابت دیگر ادعا نیست. تا ۱۴۰۵/۰۶/۲۳ اینجا نوشته بود «دقیقاً بیست»
+    // و همان عدد باعث شد هشت میلهٔ رتبه‌ایِ بی‌فایده فقط برای پرکردن فهرست
+    // بمانند. حالا کف می‌گذاریم و به‌جای شمارش، **تکرار** را ممنوع می‌کنیم.
+    check(`${name} فهرست معناداری دارد`, views.length >= 10, `${views.length}`);
+    // ═══ نمایی که فقط «همان جدول، مرتب بر ستون دیگر» است ═══
+    //
+    // جدول‌های این تب روی هر ستون مرتب می‌شوند. پس یک نمودار میله‌ای که
+    // همان منبع و همان سنجهٔ یک جدولِ موجود را رتبه می‌کند، نمای تازه‌ای
+    // نیست — یک کلیک روی سرستون است. این ادعا همان را می‌گیرد.
+    const tableKeys = new Set(views.filter((view) => view.kind.startsWith('table'))
+      .map((view) => `${view.source}|${view.metric}`));
+    const echoes = views.filter((view) => view.kind === 'bar' && tableKeys.has(`${view.source}|${view.metric}`));
+    check(`${name} نمودار میله‌ای تکرارِ مرتب‌سازی جدول ندارد`,
+      echoes.length === 0, echoes.map((view) => view.id).join('، '));
     // دو نما با یک شکل و یک منبع و یک سنجه، یک نما هستند — و چون جدول‌ها
     // خودشان سورت‌پذیرند، «جدول X» و «میله X» هم دیگر تفاوت واقعی نیستند.
     const signatures = views.map((view) => `${view.kind}|${view.source}|${view.metric}`);

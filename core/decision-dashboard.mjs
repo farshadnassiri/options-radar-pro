@@ -186,7 +186,18 @@ export const MARKET_MAP_METRICS = [
   { key: 'uaValue', label: 'ارزش معاملات نماد پایه', format: 'money' },
   { key: 'volume', label: 'حجم معاملات اختیار', format: 'int' },
   { key: 'changePct', label: 'درصد آخرین معامله پایه', format: 'pct' },
+  // ── خانه‌های هم‌اندازه ────────────────────────────────────────────
+  //
+  // خواستهٔ صاحب پروژه. نقشهٔ وزن‌دار یک سؤال را خوب جواب می‌دهد («پول
+  // کجاست») و یک سؤال را اصلاً: «چه چیزهایی هست». با وزنِ ارزش، نمادِ
+  // کم‌معامله به نواری یک‌پیکسلی تبدیل می‌شود که نه خوانده می‌شود نه
+  // کلیک. در حالت هم‌اندازه، نقشه به یک شبکهٔ رنگیِ کامل تبدیل می‌شود که
+  // فقط **جهت** را می‌گوید — و هر نماد به یک اندازه در دسترس است.
+  { key: 'equal', label: 'همه هم‌اندازه', format: 'equal' },
 ];
+
+/** حالتی که اندازه را از داده نمی‌گیرد؛ رنگ همچنان از تغییر واقعی می‌آید. */
+export const EQUAL_MAP_METRIC = 'equal';
 
 /** فیلتر نمایشی زنجیره؛ دادهٔ سمت پنهان حذف نمی‌شود و در universe می‌ماند. */
 export function filterContractsBySide(rows = [], side = 'all') {
@@ -204,6 +215,11 @@ const mapMetric = (key) => MARKET_MAP_METRICS.some((item) => item.key === key) ?
  */
 export function marketMapRows(snapshot = {}, metric = 'value') {
   const key = mapMetric(metric);
+  if (key === EQUAL_MAP_METRIC) {
+    // هیچ عددی ادعا نمی‌شود: `metricValue` نامعلوم می‌ماند تا راهنما
+    // عددِ ساختگی نگوید، و وزن برای همه دقیقاً یک است.
+    return (snapshot.underlyings || []).map((row) => ({ ...row, metric: key, metricValue: NaN, sizeValue: 1, mapWeight: 1 }));
+  }
   const rows = (snapshot.underlyings || []).map((row) => {
     const raw = Number(row[key]);
     const metricValue = Number.isFinite(raw) ? raw : NaN;
@@ -553,4 +569,47 @@ export function termStructure(contracts = []) {
       weight: totalWeight,
     };
   }).sort((a, b) => a.days - b.days);
+}
+
+// ————————————————————————————————————————————————————————————————
+// زنجیرهٔ دوطرفه — همان چیدمانی که هر تابلوی اختیارِ حرفه‌ای دارد.
+//
+// جدول تخت برای مرتب‌کردن و غربال‌کردن خوب است، ولی سؤالی را که معامله‌گر
+// اختیار واقعاً می‌پرسد جواب نمی‌دهد: «روی این اعمال، کال گران‌تر است یا
+// پوت؟ کدام طرف موقعیت باز سنگین‌تری دارد؟» آن سؤال **قرینه** است و با
+// ردیف‌های پشت‌سرهم دیده نمی‌شود؛ با کال و پوتِ هم‌اعمال روی یک ردیف دیده
+// می‌شود.
+// ————————————————————————————————————————————————————————————————
+
+/**
+ * کال و پوتِ هر قیمت اعمال، روی یک ردیف.
+ *
+ * `spotIndex` شمارهٔ ردیفی است که **خطِ قیمت جاری بالای آن** می‌نشیند —
+ * یعنی نخستین اعمالی که از قیمت جاری بالاتر است. بی‌قیمتِ پایه، `-1`:
+ * خطی که جایش معلوم نیست کشیده نمی‌شود، نه اینکه حدس زده شود.
+ *
+ * «در سود» از دید هر سمت جدا خوانده می‌شود: کال وقتی اعمالش زیر قیمت جاری
+ * است و پوت وقتی بالای آن — همان اشتباهی که با یک شرط مشترک پیش می‌آید.
+ */
+export function twoSidedChain(contracts = [], spot = NaN) {
+  const strikes = new Map();
+  for (const row of contracts) {
+    const strike = Number(row.strike);
+    if (!(strike > 0)) continue;
+    let rung = strikes.get(strike);
+    if (!rung) { rung = { strike, call: null, put: null }; strikes.set(strike, rung); }
+    rung[row.kind === 'put' ? 'put' : 'call'] = row;
+  }
+  const price = Number(spot);
+  const rows = [...strikes.values()].sort((a, b) => a.strike - b.strike).map((rung) => ({
+    ...rung,
+    callItm: price > 0 ? rung.strike < price : null,
+    putItm: price > 0 ? rung.strike > price : null,
+  }));
+  return { rows, spot: price > 0 ? price : NaN, spotIndex: price > 0 ? rows.findIndex((row) => row.strike > price) : -1 };
+}
+
+/** بیشینهٔ یک ستون در هر دو سمت — مقیاس مشترک نوارهای «دیوار». */
+export function chainSideMax(rows = [], key = 'oi') {
+  return Math.max(0, ...rows.flatMap((row) => [Number(row.call?.[key]) || 0, Number(row.put?.[key]) || 0]));
 }

@@ -4,7 +4,10 @@
 // اینجا قفل می‌شوند؛ بقیه با ادعای متنِ منبع.
 
 import { check, near, group, readSrc } from '../harness.mjs';
-import { contractBreakeven, breakevenGap, breakevenGapPct, activeOptionsBoard } from '../../core/decision-dashboard.mjs';
+import {
+  contractBreakeven, breakevenGap, breakevenGapPct, activeOptionsBoard,
+  marketMapRows, EQUAL_MAP_METRIC, twoSidedChain, chainSideMax,
+} from '../../core/decision-dashboard.mjs';
 import { SCOPE_LEVELS, resolveScope, needsTape, shouldFetchRange } from '../../ui/live-dashboard-scope.mjs';
 import { candleDomain, candleGeometry, candlePoints, dayPositionPct } from '../../ui/candle-points.mjs';
 
@@ -121,3 +124,79 @@ check('۸. تیک خودکار دیگر ریزمعامله و بازهٔ روز�
   dash246.includes('if (!needsTape(pick.level, viewOf()?.[2]))')
   && map246.includes('shouldFetchRange({ visible: isVisible(), cached: rangeCache.get(key), now: Date.now() })')
   && dash246.includes('isVisible: explorerVisible'));
+
+// ————————————————————————————————————————————————————————————————
+// دور دوم گزارش (۱۴۰۵/۰۶/۲۳): نگاه باز لحظه‌ای، زنجیرهٔ دوطرفه،
+// نقشهٔ هم‌اندازه، و هرس نماها.
+// ————————————————————————————————————————————————————————————————
+group('۲۴۶-ب. زنجیرهٔ دوطرفه، نقشهٔ هم‌اندازه و نگاه باز لحظه‌ای');
+
+// ————— ۳. نقشه‌ای که همه نمادها را هم‌اندازه نشان می‌دهد —————
+const uni246 = { underlyings: [
+  { ins: '11', name: 'اهرم', value: 9_000_000, changePct: 3 },
+  { ins: '22', name: 'کم‌معامله', value: 120, changePct: -1 },
+  { ins: '33', name: 'بی‌معامله', value: 0, changePct: 0 },
+] };
+const weighted246 = marketMapRows(uni246, 'value');
+check('نقشهٔ وزنی، نماد کم‌معامله را به نواری باریک تبدیل می‌کند',
+  weighted246[0].mapWeight / weighted246[1].mapWeight > 1000);
+const equal246 = marketMapRows(uni246, EQUAL_MAP_METRIC);
+check('در حالت هم‌اندازه هر سه خانه دقیقاً یک وزن دارند',
+  equal246.length === 3 && equal246.every((row) => row.mapWeight === 1));
+// رنگ همچنان از تغییر واقعی می‌آید؛ فقط اندازه از داده جدا شده.
+check('هم‌اندازه‌بودن، تغییر واقعی نماد را پاک نمی‌کند',
+  equal246.map((row) => row.changePct).join(',') === '3,-1,0');
+// و هیچ عددی برای سنجه ساخته نمی‌شود — راهنما باید «اندازه یکسان» بگوید.
+check('حالت هم‌اندازه عددِ سنجه نمی‌سازد', equal246.every((row) => Number.isNaN(row.metricValue)));
+
+// ————— ۳. زنجیرهٔ دوطرفه —————
+const pair246 = [
+  { kind: 'call', ins: 'c1', strike: 900, oi: 40 }, { kind: 'put', ins: 'p1', strike: 900, oi: 12 },
+  { kind: 'call', ins: 'c2', strike: 1000, oi: 90 }, { kind: 'put', ins: 'p2', strike: 1000, oi: 30 },
+  { kind: 'call', ins: 'c3', strike: 1100, oi: 7 },
+];
+const chain246 = twoSidedChain(pair246, 1050);
+check('هر قیمت اعمال یک ردیف است و دو سمتش کنار هم می‌نشینند',
+  chain246.rows.length === 3 && chain246.rows[1].call.ins === 'c2' && chain246.rows[1].put.ins === 'p2');
+check('سمتی که قرارداد ندارد خالی می‌ماند، نه اینکه ردیف حذف شود',
+  chain246.rows[2].call.ins === 'c3' && chain246.rows[2].put === null);
+// ═══ «در سود» برای دو سمت یک شرط نیست ═══
+// کال وقتی اعمالش زیر قیمت جاری است و پوت وقتی بالای آن. با یک شرط مشترک،
+// یکی از دو سمت کاملاً وارونه رنگ می‌شود.
+check('در سودبودن از دید هر سمت جدا خوانده می‌شود',
+  chain246.rows.map((row) => `${row.callItm ? 'c' : '-'}${row.putItm ? 'p' : '-'}`).join('|') === 'c-|c-|-p');
+check('خط قیمت جاری بالای نخستین اعمالِ بالاتر از پایه می‌نشیند', chain246.spotIndex === 2);
+check('بی‌قیمتِ پایه، خط کشیده نمی‌شود و «در سود» ادعا نمی‌شود',
+  twoSidedChain(pair246, 0).spotIndex === -1 && twoSidedChain(pair246, 0).rows[0].callItm === null);
+check('مقیاس نوار موقعیت باز میان دو سمت مشترک است', chainSideMax(chain246.rows, 'oi') === 90);
+check('قرارداد بدون قیمت اعمال وارد زنجیره نمی‌شود',
+  twoSidedChain([{ kind: 'call', strike: 0 }], 100).rows.length === 0);
+
+// ————— ادعاهای متنِ منبع، دور دوم —————
+const mapB246 = readSrc('../ui/live-market-map.mjs');
+const openB246 = readSrc('../ui/tabs/open-view.mjs');
+const dashB246 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+
+check('۲. پنل «روی ردیف کلیک کن» و کل بخش جزئیات قرارداد برداشته شد',
+  !mapB246.includes('برای دیدن اطلاعات کامل یک قرارداد')
+  && !mapB246.includes('lmm-contract-detail') && !mapB246.includes('function paintContract('));
+check('۳. زنجیرهٔ دوطرفه پیش‌فرض است و جدول تخت گزینهٔ کنار آن',
+  mapB246.includes("data-lmm-layout=\"paired\"") && mapB246.includes("data-lmm-layout=\"flat\"")
+  && mapB246.includes("localStorage.getItem('options-radar:market-map-chain-layout') || 'paired'"));
+check('۳. گزینهٔ «همه هم‌اندازه» در هر دو نقشه هست',
+  mapB246.includes("label: 'همه هم‌اندازه'") && mapB246.includes('metric === EQUAL_MAP_METRIC'));
+check('۱. نگاه باز پیش‌فرض لحظه‌ای است و گزینهٔ تاریخی کنارش',
+  openB246.includes("data-ov-mode=\"live\"") && openB246.includes("data-ov-mode=\"history\"")
+  && openB246.includes("localStorage.getItem('options-radar:open-view-mode') || 'live'"));
+// مهم‌ترین بخش قلم ۱: مسیر لحظه‌ای نه تاریخ می‌پرسد نه تاریخچهٔ روزانه می‌گیرد.
+check('۱. مسیر لحظه‌ای نه دکمه دارد نه تاریخچهٔ روزانه می‌گیرد',
+  openB246.includes('async function loadLive()') && openB246.includes('fillExpiriesFromContracts()')
+  && !/async function loadLive\(\)[\s\S]*?\n  }/.exec(openB246)?.[0].includes('/api/dailies')
+  && openB246.includes("if (isLive() && baseSelect.value) void loadLive();"));
+check('۱. کنترل‌های تاریخی در حالت لحظه‌ای پنهان می‌شوند، نه اینکه بی‌کار بمانند',
+  openB246.includes("root.querySelectorAll('[data-ov-history]').forEach((node) => { node.hidden = isLive(); })")
+  && (openB246.match(/data-ov-history/g) || []).length >= 8);
+check('۴. نمای «همان جدول، مرتب بر ستون دیگر» در هیچ فهرستی نمانده',
+  !dashB246.includes("'value-bars'") && !dashB246.includes("'volume-bars'")
+  && !dashB246.includes("'gainers-bars'") && !dashB246.includes("'iv-bars'")
+  && !dashB246.includes("'bar-asc'"));

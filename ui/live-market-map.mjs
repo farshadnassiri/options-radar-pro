@@ -7,7 +7,8 @@ import { mountChart, chartFormat } from './chart-host.mjs';
 import { historyDateLabel } from '../core/history.mjs';
 import {
   filterContractsBySide, MARKET_MAP_METRICS, marketMapRows, marketMapSummary,
-  contractBreakeven, breakevenGap, breakevenGapPct,
+  contractBreakeven, breakevenGap, breakevenGapPct, EQUAL_MAP_METRIC,
+  twoSidedChain, chainSideMax,
 } from '../core/decision-dashboard.mjs';
 import { shouldFetchRange } from './live-dashboard-scope.mjs';
 
@@ -19,6 +20,8 @@ const kindLabel = (kind) => kind === 'call' ? 'اختیار خرید' : 'اخت�
 const tone = (value) => Number(value) > 0 ? 'gain' : Number(value) < 0 ? 'loss' : '';
 const metricText = (info, value) => {
   const format = info.format;
+  // حالت هم‌اندازه عددی ندارد و نباید بسازد؛ راهنما همین را می‌گوید.
+  if (format === 'equal') return 'اندازه یکسان برای همه خانه‌ها';
   if (format === 'pct') return Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—';
   return (fmt[format] || fmt.num)(value);
 };
@@ -27,6 +30,7 @@ const CONTRACT_MAP_METRICS = [
   { key: 'volume', label: 'حجم معاملات', format: 'int' },
   { key: 'oi', label: 'موقعیت باز', format: 'int' },
   { key: 'changePct', label: 'درصد آخرین معامله', format: 'pct' },
+  { key: EQUAL_MAP_METRIC, label: 'همه هم‌اندازه', format: 'equal' },
 ];
 
 const stat = (label, value, note = '', className = '') => `<article class="lmm-stat ${className}">
@@ -61,8 +65,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       <div class="lmm-expiry-step" data-lmm-expiry-step hidden><div class="lmm-step-head"><h3>سررسیدها</h3><span>هر سررسید، آمار مستقل و زنجیره خودش را دارد.</span></div><div class="lmm-expiries" data-lmm-expiries></div></div>
       <div class="lmm-expiry-info" data-lmm-expiry-info></div>
       <section class="lmm-day-range" data-lmm-day-range hidden><div class="lmm-step-head"><div><h3>کندل قیمت امروز قراردادها</h3><span>سایه: کمترین تا بیشترین · بدنه: اولین تا آخرین · لوزی: قیمت پایانی</span></div><div class="lmm-range-sort" data-lmm-range-sort role="group" aria-label="مرتب‌سازی نمودار کندلی روزانه"></div></div><div data-lmm-range-status class="note"></div><div data-lmm-range-chart></div></section>
-      <div class="lmm-chain-step" data-lmm-chain-step hidden><div class="lmm-step-head"><div><h3>زنجیره قرارداد</h3><span data-lmm-chain-count>کال و پوت این سررسید</span></div><div class="lmm-chain-kind" data-lmm-chain-kind role="group" aria-label="نوع قراردادهای زنجیره"><button type="button" data-lmm-chain-side="all">هر دو</button><button type="button" data-lmm-chain-side="call">فقط کال</button><button type="button" data-lmm-chain-side="put">فقط پوت</button></div></div><p class="note">روی «ستون‌ها» بزن تا هر داده‌ای را اضافه یا حذف کنی؛ روی ردیف بزن تا جزئیات قرارداد باز شود.</p><div data-lmm-chain></div></div>
-      <div class="lmm-contract-detail" data-lmm-contract-detail></div>
+      <div class="lmm-chain-step" data-lmm-chain-step hidden><div class="lmm-step-head"><div><h3>زنجیره قرارداد</h3><span data-lmm-chain-count>کال و پوت این سررسید</span></div><div class="lmm-chain-tools"><div class="lmm-chain-kind" data-lmm-chain-layout role="group" aria-label="چیدمان زنجیره"><button type="button" data-lmm-layout="paired">زنجیره دوطرفه</button><button type="button" data-lmm-layout="flat">جدول تخت</button></div><div class="lmm-chain-kind" data-lmm-chain-kind role="group" aria-label="نوع قراردادهای زنجیره"><button type="button" data-lmm-chain-side="all">هر دو</button><button type="button" data-lmm-chain-side="call">فقط کال</button><button type="button" data-lmm-chain-side="put">فقط پوت</button></div></div></div><p class="note" data-lmm-chain-note></p><div class="lmm-paired-wrap" data-lmm-paired hidden></div><div data-lmm-chain></div></div>
     </section>`;
 
   const mapHost = root.querySelector('[data-lmm-map]');
@@ -75,7 +78,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   const rangeStatus = root.querySelector('[data-lmm-range-status]');
   const rangeChart = root.querySelector('[data-lmm-range-chart]');
   const chainStep = root.querySelector('[data-lmm-chain-step]');
-  const detailHost = root.querySelector('[data-lmm-contract-detail]');
+  const pairedHost = root.querySelector('[data-lmm-paired]');
   const chainHost = root.querySelector('[data-lmm-chain]');
   let universe = { underlyings: [], expiries: [], contracts: [] };
   let mapMode = localStorage.getItem('options-radar:market-map-mode') || 'underlyings';
@@ -88,6 +91,10 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   if (!['value', 'volume', 'oi'].includes(rangeSort)) rangeSort = 'value';
   let chainSide = localStorage.getItem('options-radar:market-map-chain-side') || 'all';
   if (!['all', 'call', 'put'].includes(chainSide)) chainSide = 'all';
+  // چیدمان پیش‌فرض همان چیزی است که هر تابلوی اختیار دارد: کال و پوتِ
+  // هم‌اعمال روی یک ردیف. جدول تخت برای غربال و خروجی اکسل می‌ماند.
+  let chainLayout = localStorage.getItem('options-radar:market-map-chain-layout') || 'paired';
+  if (!['paired', 'flat'].includes(chainLayout)) chainLayout = 'paired';
   let uaIns = '', endDate = '', contractIns = '', mapHandle = null, rangeRequest = 0;
   let marketContext = {};
   const rangeCache = new Map();
@@ -107,7 +114,6 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   const visibleContracts = () => filterContractsBySide(contracts(), chainSide);
   const selectedUa = () => underlyings().find((row) => String(row.ins) === uaIns);
   const selectedExpiry = () => expiries().find((row) => String(row.endDate) === endDate);
-  const selectedContract = () => contracts().find((row) => String(row.ins) === contractIns);
 
   function normalizeSelection(preserve = true) {
     if (!preserve || !underlyings().some((row) => String(row.ins) === uaIns)) {
@@ -150,7 +156,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       root.querySelector('[data-lmm-title]').textContent = 'داده‌ای برای انتخاب نماد پایه نیست';
       root.querySelector('[data-lmm-selected]').textContent = 'هنوز عکس معتبر بازار دریافت نشده است.';
       underlyingHost.innerHTML = '<p class="empty-note">پس از دریافت عکس بازار، همه نمادهای پایه اینجا ظاهر می‌شوند.</p>';
-      expiryStep.hidden = true; chainStep.hidden = true; expiryInfo.innerHTML = ''; detailHost.innerHTML = ''; chainTable.set([]);
+      expiryStep.hidden = true; chainStep.hidden = true; expiryInfo.innerHTML = ''; pairedHost.innerHTML = ''; chainTable.set([]);
       return;
     }
     const change = Number(ua.changePct);
@@ -173,7 +179,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
 
   function paintExpiry() {
     const ex = selectedExpiry();
-    if (!ex) { expiryInfo.innerHTML = ''; rangeSection.hidden = true; chainStep.hidden = true; detailHost.innerHTML = ''; chainTable.set([]); return; }
+    if (!ex) { expiryInfo.innerHTML = ''; rangeSection.hidden = true; chainStep.hidden = true; pairedHost.innerHTML = ''; chainTable.set([]); return; }
     expiryInfo.innerHTML = `<div class="lmm-scope-title"><h3>سررسید ${dateLabel(ex.endDate)}</h3><span>${fmt.int(ex.days)} روز مانده</span></div><div class="lmm-stat-grid compact">
       ${stat('ارزش کل', fmt.money(ex.value), `${fmt.int(ex.tradedContracts)} قرارداد معامله‌شده`)}
       ${stat('ارزش کال', fmt.money(ex.callValue), Number.isFinite(ex.callValuePct) ? `سهم ${fmt.pct(ex.callValuePct)}٪` : '')}
@@ -184,43 +190,92 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     </div>`;
     chainStep.hidden = false;
     paintChain();
-    paintContract();
     loadDailyRanges();
   }
 
   function paintChain() {
     const rows = visibleContracts();
     root.querySelectorAll('[data-lmm-chain-side]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.lmmChainSide === chainSide)));
+    root.querySelectorAll('[data-lmm-layout]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.lmmLayout === chainLayout)));
     root.querySelector('[data-lmm-chain-count]').textContent = chainSide === 'all'
       ? `${fmt.int(rows.length)} قرارداد کال و پوت`
       : `${fmt.int(rows.length)} قرارداد ${chainSide === 'call' ? 'کال' : 'پوت'}`;
-    chainTable.set(rows.map(contractRow));
+    const paired = chainLayout === 'paired';
+    root.querySelector('[data-lmm-chain-note]').textContent = paired
+      ? 'کال و پوتِ هر قیمت اعمال روی یک ردیف. خانه‌های پررنگ «در سود»اند، نوار زیر موقعیت باز سنگینی تعهد را نشان می‌دهد، و خط‌چین جای قیمت جاری پایه است.'
+      : 'روی «ستون‌ها» بزن تا هر داده‌ای را اضافه یا حذف کنی؛ روی ردیف بزن تا همان قرارداد دامنهٔ تحلیل شود.';
+    pairedHost.hidden = !paired;
+    chainHost.hidden = paired;
+    if (paired) paintPairedChain(rows);
+    else chainTable.set(rows.map(contractRow));
   }
 
-  function paintContract() {
-    const row = selectedContract();
-    if (!row) {
-      detailHost.innerHTML = '<p class="lmm-contract-prompt">برای دیدن اطلاعات کامل یک قرارداد، روی ردیف آن در زنجیره کلیک کن.</p>';
-      return;
-    }
-    const change = Number(row.changePct);
-    detailHost.innerHTML = `<div class="lmm-scope-title"><div><p class="eyebrow">جزئیات قرارداد انتخابی</p><h3>${esc(row.name)}</h3></div><span>${kindLabel(row.kind)} · اعمال ${fmt.money(row.strike)}</span></div><div class="lmm-stat-grid compact">
-      ${stat('آخرین', fmt.money(row.last), Number.isFinite(change) ? `تغییر ${fmt.pct(change)}٪` : 'تغییر نامعلوم', tone(change))}
-      ${stat('تقاضا / عرضه', `${fmt.money(row.bid)} / ${fmt.money(row.ask)}`, `فاصله ${fmt.pct(row.spreadPct)}٪`)}
-      ${stat('حجم', fmt.int(row.volume), `${fmt.int(row.trades)} معامله`)}
-      ${stat('ارزش معامله', fmt.money(row.value))}
-      ${stat('موقعیت باز', fmt.int(row.oi), `تغییر ${fmt.int(row.oiChange)}`)}
-      ${stat('تلاطم ضمنی', Number.isFinite(row.ivPct) ? `${fmt.pct(row.ivPct)}٪` : '—')}
-      ${stat('ارزش ذاتی', fmt.money(row.intrinsic), `ارزش زمانی ${fmt.money(row.timeValue)}`)}
-      ${stat('فاصله اعمال از پایه', Number.isFinite(row.moneynessPct) ? `${fmt.pct(row.moneynessPct)}٪` : '—', `پایه ${fmt.money(row.spot)}`)}
-    </div>`;
+  // ————— زنجیرهٔ دوطرفه —————
+  //
+  // ستون‌ها عمداً کم‌اند و همان‌هایی که پیش از زدن یک اختیار نگاه می‌شوند:
+  // موقعیت باز (کجا تعهد جمع شده)، حجم امروز، IV (گران یا ارزان)، فاصله تا
+  // سربه‌سر (چقدر باید حرکت کند) و آخرین قیمت با تغییرش. بقیهٔ ۳۴ ستون در
+  // جدول تخت سر جایشان‌اند.
+  const PAIRED_COLS = [
+    ['oi', 'موقعیت باز', (row) => fmt.int(row.oi), true],
+    ['volume', 'حجم', (row) => fmt.int(row.volume), false],
+    ['ivPct', 'IV٪', (row) => Number.isFinite(row.ivPct) ? `${fmt.pct(row.ivPct)}٪` : '—', false],
+    ['breakevenGapPct', 'تا سربه‌سر٪', (row) => Number.isFinite(row.breakevenGapPct) ? `${fmt.pct(row.breakevenGapPct)}٪` : '—', false],
+    ['changePct', 'تغییر٪', (row) => Number.isFinite(row.changePct) ? `${fmt.pct(row.changePct)}٪` : '—', false],
+    ['last', 'آخرین', (row) => fmt.money(row.last), false],
+  ];
+
+  function pairedCells(row, side, oiMax, itm) {
+    const shade = itm ? ' is-itm' : '';
+    if (!row) return PAIRED_COLS.map(() => `<td class="lmm-paired-void${shade}">—</td>`).join('');
+    const enriched = contractRow(row);
+    const cells = PAIRED_COLS.map(([key, , format, bar]) => {
+      const value = Number(enriched[key]);
+      const signed = key === 'changePct' || key === 'breakevenGapPct';
+      const share = bar && oiMax > 0 ? Math.min(1, (Number(enriched.oi) || 0) / oiMax) : 0;
+      return `<td class="${signed ? tone(value) : ''}${bar ? ' lmm-paired-bar' : ''}${shade}"${bar ? ` style="--share:${(share * 100).toFixed(1)}%"` : ''}>${format(enriched)}</td>`;
+    });
+    // سمت کال از راست خوانده می‌شود و سمت پوت از چپ، پس ترتیب ستون‌های کال
+    // آینه می‌شود تا «آخرین» هر دو سمت کنار ستون اعمال بنشیند.
+    return (side === 'call' ? cells.reverse() : cells).join('');
+  }
+
+  function paintPairedChain(rows) {
+    const spot = Number(contracts().find((row) => Number(row.spot) > 0)?.spot);
+    const chain = twoSidedChain(rows, spot);
+    if (!chain.rows.length) { pairedHost.innerHTML = '<p class="empty-note">برای این سررسید قرارداد معتبری در عکس بازار نیست.</p>'; return; }
+    const oiMax = chainSideMax(chain.rows, 'oi');
+    const head = PAIRED_COLS.map(([, label]) => `<th>${label}</th>`);
+    const spotRow = `<tr class="lmm-paired-spot"><td colspan="${PAIRED_COLS.length * 2 + 1}"><span>قیمت جاری پایه ${fmt.money(chain.spot)}</span></td></tr>`;
+    const lines = chain.rows.map((rung, index) => {
+      const lead = index === chain.spotIndex ? spotRow : '';
+      const pick = (row) => row ? ` data-lmm-paired-pick="${esc(row.ins)}"` : '';
+      const picked = (row) => row && String(row.ins) === contractIns ? ' is-picked' : '';
+      return `${lead}<tr class="lmm-paired-row">
+        <td class="lmm-paired-edge${rung.callItm ? ' is-itm' : ''}${picked(rung.call)}"${pick(rung.call)}>${rung.call ? esc(rung.call.name) : '—'}</td>
+        ${pairedCells(rung.call, 'call', oiMax, rung.callItm)}
+        <th class="lmm-paired-strike" scope="row">${fmt.money(rung.strike)}</th>
+        ${pairedCells(rung.put, 'put', oiMax, rung.putItm)}
+        <td class="lmm-paired-edge${rung.putItm ? ' is-itm' : ''}${picked(rung.put)}"${pick(rung.put)}>${rung.put ? esc(rung.put.name) : '—'}</td>
+      </tr>`;
+    }).join('');
+    pairedHost.innerHTML = `<table class="lmm-paired">
+      <thead>
+        <tr class="lmm-paired-sides"><th colspan="${PAIRED_COLS.length + 1}">اختیار خرید (کال)</th><th class="lmm-paired-strike">قیمت اعمال</th><th colspan="${PAIRED_COLS.length + 1}">اختیار فروش (پوت)</th></tr>
+        <tr><th>قرارداد</th>${[...head].reverse().join('')}<th class="lmm-paired-strike"></th>${head.join('')}<th>قرارداد</th></tr>
+      </thead>
+      <tbody>${lines}</tbody>
+    </table>`;
+    pairedHost.querySelectorAll('[data-lmm-paired-pick]').forEach((cell) => cell.addEventListener('click', () => selectContract(cell.dataset.lmmPairedPick)));
   }
 
   const currentMetrics = () => mapMode === 'contracts' ? CONTRACT_MAP_METRICS : MARKET_MAP_METRICS;
   const currentMetric = () => mapMode === 'contracts' ? contractMetric : baseMetric;
 
   function weightedContracts(metric) {
-    const rows = (universe.contracts || []).filter((row) => String(row.uaIns) === uaIns).map((row) => {
+    const list = (universe.contracts || []).filter((row) => String(row.uaIns) === uaIns);
+    if (metric === EQUAL_MAP_METRIC) return list.map((row) => ({ ...row, metricValue: NaN, sizeValue: 1, mapWeight: 1 }));
+    const rows = list.map((row) => {
       const raw = Number(row[metric]);
       const metricValue = Number.isFinite(raw) ? raw : NaN;
       const sizeValue = metric === 'changePct' ? Math.abs(metricValue) : Math.max(0, metricValue);
@@ -243,7 +298,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
         baseMetric = button.dataset.lmmMetric;
         localStorage.setItem('options-radar:market-map-metric', baseMetric);
       }
-      paintMetricControls(); paintMap();
+      paintMapMode(); paintMap();
     }));
   }
 
@@ -251,9 +306,16 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     const ua = selectedUa();
     root.querySelectorAll('[data-lmm-map-mode]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.lmmMapMode === mapMode)));
     root.querySelector('[data-lmm-map-title]').textContent = mapMode === 'contracts' ? `نقشه قراردادهای ${ua?.name || 'نماد انتخابی'}` : 'نقشه بازار اختیار';
-    root.querySelector('[data-lmm-map-note]').textContent = mapMode === 'contracts'
-      ? 'همه قراردادهای این نماد در همه سررسیدها؛ اندازه با سنجه انتخابی و رنگ با تغییر خود قرارداد.'
-      : 'اندازه خانه از سنجه انتخابی می‌آید؛ رنگ، جهت آخرین معامله نماد پایه نسبت به پایانی دیروز است.';
+    // جملهٔ زیر عنوان باید همان کاری را بگوید که نقشه دارد می‌کند. در حالت
+    // هم‌اندازه «اندازه از سنجه می‌آید» دیگر درست نیست.
+    const equal = currentMetric() === EQUAL_MAP_METRIC;
+    root.querySelector('[data-lmm-map-note]').textContent = equal
+      ? (mapMode === 'contracts'
+        ? 'همه قراردادهای این نماد هم‌اندازه‌اند تا هیچ‌کدام زیر وزنِ پرمعامله‌ها گم نشود؛ رنگ، تغییر خود قرارداد است.'
+        : 'همه نمادها هم‌اندازه‌اند تا کم‌معامله‌ها هم دیده و کلیک شوند؛ رنگ، جهت آخرین معامله نسبت به پایانی دیروز است.')
+      : (mapMode === 'contracts'
+        ? 'همه قراردادهای این نماد در همه سررسیدها؛ اندازه با سنجه انتخابی و رنگ با تغییر خود قرارداد.'
+        : 'اندازه خانه از سنجه انتخابی می‌آید؛ رنگ، جهت آخرین معامله نماد پایه نسبت به پایانی دیروز است.');
     mapHost.setAttribute('aria-label', mapMode === 'contracts' ? `نقشه قراردادهای ${ua?.name || 'نماد انتخابی'}` : 'نقشه همه نمادهای پایه');
     paintMetricControls();
   }
@@ -399,12 +461,12 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     endDate = String(next); contractIns = ''; normalizeSelection(true); paintUnderlying(); emit('expiry');
   }
   function selectContract(next) {
-    contractIns = String(next); paintContract(); emit('contract');
+    contractIns = String(next); paintChain(); emit('contract');
   }
   function selectContractFromMap(data) {
     uaIns = String(data.uaIns); endDate = String(data.endDate); contractIns = String(data.contractIns);
     normalizeSelection(true); paintUnderlying(); emit('contract');
-    root.querySelector('[data-lmm-contract-detail]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    root.querySelector('[data-lmm-chain-step]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   root.querySelectorAll('[data-lmm-map-mode]').forEach((button) => button.addEventListener('click', () => {
@@ -415,6 +477,13 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   expiryRail.addEventListener('click', (event) => {
     const button = event.target.closest('[data-lmm-expiry]');
     if (button) selectExpiry(button.dataset.lmmExpiry);
+  });
+  root.querySelector('[data-lmm-chain-layout]').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-lmm-layout]');
+    if (!button) return;
+    chainLayout = button.dataset.lmmLayout;
+    localStorage.setItem('options-radar:market-map-chain-layout', chainLayout);
+    paintChain();
   });
   root.querySelector('[data-lmm-chain-kind]').addEventListener('click', (event) => {
     const button = event.target.closest('[data-lmm-chain-side]');
