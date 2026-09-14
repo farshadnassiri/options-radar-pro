@@ -4165,6 +4165,42 @@ table.data thead th {
     box-shadow: none;
   }
 }
+/* ————— زنجیرهٔ دوطرفه ————— */
+.lmm-chain-tools { display: flex; flex-wrap: wrap; gap: 10px; }
+.lmm-paired-wrap { overflow: auto; max-height: 620px; border: 1px solid var(--line-soft); border-radius: var(--radius-md); }
+.lmm-paired { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); white-space: nowrap; }
+.lmm-paired th, .lmm-paired td { padding: 5px 8px; border-bottom: 1px solid var(--line-soft); text-align: center; }
+.lmm-paired thead th { position: sticky; top: 0; z-index: 2; background: var(--panel-2); color: var(--ink-2); font-size: var(--fs-3xs); font-weight: 900; }
+.lmm-paired-sides th { top: 0; border-bottom: 1px solid var(--line); font-size: var(--fs-2xs); }
+.lmm-paired-sides th:first-child { color: var(--call); }
+.lmm-paired-sides th:last-child { color: var(--put); }
+.lmm-paired thead tr:last-child th { top: 27px; }
+.lmm-paired-strike { background: var(--panel); color: var(--ink); font-weight: 900; font-variant-numeric: tabular-nums; box-shadow: inset 1px 0 var(--line), inset -1px 0 var(--line); }
+.lmm-paired-row:hover td, .lmm-paired-row:hover th { background: var(--panel-2); }
+.lmm-paired td.is-itm { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.lmm-paired-edge { max-width: 130px; overflow: hidden; color: var(--ink-2); text-overflow: ellipsis; cursor: pointer; }
+.lmm-paired-edge:hover { color: var(--accent-ink); text-decoration: underline; }
+.lmm-paired-edge.is-picked { background: var(--accent-soft); color: var(--accent-ink); font-weight: 900; box-shadow: inset 0 -2px var(--accent); }
+.lmm-paired-void { color: var(--line-strong); }
+.lmm-paired td.gain { color: var(--gain); font-weight: 800; }
+.lmm-paired td.loss { color: var(--loss); font-weight: 800; }
+/* نوار «دیوار»: سنگینی موقعیت باز همان اعمال، با مقیاس مشترک دو سمت. */
+.lmm-paired-bar { position: relative; font-variant-numeric: tabular-nums; }
+.lmm-paired-bar::after { content: ''; position: absolute; inset-block-end: 0; inset-inline-start: 0; width: var(--share); height: 3px; background: var(--accent); opacity: .65; }
+.lmm-paired-spot td { padding: 0; border-bottom: 0; background: none; }
+.lmm-paired-spot span { display: block; padding: 3px 8px; border-block: 1px dashed var(--warn); color: var(--warn); font-size: var(--fs-3xs); font-weight: 900; text-align: center; }
+
+@media (max-width: 760px) {
+  .lmm-paired { font-size: var(--fs-3xs); }
+  .lmm-paired th, .lmm-paired td { padding: 4px 5px; }
+}
+
+/* حالت نگاه باز: لحظه‌ای یا تاریخی */
+.open-view-mode { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.open-view-mode button { min-height: 38px; padding: 7px 18px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); font-weight: 800; cursor: pointer; }
+.open-view-mode button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+#ov-mode-note { margin: 0 0 12px; color: var(--muted); font-size: var(--fs-xs); }
+
 
 .pb-skin {
   --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */

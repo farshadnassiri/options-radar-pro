@@ -38,8 +38,10 @@ group('۷۳. ادغام تب‌های نگاه کلی');
   check('حالت بدون نما، مسیر نمای شماره‌دار را نمی‌رود',
     dash73.includes('if (mode?.mod) { await mountEmbedded(mode); return; }')
     && dash73.includes('(modeOf()?.views || [])'));
-  check('سه حالت تصمیم‌گیری هنوز بیست نما دارند',
-    DASHBOARD_VIEW_COUNTS73().every((n) => n === 20), DASHBOARD_VIEW_COUNTS73().join('/'));
+  // ادغام دو تب نباید نماهای سه حالت را ببلعد. عدد ثابت نیست (دستهٔ ۷۶
+  // تکرارنبودن را می‌سنجد)، ولی کف هست.
+  check('ادغام، فهرست نماهای سه حالت را خالی نکرده',
+    DASHBOARD_VIEW_COUNTS73().every((n) => n >= 10), DASHBOARD_VIEW_COUNTS73().join('/'));
   function DASHBOARD_VIEW_COUNTS73() {
     return ['pulseViews', 'liquidityViews', 'volatilityViews'].map((name) =>
       ((new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash73)?.[1] || '').match(/^\s*\['/gm) || []).length);

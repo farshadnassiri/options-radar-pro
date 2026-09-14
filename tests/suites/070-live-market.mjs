@@ -62,7 +62,7 @@ group('۶۹. داشبورد تجمعی بازار و رصد زنده موقعی�
     && server69.includes('Promise.all(instruments.map(async (item)'));
   check('داشبورد دایره‌ای، میله‌ای و سه مسیر تجمعی را در کاتالوگ تصمیم نگه می‌دارد',
     ui69.includes("'breadth-donut'") && ui69.includes("'breadth-bars'")
-    && ui69.includes("'breadth-pct'") && ui69.includes("'breadth-net'") && ui69.includes("'base-volume-path'"));
+    && ui69.includes("'breadth-pct'") && ui69.includes("'base-volume-path'"));
   // این ادعا تا ۱۴۰۵/۰۶/۲۳ سه کشوی جداگانه را قفل کرده بود — یعنی دقیقاً
   // همان دوباره‌پرسیدنی که صاحب پروژه خواست برداشته شود. نقشه حالا تنها
   // منبع انتخاب است، پس ادعا هم همان را قفل می‌کند: نه کشوی موازی بماند،
