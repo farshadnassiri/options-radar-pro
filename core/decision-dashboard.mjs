@@ -806,3 +806,64 @@ export function mergeUnderlyingTrades(universe = {}, observed = []) {
   });
   return { ...universe, underlyings };
 }
+
+// ————————————————————————————————————————————————————————————————
+// مرتب‌سازی زنجیرهٔ دوطرفه.
+//
+// ═══ چرا این یک تصمیم است، نه یک `sort` ساده ═══
+//
+// در زنجیرهٔ دوطرفه هر ردیف **دو** مقدار برای هر ستون دارد: یکی کال، یکی
+// پوت. پس «مرتب بر تلاطم» به‌تنهایی یک دستور ناقص است — تلاطمِ کدام سمت؟
+// انتخابگر همین را حل می‌کند: کلیک روی سرستونِ سمت کال یعنی با کال مرتب
+// کن، سمت پوت یعنی با پوت.
+//
+// قیمت اعمال استثناست: یکی است و به هیچ سمتی تعلق ندارد. مرتب‌سازی بر آن،
+// همان **نردبانِ** اصلی زنجیره است و تنها حالتی است که خط قیمت جاری معنی
+// دارد — چون آن خط بین دو اعمالِ در بر گیرنده می‌نشیند و در ترتیب دیگری
+// جایی ندارد.
+//
+// ردیفی که در آن سمت قرارداد ندارد همیشه **آخر** می‌ماند، در هر دو جهت.
+// وگرنه در ترتیب صعودی، ردیف‌های خالی بالای همهٔ قراردادهای واقعی می‌نشینند.
+// ————————————————————————————————————————————————————————————————
+
+export const PAIRED_SORT_DEFAULT = Object.freeze({ key: 'strike', side: null, dir: 1 });
+
+export function sortPairedChain(rows = [], sort = PAIRED_SORT_DEFAULT) {
+  const key = sort?.key || 'strike';
+  const dir = Number(sort?.dir) < 0 ? -1 : 1;
+  const side = sort?.side === 'call' || sort?.side === 'put' ? sort.side : null;
+  const list = [...rows];
+  if (key === 'strike' || !side) {
+    return list.sort((a, b) => (Number(a.strike) - Number(b.strike)) * dir);
+  }
+  const valueOf = (row) => {
+    const raw = row?.[side]?.[key];
+    const num = Number(raw);
+    if (Number.isFinite(num)) return { num, text: null };
+    return typeof raw === 'string' && raw ? { num: NaN, text: raw } : { num: NaN, text: null };
+  };
+  return list.sort((a, b) => {
+    const left = valueOf(a), right = valueOf(b);
+    const leftEmpty = !Number.isFinite(left.num) && left.text === null;
+    const rightEmpty = !Number.isFinite(right.num) && right.text === null;
+    if (leftEmpty !== rightEmpty) return leftEmpty ? 1 : -1;   // خالی، همیشه آخر
+    if (leftEmpty && rightEmpty) return Number(a.strike) - Number(b.strike);
+    if (left.text !== null || right.text !== null) {
+      return String(left.text ?? '').localeCompare(String(right.text ?? ''), 'fa') * dir;
+    }
+    return (left.num - right.num) * dir || (Number(a.strike) - Number(b.strike));
+  });
+}
+
+/**
+ * کدام سمت‌ها رسم شوند.
+ *
+ * خواستهٔ صاحب پروژه: «اگر فقط کال بود فقط کال را نشان بده، یعنی پوت را
+ * کلاً نیار.» تا امروز ستون‌های سمتِ فیلترشده با «—» پر می‌شدند — یعنی
+ * نصف عرض جدول خرج چیزی می‌شد که کاربر صریحاً کنارش گذاشته بود.
+ */
+export function pairedSides(side = 'all') {
+  if (side === 'call') return ['call'];
+  if (side === 'put') return ['put'];
+  return ['call', 'put'];
+}

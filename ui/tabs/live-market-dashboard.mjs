@@ -13,6 +13,7 @@ import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { dashboardClock } from '/core/watch-health.mjs';
+import { busyBlock, attachBusyBar } from '/ui/busy.mjs';
 import { createOpenViewBaseSyncGate } from '/ui/open-view-selection.mjs';
 import { mountLiveMarketMap } from '/ui/live-market-map.mjs';
 import { SCOPE_LEVELS, resolveScope, needsTape } from '/ui/live-dashboard-scope.mjs';
@@ -830,7 +831,7 @@ export async function mount(root, { state, api }) {
       ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div id="dd-market-explorer"></div></section>`
       : mode.mod
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
-        : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host></div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</div>`;
+        : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host>${busyBlock('در حال دریافت نخستین عکس بازار… این مرحله چند ثانیه طول می‌کشد.', { lines: 4 })}</div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</div>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
   // یونانی‌ها با همان فرض‌هایی حساب می‌شوند که بقیهٔ برنامه؛ نه با عدد
@@ -1208,6 +1209,7 @@ export async function mount(root, { state, api }) {
   async function refresh() {
     if (loading) return;
     loading = true; $('dd-refresh').disabled = true; $('dd-status').textContent = 'در حال دریافت عکس تازه بازار…';
+    $('dd-status').className = ''; busyBar?.busy(true);
     try {
       const response = await fetch('/api/live-dashboard', { cache: 'no-store' }), next = await response.json();
       if (!response.ok || next.error) throw new Error(next.error || `HTTP ${response.status}`);
@@ -1225,7 +1227,7 @@ export async function mount(root, { state, api }) {
       $('dd-status').className = clock.stale ? 'loss' : '';
     } catch (error) {
       $('dd-status').textContent = `به‌روزرسانی ناموفق: ${error.message}`; logError('داشبورد تصمیم‌گیری', error);
-    } finally { loading = false; $('dd-refresh').disabled = false; schedule(); }
+    } finally { loading = false; $('dd-refresh').disabled = false; busyBar?.busy(false); schedule(); }
   }
 
   root.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', async () => {
@@ -1277,9 +1279,13 @@ export async function mount(root, { state, api }) {
   const countdown = setInterval(() => {
     if (!paused && nextAt > Date.now() && !loading) $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه · نوبت بعد ${faDigits(Math.ceil((nextAt - Date.now()) / 1000))} ثانیه`;
   }, 1000);
+  // نوار باریکِ «در جریان» بالای نوار تب: محتوای موجود پاک نمی‌شود، ولی
+  // کاربر می‌بیند که چیزی در راه است.
+  const busyBar = attachBusyBar(root.querySelector('.dd-tabbar'), { label: 'در حال دریافت عکس تازه بازار…' });
   paintInterval(); paintLevels(); await refresh();
   return () => {
     clearTimeout(timer); clearInterval(countdown);
+    busyBar?.dispose();
     openViewController?.dispose?.();
     marketExplorer.dispose();
     for (const dispose of embedded.values()) { try { dispose?.(); } catch { /* برچیدن نباید بترکد */ } }
