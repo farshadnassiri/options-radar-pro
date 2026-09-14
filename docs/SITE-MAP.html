@@ -1,0 +1,396 @@
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>نقشهٔ سایت — رصد استراتژی آپشن</title>
+<style>
+  @page { size: A4; margin: 14mm 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "DejaVu Sans", sans-serif; color: #0f172a; font-size: 10.5px; line-height: 1.85; }
+  h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -.3px; }
+  h2 { margin: 26px 0 10px; padding-block-end: 6px; border-block-end: 2px solid #4338ca; color: #312e81; font-size: 16px; }
+  h3 { margin: 16px 0 6px; color: #1e293b; font-size: 12.5px; }
+  p { margin: 0 0 8px; }
+  .cover { padding: 22px 20px; border-radius: 14px; background: linear-gradient(135deg, #eef2ff, #f8fafc); border: 1px solid #c7d2fe; }
+  .cover .sub { color: #4338ca; font-weight: bold; font-size: 12px; margin-bottom: 8px; }
+  .cover .lead { font-size: 12px; color: #334155; }
+  .meta { margin-top: 10px; color: #64748b; font-size: 9.5px; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 9.5px; }
+  th, td { padding: 5px 7px; border: 1px solid #e2e8f0; vertical-align: top; text-align: right; }
+  thead th { background: #eef2ff; color: #312e81; font-size: 9.5px; }
+  tbody th { background: #f8fafc; white-space: nowrap; }
+  tr.grp th { background: #4338ca; color: #fff; text-align: center; font-size: 10px; }
+  td.c { text-align: center; white-space: nowrap; }
+  td.nm b { display: block; } td.nm small { color: #64748b; direction: ltr; display: block; }
+  td.note, .note { color: #475569; font-size: 9px; line-height: 1.7; }
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .card { padding: 9px 11px; border: 1px solid #e2e8f0; border-radius: 9px; background: #fff; break-inside: avoid; }
+  .card b { color: #312e81; display: block; margin-bottom: 2px; }
+  .card .q { color: #0369a1; font-weight: bold; font-size: 9.5px; display: block; margin-bottom: 3px; }
+  .card .w { color: #475569; font-size: 9px; }
+  .card .when { display: block; margin-top: 4px; padding-top: 4px; border-top: 1px dashed #cbd5e1; color: #166534; font-size: 9px; }
+  ol.flow { margin: 4px 0 0; padding-inline-start: 18px; } ol.flow li { margin-bottom: 2px; font-size: 9.5px; }
+  .sitemap { width: 100%; height: auto; margin: 6px 0 10px; }
+  .node rect { fill: #fff; stroke: #cbd5e1; stroke-width: 1.4; }
+  .node.base rect { fill: #f1f5f9; stroke: #94a3b8; }
+  .node.hub rect { fill: #eef2ff; stroke: #4338ca; stroke-width: 2.2; }
+  .node.act rect { fill: #ecfdf5; stroke: #059669; }
+  .node.gate rect { fill: #fef3c7; stroke: #d97706; stroke-dasharray: 5 4; }
+  .node.hold rect { fill: #faf5ff; stroke: #7c3aed; }
+  .nt { font-size: 13px; font-weight: bold; fill: #0f172a; text-anchor: middle; }
+  .ns { font-size: 10px; fill: #64748b; text-anchor: middle; }
+  .edge { fill: none; stroke: #94a3b8; stroke-width: 1.5; }
+  .chart { width: 100%; height: auto; }
+  .chart .ax { stroke: #334155; stroke-width: 1.2; }
+  .chart .grid { stroke: #cbd5e1; stroke-dasharray: 4 4; }
+  .chart .be { stroke: #d97706; stroke-dasharray: 5 3; stroke-width: 1.4; }
+  .chart .pnl { fill: none; stroke: #059669; stroke-width: 2.6; }
+  .chart { direction: ltr; }
+  .chart .lb { font-size: 10px; fill: #475569; }
+  .chart .be-t { fill: #b45309; font-weight: bold; }
+  .chart .loss-t { fill: #b91c1c; }
+  .rule { display: grid; grid-template-columns: 170px 1fr; gap: 8px; padding: 6px 0; border-block-end: 1px dashed #e2e8f0; }
+  .rule b { color: #b91c1c; font-size: 10px; }
+  .gl { display: grid; grid-template-columns: 120px 1fr; gap: 6px 10px; font-size: 9.5px; }
+  .gl b { color: #312e81; }
+  .pg { break-before: page; }
+  .foot { margin-top: 18px; padding-top: 8px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 8.5px; text-align: center; }
+  .kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 14px; }
+  .kpi div { padding: 8px; border: 1px solid #c7d2fe; border-radius: 9px; background: #eef2ff; text-align: center; }
+  .kpi b { display: block; color: #312e81; font-size: 19px; }
+  .kpi span { color: #475569; font-size: 8.5px; }
+</style></head><body>
+
+<section class="cover">
+  <p class="sub">راهنمای یک‌جای برنامه، برای معامله‌گر آپشن</p>
+  <h1>رصد استراتژی آپشن — نقشهٔ سایت</h1>
+  <p class="lead">این برنامه یک <b>دفتر محاسبه</b> است، نه تابلوی تبلیغ. کارش این است که همان اعدادی را که
+  خودت روی کاغذ حساب می‌کنی — سربه‌سر، بیشترین زیان، وجه تضمین، دلتا، بازده — برای <b>همهٔ ترکیب‌های ممکن</b>
+  روی کل بازار اختیار، هم‌زمان حساب کند و مرتب جلویت بگذارد. هیچ عددی را نمی‌سازد: اگر داده‌ای نیامده باشد،
+  خانه «—» می‌ماند و می‌گوید چرا.</p>
+  <p class="meta">این سند از روی خودِ کد ساخته شده — شمار استراتژی‌ها، ستون‌ها و نماها، همان‌هایی است که در برنامه هست.</p>
+</section>
+
+<div class="kpi">
+  <div><b>۳۶</b><span>استراتژی، هرکدام یک تب</span></div>
+  <div><b>۵۶</b><span>ستون انتخابی برای هر قرارداد</span></div>
+  <div><b>۵۰</b><span>جدول و نمودار تحلیلی</span></div>
+  <div><b>۱۲</b><span>بخش اصلی</span></div>
+</div>
+
+<h2>۱. خلاصه در یک نگاه</h2>
+<p>اگر فقط یک صفحه وقت داری، همین است. هر بخش، یک سؤال مشخص را جواب می‌دهد:</p>
+<div class="cards">
+<div class="card"><b>رصد لحظه‌ای بازار</b><span class="q">کل بازار اختیار همین حالا کجاست؟</span>
+  <span class="w">نقشهٔ بازار، زنجیرهٔ دوطرفه، کندل روزانه، ۵۰ جدول و نمودار تحلیلی، تابلوی پرمعامله، دیده‌بان زنجیره و برترین موقعیت‌ها — همه در یک صفحهٔ تب‌بندی‌شده.</span><span class="when">کِی: شروع هر روز. پیش از اینکه بدانی چه می‌خواهی بزنی.</span></div><div class="card"><b>۳۶ تب استراتژی</b><span class="q">این استراتژی امروز روی کدام نماد جواب می‌دهد؟</span>
+  <span class="w">برای هر استراتژی یک تب: غربال همهٔ ترکیب‌های ممکن روی کل بازار، با سود/زیان، سربه‌سر، وجه تضمین و بازده. رصد زنده و رصد تاریخی در همان تب.</span><span class="when">کِی: وقتی دیدگاه داری (صعودی/نزولی/خنثی) و دنبال بهترین اجرای آن می‌گردی.</span></div><div class="card"><b>آزمایشگاه آپشن</b><span class="q">اگر این موقعیت را در گذشته باز کرده بودم چه می‌شد؟</span>
+  <span class="w">بک‌تست یک ترکیب مشخص روی بازهٔ تاریخی، ثانیه به ثانیه، با قیمت‌های واقعی مشاهده‌شده. رصد زندهٔ همان موقعیت از یک ورود تاریخی.</span><span class="when">کِی: پیش از اینکه پول واقعی بگذاری. یا بعد از ورود، برای دنبال‌کردن موقعیت.</span></div><div class="card"><b>آزمون همه استراتژی‌ها</b><span class="q">کدام استراتژی در این بازه بهترین بود؟</span>
+  <span class="w">همان بک‌تست، ولی روی هر ۳۶ استراتژی و همهٔ ترکیب‌هایشان با هم؛ خروجی، رتبه‌بندی استراتژی‌هاست نه یک ترکیب.</span><span class="when">کِی: وقتی می‌خواهی سبک معاملاتی‌ات را انتخاب کنی، نه یک معامله.</span></div><div class="card"><b>رصد یونانی و تلاطم</b><span class="q">حساسیت موقعیتم به قیمت، زمان و نوسان چقدر است؟</span>
+  <span class="w">دلتا، گاما، تتا، وگا و تلاطم ضمنی یک موقعیت در طول عمرش — نه در یک لحظه.</span><span class="when">کِی: بعد از ورود، برای مدیریت ریسک. مخصوصاً وقتی چند پا داری.</span></div><div class="card"><b>رادار فاصله</b><span class="q">فاصلهٔ اسپرد یا استرانگل کِی به شرط من می‌رسد؟</span>
+  <span class="w">شرط‌گذاری روی فاصله — عدد مشخص، درصد پرشدن، درصد از کف امروز، یا صدک تاریخی — با رصد هر ده ثانیه و اعلان.</span><span class="when">کِی: وقتی منتظر یک قیمت خاصی و نمی‌خواهی تابلو را ساعت‌ها نگاه کنی.</span></div><div class="card"><b>دیده‌بان شرطی</b><span class="q">کِی شرط من روی هر سنجه‌ای برقرار می‌شود؟</span>
+  <span class="w">همان ایده، ولی روی هر سنجه‌ای: قیمت، تلاطم، موقعیت باز، وسعت بازار.</span><span class="when">کِی: برای شرط‌هایی که رادار فاصله پوشش نمی‌دهد.</span></div><div class="card"><b>سفره پر برکت بازار</b><span class="q">فرصت‌های کم‌ریسکِ امروز کجاست؟</span>
+  <span class="w">غربال ویژهٔ موقعیت‌هایی با نسبت سود به ریسک بالا و رویدادهای قابل شناسایی.</span><span class="when">کِی: مرور سریع روزانه، برای کسی که وقت غربال کامل ندارد.</span></div><div class="card"><b>استودیوی سفر زمانی سبد</b><span class="q">اگر سبدم را از فلان تاریخ می‌ساختم، امروز کجا بودم؟</span>
+  <span class="w">شبیه‌سازی یک سبد چندموقعیتی در طول زمان، با تخصیص سرمایه و قواعد ورود و خروج.</span><span class="when">کِی: برای برنامه‌ریزی سبد، نه یک معامله.</span></div><div class="card"><b>موقعیت‌های من و تحلیل رول</b><span class="q">موقعیت باز من الان چه وضعی دارد و کِی باید غلتانده شود؟</span>
+  <span class="w">ثبت موقعیت واقعی، سود و زیان جاری، و مقایسهٔ گزینه‌های رول (تمدید سررسید یا جابه‌جایی اعمال).</span><span class="when">کِی: بعد از ورود تا خروج.</span></div><div class="card"><b>تنظیمات</b><span class="q">فرض‌های محاسبه چیست؟</span>
+  <span class="w">کارمزد، اندازهٔ قرارداد، نرخ بدون ریسک، بازده نقدی، روزهای سال، دامنهٔ تلاطم، بازهٔ رصد.</span><span class="when">کِی: یک بار در شروع، و هر وقت فرضی عوض شد — این اعداد روی همهٔ خروجی‌ها اثر دارند.</span></div><div class="card"><b>دفتر خطاها</b><span class="q">چه چیزی از بالادست نیامد؟</span>
+  <span class="w">هر خطای دریافت داده با زمان و محل، تا بدانی کدام عدد ناقص است.</span><span class="when">کِی: وقتی عددی مشکوک یا خالی است.</span></div>
+</div>
+
+<h2 class="pg">۲. نقشهٔ مسیر کار</h2>
+<p>ترتیبِ طبیعیِ کار در برنامه از بالا به پایین است: فرض‌ها را یک بار تنظیم می‌کنی، از رصد بازار شروع
+می‌کنی، یکی از سه مسیر تحلیل را می‌روی، تصمیم می‌گیری (که <b>بیرون از برنامه</b> اتفاق می‌افتد)، و بعد
+موقعیت را تا خروج دنبال می‌کنی.</p>
+<svg viewBox="0 0 900 560" class="sitemap" role="img" aria-label="نقشهٔ مسیر کار در برنامه">
+  <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M0 0 L10 5 L0 10 z" fill="#64748b"/></marker></defs>
+  
+  <g class="node base">
+    <rect x="350" y="10" width="200" height="56" rx="10"/>
+    <text x="450" y="34" class="nt">تنظیمات</text>
+    <text x="450" y="52" class="ns">کارمزد · نرخ · اندازهٔ قرارداد</text>
+  </g>
+  <path class="edge" d="M450 66 C 450 86, 450 86, 450 106" marker-end="url(#ar)"/>
+  
+  <g class="node hub">
+    <rect x="310" y="106" width="280" height="56" rx="10"/>
+    <text x="450" y="130" class="nt">رصد لحظه‌ای بازار</text>
+    <text x="450" y="148" class="ns">نقشه ← نماد ← سررسید ← قرارداد</text>
+  </g>
+  <path class="edge" d="M370 162 C 370 187, 170 187, 170 212" marker-end="url(#ar)"/> <path class="edge" d="M450 162 C 450 187, 450 187, 450 212" marker-end="url(#ar)"/> <path class="edge" d="M530 162 C 530 187, 730 187, 730 212" marker-end="url(#ar)"/>
+  
+  <g class="node act">
+    <rect x="50" y="212" width="240" height="56" rx="10"/>
+    <text x="170" y="236" class="nt">۳۶ تب استراتژی</text>
+    <text x="170" y="254" class="ns">غربال ترکیب‌های ممکن</text>
+  </g>
+  
+  <g class="node act">
+    <rect x="330" y="212" width="240" height="56" rx="10"/>
+    <text x="450" y="236" class="nt">آزمایشگاه آپشن</text>
+    <text x="450" y="254" class="ns">بک‌تست یک ترکیب</text>
+  </g>
+  
+  <g class="node act">
+    <rect x="610" y="212" width="240" height="56" rx="10"/>
+    <text x="730" y="236" class="nt">آزمون همه استراتژی‌ها</text>
+    <text x="730" y="254" class="ns">رتبه‌بندی سبک‌ها</text>
+  </g>
+  <path class="edge" d="M170 268 C 170 293, 450 293, 450 318" marker-end="url(#ar)"/> <path class="edge" d="M450 268 C 450 293, 450 293, 450 318" marker-end="url(#ar)"/> <path class="edge" d="M730 268 C 730 293, 450 293, 450 318" marker-end="url(#ar)"/>
+  
+  <g class="node gate">
+    <rect x="330" y="318" width="240" height="56" rx="10"/>
+    <text x="450" y="342" class="nt">تصمیم و اجرا</text>
+    <text x="450" y="360" class="ns">بیرون از برنامه</text>
+  </g>
+  <path class="edge" d="M450 374 C 450 394, 450 394, 450 414" marker-end="url(#ar)"/>
+  
+  <g class="node hold">
+    <rect x="330" y="414" width="240" height="56" rx="10"/>
+    <text x="450" y="438" class="nt">موقعیت‌های من</text>
+    <text x="450" y="456" class="ns">ثبت موقعیت واقعی</text>
+  </g>
+  <path class="edge" d="M370 470 C 370 485, 170 485, 170 500" marker-end="url(#ar)"/> <path class="edge" d="M450 470 C 450 485, 450 485, 450 500" marker-end="url(#ar)"/> <path class="edge" d="M530 470 C 530 485, 730 485, 730 500" marker-end="url(#ar)"/>
+  
+  <g class="node hold">
+    <rect x="50" y="500" width="240" height="50" rx="10"/>
+    <text x="170" y="524" class="nt">رصد یونانی</text>
+    <text x="170" y="542" class="ns">دلتا · تتا · وگا</text>
+  </g>
+  
+  <g class="node hold">
+    <rect x="330" y="500" width="240" height="50" rx="10"/>
+    <text x="450" y="524" class="nt">رادار فاصله و دیده‌بان</text>
+    <text x="450" y="542" class="ns">شرط و اعلان</text>
+  </g>
+  
+  <g class="node hold">
+    <rect x="610" y="500" width="240" height="50" rx="10"/>
+    <text x="730" y="524" class="nt">تحلیل رول</text>
+    <text x="730" y="542" class="ns">تمدید یا جابه‌جایی</text>
+  </g>
+</svg>
+<p class="note">کادر نقطه‌چین زرد عمداً آنجاست: برنامه تصمیم نمی‌گیرد و سفارش نمی‌زند. عدد می‌دهد و می‌گوید
+هر عدد از کجا آمده.</p>
+
+<h2>۳. مسیرهای کاری نمونه</h2>
+<div class="cards">
+<div class="card"><b>شروع روز</b><ol class="flow"><li>تنظیمات را یک بار چک کن</li><li>رصد لحظه‌ای → نقشهٔ بازار: پول کجاست؟</li><li>یک نماد را از نقشه انتخاب کن</li><li>زنجیرهٔ دوطرفه: کدام اعمال تعهد سنگین دارد؟</li><li>تب «نبض و جهت»: بازار امروز کدام طرف است؟</li></ol></div><div class="card"><b>دیدگاه دارم، اجرا می‌خواهم</b><ol class="flow"><li>تب استراتژیِ متناسب با دیدگاه را باز کن</li><li>اسکن بزن؛ جدول را روی «بازده» یا «سود به ریسک» مرتب کن</li><li>ردیف مشکوک را باز کن و نمودار سود و زیانش را ببین</li><li>با «آزمایشگاه آپشن» همان ترکیب را روی گذشته بیازما</li></ol></div><div class="card"><b>وارد شدم، مدیریت می‌خواهم</b><ol class="flow"><li>موقعیت را در «موقعیت‌های من» ثبت کن</li><li>«رصد یونانی» را برای دنبال‌کردن دلتا و تتا باز کن</li><li>در «رادار فاصله» شرط خروج بگذار تا اعلان بگیری</li><li>نزدیک سررسید، «تحلیل رول» گزینه‌ها را مقایسه می‌کند</li></ol></div><div class="card"><b>می‌خواهم سبکم را انتخاب کنم</b><ol class="flow"><li>«آزمون همه استراتژی‌ها» را روی یک بازهٔ معنادار اجرا کن</li><li>رتبه‌بندی استراتژی‌ها را ببین، نه یک ترکیب</li><li>«استودیوی سفر زمانی سبد» برای ترکیب چند موقعیت</li></ol></div>
+</div>
+
+<h2 class="pg">۴. صفحهٔ رصد لحظه‌ای — قلب برنامه</h2>
+<p>این صفحه هفت تب دارد. تب نخست <b>نقشه و زنجیره</b> است و بقیه تحلیل‌های تخصصی روی همان انتخاب.
+نکتهٔ مهم: <b>نماد را فقط یک بار انتخاب می‌کنی</b> — روی نقشه — و همهٔ تب‌های دیگر از همان انتخاب
+تغذیه می‌شوند.</p>
+
+<h3>نقشهٔ بازار</h3>
+<p class="note">هر خانه یک نماد پایه است. اندازه از سنجهٔ انتخابی می‌آید (ارزش کال، ارزش پوت، حجم، …) و
+رنگ از جهت آخرین معامله. گزینهٔ «همه هم‌اندازه» اندازه را از داده جدا می‌کند تا نمادهای کم‌معامله هم دیده
+و کلیک شوند — نقشهٔ وزنی «پول کجاست» را جواب می‌دهد و «چه چیزهایی هست» را اصلاً.</p>
+
+<h3>زنجیرهٔ دوطرفه</h3>
+<p class="note">کال و پوتِ هر قیمت اعمال روی یک ردیف — همان چیدمانی که هر تابلوی اختیار حرفه‌ای دارد،
+چون سؤال معامله‌گر قرینه است: «روی این اعمال، کال گران‌تر است یا پوت؟». خانه‌های پررنگ «در سود»اند،
+نوار زیر موقعیت باز سنگینی تعهد را نشان می‌دهد («دیوار»)، و خط‌چین جای قیمت جاری پایه است.
+با کلیک روی هر سرستون مرتب می‌شود؛ چون هر ردیف دو مقدار دارد، سرستونِ سمت کال با کال مرتب می‌کند و
+سمت پوت با پوت. «فقط کال» یا «فقط پوت» سمت دیگر را کاملاً حذف می‌کند، نه اینکه با «—» پر کند.</p>
+
+<h3>۵۶ ستون، در ده دسته</h3>
+<table><thead><tr><th>دسته</th><th>تعداد</th><th>ستون‌ها</th></tr></thead><tbody><tr>
+  <th>شناسه</th><td class="c">۶</td><td class="note">قرارداد · نماد پایه · نوع · قیمت اعمال · سررسید · روز مانده</td></tr><tr>
+  <th>قیمت</th><td class="c">۱۱</td><td class="note">قیمت جاری پایه · آخرین · پایانی · پایانی دیروز · تغییر نسبت به پایانی دیروز ٪ · پریمیوم ٪ قیمت پایه · فاصله اعمال از پایه ٪ · ارزش ذاتی هر سهم · ارزش ذاتی ٪ قیمت پایه · ارزش زمانی هر سهم · ارزش زمانی ٪ قیمت پایه</td></tr><tr>
+  <th>سربه‌سر</th><td class="c">۳</td><td class="note">سربه‌سر · فاصله تا سربه‌سر · فاصله تا سربه‌سر ٪</td></tr><tr>
+  <th>مظنه</th><td class="c">۶</td><td class="note">تقاضا · حجم تقاضا · عرضه · حجم عرضه · میانه مظنه · فاصله مظنه ٪</td></tr><tr>
+  <th>گردش امروز</th><td class="c">۴</td><td class="note">حجم · ارزش معامله · تعداد معامله · گردش به موقعیت باز</td></tr><tr>
+  <th>تعهد انباشته</th><td class="c">۴</td><td class="note">موقعیت باز · موقعیت باز دیروز · تغییر موقعیت باز · تغییر موقعیت باز ٪</td></tr><tr>
+  <th>تلاطم</th><td class="c">۸</td><td class="note">تلاطم ضمنی ٪ — آخرین معامله · تلاطم اجرایی ٪ — میانه مظنه · تلاطم مظنه خرید ٪ · تلاطم مظنه فروش ٪ · علت نبود تلاطم · کف نظری قیمت · فاصله قیمت از کف نظری · قیمت از معامله امروز</td></tr><tr>
+  <th>یونانی</th><td class="c">۷</td><td class="note">دلتا — از آخرین معامله · دلتای اجرایی — از میانه مظنه · گاما · تتا (ریال در روز) · وگا (هر ۱٪ تلاطم) · رو (هر ۱٪ نرخ) · احتمال در سود در سررسید ٪</td></tr><tr>
+  <th>اهرم و فرسایش</th><td class="c">۵</td><td class="note">اهرم ساده · اهرم مؤثر (دلتا × اهرم) · فرسایش روزانه ریال · فرسایش روزانه ٪ پریمیوم · ارزش زمانی سالانه ٪ پایه</td></tr><tr>
+  <th>بازده</th><td class="c">۲</td><td class="note">بازده اگر پایه تکان نخورد ٪ · پریمیوم ٪ قیمت اعمال</td></tr></tbody></table>
+
+<h3>تب‌های تحلیلی</h3>
+<table><thead><tr><th>تب</th><th>نما</th><th>فهرست</th></tr></thead><tbody><tr>
+  <th>نبض و جهت بازار</th><td class="c">۱۵</td>
+  <td class="note">دایره جهت بازار · میله قدرت جهت‌ها · روند درصد مثبت و منفی · حجم تجمعی پایه‌ها · تغییر همه پایه‌ها · تغییر همه قراردادها · جدول جهت‌ها · جهت اختیار خرید · جهت اختیار فروش · جهت سررسیدها · نمادهای بدون تغییر · توزیع تغییر قیمت · تغییر در برابر حجم · جهت کال در برابر پوت · ریزمعامله قرارداد</td></tr><tr>
+  <th>نقدینگی و سررسید</th><td class="c">۱۳</td>
+  <td class="note">تابلوی قراردادها · تابلوی نمادهای پایه · تابلوی سررسیدها · رهبر ارزش هر سررسید · کال در برابر پوت · نردبان موقعیت باز روی اعمال · نردبان حجم روی اعمال · بیشترین درد هر سررسید · منحنی درد سررسید انتخابی · گرمانمای سررسید × فاصله اعمال · فاصله مظنه دوطرفه · توزیع ارزش روی فاصله اعمال · مسیر ارزش قرارداد</td></tr><tr>
+  <th>تلاطم و انتظارات</th><td class="c">۱۶</td>
+  <td class="note">تابلوی تلاطم قراردادها · تلاطم به تفکیک سررسید · تلاطم به تفکیک اعمال · لبخند تلاطم روی فاصله اعمال · ساختار زمانی تلاطم · چولگی پوت منهای کال هر سررسید · گرمانمای سررسید × فاصله اعمال · توزیع تلاطم · تلاطم در برابر ارزش معامله · تلاطم در برابر فاصله مظنه · نسبت موقعیت باز پوت به کال · نسبت حجم پوت به کال · نسبت پوت به کال روی هر اعمال · تغییر موقعیت باز قراردادها · IV ریزمعامله قرارداد · نگاه باز چندروزه</td></tr><tr>
+  <th>اختیارهای پرمعامله</th><td class="c">۶</td>
+  <td class="note">تابلوی پرمعامله · سربه‌سر وزنی هر سررسید · فاصله سربه‌سر از قیمت جاری · باند سربه‌سر پوت تا کال · توزیع روی فاصله از قیمت جاری · اعمال در برابر سربه‌سر</td></tr></tbody></table>
+<p class="note">به‌علاوهٔ دو تب ادغام‌شده: <b>دیده‌بان زنجیره</b> (کل بازار اختیار در یک درخواست) و
+<b>برترین موقعیت‌ها</b> (غربال روی کل کاتالوگ استراتژی).</p>
+
+<h2 class="pg">۵. سود و زیان — چیزی که همهٔ تب‌های استراتژی می‌سازند</h2>
+<p>هر تب استراتژی، برای هر ترکیبِ ممکن، همین نمودار را می‌سازد و از رویش سربه‌سر، بیشترین سود،
+بیشترین زیان و بازده را بیرون می‌کشد. نمونهٔ زیر سادهٔ همه است: خرید یک کال با اعمال ۱۰۰ و پریمیوم ۸.</p>
+<svg viewBox="0 0 780 240" class="chart" role="img" aria-label="نمودار سود و زیان خرید کال">
+    <line class="ax" x1="40" y1="150" x2="760" y2="150"/>
+    <line class="grid" x1="363.0769230769231" y1="20" x2="363.0769230769231" y2="200"/>
+    <line class="be" x1="449.2307692307692" y1="20" x2="449.2307692307692" y2="200"/>
+    <polyline class="pnl" points="40.0,179.3 45.4,179.3 50.8,179.3 56.2,179.3 61.5,179.3 66.9,179.3 72.3,179.3 77.7,179.3 83.1,179.3 88.5,179.3 93.8,179.3 99.2,179.3 104.6,179.3 110.0,179.3 115.4,179.3 120.8,179.3 126.2,179.3 131.5,179.3 136.9,179.3 142.3,179.3 147.7,179.3 153.1,179.3 158.5,179.3 163.8,179.3 169.2,179.3 174.6,179.3 180.0,179.3 185.4,179.3 190.8,179.3 196.2,179.3 201.5,179.3 206.9,179.3 212.3,179.3 217.7,179.3 223.1,179.3 228.5,179.3 233.8,179.3 239.2,179.3 244.6,179.3 250.0,179.3 255.4,179.3 260.8,179.3 266.2,179.3 271.5,179.3 276.9,179.3 282.3,179.3 287.7,179.3 293.1,179.3 298.5,179.3 303.8,179.3 309.2,179.3 314.6,179.3 320.0,179.3 325.4,179.3 330.8,179.3 336.2,179.3 341.5,179.3 346.9,179.3 352.3,179.3 357.7,179.3 363.1,179.3 368.5,177.5 373.8,175.7 379.2,173.8 384.6,172.0 390.0,170.2 395.4,168.3 400.8,166.5 406.2,164.7 411.5,162.8 416.9,161.0 422.3,159.2 427.7,157.3 433.1,155.5 438.5,153.7 443.8,151.8 449.2,150.0 454.6,148.2 460.0,146.3 465.4,144.5 470.8,142.7 476.2,140.8 481.5,139.0 486.9,137.2 492.3,135.3 497.7,133.5 503.1,131.7 508.5,129.8 513.8,128.0 519.2,126.2 524.6,124.3 530.0,122.5 535.4,120.7 540.8,118.8 546.2,117.0 551.5,115.2 556.9,113.3 562.3,111.5 567.7,109.7 573.1,107.8 578.5,106.0 583.8,104.2 589.2,102.3 594.6,100.5 600.0,98.7 605.4,96.8 610.8,95.0 616.2,93.2 621.5,91.3 626.9,89.5 632.3,87.7 637.7,85.8 643.1,84.0 648.5,82.2 653.8,80.3 659.2,78.5 664.6,76.7 670.0,74.8 675.4,73.0 680.8,71.2 686.2,69.3 691.5,67.5 696.9,65.7 702.3,63.8 707.7,62.0 713.1,60.2 718.5,58.3 723.8,56.5 729.2,54.7 734.6,52.8 740.0,51.0"/>
+    <text class="lb" x="363.0769230769231" y="215" text-anchor="middle">اعمال ۱۰۰</text>
+    <text class="lb be-t" x="449.2307692307692" y="15" text-anchor="middle">سربه‌سر ۱۰۸</text>
+    <text class="lb" x="748" y="142" text-anchor="end">سود</text>
+    <text class="lb" x="748" y="168" text-anchor="end">زیان</text>
+    <text class="lb" x="600" y="228" text-anchor="middle">← قیمت پایهٔ نماد در روز سررسید</text>
+    <text class="lb loss-t" x="201.53846153846155" y="167.33333333333334" text-anchor="middle">بیشترین زیان = پریمیوم ۸</text>
+  </svg>
+<p class="note">زیر اعمال، تمام پریمیوم می‌سوزد (خط صاف). از اعمال به بالا، هر ریال حرکتِ پایه یک ریال به
+موقعیت اضافه می‌کند، ولی تا <b>سربه‌سر = اعمال + پریمیوم</b> هنوز در زیانی. بالای سربه‌سر، سود بی‌سقف است.
+برای پوت همه‌چیز آینه می‌شود و سربه‌سر «اعمال − پریمیوم».</p>
+
+<h2>۶. ۳۶ استراتژی، در ۹ گروه</h2>
+<p class="note">«پا» یعنی تعداد قراردادهای تشکیل‌دهنده. «پرداخت» یعنی برای باز کردن پول می‌دهی،
+«دریافت» یعنی پول می‌گیری و در عوض تعهد و وجه تضمین داری.</p>
+<table><thead><tr><th>استراتژی</th><th>دیدگاه</th><th>پا</th><th>جریان نقد</th><th>نکته</th></tr></thead>
+<tbody><tr class="grp"><th colspan="5">تک‌پایه — ۲ استراتژی</th></tr><tr>
+    <td class="nm"><b>خرید کال اختیار خرید</b><small>Long Call</small></td>
+    <td>صعودی</td><td class="c">۱</td>
+    <td>پرداخت</td>
+    <td class="note">زیان محدود به قیمت پرداختی. وجه تضمین ندارد؛ سرمایه درگیر، همان بهای خرید است.</td></tr><tr>
+    <td class="nm"><b>خرید پوت اختیار فروش</b><small>Long Put</small></td>
+    <td>نزولی</td><td class="c">۱</td>
+    <td>پرداخت</td>
+    <td class="note">تنها راه سادهٔ سود از افت، وقتی فروش سهم پایه ممکن نیست.</td></tr><tr class="grp"><th colspan="5">کسب درآمد — ۵ استراتژی</th></tr><tr>
+    <td class="nm"><b>کاوردکال</b><small>Covered Call</small></td>
+    <td>صعودی ملایم</td><td class="c">۲</td>
+    <td>—</td>
+    <td class="note">سهم پایه، پوشش موقعیت فروش کال است؛ وجه تضمین نقدی ندارد.</td></tr><tr>
+    <td class="nm"><b>فروش پوت با پشتوانه نقد</b><small>Cash-Secured Put</small></td>
+    <td>صعودی ملایم</td><td class="c">۱</td>
+    <td>—</td>
+    <td class="note">سرمایه درگیر، بیشینه وجه تضمین و ارزش تعهد خرید است.</td></tr><tr>
+    <td class="nm"><b>فروش کال بدون پوشش</b><small>Naked Call</small></td>
+    <td>نزولی</td><td class="c">۱</td>
+    <td>—</td>
+    <td class="note">زیان نامحدود. وجه تضمین کامل و کال مارجین جدی است.</td></tr><tr>
+    <td class="nm"><b>فروش پوت بدون پوشش</b><small>Naked Put</small></td>
+    <td>صعودی</td><td class="c">۱</td>
+    <td>—</td>
+    <td class="note">بیشترین زیان تا صفر شدن پایه.</td></tr><tr>
+    <td class="nm"><b>کاورد پوت</b><small>Covered Put</small></td>
+    <td>نزولی</td><td class="c">۲</td>
+    <td>—</td>
+    <td class="note"></td></tr><tr class="grp"><th colspan="5">اسپرد عمودی — ۴ استراتژی</th></tr><tr>
+    <td class="nm"><b>اسپرد صعودی کال</b><small>Bull Call Spread</small></td>
+    <td>صعودی</td><td class="c">۲</td>
+    <td>پرداخت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>اسپرد نزولی کال</b><small>Bear Call Spread</small></td>
+    <td>نزولی</td><td class="c">۲</td>
+    <td>دریافت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>اسپرد صعودی پوت</b><small>Bull Put Spread</small></td>
+    <td>صعودی</td><td class="c">۲</td>
+    <td>دریافت</td>
+    <td class="note">صعودی است ولی بستانکار؛ پس وجه تضمین می‌گیرد. جهت و بستانکاری یکی نیستند.</td></tr><tr>
+    <td class="nm"><b>اسپرد نزولی پوت</b><small>Bear Put Spread</small></td>
+    <td>نزولی</td><td class="c">۲</td>
+    <td>پرداخت</td>
+    <td class="note">نزولی است ولی بدهکار؛ پس وجه تضمین نمی‌گیرد.</td></tr><tr class="grp"><th colspan="5">اسپرد تقویمی — ۴ استراتژی</th></tr><tr>
+    <td class="nm"><b>تقویمی کال</b><small>Calendar Call Spread</small></td>
+    <td>خنثی</td><td class="c">۲</td>
+    <td>پرداخت</td>
+    <td class="note">پس از سررسید پای نزدیک، پای دور تنها می‌ماند. وجه تضمین شرطی مهم است.</td></tr><tr>
+    <td class="nm"><b>تقویمی پوت</b><small>Calendar Put Spread</small></td>
+    <td>خنثی</td><td class="c">۲</td>
+    <td>پرداخت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>مورب کال</b><small>Diagonal Call Spread</small></td>
+    <td>صعودی ملایم</td><td class="c">۲</td>
+    <td>پرداخت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>مورب پوت</b><small>Diagonal Put Spread</small></td>
+    <td>نزولی ملایم</td><td class="c">۲</td>
+    <td>پرداخت</td>
+    <td class="note">قرینهٔ مورب کال: پای نزدیک با اعمال پایین‌تر فروخته می‌شود و پای دور با اعمال بالاتر خریده.</td></tr><tr class="grp"><th colspan="5">تلاطم — ۴ استراتژی</th></tr><tr>
+    <td class="nm"><b>استرادل خرید</b><small>Long Straddle</small></td>
+    <td>تلاطم بالا</td><td class="c">۲</td>
+    <td>پرداخت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>استرادل فروش</b><small>Short Straddle</small></td>
+    <td>تلاطم پایین</td><td class="c">۲</td>
+    <td>دریافت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>استرانگل خرید</b><small>Long Strangle</small></td>
+    <td>تلاطم بالا</td><td class="c">۲</td>
+    <td>پرداخت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>استرانگل فروش</b><small>Short Strangle</small></td>
+    <td>تلاطم پایین</td><td class="c">۲</td>
+    <td>دریافت</td>
+    <td class="note"></td></tr><tr class="grp"><th colspan="5">باترفلای و کندور — ۷ استراتژی</th></tr><tr>
+    <td class="nm"><b>باترفلای کال خرید</b><small>Long Call Butterfly</small></td>
+    <td>خنثی</td><td class="c">۳</td>
+    <td>پرداخت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>باترفلای کال فروش</b><small>Short Call Butterfly</small></td>
+    <td>تلاطم بالا</td><td class="c">۳</td>
+    <td>دریافت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>باترفلای پوت خرید</b><small>Long Put Butterfly</small></td>
+    <td>خنثی</td><td class="c">۳</td>
+    <td>پرداخت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>باترفلای آهنی</b><small>Iron Butterfly</small></td>
+    <td>خنثی</td><td class="c">۴</td>
+    <td>دریافت</td>
+    <td class="note">چهار پا یعنی چهار بار کارمزد و چهار بار عبور از اسپرد.</td></tr><tr>
+    <td class="nm"><b>کندور آهنی</b><small>Iron Condor</small></td>
+    <td>خنثی</td><td class="c">۴</td>
+    <td>دریافت</td>
+    <td class="note">در بازار ایران معمولاً یکی از چهار پا مظنه ندارد و کل ترکیب می‌افتد.</td></tr><tr>
+    <td class="nm"><b>کندور کال خرید</b><small>Long Call Condor</small></td>
+    <td>خنثی</td><td class="c">۴</td>
+    <td>پرداخت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>کندور پوت خرید</b><small>Long Put Condor</small></td>
+    <td>خنثی</td><td class="c">۴</td>
+    <td>پرداخت</td>
+    <td class="note">همان نیم‌رخ کندور کال با پاهای پوت؛ کدامشان ارزان‌تر درمی‌آید به اسپرد همان لحظه بستگی دارد.</td></tr><tr class="grp"><th colspan="5">نسبت و بک‌اسپرد — ۴ استراتژی</th></tr><tr>
+    <td class="nm"><b>نسبت‌اسپرد کال</b><small>Call Ratio Spread</small></td>
+    <td>صعودی ملایم</td><td class="c">۲</td>
+    <td>—</td>
+    <td class="note">فروش بیشتر از خرید؛ بخشی از موقعیت لخت است و وجه تضمین کامل می‌گیرد.</td></tr><tr>
+    <td class="nm"><b>نسبت‌اسپرد پوت</b><small>Put Ratio Spread</small></td>
+    <td>نزولی ملایم</td><td class="c">۲</td>
+    <td>—</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>بک‌اسپرد کال</b><small>Call Backspread</small></td>
+    <td>صعودی تند</td><td class="c">۲</td>
+    <td>—</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>بک‌اسپرد پوت</b><small>Put Backspread</small></td>
+    <td>نزولی تند</td><td class="c">۲</td>
+    <td>—</td>
+    <td class="note">فروش یک پوت با اعمال بالاتر و خرید دو پوت با اعمال پایین‌تر؛ از افت تند سود می‌برد و از رکود زیان.</td></tr><tr class="grp"><th colspan="5">پوشش ریسک — ۲ استراتژی</th></tr><tr>
+    <td class="nm"><b>پوت محافظ</b><small>Protective Put</small></td>
+    <td>صعودی با بیمه</td><td class="c">۲</td>
+    <td>پرداخت</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>کولار</b><small>Collar</small></td>
+    <td>محافظه‌کارانه</td><td class="c">۳</td>
+    <td>—</td>
+    <td class="note">سود و زیان هر دو محدود. مناسب قفل کردن سود سهمی که داری.</td></tr><tr class="grp"><th colspan="5">آربیتراژ و همبستگی — ۴ استراتژی</th></tr><tr>
+    <td class="nm"><b>سهم مصنوعی خرید</b><small>Synthetic Long Stock</small></td>
+    <td>صعودی</td><td class="c">۲</td>
+    <td>—</td>
+    <td class="note">اگر ارزان‌تر از خود سهم تمام شود، جای خرید سهم می‌نشیند.</td></tr><tr>
+    <td class="nm"><b>جعبه‌اسپرد</b><small>Box Spread</small></td>
+    <td>بی‌جهت</td><td class="c">۴</td>
+    <td>—</td>
+    <td class="note">بازده قطعی؛ فقط اگر بستانکار خالص از فاصله قیمت اعمال بیشتر باشد. چهار کارمزد آن را معمولاً می‌خورد.</td></tr><tr>
+    <td class="nm"><b>تبدیل</b><small>Conversion</small></td>
+    <td>بی‌جهت</td><td class="c">۳</td>
+    <td>—</td>
+    <td class="note"></td></tr><tr>
+    <td class="nm"><b>برگردان</b><small>Reversal</small></td>
+    <td>بی‌جهت</td><td class="c">۳</td>
+    <td>—</td>
+    <td class="note"></td></tr></tbody></table>
+
+<h2 class="pg">۷. قواعدی که برنامه زیرشان نمی‌زند</h2>
+<p>این‌ها تصمیم‌های عمدی‌اند، نه محدودیت. اگر جایی عددی ندیدی، یکی از این‌ها دلیلش است:</p>
+<div class="rule"><b>عدد نداشته، ساخته نمی‌شود</b><span class="note">اگر قیمتی نیامده، خانه «—» می‌ماند. با پایانی دیروز، VWAP یا قیمت مدل پر نمی‌شود. «نمی‌دانیم» با «صفر» یکی نیست.</span></div><div class="rule"><b>هر عدد، منبعش معلوم است</b><span class="note">ستون «علت نبود تلاطم» می‌گوید چرا خانه‌ای خالی است: قیمت زیر کف نظری، بالاتر از دامنه، بدون معامله، یا ورودی ناقص.</span></div><div class="rule"><b>مشاهده‌ای و اجرایی جدا</b><span class="note">تلاطم و دلتای «آخرین معامله» ممکن است با قیمت پایه هم‌زمان نباشند. ستون‌های «اجرایی» از میانهٔ مظنه می‌آیند که همین حالای دفتر سفارش است.</span></div><div class="rule"><b>قیمت تاریخی، قیمت اجرا نیست</b><span class="note">بک‌تست از معاملات مشاهده‌شده ساخته می‌شود. تضمین نمی‌کند در آن لحظه می‌شد همان قیمت را زد.</span></div><div class="rule"><b>قرارداد سررسیدشده معامله‌پذیر نیست</b><span class="note">حتی اگر بالادست آخرین قیمتش را تکرار کند.</span></div><div class="rule"><b>زمان عکس، زمان پاسخ نیست</b><span class="note">نوار بالای داشبورد هر دو را می‌گوید. عکس کهنه، قرمز می‌شود.</span></div>
+
+<h2>۸. واژه‌نامه</h2>
+<div class="gl"><b>سربه‌سر</b><span class="note">قیمتی از پایه که در آن، در سررسید، نه سود می‌کنی نه زیان. کال: اعمال + پریمیوم. پوت: اعمال − پریمیوم.</span><b>فاصله تا سربه‌سر</b><span class="note">پایه چقدر باید حرکت کند تا به سربه‌سر برسد. در هر دو سمت، مثبت یعنی هنوز نرسیده‌ایم.</span><b>در سود (ITM)</b><span class="note">کال وقتی اعمالش زیر قیمت جاری است؛ پوت وقتی بالای آن. ارزش ذاتی دارد.</span><b>ارزش ذاتی و ارزش زمانی</b><span class="note">ذاتی همان سودِ همین‌حالای اعمال است؛ زمانی، مابقی پریمیوم — که تا سررسید می‌سوزد.</span><b>تلاطم ضمنی (IV)</b><span class="note">نوسانی که قیمت بازار، در مدل بلک–شولز، به آن قرارداد نسبت می‌دهد. گران یا ارزان بودن اختیار را می‌گوید.</span><b>دلتا</b><span class="note">یک واحد حرکت پایه، چند واحد روی پریمیوم می‌نشیند. کال مثبت، پوت منفی.</span><b>گاما</b><span class="note">دلتا خودش چقدر سریع عوض می‌شود. نزدیک پول و نزدیک سررسید بیشینه است.</span><b>تتا</b><span class="note">هر روز چقدر از ارزش زمانی می‌سوزد. برای خریدار منفی، برای فروشنده مثبت.</span><b>وگا</b><span class="note">یک درصد تغییر تلاطم، چقدر روی پریمیوم اثر دارد.</span><b>اهرم مؤثر</b><span class="note">اهرم ساده (پایه ÷ پریمیوم) ضربدر قدرمطلق دلتا. یعنی «یک درصد حرکت پایه، چند درصد روی پریمیوم».</span><b>موقعیت باز (OI)</b><span class="note">تعداد قراردادهای بازِ تسویه‌نشده. تجمع سنگین روی یک اعمال، مثل سطح حمایت یا مقاومت رفتار می‌کند.</span><b>بیشترین درد (Max Pain)</b><span class="note">قیمتی که در آن مجموع ارزش ذاتی تعهدهای باز کمینه می‌شود. ادعای پیش‌بینی نیست؛ می‌گوید سنگینی تعهد کجاست.</span><b>کف نظری</b><span class="note">کمترین قیمتی که مدل برای آن قرارداد مجاز می‌داند. قیمت زیر آن، یعنی تلاطم ضمنی حل نمی‌شود.</span></div>
+
+<p class="foot">رصد استراتژی آپشن — نقشهٔ سایت · ساخته‌شده از روی کد مخزن · این سند راهنمای استفاده است و توصیهٔ معاملاتی نیست.</p>
+</body></html>
