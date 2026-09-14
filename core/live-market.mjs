@@ -4,7 +4,7 @@
 // آن دو، خلاصه روز و IV هر معامله اختیار را می‌سازد تا محاسبه در تب دیگری
 // تکرار نشود و بی‌نیاز از DOM آزمون‌پذیر بماند.
 
-import { impliedVol } from './bs.mjs';
+import { impliedVol, impliedVolWhy } from './bs.mjs';
 import { tradeSecond } from './backtest.mjs';
 
 const finite = (v) => (Number.isFinite(Number(v)) ? Number(v) : NaN);
@@ -249,13 +249,69 @@ export function marketBreadthTimeline(instruments = [], tradesByIns = {}, { buck
 
 /** IV آخرین قیمت مشاهده‌شده قرارداد در عکس زنجیره. */
 export function liveQuoteIv(contract = {}, basePrice, settings = {}) {
-  const price = finite(contract.last) > 0 ? finite(contract.last) : finite(contract.close);
+  return liveIvAt(contract, basePrice, settings, priceOf(contract)).ivPct;
+}
+
+const priceOf = (contract) => (finite(contract.last) > 0 ? finite(contract.last) : finite(contract.close));
+
+/**
+ * IV یک قیمتِ مشخص، با **علت** خالی‌ماندن.
+ *
+ * ═══ چرا یک تابع، نه چهار ═══
+ *
+ * ممیزی ۱۴۰۵/۰۶/۲۴ دو چیز را هم‌زمان خواست: علتِ خالی‌بودن ستون تلاطم، و
+ * تفکیک تلاطمِ «مشاهده‌ای» از تلاطمِ «اجرایی». هر دو یک محاسبه‌اند با یک
+ * ورودیِ قیمت متفاوت، پس یک مسیر می‌مانند — وگرنه روزی یکی اصلاح می‌شود و
+ * دیگری نه.
+ *
+ * `why` علاوه بر کدهای حل‌گر، `noPrice`، `noSpot` و `noDays` هم می‌دهد تا
+ * «قیمتی نداشتیم» با «قیمت داشتیم ولی حل نشد» یکی نشود.
+ */
+export function liveIvAt(contract = {}, basePrice, settings = {}, price = NaN) {
   const days = finite(contract.days);
   const yearDays = finite(settings.dayCountYear);
   const T = days > 0 && yearDays > 0 ? days / yearDays : NaN;
   const strike = finite(contract.strike);
-  if (!(price > 0) || !(finite(basePrice) > 0) || !(strike > 0) || !Number.isFinite(T)) return NaN;
-  const iv = impliedVol(contract.kind === 'put' ? 'put' : 'call', price, finite(basePrice), strike, T,
+  const spot = finite(basePrice);
+  if (!(finite(price) > 0)) return { ivPct: NaN, why: 'noPrice' };
+  if (!(spot > 0)) return { ivPct: NaN, why: 'noSpot' };
+  if (!(strike > 0) || !Number.isFinite(T)) return { ivPct: NaN, why: 'noDays' };
+  const { iv, why } = impliedVolWhy(contract.kind === 'put' ? 'put' : 'call', finite(price), spot, strike, T,
     finite(settings.rFree), finite(settings.divYield), { lo: finite(settings.ivLo), hi: finite(settings.ivHi) });
-  return Number.isFinite(iv) ? iv * 100 : NaN;
+  return { ivPct: Number.isFinite(iv) ? iv * 100 : NaN, why };
 }
+
+/**
+ * سه تلاطمِ یک قرارداد، از سه قیمتِ متفاوت.
+ *
+ * ═══ چرا لازم شد ═══
+ *
+ * ممیزی: «علت اصلی دلتاهای خالی، جفت‌کردن آخرین معاملهٔ قرارداد با آخرین
+ * قیمت فعلی پایه است، بدون هم‌زمانی.» نمونهٔ واقعی: قراردادی که آخرین
+ * معامله‌اش ساعت‌ها پیش بوده، با پایهٔ همین لحظه جفت می‌شود و قیمتش از کف
+ * نظریِ امروز پایین‌تر می‌افتد — پس IV حل نمی‌شود.
+ *
+ * مظنهٔ خرید و فروش این مشکل را ندارند: هر دو **همین حالا**ی دفتر سفارش‌اند
+ * و با پایهٔ همین حالا هم‌زمان‌اند. پس «تلاطمِ اجرایی» از میانهٔ مظنه ساخته
+ * می‌شود و جدا از «تلاطمِ مشاهده‌ای» آخرین معامله می‌نشیند. هیچ‌کدام جای
+ * دیگری را پر نمی‌کند.
+ */
+export function liveQuoteIvSet(contract = {}, basePrice, settings = {}) {
+  const bid = finite(contract.bid), ask = finite(contract.ask);
+  const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : NaN;
+  const last = liveIvAt(contract, basePrice, settings, priceOf(contract));
+  return {
+    ivPct: last.ivPct, ivWhy: last.why,
+    ivBidPct: liveIvAt(contract, basePrice, settings, bid).ivPct,
+    ivAskPct: liveIvAt(contract, basePrice, settings, ask).ivPct,
+    ivMidPct: liveIvAt(contract, basePrice, settings, mid).ivPct,
+    ivMidWhy: liveIvAt(contract, basePrice, settings, mid).why,
+  };
+}
+
+/** جملهٔ فارسی همان کد، برای ستون «علت نبود تلاطم». */
+export const IV_WHY_LABEL = {
+  ok: '', noPrice: 'بدون معامله و مظنه', noSpot: 'قیمت پایه نامعلوم', noDays: 'روز مانده نامعتبر',
+  input: 'ورودی ناقص', belowFloor: 'قیمت زیر کف نظری', aboveBand: 'قیمت بالاتر از دامنه تلاطم',
+  unstable: 'حل‌گر در کران‌ها جواب نداد',
+};

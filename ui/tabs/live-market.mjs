@@ -28,7 +28,16 @@ const timeLabel = (value, seconds = false) => {
 const kindLabel = (kind) => kind === 'call' ? 'اختیار خرید' : kind === 'put' ? 'اختیار فروش' : 'نماد پایه';
 const expiryLabel = (endDate, days) => `${faDigits(historyDateLabel(endDate))} · ${fmt.int(days)} روز`;
 
-export function breadthDonut(host, summary) {
+/**
+ * `unit` می‌گوید ردیف‌های ورودی چه هستند.
+ *
+ * ممیزی ۱۴۰۵/۰۶/۲۴: «دایره عدد ۵۹۱ را با عنوان «نماد معامله‌شده» نشان
+ * می‌دهد، در حالی که ۵۹۱ تعداد **قرارداد** معامله‌شده است؛ نماد پایه ۲۳
+ * تا بود.» تابع درست کار می‌کرد و برچسبش هم برای تب رصد لحظه‌ای درست بود؛
+ * داشبورد آرایهٔ قرارداد می‌داد و برچسب عوض نمی‌شد. حالا واحد از صداکننده
+ * می‌آید، چون فقط اوست که می‌داند چه فرستاده.
+ */
+export function breadthDonut(host, summary, { unit = 'نماد' } = {}) {
   const parts = [
     ['مثبت', summary.positive, summary.positivePct, 'var(--gain)'],
     ['منفی', summary.negative, summary.negativePct, 'var(--loss)'],
@@ -41,14 +50,14 @@ export function breadthDonut(host, summary) {
     offset += value;
     return ring;
   }).join('');
-  host.innerHTML = `<div class="live-breadth-donut"><svg viewBox="0 0 160 160" aria-label="نمودار دایره‌ای نمادهای مثبت و منفی"><circle class="live-breadth-track" pathLength="100" cx="80" cy="80" r="54"/>${rings}<text x="80" y="76" text-anchor="middle">${fmt.int(summary.traded)}</text><text x="80" y="96" text-anchor="middle">نماد معامله‌شده</text></svg><div>${parts.map(([label, count, pct, color]) => `<span style="--segment:${color}"><i></i><b>${label}</b><strong>${fmt.int(count)}</strong><small>${fmt.pct(pct)}٪</small></span>`).join('')}<span style="--segment:var(--muted)"><i></i><b>بی‌معامله</b><strong>${fmt.int(summary.untraded)}</strong><small>خارج از درصد</small></span></div></div>`;
+  host.innerHTML = `<div class="live-breadth-donut"><svg viewBox="0 0 160 160" aria-label="نمودار دایره‌ای ${unit}های مثبت و منفی"><circle class="live-breadth-track" pathLength="100" cx="80" cy="80" r="54"/>${rings}<text x="80" y="76" text-anchor="middle">${fmt.int(summary.traded)}</text><text x="80" y="96" text-anchor="middle">${unit} معامله‌شده</text></svg><div>${parts.map(([label, count, pct, color]) => `<span style="--segment:${color}"><i></i><b>${label}</b><strong>${fmt.int(count)}</strong><small>${fmt.pct(pct)}٪</small></span>`).join('')}<span style="--segment:var(--muted)"><i></i><b>بی‌معامله</b><strong>${fmt.int(summary.untraded)}</strong><small>خارج از درصد</small></span></div></div>`;
 }
 
-export function breadthBars(host, summary) {
+export function breadthBars(host, summary, { unit = 'نماد' } = {}) {
   const maxCount = Math.max(1, summary.positive, summary.negative, summary.flat);
   const parts = [
-    ['نماد مثبت', summary.positive, summary.positivePct, summary.positiveVolume, summary.positiveValue, 'gain'],
-    ['نماد منفی', summary.negative, summary.negativePct, summary.negativeVolume, summary.negativeValue, 'loss'],
+    [`${unit} مثبت`, summary.positive, summary.positivePct, summary.positiveVolume, summary.positiveValue, 'gain'],
+    [`${unit} منفی`, summary.negative, summary.negativePct, summary.negativeVolume, summary.negativeValue, 'loss'],
     ['بدون تغییر', summary.flat, summary.flatPct, summary.flatVolume, summary.flatValue, 'warn'],
   ];
   host.innerHTML = `<div class="live-breadth-bars">${parts.map(([label, count, pct, volume, value, tone]) => `<article class="${tone}"><header><b>${label}</b><strong>${fmt.int(count)} · ${fmt.pct(pct)}٪</strong></header><i><b style="--bar:${(count / maxCount) * 100}%"></b></i><footer><span>حجم ${fmt.int(volume)}</span><span>ارزش ${fmt.money(value)}</span></footer></article>`).join('')}</div>`;

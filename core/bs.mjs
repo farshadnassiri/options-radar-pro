@@ -131,19 +131,41 @@ export function bsGreeks(kind, S, K, T, r, q, sigma, yearDays = 365) {
  * bsPrice چون نیوتن معمولاً در چند گام همگرا می‌شود.
  */
 export function impliedVol(kind, mktPrice, S, K, T, r, q, opt = {}) {
+  return impliedVolWhy(kind, mktPrice, S, K, T, r, q, opt).iv;
+}
+
+/**
+ * همان حل‌گر، ولی **علت** نرسیدن به جواب را هم می‌گوید.
+ *
+ * ═══ چرا لازم شد ═══
+ *
+ * ممیزی ۱۴۰۵/۰۶/۲۴: «از ۱٬۵۴۶ قرارداد، دلتا و IV برای ۴۴۱ تا خالی بود.»
+ * `NaN` درست بود — عددِ ساختگی بدتر است — ولی کاربر هیچ راهی نداشت بفهمد
+ * چرا: قیمت زیر کف نظری افتاده؟ بالاتر از سقف دامنه؟ اصلاً معامله‌ای نشده؟
+ * سه وضعیت کاملاً متفاوت، یک «—».
+ *
+ * `why` یکی از این‌هاست:
+ *   ok           جواب پیدا شد
+ *   input        یکی از ورودی‌ها معتبر نیست (قیمت، پایه، اعمال یا زمان)
+ *   belowFloor   قیمت بازار از ارزش نظری در کمینهٔ تلاطم هم کمتر است
+ *   aboveBand    قیمت بازار از ارزش نظری در بیشینهٔ تلاطم هم بیشتر است
+ *   unstable     تابع در کران‌ها عددی نداد
+ */
+export function impliedVolWhy(kind, mktPrice, S, K, T, r, q, opt = {}) {
   let lo = num(opt.lo, 0.01);
   let hi = num(opt.hi, 5.0);
   const tol = num(opt.tol, 1e-6);
   const iters = num(opt.iters, 120);
   const newtonIters = num(opt.newtonIters, 15);
-  if (!(mktPrice > 0 && S > 0 && K > 0 && T > 0)) return NaN;
+  const fail = (why) => ({ iv: NaN, why });
+  if (!(mktPrice > 0 && S > 0 && K > 0 && T > 0)) return fail('input');
 
   const f = (s) => bsPrice(kind, S, K, T, r, q, s) - mktPrice;
   const fLo = f(lo);
   const fHi = f(hi);
-  if (!ok(fLo) || !ok(fHi)) return NaN;
-  if (fLo > 0) return NaN; // زیر کف نظری، ارزش ذاتی نقض شده
-  if (fHi < 0) return NaN; // بالای سقف نظری
+  if (!ok(fLo) || !ok(fHi)) return fail('unstable');
+  if (fLo > 0) return fail('belowFloor'); // زیر کف نظری، ارزش ذاتی نقض شده
+  if (fHi < 0) return fail('aboveBand'); // بالای سقف نظری
 
   const absTol = tol * Math.max(1, mktPrice);
   const sqT = Math.sqrt(T);
@@ -151,7 +173,7 @@ export function impliedVol(kind, mktPrice, S, K, T, r, q, opt = {}) {
   let s = clamp(0.2, lo, hi);
   for (let i = 0; i < newtonIters; i++) {
     const diff = f(s);
-    if (Math.abs(diff) < absTol) return s;
+    if (Math.abs(diff) < absTol) return { iv: s, why: 'ok' };
     if (diff < 0) lo = s;
     else hi = s;
     const [a] = d1d2(S, K, T, r, q, s);
@@ -164,11 +186,11 @@ export function impliedVol(kind, mktPrice, S, K, T, r, q, opt = {}) {
   for (let i = 0; i < iters; i++) {
     const mid = 0.5 * (lo + hi);
     const fm = f(mid);
-    if (Math.abs(fm) < absTol) return mid;
+    if (Math.abs(fm) < absTol) return { iv: mid, why: 'ok' };
     if (fm < 0) lo = mid;
     else hi = mid;
   }
-  return 0.5 * (lo + hi);
+  return { iv: 0.5 * (lo + hi), why: 'ok' };
 }
 
 /**

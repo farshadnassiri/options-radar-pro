@@ -5,8 +5,9 @@
 // حدس‌زدن یا درخواست شبکه تازه نباشد.
 
 import { buildChain, underlyingList } from './chain.mjs';
-import { liveQuoteIv } from './live-market.mjs';
+import { liveQuoteIvSet, IV_WHY_LABEL } from './live-market.mjs';
 import { greeksFromIvPct } from './leg-iv.mjs';
+import { bsPrice } from './bs.mjs';
 
 export function pctVsYesterday(last, yesterday) {
   const now = Number(last), prior = Number(yesterday);
@@ -137,7 +138,10 @@ export function decisionDashboardSnapshot(rows, settings = {}) {
             oiChange: Number.isFinite(oiYday) ? Number(quote.oi) - oiYday : NaN,
             oiChangePct: Number.isFinite(oiYday) && oiYday > 0
               ? ((Number(quote.oi) / oiYday) - 1) * 100 : NaN,
-            ivPct: liveQuoteIv({ ...quote, strike: strike.strike, days: expiry.days }, spot, settings),
+            // سه تلاطم و علتش، از یک مسیر: مشاهده‌ای (آخرین معامله) و
+            // اجرایی (مظنه). مظنه با قیمت پایه هم‌زمان است، آخرین معامله
+            // لزوماً نه — و همین تفاوت، علتِ بیشترِ ستون‌های خالی بود.
+            ...liveQuoteIvSet({ ...quote, strike: strike.strike, days: expiry.days }, spot, settings),
           };
           contracts.push(contract); addContract(expiryAgg, contract); addContract(marketAgg, contract);
         }
@@ -640,6 +644,12 @@ export function contractAnalytics(row = {}, params = {}) {
   const days = Number(row.days), ivPct = Number(row.ivPct);
   const yearDays = Number(params.yearDays) > 0 ? Number(params.yearDays) : 365;
   const greeks = kind ? greeksFromIvPct({ kind, strike }, { spot, days }, ivPct, { ...params, yearDays }) : null;
+  // کف نظری = ارزش بلک–شولز در کمینهٔ دامنهٔ تلاطم. زیر این عدد، هیچ
+  // تلاطمی جواب نمی‌دهد.
+  const ivLo = Number(params.ivLo) > 0 ? Number(params.ivLo) : 0.01;
+  const T = days > 0 ? days / yearDays : NaN;
+  const floor = kind && spot > 0 && strike > 0 && T > 0
+    ? bsPrice(kind, spot, strike, T, Number(params.rFree) || 0, Number(params.divYield) || 0, ivLo) : NaN;
 
   const intrinsic = kind && spot > 0 && strike > 0
     ? Math.max(0, kind === 'call' ? spot - strike : strike - spot) : NaN;
@@ -652,7 +662,29 @@ export function contractAnalytics(row = {}, params = {}) {
   const delta = Number(greeks?.delta);
   const effectiveLeverage = Number.isFinite(leverage) && Number.isFinite(delta) ? leverage * Math.abs(delta) : NaN;
 
+  // ── دلتای اجرایی، جدا از دلتای مشاهده‌ای ──────────────────────────
+  //
+  // اولی از میانهٔ مظنه می‌آید که با قیمت پایه هم‌زمان است؛ دومی از آخرین
+  // معامله که ممکن است ساعت‌ها پیش باشد. کنار هم نشستنشان خودش یک هشدار
+  // است: فاصلهٔ زیاد یعنی قیمت مشاهده‌ای کهنه است.
+  const midGreeks = kind && Number.isFinite(Number(row.ivMidPct))
+    ? greeksFromIvPct({ kind, strike }, { spot, days }, Number(row.ivMidPct), { ...params, yearDays })
+    : null;
+
   return {
+    // ستون خالی وقتی تلاطم هست یعنی «چیزی برای توضیح نیست»؛ ستون خالی
+    // وقتی تلاطم نیست یعنی «خودمان هم نمی‌دانیم» — و این دو نباید یک شکل
+    // دیده شوند.
+    ivWhyText: Number.isFinite(Number(row.ivPct)) ? ''
+      : (IV_WHY_LABEL[row.ivWhy] || 'نامشخص'),
+    // ═══ «آخرین قیمت» همیشه «قیمت امروز» نیست ═══
+    //
+    // ممیزی: «قراردادهای بدون معامله تازه ممکن است با قیمت قدیمی
+    // رتبه‌بندی شوند.» تابلو برای قراردادِ امروز بی‌معامله هم یک `last`
+    // می‌دهد — آخرین معاملهٔ هر جلسه‌ای که بوده. تنها نشانهٔ قابل اتکا در
+    // همین عکس، حجم امروز است.
+    pricedToday: Number(row.volume) > 0,
+    deltaMid: Number(midGreeks?.delta ?? NaN),
     delta: Number.isFinite(delta) ? delta : NaN,
     gamma: Number(greeks?.gamma ?? NaN),
     vega: Number(greeks?.vega ?? NaN),
@@ -679,5 +711,98 @@ export function contractAnalytics(row = {}, params = {}) {
     // فاصلهٔ سربه‌سر از قیمت اعمال، به درصد اعمال: همان پریمیوم است ولی
     // در مقیاسی که بین اعمال‌های مختلف قابل مقایسه است.
     premiumPctStrike: premium > 0 && strike > 0 ? (premium / strike) * 100 : NaN,
+    // ═══ کفِ نظری، کنارِ علتش ═══
+    //
+    // «قیمت زیر کف نظری» تا وقتی خودِ کف دیده نشود یک ادعای بی‌شاهد است.
+    // این ستون همان عددی است که حل‌گر با آن مقایسه می‌کند — و چون از نرخ
+    // بدون ریسک تنظیمات می‌آید، به کاربر نشان می‌دهد که فرضِ نرخ، نه بازار،
+    // دارد ستون تلاطم را خالی می‌کند.
+    theoreticalFloor: floor,
+    floorGap: Number.isFinite(floor) && Number.isFinite(premium) ? premium - floor : NaN,
   };
+}
+
+// ————————————————————————————————————————————————————————————————
+// تغذیهٔ «نگاه باز» در حالت لحظه‌ای، از همان عکس زندهٔ داشبورد.
+//
+// ممیزی ۱۴۰۵/۰۶/۲۴، دو ایراد بحرانی: باز کردن نمای لحظه‌ای، ساختِ دفتر
+// تاریخیِ ۲۶۲ روزه را راه می‌انداخت — ۲۰۱ درخواست تاریخچهٔ قیمت — و در
+// همان حال انتخابگر نماد صفر گزینه نشان می‌داد، چون فهرست از **دفتر بازه**
+// می‌آمد نه از تابلوی امروز. نتیجه: نمادهایی قابل انتخاب بودند که امروز
+// هیچ قراردادی ندارند، و کاربر منتظر داده‌ای می‌ماند که برای این نما لازم
+// نبود.
+//
+// این دو تابع همان عکس زنده را به شکلی می‌دهند که نگاه باز می‌خواهد، بدون
+// هیچ درخواست تازه‌ای.
+// ————————————————————————————————————————————————————————————————
+
+/** فهرست نماد پایه برای انتخابگر نمای لحظه‌ای — فقط نمادهای امروزِ تابلو. */
+export function liveBaseList(universe = {}) {
+  const contracts = universe.contracts || [];
+  const byUa = new Map();
+  for (const row of contracts) {
+    const key = String(row.uaIns || '');
+    if (!key) continue;
+    let item = byUa.get(key);
+    if (!item) { item = { ins: key, name: row.uaName || key, contracts: 0, expiries: new Set(), traded: 0 }; byUa.set(key, item); }
+    item.contracts += 1;
+    if (row.endDate) item.expiries.add(String(row.endDate));
+    if (Number(row.volume) > 0) item.traded += 1;
+  }
+  const meta = new Map((universe.underlyings || []).map((row) => [String(row.ins), row]));
+  return [...byUa.values()]
+    .map((item) => ({
+      ins: item.ins, name: meta.get(item.ins)?.name || item.name,
+      contracts: item.contracts, expiries: item.expiries.size, tradedContracts: item.traded,
+      changePct: Number(meta.get(item.ins)?.changePct ?? NaN),
+    }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'fa'));
+}
+
+/**
+ * قراردادهای فعال یک نماد، با همان شکلی که `flattenActiveContracts` می‌دهد
+ * تا مصرف‌کننده نفهمد داده از کجا آمده.
+ *
+ * `size` وقتی تابلو نداده صفر می‌ماند و پرچمش پایین است؛ لایهٔ بالاتر
+ * پیش‌فرض اعلامی کاربر را می‌گذارد و ردیف را نشان‌دار می‌کند (قاعدهٔ ۲-۴).
+ */
+export function liveOpenViewContracts(universe = {}, uaIns = '') {
+  const key = String(uaIns || '');
+  return (universe.contracts || [])
+    .filter((row) => String(row.uaIns) === key && row.ins)
+    .map((row) => ({
+      ins: String(row.ins), name: row.name, kind: row.kind,
+      strike: Number(row.strike), size: Number(row.size) > 0 ? Number(row.size) : 0,
+      sizeFromSpec: Number(row.size) > 0,
+      expiry: Number(row.endDate), expiryRaw: row.endDate, daysNow: Number(row.days),
+    }))
+    .sort((a, b) => a.expiry - b.expiry || a.strike - b.strike || a.kind.localeCompare(b.kind));
+}
+
+// ————————————————————————————————————————————————————————————————
+// ادغام گردش واقعی نماد پایه در عکس زنجیره.
+//
+// ممیزی: «ارزش خود پایه» برای هر ۲۵ ردیف صفر بود، در حالی که نوار معاملات
+// می‌گفت ۲۳ پایه معامله شده و جمع ارزششان بیش از ۱۵۵ هزار میلیارد ریال
+// است. علت: سرور گردش پایه‌ها را جدا می‌گیرد و در `snapshot` می‌ریزد، ولی
+// هیچ‌وقت به `universe.underlyings` برنمی‌گرداند — و `buildChain` نبودِ
+// `qTotCap_UA` را **صفر** می‌نویسد، نه «نداریم».
+//
+// `observed` همان ردیف‌های نوار معامله است. پایه‌ای که اصلاً در آن فهرست
+// نیست «نامعلوم» می‌گیرد نه صفر؛ پایه‌ای که هست و امروز معامله نشده، صفرِ
+// واقعی می‌گیرد.
+// ————————————————————————————————————————————————————————————————
+export function mergeUnderlyingTrades(universe = {}, observed = []) {
+  const seen = new Map((observed || []).map((row) => [String(row.ins), row]));
+  const underlyings = (universe.underlyings || []).map((row) => {
+    const hit = seen.get(String(row.ins));
+    if (!hit) return { ...row, uaValue: NaN, uaVolume: NaN, uaTrades: NaN };
+    return {
+      ...row,
+      uaValue: Number(hit.value), uaVolume: Number(hit.volume), uaTrades: Number(hit.trades),
+      // قیمت پایه هم اگر نوار معامله تازه‌تر دارد، همان مبناست.
+      last: Number(hit.last) > 0 ? Number(hit.last) : row.last,
+    };
+  });
+  return { ...universe, underlyings };
 }

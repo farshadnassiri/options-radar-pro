@@ -2,6 +2,7 @@ import { buildChain, legContractSize } from '/core/chain.mjs';
 import { flattenActiveContracts, historyDateLabel, normalizeHistoryDate } from '/core/history.mjs';
 import { analyzeDailyOpenView, analyzeIntradayOpenView, liveTradeBatch, relationMatrix } from '/core/open-view.mjs';
 import { liveDayOf } from '/core/live-day.mjs';
+import { liveBaseList, liveOpenViewContracts } from '/core/decision-dashboard.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
 import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
@@ -387,10 +388,12 @@ export async function mount(root, { state }) {
 
   /** مسیر لحظه‌ای: بدون `/api/dailies`، بدون دکمه، بدون انتخاب تاریخ. */
   async function loadLive() {
-    ua = chain.get(baseSelect.value);
-    if (!ua) { setStatus('برای نمای لحظه‌ای، یک نماد پایه انتخاب کن.'); return; }
+    const pick = baseSelect.value;
+    const meta = liveBaseList(liveUniverse || {}).find((item) => String(item.ins) === pick);
+    if (!pick || !meta) { setStatus('برای نمای لحظه‌ای، یک نماد پایه انتخاب کن.'); return; }
+    ua = { ins: pick, name: meta.name };
     daily = null; dailyRelations = []; selectedDate = 0;
-    contracts = flattenActiveContracts(ua, state.settings.blockedExpiries).map((contract) => {
+    contracts = liveOpenViewContracts(liveUniverse || {}, pick).map((contract) => {
       const sized = legContractSize(contract.size, state.settings.contractSize);
       return { ...contract, size: sized.size, sizeAssumed: sized.assumed };
     });
@@ -524,8 +527,9 @@ export async function mount(root, { state }) {
     viewMode = button.dataset.ovMode;
     localStorage.setItem('options-radar:open-view-mode', viewMode);
     resetIntraday(); applyViewMode();
-    if (!baseSelect.value) return;
-    if (isLive()) await loadLive(); else await loadDaily();
+    if (isLive()) { if (liveUniverse) fillLiveBases(liveUniverse); if (baseSelect.value) await loadLive(); return; }
+    await ensureHistoryUniverse();
+    if (baseSelect.value) await loadDaily();
   }));
   $('ov-load').addEventListener('click', loadDaily);
   $('ov-scope').addEventListener('change', async () => {
@@ -599,12 +603,58 @@ export async function mount(root, { state }) {
     catch (error) { baseGate.failed(); setStatus(errorText(error, 'فهرست قراردادهای این بازه دریافت نشد.'), true); }
   }
 
-  rangeUi = mountHistoryRange($('ov-range'), { onApply: (range) => loadUniverseForRange(range) });
+  // ── فهرست نماد لحظه‌ای، از تابلوی امروز ────────────────────────────
+  //
+  // ممیزی ۱۴۰۵/۰۶/۲۴ (دو ایراد بحرانی): فهرست نماد حتی در حالت لحظه‌ای از
+  // **دفتر تاریخیِ بازه** ساخته می‌شد. دو پیامد داشت: نمادهایی قابل انتخاب
+  // بودند که امروز هیچ قراردادی ندارند، و باز کردن همین نما ساختِ دفتر
+  // ۲۶۲ روزه را راه می‌انداخت — ۲۰۱ درخواست تاریخچهٔ قیمت، در حالی که
+  // انتخابگر هنوز صفر گزینه داشت.
+  //
+  // حالا حالت لحظه‌ای از همان عکسی تغذیه می‌شود که داشبورد از قبل دارد و
+  // **هیچ درخواست تازه‌ای نمی‌زند**. دفتر تاریخی فقط با رفتن به «تاریخی
+  // چندروزه» بار می‌شود.
+  let liveUniverse = null, historyLoaded = false;
+
+  function fillLiveBases(universe) {
+    liveUniverse = universe || null;
+    const list = liveBaseList(liveUniverse || {});
+    const keep = baseSelect.value;
+    baseGate.ready(list.length);
+    baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>'
+      + list.map((item) => `<option value="${esc(item.ins)}">${esc(item.name)} · ${fmt.int(item.contracts)} قرارداد · ${fmt.int(item.expiries)} سررسید</option>`).join('');
+    if (keep && list.some((item) => String(item.ins) === keep)) baseSelect.value = keep;
+    setStatus(`${fmt.int(list.length)} نماد پایه در تابلوی امروز؛ فهرست از همان عکس زندهٔ بالای صفحه می‌آید و درخواست تازه‌ای ندارد.`);
+    return list;
+  }
+
+  /** دفتر تاریخی فقط یک بار، و فقط وقتی حالت تاریخی خواسته شد. */
+  async function ensureHistoryUniverse() {
+    if (historyLoaded) return;
+    historyLoaded = true;
+    await loadUniverseForRange(rangeUi.range);
+  }
+
+  rangeUi = mountHistoryRange($('ov-range'), { onApply: (range) => { historyLoaded = true; return loadUniverseForRange(range); } });
   applyViewMode();
-  await loadUniverseForRange(rangeUi.range);
+  if (isLive()) {
+    // در حالت لحظه‌ای هیچ درخواستی در جریان نیست؛ منتظر نخستین عکس داشبورد
+    // می‌مانیم. جملهٔ «در حال دریافت نمادهای این بازه» اینجا دروغ بود.
+    baseSelect.disabled = true;
+    baseSelect.innerHTML = '<option value="">در انتظار نخستین عکس بازار…</option>';
+    setStatus('نمای لحظه‌ای از عکس زندهٔ بالای صفحه تغذیه می‌شود؛ دفتر تاریخی فقط با «تاریخی چندروزه» بار می‌شود.');
+  } else await ensureHistoryUniverse();
   return {
-    updateLive() {
-      if (Date.now() - lastLiveRefreshAt < 12_000 || root.offsetParent === null) return;
+    updateLive(payload) {
+      if (root.offsetParent === null) return;
+      // در حالت لحظه‌ای، هر عکس تازه فهرست نماد را هم تازه می‌کند — همان
+      // عکسی که داشبورد از قبل گرفته، بدون یک درخواست اضافه.
+      if (isLive() && payload?.universe?.contracts?.length) {
+        const before = baseSelect.value;
+        fillLiveBases(payload.universe);
+        if (!before && baseSelect.value) void loadLive();
+      }
+      if (Date.now() - lastLiveRefreshAt < 12_000) return;
       refreshLiveViews();
     },
     dispose() { disposed = true; rangeJob?.stop(); },

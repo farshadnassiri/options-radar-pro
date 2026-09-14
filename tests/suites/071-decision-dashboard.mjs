@@ -76,6 +76,10 @@ group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دا�
     ui70.includes("'high-value-expiry'") && ui70.includes("'open-view-history'")
     && !app70.includes("id: 'open-view'"));
   const server70 = readSrc('../server/server.mjs');
-  check('endpoint زنده عکس فشرده چهار دامنه را تحویل می‌دهد',
-    server70.includes('universe: decisionDashboardSnapshot(sourceRows, S)'));
+  // ادعا از «عکس خام» به «عکس ادغام‌شده» رفت: گردش واقعی پایه‌ها باید
+  // پیش از رفتن به رابط روی همان عکس بنشیند، وگرنه «ارزش خود پایه» در کل
+  // برنامه صفر می‌ماند (ممیزی ۱۴۰۵/۰۶/۲۴، ردیف ۵).
+  check('endpoint زنده عکس فشرده را با گردش واقعی پایه‌ها ادغام‌شده می‌دهد',
+    server70.includes('universe: mergeUnderlyingTrades(decisionDashboardSnapshot(sourceRows, S), observed)')
+    && server70.includes('snapshotAt: watch.at'));
 }
