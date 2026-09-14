@@ -8,7 +8,7 @@ import { historyDateLabel } from '../core/history.mjs';
 import {
   filterContractsBySide, MARKET_MAP_METRICS, marketMapRows, marketMapSummary,
   contractBreakeven, breakevenGap, breakevenGapPct, EQUAL_MAP_METRIC,
-  twoSidedChain, chainSideMax,
+  twoSidedChain, chainSideMax, contractAnalytics,
 } from '../core/decision-dashboard.mjs';
 import { shouldFetchRange } from './live-dashboard-scope.mjs';
 
@@ -37,7 +37,7 @@ const stat = (label, value, note = '', className = '') => `<article class="lmm-s
   <small>${esc(label)}</small><strong>${value}</strong>${note ? `<span>${esc(note)}</span>` : ''}
 </article>`;
 
-function contractRow(row) {
+function contractRow(row, greekParams = {}) {
   return {
     ...row, title: row.name, kindLabel: kindLabel(row.kind),
     expiryText: row.endDate ? dateLabel(row.endDate) : '',
@@ -45,11 +45,13 @@ function contractRow(row) {
     breakeven: contractBreakeven(row),
     breakevenGap: breakevenGap(row),
     breakevenGapPct: breakevenGapPct(row),
+    // یونانی، اهرم، فرسایش و بازده سناریو — همان کاتالوگ ستونی که جدول تخت دارد.
+    ...contractAnalytics(row, greekParams),
   };
 }
 
 /** سوارکردن کاوشگر؛ خروجی scope فقط برای همگام‌کردن تحلیل‌های قدیمی است. */
-export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns = [], isVisible = () => true } = {}) {
+export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns = [], isVisible = () => true, greekParams = () => ({}) } = {}) {
   root.innerHTML = `
     <section class="card lmm-map-card">
       <div class="section-head lmm-head"><div><p class="eyebrow">نمای اصلی رصد لحظه‌ای</p><h2 data-lmm-map-title>نقشه بازار اختیار</h2><p data-lmm-map-note>اندازه خانه از سنجه انتخابی می‌آید؛ رنگ، جهت آخرین معامله نماد پایه نسبت به پایانی دیروز است.</p></div>
@@ -65,7 +67,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       <div class="lmm-expiry-step" data-lmm-expiry-step hidden><div class="lmm-step-head"><h3>سررسیدها</h3><span>هر سررسید، آمار مستقل و زنجیره خودش را دارد.</span></div><div class="lmm-expiries" data-lmm-expiries></div></div>
       <div class="lmm-expiry-info" data-lmm-expiry-info></div>
       <section class="lmm-day-range" data-lmm-day-range hidden><div class="lmm-step-head"><div><h3>کندل قیمت امروز قراردادها</h3><span>سایه: کمترین تا بیشترین · بدنه: اولین تا آخرین · لوزی: قیمت پایانی</span></div><div class="lmm-range-sort" data-lmm-range-sort role="group" aria-label="مرتب‌سازی نمودار کندلی روزانه"></div></div><div data-lmm-range-status class="note"></div><div data-lmm-range-chart></div></section>
-      <div class="lmm-chain-step" data-lmm-chain-step hidden><div class="lmm-step-head"><div><h3>زنجیره قرارداد</h3><span data-lmm-chain-count>کال و پوت این سررسید</span></div><div class="lmm-chain-tools"><div class="lmm-chain-kind" data-lmm-chain-layout role="group" aria-label="چیدمان زنجیره"><button type="button" data-lmm-layout="paired">زنجیره دوطرفه</button><button type="button" data-lmm-layout="flat">جدول تخت</button></div><div class="lmm-chain-kind" data-lmm-chain-kind role="group" aria-label="نوع قراردادهای زنجیره"><button type="button" data-lmm-chain-side="all">هر دو</button><button type="button" data-lmm-chain-side="call">فقط کال</button><button type="button" data-lmm-chain-side="put">فقط پوت</button></div></div></div><p class="note" data-lmm-chain-note></p><div class="lmm-paired-wrap" data-lmm-paired hidden></div><div data-lmm-chain></div></div>
+      <div class="lmm-chain-step" data-lmm-chain-step hidden><div class="lmm-step-head"><div><h3>زنجیره قرارداد</h3><span data-lmm-chain-count>کال و پوت این سررسید</span></div><div class="lmm-chain-tools"><div class="lmm-chain-kind" data-lmm-chain-layout role="group" aria-label="چیدمان زنجیره"><button type="button" data-lmm-layout="paired">زنجیره دوطرفه</button><button type="button" data-lmm-layout="flat">جدول تخت</button></div><div class="lmm-chain-kind" data-lmm-chain-kind role="group" aria-label="نوع قراردادهای زنجیره"><button type="button" data-lmm-chain-side="all">هر دو</button><button type="button" data-lmm-chain-side="call">فقط کال</button><button type="button" data-lmm-chain-side="put">فقط پوت</button></div><button type="button" class="ghost tbl-cols-btn" data-lmm-paired-cols aria-expanded="false">ستون‌ها <b></b></button></div></div><p class="note" data-lmm-chain-note></p><div class="col-panel" data-lmm-paired-panel hidden></div><div class="lmm-paired-wrap" data-lmm-paired hidden></div><div data-lmm-chain></div></div>
     </section>`;
 
   const mapHost = root.querySelector('[data-lmm-map]');
@@ -79,6 +81,8 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   const rangeChart = root.querySelector('[data-lmm-range-chart]');
   const chainStep = root.querySelector('[data-lmm-chain-step]');
   const pairedHost = root.querySelector('[data-lmm-paired]');
+  const pairedPanel = root.querySelector('[data-lmm-paired-panel]');
+  const pairedBtn = root.querySelector('[data-lmm-paired-cols]');
   const chainHost = root.querySelector('[data-lmm-chain]');
   let universe = { underlyings: [], expiries: [], contracts: [] };
   let mapMode = localStorage.getItem('options-radar:market-map-mode') || 'underlyings';
@@ -206,8 +210,11 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       : 'روی «ستون‌ها» بزن تا هر داده‌ای را اضافه یا حذف کنی؛ روی ردیف بزن تا همان قرارداد دامنهٔ تحلیل شود.';
     pairedHost.hidden = !paired;
     chainHost.hidden = paired;
+    pairedBtn.hidden = !paired;
+    if (!paired) togglePairedPanel(false);
+    paintPairedCount();
     if (paired) paintPairedChain(rows);
-    else chainTable.set(rows.map(contractRow));
+    else chainTable.set(rows.map((row) => contractRow(row, greekParams())));
   }
 
   // ————— زنجیرهٔ دوطرفه —————
@@ -216,28 +223,120 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   // موقعیت باز (کجا تعهد جمع شده)، حجم امروز، IV (گران یا ارزان)، فاصله تا
   // سربه‌سر (چقدر باید حرکت کند) و آخرین قیمت با تغییرش. بقیهٔ ۳۴ ستون در
   // جدول تخت سر جایشان‌اند.
-  const PAIRED_COLS = [
-    ['oi', 'موقعیت باز', (row) => fmt.int(row.oi), true],
-    ['volume', 'حجم', (row) => fmt.int(row.volume), false],
-    ['ivPct', 'IV٪', (row) => Number.isFinite(row.ivPct) ? `${fmt.pct(row.ivPct)}٪` : '—', false],
-    ['breakevenGapPct', 'تا سربه‌سر٪', (row) => Number.isFinite(row.breakevenGapPct) ? `${fmt.pct(row.breakevenGapPct)}٪` : '—', false],
-    ['changePct', 'تغییر٪', (row) => Number.isFinite(row.changePct) ? `${fmt.pct(row.changePct)}٪` : '—', false],
-    ['last', 'آخرین', (row) => fmt.money(row.last), false],
-  ];
+  // ────────── ستون‌های زنجیرهٔ دوطرفه ──────────
+  //
+  // خواستهٔ صاحب پروژه: «امکان انتخاب ستون‌های متعدد… همه چیز در تمامی
+  // موضوعات؛ چیزی جا نمونه.» پس فهرست ثابت شش‌تایی رفت و جایش **همان
+  // کاتالوگ کامل جدول تخت** نشست — یک منبع ستون برای هر دو چیدمان، تا
+  // ستونی که در یکی هست در دیگری نباشد.
+  //
+  // چند ستون از کاتالوگ کنار گذاشته می‌شوند چون در چیدمان قرینه معنی
+  // ندارند یا در خود ردیف تکرارند: نام قرارداد (ستون لبهٔ هر سمت است)،
+  // نوع (خودِ سمت است)، قیمت اعمال (ستون میانی است) و سررسید/نماد پایه که
+  // برای کل جدول یکی‌اند.
+  const PAIRED_SKIP = new Set(['title', 'kindLabel', 'strike', 'expiryText', 'uaName']);
+  const PAIRED_CATALOG = contractColumns.filter((item) => !PAIRED_SKIP.has(item.key));
+  const PAIRED_DEFAULT = ['oi', 'volume', 'ivPct', 'delta', 'breakevenGapPct', 'changePct', 'last'];
+  const pairedByKey = new Map(PAIRED_CATALOG.map((item) => [item.key, item]));
+  // ستون‌هایی که علامتشان خبر است، در هر دو سمت رنگ می‌گیرند.
+  const SIGNED_KEYS = new Set(PAIRED_CATALOG.filter((item) => item.sign).map((item) => item.key));
+
+  let pairedKeys = readPairedKeys();
+  function readPairedKeys() {
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem('options-radar:market-map-paired-cols') || '[]'); }
+    catch { saved = []; }
+    const usable = (Array.isArray(saved) ? saved : []).filter((key) => pairedByKey.has(key));
+    const fallback = PAIRED_DEFAULT.filter((key) => pairedByKey.has(key));
+    return usable.length ? usable : (fallback.length ? fallback : PAIRED_CATALOG.slice(0, 6).map((item) => item.key));
+  }
+  const savePairedKeys = () => {
+    try { localStorage.setItem('options-radar:market-map-paired-cols', JSON.stringify(pairedKeys)); }
+    catch { /* حافظهٔ مرورگر ممکن است بسته باشد؛ انتخاب همین نشست می‌ماند */ }
+  };
+  // ترتیب نمایش همیشه ترتیب کاتالوگ است، نه ترتیب تیک‌زدن: با ترتیب
+  // تیک، دو بار عوض‌کردن یک ستون کل جدول را جابه‌جا می‌کرد.
+  const pairedCols = () => PAIRED_CATALOG.filter((item) => pairedKeys.includes(item.key));
+
+  const cellText = (item, row) => {
+    const value = row[item.key];
+    if (item.fmt === 'pct') return Number.isFinite(Number(value)) ? `${fmt.pct(value)}٪` : '—';
+    return (fmt[item.fmt] || fmt.text)(value);
+  };
 
   function pairedCells(row, side, oiMax, itm) {
     const shade = itm ? ' is-itm' : '';
-    if (!row) return PAIRED_COLS.map(() => `<td class="lmm-paired-void${shade}">—</td>`).join('');
-    const enriched = contractRow(row);
-    const cells = PAIRED_COLS.map(([key, , format, bar]) => {
-      const value = Number(enriched[key]);
-      const signed = key === 'changePct' || key === 'breakevenGapPct';
+    const cols = pairedCols();
+    if (!row) return cols.map(() => `<td class="lmm-paired-void${shade}">—</td>`).join('');
+    const enriched = contractRow(row, greekParams());
+    const cells = cols.map((item) => {
+      // نوار «دیوار» فقط زیر موقعیت باز می‌آید؛ روی هر ستون عددی، نوار
+      // یعنی شلوغی بی‌معنی.
+      const bar = item.key === 'oi';
       const share = bar && oiMax > 0 ? Math.min(1, (Number(enriched.oi) || 0) / oiMax) : 0;
-      return `<td class="${signed ? tone(value) : ''}${bar ? ' lmm-paired-bar' : ''}${shade}"${bar ? ` style="--share:${(share * 100).toFixed(1)}%"` : ''}>${format(enriched)}</td>`;
+      const cls = `${SIGNED_KEYS.has(item.key) ? tone(Number(enriched[item.key])) : ''}${bar ? ' lmm-paired-bar' : ''}${shade}`;
+      return `<td class="${cls}"${bar ? ` style="--share:${(share * 100).toFixed(1)}%"` : ''}>${cellText(item, enriched)}</td>`;
     });
     // سمت کال از راست خوانده می‌شود و سمت پوت از چپ، پس ترتیب ستون‌های کال
-    // آینه می‌شود تا «آخرین» هر دو سمت کنار ستون اعمال بنشیند.
+    // آینه می‌شود تا ستون‌های هم‌نام دو سمت، قرینهٔ هم بنشینند.
     return (side === 'call' ? cells.reverse() : cells).join('');
+  }
+
+  // ────────── انتخابگر ستون، با همان ظاهر جدول‌های دیگر ──────────
+  function buildPairedPanel() {
+    const groups = [...new Set(PAIRED_CATALOG.map((item) => item.group || 'دیگر'))];
+    pairedPanel.innerHTML = `
+      <div class="col-panel-head">
+        <span>هر ستون کاتالوگ قرارداد را می‌شود به هر دو سمت زنجیره اضافه یا از آن کم کرد. انتخاب ذخیره می‌ماند.</span>
+        <span class="sp"></span>
+        <input type="search" class="col-search" aria-label="جست‌وجوی ستون" placeholder="جست‌وجوی سربه‌سر، دلتا، بازده…">
+        <button type="button" class="ghost" data-paired-act="base">نمای آماده</button>
+        <button type="button" class="ghost" data-paired-act="all">همه</button>
+        <button type="button" class="ghost" data-paired-act="close">بستن</button>
+      </div>
+      <div class="col-groups">${groups.map((group) => `
+        <div class="col-group">
+          <h5>${esc(group)}</h5>
+          ${PAIRED_CATALOG.filter((item) => (item.group || 'دیگر') === group).map((item) => `
+            <label class="col-opt">
+              <input type="checkbox" data-paired-key="${esc(item.key)}" ${pairedKeys.includes(item.key) ? 'checked' : ''}>
+              <span>${esc(item.label)}</span>
+            </label>`).join('')}
+        </div>`).join('')}</div>`;
+
+    pairedPanel.querySelectorAll('[data-paired-key]').forEach((box) => box.addEventListener('change', () => {
+      const key = box.dataset.pairedKey;
+      if (box.checked) pairedKeys = [...new Set([...pairedKeys, key])];
+      else if (pairedKeys.length === 1) { box.checked = true; return; }  // زنجیرهٔ بی‌ستون معنی ندارد
+      else pairedKeys = pairedKeys.filter((item) => item !== key);
+      savePairedKeys(); paintPairedCount(); paintChain();
+    }));
+    pairedPanel.querySelector('.col-search').addEventListener('input', (event) => {
+      const needle = String(event.target.value || '').trim();
+      pairedPanel.querySelectorAll('.col-opt').forEach((label) => {
+        label.hidden = needle ? !label.textContent.includes(needle) : false;
+      });
+      pairedPanel.querySelectorAll('.col-group').forEach((group) => {
+        group.hidden = [...group.querySelectorAll('.col-opt')].every((label) => label.hidden);
+      });
+    });
+    pairedPanel.querySelectorAll('[data-paired-act]').forEach((button) => button.addEventListener('click', () => {
+      const act = button.dataset.pairedAct;
+      if (act === 'close') { togglePairedPanel(false); return; }
+      pairedKeys = act === 'all' ? PAIRED_CATALOG.map((item) => item.key) : PAIRED_DEFAULT.filter((key) => pairedByKey.has(key));
+      savePairedKeys(); buildPairedPanel(); paintPairedCount(); paintChain();
+    }));
+  }
+
+  function paintPairedCount() {
+    pairedBtn.querySelector('b').textContent = `${faDigits(pairedCols().length)}/${faDigits(PAIRED_CATALOG.length)}`;
+  }
+
+  function togglePairedPanel(open) {
+    const next = open ?? pairedPanel.hidden;
+    if (next) buildPairedPanel();
+    pairedPanel.hidden = !next;
+    pairedBtn.setAttribute('aria-expanded', String(next));
   }
 
   function paintPairedChain(rows) {
@@ -245,8 +344,9 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     const chain = twoSidedChain(rows, spot);
     if (!chain.rows.length) { pairedHost.innerHTML = '<p class="empty-note">برای این سررسید قرارداد معتبری در عکس بازار نیست.</p>'; return; }
     const oiMax = chainSideMax(chain.rows, 'oi');
-    const head = PAIRED_COLS.map(([, label]) => `<th>${label}</th>`);
-    const spotRow = `<tr class="lmm-paired-spot"><td colspan="${PAIRED_COLS.length * 2 + 1}"><span>قیمت جاری پایه ${fmt.money(chain.spot)}</span></td></tr>`;
+    const cols = pairedCols();
+    const head = cols.map((item) => `<th title="${esc(item.label)}">${esc(item.label)}</th>`);
+    const spotRow = `<tr class="lmm-paired-spot"><td colspan="${cols.length * 2 + 3}"><span><b>قیمت جاری پایه ${fmt.money(chain.spot)}</b></span></td></tr>`;
     const lines = chain.rows.map((rung, index) => {
       const lead = index === chain.spotIndex ? spotRow : '';
       const pick = (row) => row ? ` data-lmm-paired-pick="${esc(row.ins)}"` : '';
@@ -261,7 +361,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     }).join('');
     pairedHost.innerHTML = `<table class="lmm-paired">
       <thead>
-        <tr class="lmm-paired-sides"><th colspan="${PAIRED_COLS.length + 1}">اختیار خرید (کال)</th><th class="lmm-paired-strike">قیمت اعمال</th><th colspan="${PAIRED_COLS.length + 1}">اختیار فروش (پوت)</th></tr>
+        <tr class="lmm-paired-sides"><th colspan="${cols.length + 1}">اختیار خرید (کال)</th><th class="lmm-paired-strike">قیمت اعمال</th><th colspan="${cols.length + 1}">اختیار فروش (پوت)</th></tr>
         <tr><th>قرارداد</th>${[...head].reverse().join('')}<th class="lmm-paired-strike"></th>${head.join('')}<th>قرارداد</th></tr>
       </thead>
       <tbody>${lines}</tbody>
@@ -478,6 +578,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     const button = event.target.closest('[data-lmm-expiry]');
     if (button) selectExpiry(button.dataset.lmmExpiry);
   });
+  pairedBtn.addEventListener('click', () => togglePairedPanel());
   root.querySelector('[data-lmm-chain-layout]').addEventListener('click', (event) => {
     const button = event.target.closest('[data-lmm-layout]');
     if (!button) return;

@@ -6,6 +6,7 @@
 
 import { buildChain, underlyingList } from './chain.mjs';
 import { liveQuoteIv } from './live-market.mjs';
+import { greeksFromIvPct } from './leg-iv.mjs';
 
 export function pctVsYesterday(last, yesterday) {
   const now = Number(last), prior = Number(yesterday);
@@ -612,4 +613,71 @@ export function twoSidedChain(contracts = [], spot = NaN) {
 /** بیشینهٔ یک ستون در هر دو سمت — مقیاس مشترک نوارهای «دیوار». */
 export function chainSideMax(rows = [], key = 'oi') {
   return Math.max(0, ...rows.flatMap((row) => [Number(row.call?.[key]) || 0, Number(row.put?.[key]) || 0]));
+}
+
+// ————————————————————————————————————————————————————————————————
+// سنجه‌های یک قرارداد که تا امروز در هیچ ستونی نبودند.
+//
+// خواستهٔ صاحب پروژه: «ارزش معاملات، فاصله‌ها، درصد سودها و… همه چیز در
+// تمامی موضوعات؛ چیزی جا نمونه.» تابلو، ارزش و حجم و موقعیت باز را خودش
+// می‌دهد؛ آنچه نمی‌دهد و معامله‌گر اختیار پیش از زدن دکمه حساب می‌کند این
+// چهار دسته است: یونانی‌ها، اهرم، فرسایش زمان، و بازدهِ سناریو.
+//
+// هر عدد از دادهٔ واقعی همان ردیف می‌آید. جایی که ورودی نیست — تلاطم حل
+// نشده، پریمیوم صفر، روزِ مانده نامعلوم — خروجی `NaN` است و ستون «—» نشان
+// می‌دهد، نه صفر (قاعدهٔ ۲-۴).
+// ————————————————————————————————————————————————————————————————
+
+/**
+ * `params` همان `{ rFree, divYield, yearDays }` تنظیمات کاربر است. تلاطم
+ * دوباره حل نمی‌شود: `ivPct` همان چیزی است که عکس بازار داده، پس ستون
+ * تلاطم و ستون یونانی همیشه با هم می‌خوانند.
+ */
+export function contractAnalytics(row = {}, params = {}) {
+  const kind = row.kind === 'put' ? 'put' : row.kind === 'call' ? 'call' : null;
+  const spot = Number(row.spot), strike = Number(row.strike);
+  const premium = Number(row.last) > 0 ? Number(row.last) : NaN;
+  const days = Number(row.days), ivPct = Number(row.ivPct);
+  const yearDays = Number(params.yearDays) > 0 ? Number(params.yearDays) : 365;
+  const greeks = kind ? greeksFromIvPct({ kind, strike }, { spot, days }, ivPct, { ...params, yearDays }) : null;
+
+  const intrinsic = kind && spot > 0 && strike > 0
+    ? Math.max(0, kind === 'call' ? spot - strike : strike - spot) : NaN;
+  const timeValue = Number.isFinite(intrinsic) && Number.isFinite(premium) ? premium - intrinsic : NaN;
+
+  // اهرمِ ساده می‌گوید یک قرارداد چند برابرِ خودِ سهم را کنترل می‌کند؛ اهرمِ
+  // مؤثر همان را در دلتا ضرب می‌کند، یعنی «یک درصد حرکت پایه چند درصد روی
+  // پریمیوم می‌نشیند». دومی عددی است که واقعاً تصمیم می‌سازد.
+  const leverage = premium > 0 && spot > 0 ? spot / premium : NaN;
+  const delta = Number(greeks?.delta);
+  const effectiveLeverage = Number.isFinite(leverage) && Number.isFinite(delta) ? leverage * Math.abs(delta) : NaN;
+
+  return {
+    delta: Number.isFinite(delta) ? delta : NaN,
+    gamma: Number(greeks?.gamma ?? NaN),
+    vega: Number(greeks?.vega ?? NaN),
+    theta: Number(greeks?.theta ?? NaN),
+    rho: Number(greeks?.rho ?? NaN),
+    probItmPct: Number.isFinite(Number(greeks?.probItm)) ? Number(greeks.probItm) * 100 : NaN,
+    leverage, effectiveLeverage,
+    // فرسایش: ارزش زمانی تقسیم بر روزهای مانده. هزینهٔ نگه‌داشتن، به ریال
+    // در روز — و همان به درصدِ پریمیوم، تا دو قرارداد با دو قیمت مقایسه شوند.
+    timeValuePerDay: Number.isFinite(timeValue) && days > 0 ? timeValue / days : NaN,
+    timeDecayPctPerDay: Number.isFinite(timeValue) && days > 0 && premium > 0
+      ? (timeValue / days / premium) * 100 : NaN,
+    // ارزش زمانی سالانه‌شده روی قیمت پایه: تنها شکلی که دو سررسید متفاوت
+    // را قابل مقایسه می‌کند.
+    timeValueAnnualPct: Number.isFinite(timeValue) && days > 0 && spot > 0
+      ? (timeValue / spot) * (yearDays / days) * 100 : NaN,
+    // اگر پایه تا سررسید **تکان نخورد**، خریدار چند درصد می‌بَرد یا می‌بازد.
+    // برای هر اختیارِ بی‌ارزشِ ذاتی دقیقاً ‎−۱۰۰‎ است و همان هم درست است.
+    staticReturnPct: Number.isFinite(intrinsic) && premium > 0
+      ? ((intrinsic - premium) / premium) * 100 : NaN,
+    // گردش امروز نسبت به تعهد انباشته: بالای یک یعنی حجم امروز از کل
+    // موقعیت باز بیشتر است — جابه‌جایی، نه انباشت.
+    turnoverRatio: Number(row.oi) > 0 && Number(row.volume) >= 0 ? Number(row.volume) / Number(row.oi) : NaN,
+    // فاصلهٔ سربه‌سر از قیمت اعمال، به درصد اعمال: همان پریمیوم است ولی
+    // در مقیاسی که بین اعمال‌های مختلف قابل مقایسه است.
+    premiumPctStrike: premium > 0 && strike > 0 ? (premium / strike) * 100 : NaN,
+  };
 }

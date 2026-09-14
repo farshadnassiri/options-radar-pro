@@ -4188,7 +4188,11 @@ table.data thead th {
 .lmm-paired-bar { position: relative; font-variant-numeric: tabular-nums; }
 .lmm-paired-bar::after { content: ''; position: absolute; inset-block-end: 0; inset-inline-start: 0; width: var(--share); height: 3px; background: var(--accent); opacity: .65; }
 .lmm-paired-spot td { padding: 0; border-bottom: 0; background: none; }
-.lmm-paired-spot span { display: block; padding: 3px 8px; border-block: 1px dashed var(--warn); color: var(--warn); font-size: var(--fs-3xs); font-weight: 900; text-align: center; }
+/* با ۴۳ ستون، ردیف خط قیمت جاری از عرضِ دید بیرون می‌زند و برچسبش دیده
+   نمی‌شود. خطِ چین کل عرض را می‌گیرد، ولی برچسب به لبهٔ دید می‌چسبد. */
+.lmm-paired-spot span { display: block; padding: 3px 8px; border-block: 1px dashed var(--warn); color: var(--warn); font-size: var(--fs-3xs); font-weight: 900; text-align: start; }
+.lmm-paired-spot b { position: sticky; inset-inline-start: 8px; }
+.lmm-paired thead th:first-child, .lmm-paired thead th:last-child { min-width: 96px; }
 
 @media (max-width: 760px) {
   .lmm-paired { font-size: var(--fs-3xs); }
