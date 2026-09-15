@@ -82,7 +82,24 @@ export const LIVE_DAY_PHASES = ['open', 'after', 'ungated'];
 //
 // بقیهٔ منبع‌ها (`archive`، `roster`، `roster-range`، `watch-archive`)
 // هرکدام روزِ دیگری‌اند و خودشان هم همین را می‌گویند؛ فقط کسی نمی‌پرسید.
-export const LIVE_DAY_SOURCES = ['watch', 'snapshot'];
+// ═══ چرا این‌ها ثابتِ نام‌دارند، نه رشتهٔ خام ═══
+//
+// ممیزی (۱۴۰۵/۰۶/۲۴، دور پنجم): «نگاه باز چندروزه» با پیام «عکس از منبع
+// نامعلوم آمد» کاملاً از کار افتاده بود. علتش همین فهرست بود: وقتی سخت‌گیر
+// شد، `/api/live-trades` — که یک مصرف‌کنندهٔ کاملاً معتبر است — نه در فهرست
+// بود و نه اصلاً `source` می‌فرستاد.
+//
+// درسِ آن: فهرستِ سفید وقتی امن است که هیچ‌کس نتواند عضوی از آن را فراموش
+// کند. رشتهٔ خام در دو فایل، دقیقاً همان فراموشی است. حالا سرور همین
+// ثابت‌ها را وارد می‌کند و می‌فرستد، پس نامشان نمی‌تواند از هم جدا بیفتد.
+export const LIVE_SOURCE_BOARD = 'watch';
+export const LIVE_SOURCE_SNAPSHOT = 'snapshot';
+export const LIVE_SOURCE_TAPE = 'live-trades';
+
+// نوار ریزمعامله هم منبعِ زنده است و بایگانی نمی‌شود: سرور آن را همیشه
+// تازه می‌گیرد و شکستش خطاست، نه جایگزینیِ بی‌صدا با روزِ دیگر. پس همان
+// تضمینی را دارد که این فهرست محافظش است.
+export const LIVE_DAY_SOURCES = [LIVE_SOURCE_BOARD, LIVE_SOURCE_SNAPSHOT, LIVE_SOURCE_TAPE];
 
 /**
  * روزی که باید روی عکس تابلو مهر شود.
@@ -107,6 +124,21 @@ export function liveDayOf(market = {}, at = Date.now(), meta = {}) {
   const date = tehranDateNumber(at);
   if (!date) return { ok: false, date: 0, phase, why: 'ساعت عکس لحظه‌ای خوانده نشد' };
   return { ok: true, date, phase, why };
+}
+
+/**
+ * روزِ یک پاسخِ نوار ریزمعامله.
+ *
+ * ═══ چرا این تابع وجود دارد ═══
+ *
+ * `liveDayOf` سه ورودی دارد و سومی — بدنهٔ پاسخ — الزامی است. فراخوانی که
+ * فقط `market` و `at` بدهد، **بی‌صدا** جواب «منبع نامعلوم» می‌گیرد؛ و دقیقاً
+ * همین یک بار کل «نگاه باز چندروزه» را از کار انداخت.
+ *
+ * یک ورودی، یک پاسخ: جای فراموش‌کردن نمی‌ماند.
+ */
+export function liveTapeDay(payload = {}) {
+  return liveDayOf(payload?.market, payload?.at, payload);
 }
 
 /**

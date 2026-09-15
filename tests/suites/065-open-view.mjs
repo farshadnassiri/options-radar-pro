@@ -136,9 +136,14 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
   check('پارامترهای مدل IV در خود نگاه باز قابل تنظیم‌اند', ['ov-rfree', 'ov-divyield', 'ov-year-days', 'ov-iv-lo', 'ov-iv-hi', 'ov-apply-iv'].every((id) => ui64.includes(id)) && ui64.includes('toEnDigits'));
   check('نگاه باز، دامنه روزهای بسته و تا همین لحظه را با مسیر مشترک دارد',
     ui64.includes('id="ov-scope"') && ui64.includes('scopeOptionsMarkup') && ui64.includes('applyLiveScope'));
+  // `ui64.includes('liveDayOf')` بود و سبز ماند در حالی که همین نما کاملاً
+  // از کار افتاده بود: فراخوان ورودی سومش را جا گذاشته بود و آن ادعا فقط
+  // وجودِ نام را می‌دید. حالا خودِ تابعِ تک‌ورودی خواسته می‌شود، که جای
+  // فراموشی ندارد.
   check('ریز روز بین تاریخی و امروز زنده عوض می‌شود و سقف درخواست رعایت می‌شود',
     ui64.includes('id="ov-day-source"') && ui64.includes("chunks(ids, 24)")
-    && ui64.includes("priceBasis: live ? 'latest' : 'vwap'") && ui64.includes('liveDayOf'));
+    && ui64.includes("priceBasis: live ? 'latest' : 'vwap'") && ui64.includes('liveTapeDay(parts[0])')
+    && !ui64.includes('liveDayOf('));
   check('نمای زنده پیش‌فرض است، خودکار تازه می‌شود و از نخستین سطل هم نمودار می‌سازد',
     ui64.includes('<option value="live" selected>') && ui64.includes('await loadDayIntraday()')
     && ui64.includes('open-view-single-point') && !ui64.includes('rows.length < 2'));
