@@ -18,7 +18,7 @@ import { normalizeHistoryDate } from '../core/history.mjs';
  * چسبانده می‌شود. هیچ‌وقت پرتاب نمی‌کند و شکستش سری را خراب نمی‌کند —
  * `liveNote` می‌گوید چه شد، و ردیف امروز صریحاً «بسته‌نشده» علامت می‌خورد.
  */
-export async function loadHistoricalDailies(codes, baseIns, fetcher = fetch, { onProgress = () => {}, signal, tolerateErrors = false, includeToday = true } = {}) {
+export async function loadHistoricalDailies(codes, baseIns, fetcher = fetch, { onProgress = () => {}, signal, tolerateErrors = false, includeToday = true, tapeFor = 'bases' } = {}) {
   const seriesByIns = {}, errors = {};
   const request = async (wanted, asOf = 0) => {
     let done = 0;
@@ -52,6 +52,6 @@ export async function loadHistoricalDailies(codes, baseIns, fetcher = fetch, { o
   const empty = codes.filter((ins) => !seriesByIns[ins]?.length && !errors[ins]);
   if (asOf && empty.length) await request(empty, asOf);
   if (!includeToday) return { seriesByIns, errors, liveNote: '', liveDate: 0 };
-  const live = await applyLiveScope(seriesByIns, { fetcher });
+  const live = await applyLiveScope(seriesByIns, { fetcher, tapeFor });
   return { seriesByIns: live.series, errors, liveNote: live.note, liveDate: live.date || 0 };
 }

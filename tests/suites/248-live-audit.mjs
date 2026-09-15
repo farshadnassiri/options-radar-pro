@@ -333,10 +333,15 @@ check('۲. عددها هم‌عرض و بولد نوشته می‌شوند',
 // ═══ چرا دو اندپوینت ═══
 // دفتر روزانهٔ بالادست ردیف یک روز را تا پایان همان روز منتشر نمی‌کند، پس
 // هر فهرست تاریخی که فقط از آن ساخته شود تا شب یک روز عقب است.
-const day248 = liveDayOf({ phase: 'open' }, Date.parse('2026-09-15T10:00:00+03:30'));
+const day248 = liveDayOf({ phase: 'open' }, Date.parse('2026-09-15T10:00:00+03:30'), { source: 'watch' });
 check('عکس تابلو در جلسهٔ باز به روز جاری نسبت داده می‌شود',
   day248.ok === true && day248.date === 20260915);
-const boardRows248 = liveDayRows([{ uaInsCode: '11', pDrCotVal_UA: 105, pClosing_UA: 104, priceYesterday_UA: 101, qTotTran5J_UA: 50, qTotCap_UA: 5000 }], { date: day248.date });
+// ردیفِ قرارداد اختیار از خودِ تابلو می‌آید — تابلو برای آن حجم و تعداد
+// معامله می‌فرستد، پس مدرکِ «امروز معامله شد» دارد.
+const boardRows248 = liveDayRows([{
+  uaInsCode: 'UA', insCode_C: '11',
+  pDrCotVal_C: 105, pClosing_C: 104, priceYesterday_C: 101, qTotTran5J_C: 50, qTotCap_C: 5000,
+}], { date: day248.date });
 const merged248b = mergeLiveDay({ 11: [{ date: 20260913, last: 100 }, { date: 20260914, last: 101 }] }, boardRows248, { date: day248.date });
 check('۵. روز جاری به انتهای سری تاریخی اضافه می‌شود',
   merged248b.series[11].map((row) => row.date).join(',') === '20260913,20260914,20260915'
@@ -350,7 +355,7 @@ check('۵. سه عددی که عکس تابلو ندارد، ساخته نمی�
   [boardRows248['11'].first, boardRows248['11'].low, boardRows248['11'].high].every((v) => v === 0));
 const loaderSrc248 = readSrc('../ui/history-dailies.mjs');
 check('۵. بارگذار مشترک هر دو منبع را می‌چسباند و راه خاموشی دارد',
-  loaderSrc248.includes('includeToday = true') && loaderSrc248.includes('await applyLiveScope(seriesByIns, { fetcher })')
+  loaderSrc248.includes('includeToday = true') && loaderSrc248.includes('await applyLiveScope(seriesByIns, { fetcher, tapeFor })')
   && loaderSrc248.includes('liveNote: live.note'));
 check('۵. پیش‌فرض انتخابگر دامنه، روز جاری را در بر می‌گیرد',
   readSrc('../ui/live-scope.mjs').includes('scopeOptionsMarkup = (selected = SCOPE_LIVE)'));

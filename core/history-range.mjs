@@ -7,6 +7,7 @@
 import { num } from './num.mjs';
 import { expiryLabel } from './option-roster.mjs';
 import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
+import { tehranDateNumber } from './tehran-day.mjs';
 
 const faDigits = (value) => String(value).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
 
@@ -37,7 +38,23 @@ const dateOf = (compact) => {
   return new Date(Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8)));
 };
 
-export const todayCompact = () => compactOf(new Date());
+/**
+ * «امروز» — به وقت تهران، نه گرینویچ.
+ *
+ * ممیزی ردیف ۹: این تابع `compactOf(new Date())` بود، یعنی UTC. تهران
+ * ‎+۳:۳۰‎ است، پس از ۲۰:۳۰ هر شب تا نیمه‌شب گرینویچ، «امروز»ِ این تقویم یک
+ * روز از «امروز»ِ عکس تابلو عقب می‌افتاد — دقیقاً در ساعت‌هایی که کاربر
+ * بعد از بستن بازار می‌نشیند و کار می‌کند، و دقیقاً همان‌جا که سقفِ بازه
+ * تعیین می‌شود. نتیجه: روزی که روی تابلو قیمت داشت، از بازه بیرون می‌ماند.
+ *
+ * ═══ چرا ساعت ورودی می‌گیرد ═══
+ *
+ * نخستین نسخهٔ آزمونِ این اصلاح، خروجی را با `tehranDateNumber(Date.now())`
+ * می‌سنجید — و آن ادعا فقط بین ۲۰:۳۰ تا نیمه‌شب گرینویچ می‌گزید؛ باقیِ
+ * شبانه‌روز دو تعریف هم‌نتیجه‌اند و آزمون با برگشتِ باگ هم سبز می‌ماند.
+ * ساعتِ تزریق‌شدنی یعنی همان لحظهٔ حساس مستقیم آزمون می‌شود.
+ */
+export const todayCompact = (at = Date.now()) => tehranDateNumber(at) || compactOf(new Date(at));
 
 /** بازهٔ یک پیش‌فرض، از امروز به عقب. */
 export function presetRange(id, today = todayCompact()) {

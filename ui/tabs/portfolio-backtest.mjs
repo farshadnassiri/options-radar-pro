@@ -600,7 +600,10 @@ export async function mount(root, { state, api }) {
       liveDate = 0;
       return;
     }
-    const result = await applyLiveScope(seriesByIns);
+    // ریزمعاملهٔ قراردادهای همین نماد هم خلاصه می‌شود، وگرنه ردیف
+    // امروزشان «اولین/کمترین/بیشترین» ندارد و با آن مبناها روز جاری
+    // اصلاً پیشنهاد نمی‌شود. اینجا امن است: یک نماد، و با دکمهٔ خودِ کاربر.
+    const result = await applyLiveScope(seriesByIns, { tapeFor: 'all' });
     seriesByIns = result.series;
     liveDate = result.ok ? result.date : 0;
     note.hidden = false;

@@ -37,6 +37,7 @@ import { loadMomentContracts } from '../portfolio-snapshot-data.mjs';
 import { createPortfolioHistoryRequestGate } from '../portfolio-history-request.mjs';
 import { payoffSummaryText, portfolioPayoffView } from '../portfolio-payoff-view.mjs';
 import { portfolioWatchView } from '../portfolio-watch-view.mjs';
+import { liveDaySnapshot } from '../live-scope.mjs';
 import { portfolioDossierAnalysisView } from '../portfolio-dossier-analysis-view.mjs';
 import { portfolioDossierWeaknessView } from '../portfolio-dossier-weakness-view.mjs';
 import { portfolioDossierComparisonView } from '../portfolio-dossier-compare-view.mjs';
@@ -1874,8 +1875,16 @@ export async function mount(root, { state, api }) {
       const response = await fetch(`/api/dailies?ins=${encodeURIComponent(ins)}&n=0`);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
-      const nextDates = (payload?.[ins]?.rows || [])
-        .map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
+      const days = new Set((payload?.[ins]?.rows || [])
+        .map((row) => normalizeHistoryDate(row.date)).filter(Boolean));
+      // ── روزِ جاری ─────────────────────────────────────────────────
+      //
+      // این تقویم تا امروز فقط از دفتر روزانه تغذیه می‌شد و دفتر ردیفِ
+      // امروز را تا پایانِ همان روز ندارد؛ پس «امروز» هیچ‌وقت قابل انتخاب
+      // نبود. روز فقط وقتی اضافه می‌شود که نماد واقعاً معامله شده باشد.
+      const snap = await liveDaySnapshot({ wanted: [ins] });
+      if (snap.ok && snap.rows[ins]) days.add(snap.date);
+      const nextDates = [...days].sort((a, b) => a - b);
       if (!nextDates.length) throw new Error('برای این نماد روز معاملاتی ثبت نشده است');
       if (!historyRequests.accepts(ticket, base.value)) return;
       dates = nextDates;

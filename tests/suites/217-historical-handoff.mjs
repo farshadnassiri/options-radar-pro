@@ -61,7 +61,7 @@ check('مقصد پیش از فهرست قراردادها بازهٔ تحویل 
   destination.includes('initialRange: handoffRange(state.handoff)')
   && destination.indexOf('initialRange: handoffRange(state.handoff)') < destination.indexOf('await loadUniverseForRange(rangeUi.range)'));
 check('مقصد از بارگیر دارای منبع دوم و خطای پاهای الزامی استفاده می‌کند',
-  destination.includes('await loadHistoricalDailies(codes, ua.ins)')
+  destination.includes('await loadHistoricalDailies(codes, ua.ins, fetch,')
   && destination.includes('await loadHistory({ requiredIns: plan.legIns })')
   && destination.includes('loaded.errors[ins]'));
 check('پای سهم در انتقال همه به‌عنوان قرارداد آپشن فرستاده نمی‌شود',

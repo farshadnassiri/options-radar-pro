@@ -422,7 +422,7 @@ export async function mount(root, { state }) {
       : [...new Set([String(ua.ins), ...contracts.map((contract) => String(contract.ins))])];
     $('bt-load').disabled = true; setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
     try {
-      const loaded = await loadHistoricalDailies(codes, ua.ins);
+      const loaded = await loadHistoricalDailies(codes, ua.ins, fetch, { tapeFor: 'all' });
       seriesByIns = loaded.seriesByIns;
       // روز جاری از عکس زندهٔ تابلو می‌آید، نه از دفتر روزانه که تا شب
       // منتشرش نمی‌کند. جمله‌اش را همان‌جا می‌گوییم چون ارقام امروز نهایی

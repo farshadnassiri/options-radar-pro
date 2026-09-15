@@ -372,7 +372,10 @@ export async function mount(root, { state }) {
       return;
     }
     $('ov-live-note').textContent = 'در حال افزودن عکس معتبر امروز به نمودار چندروزه…';
-    const result = await applyLiveScope(closedSeriesByIns);
+    // ریزمعاملهٔ قراردادهای همین نماد هم خلاصه می‌شود، وگرنه ردیف
+    // امروزشان «اولین/کمترین/بیشترین» ندارد و با آن مبناها روز جاری
+    // اصلاً پیشنهاد نمی‌شود. اینجا امن است: یک نماد، و با دکمهٔ خودِ کاربر.
+    const result = await applyLiveScope(closedSeriesByIns, { tapeFor: 'all' });
     seriesByIns = result.series;
     $('ov-live-note').textContent = result.note;
   }
