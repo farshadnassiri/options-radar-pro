@@ -238,7 +238,29 @@ function boardRow(row, suffix, date) {
  * «پایانی دیروز». هیچ‌کدام با عددِ نوار پر نمی‌شوند: پایانیِ ساختگی از
  * آخرین معامله، همان جعلی است که قاعدهٔ ۲-۴ منع می‌کند.
  */
-function tapeRow(summary, date, board = null) {
+/**
+ * ارزشِ معامله‌شدهٔ نوار، با اندازهٔ قرارداد.
+ *
+ * ═══ چرا این یک خط لازم شد ═══
+ *
+ * `summarizeLiveTrades` مجموعِ «تعداد × قیمت» را می‌دهد. برای سهم درست
+ * است؛ برای اختیار نه، چون «تعداد» به **قرارداد** است و هر قرارداد اندازه
+ * دارد. بی این ضرب، ارزشِ امروزِ هر اختیار هزار برابر کمتر نوشته می‌شد — و
+ * چون این عدد در سری روزانه به‌عنوان ارزشِ **رسمی** می‌نشیند، لایه‌های
+ * بالاتر دیگر برآوردش نمی‌کردند و همان عددِ غلط را مبنا می‌گرفتند.
+ *
+ * اندازهٔ نامعلوم، صفر می‌شود نه عددِ بی‌اندازه: صفر یعنی «ارزشِ رسمی
+ * نداریم» و مصرف‌کننده خودش با اندازهٔ قراردادِ خودش برآورد می‌کند. عددِ
+ * بی‌اندازه، دروغی است که کسی دیگر اصلاحش نمی‌کند.
+ */
+function tapeValue(summary, lot) {
+  const value = n(summary?.value);
+  const size = n(lot);
+  if (!(value > 0)) return 0;
+  return size > 0 ? value * size : 0;
+}
+
+function tapeRow(summary, date, board = null, lot = 1) {
   const trades = n(summary?.count), vol = n(summary?.volume);
   if (!(trades > 0) && !(vol > 0)) return null;
   const last = price(summary?.lastPrice);
@@ -250,7 +272,7 @@ function tapeRow(summary, date, board = null) {
     yday: n(board?.yday),
     // ریزمعامله این سه را **واقعاً** دارد؛ اینجا حدس نیست
     first: price(summary?.firstPrice), low: price(summary?.low), high: price(summary?.high),
-    vol, trades, value: n(summary?.value),
+    vol, trades, value: tapeValue(summary, lot),
     live: true, liveSource: 'tape',
   };
 }
@@ -274,8 +296,11 @@ export function liveDayRows(rows = [], { date, tapeByIns = null } = {}) {
       const ins = String(row?.[key] ?? '').trim();
       if (!ins || out[ins]) continue;
       const summary = tapeByIns ? tapeByIns[ins] : null;
+      // نماد پایه ضریب ندارد؛ قرارداد اندازهٔ خودش را از همان ردیف تابلو
+      // می‌گیرد. اندازهٔ نیامده صفر می‌ماند و بالاتر برآورد می‌شود.
+      const lot = suffix === 'UA' ? 1 : n(row?.contractSize);
       // نوار مقدم است، تابلو جایگزینِ نبودنش — نه برعکس
-      const built = (summary ? tapeRow(summary, day, boardPrices(row, suffix)) : null)
+      const built = (summary ? tapeRow(summary, day, boardPrices(row, suffix), lot) : null)
         || boardRow(row, suffix, day);
       if (built) out[ins] = built;
     }

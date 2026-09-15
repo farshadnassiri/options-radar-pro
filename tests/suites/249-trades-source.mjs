@@ -7,6 +7,10 @@
 // را کنترل می‌کنند، نه اتصال واقعی endpointها.» این دسته قاعده را می‌سنجد.
 
 import { check, group, readSrc } from '../harness.mjs';
+import { faNum } from '../../ui/fmt.mjs';
+import {
+  intradayPathWithGaps, coverageSummary, TF_DAY_STATUS, TF_DAY_LABEL,
+} from '../../core/backtest.mjs';
 import {
   TRADES_LIVE, TRADES_HISTORY, BATCH_PAIR_CAP, LIVE_CODE_CAP,
   tradesSourceFor, splitTradeDays, tradeBatches, batchKey,
@@ -114,4 +118,79 @@ group('۲۴۹. منبع ریزمعاملهٔ هر روز و شمار درخوا�
   }, 20260909, codes3);
   check('۶. روزِ خالیِ بالادست «دریافت‌نشده» علامت نمی‌خورد',
     gap.failed.length === 0 && Object.values(gap.byIns).every((list) => list.length === 0));
+}
+
+
+// ═════════ ۲۵۰. پوشش روزها در گام سوم ═════════
+//
+// گزارش صاحب پروژه: «همه روزهای درون بازه را انگار پوشش نمیده و برخی روزها
+// رو نمیاره.» دو نیمه داشت و هر دو یک ریشه: روزِ بی‌داده بی‌صدا حذف می‌شد.
+group('۲۵۰. پوشش روزها در گام سوم و شکافِ دیده‌شدنی');
+{
+  const cov = [
+    { date: 20260908, status: TF_DAY_STATUS.SKIPPED },
+    { date: 20260909, status: TF_DAY_STATUS.OK, points: 12 },
+    { date: 20260910, status: TF_DAY_STATUS.NO_LEGS, legs: ['ضهرم۲۰۴۰'] },
+    { date: 20260913, status: TF_DAY_STATUS.FAILED },
+    { date: 20260914, status: TF_DAY_STATUS.NO_BASE },
+    { date: 20260915, status: TF_DAY_STATUS.OK, points: 8 },
+  ];
+  const buckets = [
+    { date: 20260909, closePnl: 5, perLeg: [{ netPnl: 5, price: 100 }] },
+    { date: 20260909, closePnl: 7, perLeg: [{ netPnl: 7, price: 110 }] },
+    { date: 20260915, closePnl: 9, perLeg: [{ netPnl: 9, price: 120 }] },
+  ];
+  const rows = intradayPathWithGaps(buckets, cov);
+
+  // ═══ نیمهٔ اول: هیچ روزی از فهرست نمی‌افتد ═══
+  check('هر روزِ فهرست در خروجی هست', new Set(rows.map((r) => r.date)).size === cov.length,
+    `${faNum(new Set(rows.map((r) => r.date)).size)} از ${faNum(cov.length)}`);
+  check('روزِ دارای داده سطل‌های واقعی‌اش را نگه می‌دارد',
+    rows.filter((r) => r.date === 20260909 && !r.gap).length === 2);
+  check('ترتیب فهرست حفظ می‌شود',
+    rows.map((r) => r.date).join(',') === '20260908,20260909,20260909,20260910,20260913,20260914,20260915');
+
+  // ═══ نیمهٔ دوم: روزِ بی‌داده شکاف است، نه صفر ═══
+  //
+  // این تفاوت معاملاتی است، نه نمایشی: بیشینهٔ افت از شکلِ خط خوانده
+  // می‌شود، و صفرِ جعلی یا خطی که از روی یک هفته پریده، هر دو عددِ غلط
+  // می‌دهند — یکی کمتر از واقع، یکی بیشتر.
+  // ادعا باید **گزارش** بدهد، نه پرتاب کند: وقتی ردیف اصلاً ساخته نشود،
+  // `gap[key]` خطا می‌دهد و کلِ دسته می‌میرد — و آن‌وقت به‌جای یک سطرِ
+  // قرمزِ گویا، یک stack trace می‌گیریم.
+  const METRICS = ['closePnl', 'openPnl', 'highPnl', 'lowPnl', 'returnPct', 'basePrice', 'basePct'];
+  const gap = rows.find((r) => r.date === 20260913);
+  check('روزِ دریافت‌نشده ردیفِ شکاف می‌گیرد', gap?.gap === true, gap ? '' : 'ردیفی ساخته نشد');
+  check('و هیچ عددی ندارد — نه صفر، نه حمل‌شده از روز قبل',
+    Boolean(gap) && METRICS.every((key) => Number.isNaN(gap[key])),
+    gap ? METRICS.filter((key) => !Number.isNaN(gap[key])).join('، ') : 'ردیفی ساخته نشد');
+  check('پاهای ردیفِ شکاف خالی‌اند، پس ستون هر پا هم شکاف می‌شود',
+    Array.isArray(gap?.perLeg) && gap.perLeg.length === 0);
+  check('و علتش روی خودِ ردیف نوشته می‌شود',
+    gap?.why === TF_DAY_LABEL.failed
+    && rows.find((r) => r.date === 20260914)?.why === TF_DAY_LABEL.noBase);
+  check('روزِ بیرونِ سقف هم شکاف می‌گیرد، نه حذف',
+    rows.find((r) => r.date === 20260908)?.why === TF_DAY_LABEL.skipped);
+
+  // ═══ چهار علتِ متفاوت، چهار جملهٔ متفاوت ═══
+  //
+  // «خطای دریافت» یعنی دوباره تلاش کن؛ «نماد پایه معامله نشد» یعنی واقعیتِ
+  // بازار است و تلاش دوباره عوضش نمی‌کند. یک جمله برای هر دو، تصمیمِ کاربر
+  // را خراب می‌کند.
+  const labels = Object.values(TF_DAY_LABEL);
+  check('هر وضعیت جملهٔ فارسیِ جدا دارد',
+    new Set(labels).size === labels.length && labels.every((text) => text.length > 2));
+  check('هر کدِ وضعیت جمله دارد',
+    Object.values(TF_DAY_STATUS).every((key) => typeof TF_DAY_LABEL[key] === 'string' && TF_DAY_LABEL[key]));
+
+  const sum = coverageSummary(cov);
+  check('خلاصه هر علت را جدا می‌شمارد',
+    sum.ok === 2 && sum.noLegs === 1 && sum.failed === 1 && sum.noBase === 1 && sum.skipped === 1);
+  check('و جمعش همان تعداد روزهای بازه است', sum.total === 6);
+  check('فهرست خالی هم پرتاب نمی‌کند',
+    intradayPathWithGaps().length === 0 && coverageSummary().total === 0);
+  // سطلی که روزش در فهرست پوشش نیست، بی‌صدا وارد نمی‌شود: فهرستِ مرجع
+  // همان فهرست است، نه اتحادِ دو منبع.
+  check('سطلِ روزِ خارج از فهرست وارد خروجی نمی‌شود',
+    !intradayPathWithGaps([{ date: 20261231, closePnl: 1, perLeg: [] }], cov).some((r) => r.date === 20261231));
 }

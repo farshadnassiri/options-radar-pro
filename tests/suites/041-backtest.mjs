@@ -89,13 +89,26 @@ group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فری�
     source40.includes("function tfNote(text, error = false)")
     && source40.includes("tfNote(text); setStatus(text);")
     && /catch \(error\) \{\s*const text = errorText\(error, 'تحلیل تایم‌فریم کامل نشد\.'\);\s*setStatus\(text, true\); tfNote\(text, true\);/.test(source40));
-  check('۵. «دریافت نشد» از «معامله نشده» جدا شمرده می‌شود',
-    source40.includes('if (requiredMissing(day.failed).length) { failedDays.push(date); continue; }')
-    && source40.includes('روز دریافت نشد و «بی‌معامله» شمرده نشد')
-    && source40.includes('روز بدون نقطهٔ مشترک کنار گذاشته شد'));
-  check('۳. سقف روز دیگر ۴۵ نیست و وقتی بگزد گفته می‌شود',
+  // ═══ گزارش «برخی روزها رو نمیاره» ═══
+  //
+  // فهرستِ مرجع باید هر روزِ معاملاتیِ بازه باشد، نه فقط روزهای `ok`. آن
+  // فیلتر باعث می‌شد روزِ `missing` یا `liquidity` اصلاً **درخواست هم
+  // نشود** — در حالی که نوار ریزمعامله منبعِ دیگری است.
+  check('همهٔ روزهای بازه پرسیده می‌شوند، نه فقط روزهای «معتبر»',
+    source40.includes('const dates = replay.rows.map((row) => Number(row.date)).filter(Boolean);')
+    && !source40.includes("const dates = replay.rows.filter((row) => row.status === 'ok').map((row) => row.date);"));
+  check('۵. هر روز وضعیتِ خودش را می‌گیرد، نه یک شمارندهٔ مشترک',
+    ['FAILED', 'NO_BASE', 'NO_LEGS', 'NO_POINTS', 'SKIPPED', 'OK']
+      .every((key) => source40.includes(`TF_DAY_STATUS.${key}`)));
+  check('روزِ بی‌داده روی نمودار شکاف می‌شود، نه حذف',
+    source40.includes('intradayPathWithGaps(buckets, loaded?.coverage || [])'));
+  check('جدول پوشش هر روز بازه را نشان می‌دهد',
+    source40.includes('function paintCoverage(loaded)') && source40.includes('id="bt-tf-coverage"')
+    // حتی وقتی هیچ روزی نقطه نساخته: کاربر باید ببیند کدام روز و چرا
+    && source40.indexOf('paintCoverage(loaded);') < source40.indexOf('if (!timeframeDays.length)'));
+  check('۳. سقف روز دیگر ۴۵ نیست و وقتی بگزد صریح گفته می‌شود',
     /const TIMEFRAME_DAY_CAP = (\d+);/.exec(source40)?.[1] >= 250
-    && source40.includes('روز قدیمی‌تر به‌خاطر سقف'));
+    && source40.includes('روز قدیمی‌تر بررسی نشد (سقف'));
   check('۴. مسیر دسته‌ای استفاده می‌شود، نه یک درخواست به‌ازای هر روز و هر ابزار',
     source40.includes("fetch('/api/trades/batch'") && source40.includes('tradeBatches(history, codes')
     && !source40.includes('/api/trades?ins='));

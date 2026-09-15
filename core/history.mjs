@@ -106,15 +106,47 @@ export function indexHistory(rows = []) {
   return out;
 }
 
-/** حجم، تعداد معامله و ارزش روزانه؛ ارزش برآوردی هرگز با مقدار رسمی قاطی نمی‌شود. */
-export function historyMarketMetrics(row) {
-  if (!row) return { volume: 0, trades: 0, value: 0, valueEstimated: false };
+/**
+ * حجم، تعداد معامله و ارزش روزانه؛ ارزش برآوردی هرگز با مقدار رسمی قاطی
+ * نمی‌شود.
+ *
+ * ═══ چرا `size` لازم شد ═══
+ *
+ * گزارش صاحب پروژه: «وقتی حداقل ارزش هر قرارداد را تعیین می‌کنم برنامه
+ * خروجی نمی‌ده.»
+ *
+ * علتِ اصلی همین‌جا بود. وقتی بالادست `qTotCap` را ندهد، برآورد
+ * «حجم × قیمت پایانی» ساخته می‌شد — و آن برای **سهم** درست است، نه برای
+ * اختیار. حجمِ اختیار به **قرارداد** است و هر قرارداد اندازه‌ای دارد:
+ *
+ *     ۲۰۰ قرارداد × ۴۵۰ ریال × اندازهٔ ۱۰۰۰  =  ۹۰ میلیون ریال
+ *     ۲۰۰        × ۴۵۰                      =  ۹۰ هزار ریال
+ *
+ * یعنی برآورد دقیقاً **هزار برابر** کمتر بود. کاربری که «حداقل ۱ میلیون
+ * ریال» می‌خواست، قراردادی را که واقعاً ۹۰ میلیون معامله شده بود کنار
+ * می‌گذاشت — و چون همهٔ پاها همین‌طور بودند، خروجی صفر می‌شد.
+ *
+ * ═══ و چرا اندازهٔ نامعلوم، صفر نمی‌شود ═══
+ *
+ * اگر اندازه را ندانیم، ارزش را **نمی‌دانیم**. نوشتنِ صفر یعنی ادعای
+ * «معامله‌ای نشده»، و نوشتنِ عددِ بی‌اندازه یعنی همان خطای هزاربرابری.
+ * پس `NaN` برمی‌گردد و `valueKnown: false` — تا پالایه بتواند بگوید
+ * «نامعلوم»، نه «زیر حد».
+ */
+export function historyMarketMetrics(row, { size = 1 } = {}) {
+  if (!row) return { volume: 0, trades: 0, value: 0, valueEstimated: false, valueKnown: true };
   const volume = Math.max(0, num(row.vol));
   const trades = Math.max(0, num(row.trades));
   const official = Math.max(0, num(row.value));
+  if (official > 0) return { volume, trades, value: official, valueEstimated: false, valueKnown: true };
+  if (!(volume > 0)) return { volume, trades, value: 0, valueEstimated: false, valueKnown: true };
   const close = historyPrice(row, 'CLOSE');
-  const estimated = official > 0 ? official : (volume > 0 && close > 0 ? volume * close : 0);
-  return { volume, trades, value: estimated, valueEstimated: official <= 0 && estimated > 0 };
+  const lot = num(size, 1);
+  // معامله هست ولی نه ارزشِ رسمی و نه اندازهٔ قرارداد: ارزش نامعلوم است.
+  if (!(close > 0) || !(lot > 0)) {
+    return { volume, trades, value: NaN, valueEstimated: false, valueKnown: false };
+  }
+  return { volume, trades, value: volume * close * lot, valueEstimated: true, valueKnown: true };
 }
 
 /**
@@ -143,15 +175,34 @@ export function strategyLegSnapshots(legs = [], seriesByIns = {}, date) {
       index, ins: String(leg.ins), name: leg.name, kind: leg.kind, side: leg.side,
       strike: leg.strike,
       prices: Object.fromEntries(HISTORY_BASES.map(([basis]) => [basis, historyPrice(row, basis)])),
-      market: historyMarketMetrics(row),
+      market: historyMarketMetrics(row, { size: legLot(leg) }),
       missing: !row,
     };
   });
 }
 
-function passesLiquidity(row, minVolume = 0, minValue = 0) {
-  const m = historyMarketMetrics(row);
-  return m.volume >= Math.max(0, num(minVolume)) && m.value >= Math.max(0, num(minValue));
+/** اندازهٔ قرارداد هر پا. دارایی پایه ضریب ندارد، پس یک است. */
+const legLot = (leg) => (leg?.kind === 'underlying' ? 1 : num(leg?.size, 0));
+
+/**
+ * `false` هم برای «زیر حد» است هم برای «نامعلوم» — ولی `liquidityReason`
+ * این دو را جدا می‌گوید، چون کاربر با اولی حد را پایین می‌آورد و با دومی
+ * می‌فهمد اندازهٔ قرارداد نیامده و پایین‌آوردنِ حد کمکی نمی‌کند.
+ */
+function passesLiquidity(row, minVolume = 0, minValue = 0, size = 1) {
+  const m = historyMarketMetrics(row, { size });
+  if (m.volume < Math.max(0, num(minVolume))) return false;
+  if (!(Math.max(0, num(minValue)) > 0)) return true;
+  return m.valueKnown && m.value >= Math.max(0, num(minValue));
+}
+
+/** چرا این ردیف از پالایهٔ نقدشوندگی رد نشد. خالی یعنی رد نشده. */
+export function liquidityReason(row, minVolume = 0, minValue = 0, size = 1) {
+  const m = historyMarketMetrics(row, { size });
+  if (m.volume < Math.max(0, num(minVolume))) return 'volume';
+  if (!(Math.max(0, num(minValue)) > 0)) return '';
+  if (!m.valueKnown) return 'valueUnknown';
+  return m.value >= Math.max(0, num(minValue)) ? '' : 'value';
 }
 
 function readableHistoryName(entity, fallback) {
@@ -268,7 +319,7 @@ export function contractCensus({ ua, seriesByIns, startDate, entryBasis = 'CLOSE
     let reason = '';
     if (Number.isFinite(price)) {
       tally.priced += 1; bucket.priced += 1;
-      if (!passesLiquidity(row, liquidity.minLegVolume, liquidity.minLegValue)) {
+      if (!passesLiquidity(row, liquidity.minLegVolume, liquidity.minLegValue, legLot(c))) {
         tally.illiquid += 1; bucket.illiquid += 1;
         reason = 'illiquid';
       }
@@ -361,7 +412,7 @@ function pricedLegsAtEntry(legs, indexes, startDate, basis, manuals, units) {
     const manual = manuals?.[i];
     const price = historyPrice(row, manual != null && manual !== '' ? 'MANUAL' : basis, manual);
     if (!(price >= 0) || !Number.isFinite(price)) missing.push(i);
-    const market = historyMarketMetrics(row);
+    const market = historyMarketMetrics(row, { size: legLot(leg) });
     priced.push({
       ...leg,
       ratio: num(leg.ratio, 1) * Math.max(1, Math.trunc(num(units, 1))),
@@ -392,7 +443,7 @@ function closeAtDate(priced, indexes, date, basis, fees, manuals = null) {
     const closeGross = Number.isFinite(price) ? grossCash([close]) : NaN;
     const entryFee = entryFees([leg], fees);
     const exitFee = Number.isFinite(price) ? entryFees([close], fees) : NaN;
-    const market = historyMarketMetrics(row);
+    const market = historyMarketMetrics(row, { size: legLot(leg) });
     perLeg.push({
       index: i, ins: leg.ins, name: leg.name, kind: leg.kind, side: leg.side,
       strike: leg.strike, entryPrice: leg.price, exitPrice: price,
@@ -545,7 +596,8 @@ export function replayHistory({
   const baseEntryLiquid = passesLiquidity(startBase, liquidity.minBaseVolume, liquidity.minBaseValue);
   const illiquidEntryLegs = priced
     .map((leg, i) => ({ leg, i, row: indexes.get(String(leg.ins))?.get(start) }))
-    .filter(({ leg, row }) => leg.kind !== 'underlying' && !passesLiquidity(row, liquidity.minLegVolume, liquidity.minLegValue))
+    .filter(({ leg, row }) => leg.kind !== 'underlying'
+      && !passesLiquidity(row, liquidity.minLegVolume, liquidity.minLegValue, legLot(leg)))
     .map(({ i }) => i);
   if (!baseEntryLiquid || illiquidEntryLegs.length) {
     return {
@@ -799,7 +851,7 @@ export function generateHistoricalCombos({
       const hasEntry = legs.every((l) => Number.isFinite(historyPrice(indexes.get(String(l.ins))?.get(start), entryBasis)));
       if (!hasEntry) { noEntry += 1; continue; }
       const liquidEntry = legs.every((l) => l.kind === 'underlying'
-        || passesLiquidity(indexes.get(String(l.ins))?.get(start), liquidity.minLegVolume, liquidity.minLegValue));
+        || passesLiquidity(indexes.get(String(l.ins))?.get(start), liquidity.minLegVolume, liquidity.minLegValue, legLot(l)));
       if (!liquidEntry) { noLiquidity += 1; continue; }
       bucket.push({
         id: legs.map((l) => l.ins).join('|'), legs, strikes: strikeSet,
@@ -1038,4 +1090,74 @@ export function optimizeExitPolicy(args, {
     policies: policies.slice(0, 12),
     bestObserved: fixed.ok ? fixed.summary.best : null,
   };
+}
+
+// ————————————————————————————————————————————————————————————————
+// چرا هیچ ترکیبی نماند.
+//
+// ═══ گزارش صاحب پروژه ═══
+//
+// «وقتی حداقل ارزش هر قرارداد (میلیون ریال) را تعیین می‌کنم برنامه خروجی
+// نمی‌ده.»
+//
+// دو علت داشت. اولی عددی بود و اصلاح شد: برآوردِ ارزشِ اختیار، اندازهٔ
+// قرارداد را در نظر نمی‌گرفت و هزار برابر کمتر می‌شد.
+//
+// دومی گزارش‌دهی است، و همان چیزی که این تابع حل می‌کند. وقتی همه‌چیز
+// پالایه می‌شد، کاربر فقط یک جملهٔ کلی می‌دید: «هیچ ترکیبی با قیمت و
+// نقدشوندگی معتبر در هر دو تاریخ پیدا نشد». از آن جمله نمی‌شود فهمید:
+//
+//   ترکیبی ساخته نشد، یا ساخته شد و در روز خروج افتاد؟
+//   حد را پایین بیاورم، یا بازه را عوض کنم، یا این نماد اصلاً داده ندارد؟
+//
+// «خروجی نمی‌ده» دقیقاً همین است: برنامه کار کرده، ولی نگفته چه کرده.
+//
+// خروجی، جمله‌ای است که **کارِ بعدیِ کاربر** را می‌گوید، نه فقط عددها را.
+// ————————————————————————————————————————————————————————————————
+export function emptyPortfolioReason({ generatedByStrategy = [], excluded = {}, census = null, liquidity = {} } = {}) {
+  const n = (value) => Math.max(0, num(value, 0));
+  const sum = (key) => (generatedByStrategy || []).reduce((total, row) => total + n(row[key]), 0);
+  const counts = {
+    built: sum('candidates'),
+    noLiquidity: sum('noLiquidity'),
+    noEntry: sum('noEntry'),
+    entryLiquidity: n(excluded.entryLiquidity),
+    exitLiquidity: n(excluded.exitLiquidity),
+    exitPrice: n(excluded.exitPrice),
+    exitMissing: n(excluded.exitMissing),
+    errors: n(excluded.replayErrors),
+  };
+  const hasFilter = [liquidity.minLegValue, liquidity.minLegVolume, liquidity.minBaseValue, liquidity.minBaseVolume]
+    .some((value) => n(value) > 0);
+
+  // ترتیبِ ثابت، تا جمله هر بار یک شکل باشد. عدد اینجا قالب نمی‌گیرد:
+  // هر رقمِ نمایشی از `ui/fmt.mjs` می‌آید و این ماژول هستهٔ محاسبه است.
+  const parts = [
+    ['built', 'ترکیب در روز ورود ساخته شد'],
+    ['noLiquidity', 'ترکیب در روز ورود به پالایهٔ نقدشوندگی نخورد'],
+    ['noEntry', 'ترکیب قیمت ورود نداشت'],
+    ['entryLiquidity', 'ترکیب در بازپخش، روز ورودش زیر حد بود'],
+    ['exitLiquidity', 'ترکیب در روز خروج زیر حد نقدشوندگی افتاد'],
+    ['exitPrice', 'ترکیب در روز خروج قیمت کامل نداشت'],
+    ['exitMissing', 'ترکیب اصلاً ردیف روز خروج نساخت'],
+    ['errors', 'ترکیب در بازپخش خطا داد'],
+  ].filter(([key]) => counts[key] > 0).map(([key, label]) => ({ key, count: counts[key], label }));
+
+  // کارِ بعدی، نه فقط عدد. این تنها چیزی است که کاربر واقعاً می‌خواهد:
+  // «حد را پایین بیاور» با «بازه را عوض کن» دو کارِ کاملاً متفاوت‌اند.
+  let advice = '';
+  if (counts.exitLiquidity && counts.exitLiquidity >= Math.max(1, counts.built * 0.2)) {
+    advice = 'همان حداقلی که برای روز ورود گذاشتی، برای روز خروج هم لازم شمرده می‌شود؛ '
+      + 'اگر قرارداد در روز خروج کم‌معامله باشد کل ترکیب کنار می‌رود. حد را پایین‌تر بگذار یا روز خروج را عوض کن.';
+  } else if ((counts.noLiquidity || counts.entryLiquidity) && hasFilter) {
+    advice = 'حداقل‌های نقدشوندگی را پایین‌تر بگذار؛ با همین حد، هیچ قراردادی در روز ورود نمی‌ماند.';
+  } else if (!counts.built) {
+    advice = census && n(census.priced) === 0
+      ? 'در این تاریخ هیچ قراردادی قیمت ندارد — تاریخ ورود را عوض کن.'
+      : 'با این تاریخ و این استراتژی‌ها ترکیبی ساخته نشد؛ بازه یا سررسیدها را بازتر کن.';
+  } else if (counts.exitPrice || counts.exitMissing) {
+    advice = 'ترکیب‌ها ساخته شدند ولی روز خروج قیمت کامل ندارد — روز خروج را عوض کن.';
+  }
+
+  return { ...counts, hasFilter, parts, advice };
 }
