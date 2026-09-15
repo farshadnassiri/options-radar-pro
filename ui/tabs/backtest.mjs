@@ -9,7 +9,7 @@ import {
 import {
   replayIntraday, summarizeIntraday, inIntradaySession,
   bucketIntradayPath, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
-  intradayPathWithGaps, coverageSummary, TF_DAY_STATUS, TF_DAY_LABEL,
+  intradayPathWithGaps, coverageSummary, baseGapSuspect, TF_DAY_STATUS, TF_DAY_LABEL,
 } from '/core/backtest.mjs';
 import {
   ivParams, IV_PARAMS, annotateDailyIv, annotateIntradayIv, annotateBucketIv, ivSummary, legDaysToExpiry,
@@ -473,11 +473,11 @@ export async function mount(root, { state }) {
    * می‌خورد و بقیهٔ تکه‌ها ادامه می‌دهند. یک ۵۰۲ نباید کل تحلیل را ببلعد،
    * و مهم‌تر، نباید به‌شکل «آن روزها معامله نشده» دیده شود.
    */
-  async function postTradeBatch(requests) {
+  async function postTradeBatch(requests, { fresh = false } = {}) {
     try {
       const response = await fetch('/api/trades/batch', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ requests }),
+        body: JSON.stringify({ requests, fresh }),
       });
       const payload = await response.json();
       if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
@@ -517,8 +517,8 @@ export async function mount(root, { state }) {
    * ردیف ۴: برای هر روز و هر ابزار یک درخواست جدا می‌رفت؛ ۴۵ روز و دو پا
    * یعنی ۱۳۵ درخواست. `/api/trades/batch` از قبل بود و استفاده نمی‌شد.
    */
-  async function loadTradeDays(dates, codes, { onProgress = () => {} } = {}) {
-    batchErrors = [];
+  async function loadTradeDays(dates, codes, { onProgress = () => {}, fresh = false } = {}) {
+    if (!fresh) batchErrors = [];
     const days = new Map();
     const { live, history, ahead } = splitTradeDays(dates, { liveDate });
     const batches = tradeBatches(history, codes, { cap: BATCH_PAIR_CAP });
@@ -527,7 +527,7 @@ export async function mount(root, { state }) {
     for (const requests of batches) {
       onProgress({ done, total, phase: 'history', days: requests.length / Math.max(1, codes.length) });
       await nextFrame();
-      const items = await postTradeBatch(requests);
+      const items = await postTradeBatch(requests, { fresh });
       for (const date of [...new Set(requests.map((row) => row.date))]) {
         days.set(date, dayFromBatch(items, date, codes));
       }
@@ -1014,6 +1014,38 @@ export async function mount(root, { state }) {
         tfNote(text); setStatus(text);
       },
     });
+    // ═══ پاسخِ ناقص، نه واقعیتِ بازار ═══
+    //
+    // ممیزی (۱۴۰۵/۰۶/۲۴): سه روزی که واقعاً معامله داشتند «نماد پایه معامله
+    // نشد» گرفتند، و با سرورِ تازه همان درخواست‌ها دادهٔ کامل دادند. یعنی
+    // پاسخِ خالیِ لحظه‌ای کش می‌شد و تا پایان نشست می‌ماند.
+    //
+    // تشخیصش به پرسیدنِ بیرون نیاز ندارد: اختیار وقتی معامله می‌شود که
+    // خودِ نماد باز است، پس «پاها معامله دارند ولی پایه صفر» متناقض است.
+    // چنین روزی یک بار — و فقط یک بار — بی کش دوباره پرسیده می‌شود.
+    const suspect = wanted.filter((date) => {
+      const day = tradesCache.get(date) || loaded.days.get(date);
+      if (!day || requiredMissing(day.failed).length) return false;
+      return baseGapSuspect({
+        baseTrades: day.byIns[String(ua.ins)] || [],
+        legTrades: legs.map((leg) => day.byIns[String(leg.ins)] || []),
+      });
+    });
+    let retried = new Map();
+    let retryRequests = 0;
+    if (suspect.length) {
+      const text = `${fmt.int(suspect.length)} روز پاسخِ ناقص داد — دوباره و بی کش پرسیده می‌شود…`;
+      tfNote(text); setStatus(text);
+      await nextFrame();
+      // پاسخِ ناقص هرگز کش نمی‌شود، وگرنه همان روز تا پایان نشست می‌ماند.
+      for (const date of suspect) tradesCache.delete(date);
+      const again = await loadTradeDays(suspect, codes, { fresh: true });
+      retried = again.days;
+      // شمار درخواست‌ها باید همه‌چیز را بگوید، وگرنه عددِ گزارش‌شده از
+      // چیزی که واقعاً به بالادست رفت کمتر است.
+      retryRequests = again.batches + (again.live ? 1 : 0);
+    }
+
     const out = [];
     const coverage = [];
     // روزهایی که از سقف بیرون ماندند هم در فهرست می‌مانند — با علتِ خودشان.
@@ -1022,7 +1054,8 @@ export async function mount(root, { state }) {
       coverage.push({ date, status: TF_DAY_STATUS.SKIPPED, dayStatus: dayStatus.get(date) || '', legs: [] });
     }
     for (const date of wanted) {
-      const day = tradesCache.get(date) || loaded.days.get(date) || { byIns: {}, failed: codes, date };
+      const day = retried.get(date) || tradesCache.get(date) || loaded.days.get(date)
+        || { byIns: {}, failed: codes, date };
       const row = { date, dayStatus: dayStatus.get(date) || '', legs: [] };
       // ── چهار علتِ متفاوت، چهار وضعیت ──────────────────────────────
       //
@@ -1033,6 +1066,13 @@ export async function mount(root, { state }) {
         coverage.push({ ...row, status: TF_DAY_STATUS.FAILED, legs: legNames(requiredMissing(day.failed)) });
         continue;
       }
+      const gap = baseGapSuspect({
+        baseTrades: day.byIns[String(ua.ins)] || [],
+        legTrades: legs.map((leg) => day.byIns[String(leg.ins)] || []),
+      });
+      // ناقص بودن پس از تلاشِ دوباره هم ادامه دارد: کش نمی‌شود و «معامله
+      // نشده» هم شمرده نمی‌شود — چون نیست.
+      if (gap) { coverage.push({ ...row, status: TF_DAY_STATUS.BASE_GAP }); continue; }
       if (!tradesCache.has(date)) tradesCache.set(date, day);
       if (!sessionTrades(day.byIns[String(ua.ins)]).length) {
         coverage.push({ ...row, status: TF_DAY_STATUS.NO_BASE });
@@ -1047,7 +1087,8 @@ export async function mount(root, { state }) {
     coverage.sort((a, b) => a.date - b.date);
     return {
       days: out, coverage, summary: coverageSummary(coverage), ahead: loaded.ahead,
-      requests: loaded.batches + (loaded.live ? 1 : 0), live: loaded.live,
+      requests: loaded.batches + (loaded.live ? 1 : 0) + retryRequests,
+      retried: suspect.length, live: loaded.live,
       errors: [...new Set(batchErrors)],
       cap: TIMEFRAME_DAY_CAP, range: dates.length,
     };
@@ -1069,6 +1110,7 @@ export async function mount(root, { state }) {
     // هر علت جدا شمرده می‌شود. «خطای دریافت» یعنی دوباره تلاش کن؛ بقیه
     // واقعیتِ بازارند و تلاش دوباره عوضشان نمی‌کند.
     for (const [key, label] of [
+      [TF_DAY_STATUS.BASE_GAP, TF_DAY_LABEL.baseGap],
       [TF_DAY_STATUS.NO_BASE, TF_DAY_LABEL.noBase],
       [TF_DAY_STATUS.NO_LEGS, TF_DAY_LABEL.noLegs],
       [TF_DAY_STATUS.NO_POINTS, TF_DAY_LABEL.noPoints],
@@ -1080,6 +1122,9 @@ export async function mount(root, { state }) {
     // سقف، وقتی بگزد، صریح گفته می‌شود — «کل بازه» بی‌قید ادعای بزرگی است.
     if (sum[TF_DAY_STATUS.SKIPPED]) {
       parts.push(`${fmt.int(sum[TF_DAY_STATUS.SKIPPED])} روز قدیمی‌تر بررسی نشد (سقف ${fmt.int(loaded.cap || TIMEFRAME_DAY_CAP)} روز از ${fmt.int(loaded.range || 0)} روز بازه)`);
+    }
+    if (loaded.retried) {
+      parts.push(`${fmt.int(loaded.retried)} روز پاسخِ ناقص داد و بی کش دوباره پرسیده شد`);
     }
     if (loaded.requests) {
       parts.push(`${fmt.int(loaded.requests)} درخواست${loaded.live ? ' (روز جاری از نوار زنده)' : ''}`);
@@ -1103,7 +1148,8 @@ export async function mount(root, { state }) {
       : '—';
     if (!rows.length) { $('bt-tf-coverage').innerHTML = '<p class="empty-note">هنوز بازه‌ای بررسی نشده است.</p>'; return; }
     $('bt-tf-coverage').innerHTML = `<table class="history-table backtest-compact-table"><thead><tr><th>روز</th><th>وضعیت گام سوم</th><th>جزئیات</th><th>سطل/نقطه</th><th>وضعیت مسیر روزانه</th></tr></thead><tbody>${rows.map((row) => {
-      const tone = row.status === TF_DAY_STATUS.OK ? 'gain' : row.status === TF_DAY_STATUS.FAILED ? 'loss' : '';
+      const tone = row.status === TF_DAY_STATUS.OK ? 'gain'
+        : (row.status === TF_DAY_STATUS.FAILED || row.status === TF_DAY_STATUS.BASE_GAP) ? 'loss' : '';
       const daily = row.dayStatus === 'ok' ? 'معتبر' : row.dayStatus === 'liquidity' ? 'حذف نقدشوندگی' : row.dayStatus === 'missing' ? 'قیمت ناقص' : '—';
       return `<tr class="${row.status === TF_DAY_STATUS.OK ? '' : 'history-missing'}"><td>${dateLabel(row.date)}</td><td class="${tone}">${TF_DAY_LABEL[row.status] || row.status}</td><td>${row.legs?.length ? esc(row.legs.join('، ')) : '—'}</td><td>${row.points ? fmt.int(row.points) : '—'}</td><td>${daily}</td></tr>`;
     }).join('')}</tbody></table>`;

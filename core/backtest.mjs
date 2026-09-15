@@ -565,11 +565,35 @@ export function intradayEntryExitProfile(days = [], { legs = [], bucketSeconds =
 export const TF_DAY_STATUS = Object.freeze({
   OK: 'ok',
   FAILED: 'failed',
+  BASE_GAP: 'baseGap',
   NO_BASE: 'noBase',
   NO_LEGS: 'noLegs',
   NO_POINTS: 'noPoints',
   SKIPPED: 'skipped',
 });
+
+/**
+ * پاسخِ خالیِ نماد پایه، در روزی که پاها معامله داشته‌اند.
+ *
+ * ═══ چرا این «واقعیتِ بازار» نیست ═══
+ *
+ * ممیزی (۱۴۰۵/۰۶/۲۴): سه روزِ ۲۱ تا ۲۳ شهریور «نماد پایه معامله نشد»
+ * گرفتند، در حالی که درخواستِ مستقیمِ همان endpoint برای اهرم ۹۷۵ و ۹۴۹ و
+ * ۵٬۸۴۵ معامله داد.
+ *
+ * ولی برای تشخیصش لازم نبود بیرون را بپرسیم — خودِ داده متناقض بود:
+ * اختیارِ روی یک نماد وقتی معامله می‌شود که خودِ نماد باز و فعال است. پس
+ * «پاها معامله دارند ولی پایه صفر است» یک وضعیتِ بازاری نیست؛ نشانهٔ
+ * پاسخِ ناقص است.
+ *
+ * این تفاوت عملی است: «معامله نشده» یعنی تمام، و «ناقص» یعنی دوباره
+ * بپرس. تا امروز هر دو یک چیز شمرده می‌شدند و روز برای همیشه می‌رفت.
+ */
+export function baseGapSuspect({ baseTrades = [], legTrades = [] } = {}) {
+  const live = (rows) => (rows || []).some((row) => !row?.canceled
+    && Number(row?.price) > 0 && inIntradaySession(row?.time));
+  return !live(baseTrades) && (legTrades || []).some((rows) => live(rows));
+}
 
 /**
  * جملهٔ فارسی هر وضعیت.
@@ -581,6 +605,7 @@ export const TF_DAY_STATUS = Object.freeze({
 export const TF_DAY_LABEL = Object.freeze({
   ok: 'معتبر',
   failed: 'خطای دریافت',
+  baseGap: 'پاسخ ناقص پایه (پاها معامله داشتند)',
   noBase: 'نماد پایه معامله نشد',
   noLegs: 'پای بی‌معامله',
   noPoints: 'نقطهٔ مشترک نساخت',

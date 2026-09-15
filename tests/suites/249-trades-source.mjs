@@ -9,7 +9,7 @@
 import { check, group, readSrc } from '../harness.mjs';
 import { faNum } from '../../ui/fmt.mjs';
 import {
-  intradayPathWithGaps, coverageSummary, TF_DAY_STATUS, TF_DAY_LABEL,
+  intradayPathWithGaps, coverageSummary, baseGapSuspect, TF_DAY_STATUS, TF_DAY_LABEL,
 } from '../../core/backtest.mjs';
 import {
   TRADES_LIVE, TRADES_HISTORY, BATCH_PAIR_CAP, LIVE_CODE_CAP,
@@ -193,4 +193,68 @@ group('۲۵۰. پوشش روزها در گام سوم و شکافِ دیده‌�
   // همان فهرست است، نه اتحادِ دو منبع.
   check('سطلِ روزِ خارج از فهرست وارد خروجی نمی‌شود',
     !intradayPathWithGaps([{ date: 20261231, closePnl: 1, perLeg: [] }], cov).some((r) => r.date === 20261231));
+}
+
+
+// ═════════ ۲۵۲. پاسخِ ناقص، نه واقعیتِ بازار ═════════
+//
+// ممیزی (۱۴۰۵/۰۶/۲۴): سه روزِ ۲۱ تا ۲۳ شهریور «نماد پایه معامله نشد»
+// گرفتند، در حالی که درخواستِ مستقیمِ همان endpoint برای اهرم ۹۷۵ و ۹۴۹ و
+// ۵٬۸۴۵ معامله داد. پاسخِ خالیِ لحظه‌ای کش شده بود و مثل واقعیتِ بازار
+// رفتار می‌کرد.
+group('۲۵۲. پاسخِ خالیِ پایه که واقعیتِ بازار نبود');
+{
+  const t = (time, price) => ({ time, price, quantity: 5, canceled: false });
+  // ═══ تشخیص، از خودِ داده ═══
+  //
+  // برای فهمیدنش لازم نیست بیرون را بپرسیم: اختیارِ روی یک نماد وقتی
+  // معامله می‌شود که خودِ نماد باز و فعال است.
+  check('پایهٔ خالی در روزی که پاها معامله دارند، مشکوک است',
+    baseGapSuspect({ baseTrades: [], legTrades: [[t(94300, 450)]] }) === true);
+  check('روزِ واقعاً ساکت مشکوک نیست',
+    baseGapSuspect({ baseTrades: [], legTrades: [[], []] }) === false);
+  check('وقتی پایه معامله دارد، مشکوک نیست',
+    baseGapSuspect({ baseTrades: [t(94300, 2400)], legTrades: [[t(94300, 450)]] }) === false);
+  // معاملهٔ بیرونِ جلسه و معاملهٔ باطل، «فعالیت» شمرده نمی‌شوند — وگرنه
+  // روزِ واقعاً ساکت هم مشکوک می‌شد و بی‌جهت دوباره پرسیده.
+  check('پیش‌گشایش فعالیت شمرده نمی‌شود',
+    baseGapSuspect({ baseTrades: [], legTrades: [[t(84500, 450)]] }) === false);
+  check('معاملهٔ باطل هم فعالیت شمرده نمی‌شود',
+    baseGapSuspect({ baseTrades: [], legTrades: [[{ ...t(94300, 450), canceled: true }]] }) === false);
+  check('قیمت صفر فعالیت نیست',
+    baseGapSuspect({ baseTrades: [], legTrades: [[t(94300, 0)]] }) === false);
+  // و برعکس: پایه‌ای که فقط بیرونِ جلسه معامله دارد، در جلسه خالی است
+  check('پایهٔ فقط‌پیش‌گشایشی هم ناقص شمرده می‌شود',
+    baseGapSuspect({ baseTrades: [t(84500, 2400)], legTrades: [[t(94300, 450)]] }) === true);
+  check('ورودی خالی پرتاب نمی‌کند', baseGapSuspect() === false && baseGapSuspect({}) === false);
+
+  // ═══ وضعیتِ جدا، چون کارِ جدا می‌خواهد ═══
+  //
+  // «معامله نشده» یعنی تمام؛ «ناقص» یعنی دوباره بپرس. تا امروز هر دو یک
+  // چیز شمرده می‌شدند و روز برای همیشه می‌رفت.
+  check('وضعیتِ ناقص از «معامله نشد» جداست',
+    TF_DAY_STATUS.BASE_GAP === 'baseGap' && TF_DAY_STATUS.BASE_GAP !== TF_DAY_STATUS.NO_BASE);
+  check('و جملهٔ خودش را دارد که متناقض‌بودن را می‌گوید',
+    TF_DAY_LABEL.baseGap.includes('ناقص') && TF_DAY_LABEL.baseGap !== TF_DAY_LABEL.noBase);
+  check('در خلاصه هم جدا شمرده می‌شود',
+    coverageSummary([{ status: TF_DAY_STATUS.BASE_GAP }, { status: TF_DAY_STATUS.NO_BASE }]).baseGap === 1);
+  check('و روی نمودار شکاف می‌گیرد، نه حذف',
+    intradayPathWithGaps([], [{ date: 20260912, status: TF_DAY_STATUS.BASE_GAP }])[0]?.why
+      === TF_DAY_LABEL.baseGap);
+
+  // ═══ و مسیرِ تلاش دوباره ═══
+  const src252 = readSrc('../ui/tabs/backtest.mjs');
+  check('روزِ مشکوک بی کش دوباره پرسیده می‌شود',
+    src252.includes("loadTradeDays(suspect, codes, { fresh: true })")
+    && src252.includes('for (const date of suspect) tradesCache.delete(date);'));
+  check('و پاسخِ ناقص هرگز کش نمی‌شود',
+    /if \(gap\) \{ coverage\.push\(\{ \.\.\.row, status: TF_DAY_STATUS\.BASE_GAP \}\); continue; \}[\s\S]{0,80}tradesCache\.set/.test(src252));
+  const srv252 = readSrc('../server/server.mjs');
+  check('سرور هم راهِ «بی کش» دارد',
+    srv252.includes('const fresh = body.fresh === true;')
+    && srv252.includes('fresh ? await getFresh(path, 2, 6) : await get(path, S.ttlDailySec, 6)'));
+  // ═══ و عمرِ کوتاهِ پاسخِ خالی ═══
+  check('پاسخِ خالی برچسب می‌خورد و عمرِ کوتاه‌تر می‌گیرد',
+    srv252.includes('empty: firstList(data).length === 0')
+    && srv252.includes('hit?.empty ? Math.min(ttlSec, Math.max(0, num(S.ttlEmptySec, 60)))'));
 }
