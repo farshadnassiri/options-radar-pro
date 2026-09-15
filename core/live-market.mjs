@@ -298,14 +298,26 @@ export function liveIvAt(contract = {}, basePrice, settings = {}, price = NaN) {
  */
 export function liveQuoteIvSet(contract = {}, basePrice, settings = {}) {
   const bid = finite(contract.bid), ask = finite(contract.ask);
-  const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : NaN;
+  const twoSided = bid > 0 && ask > 0;
+  const mid = twoSided ? (bid + ask) / 2 : NaN;
   const last = liveIvAt(contract, basePrice, settings, priceOf(contract));
+  const midIv = liveIvAt(contract, basePrice, settings, mid);
+  // ═══ «مظنه یک‌طرفه» با «بدون مظنه» یکی نیست ═══
+  //
+  // ممیزی ردیف ۵: «اگر یکی از دو سمت دفتر سفارش خالی باشد، میانهٔ مظنه
+  // ساخته نمی‌شود.» درست است و باید هم همین باشد — میانه‌ای که از یک سمت
+  // ساخته شود، میانه نیست.
+  //
+  // ولی علتی که گزارش می‌شد `noPrice` بود، یعنی «بدون معامله و مظنه». این
+  // غلط است: مظنه هست، فقط یک سمتش. کاربر با آن جمله فکر می‌کند قرارداد
+  // اصلاً مظنه ندارد، در حالی که یک سمتِ قابل اجرا روی تابلوست.
+  const midWhy = !twoSided && (bid > 0 || ask > 0) ? 'oneSided' : midIv.why;
   return {
     ivPct: last.ivPct, ivWhy: last.why,
     ivBidPct: liveIvAt(contract, basePrice, settings, bid).ivPct,
     ivAskPct: liveIvAt(contract, basePrice, settings, ask).ivPct,
-    ivMidPct: liveIvAt(contract, basePrice, settings, mid).ivPct,
-    ivMidWhy: liveIvAt(contract, basePrice, settings, mid).why,
+    ivMidPct: midIv.ivPct,
+    ivMidWhy: midWhy,
   };
 }
 
@@ -313,5 +325,5 @@ export function liveQuoteIvSet(contract = {}, basePrice, settings = {}) {
 export const IV_WHY_LABEL = {
   ok: '', noPrice: 'بدون معامله و مظنه', noSpot: 'قیمت پایه نامعلوم', noDays: 'روز مانده نامعتبر',
   input: 'ورودی ناقص', belowFloor: 'قیمت زیر کف نظری', aboveBand: 'قیمت بالاتر از دامنه تلاطم',
-  unstable: 'حل‌گر در کران‌ها جواب نداد',
+  unstable: 'حل‌گر در کران‌ها جواب نداد', oneSided: 'مظنه فقط یک‌طرفه است',
 };

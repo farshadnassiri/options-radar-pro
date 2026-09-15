@@ -662,14 +662,25 @@ export function contractAnalytics(row = {}, params = {}) {
   const delta = Number(greeks?.delta);
   const effectiveLeverage = Number.isFinite(leverage) && Number.isFinite(delta) ? leverage * Math.abs(delta) : NaN;
 
-  // ── دلتای اجرایی، جدا از دلتای مشاهده‌ای ──────────────────────────
+  // ── یونانی‌های اجرایی، جدا از مشاهده‌ای ───────────────────────────
   //
-  // اولی از میانهٔ مظنه می‌آید که با قیمت پایه هم‌زمان است؛ دومی از آخرین
-  // معامله که ممکن است ساعت‌ها پیش باشد. کنار هم نشستنشان خودش یک هشدار
-  // است: فاصلهٔ زیاد یعنی قیمت مشاهده‌ای کهنه است.
+  // اولی‌ها از میانهٔ مظنه می‌آیند که با قیمت پایه هم‌زمان است؛ دومی‌ها از
+  // آخرین معامله که ممکن است ساعت‌ها پیش باشد. کنار هم نشستنشان خودش یک
+  // هشدار است: فاصلهٔ زیاد یعنی قیمت مشاهده‌ای کهنه است.
+  //
+  // ═══ چرا دیگر فقط دلتا نیست ═══
+  //
+  // ممیزی (۱۴۰۵/۰۶/۲۴) ردیف ۴: «از IV میانهٔ مظنه تمام یونانی‌ها محاسبه
+  // می‌شوند؛ اما در خروجی فقط `deltaMid` نگه داشته می‌شود. گاما، تتا، وگا،
+  // رو و احتمال ITM همچنان فقط از IV آخرین معامله می‌آیند.»
+  //
+  // درست بود، و نتیجه‌اش بدترین شکلِ ناقص‌بودن: ردیفی که «دلتای اجرایی»
+  // داشت ولی گاما و تتا و وگایش خالی بود — یعنی داده **بود** و ما دورش
+  // ریخته بودیم. محاسبه همان یک فراخوانی بود که از قبل انجام می‌شد.
   const midGreeks = kind && Number.isFinite(Number(row.ivMidPct))
     ? greeksFromIvPct({ kind, strike }, { spot, days }, Number(row.ivMidPct), { ...params, yearDays })
     : null;
+  const deltaMid = Number(midGreeks?.delta ?? NaN);
 
   return {
     // ستون خالی وقتی تلاطم هست یعنی «چیزی برای توضیح نیست»؛ ستون خالی
@@ -684,7 +695,23 @@ export function contractAnalytics(row = {}, params = {}) {
     // می‌دهد — آخرین معاملهٔ هر جلسه‌ای که بوده. تنها نشانهٔ قابل اتکا در
     // همین عکس، حجم امروز است.
     pricedToday: Number(row.volume) > 0,
-    deltaMid: Number(midGreeks?.delta ?? NaN),
+    // ── مجموعهٔ کاملِ اجرایی، نه فقط دلتا ──────────────────────────
+    deltaMid,
+    gammaMid: Number(midGreeks?.gamma ?? NaN),
+    vegaMid: Number(midGreeks?.vega ?? NaN),
+    thetaMid: Number(midGreeks?.theta ?? NaN),
+    rhoMid: Number(midGreeks?.rho ?? NaN),
+    probItmMidPct: Number.isFinite(Number(midGreeks?.probItm)) ? Number(midGreeks.probItm) * 100 : NaN,
+    effectiveLeverageMid: Number.isFinite(leverage) && Number.isFinite(deltaMid)
+      ? leverage * Math.abs(deltaMid) : NaN,
+    // ═══ ردیف ۶ ممیزی: علتِ خالی‌بودنِ ستونِ اجرایی ═══
+    //
+    // «هسته کد علت شکست IV میانهٔ مظنه را در `ivMidWhy` تولید می‌کند؛ اما
+    // داشبورد فقط `ivWhyText` مربوط به آخرین معامله را ستون‌بندی کرده.»
+    // اطلاعات تشخیصی بود و نمایش داده نمی‌شد — همان قاعدهٔ ستون «علت نبود
+    // تلاطم»، این بار برای سمتِ اجرایی.
+    ivMidWhyText: Number.isFinite(Number(row.ivMidPct)) ? ''
+      : (IV_WHY_LABEL[row.ivMidWhy] || 'نامشخص'),
     delta: Number.isFinite(delta) ? delta : NaN,
     gamma: Number(greeks?.gamma ?? NaN),
     vega: Number(greeks?.vega ?? NaN),

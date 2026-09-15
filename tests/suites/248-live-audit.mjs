@@ -126,6 +126,69 @@ check('قراردادِ امروز بی‌معامله نشان‌دار می‌
   anA248.pricedToday === false
   && contractAnalytics({ ...rowA248, volume: 7 }, {}).pricedToday === true);
 
+// ————— ممیزی دوم (یونانی‌های خالی): ردیف ۴، ۵ و ۶ —————
+//
+// «از IV میانهٔ مظنه تمام یونانی‌ها محاسبه می‌شوند؛ اما در خروجی فقط
+// `deltaMid` نگه داشته می‌شود. گاما، تتا، وگا، رو و احتمال ITM همچنان فقط
+// از IV آخرین معامله می‌آیند.» یعنی داده **بود** و دور ریخته می‌شد.
+//
+// نمونه همان `async248` بالاست: آخرین معامله حل نمی‌شود (زیر کف نظری) ولی
+// میانهٔ مظنه حل می‌شود. پس مشاهده‌ای‌ها باید خالی باشند و اجرایی‌ها پر —
+// این دقیقاً همان ردیفی است که ممیزی توصیفش کرد.
+const mid248 = contractAnalytics({
+  ...async248, spot: 2100, volume: 5,
+  ivPct: pair248.ivPct, ivWhy: pair248.ivWhy,
+  ivMidPct: pair248.ivMidPct, ivMidWhy: pair248.ivMidWhy,
+}, { rFree: 0.3, divYield: 0, yearDays: 365 });
+check('۴. یونانی‌های مشاهده‌ای این ردیف خالی‌اند',
+  ['delta', 'gamma', 'theta', 'vega', 'rho', 'probItmPct'].every((key) => Number.isNaN(mid248[key])));
+check('۴. ولی هر شش یونانیِ اجرایی پر است، نه فقط دلتا',
+  ['deltaMid', 'gammaMid', 'thetaMid', 'vegaMid', 'rhoMid', 'probItmMidPct']
+    .every((key) => Number.isFinite(mid248[key])),
+  ['deltaMid', 'gammaMid', 'thetaMid', 'vegaMid', 'rhoMid', 'probItmMidPct']
+    .filter((key) => !Number.isFinite(mid248[key])).join('، '));
+// و علامت‌ها همان چیزی‌اند که باید: کالِ عمیقاً در سود دلتای مثبت نزدیک یک،
+// تتای منفی (فرسایش)، گاما و وگای مثبت.
+check('۴. علامت یونانی‌های اجرایی درست است',
+  mid248.deltaMid > 0.5 && mid248.thetaMid < 0 && mid248.gammaMid > 0 && mid248.vegaMid > 0);
+check('۴. اهرم مؤثر اجرایی هم ساخته می‌شود',
+  Number.isFinite(mid248.effectiveLeverageMid)
+  && near(mid248.effectiveLeverageMid, mid248.leverage * Math.abs(mid248.deltaMid), 1e-9));
+// بی میانهٔ مظنه هیچ‌کدام ساخته نمی‌شود — صفر جعلی در کار نیست.
+const noMid248 = contractAnalytics({ ...async248, spot: 2100, ivMidPct: NaN }, {});
+check('۴. بدون میانهٔ مظنه، هیچ یونانیِ اجرایی‌ای ساخته نمی‌شود',
+  ['deltaMid', 'gammaMid', 'thetaMid', 'vegaMid', 'rhoMid', 'probItmMidPct']
+    .every((key) => Number.isNaN(noMid248[key])));
+
+// ۵. «مظنهٔ یک‌طرفه» با «بدون مظنه» یکی نیست.
+//
+// میانه‌ای که از یک سمت ساخته شود میانه نیست، پس نبودنش درست است — ولی
+// علتی که گزارش می‌شد `noPrice` بود، یعنی «بدون معامله و مظنه». کاربر با
+// آن جمله فکر می‌کند قرارداد اصلاً مظنه ندارد.
+const oneSided248 = liveQuoteIvSet({ ...async248, ask: 0 }, 2100, S248);
+check('۵. مظنهٔ یک‌طرفه میانه نمی‌سازد', Number.isNaN(oneSided248.ivMidPct));
+check('۵. ولی علتش «بدون مظنه» نیست', oneSided248.ivMidWhy === 'oneSided', oneSided248.ivMidWhy);
+check('۵. و سمتِ موجود همچنان تلاطم خودش را دارد',
+  Number.isFinite(oneSided248.ivBidPct) && Number.isNaN(oneSided248.ivAskPct));
+check('۵. نبودِ هر دو سمت، همان «بدون معامله و مظنه» می‌ماند',
+  liveQuoteIvSet({ ...async248, bid: 0, ask: 0 }, 2100, S248).ivMidWhy === 'noPrice');
+check('۵. کد تازه جملهٔ فارسی دارد', IV_WHY_LABEL.oneSided === 'مظنه فقط یک‌طرفه است');
+
+// ۶. علتِ خالی‌بودنِ ستونِ اجرایی باید دیده شود.
+check('۶. علت نبود تلاطم اجرایی ستون خودش را دارد',
+  contractAnalytics({ ...async248, ivMidPct: NaN, ivMidWhy: 'oneSided' }, {}).ivMidWhyText
+    === 'مظنه فقط یک‌طرفه است');
+check('۶. وقتی تلاطم اجرایی هست، ستون علت خالی می‌ماند',
+  mid248.ivMidWhyText === '', mid248.ivMidWhyText);
+check('۶. و علتِ نامعلوم با «توضیحی لازم نیست» قاطی نمی‌شود',
+  contractAnalytics({ ...async248, ivMidPct: NaN, ivMidWhy: undefined }, {}).ivMidWhyText === 'نامشخص');
+const dashE248 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+check('۶. و داشبورد واقعاً ستون‌بندی‌اش کرده',
+  dashE248.includes("col('ivMidWhyText', 'علت نبود تلاطم اجرایی'"));
+check('۴. و هر پنج یونانیِ اجرایی ستون دارند',
+  ['gammaMid', 'thetaMid', 'vegaMid', 'rhoMid', 'probItmMidPct', 'effectiveLeverageMid']
+    .every((key) => dashE248.includes(`col('${key}'`)));
+
 // ————— ۹. فرضِ نرخ، نه بازار، ستون را خالی می‌کند —————
 //
 // ممیزی ردیف ۹: «یک نرخ سود سراسری برای تمام نمادها… می‌تواند کف نظری و
