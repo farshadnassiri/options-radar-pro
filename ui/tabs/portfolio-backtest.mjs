@@ -4,7 +4,7 @@ import { buildChain } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, basisMatrix, censusNote, entrySensitivity, flattenActiveContracts,
-  historyDateLabel, historyMarketMetrics, historyPrice,
+  historyDateLabel, historyMarketMetrics, historyPrice, emptyPortfolioReason,
   normalizeHistoryDate, replayHistory,
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
@@ -2064,9 +2064,20 @@ export async function mount(root, { state, api }) {
       if (runEpoch !== settingsEpoch) throw new Error('فهرست سررسیدهای سقف‌پر هنگام اجرا عوض شد؛ آزمون را دوباره اجرا کن.');
       lastRunStopped = !!payload.stopped;
       if (!payload.rows.length) {
+        // ── چرا هیچ ترکیبی نماند ─────────────────────────────────────
+        //
+        // گزارش صاحب پروژه: «وقتی حداقل ارزش هر قرارداد را تعیین می‌کنم
+        // برنامه خروجی نمی‌ده.» جملهٔ قبلی فقط می‌گفت «پیدا نشد» — و از
+        // آن نمی‌شد فهمید ترکیبی ساخته نشد، یا ساخته شد و در روز **خروج**
+        // افتاد. آن دو، دو کارِ کاملاً متفاوت از کاربر می‌خواهند.
+        const why = emptyPortfolioReason({
+          generatedByStrategy: payload.generatedByStrategy, excluded: payload.excluded,
+          census: payload.census, liquidity: liquidity(),
+        });
+        const counted = why.parts.map((part) => `${fmt.int(part.count)} ${part.label}`).join(' · ');
         throw new Error(payload.stopped
           ? 'اجرا پیش از رسیدن به اولین ترکیبِ معتبر متوقف شد'
-          : 'هیچ ترکیبی با قیمت و نقدشوندگی معتبر در هر دو تاریخ پیدا نشد');
+          : `هیچ ترکیبی با قیمت و نقدشوندگی معتبر در هر دو تاریخ نماند. ${counted}${why.advice ? ` — ${why.advice}` : ''}`);
       }
       renderReport(payload);
       setStatus(`${fmt.int(payload.rows.length)} ترکیب معتبر از ${fmt.int(payload.generatedByStrategy.length)} استراتژی گزارش شد.${payload.stopped ? ' اجرا با توقف تو ناتمام ماند — عددها فقط بخشِ ساخته‌شده را می‌گویند.' : ''}`, false);

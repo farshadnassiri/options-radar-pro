@@ -134,7 +134,19 @@ self.onmessage = (event) => {
       const definitions = CATALOG.filter((def) => m.includeInfeasible || def.feasible);
       const rows = [];
       const generatedByStrategy = [];
+      // ═══ چرا این شمارنده‌ها جدا شدند ═══
+      //
+      // گزارش صاحب پروژه: «وقتی حداقل ارزش هر قرارداد را تعیین می‌کنم
+      // برنامه خروجی نمی‌ده.» و وقتی خروجی صفر می‌شد، تنها چیزی که کاربر
+      // می‌دید یک جملهٔ کلی بود. پس نمی‌فهمید ترکیبی ساخته نشد، یا ساخته
+      // شد و در روز **خروج** افتاد، یا اصلاً قیمت نداشت.
+      //
+      // `invalidAtEnd` یک عدد بود برای چهار علتِ کاملاً متفاوت. حالا هرکدام
+      // جدا شمرده می‌شود، چون هرکدام کارِ متفاوتی از کاربر می‌خواهد: یکی
+      // «حد را پایین بیاور»، یکی «بازه را عوض کن»، یکی «این نماد داده
+      // ندارد».
       let invalidAtEnd = 0, replayErrors = 0;
+      let entryLiquidity = 0, exitLiquidity = 0, exitMissing = 0, exitPrice = 0;
       // هیچ سقفی به تنظیمات تزریق نمی‌شود. پیش از این همین‌جا `maxRows` و
       // `maxCombosPerExpiry` با عدد فرم بازنویسی می‌شدند و ترکیب‌ها را
       // پیش از دیده‌شدن می‌بریدند.
@@ -171,10 +183,17 @@ self.onmessage = (event) => {
             entryBasis: m.entryBasis, exitBasis: m.exitBasis,
             units: m.units, fees: m.fees, settings: m.settings, liquidity: m.liquidity,
           });
-          if (!replay.ok) { replayErrors += 1; continue; }
+          if (!replay.ok) {
+            if (replay.liquidityError) entryLiquidity += 1; else replayErrors += 1;
+            continue;
+          }
           const final = replay.rows.find((row) => row.date === Number(m.endDate));
           if (!final || final.status !== 'ok' || !Number.isFinite(final.netPnl) || !Number.isFinite(final.returnPct)) {
             invalidAtEnd += 1;
+            // سه علتِ متفاوت که تا امروز یک عدد بودند
+            if (!final) exitMissing += 1;
+            else if (final.status === 'liquidity') exitLiquidity += 1;
+            else exitPrice += 1;
             continue;
           }
           accepted += 1;
@@ -287,7 +306,8 @@ self.onmessage = (event) => {
         type: 'portfolio', id: m.id, rows,
         report, generatedByStrategy, census,
         matrix: { dates: matrix.dates, pnl: matrix.pnl, rowCount: matrix.rowCount, baseSeries, basePrices },
-        excluded: { invalidAtEnd, replayErrors }, stopped: stoppedAt,
+        excluded: { invalidAtEnd, replayErrors, entryLiquidity, exitLiquidity, exitMissing, exitPrice },
+        stopped: stoppedAt,
       }, [matrix.pnl.buffer]);
       return;
     }
