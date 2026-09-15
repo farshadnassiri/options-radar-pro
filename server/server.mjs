@@ -33,7 +33,7 @@ import { tradingDays } from '../core/roster-scan.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
 import { infoPath, instrumentInfo, optionSpec, optionSpecPath } from '../core/roster-catalog.mjs';
 import { readJsonSafe } from '../core/json-safe.mjs';
-import { tehranDateNumber } from '../core/live-day.mjs';
+import { tehranDateNumber, LIVE_SOURCE_TAPE } from '../core/live-day.mjs';
 import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
@@ -1029,7 +1029,15 @@ async function handle(req, res) {
       // بازارِ بسته یعنی «هنوز جلسه‌ای نبوده»، و در بازارِ باز یعنی «این
       // ابزار معامله نشده». مصرف‌کننده بی این دو را از هم جدا نمی‌کند و
       // محدودیتِ ساعت را به حسابِ نقدشوندگیِ نماد می‌گذارد.
-      return sendJson(res, 200, { at: Date.now(), count: codes.length, market: marketOpen(), items });
+      // ── منبع، صریح ───────────────────────────────────────────────
+      //
+      // مصرف‌کننده باید بتواند بگوید این پاسخ مال کدام روز است، و برای آن
+      // هم فاز بازار لازم است هم منبع. نوار همیشه تازه گرفته می‌شود و
+      // هیچ‌وقت با بایگانی جایگزین نمی‌شود — ولی این تضمین تا وقتی نوشته
+      // نشود، در سمت مصرف‌کننده قابل تکیه نیست.
+      return sendJson(res, 200, {
+        at: Date.now(), source: LIVE_SOURCE_TAPE, count: codes.length, market: marketOpen(), items,
+      });
     }
 
     // داشبورد وسعت بازار پایه از اولین معامله امروز تا همین لحظه. نوار همه

@@ -626,6 +626,72 @@ group('۱۰. چیدمان آزمون سبد کپی نمی‌شود');
 //
 // چرا هست: گزارش کامل چند هزار خط «✔» است. برای آدمی که ترمینال را
 // می‌بیند مفید است، ولی عاملی که این خروجی را در بافتار خودش می‌ریزد،
+// ═══════════════════ ۱۱. انتساب روز جاری، بی فراموشی ═══════════════════
+//
+// ممیزی ۱۴۰۵/۰۶/۲۴ (دور پنجم): «نگاه باز چندروزه» با پیام «عکس از منبع
+// نامعلوم آمد» کاملاً از کار افتاده بود. علتش یک اصلاحِ **خودم** بود:
+// `liveDayOf` سخت‌گیر شد و ورودی سومش — بدنهٔ پاسخ — الزامی؛ ولی یک
+// فراخوانِ قدیمی همچنان دو ورودی می‌داد و بی‌صدا «ناموفق» می‌گرفت.
+//
+// نه آزمونِ رفتاری گرفتش و نه چیز دیگری، چون هیچ‌کدام مسیرِ
+// «پاسخِ endpoint → فراخوانِ رابط» را نمی‌سنجیدند. این دو نگهبان همان
+// مسیر را می‌بندند — نه با سنجیدنِ رفتار، که با غیرممکن‌کردنِ فراموشی.
+group('۱۱. انتساب روز جاری، بی فراموشی');
+{
+  // ── الف. هیچ فراخوانی نباید ورودی سوم را جا بگذارد ──
+  //
+  // شمارشِ کاما در سطحِ صفرِ پرانتز، نه `split(',')`: ورودی‌ها خودشان
+  // پرانتز و شیء دارند.
+  const topLevelArgs = (text, from) => {
+    let depth = 0, args = text[from + 1] === ')' ? 0 : 1;
+    for (let at = from; at < text.length; at += 1) {
+      const ch = text[at];
+      if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+      else if (ch === ')' || ch === ']' || ch === '}') { depth -= 1; if (!depth) break; }
+      else if (ch === ',' && depth === 1) args += 1;
+    }
+    return args;
+  };
+  const dayCallers = [];
+  for (const file of walk(ROOT, '.mjs')) {
+    const rel = path.relative(ROOT, file).split(path.sep).join('/');
+    if (rel === 'core/live-day.mjs' || rel.startsWith('tests/')) continue;
+    const text = fs.readFileSync(file, 'utf8');
+    for (const match of text.matchAll(/\bliveDayOf\s*\(/g)) {
+      dayCallers.push([rel, topLevelArgs(text, match.index + match[0].length - 1)]);
+    }
+  }
+  const short = dayCallers.filter(([, count]) => count < 3);
+  check('هر فراخوان liveDayOf بدنهٔ پاسخ را هم می‌دهد', short.length === 0,
+    short.map(([rel, count]) => `${rel}: ${faNum(count)} ورودی`).join('، '));
+
+  // ── ب. هر پاسخی که فاز بازار می‌فرستد، منبعش را هم می‌فرستد ──
+  //
+  // نیمهٔ دومِ همان باگ: حتی اگر رابط کلِ بدنه را می‌داد، پاسخِ
+  // `/api/live-trades` اصلاً `source` نداشت. مصرف‌کننده با فازِ تنها
+  // نمی‌تواند بگوید این پاسخ مالِ امروز است یا بایگانیِ دیروز.
+  const server = fs.readFileSync(path.join(ROOT, 'server/server.mjs'), 'utf8');
+  const bodies = [];
+  for (const match of server.matchAll(/sendJson\(res, 200, \{/g)) {
+    let depth = 0;
+    const from = match.index + match[0].length - 1;
+    for (let at = from; at < server.length; at += 1) {
+      const ch = server[at];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') { depth -= 1; if (!depth) { bodies.push(server.slice(from, at + 1)); break; } }
+    }
+  }
+  // قاعده دقیقاً همان چیزی است که `liveDayOf` لازم دارد: فاز **و** ساعت.
+  // پاسخی که ساعت ندارد (مثل `/api/logs`) اصلاً نمی‌تواند روز بسازد؛ فازش
+  // فقط بافتارِ تشخیصی است و منبع خواستن از آن، سروصدای بی‌فایده است.
+  const stamps = (body) => /(^|[{,\s])at\s*[:,]/.test(body);
+  const phased = bodies.filter((body) => body.includes('market: marketOpen()') && stamps(body));
+  const sourceless = phased.filter((body) => !/(^|[{,\s])source\s*[:,]/.test(body));
+  check('هر پاسخی که فاز و ساعت دارد، منبعش را هم اعلام می‌کند',
+    phased.length > 0 && sourceless.length === 0,
+    sourceless.length ? `${faNum(sourceless.length)} پاسخ بی منبع` : `${faNum(phased.length)} پاسخ بررسی شد`);
+}
+
 // هر بار ده‌ها هزار توکن بابت سطرهایی می‌دهد که همه سبزند. قاعده:
 // عامل با `--quiet` اجرا کند، آدم بدون آن.
 const QUIET = process.argv.includes('--quiet') || process.argv.includes('-q');

@@ -1,7 +1,7 @@
 import { buildChain, legContractSize } from '/core/chain.mjs';
 import { flattenActiveContracts, historyDateLabel, normalizeHistoryDate } from '/core/history.mjs';
 import { analyzeDailyOpenView, analyzeIntradayOpenView, liveTradeBatch, relationMatrix } from '/core/open-view.mjs';
-import { liveDayOf } from '/core/live-day.mjs';
+import { liveTapeDay } from '/core/live-day.mjs';
 import { liveBaseList, liveOpenViewContracts } from '/core/decision-dashboard.mjs';
 import { busyBlock } from '/ui/busy.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
@@ -466,7 +466,10 @@ export async function mount(root, { state }) {
           if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
           return payload;
         }));
-        const day = liveDayOf(parts[0]?.market, parts[0]?.at);
+        // کلِ بدنهٔ پاسخ می‌رود، نه دو فیلدش: انتساب روز به منبع هم نگاه
+        // می‌کند، و فرستادنِ ناقصش «منبع نامعلوم» می‌داد — بی‌صدا، و کلِ
+        // این نما را از کار می‌انداخت.
+        const day = liveTapeDay(parts[0]);
         if (!day.ok) throw new Error(`عکس بازار به امروز قابل انتساب نیست${day.why ? `؛ ${day.why}` : ''}`);
         analysisDate = day.date;
         const items = Object.assign({}, ...parts.map((part) => part.items || {}));

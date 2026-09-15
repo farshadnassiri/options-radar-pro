@@ -2,11 +2,11 @@
 //
 // دستهٔ مستقل آزمون. اجرا با کل مجموعه:  node tests/run.mjs
 
-import { check, group } from '../harness.mjs';
+import { check, group, readSrc } from '../harness.mjs';
 import { historyPrice } from '../../core/history.mjs';
 import {
-  LIVE_DAY_PHASES, LIVE_DAY_SOURCES, liveDayOf, liveDayRows, liveTapeCodes,
-  mergeLiveDay, tehranDateNumber,
+  LIVE_DAY_PHASES, LIVE_DAY_SOURCES, LIVE_SOURCE_TAPE, liveDayOf, liveDayRows,
+  liveTapeCodes, liveTapeDay, mergeLiveDay, tehranDateNumber,
 } from '../../core/live-day.mjs';
 import { applyLiveScope, liveDaySnapshot, scopeNote } from '../../ui/live-scope.mjs';
 
@@ -77,7 +77,40 @@ group('۸۷. دامنهٔ داده تا لحظهٔ جاری');
   // `source=watch-archive` سرو می‌کند — و آن اتفاق دقیقاً در فاز `open`
   // می‌افتد، یعنی همان‌جا که بررسیِ فاز سبز می‌شود. ردیفِ دیروز با مهر
   // امروز، از نبودِ ردیف امروز بدتر است.
-  check('فهرست منبع‌های زنده صریح است', LIVE_DAY_SOURCES.join(',') === 'watch,snapshot');
+  check('فهرست منبع‌های زنده صریح است',
+    LIVE_DAY_SOURCES.join(',') === 'watch,snapshot,live-trades', LIVE_DAY_SOURCES.join(','));
+
+  // ═══ باگی که این فهرست خودش ساخت ═══
+  //
+  // ممیزی (دور پنجم): «نگاه باز چندروزه» با پیام «عکس از منبع نامعلوم
+  // آمد» کاملاً از کار افتاد. وقتی این فهرست سخت‌گیر شد، نوار ریزمعامله —
+  // یک مصرف‌کنندهٔ کاملاً معتبر — نه در فهرست بود و نه اصلاً `source`
+  // می‌فرستاد. فهرستِ سفید فقط وقتی امن است که کسی نتواند عضوی را فراموش
+  // کند، و رشتهٔ خام در دو فایل دقیقاً همان فراموشی است.
+  //
+  // این ادعا همان مسیرِ واقعی را می‌سنجد: بدنه‌ای که سرور می‌فرستد، از
+  // همان ثابتی که سرور وارد می‌کند، تا خروجیِ تصمیم.
+  const tapeBody = (over = {}) => ({
+    at: Date.UTC(2026, 1, 10, 8, 30), source: LIVE_SOURCE_TAPE,
+    count: 3, market: { open: true, phase: 'open' }, items: {}, ...over,
+  });
+  check('پاسخِ نوار ریزمعامله به امروز نسبت داده می‌شود',
+    liveTapeDay(tapeBody()).ok === true && liveTapeDay(tapeBody()).date === 20260210,
+    JSON.stringify(liveTapeDay(tapeBody())));
+  // و همان بدنه بدون منبع — یعنی پاسخِ پیش از اصلاح — رد می‌شود
+  check('همان بدنه بدون منبع، همان پیام «منبع نامعلوم» را می‌دهد',
+    liveTapeDay({ at: tapeBody().at, market: { phase: 'open' } }).why.includes('منبع نامعلوم'));
+  check('نوار در بازار بسته هم به امروز نمی‌چسبد',
+    liveTapeDay(tapeBody({ market: { phase: 'before', why: 'بازار باز نشده' } })).ok === false);
+  // ورودیِ ناقص دیگر ممکن نیست: یک شیء می‌رود، نه دو فیلدِ جدا
+  check('ورودیِ خالی هم پرتاب نمی‌کند', liveTapeDay().ok === false && liveTapeDay(null).ok === false);
+  // و سرور واقعاً همان ثابت را می‌فرستد، نه رشته‌ای که بتواند جدا بیفتد
+  const srv87 = readSrc('../server/server.mjs');
+  check('سرور همان ثابتِ مشترک را وارد و ارسال می‌کند',
+    srv87.includes('LIVE_SOURCE_TAPE } from \'../core/live-day.mjs\'')
+    && srv87.includes('source: LIVE_SOURCE_TAPE'));
+  check('و نگاه باز کلِ بدنه را می‌دهد، نه دو فیلدش',
+    readSrc('../ui/tabs/open-view.mjs').includes('liveTapeDay(parts[0])'));
   check('عکس مستقیم تابلو پذیرفته می‌شود',
     liveDayOf({ phase: 'open' }, Date.UTC(2026, 1, 10, 8, 0), { source: 'snapshot' }).ok === true);
   for (const source of ['watch-archive', 'archive', 'roster', 'roster-range', '']) {
