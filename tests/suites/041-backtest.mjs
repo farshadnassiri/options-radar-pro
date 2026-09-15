@@ -75,13 +75,32 @@ group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فری�
     && source40.includes('intradayEntryExitProfile(timeframeDays'));
   check('بهترین بازه ورود و خروج به کاربر گفته می‌شود',
     source40.includes('بهترین بازه ورود') && source40.includes('بهترین بازه خروج'));
-  // چند ده درخواست بی‌خبر نباید برود؛ و روزی که نقطه مشترک ندارد باید شمرده
-  // شود نه اینکه با صفر پر شود.
-  check('گرفتن ریزمعامله چندروزه پیشرفت گزارش می‌کند و سقف دارد',
-    source40.includes('دریافت ریزمعامله ${fmt.int(index + 1)} از') && source40.includes('TIMEFRAME_DAY_CAP'));
-  check('روز بدون نقطه مشترک شمرده و صریح گزارش می‌شود',
-    source40.includes('if (points.length) out.push({ date: wanted[index], points }); else empty += 1;')
-    && source40.includes('روز بدون نقطه مشترک کنار گذاشته شد'));
+  // ═══ ممیزی ۱۴۰۵/۰۶/۲۴ ردیف ۲، ۳ و ۷ ═══
+  //
+  // نسخهٔ پیشینِ این دو ادعا، **متنِ** کد را می‌سنجید:
+  //
+  //   source40.includes('دریافت ریزمعامله ${fmt.int(index + 1)} از')
+  //
+  // یعنی همان حلقهٔ روز-به-روزی را قفل می‌کرد که ردیف ۴ ممیزی ایرادش بود،
+  // و دربارهٔ اینکه کاربر آن پیام را **می‌بیند** یا نه هیچ ادعایی نداشت.
+  // ردیف ۷ دقیقاً همین را گفت: «آزمون‌ها بیشتر ساختار کد و وجود توابع را
+  // کنترل می‌کنند، نه اتصال واقعی.»
+  check('۲. پیشرفت و خطا داخل همین تب نوشته می‌شود، نه فقط در نوار گام اول',
+    source40.includes("function tfNote(text, error = false)")
+    && source40.includes("tfNote(text); setStatus(text);")
+    && /catch \(error\) \{\s*const text = errorText\(error, 'تحلیل تایم‌فریم کامل نشد\.'\);\s*setStatus\(text, true\); tfNote\(text, true\);/.test(source40));
+  check('۵. «دریافت نشد» از «معامله نشده» جدا شمرده می‌شود',
+    source40.includes('if (requiredMissing(day.failed).length) { failedDays.push(date); continue; }')
+    && source40.includes('روز دریافت نشد و «بی‌معامله» شمرده نشد')
+    && source40.includes('روز بدون نقطهٔ مشترک کنار گذاشته شد'));
+  check('۳. سقف روز دیگر ۴۵ نیست و وقتی بگزد گفته می‌شود',
+    /const TIMEFRAME_DAY_CAP = (\d+);/.exec(source40)?.[1] >= 250
+    && source40.includes('روز قدیمی‌تر به‌خاطر سقف'));
+  check('۴. مسیر دسته‌ای استفاده می‌شود، نه یک درخواست به‌ازای هر روز و هر ابزار',
+    source40.includes("fetch('/api/trades/batch'") && source40.includes('tradeBatches(history, codes')
+    && !source40.includes('/api/trades?ins='));
+  check('۱. روز جاری از نوار زنده می‌آید',
+    source40.includes("getLiveTape(codes)") && source40.includes('liveDate = Number(loaded.liveDate) || 0;'));
   check('اگر ماتریس روی سطل درشت‌تر ساخته شود، همان‌جا گفته می‌شود',
     source40.includes('matrix.bucketSeconds !== matrix.requestedBucketSeconds'));
 }
