@@ -60,24 +60,24 @@ group('۱۱۷. UI مأموریت — ریسک و نقدشوندگی');
     && budget.budget.flexiblePct === 20);
   check('بودجه با ریسک نامعتبر عدد نمی‌سازد',
     !portfolioMissionRiskBudget(made.session, { ...risk, maxMarginUsePct: 90 }).ok);
-  check('عدد صحیح فارسی برای موقعیت باز خوانده می‌شود', parseIntegerInput('۱٬۲۵۰') === 1250);
+  check('عدد صحیح فارسی برای موقعیت باز خوانده می‌شود', parseIntegerInput('۱,۲۵۰') === 1250);
 
   const setup = createPortfolioStepOneDraft({
-    id: 'pt-risk-ui', baseIns: '900001', capitalToman: '۱٬۰۰۰٬۰۰۰٬۰۰۰',
-    reserveToman: '۲۰۰٬۰۰۰٬۰۰۰', startDate: 20260521, startSecond: 9 * 3600,
+    id: 'pt-risk-ui', baseIns: '900001', capitalToman: '۱,۰۰۰,۰۰۰,۰۰۰',
+    reserveToman: '۲۰۰,۰۰۰,۰۰۰', startDate: 20260521, startSecond: 9 * 3600,
     endDate: 20260621, endSecond: 12 * 3600 + 1800, grain: 'halfHour', createdAt: 123,
   });
   const outlook = createPortfolioOutlookDraft(setup.draft, {
-    direction: 'bullish', targetPriceToman: '۱۲٬۰۰۰',
-    rangeLowToman: '۱۱٬۰۰۰', rangeHighToman: '۱۳٬۰۰۰',
+    direction: 'bullish', targetPriceToman: '۱۲,۰۰۰',
+    rangeLowToman: '۱۱,۰۰۰', rangeHighToman: '۱۳,۰۰۰',
     volatilityView: 'higher', expectedVolatilityPct: '۴۵', confidencePct: '۷۰',
     thesis: 'انتظار شکست مقاومت',
   });
   const riskForm = {
     maxLossPct: '۸', maxDrawdownPct: '۱۵', minFreeCapitalPct: '۲۰',
     maxMarginUsePct: '۶۰', allowUnlimitedRisk: 'no',
-    minUnderlyingDailyValueToman: '۱۰٬۰۰۰٬۰۰۰٬۰۰۰',
-    minOptionDailyValueToman: '۱۰۰٬۰۰۰٬۰۰۰', minOpenInterest: '۱۰۰',
+    minUnderlyingDailyValueToman: '۱۰,۰۰۰,۰۰۰,۰۰۰',
+    minOptionDailyValueToman: '۱۰۰,۰۰۰,۰۰۰', minOpenInterest: '۱۰۰',
     maxSpreadPct: '۸', maxBookTakePct: '۳۰', requireFullBook: 'yes',
   };
   const riskDraft = createPortfolioRiskDraft(outlook.draft, riskForm);

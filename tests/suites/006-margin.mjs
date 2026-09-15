@@ -22,7 +22,7 @@ group('۵-ب. تطبیق وجه تضمین و بازده با صورتحساب �
   const broker300 = strategyMargin([
     leg('put', 42000, 1416, 300), leg('call', 56000, 5508, 300),
   ], { S, closes: { 0: 1416, 1: 5508 }, params, capitalMode: 'GROSS' });
-  check('صورتحساب ۴۲٬۰۰۰ / ۵۶٬۰۰۰ با حجم ۳۰۰ دقیقاً بازتولید می‌شود',
+  check('صورتحساب ۴۲,۰۰۰ / ۵۶,۰۰۰ با حجم ۳۰۰ دقیقاً بازتولید می‌شود',
     broker300.margin === 4_354_200_000, broker300.margin.toLocaleString());
   check('استرانگل ۳۰۰تایی فقط یک جزء تضمین ترکیبی دارد',
     broker300.comboRule === 'MAX_PLUS_PREMIUM' && broker300.components.length === 1
@@ -31,7 +31,7 @@ group('۵-ب. تطبیق وجه تضمین و بازده با صورتحساب �
   const broker200 = strategyMargin([
     leg('put', 46000, 2434, 200), leg('call', 62000, 3537, 200),
   ], { S, closes: { 0: 2434, 1: 3537 }, params, capitalMode: 'GROSS' });
-  check('صورتحساب ۴۶٬۰۰۰ / ۶۲٬۰۰۰ با حجم ۲۰۰ دقیقاً بازتولید می‌شود',
+  check('صورتحساب ۴۶,۰۰۰ / ۶۲,۰۰۰ با حجم ۲۰۰ دقیقاً بازتولید می‌شود',
     broker200.margin === 2_254_200_000, broker200.margin.toLocaleString());
   check('استرانگل ۲۰۰تایی هم فقط یک ستون وجه تضمین لازم دارد',
     broker200.components.length === 1 && broker200.components[0].amount === broker200.margin);

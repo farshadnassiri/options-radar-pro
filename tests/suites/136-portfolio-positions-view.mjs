@@ -53,7 +53,7 @@ group('۱۳۶. موقعیت‌های جلسه در تب');
     !/analyzePayoff|walkBook|portfolioCapitalRequirement|replayPortfolioSession/
       .test(code136));
   check('سرمایهٔ نمایش‌داده‌شده ده برابر کوچک‌تر از ریالِ سند است',
-    Number(row136.capitalTomanText.replace(/٬/g, '')
+    Number(row136.capitalTomanText.replace(/,/g, '')
       .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)))
       === doc136.capitalRial / 10, row136.capitalTomanText);
 

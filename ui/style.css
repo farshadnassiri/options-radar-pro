@@ -164,22 +164,27 @@
      متن فارسی در همان اندازه‌ای که لاتین راحت خوانده می‌شود سخت‌تر است،
      چون نقطه‌ها و سرکش‌ها بار معنایی دارند و اول از همه له می‌شوند.
      چون همهٔ شیوه‌نامه از همین توکن‌ها می‌خواند، تغییر مقیاس یک‌جاست. */
-  --fs-3xs: 12px;
-  --fs-2xs: 12.5px;
-  --fs-xs: 13.5px;
-  --fs-sm: 14.5px;
-  --fs-small: 14.5px;
-  --fs-md: 15.5px;
-  --fs-lg: 17px;
-  --fs-xl: 18px;
-  --fs-2xl: 20.5px;
-  --fs-3xl: 24px;
-  --fs-4xl: 29px;
-  --fs-hero: clamp(27px, 3.4vw, 40px);
-  --fs-chart-sm: 14px;
-  --fs-chart: 16px;
-  --fs-chart-lg: 18.5px;
-  --fs-axis: 17px;
+  /* ── پلهٔ دوم، ۱۴۰۵/۰۶/۲۵ ──────────────────────────────────────────
+     گزارش صاحب پروژه: «فونت‌ها درشت و بولد باشه در همه جا». مقیاس یک پلهٔ
+     دیگر بالا رفت و کف از ۱۲ به ۱۳ رسید — زیر ۱۳ پیکسل، نقطه‌های فارسی
+     روی نمایشگر معمولی له می‌شوند و همان جایی است که ستون‌های عددی خوانده
+     نمی‌شوند. چون همهٔ شیوه‌نامه از همین توکن‌ها می‌خواند، تغییر یک‌جاست. */
+  --fs-3xs: 13px;
+  --fs-2xs: 13.5px;
+  --fs-xs: 14.5px;
+  --fs-sm: 15.5px;
+  --fs-small: 15.5px;
+  --fs-md: 16.5px;
+  --fs-lg: 18px;
+  --fs-xl: 19.5px;
+  --fs-2xl: 22px;
+  --fs-3xl: 26px;
+  --fs-4xl: 31px;
+  --fs-hero: clamp(29px, 3.6vw, 43px);
+  --fs-chart-sm: 15px;
+  --fs-chart: 17px;
+  --fs-chart-lg: 19.5px;
+  --fs-axis: 18px;
 
   /* ═══════════════════ پوستهٔ شیشه‌ای ═══════════════════
 
@@ -317,6 +322,16 @@ body { direction: rtl; height: 100vh; overflow: hidden; display: flex; flex-dire
 b, strong { font-weight: 700; }
 code, pre { font-family: var(--mono-code); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
 .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
+/* ═══ هر عددی، خوانا و بولد ═══
+   خواستهٔ صاحب پروژه: «کلیهٔ ارقام خوانا و بولد باشد در هر جا». وزن ۷۰۰
+   روی خانه‌های عددی جدول و روی هر نگاره‌ای که عدد نشان می‌دهد، به‌علاوهٔ
+   `tabular-nums` که ستون‌ها را هم‌تراز نگه می‌دارد — بدون آن، بولدکردن
+   عرض رقم‌ها را جابه‌جا می‌کند و ستون می‌لرزد. */
+td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+.kpi b, .lmm-stat strong, .pulse-stat strong, .decision-kpi b { font-variant-numeric: tabular-nums; font-weight: 900; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 ::selection { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 
@@ -4190,8 +4205,17 @@ table.data thead th {
 .lmm-paired-spot td { padding: 0; border-bottom: 0; background: none; }
 /* با ۴۳ ستون، ردیف خط قیمت جاری از عرضِ دید بیرون می‌زند و برچسبش دیده
    نمی‌شود. خطِ چین کل عرض را می‌گیرد، ولی برچسب به لبهٔ دید می‌چسبد. */
-.lmm-paired-spot span { display: block; padding: 3px 8px; border-block: 1px dashed var(--warn); color: var(--warn); font-size: var(--fs-3xs); font-weight: 900; text-align: start; }
-.lmm-paired-spot b { position: sticky; inset-inline-start: 8px; }
+/* ردیف نماد پایه: نه یک خط‌چین، یک ردیفِ واقعی و کاملاً متمایز. با ۵۶
+   ستون از عرضِ دید بیرون می‌زند، پس محتوایش به لبهٔ دید می‌چسبد. */
+.lmm-paired-spot td { padding: 0; background: color-mix(in srgb, var(--warn) 13%, var(--panel)); }
+.lmm-paired-spot span { display: block; padding: 6px 10px; border-block: 2px solid var(--warn); }
+.lmm-paired-spot > td > span { position: sticky; inset-inline-start: 0; display: flex; align-items: baseline; gap: 10px; width: max-content; max-width: 100%; }
+.lmm-paired-spot b { color: var(--ink); font-size: var(--fs-sm); font-weight: 900; }
+.lmm-paired-spot strong { color: var(--ink); font-size: var(--fs-md); font-weight: 900; font-variant-numeric: tabular-nums; }
+.lmm-paired-spot em { font-size: var(--fs-xs); font-style: normal; font-weight: 900; }
+.lmm-paired-spot em.gain { color: var(--gain); }
+.lmm-paired-spot em.loss { color: var(--loss); }
+.lmm-paired-spot i { color: var(--muted); font-size: var(--fs-3xs); font-style: normal; font-weight: 700; }
 .lmm-paired thead th:first-child, .lmm-paired thead th:last-child { min-width: 96px; }
 /* سرستونِ مرتب‌شونده: دکمه است، ولی نباید شبیه دکمه باشد — سرستون بماند. */
 .lmm-sort-btn { display: inline-flex; align-items: center; gap: 4px; width: 100%; justify-content: center; padding: 2px 3px; border: 0; border-radius: var(--radius-sm); background: none; color: inherit; font: inherit; font-weight: inherit; cursor: pointer; }

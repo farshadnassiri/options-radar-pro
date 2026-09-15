@@ -21,20 +21,20 @@ import {
 group('۱۱۹. UI مأموریت — مرور، قفل و عکس شروع');
 {
   const setup = createPortfolioStepOneDraft({
-    id: 'pt-review-ui', baseIns: '900001', capitalToman: '۱٬۰۰۰٬۰۰۰٬۰۰۰',
-    reserveToman: '۲۰۰٬۰۰۰٬۰۰۰', startDate: 20260521, startSecond: 9 * 3600,
+    id: 'pt-review-ui', baseIns: '900001', capitalToman: '۱,۰۰۰,۰۰۰,۰۰۰',
+    reserveToman: '۲۰۰,۰۰۰,۰۰۰', startDate: 20260521, startSecond: 9 * 3600,
     endDate: 20260621, endSecond: 12 * 3600 + 1800, grain: 'halfHour', createdAt: 123,
   });
   const outlook = createPortfolioOutlookDraft(setup.draft, {
-    direction: 'bullish', targetPriceToman: '۱۲٬۰۰۰', rangeLowToman: '۱۱٬۰۰۰',
-    rangeHighToman: '۱۳٬۰۰۰', volatilityView: 'higher', expectedVolatilityPct: '۴۵',
+    direction: 'bullish', targetPriceToman: '۱۲,۰۰۰', rangeLowToman: '۱۱,۰۰۰',
+    rangeHighToman: '۱۳,۰۰۰', volatilityView: 'higher', expectedVolatilityPct: '۴۵',
     confidencePct: '۷۰', thesis: 'انتظار شکست مقاومت',
   });
   const risk = createPortfolioRiskDraft(outlook.draft, {
     maxLossPct: '۸', maxDrawdownPct: '۱۵', minFreeCapitalPct: '۲۰',
     maxMarginUsePct: '۶۰', allowUnlimitedRisk: 'no',
-    minUnderlyingDailyValueToman: '۱۰٬۰۰۰٬۰۰۰٬۰۰۰',
-    minOptionDailyValueToman: '۱۰۰٬۰۰۰٬۰۰۰', minOpenInterest: '۱۰۰',
+    minUnderlyingDailyValueToman: '۱۰,۰۰۰,۰۰۰,۰۰۰',
+    minOptionDailyValueToman: '۱۰۰,۰۰۰,۰۰۰', minOpenInterest: '۱۰۰',
     maxSpreadPct: '۸', maxBookTakePct: '۳۰', requireFullBook: 'yes',
   });
   const allocation = createPortfolioAllocationDraft(risk.draft, [

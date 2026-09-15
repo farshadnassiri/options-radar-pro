@@ -17,6 +17,8 @@
 // `ui/table.mjs` دارند و ماژول‌های `ui/tabs/` ندارند.
 import { scan } from '../core/scan.mjs';
 import { buildHistoryChain, historyBasis, historyChainNote } from '../core/history-chain.mjs';
+import { todayCompact } from '../core/history-range.mjs';
+import { liveDaySnapshot } from './live-scope.mjs';
 
 /** درخواستِ کدها، تکه‌تکه — `/api/dailies` سقف ۲۰۰ کد دارد. */
 const CHUNK = 100;
@@ -42,23 +44,51 @@ const asJson = async (url, fetcher) => {
  * به جدولِ خالی می‌برد بی آنکه بداند چرا. فهرستِ کوتاه‌ترِ راست، بهتر از
  * فهرستِ بلندِ امیدوارکننده است.
  */
-export async function historyDates(uaIns, count = 180, { fetcher } = {}) {
+export async function historyDates(uaIns, count = 180, { fetcher, includeToday = true } = {}) {
   const payload = await asJson(`/api/daily?ins=${encodeURIComponent(uaIns)}&n=${count}`, fetcher);
-  return (payload.rows || [])
+  const dates = new Set((payload.rows || [])
     .filter((row) => Number(row?.close) > 0 || Number(row?.last) > 0)
     .map((row) => Number(row.date))
-    .filter((date) => Number.isFinite(date) && date > 0)
-    .sort((a, b) => a - b);
+    .filter((date) => Number.isFinite(date) && date > 0));
+  // ── روزِ جاری، از منبع دوم ───────────────────────────────────────
+  //
+  // دفتر روزانهٔ بالادست ردیفِ امروز را تا پایانِ همان روز منتشر نمی‌کند،
+  // پس این فهرست تا شب یک روز عقب است. عکس تابلو به‌علاوهٔ نوار معامله
+  // همان روز را دارند — و فقط وقتی اضافه می‌شود که نماد **واقعاً** امروز
+  // معامله شده باشد، نه صرفاً چون تقویم می‌گوید امروز روزِ کاری است.
+  if (includeToday) {
+    const snap = await liveDaySnapshot({ wanted: [String(uaIns)], fetcher: fetcher || fetch });
+    if (snap.ok && snap.rows[String(uaIns)]) dates.add(snap.date);
+  }
+  return [...dates].sort((a, b) => a - b);
 }
 
-/** سری‌های روزانهٔ چند ابزار، در چند تکه. */
-export async function dailiesFor(codes = [], { fetcher } = {}) {
+/**
+ * سری‌های روزانهٔ چند ابزار، در چند تکه — به‌علاوهٔ ردیف امروز.
+ *
+ * `includeToday` وقتی خاموش می‌شود که فراخوان تاریخِ گذشته می‌خواهد: آن
+ * روز در دفتر روزانه هست و دو درخواستِ لحظه‌ای چیزی به آن اضافه نمی‌کنند.
+ */
+export async function dailiesFor(codes = [], { fetcher, includeToday = true } = {}) {
   const list = [...new Set(codes.map((code) => String(code || '')).filter(Boolean))];
   const out = {};
   for (let at = 0; at < list.length; at += CHUNK) {
     const part = list.slice(at, at + CHUNK);
     const payload = await asJson(`/api/dailies?ins=${part.join(',')}&n=0`, fetcher);
     Object.assign(out, payload);
+  }
+  if (!includeToday) return out;
+  const snap = await liveDaySnapshot({ wanted: list, fetcher: fetcher || fetch });
+  if (!snap.ok) return out;
+  for (const ins of list) {
+    const live = snap.rows[ins];
+    if (!live) continue;
+    const rows = Array.isArray(out[ins]?.rows) ? out[ins].rows : [];
+    out[ins] = {
+      ...(out[ins] || {}),
+      rows: [...rows.filter((row) => Number(row?.date) !== snap.date), live]
+        .sort((a, b) => Number(a.date) - Number(b.date)),
+    };
   }
   return out;
 }
@@ -95,7 +125,8 @@ export async function runHistoryScan({ def, uaIns, date, basis = 'CLOSE', settin
     if (row.insCode_C) codes.push(row.insCode_C);
     if (row.insCode_P) codes.push(row.insCode_P);
   }
-  const dailies = await dailiesFor(codes, { fetcher });
+  // روزِ گذشته دو درخواستِ لحظه‌ای لازم ندارد؛ دفتر روزانه خودش داردش.
+  const dailies = await dailiesFor(codes, { fetcher, includeToday: Number(date) >= todayCompact() });
   const built = buildHistoryChain(rows, dailies, date);
   const used = historyBasis(basis);
   const result = scan({

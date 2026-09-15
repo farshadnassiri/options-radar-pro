@@ -447,7 +447,7 @@ export async function mount(root, { state }) {
       if (!contracts.length) throw new Error('برای این نماد در این بازه قراردادی نبود');
       setStatus(`دریافت تاریخچهٔ ${fmt.int(contracts.length + 1)} ابزار…`);
       const codes = [...new Set([String(ua.ins), ...contracts.map((row) => String(row.ins))])];
-      const loaded = await loadHistoricalDailies(codes, ua.ins, fetch, { signal: job.signal, tolerateErrors: true,
+      const loaded = await loadHistoricalDailies(codes, ua.ins, fetch, { signal: job.signal, tolerateErrors: true, tapeFor: 'all',
         onProgress: ({ phase, done, total }) => {
           if (!current()) return;
           setStatus(`${phase === 'fallback' ? 'بررسی منبع دوم برای پاسخ‌های خالی' : 'دریافت تاریخچه'}: ${fmt.int(done)} از ${fmt.int(total)} ابزار بررسی شد.`);

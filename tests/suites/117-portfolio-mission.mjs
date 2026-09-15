@@ -41,14 +41,14 @@ group('۱۱۶. UI مأموریت — انتظار بازار');
 
   const setup = createPortfolioStepOneDraft({
     id: 'pt-outlook-test', baseIns: '900001',
-    capitalToman: '۱٬۰۰۰٬۰۰۰٬۰۰۰', reserveToman: '۲۰۰٬۰۰۰٬۰۰۰',
+    capitalToman: '۱,۰۰۰,۰۰۰,۰۰۰', reserveToman: '۲۰۰,۰۰۰,۰۰۰',
     startDate: 20260521, startSecond: 9 * 3600,
     endDate: 20260621, endSecond: 12 * 3600 + 1800,
     grain: 'halfHour', createdAt: 123,
   });
   const outlook = createPortfolioOutlookDraft(setup.draft, {
-    direction: 'bullish', targetPriceToman: '۱۲٬۰۰۰',
-    rangeLowToman: '۱۱٬۰۰۰', rangeHighToman: '۱۳٬۰۰۰',
+    direction: 'bullish', targetPriceToman: '۱۲,۰۰۰',
+    rangeLowToman: '۱۱,۰۰۰', rangeHighToman: '۱۳,۰۰۰',
     volatilityView: 'higher', expectedVolatilityPct: '۴۵٫۵',
     confidencePct: '۷۰', thesis: '  انتظار شکست مقاومت  ',
   });
@@ -63,8 +63,8 @@ group('۱۱۶. UI مأموریت — انتظار بازار');
     && !('risk' in outlook.draft) && !('liquidity' in outlook.draft));
   check('قیمت هدف متنی حتی با بازه معتبر نادیده گرفته نمی‌شود',
     !createPortfolioOutlookDraft(setup.draft, {
-      direction: 'neutral', targetPriceToman: 'هدف من', rangeLowToman: '۱۱٬۰۰۰',
-      rangeHighToman: '۱۳٬۰۰۰', volatilityView: 'stable', confidencePct: '۷۰', thesis: 'بازه',
+      direction: 'neutral', targetPriceToman: 'هدف من', rangeLowToman: '۱۱,۰۰۰',
+      rangeHighToman: '۱۳,۰۰۰', volatilityView: 'stable', confidencePct: '۷۰', thesis: 'بازه',
     }).ok);
   check('مرحله دوم بدون draft مرحله نخست ساخته نمی‌شود',
     !createPortfolioOutlookDraft(null, bullish).ok);

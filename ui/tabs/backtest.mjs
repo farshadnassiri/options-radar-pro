@@ -409,6 +409,7 @@ export async function mount(root, { state }) {
     box.querySelector('#bt-load-all').addEventListener('click', () => loadHistory());
   }
 
+  let liveDayNote = '';
   async function loadHistory({ requiredIns = [] } = {}) {
     entryDates = [];
     ua = chain.get(baseSelect.value);
@@ -421,8 +422,12 @@ export async function mount(root, { state }) {
       : [...new Set([String(ua.ins), ...contracts.map((contract) => String(contract.ins))])];
     $('bt-load').disabled = true; setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
     try {
-      const loaded = await loadHistoricalDailies(codes, ua.ins);
+      const loaded = await loadHistoricalDailies(codes, ua.ins, fetch, { tapeFor: 'all' });
       seriesByIns = loaded.seriesByIns;
+      // روز جاری از عکس زندهٔ تابلو می‌آید، نه از دفتر روزانه که تا شب
+      // منتشرش نمی‌کند. جمله‌اش را همان‌جا می‌گوییم چون ارقام امروز نهایی
+      // نیستند و کاربر باید بداند.
+      liveDayNote = loaded.liveNote || '';
       const failed = [String(ua.ins), ...wanted].filter((ins) => loaded.errors[ins]);
       if (failed.length) throw new Error(`دریافت تاریخچه ناموفق بود: ${failed.map((ins) => `${nameOf(contracts.find((contract) => String(contract.ins) === ins) || ua)}: ${loaded.errors[ins]}`).join('؛ ')}`);
       entryDates = fastPath
@@ -439,9 +444,9 @@ export async function mount(root, { state }) {
       entryWheel = mountDateWheel($('bt-entry-date'), entryDates, selected, () => refreshCombos(), { empty: 'روز قابل‌اجرا پیدا نشد.' });
       refreshCombos();
       paintFastPathNote();
-      setStatus(fastPath
+      setStatus(`${fastPath
         ? `${fmt.int(entryDates.length)} روز برای همین ترکیب آماده است — بی معطلیِ کلِ زنجیره.`
-        : `${fmt.int(entryDates.length)} روز قابل اجرا آماده است.`);
+        : `${fmt.int(entryDates.length)} روز قابل اجرا آماده است.`}${liveDayNote ? ` · ${liveDayNote}` : ''}`);
     } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); } finally { $('bt-load').disabled = false; }
   }
 

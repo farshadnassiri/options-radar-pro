@@ -1,7 +1,24 @@
+import { applyLiveScope } from './live-scope.mjs';
 import { normalizeHistoryDate } from '../core/history.mjs';
 
 /** تاریخچهٔ کامل، با همان منبع دومِ آزمون همه برای قراردادهای سررسیدشده. */
-export async function loadHistoricalDailies(codes, baseIns, fetcher = fetch, { onProgress = () => {}, signal, tolerateErrors = false } = {}) {
+/**
+ * ── دو منبع، یک سری ────────────────────────────────────────────────
+ *
+ * گزارش صاحب پروژه (۱۴۰۵/۰۶/۲۵): «امروز ۲۴ است ولی در تقویم انتخابگر تا
+ * ۲۳ آمده… برای روزهای قبل دیتای تاریخی داریم و برای روز جاری هم قیمت‌ها
+ * را داریم.»
+ *
+ * دقیقاً همین است: دفتر روزانهٔ بالادست ردیفِ یک روز را تا **پایان** همان
+ * روز منتشر نمی‌کند. پس هر فهرست تاریخی که فقط از `/api/dailies` ساخته
+ * شود، تا شب یک روز عقب است — و کاربر روزی را که قیمتش روی تابلو هست
+ * نمی‌تواند انتخاب کند.
+ *
+ * `includeToday` همان «اندپوینت دوم» است: عکس زندهٔ تابلو به انتهای سری
+ * چسبانده می‌شود. هیچ‌وقت پرتاب نمی‌کند و شکستش سری را خراب نمی‌کند —
+ * `liveNote` می‌گوید چه شد، و ردیف امروز صریحاً «بسته‌نشده» علامت می‌خورد.
+ */
+export async function loadHistoricalDailies(codes, baseIns, fetcher = fetch, { onProgress = () => {}, signal, tolerateErrors = false, includeToday = true, tapeFor = 'bases' } = {}) {
   const seriesByIns = {}, errors = {};
   const request = async (wanted, asOf = 0) => {
     let done = 0;
@@ -34,5 +51,7 @@ export async function loadHistoricalDailies(codes, baseIns, fetcher = fetch, { o
   const asOf = Math.max(0, ...(seriesByIns[String(baseIns)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean));
   const empty = codes.filter((ins) => !seriesByIns[ins]?.length && !errors[ins]);
   if (asOf && empty.length) await request(empty, asOf);
-  return { seriesByIns, errors };
+  if (!includeToday) return { seriesByIns, errors, liveNote: '', liveDate: 0 };
+  const live = await applyLiveScope(seriesByIns, { fetcher, tapeFor });
+  return { seriesByIns: live.series, errors, liveNote: live.note, liveDate: live.date || 0 };
 }
