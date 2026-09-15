@@ -36,7 +36,7 @@ group('۱۴۱. ارزش و سود در تب');
   check('هیچ رقم لاتینی در این ستون‌ها نیست',
     shown141.every((value) => !/[0-9]/.test(value)), shown141.join(' | '));
   check('واحد تومان است و ده برابر کوچک‌تر از ریال',
-    Number(row141.valueTomanText.replace(/٬/g, '')
+    Number(row141.valueTomanText.replace(/,/g, '')
       .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)))
       === val141.rows[0].valueRial / 10, row141.valueTomanText);
 

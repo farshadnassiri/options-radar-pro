@@ -69,7 +69,7 @@ group('۱۳۴. دفتر سرمایه در تب');
   check('هر عدد نمایش‌داده‌شده در خروجی دفتر عیناً هست',
     view134.committedTomanText === new Intl.NumberFormat('en-US')
       .format(ledger134.committed.totalRial / 10)
-      .replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]).replace(/,/g, '٬'),
+      .replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]).replace(/,/g, ','),
     view134.committedTomanText);
 
   // ── بند ۲: رقم فارسی و تومان ────────────────────────────────────────
@@ -93,7 +93,7 @@ group('۱۳۴. دفتر سرمایه در تب');
     view134.committedTomanText !== '—'
     && !/ریال/.test([...shown134, view134.headlineText].join(' ')));
   check('تبدیل واحد درست انجام شده — ده برابر کوچک‌تر از ریال',
-    near(Number(view134.freeTomanText.replace(/٬/g, '')
+    near(Number(view134.freeTomanText.replace(/,/g, '')
       .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))),
     ledger134.free.rial / 10, 1e-9), view134.freeTomanText);
 

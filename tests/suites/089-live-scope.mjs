@@ -18,10 +18,20 @@ group('۸۸. اتصال دامنهٔ داده به دو تب');
   const css88 = readSrc('../ui/style.css');
   const bt88 = readSrc('../ui/tabs/backtest.mjs');
 
-  check('حالت پیش‌فرض همان رفتار قبلی است', SCOPE_OPTIONS[0][0] === 'closed');
-  check('انتخابگر دو گزینه دارد', SCOPE_OPTIONS.length === 2 && SCOPE_OPTIONS[1][0] === 'live');
+  // ═══ پیش‌فرض عوض شد، و این ادعا همان را قفل می‌کند ═══
+  //
+  // ممیزی ۱۴۰۵/۰۶/۲۵: دفتر روزانهٔ بالادست ردیفِ امروز را تا پایان روز
+  // منتشر نمی‌کند، پس تا شب هیچ تقویمی امروز را نشان نمی‌داد — در حالی که
+  // عکس زندهٔ تابلو قیمت امروز را دارد. مسیر چسباندنش از قبل بود و فقط
+  // خاموش بود. حالا پیش‌فرض، روز جاری را هم می‌آورد.
+  check('پیش‌فرض، روز جاری را هم در بر می‌گیرد', SCOPE_OPTIONS[0][0] === 'live');
+  check('انتخابگر دو گزینه دارد و «بسته‌شده» سر جایش است',
+    SCOPE_OPTIONS.length === 2 && SCOPE_OPTIONS[1][0] === 'closed');
   check('گزینهٔ پیش‌فرض در نشانه‌گذاری انتخاب می‌شود',
-    scopeOptionsMarkup().includes('value="closed" selected') && !scopeOptionsMarkup().includes('value="live" selected'));
+    scopeOptionsMarkup().includes('value="live" selected') && !scopeOptionsMarkup().includes('value="closed" selected'));
+  // و راه برگشت باز است: هرکس عددِ نهایی می‌خواهد، صریح انتخابش می‌کند.
+  check('حالت بسته‌شده همچنان قابل انتخاب صریح است',
+    scopeOptionsMarkup('closed').includes('value="closed" selected'));
 
   for (const [name, src, id] of [['تحلیل تاریخی', hist88, 'h-scope'], ['آزمون همه استراتژی‌ها', pb88, 'pb-data-scope']]) {
     check(`${name} انتخابگر دامنه دارد`, src.includes(`id="${id}"`) && src.includes('scopeOptionsMarkup()'));

@@ -18,9 +18,9 @@ import { moveColumn } from '../../ui/table.mjs';
 group('۸۰. سورت و جابه‌جایی ستون جدول‌های رشته‌ای');
 {
   // ——— مقدار خانه ———
-  check('رقم فارسی عدد خوانده می‌شود', enhanceCellValue({ textContent: '۱٬۲۳۴' }).num === 1234);
+  check('رقم فارسی عدد خوانده می‌شود', enhanceCellValue({ textContent: '۱,۲۳۴' }).num === 1234);
   check('اولین عدد ملاک است، نه تکهٔ دوم خانه',
-    enhanceCellValue({ textContent: '۱٬۰۰۰ اثر ۵۰٪' }).num === 1000);
+    enhanceCellValue({ textContent: '۱,۰۰۰ اثر ۵۰٪' }).num === 1000);
   check('عدد منفی و اعشاری خوانده می‌شود', enhanceCellValue({ textContent: '-۱۲٫۵' }).num === -12.5);
   check('خانهٔ «—» بی‌مقدار است، نه صفر',
     enhanceCellValue({ textContent: '—' }).empty === true && enhanceCellValue({ textContent: '' }).empty === true);

@@ -8,9 +8,11 @@ import { impliedVolWhy, bsPrice } from '../../core/bs.mjs';
 import { liveIvAt, liveQuoteIvSet, IV_WHY_LABEL } from '../../core/live-market.mjs';
 import {
   liveBaseList, liveOpenViewContracts, mergeUnderlyingTrades, contractAnalytics,
-  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT,
+  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT, twoSidedChain,
 } from '../../core/decision-dashboard.mjs';
 import { dashboardClock } from '../../core/watch-health.mjs';
+import { liveDayOf, liveDayRows, mergeLiveDay } from '../../core/live-day.mjs';
+import { fmt, toEnDigits } from '../../ui/fmt.mjs';
 
 group('۲۴۸. ممیزی رصد زنده — فهرست لحظه‌ای، گردش پایه، علت تلاطم و ساعت');
 
@@ -89,7 +91,7 @@ check('هر کد یک جملهٔ فارسی دارد',
 
 // ————— ۴. تلاطم مشاهده‌ای در برابر تلاطم اجرایی —————
 const S248 = { dayCountYear: 365, rFree: 0.3, divYield: 0, ivLo: 0.01, ivHi: 5 };
-// نمونهٔ واقعی ممیزی: ضهرم۶۰۵۰ — پایه ۷۲٬۵۷۲، اعمال ۶۸٬۰۰۰، پریمیوم ۴٬۶۳۱.
+// نمونهٔ واقعی ممیزی: ضهرم۶۰۵۰ — پایه ۷۲,۵۷۲، اعمال ۶۸,۰۰۰، پریمیوم ۴,۶۳۱.
 const audited248 = { kind: 'call', strike: 68000, days: 30, last: 4631, close: 4631, bid: 5200, ask: 5400 };
 const set248 = liveQuoteIvSet(audited248, 72572, S248);
 check('نمونهٔ ممیزی همچنان حل نمی‌شود، ولی حالا علتش را می‌گوید',
@@ -128,8 +130,8 @@ check('قراردادِ امروز بی‌معامله نشان‌دار می‌
 //
 // ممیزی ردیف ۹: «یک نرخ سود سراسری برای تمام نمادها… می‌تواند کف نظری و
 // دلتا را مخدوش کند.» اندازه‌گیری روی همان نمونه نشان داد این فرض **علت
-// غالب** است، نه ناهم‌زمانی: با نرخ ۳۰٪ کف نظری ۶٬۲۲۸ است و قیمت ۴٬۶۳۱
-// زیرش می‌افتد؛ با نرخ صفر کف ۴٬۵۷۲ می‌شود و همان قیمت بالای آن است.
+// غالب** است، نه ناهم‌زمانی: با نرخ ۳۰٪ کف نظری ۶,۲۲۸ است و قیمت ۴,۶۳۱
+// زیرش می‌افتد؛ با نرخ صفر کف ۴,۵۷۲ می‌شود و همان قیمت بالای آن است.
 // ستون «کف نظری» همین را دیدنی می‌کند تا انتخاب فرض، تصمیمِ آگاهانه باشد.
 const floorHigh248 = contractAnalytics(rowA248, { rFree: 0.3, divYield: 0, yearDays: 365, ivLo: 0.01 });
 const floorZero248 = contractAnalytics(rowA248, { rFree: 0, divYield: 0, yearDays: 365, ivLo: 0.01 });
@@ -267,3 +269,88 @@ check('۱. نمودارهای درون‌روزی نگاه باز هم حین د
   ovD248.includes("for (const id of ['ov-day-price', 'ov-day-gap', 'ov-day-strike', 'ov-day-premium', 'ov-day-iv'])"));
 check('۱. نشانهٔ بارگذاری حرکت را برای کاربرِ حساس خاموش می‌کند',
   cssD248.includes('@media (prefers-reduced-motion: reduce)') && cssD248.includes('.busy-spin, .skeleton-bar'));
+
+// ————————————————————————————————————————————————————————————————
+// گزارش ۱۴۰۵/۰۶/۲۵ (دوم): ردیف نماد پایه، قلم و عدد، مرتب‌سازی واقعی،
+// و روز جاری در تقویم.
+// ————————————————————————————————————————————————————————————————
+group('۲۴۸-پ. ردیف پایه، خوانایی عدد، مرتب‌سازی مشتق و روز جاری');
+
+// ═══ ۴. چرا مرتب‌سازی کار نمی‌کرد ═══
+//
+// ستون‌های مشتق — فاصله تا سربه‌سر، دلتا، اهرم، بازده — را `contractRow`
+// می‌سازد و آن **حین رسم هر خانه** صدا زده می‌شد، یعنی بعد از مرتب‌سازی.
+// مرتب‌ساز روی ردیف خام می‌نشست، آن کلیدها را `undefined` می‌دید، همه را
+// «خالی» می‌شمرد و بی‌صدا به ترتیب قیمت اعمال برمی‌گشت.
+const raw248 = [
+  { kind: 'call', ins: 'a', strike: 2000, last: 300, spot: 2100, days: 30, ivPct: 40, oi: 5, volume: 1 },
+  { kind: 'call', ins: 'b', strike: 2400, last: 40, spot: 2100, days: 30, ivPct: 40, oi: 5, volume: 1 },
+  { kind: 'call', ins: 'c', strike: 2200, last: 120, spot: 2100, days: 30, ivPct: 40, oi: 5, volume: 1 },
+];
+const byGap = (rows) => sortPairedChain(twoSidedChain(rows, 2100).rows, { key: 'breakevenGapPct', side: 'call', dir: -1 })
+  .map((row) => row.strike).join(',');
+check('ردیف خام، ستون مشتق را ندارد و مرتب‌سازی بی‌صدا بی‌اثر می‌ماند',
+  byGap(raw248) === '2000,2200,2400');
+const rich248 = raw248.map((row) => ({ ...row, breakevenGapPct: ((row.strike + row.last) / row.spot - 1) * 100 }));
+check('با ردیف غنی، همان مرتب‌سازی واقعاً کار می‌کند',
+  byGap(rich248) === '2400,2200,2000');
+
+const mapE248 = readSrc('../ui/live-market-map.mjs');
+check('۴. غنی‌سازی پیش از ساخت زنجیره انجام می‌شود، نه حین رسم خانه',
+  mapE248.includes('twoSidedChain(rows.map((row) => contractRow(row, params)), spot)')
+  && !/function pairedCells\([\s\S]{0,220}contractRow\(/.test(mapE248));
+
+// ————— ۱. ردیف نماد پایه —————
+check('۱. ردیف نماد پایه نام، آخرین قیمت و تغییرش را دارد',
+  mapE248.includes('lmm-paired-spot') && mapE248.includes('آخرین معاملهٔ نماد پایه')
+  && mapE248.includes('const uaChange = Number(ua?.changePct);'));
+const cssE248 = readSrc('../ui/style.css');
+check('۱. و از هر ردیف دیگر جدا دیده می‌شود',
+  cssE248.includes('.lmm-paired-spot td { padding: 0; background: color-mix(in srgb, var(--warn)')
+  && cssE248.includes('.lmm-paired-spot strong {'));
+
+// ————— ۲ و ۳. قلم و عدد —————
+const fmtSrc248 = readSrc('../ui/fmt.mjs');
+check('۳. جداکنندهٔ سه‌رقمی کاما است، نه خطِ موی «٬»',
+  fmt.money(1234567) === '۱,۲۳۴,۵۶۷' && fmt.int(-98765) === '−۹۸,۷۶۵');
+// رفت و برگشت باید سالم بماند، وگرنه ورودی عددی کاربر می‌شکند.
+check('۳. خواندن ورودی کاربر هر دو جداکننده را می‌پذیرد',
+  toEnDigits('۱,۲۳۴,۵۶۷') === '1234567' && toEnDigits('۱٬۲۳۴٬۵۶۷') === '1234567');
+check('۳. اعشار و منفی همچنان فارسی‌اند', fmt.pct(-5.6) === '−۵٫۶۰');
+check('۳. و «٬» دیگر ساخته نمی‌شود', !fmtSrc248.includes("replace(/,/g, '٬')"));
+// ═══ ۲. کف مقیاس قلم ═══
+// زیر ۱۳ پیکسل نقطه‌های فارسی روی نمایشگر معمولی له می‌شوند، و همان جایی
+// است که ستون عددی خوانده نمی‌شود.
+const scale248 = Object.fromEntries([...cssE248.matchAll(/--fs-(\w+): ([\d.]+)px;/g)].map((m) => [m[1], Number(m[2])]));
+check('۲. هیچ پلهٔ مقیاس قلم زیر ۱۳ پیکسل نیست',
+  Object.values(scale248).every((size) => size >= 13),
+  Object.entries(scale248).filter(([, v]) => v < 13).map(([k]) => k).join('، '));
+check('۲. عددها هم‌عرض و بولد نوشته می‌شوند',
+  cssE248.includes('td.n, .tbl-body td.n, .lmm-paired td, .data td.n {')
+  && cssE248.includes('font-variant-numeric: tabular-nums;') && cssE248.includes('font-weight: 700;'));
+
+// ————— ۵. روز جاری، از منبع دوم —————
+// ═══ چرا دو اندپوینت ═══
+// دفتر روزانهٔ بالادست ردیف یک روز را تا پایان همان روز منتشر نمی‌کند، پس
+// هر فهرست تاریخی که فقط از آن ساخته شود تا شب یک روز عقب است.
+const day248 = liveDayOf({ phase: 'open' }, Date.parse('2026-09-15T10:00:00+03:30'));
+check('عکس تابلو در جلسهٔ باز به روز جاری نسبت داده می‌شود',
+  day248.ok === true && day248.date === 20260915);
+const boardRows248 = liveDayRows([{ uaInsCode: '11', pDrCotVal_UA: 105, pClosing_UA: 104, priceYesterday_UA: 101, qTotTran5J_UA: 50, qTotCap_UA: 5000 }], { date: day248.date });
+const merged248b = mergeLiveDay({ 11: [{ date: 20260913, last: 100 }, { date: 20260914, last: 101 }] }, boardRows248, { date: day248.date });
+check('۵. روز جاری به انتهای سری تاریخی اضافه می‌شود',
+  merged248b.series[11].map((row) => row.date).join(',') === '20260913,20260914,20260915'
+  && merged248b.added === 1);
+// و صریحاً نشان‌دار می‌ماند: ارقام امروز نهایی نیستند.
+check('۵. ردیف امروز «زنده» علامت می‌خورد، نه اینکه شبیه روز بسته شود',
+  merged248b.series[11].at(-1).live === true
+  && !('live' in merged248b.series[11][0]));
+// عکس تابلو «اولین/کمترین/بیشترین» ندارد؛ نداشتنش صفر ادعا نمی‌شود.
+check('۵. سه عددی که عکس تابلو ندارد، ساخته نمی‌شوند',
+  [boardRows248['11'].first, boardRows248['11'].low, boardRows248['11'].high].every((v) => v === 0));
+const loaderSrc248 = readSrc('../ui/history-dailies.mjs');
+check('۵. بارگذار مشترک هر دو منبع را می‌چسباند و راه خاموشی دارد',
+  loaderSrc248.includes('includeToday = true') && loaderSrc248.includes('await applyLiveScope(seriesByIns, { fetcher })')
+  && loaderSrc248.includes('liveNote: live.note'));
+check('۵. پیش‌فرض انتخابگر دامنه، روز جاری را در بر می‌گیرد',
+  readSrc('../ui/live-scope.mjs').includes('scopeOptionsMarkup = (selected = SCOPE_LIVE)'));

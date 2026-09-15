@@ -104,14 +104,14 @@ group('۲۲۴-ج. «وقتی فاصله رسید به ۹۰٪ فاصلهٔ ۵ ر�
 {
   const condition = { metric: 'current', op: 'ge', value: 90, ref: 'windowMean', windowDays: 5 };
   // پنجره **پیش از** نقطهٔ آخر بسته می‌شود: [2000,2100,2200,2300,2500]
-  // میانگین ۲٬۲۲۰ و ۹۰٪ آن ۱٬۹۹۸.
+  // میانگین ۲,۲۲۰ و ۹۰٪ آن ۱,۹۹۸.
   check('مرجع، میانگینِ پنج نقطهٔ پیش از امروز است — نه شاملِ خودِ امروز',
     near(referenceValue(condition, snap()), 2220), `${referenceValue(condition, snap())}`);
   check('و آستانه، همان ضرب در درصدِ خواسته‌شده',
     near(thresholdOf(condition, snap()), 1998), `${thresholdOf(condition, snap())}`);
-  check('فاصلهٔ ۲٬۴۰۰ از آن آستانه بالاتر است، پس شرط می‌گیرد',
+  check('فاصلهٔ ۲,۴۰۰ از آن آستانه بالاتر است، پس شرط می‌گیرد',
     checkCondition(condition, snap()).held === true);
-  check('و فاصلهٔ ۱٬۹۰۰ نمی‌گیرد',
+  check('و فاصلهٔ ۱,۹۰۰ نمی‌گیرد',
     checkCondition(condition, snap({ current: 1900 })).held === false);
   check('پنجرهٔ کوتاه‌تر، مرجع دیگری می‌دهد',
     near(referenceValue({ ...condition, windowDays: 2 }, snap()), 2400),

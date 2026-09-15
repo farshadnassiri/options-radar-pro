@@ -25,7 +25,7 @@ import { buildRadarHistory } from '../../core/radar-history.mjs';
 import { jalaliToGregorian } from '../../core/jalali.mjs';
 import { byId } from '../../strategies/catalog.mjs';
 
-// اسپرد صعودی کال: خرید ۵۰٬۰۰۰، فروش ۵۴٬۰۰۰.
+// اسپرد صعودی کال: خرید ۵۰,۰۰۰، فروش ۵۴,۰۰۰.
 const BULL = [
   { ins: 'c50', kind: 'call', side: 'buy', strike: 50000, size: 1000, ratio: 1, name: 'ضهرم۵۰' },
   { ins: 'c54', kind: 'call', side: 'sell', strike: 54000, size: 1000, ratio: 1, name: 'ضهرم۵۴' },
@@ -50,7 +50,7 @@ group('۲۲۲-الف. تایم‌فریم و مقایسه با دارایی پا
     basis: 'CLOSE', strategyId: 'bull-call-spread', entry: 1400, baseIns: 'ua',
   });
 
-  check('چهل روز، چهل نقطه، و فاصله از ۱٬۴۰۰ تا ۲٬۹۶۰ می‌رود',
+  check('چهل روز، چهل نقطه، و فاصله از ۱,۴۰۰ تا ۲,۹۶۰ می‌رود',
     series.points.length === 40 && series.points[0].current === 1400
     && series.points.at(-1).current === 2960,
     `${series.points[0]?.current} → ${series.points.at(-1)?.current}`);

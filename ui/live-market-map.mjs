@@ -266,11 +266,22 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     return (fmt[item.fmt] || fmt.text)(value);
   };
 
-  function pairedCells(row, side, oiMax, itm) {
+  // ═══ ردیف‌ها **پیش از** مرتب‌سازی غنی می‌شوند ═══
+  //
+  // گزارش صاحب پروژه: «مرتب‌سازی درست کار نمی‌دهد؛ مثلاً ستون درصد فاصله
+  // تا سربه‌سر.» علتش همین‌جا بود: ستون‌های مشتق — فاصله تا سربه‌سر، دلتا،
+  // اهرم، بازده — را `contractRow` می‌ساخت و آن **حین رسم هر خانه** صدا
+  // زده می‌شد، یعنی بعد از مرتب‌سازی. مرتب‌ساز روی ردیف خام می‌نشست، آن
+  // کلیدها را `undefined` می‌دید، همه را «خالی» می‌شمرد و بی‌صدا به ترتیب
+  // قیمت اعمال برمی‌گشت. هیچ خطایی هم نمی‌داد — فقط کاری نمی‌کرد.
+  //
+  // حالا یک بار برای هر قرارداد غنی می‌شود و همان ردیفِ غنی هم مرتب
+  // می‌شود هم رسم. کنارش، به‌جای «تعداد خانه» بار محاسبه «تعداد قرارداد»
+  // شد.
+  function pairedCells(enriched, side, oiMax, itm) {
     const shade = itm ? ' is-itm' : '';
     const cols = pairedCols();
-    if (!row) return cols.map(() => `<td class="lmm-paired-void${shade}">—</td>`).join('');
-    const enriched = contractRow(row, greekParams());
+    if (!enriched) return cols.map(() => `<td class="lmm-paired-void${shade}">—</td>`).join('');
     const cells = cols.map((item) => {
       // نوار «دیوار» فقط زیر موقعیت باز می‌آید؛ روی هر ستون عددی، نوار
       // یعنی شلوغی بی‌معنی.
@@ -368,7 +379,8 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
 
   function paintPairedChain(rows) {
     const spot = Number(contracts().find((row) => Number(row.spot) > 0)?.spot);
-    const chain = twoSidedChain(rows, spot);
+    const params = greekParams();
+    const chain = twoSidedChain(rows.map((row) => contractRow(row, params)), spot);
     if (!chain.rows.length) { pairedHost.innerHTML = '<p class="empty-note">برای این سررسید قرارداد معتبری در عکس بازار نیست.</p>'; return; }
     const oiMax = chainSideMax(chain.rows, 'oi');
     const cols = pairedCols();
@@ -382,7 +394,20 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     // «بین دو اعمالِ در بر گیرنده» جایی ندارد.
     const ladder = pairedSort.key === 'strike';
     const width = cols.length * sides.length + sides.length + 1;
-    const spotRow = `<tr class="lmm-paired-spot"><td colspan="${width}"><span><b>قیمت جاری پایه ${fmt.money(chain.spot)}</b></span></td></tr>`;
+    // ── ردیف نماد پایه، متمایز از هر ردیف دیگر ───────────────────────
+    //
+    // خواستهٔ صاحب پروژه: «قیمت آخرین معاملهٔ نماد پایه در یک ردیف، متمایز
+    // از سایر ردیف‌ها.» پیش از این فقط یک خط‌چین نازک با یک برچسب بود.
+    // حالا خودِ ردیف است: نام نماد، آخرین قیمت، و تغییرش نسبت به پایانی
+    // دیروز — با رنگ و وزن جدا، تا چشم بدون گشتن پیدایش کند.
+    const ua = selectedUa();
+    const uaChange = Number(ua?.changePct);
+    const spotRow = `<tr class="lmm-paired-spot"><td colspan="${width}"><span>
+      <b>${esc(ua?.name || 'نماد پایه')}</b>
+      <strong>${fmt.money(chain.spot)}</strong>
+      <em class="${tone(uaChange)}">${Number.isFinite(uaChange) ? `${fmt.pct(uaChange)}٪` : '—'}</em>
+      <i>آخرین معاملهٔ نماد پایه</i>
+    </span></td></tr>`;
     const ordered = sortPairedChain(chain.rows, pairedSort);
     // در ترتیب نردبانی، خط قیمت جاری سرِ جای خودش می‌ماند؛ محاسبه دوباره
     // انجام می‌شود چون ممکن است ترتیب نزولی باشد.

@@ -19,8 +19,8 @@ group('۱۶۵. اتصال سرمایه قطعی به فرم جلسه بعد');
 
   check('پرونده کامل، اقدام آماده با سرمایه قطعی می‌سازد',
     view165.ok && view165.available && view165.state === 'ready'
-    && view165.capitalText === '۱٬۰۰۰٬۰۰۰ تومان'
-    && view165.capitalInputText === '۱٬۰۰۰٬۰۰۰');
+    && view165.capitalText === '۱,۰۰۰,۰۰۰ تومان'
+    && view165.capitalInputText === '۱,۰۰۰,۰۰۰');
   check('نماد، جلسه، سبد و لحظه منشأ برای نمایش آماده‌اند',
     view165.baseText === '۹۰۰۰۰۱'
     && view165.sourceSessionText.includes('۱۶۵')

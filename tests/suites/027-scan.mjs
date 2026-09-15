@@ -58,7 +58,7 @@ group('۲۶. فیلترهای نقدشوندگی غربال');
   const byValueOk = scanFn({ def: byId('naked-call'), chain: chainL, uaKeys: ['L'], settings: { ...s0, minLegValue: 100000000 } });
   check('حداقل ارزش معاملات زیر واقعی، ردیف را نمی‌اندازد', byValueOk.rows.length === base.rows.length);
 
-  // نقدشوندگی زنجیره: مجموع ارزش کل زنجیره همین پایه = ۲ پا × ۲ سمت × ۳۰۰م = ۱٬۲۰۰٬۰۰۰٬۰۰۰
+  // نقدشوندگی زنجیره: مجموع ارزش کل زنجیره همین پایه = ۲ پا × ۲ سمت × ۳۰۰م = ۱,۲۰۰,۰۰۰,۰۰۰
   const combos = generateCombos(byId('naked-call'), chainL.get('L'), { ...s0, minUaLiquidity: 1500000000 });
   check('نقدشوندگی زنجیره پایین‌تر از آستانه، کل پایه را حذف می‌کند (نه فقط یک پا)',
     combos.length === 0, `${combos.length} ترکیب`);

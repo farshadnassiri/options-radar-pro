@@ -97,7 +97,7 @@ group('۱۵۹. استخراج ضعف‌های مستند پرونده');
   const money159 = shown159.rows.find((row) => row.code === 'risk-breached:maxMarginUse')
     ?.evidence.find((row) => row.key === 'headroomRial')?.valueText;
   check('شاهد مالی تومان و رقم فارسی است',
-    money159 === '−۶۰٬۰۰۰ تومان' && !/[0-9]/.test(money159));
+    money159 === '−۶۰,۰۰۰ تومان' && !/[0-9]/.test(money159));
   check('شاهد درصدی واحد خودش را دارد',
     shown159.rows.find((row) => row.code === 'risk-near:missionLossCap')
       ?.evidence.some((row) => row.key === 'headroomPct' && row.valueText.endsWith('٪')));

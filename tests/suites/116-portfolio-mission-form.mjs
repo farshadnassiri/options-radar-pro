@@ -18,16 +18,16 @@ import {
 group('۱۱۵. پوسته UI مأموریت — مرحله نخست');
 {
   check('ورودی یک میلیارد تومان با رقم فارسی خوانده می‌شود',
-    parseTomanInput('۱٬۰۰۰٬۰۰۰٬۰۰۰') === 1_000_000_000);
+    parseTomanInput('۱,۰۰۰,۰۰۰,۰۰۰') === 1_000_000_000);
   check('رقم عربی و فاصله هم بدون اعشار خوانده می‌شوند',
     parseTomanInput('١ ٢٣٤') === 1234);
   check('متن و اعشار سرمایه عدد معتبر ساخته نمی‌کنند',
     Number.isNaN(parseTomanInput('یک میلیارد')) && Number.isNaN(parseTomanInput('۱۲٫۵')));
-  check('تومان فقط یک بار به ریال تبدیل می‌شود', tomanToRial('۱٬۰۰۰') === 10_000);
+  check('تومان فقط یک بار به ریال تبدیل می‌شود', tomanToRial('۱,۰۰۰') === 10_000);
   check('عدد بیرون بازه امن ریال پذیرفته نمی‌شود', Number.isNaN(tomanToRial(Number.MAX_SAFE_INTEGER)));
 
   const preview = previewPortfolioCapital({
-    capitalToman: '۱٬۰۰۰٬۰۰۰٬۰۰۰', reserveToman: '۲۰۰٬۰۰۰٬۰۰۰',
+    capitalToman: '۱,۰۰۰,۰۰۰,۰۰۰', reserveToman: '۲۰۰,۰۰۰,۰۰۰',
   });
   check('خلاصه زنده سرمایه از همان مدل session می‌آید',
     preview.ok && preview.plan.initialRial === 10_000_000_000
@@ -38,7 +38,7 @@ group('۱۱۵. پوسته UI مأموریت — مرحله نخست');
 
   const stepArgs = {
     id: 'pt-ui-test', baseIns: '900001',
-    capitalToman: '۱٬۰۰۰٬۰۰۰٬۰۰۰', reserveToman: '۲۰۰٬۰۰۰٬۰۰۰',
+    capitalToman: '۱,۰۰۰,۰۰۰,۰۰۰', reserveToman: '۲۰۰,۰۰۰,۰۰۰',
     startDate: 20260521, startSecond: 9 * 3600,
     endDate: 20260621, endSecond: 12 * 3600 + 1800,
     grain: 'halfHour', createdAt: 123,

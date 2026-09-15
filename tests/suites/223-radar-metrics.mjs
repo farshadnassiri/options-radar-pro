@@ -45,9 +45,9 @@ group('۲۲۳-الف. بیشترین سود و زیان، و درصدشان');
     legs: BULL, prices: { c50: 5000, c60: 1000 }, spot: SPOT,
     settings: S, daysLeft: 30, scale: 'raw', units: 1,
   });
-  check('اسپرد صعودی کال بدهکار است و بهایش ۴٬۰۰۰',
+  check('اسپرد صعودی کال بدهکار است و بهایش ۴,۰۰۰',
     bull.ok && bull.side === 'debit' && bull.cost === 4000, `${bull.side} ${bull.cost}`);
-  check('بیشترین سودش زیر عرضِ ۱۰٬۰۰۰ منهای بها می‌ماند — کارمزد تسویه واقعی است',
+  check('بیشترین سودش زیر عرضِ ۱۰,۰۰۰ منهای بها می‌ماند — کارمزد تسویه واقعی است',
     bull.maxProfit > 5800 && bull.maxProfit < 6000, `${bull.maxProfit}`);
   check('بیشترین زیانش همان بهایی است که پرداخته‌ای',
     near(bull.maxLoss, 4000), `${bull.maxLoss}`);

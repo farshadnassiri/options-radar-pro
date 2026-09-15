@@ -116,12 +116,12 @@ group('۱۵۷. سرمایه نهایی و فاصله از هدف');
 
   const view157 = portfolioDossierAnalysisView(analysis157);
   check('نمایش سرمایه و هدف، تومان و رقم فارسی است',
-    view157.initialText === '۱٬۰۰۰٬۰۰۰ تومان'
-    && view157.finalText === '۱٬۰۰۰٬۰۰۰ تومان'
-    && view157.targetProfitText === '۲۵۰٬۰۰۰ تومان'
+    view157.initialText === '۱,۰۰۰,۰۰۰ تومان'
+    && view157.finalText === '۱,۰۰۰,۰۰۰ تومان'
+    && view157.targetProfitText === '۲۵۰,۰۰۰ تومان'
     && view157.targetReturnText.includes('۲۵') && view157.targetReturnText.endsWith('٪'));
   check('فاصله منفی لحن زیان و حکم خودش را دارد',
-    view157.targetGapText === '−۲۵۰٬۰۰۰ تومان'
+    view157.targetGapText === '−۲۵۰,۰۰۰ تومان'
     && view157.targetTone === 'loss' && view157.targetStateLabel === 'هدف محقق نشد');
   const unknownView157 = portfolioDossierAnalysisView(unknownAnalysis157);
   check('نمایش نامعلوم خط تیره است، نه صفر',

@@ -25,8 +25,16 @@ const fakeFetch = async (url) => {
 const loaded = await loadHistoricalDailies(['base', 'put', 'call', 'empty', 'broken'], 'base', fakeFetch);
 check('قیمت ورود و خروج قرارداد سررسیدشده از منبع دوم بازسازی می‌شود',
   loaded.seriesByIns.put === optionRows && loaded.seriesByIns.call === optionRows);
+// شمارش روی **دفتر روزانه** است، نه روی هر درخواست: از ۱۴۰۵/۰۶/۲۵ این
+// بارگذار عکس زندهٔ تابلو را هم می‌گیرد تا روز جاری — که دفتر روزانه تا
+// پایان روز منتشرش نمی‌کند — از فهرست تاریخ‌ها جا نماند.
+const dailyCalls = calls.filter((url) => url.startsWith('/api/dailies'));
 check('فقط ابزار خالی با آخرین روز واقعی پایه دوباره درخواست می‌شود',
-  calls.length === 2 && calls[1] === '/api/dailies?ins=put,call,empty&n=0&asOf=20240918');
+  dailyCalls.length === 2 && dailyCalls[1] === '/api/dailies?ins=put,call,empty&n=0&asOf=20240918');
+check('عکس زندهٔ تابلو دقیقاً یک بار و جدا از دفتر روزانه گرفته می‌شود',
+  calls.filter((url) => url.startsWith('/api/history/universe')).length === 1);
+check('خرابی عکس زنده، سری تاریخی را خراب نمی‌کند',
+  loaded.seriesByIns.base === baseRows && typeof loaded.liveNote === 'string');
 check('نبود معامله و خطای دریافت جدا می‌مانند',
   loaded.seriesByIns.empty.length === 0 && !loaded.errors.empty && loaded.errors.broken === 'upstream timeout');
 const fallbackFailed = await loadHistoricalDailies(['base', 'put'], 'base', async (url) => ({
@@ -35,11 +43,18 @@ const fallbackFailed = await loadHistoricalDailies(['base', 'put'], 'base', asyn
 }));
 check('خرابی منبع دوم به فاقد معامله تبدیل نمی‌شود', fallbackFailed.errors.put === 'history timeout');
 let withoutBaseCalls = 0;
-await loadHistoricalDailies(['base', 'put'], 'base', async () => {
-  withoutBaseCalls++;
+await loadHistoricalDailies(['base', 'put'], 'base', async (url) => {
+  if (url.startsWith('/api/dailies')) withoutBaseCalls++;
   return { ok: true, json: async () => ({ base: { rows: [] }, put: { rows: [] } }) };
 });
 check('بدون تاریخ واقعی پایه، روز مرجع اختراع نمی‌شود', withoutBaseCalls === 1);
+// و راه خاموش‌کردنش هست، برای مصرف‌کننده‌ای که فقط روزهای نهایی می‌خواهد.
+let closedOnly = 0;
+await loadHistoricalDailies(['base'], 'base', async (url) => {
+  closedOnly += 1;
+  return { ok: true, json: async () => ({ base: { rows: baseRows } }) };
+}, { includeToday: false });
+check('با includeToday: false هیچ درخواست عکس زنده‌ای نمی‌رود', closedOnly === 1);
 
 const destination = readSrc('../ui/tabs/backtest.mjs');
 check('مقصد پیش از فهرست قراردادها بازهٔ تحویل را روی کنترل می‌نشاند',

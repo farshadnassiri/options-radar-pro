@@ -138,7 +138,7 @@ export async function mount(root, { state, api }) {
           <div class="section-head"><div><p class="eyebrow">مرحله نخست · بخش یک</p><h2>سرمایه‌ای که با خودت به گذشته می‌بری</h2></div><span>واحد ورود: تومان</span></div>
           <div class="pt-form-grid pt-money-grid">
             <label class="field" id="pt-capital-field"><span>ارزش پورتفو در شروع</span>
-              <input id="pt-capital" type="text" inputmode="numeric" value="۱٬۰۰۰٬۰۰۰٬۰۰۰" aria-describedby="pt-capital-hint pt-capital-error">
+              <input id="pt-capital" type="text" inputmode="numeric" value="۱,۰۰۰,۰۰۰,۰۰۰" aria-describedby="pt-capital-hint pt-capital-error">
               <small class="hint" id="pt-capital-hint">نمونه: یک میلیارد تومان</small><small class="pt-field-error" id="pt-capital-error" hidden></small></label>
             <label class="field" id="pt-reserve-field"><span>ذخیره نقدی کنارگذاشته‌شده</span>
               <input id="pt-reserve" type="text" inputmode="numeric" value="۰" aria-describedby="pt-reserve-hint pt-reserve-error">
@@ -195,7 +195,7 @@ export async function mount(root, { state, api }) {
           </div>
           <small class="pt-field-error" id="pt-expected-volatility-error" hidden></small>
 
-          <label class="field pt-thesis"><span>دلیل تصمیم و چیزی که انتظار داری رخ دهد</span><textarea id="pt-thesis" maxlength="2000" rows="4" placeholder="مثلاً انتظار دارم بعد از شکست مقاومت، قیمت با تلاطم بیشتر رشد کند." aria-describedby="pt-thesis-count pt-thesis-error"></textarea><small class="hint" id="pt-thesis-count">۰ از ۲٬۰۰۰ نویسه</small><small class="pt-field-error" id="pt-thesis-error" hidden></small></label>
+          <label class="field pt-thesis"><span>دلیل تصمیم و چیزی که انتظار داری رخ دهد</span><textarea id="pt-thesis" maxlength="2000" rows="4" placeholder="مثلاً انتظار دارم بعد از شکست مقاومت، قیمت با تلاطم بیشتر رشد کند." aria-describedby="pt-thesis-count pt-thesis-error"></textarea><small class="hint" id="pt-thesis-count">۰ از ۲,۰۰۰ نویسه</small><small class="pt-field-error" id="pt-thesis-error" hidden></small></label>
           <div class="pt-stage-actions"><button type="button" class="primary" id="pt-save-outlook">ثبت انتظار بازار</button><p class="pt-save-state" id="pt-outlook-state" role="status" aria-live="polite">ابتدا فرض خود را کامل کن.</p></div>
         </section>
 

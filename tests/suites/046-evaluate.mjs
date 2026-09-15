@@ -39,7 +39,7 @@ group('۴۵. ستون‌های مشخصات قرارداد');
     near(cc.notional, 2 * size * 100000, 1e-9), uiFmt.money(cc.notional));
   check('ارزش بازاری موقعیت، قرینه نقد ناخالص است',
     near(cc.marketValue, -cc.grossCash, 1e-9), uiFmt.money(cc.marketValue));
-  // کال ۱۱۰٬۰۰۰ روی پایه ۱۰۰٬۰۰۰ خارج از سود است، پس ذاتی‌اش صفر و کل ارزش
+  // کال ۱۱۰,۰۰۰ روی پایه ۱۰۰,۰۰۰ خارج از سود است، پس ذاتی‌اش صفر و کل ارزش
   // ذاتی موقعیت فقط از سهم می‌آید.
   check('ارزش ذاتی، کال خارج از سود را صفر می‌گیرد',
     near(cc.intrinsic, size * 100000, 1e-9), uiFmt.money(cc.intrinsic));
