@@ -662,14 +662,25 @@ export function contractAnalytics(row = {}, params = {}) {
   const delta = Number(greeks?.delta);
   const effectiveLeverage = Number.isFinite(leverage) && Number.isFinite(delta) ? leverage * Math.abs(delta) : NaN;
 
-  // ── دلتای اجرایی، جدا از دلتای مشاهده‌ای ──────────────────────────
+  // ── یونانی‌های اجرایی، جدا از مشاهده‌ای ───────────────────────────
   //
-  // اولی از میانهٔ مظنه می‌آید که با قیمت پایه هم‌زمان است؛ دومی از آخرین
-  // معامله که ممکن است ساعت‌ها پیش باشد. کنار هم نشستنشان خودش یک هشدار
-  // است: فاصلهٔ زیاد یعنی قیمت مشاهده‌ای کهنه است.
+  // اولی‌ها از میانهٔ مظنه می‌آیند که با قیمت پایه هم‌زمان است؛ دومی‌ها از
+  // آخرین معامله که ممکن است ساعت‌ها پیش باشد. کنار هم نشستنشان خودش یک
+  // هشدار است: فاصلهٔ زیاد یعنی قیمت مشاهده‌ای کهنه است.
+  //
+  // ═══ چرا دیگر فقط دلتا نیست ═══
+  //
+  // ممیزی (۱۴۰۵/۰۶/۲۴) ردیف ۴: «از IV میانهٔ مظنه تمام یونانی‌ها محاسبه
+  // می‌شوند؛ اما در خروجی فقط `deltaMid` نگه داشته می‌شود. گاما، تتا، وگا،
+  // رو و احتمال ITM همچنان فقط از IV آخرین معامله می‌آیند.»
+  //
+  // درست بود، و نتیجه‌اش بدترین شکلِ ناقص‌بودن: ردیفی که «دلتای اجرایی»
+  // داشت ولی گاما و تتا و وگایش خالی بود — یعنی داده **بود** و ما دورش
+  // ریخته بودیم. محاسبه همان یک فراخوانی بود که از قبل انجام می‌شد.
   const midGreeks = kind && Number.isFinite(Number(row.ivMidPct))
     ? greeksFromIvPct({ kind, strike }, { spot, days }, Number(row.ivMidPct), { ...params, yearDays })
     : null;
+  const deltaMid = Number(midGreeks?.delta ?? NaN);
 
   return {
     // ستون خالی وقتی تلاطم هست یعنی «چیزی برای توضیح نیست»؛ ستون خالی
@@ -684,7 +695,23 @@ export function contractAnalytics(row = {}, params = {}) {
     // می‌دهد — آخرین معاملهٔ هر جلسه‌ای که بوده. تنها نشانهٔ قابل اتکا در
     // همین عکس، حجم امروز است.
     pricedToday: Number(row.volume) > 0,
-    deltaMid: Number(midGreeks?.delta ?? NaN),
+    // ── مجموعهٔ کاملِ اجرایی، نه فقط دلتا ──────────────────────────
+    deltaMid,
+    gammaMid: Number(midGreeks?.gamma ?? NaN),
+    vegaMid: Number(midGreeks?.vega ?? NaN),
+    thetaMid: Number(midGreeks?.theta ?? NaN),
+    rhoMid: Number(midGreeks?.rho ?? NaN),
+    probItmMidPct: Number.isFinite(Number(midGreeks?.probItm)) ? Number(midGreeks.probItm) * 100 : NaN,
+    effectiveLeverageMid: Number.isFinite(leverage) && Number.isFinite(deltaMid)
+      ? leverage * Math.abs(deltaMid) : NaN,
+    // ═══ ردیف ۶ ممیزی: علتِ خالی‌بودنِ ستونِ اجرایی ═══
+    //
+    // «هسته کد علت شکست IV میانهٔ مظنه را در `ivMidWhy` تولید می‌کند؛ اما
+    // داشبورد فقط `ivWhyText` مربوط به آخرین معامله را ستون‌بندی کرده.»
+    // اطلاعات تشخیصی بود و نمایش داده نمی‌شد — همان قاعدهٔ ستون «علت نبود
+    // تلاطم»، این بار برای سمتِ اجرایی.
+    ivMidWhyText: Number.isFinite(Number(row.ivMidPct)) ? ''
+      : (IV_WHY_LABEL[row.ivMidWhy] || 'نامشخص'),
     delta: Number.isFinite(delta) ? delta : NaN,
     gamma: Number(greeks?.gamma ?? NaN),
     vega: Number(greeks?.vega ?? NaN),
@@ -827,6 +854,41 @@ export function mergeUnderlyingTrades(universe = {}, observed = []) {
 // ————————————————————————————————————————————————————————————————
 
 export const PAIRED_SORT_DEFAULT = Object.freeze({ key: 'strike', side: null, dir: 1 });
+
+// ————————————————————————————————————————————————————————————————
+// جای ردیف نماد پایه در زنجیرهٔ دوطرفه.
+//
+// ═══ چرا این یک تصمیم است و از رابط بیرون کشیده شد ═══
+//
+// گزارش صاحب پروژه: «نماد پایه در یک ردیف در زنجیره قرارداد نمی‌آید.»
+// علتش این بود که در رابط، ردیفِ نماد پایه به **جایگاهِ** خط قیمت جاری گره
+// خورده بود — فقط وقتی رسم می‌شد که `findIndex` جایی بین دو اعمال پیدا
+// کند. پس با مرتب‌کردن روی هر ستونِ دیگر، یا وقتی قیمت جاری بیرون از کل
+// نردبان بود، کلاً ناپدید می‌شد.
+//
+// دو ادعای جدا در هم رفته بودند:
+//
+//   «خط قیمت جاری بین دو اعمالِ در بر گیرنده» — ادعای **جایگاهی**، و فقط
+//   در نردبانِ اعمال معنی دارد.
+//
+//   «ردیف نماد پایه با آخرین قیمتش» — ادعای **اطلاعاتی**، و همیشه درست
+//   است، در هر ترتیبی.
+//
+// پس ردیف همیشه هست و فقط جایش عوض می‌شود. اینجا خالص است تا همین قاعده
+// مستقیم آزمون شود، نه از دل `innerHTML` بیرون کشیده شود.
+// ————————————————————————————————————————————————————————————————
+export function spotRowPlacement(rows = [], { spot = NaN, sort = PAIRED_SORT_DEFAULT } = {}) {
+  const ladder = (sort?.key || 'strike') === 'strike';
+  const price = Number(spot);
+  // ترتیب غیرنردبانی: جایگاه ادعا نمی‌کنیم، ولی ردیف را هم حذف نمی‌کنیم.
+  if (!ladder || !Number.isFinite(price)) return { at: -1, head: true, tail: false };
+  const at = Number(sort?.dir) < 0
+    ? rows.findIndex((row) => Number(row?.strike) < price)
+    : rows.findIndex((row) => Number(row?.strike) > price);
+  // قیمت جاری بیرون از نردبان است: ته همان سمت می‌نشیند، نه اینکه نیاید.
+  if (at < 0) return { at: -1, head: false, tail: true };
+  return { at, head: false, tail: false };
+}
 
 export function sortPairedChain(rows = [], sort = PAIRED_SORT_DEFAULT) {
   const key = sort?.key || 'strike';

@@ -9,7 +9,7 @@ import {
   filterContractsBySide, MARKET_MAP_METRICS, marketMapRows, marketMapSummary,
   contractBreakeven, breakevenGap, breakevenGapPct, EQUAL_MAP_METRIC,
   twoSidedChain, chainSideMax, contractAnalytics,
-  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT,
+  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT, spotRowPlacement,
 } from '../core/decision-dashboard.mjs';
 import { shouldFetchRange } from './live-dashboard-scope.mjs';
 import { busyBlock } from './busy.mjs';
@@ -390,9 +390,6 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     // جدول، خرجِ چیزی که صریحاً کنار گذاشته شده بود.
     const sides = pairedSides(chainSide);
     const both = sides.length === 2;
-    // خط قیمت جاری فقط در نردبانِ اعمال معنی دارد: در هر ترتیب دیگری،
-    // «بین دو اعمالِ در بر گیرنده» جایی ندارد.
-    const ladder = pairedSort.key === 'strike';
     const width = cols.length * sides.length + sides.length + 1;
     // ── ردیف نماد پایه، متمایز از هر ردیف دیگر ───────────────────────
     //
@@ -409,12 +406,25 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       <i>آخرین معاملهٔ نماد پایه</i>
     </span></td></tr>`;
     const ordered = sortPairedChain(chain.rows, pairedSort);
-    // در ترتیب نردبانی، خط قیمت جاری سرِ جای خودش می‌ماند؛ محاسبه دوباره
-    // انجام می‌شود چون ممکن است ترتیب نزولی باشد.
-    const spotAt = !ladder || !Number.isFinite(chain.spot) ? -1
-      : pairedSort.dir < 0
-        ? ordered.findIndex((row) => row.strike < chain.spot)
-        : ordered.findIndex((row) => row.strike > chain.spot);
+    // ── کجا بنشیند ───────────────────────────────────────────────────
+    //
+    // گزارش صاحب پروژه: «نماد پایه در یک ردیف در زنجیره قرارداد نمی‌آید.»
+    // درست بود، و علتش این بود که این ردیف را به **جایگاهِ** خط قیمت جاری
+    // گره زده بودم: فقط وقتی رسم می‌شد که ترتیب، نردبانِ اعمال باشد و
+    // اعمالی هم بالاتر (یا پایین‌تر) از قیمت جاری وجود داشته باشد. پس به
+    // محض مرتب‌کردن روی هر ستون دیگر — یا وقتی قیمت جاری بیرون از کل
+    // نردبان بود — کلاً ناپدید می‌شد.
+    //
+    // ولی خواسته دو چیزِ جدا بود: «خط قیمت جاری بین دو اعمالِ در بر گیرنده»
+    // یک ادعای **جایگاهی** است و فقط در نردبان معنی دارد؛ «ردیف نماد پایه
+    // با آخرین قیمتش» یک ادعای **اطلاعاتی** است و همیشه باید باشد. حالا
+    // ردیف همیشه رسم می‌شود و فقط جایش عوض می‌شود:
+    //
+    //   نردبانِ اعمال، قیمت جاری داخل نردبان → همان‌جا، بین دو اعمال
+    //   نردبانِ اعمال، قیمت جاری بیرونِ آن   → انتهای همان سمت
+    //   هر ترتیب دیگر                        → بالای جدول، بی ادعای جایگاه
+    const place = spotRowPlacement(ordered, { spot: chain.spot, sort: pairedSort });
+    const spotAt = place.at;
 
     const edge = (row, itm) => `<td class="lmm-paired-edge${itm ? ' is-itm' : ''}${row && String(row.ins) === contractIns ? ' is-picked' : ''}"${row ? ` data-lmm-paired-pick="${esc(row.ins)}"` : ''}>${row ? esc(row.name) : '—'}</td>`;
     const lines = ordered.map((rung, index) => {
@@ -426,6 +436,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
         : sides[0] === 'call' ? `${call}${strikeCell}` : `${strikeCell}${put}`;
       return `${lead}<tr class="lmm-paired-row">${body}</tr>`;
     }).join('');
+    const tableBody = `${place.head ? spotRow : ''}${lines}${place.tail ? spotRow : ''}`;
 
     const callHead = [`<th>قرارداد</th>`, ...[...cols].reverse().map((item) => headCell(item.label, item.key, 'call'))].join('');
     const putHead = [...cols.map((item) => headCell(item.label, item.key, 'put')), `<th>قرارداد</th>`].join('');
@@ -438,7 +449,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
 
     pairedHost.innerHTML = `<table class="lmm-paired">
       <thead>${sideBanner}<tr>${headRow}</tr></thead>
-      <tbody>${lines}</tbody>
+      <tbody>${tableBody}</tbody>
     </table>`;
     pairedHost.querySelectorAll('[data-lmm-paired-pick]').forEach((cell) => cell.addEventListener('click', () => selectContract(cell.dataset.lmmPairedPick)));
     pairedHost.querySelectorAll('[data-lmm-sort-key]').forEach((button) => button.addEventListener('click', () => {

@@ -8,7 +8,7 @@ import { impliedVolWhy, bsPrice } from '../../core/bs.mjs';
 import { liveIvAt, liveQuoteIvSet, IV_WHY_LABEL } from '../../core/live-market.mjs';
 import {
   liveBaseList, liveOpenViewContracts, mergeUnderlyingTrades, contractAnalytics,
-  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT, twoSidedChain,
+  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT, twoSidedChain, spotRowPlacement,
 } from '../../core/decision-dashboard.mjs';
 import { dashboardClock } from '../../core/watch-health.mjs';
 import { liveDayOf, liveDayRows, mergeLiveDay } from '../../core/live-day.mjs';
@@ -125,6 +125,69 @@ check('دلتای مشاهده‌ای خالی می‌ماند ولی دلتای
 check('قراردادِ امروز بی‌معامله نشان‌دار می‌شود',
   anA248.pricedToday === false
   && contractAnalytics({ ...rowA248, volume: 7 }, {}).pricedToday === true);
+
+// ————— ممیزی دوم (یونانی‌های خالی): ردیف ۴، ۵ و ۶ —————
+//
+// «از IV میانهٔ مظنه تمام یونانی‌ها محاسبه می‌شوند؛ اما در خروجی فقط
+// `deltaMid` نگه داشته می‌شود. گاما، تتا، وگا، رو و احتمال ITM همچنان فقط
+// از IV آخرین معامله می‌آیند.» یعنی داده **بود** و دور ریخته می‌شد.
+//
+// نمونه همان `async248` بالاست: آخرین معامله حل نمی‌شود (زیر کف نظری) ولی
+// میانهٔ مظنه حل می‌شود. پس مشاهده‌ای‌ها باید خالی باشند و اجرایی‌ها پر —
+// این دقیقاً همان ردیفی است که ممیزی توصیفش کرد.
+const mid248 = contractAnalytics({
+  ...async248, spot: 2100, volume: 5,
+  ivPct: pair248.ivPct, ivWhy: pair248.ivWhy,
+  ivMidPct: pair248.ivMidPct, ivMidWhy: pair248.ivMidWhy,
+}, { rFree: 0.3, divYield: 0, yearDays: 365 });
+check('۴. یونانی‌های مشاهده‌ای این ردیف خالی‌اند',
+  ['delta', 'gamma', 'theta', 'vega', 'rho', 'probItmPct'].every((key) => Number.isNaN(mid248[key])));
+check('۴. ولی هر شش یونانیِ اجرایی پر است، نه فقط دلتا',
+  ['deltaMid', 'gammaMid', 'thetaMid', 'vegaMid', 'rhoMid', 'probItmMidPct']
+    .every((key) => Number.isFinite(mid248[key])),
+  ['deltaMid', 'gammaMid', 'thetaMid', 'vegaMid', 'rhoMid', 'probItmMidPct']
+    .filter((key) => !Number.isFinite(mid248[key])).join('، '));
+// و علامت‌ها همان چیزی‌اند که باید: کالِ عمیقاً در سود دلتای مثبت نزدیک یک،
+// تتای منفی (فرسایش)، گاما و وگای مثبت.
+check('۴. علامت یونانی‌های اجرایی درست است',
+  mid248.deltaMid > 0.5 && mid248.thetaMid < 0 && mid248.gammaMid > 0 && mid248.vegaMid > 0);
+check('۴. اهرم مؤثر اجرایی هم ساخته می‌شود',
+  Number.isFinite(mid248.effectiveLeverageMid)
+  && near(mid248.effectiveLeverageMid, mid248.leverage * Math.abs(mid248.deltaMid), 1e-9));
+// بی میانهٔ مظنه هیچ‌کدام ساخته نمی‌شود — صفر جعلی در کار نیست.
+const noMid248 = contractAnalytics({ ...async248, spot: 2100, ivMidPct: NaN }, {});
+check('۴. بدون میانهٔ مظنه، هیچ یونانیِ اجرایی‌ای ساخته نمی‌شود',
+  ['deltaMid', 'gammaMid', 'thetaMid', 'vegaMid', 'rhoMid', 'probItmMidPct']
+    .every((key) => Number.isNaN(noMid248[key])));
+
+// ۵. «مظنهٔ یک‌طرفه» با «بدون مظنه» یکی نیست.
+//
+// میانه‌ای که از یک سمت ساخته شود میانه نیست، پس نبودنش درست است — ولی
+// علتی که گزارش می‌شد `noPrice` بود، یعنی «بدون معامله و مظنه». کاربر با
+// آن جمله فکر می‌کند قرارداد اصلاً مظنه ندارد.
+const oneSided248 = liveQuoteIvSet({ ...async248, ask: 0 }, 2100, S248);
+check('۵. مظنهٔ یک‌طرفه میانه نمی‌سازد', Number.isNaN(oneSided248.ivMidPct));
+check('۵. ولی علتش «بدون مظنه» نیست', oneSided248.ivMidWhy === 'oneSided', oneSided248.ivMidWhy);
+check('۵. و سمتِ موجود همچنان تلاطم خودش را دارد',
+  Number.isFinite(oneSided248.ivBidPct) && Number.isNaN(oneSided248.ivAskPct));
+check('۵. نبودِ هر دو سمت، همان «بدون معامله و مظنه» می‌ماند',
+  liveQuoteIvSet({ ...async248, bid: 0, ask: 0 }, 2100, S248).ivMidWhy === 'noPrice');
+check('۵. کد تازه جملهٔ فارسی دارد', IV_WHY_LABEL.oneSided === 'مظنه فقط یک‌طرفه است');
+
+// ۶. علتِ خالی‌بودنِ ستونِ اجرایی باید دیده شود.
+check('۶. علت نبود تلاطم اجرایی ستون خودش را دارد',
+  contractAnalytics({ ...async248, ivMidPct: NaN, ivMidWhy: 'oneSided' }, {}).ivMidWhyText
+    === 'مظنه فقط یک‌طرفه است');
+check('۶. وقتی تلاطم اجرایی هست، ستون علت خالی می‌ماند',
+  mid248.ivMidWhyText === '', mid248.ivMidWhyText);
+check('۶. و علتِ نامعلوم با «توضیحی لازم نیست» قاطی نمی‌شود',
+  contractAnalytics({ ...async248, ivMidPct: NaN, ivMidWhy: undefined }, {}).ivMidWhyText === 'نامشخص');
+const dashE248 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+check('۶. و داشبورد واقعاً ستون‌بندی‌اش کرده',
+  dashE248.includes("col('ivMidWhyText', 'علت نبود تلاطم اجرایی'"));
+check('۴. و هر پنج یونانیِ اجرایی ستون دارند',
+  ['gammaMid', 'thetaMid', 'vegaMid', 'rhoMid', 'probItmMidPct', 'effectiveLeverageMid']
+    .every((key) => dashE248.includes(`col('${key}'`)));
 
 // ————— ۹. فرضِ نرخ، نه بازار، ستون را خالی می‌کند —————
 //
@@ -247,9 +310,17 @@ check('۲. هر سرستون دکمهٔ مرتب‌سازی است و سمتش �
   && mapD248.includes("localStorage.setItem('options-radar:market-map-paired-sort'"));
 // خط قیمت جاری «بین دو اعمالِ در بر گیرنده» است؛ در ترتیب دیگری جایی ندارد
 // و کشیدنش یعنی ادعای غلط.
-check('۲. خط قیمت جاری فقط در ترتیب نردبانی کشیده می‌شود',
-  mapD248.includes("const ladder = pairedSort.key === 'strike';")
-  && mapD248.includes('const spotAt = !ladder || !Number.isFinite(chain.spot) ? -1'));
+//
+// ولی این ادعا فقط دربارهٔ **جایگاه** است. نسخهٔ اول این ادعا، حذفِ کلِ
+// ردیف را هم قفل کرده بود — و همان، باگِ «نماد پایه در زنجیره نمی‌آید» را
+// ساخت. حالا قاعده در `spotRowPlacement` است و هر دو نیمه‌اش آزمون دارد.
+const placeRungs248 = [{ strike: 2040 }, { strike: 2160 }, { strike: 2280 }, { strike: 2400 }, { strike: 2520 }];
+check('۲. جایگاهِ «بین دو اعمال» فقط در ترتیب نردبانی ادعا می‌شود',
+  spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'strike', side: null, dir: 1 } }).at === 3
+  && spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'oi', side: 'call', dir: 1 } }).at === -1);
+check('۲. و رابط قاعدهٔ خودش را ندارد',
+  !mapD248.includes("const ladder = pairedSort.key === 'strike';")
+  && mapD248.includes('spotRowPlacement('));
 check('۱. نشانهٔ بارگذاری هم اسکلت دارد هم نوار در جریان',
   busy248.includes('export function busyBlock(') && busy248.includes('export function attachBusyBar(')
   && cssD248.includes('.busy-spin {') && cssD248.includes('.skeleton-bar {')
@@ -308,6 +379,41 @@ const cssE248 = readSrc('../ui/style.css');
 check('۱. و از هر ردیف دیگر جدا دیده می‌شود',
   cssE248.includes('.lmm-paired-spot td { padding: 0; background: color-mix(in srgb, var(--warn)')
   && cssE248.includes('.lmm-paired-spot strong {'));
+
+// ═══ ۱ (دور دوم). ردیفی که با مرتب‌سازی ناپدید می‌شد ═══
+//
+// گزارش صاحب پروژه: «نماد پایه در یک ردیف در زنجیره قرارداد نمی‌آید.»
+// دو ادعای متفاوت در هم رفته بودند: «خط قیمت جاری بین دو اعمالِ در بر
+// گیرنده» ادعای جایگاهی است و فقط در نردبانِ اعمال معنی دارد؛ «ردیف نماد
+// پایه با آخرین قیمتش» ادعای اطلاعاتی است و همیشه درست است. چون ردیف به
+// جایگاه گره خورده بود، هر ترتیب دیگری حذفش می‌کرد.
+//
+// ادعای قبلی فقط وجودِ رشتهٔ `lmm-paired-spot` را در فایل می‌سنجید، پس با
+// این باگ هم سبز می‌ماند. این‌ها خودِ قاعده را می‌سنجند.
+const shown248 = (place) => place.at >= 0 || place.head || place.tail;
+const asc248 = spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'strike', side: null, dir: 1 } });
+check('۱. در نردبان صعودی، ردیف بین دو اعمالِ در بر گیرنده می‌نشیند',
+  asc248.at === 3 && !asc248.head && !asc248.tail, JSON.stringify(asc248));
+const desc248 = spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'strike', side: null, dir: -1 } });
+check('۱. در نردبان نزولی هم همان دو اعمال را جدا می‌کند', desc248.at === 0);
+// هر سه حالتی که پیش از این ردیف را حذف می‌کردند:
+for (const [name, place] of [
+  ['مرتب بر ستون مشتق', spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'gapPct', side: 'call', dir: -1 } })],
+  ['قیمت جاری بیرون از نردبان', spotRowPlacement(placeRungs248, { spot: 9999, sort: { key: 'strike', side: null, dir: 1 } })],
+  ['قیمت پایهٔ نامعلوم', spotRowPlacement(placeRungs248, { spot: NaN, sort: PAIRED_SORT_DEFAULT })],
+]) {
+  check(`۱. با «${name}» ردیف نماد پایه همچنان رسم می‌شود`, shown248(place), JSON.stringify(place));
+}
+check('۱. ترتیب غیرنردبانی جایگاه ادعا نمی‌کند و ردیف را بالا می‌گذارد',
+  spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'oi', side: 'put', dir: 1 } }).head === true);
+check('۱. قیمت بالاتر از کل نردبان، ردیف را ته جدول می‌گذارد نه بالا',
+  spotRowPlacement(placeRungs248, { spot: 9999, sort: { key: 'strike', side: null, dir: 1 } }).tail === true);
+check('۱. زنجیرهٔ خالی هم ردیف نماد پایه را نگه می‌دارد',
+  shown248(spotRowPlacement([], { spot: 2300, sort: PAIRED_SORT_DEFAULT })));
+// و رابط باید از همین قاعده بخواند، نه نسخهٔ خودش
+check('۱. رابط جای ردیف را از موتور می‌گیرد',
+  mapE248.includes('spotRowPlacement(ordered, { spot: chain.spot, sort: pairedSort })')
+  && mapE248.includes('place.head ? spotRow') && mapE248.includes('place.tail ? spotRow'));
 
 // ————— ۲ و ۳. قلم و عدد —————
 const fmtSrc248 = readSrc('../ui/fmt.mjs');

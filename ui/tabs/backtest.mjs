@@ -20,6 +20,10 @@ import {
   ANALYSIS_PANELS, analysisMarkup, paintAnalysis, installAnalysisControls,
 } from '/ui/backtest-panels.mjs';
 import { tehranDateNumber } from '/core/live-day.mjs';
+import {
+  splitTradeDays, tradeBatches, dayFromBatch, dayFromLiveTape,
+  BATCH_PAIR_CAP, LIVE_CODE_CAP,
+} from '/core/trades-source.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
@@ -208,6 +212,11 @@ export async function mount(root, { state }) {
   // آخرین دریافتی که کش نشد — نتیجهٔ ناقص عمداً کش نمی‌شود، ولی پیام خطا
   // باید بداند چه شد.
   let lastDayFetch = null;
+  // روزی که عکس زندهٔ تابلو به آن نسبت داده شده — خروجی `liveDayOf`. صفر
+  // یعنی «امروز به هیچ روزی نچسبید»، و آن‌وقت هیچ روزی به نوار زنده
+  // نمی‌رود. این تنها مدرکِ «نوار مال امروز است» است و دوباره ساخته
+  // نمی‌شود.
+  let liveDate = 0;
   let timeframeDays = [], timeframeSeconds = 900;
   // قیمت دستی به یک قرارداد و یک روز مشخص تعلق دارد. با عوض‌شدن ترکیب یا
   // تاریخ، عددی که کاربر وارد کرده دیگر مال آن قرارداد و آن روز نیست، پس
@@ -428,6 +437,9 @@ export async function mount(root, { state }) {
       // منتشرش نمی‌کند. جمله‌اش را همان‌جا می‌گوییم چون ارقام امروز نهایی
       // نیستند و کاربر باید بداند.
       liveDayNote = loaded.liveNote || '';
+      // همان روزی که سری‌های روزانه ردیف لحظه‌ای گرفتند، ریزمعامله‌اش هم
+      // باید از نوار زنده بیاید نه از مسیر تاریخی. یک مدرک، دو مصرف.
+      liveDate = Number(loaded.liveDate) || 0;
       const failed = [String(ua.ins), ...wanted].filter((ins) => loaded.errors[ins]);
       if (failed.length) throw new Error(`دریافت تاریخچه ناموفق بود: ${failed.map((ins) => `${nameOf(contracts.find((contract) => String(contract.ins) === ins) || ua)}: ${loaded.errors[ins]}`).join('؛ ')}`);
       entryDates = fastPath
@@ -450,10 +462,84 @@ export async function mount(root, { state }) {
     } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); } finally { $('bt-load').disabled = false; }
   }
 
-  async function fetchTrades(ins, date) {
-    const response = await fetch(`/api/trades?ins=${encodeURIComponent(ins)}&date=${date}`), payload = await response.json();
-    if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
-    return payload.rows || [];
+  const dayCodes = () => [...new Set([...legs.map((leg) => String(leg.ins)), String(ua.ins)])];
+
+  /**
+   * یک تکه از مسیر دسته‌ای.
+   *
+   * شکستِ خودِ درخواست پرتاب نمی‌شود: هر جفتِ آن تکه «دریافت‌نشده» علامت
+   * می‌خورد و بقیهٔ تکه‌ها ادامه می‌دهند. یک ۵۰۲ نباید کل تحلیل را ببلعد،
+   * و مهم‌تر، نباید به‌شکل «آن روزها معامله نشده» دیده شود.
+   */
+  async function postTradeBatch(requests) {
+    try {
+      const response = await fetch('/api/trades/batch', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ requests }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
+      return payload.items || {};
+    } catch (error) {
+      batchErrors.push(String(error?.message || error));
+      return {};
+    }
+  }
+
+  /** نوار زندهٔ امروز، برای همان ابزارها. */
+  async function getLiveTape(codes) {
+    const items = {};
+    for (let at = 0; at < codes.length; at += LIVE_CODE_CAP) {
+      const part = codes.slice(at, at + LIVE_CODE_CAP);
+      try {
+        const response = await fetch(`/api/live-trades?ins=${part.join(',')}`, { cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok || payload.error) throw new Error(payload.error || 'نوار زنده دریافت نشد');
+        Object.assign(items, payload.items || {});
+      } catch (error) { batchErrors.push(String(error?.message || error)); }
+    }
+    return items;
+  }
+
+  let batchErrors = [];
+
+  /**
+   * ریزمعاملهٔ چند روز، از منبع درستِ هر روز و با کمترین درخواست ممکن.
+   *
+   * ═══ دو چیزی که ممیزی گرفت ═══
+   *
+   * ردیف ۱: روز جاری از `/api/trades` تاریخی خوانده می‌شد و آن تا پایان روز
+   * خالی است، در حالی که همان داده در `/api/live-trades` هست. حالا `liveDate`
+   * — همان روزی که `liveDayOf` تأیید کرده — به نوار زنده می‌رود.
+   *
+   * ردیف ۴: برای هر روز و هر ابزار یک درخواست جدا می‌رفت؛ ۴۵ روز و دو پا
+   * یعنی ۱۳۵ درخواست. `/api/trades/batch` از قبل بود و استفاده نمی‌شد.
+   */
+  async function loadTradeDays(dates, codes, { onProgress = () => {} } = {}) {
+    batchErrors = [];
+    const days = new Map();
+    const { live, history, ahead } = splitTradeDays(dates, { liveDate });
+    const batches = tradeBatches(history, codes, { cap: BATCH_PAIR_CAP });
+    const total = batches.length + (live.length ? 1 : 0);
+    let done = 0;
+    for (const requests of batches) {
+      onProgress({ done, total, phase: 'history', days: requests.length / Math.max(1, codes.length) });
+      await nextFrame();
+      const items = await postTradeBatch(requests);
+      for (const date of [...new Set(requests.map((row) => row.date))]) {
+        days.set(date, dayFromBatch(items, date, codes));
+      }
+      done += 1;
+    }
+    if (live.length) {
+      onProgress({ done, total, phase: 'live', days: live.length });
+      await nextFrame();
+      const items = await getLiveTape(codes);
+      for (const date of live) days.set(date, dayFromLiveTape(items, date, codes));
+      done += 1;
+    }
+    onProgress({ done, total, phase: 'done', days: 0 });
+    return { days, ahead, live: live.length, batches: batches.length };
   }
 
   /**
@@ -465,11 +551,10 @@ export async function mount(root, { state }) {
    */
   async function fetchDayTrades(date, { force = false } = {}) {
     if (!force && tradesCache.has(date)) return tradesCache.get(date);
-    const codes = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua.ins)])];
-    const fetched = await Promise.allSettled(codes.map(async (ins) => [ins, await fetchTrades(ins, date)]));
-    const byIns = Object.fromEntries(fetched.filter((item) => item.status === 'fulfilled').map((item) => item.value));
-    const failed = fetched.map((item, index) => item.status === 'rejected' ? codes[index] : null).filter(Boolean);
-    const result = { byIns, failed, date };
+    const codes = dayCodes();
+    const loaded = await loadTradeDays([date], codes);
+    const result = loaded.days.get(Number(date)) || { byIns: {}, failed: codes, date };
+    const { failed } = result;
     // نتیجهٔ ناقص کش نمی‌شود.
     //
     // پیش از این هر نتیجه‌ای کش می‌شد، حتی وقتی درخواستِ یکی از پاها شکست
@@ -858,29 +943,98 @@ export async function mount(root, { state }) {
 
   // ═══════════ تحلیل کل بازه روی تایم‌فریم انتخابی ═══════════
 
-  const TIMEFRAME_DAY_CAP = 45;
+  // ═══ چرا این عدد دیگر ۴۵ نیست ═══
+  //
+  // ممیزی ردیف ۳: «عنوان «کل بازه» دقیق نیست؛ کد فقط ۴۵ روز آخر را بررسی
+  // می‌کند و روزهای قدیمی‌تر را حذف می‌کند.»
+  //
+  // آن سقف معلولِ ردیف ۴ بود: وقتی هر روز `legs+1` درخواست جدا می‌فرستاد،
+  // ۴۵ روز یعنی ۱۳۵ درخواست و بیشترش عملاً غیرممکن. با مسیر دسته‌ای، همان
+  // ۴۵ روز **یک** درخواست است و ۴۰۰ روز هم یکی-دو تا. پس سقف به جایی رفت
+  // که واقعاً محدودیت است، نه جایی که پیاده‌سازی بد بود.
+  //
+  // و هر وقت بگزد، عددش در همان تب گفته می‌شود — «کل بازه» بی‌توضیح نمی‌ماند.
+  const TIMEFRAME_DAY_CAP = 400;
   const rangeLabel = (row) => `${faDigits(clockLabel(row.startSecond).slice(0, 5))}–${faDigits(clockLabel(row.endSecond).slice(0, 5))}`;
+
+  /**
+   * نوشتن وضعیت **داخل همین تب**.
+   *
+   * ممیزی ردیف ۲: «پیشرفت و خطا در `bt-status` نوشته می‌شود که کاربر در تب
+   * «کل بازه» آن را نمی‌بیند؛ فقط غیرفعال‌شدن دکمه را می‌بیند و تصور می‌کند
+   * هیچ اتفاقی نیفتاده.» درست بود — آن نوار بالای صفحه و در گام اول است.
+   * پس هر چیزی که این دکمه می‌سازد، کنار خودِ دکمه هم نوشته می‌شود.
+   */
+  function tfNote(text, error = false) {
+    const el = $('bt-tf-note');
+    el.textContent = text;
+    el.toggleAttribute('data-error', Boolean(error));
+  }
 
   /**
    * ریزمعامله همه روزهای معتبر مسیر را می‌گیرد.
    *
-   * هر روز یک درخواست به‌ازای هر نماد است، پس پیشرفت گزارش می‌شود و سقفی
-   * هست. روزی که برای همه پاها نقطه مشترک نساخته، اصلاً وارد تحلیل نمی‌شود
-   * و تعدادش جدا گفته می‌شود — نه اینکه با صفر پر شود.
+   * روزی که برای همه پاها نقطه مشترک نساخته، وارد تحلیل نمی‌شود و تعدادش
+   * جدا گفته می‌شود — نه اینکه با صفر پر شود. و مهم‌تر (ممیزی ردیف ۵):
+   * «دریافت نشد» از «معامله نشده» جدا شمرده می‌شود. یکی خرابی ماست و باید
+   * دوباره تلاش شود؛ دیگری واقعیت بازار است.
    */
   async function loadTimeframeDays() {
     const dates = replay.rows.filter((row) => row.status === 'ok').map((row) => row.date);
     const wanted = dates.slice(-TIMEFRAME_DAY_CAP);
+    const codes = dayCodes();
+    // روزهایی که از قبل کامل گرفته شده‌اند دوباره درخواست نمی‌شوند.
+    const missing = wanted.filter((date) => !tradesCache.has(date));
+    const loaded = await loadTradeDays(missing, codes, {
+      onProgress: ({ done, total, phase, days }) => {
+        const text = phase === 'done'
+          ? `دریافت تمام شد؛ در حال ساخت سطل‌ها…`
+          : phase === 'live'
+            ? `دریافت نوار زندهٔ امروز برای ${fmt.int(codes.length)} ابزار…`
+            : `دریافت دسته‌ای ${fmt.int(done + 1)} از ${fmt.int(total)} — ${fmt.int(Math.round(days))} روز × ${fmt.int(codes.length)} ابزار…`;
+        tfNote(text); setStatus(text);
+      },
+    });
     const out = [];
-    let empty = 0;
-    for (let index = 0; index < wanted.length; index++) {
-      setStatus(`دریافت ریزمعامله ${fmt.int(index + 1)} از ${fmt.int(wanted.length)} روز…`);
-      await nextFrame();
-      const day = await fetchDayTrades(wanted[index]);
-      const points = replayDay(day, wanted[index]);
-      if (points.length) out.push({ date: wanted[index], points }); else empty += 1;
+    let noTrades = 0;
+    const failedDays = [];
+    for (const date of wanted) {
+      const day = tradesCache.get(date) || loaded.days.get(date) || { byIns: {}, failed: codes, date };
+      // پایی که دریافتش شکست خورده، «بی‌معامله» شمرده نمی‌شود
+      if (requiredMissing(day.failed).length) { failedDays.push(date); continue; }
+      if (!tradesCache.has(date)) tradesCache.set(date, day);
+      const points = replayDay(day, date);
+      if (points.length) out.push({ date, points }); else noTrades += 1;
     }
-    return { days: out, empty, skipped: dates.length - wanted.length };
+    return {
+      days: out, noTrades, failed: failedDays, ahead: loaded.ahead,
+      requests: loaded.batches + (loaded.live ? 1 : 0), live: loaded.live,
+      errors: [...new Set(batchErrors)],
+      skipped: dates.length - wanted.length,
+    };
+  }
+
+  /**
+   * چه چیزی شد، به تفکیک.
+   *
+   * ممیزی ردیف ۵ و ۶: «روز خراب فقط در شمارندهٔ `empty` می‌رود… خرابی شبکه
+   * با واقعیت "قرارداد معامله نشده" اشتباه می‌شود.» و شکافِ واقعیِ بالادست
+   * هم هست — روزی که کال و پوت و پایه هر سه صفر دارند در حالی که روز قبل و
+   * بعدش کامل‌اند. این دو باید جدا دیده شوند، وگرنه کاربر نمی‌داند دوباره
+   * تلاش کند یا نه.
+   */
+  function loadedSummary(loaded) {
+    if (!loaded) return '';
+    const parts = [];
+    if (loaded.noTrades) parts.push(`${fmt.int(loaded.noTrades)} روز بدون نقطهٔ مشترک کنار گذاشته شد`);
+    if (loaded.failed?.length) parts.push(`${fmt.int(loaded.failed.length)} روز دریافت نشد و «بی‌معامله» شمرده نشد`);
+    if (loaded.ahead?.length) parts.push(`${fmt.int(loaded.ahead.length)} روز هنوز نرسیده`);
+    if (loaded.skipped) parts.push(`${fmt.int(loaded.skipped)} روز قدیمی‌تر به‌خاطر سقف ${fmt.int(TIMEFRAME_DAY_CAP)} روز بررسی نشد`);
+    if (loaded.requests) {
+      parts.push(`${fmt.int(loaded.requests)} درخواست${loaded.live ? ' (روز جاری از نوار زنده)' : ''}`);
+    }
+    const errors = loaded.errors?.length ? ` · علت: ${loaded.errors.slice(0, 2).join('؛ ')}` : '';
+    return `${parts.length ? ` · ${parts.join(' · ')}` : ''}${errors}`;
   }
 
   function paintTimeframe(loaded) {
@@ -889,7 +1043,8 @@ export async function mount(root, { state }) {
     annotateBucketIv(buckets, { legs: replay.priced }, ivP());
     if (!buckets.length) {
       $('bt-tf-body').hidden = true;
-      $('bt-tf-note').textContent = 'در هیچ روزی از این بازه، ثانیه‌ای پیدا نشد که همه پاها در آن قیمت مشاهده‌شده داشته باشند.';
+      tfNote(`در هیچ روزی از این بازه، ثانیه‌ای پیدا نشد که همه پاها در آن قیمت مشاهده‌شده داشته باشند.${loadedSummary(loaded)}`,
+        Boolean(loaded?.failed?.length));
       return;
     }
     $('bt-tf-body').hidden = false;
@@ -897,10 +1052,9 @@ export async function mount(root, { state }) {
     const clock = timeOfDayProfile(timeframeDays, { bucketSeconds: seconds });
     const matrix = intradayEntryExitProfile(timeframeDays, { legs: replay.priced, bucketSeconds: seconds, fees: feesOf(state.settings) });
 
-    $('bt-tf-note').textContent = `${fmt.int(timeframeDays.length)} روز با نقطه مشترک`
-      + `${loaded?.empty ? ` · ${fmt.int(loaded.empty)} روز بدون نقطه مشترک کنار گذاشته شد` : ''}`
-      + `${loaded?.skipped ? ` · ${fmt.int(loaded.skipped)} روز قدیمی‌تر به‌خاطر سقف ${fmt.int(TIMEFRAME_DAY_CAP)} روز بررسی نشد` : ''}`
-      + ' · هر عدد فقط از معاملات واقعی همان سطل ساخته شده و هیچ قیمتی درون‌یابی نشده است.';
+    tfNote(`${fmt.int(timeframeDays.length)} روز با نقطه مشترک${loadedSummary(loaded)}`
+      + ' · هر عدد فقط از معاملات واقعی همان سطل ساخته شده و هیچ قیمتی درون‌یابی نشده است.',
+      Boolean(loaded?.failed?.length));
 
     const hours = (value) => `${fmt.num(value / 3600)} ساعت`;
     const cards = [
@@ -966,7 +1120,10 @@ export async function mount(root, { state }) {
     try {
       const loaded = await loadTimeframeDays();
       timeframeDays = loaded.days;
-      if (!timeframeDays.length) { setStatus('در هیچ روز این بازه، ریزمعامله کامل همه پاها پیدا نشد.', true); $('bt-tf-body').hidden = true; return; }
+      if (!timeframeDays.length) {
+        const why = `در هیچ روز این بازه، ریزمعامله کامل همه پاها پیدا نشد.${loadedSummary(loaded)}`;
+        setStatus(why, true); tfNote(why, true); $('bt-tf-body').hidden = true; return;
+      }
       paintTimeframe(loaded);
       // حالا سطل‌های تایم‌فریم ساخته شده‌اند؛ پنل‌های تحلیلی هم باید همان
       // تایم‌فریم را ببینند وگرنه ریلِ «سطل تایم‌فریم» به مسیر روزانه
@@ -977,7 +1134,10 @@ export async function mount(root, { state }) {
       $('bt-tf-export').hidden = false;
       setStatus(`تحلیل ${fmt.int(timeframeDays.length)} روز روی سطل ${fmt.int(timeframeSeconds / 60)} دقیقه‌ای آماده شد.`);
       $('bt-tf-body').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch (error) { setStatus(errorText(error, 'تحلیل تایم‌فریم کامل نشد.'), true); }
+    } catch (error) {
+      const text = errorText(error, 'تحلیل تایم‌فریم کامل نشد.');
+      setStatus(text, true); tfNote(text, true);
+    }
     finally { $('bt-tf-run').disabled = false; }
   }
 
