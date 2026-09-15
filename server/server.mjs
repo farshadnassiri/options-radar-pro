@@ -227,7 +227,9 @@ async function fetchUpstream(url) {
 async function get(pathname, ttlSec, priority = 5) {
   const url = `${S.baseUrl}${pathname}`;
   const hit = cache.get(url);
-  if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; tally.cacheHit(pathname); return hit.data; }
+  // پاسخِ خالی عمرِ کوتاه‌ترِ خودش را دارد؛ چرایش کنار `ttlEmptySec` نوشته است.
+  const liveFor = hit?.empty ? Math.min(ttlSec, Math.max(0, num(S.ttlEmptySec, 60))) : ttlSec;
+  if (hit && Date.now() - hit.at < liveFor * 1000) { stat.cacheHits += 1; tally.cacheHit(pathname); return hit.data; }
   // پیوستن به درخواستِ در پرواز، عجلهٔ صدازنندهٔ تازه را هم با خودش می‌برد.
   const held = inflight.get(url);
   if (held) { boostTicket(held.ticket, priority); return held.promise; }
@@ -243,7 +245,9 @@ async function get(pathname, ttlSec, priority = 5) {
         // صدازنندهٔ عجول‌تری پیوسته باشد، و تلاشِ بعدی باید عجلهٔ او را داشته
         // باشد نه عجلهٔ صدازنندهٔ اول را.
         const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket);
-        cache.set(url, { at: Date.now(), data });
+        // «خالی» یعنی پاسخ آمد ولی هیچ ردیفی نداشت. این با «نیامد» فرق
+        // دارد و کش می‌شود — ولی نه به همان درازا.
+        cache.set(url, { at: Date.now(), data, empty: firstList(data).length === 0 });
         evictOldest(cache, S.maxCacheEntries);
         return data;
       } catch (e) {
@@ -1108,9 +1112,18 @@ async function handle(req, res) {
         const key = `${date}:${code}`;
         if (!seen.has(key)) { seen.add(key); requests.push({ key, code, date }); }
       }
+      // ── تلاش دوباره، بی کش ────────────────────────────────────────
+      //
+      // ممیزی: پاسخِ خالیِ لحظه‌ای کش می‌شد و آن روز تا پایان نشست
+      // «بی‌معامله» می‌ماند. مصرف‌کننده وقتی خودش تشخیص می‌دهد پاسخ
+      // ناسازگار است (پایه خالی ولی پاها معامله دارند) باید بتواند از کش
+      // رد شود. این راهِ فرار از سهمیه نیست: صفِ مشترک سرِ جایش است و
+      // فراخوان فقط همان چند روزِ مشکوک را دوباره می‌پرسد.
+      const fresh = body.fresh === true;
       const one = async ({ key, code, date }) => {
         try {
-          const rows = firstList(await get(historicalTradesPath(code, date), S.ttlDailySec, 6));
+          const path = historicalTradesPath(code, date);
+          const rows = firstList(fresh ? await getFresh(path, 2, 6) : await get(path, S.ttlDailySec, 6));
           return [key, { rows: normalizeTrades(rows) }];
         } catch (e) {
           return [key, { rows: [], error: `${e.name}: ${e.message}` }];
