@@ -9,6 +9,7 @@ import {
 import {
   replayIntraday, summarizeIntraday, inIntradaySession,
   bucketIntradayPath, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
+  intradayPathWithGaps, coverageSummary, TF_DAY_STATUS, TF_DAY_LABEL,
 } from '/core/backtest.mjs';
 import {
   ivParams, IV_PARAMS, annotateDailyIv, annotateIntradayIv, annotateBucketIv, ivSummary, legDaysToExpiry,
@@ -163,6 +164,7 @@ export async function mount(root, { state }) {
           <div class="backtest-chart-grid"><section><div class="section-head"><h3>آفست موقعیت در کل بازه</h3><span>ریال · هر نقطه یک سطل</span></div><div id="bt-tf-pnl-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>اثر خالص هر پا</h3><span>تفکیک ریالی</span></div><div id="bt-tf-leg-chart" class="backtest-chart"></div></section></div>
           <div class="backtest-chart-grid"><section><div class="section-head"><h3>بازده استراتژی و نماد پایه</h3><span>درصد</span></div><div id="bt-tf-return-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>قیمت نماد پایه</h3><span>ریال</span></div><div id="bt-tf-base-chart" class="backtest-chart"></div></section></div>
           <section class="backtest-tape"><div class="section-head"><div><h3>کِی وارد شوی و کِی خارج</h3><p id="bt-tf-matrix-note"></p></div><span id="bt-tf-matrix-best">—</span></div><div id="bt-tf-matrix" class="history-table-wrap"></div></section>
+          <section class="backtest-tape"><div class="section-head"><div><h3>پوشش روزهای بازه</h3><p>هر روز معاملاتی بازه یک ردیف دارد — چه داده ساخته باشد چه نه. روزِ بی‌داده روی نمودار شکاف است، نه حذف.</p></div><span id="bt-tf-coverage-count">—</span></div><div id="bt-tf-coverage" class="history-table-wrap"></div></section>
           <section class="backtest-tape"><div class="section-head"><div><h3>جدول سطل‌ها</h3><p>هر ردیف یک سطل زمانی با مشاهده واقعی. سطل بی‌معامله ساخته نشده است.</p></div><span id="bt-tf-count">—</span></div><div id="bt-tf-table" class="history-table-wrap"></div></section>
         </div>
       </section>
@@ -574,15 +576,23 @@ export async function mount(root, { state }) {
    * بازار است (قرارداد بی‌رمق)، دیگری خرابی ماست. تا امروز هر دو یک جملهٔ
    * واحد می‌گرفتند و کاربر نمی‌دانست باید دوباره تلاش کند یا نه.
    */
+  /** معامله‌های داخل جلسه — همان صافی که همه‌جای این تب مبنا است. */
+  const sessionTrades = (rows) => (rows || [])
+    .filter((t) => !t.canceled && Number(t.price) > 0 && inIntradaySession(t.time));
+
   function legsWithoutTrades(byIns) {
     const out = [];
     legs.forEach((leg, index) => {
-      const rows = byIns[String(leg.ins)] || [];
-      const inSession = rows.filter((t) => !t.canceled && Number(t.price) > 0 && inIntradaySession(t.time));
-      if (!inSession.length) out.push(nameOf(leg, `پای ${faDigits(index + 1)}`));
+      if (!sessionTrades(byIns[String(leg.ins)]).length) out.push(nameOf(leg, `پای ${faDigits(index + 1)}`));
     });
     return out;
   }
+
+  /** نامِ خواناى چند ابزار، برای جدول پوشش. */
+  const legNames = (codes) => (codes || []).map((ins) => {
+    const at = legs.findIndex((leg) => String(leg.ins) === String(ins));
+    return at < 0 ? String(ins) : nameOf(legs[at], `پای ${faDigits(at + 1)}`);
+  });
 
   const requiredMissing = (failed) => {
     const required = new Set(legs.map((leg) => String(leg.ins)));
@@ -980,8 +990,17 @@ export async function mount(root, { state }) {
    * دوباره تلاش شود؛ دیگری واقعیت بازار است.
    */
   async function loadTimeframeDays() {
-    const dates = replay.rows.filter((row) => row.status === 'ok').map((row) => row.date);
+    // ═══ فهرستِ مرجع: هر روزِ معاملاتیِ بازه، نه فقط روزهای «معتبر» ═══
+    //
+    // گزارش صاحب پروژه: «همه روزهای درون بازه را انگار پوشش نمیده.» علتش
+    // همین سطر بود که `row.status === 'ok'` فیلتر می‌کرد. روزی که مسیرِ
+    // روزانه‌اش `missing` یا `liquidity` بود، اصلاً **درخواست هم نمی‌شد** —
+    // در حالی که نوارِ ریزمعامله منبعِ دیگری است و می‌تواند همان روز داده
+    // داشته باشد. حالا همهٔ روزها پرسیده می‌شوند و علتِ هرکدام نوشته.
+    const dates = replay.rows.map((row) => Number(row.date)).filter(Boolean);
+    const dayStatus = new Map(replay.rows.map((row) => [Number(row.date), String(row.status || '')]));
     const wanted = dates.slice(-TIMEFRAME_DAY_CAP);
+    const cutOff = new Set(dates.slice(0, Math.max(0, dates.length - wanted.length)));
     const codes = dayCodes();
     // روزهایی که از قبل کامل گرفته شده‌اند دوباره درخواست نمی‌شوند.
     const missing = wanted.filter((date) => !tradesCache.has(date));
@@ -996,21 +1015,41 @@ export async function mount(root, { state }) {
       },
     });
     const out = [];
-    let noTrades = 0;
-    const failedDays = [];
+    const coverage = [];
+    // روزهایی که از سقف بیرون ماندند هم در فهرست می‌مانند — با علتِ خودشان.
+    for (const date of dates) {
+      if (!cutOff.has(date)) continue;
+      coverage.push({ date, status: TF_DAY_STATUS.SKIPPED, dayStatus: dayStatus.get(date) || '', legs: [] });
+    }
     for (const date of wanted) {
       const day = tradesCache.get(date) || loaded.days.get(date) || { byIns: {}, failed: codes, date };
-      // پایی که دریافتش شکست خورده، «بی‌معامله» شمرده نمی‌شود
-      if (requiredMissing(day.failed).length) { failedDays.push(date); continue; }
+      const row = { date, dayStatus: dayStatus.get(date) || '', legs: [] };
+      // ── چهار علتِ متفاوت، چهار وضعیت ──────────────────────────────
+      //
+      // «خطای دریافت» یعنی دوباره تلاش کن؛ «نماد پایه معامله نشد» یعنی
+      // واقعیتِ بازار است و تلاش دوباره فایده ندارد. یکی‌کردنشان تصمیمِ
+      // کاربر را خراب می‌کند.
+      if (requiredMissing(day.failed).length) {
+        coverage.push({ ...row, status: TF_DAY_STATUS.FAILED, legs: legNames(requiredMissing(day.failed)) });
+        continue;
+      }
       if (!tradesCache.has(date)) tradesCache.set(date, day);
+      if (!sessionTrades(day.byIns[String(ua.ins)]).length) {
+        coverage.push({ ...row, status: TF_DAY_STATUS.NO_BASE });
+        continue;
+      }
+      const quiet = legsWithoutTrades(day.byIns);
+      if (quiet.length) { coverage.push({ ...row, status: TF_DAY_STATUS.NO_LEGS, legs: quiet }); continue; }
       const points = replayDay(day, date);
-      if (points.length) out.push({ date, points }); else noTrades += 1;
+      if (points.length) { out.push({ date, points }); coverage.push({ ...row, status: TF_DAY_STATUS.OK, points: points.length }); }
+      else coverage.push({ ...row, status: TF_DAY_STATUS.NO_POINTS });
     }
+    coverage.sort((a, b) => a.date - b.date);
     return {
-      days: out, noTrades, failed: failedDays, ahead: loaded.ahead,
+      days: out, coverage, summary: coverageSummary(coverage), ahead: loaded.ahead,
       requests: loaded.batches + (loaded.live ? 1 : 0), live: loaded.live,
       errors: [...new Set(batchErrors)],
-      skipped: dates.length - wanted.length,
+      cap: TIMEFRAME_DAY_CAP, range: dates.length,
     };
   }
 
@@ -1025,16 +1064,49 @@ export async function mount(root, { state }) {
    */
   function loadedSummary(loaded) {
     if (!loaded) return '';
+    const sum = loaded.summary || {};
     const parts = [];
-    if (loaded.noTrades) parts.push(`${fmt.int(loaded.noTrades)} روز بدون نقطهٔ مشترک کنار گذاشته شد`);
-    if (loaded.failed?.length) parts.push(`${fmt.int(loaded.failed.length)} روز دریافت نشد و «بی‌معامله» شمرده نشد`);
+    // هر علت جدا شمرده می‌شود. «خطای دریافت» یعنی دوباره تلاش کن؛ بقیه
+    // واقعیتِ بازارند و تلاش دوباره عوضشان نمی‌کند.
+    for (const [key, label] of [
+      [TF_DAY_STATUS.NO_BASE, TF_DAY_LABEL.noBase],
+      [TF_DAY_STATUS.NO_LEGS, TF_DAY_LABEL.noLegs],
+      [TF_DAY_STATUS.NO_POINTS, TF_DAY_LABEL.noPoints],
+      [TF_DAY_STATUS.FAILED, TF_DAY_LABEL.failed],
+    ]) {
+      if (sum[key]) parts.push(`${fmt.int(sum[key])} روز ${label}`);
+    }
     if (loaded.ahead?.length) parts.push(`${fmt.int(loaded.ahead.length)} روز هنوز نرسیده`);
-    if (loaded.skipped) parts.push(`${fmt.int(loaded.skipped)} روز قدیمی‌تر به‌خاطر سقف ${fmt.int(TIMEFRAME_DAY_CAP)} روز بررسی نشد`);
+    // سقف، وقتی بگزد، صریح گفته می‌شود — «کل بازه» بی‌قید ادعای بزرگی است.
+    if (sum[TF_DAY_STATUS.SKIPPED]) {
+      parts.push(`${fmt.int(sum[TF_DAY_STATUS.SKIPPED])} روز قدیمی‌تر بررسی نشد (سقف ${fmt.int(loaded.cap || TIMEFRAME_DAY_CAP)} روز از ${fmt.int(loaded.range || 0)} روز بازه)`);
+    }
     if (loaded.requests) {
       parts.push(`${fmt.int(loaded.requests)} درخواست${loaded.live ? ' (روز جاری از نوار زنده)' : ''}`);
     }
     const errors = loaded.errors?.length ? ` · علت: ${loaded.errors.slice(0, 2).join('؛ ')}` : '';
     return `${parts.length ? ` · ${parts.join(' · ')}` : ''}${errors}`;
+  }
+
+  /**
+   * جدول پوشش: هر روزِ معاملاتیِ بازه، یک ردیف.
+   *
+   * خواستهٔ صریح صاحب پروژه: «تمام روزهای معاملاتی بین شروع و پایان در
+   * فهرست مرجع باقی بمانند و برای هر روز وضعیت دقیق نمایش داده شود.»
+   * خلاصهٔ عددی کافی نبود — کاربر باید بتواند بگوید **کدام** روز و **چرا**.
+   */
+  function paintCoverage(loaded) {
+    const rows = loaded?.coverage || [];
+    const sum = loaded?.summary || {};
+    $('bt-tf-coverage-count').textContent = rows.length
+      ? `${fmt.int(sum.ok || 0)} روز معتبر از ${fmt.int(rows.length)} روز بازه`
+      : '—';
+    if (!rows.length) { $('bt-tf-coverage').innerHTML = '<p class="empty-note">هنوز بازه‌ای بررسی نشده است.</p>'; return; }
+    $('bt-tf-coverage').innerHTML = `<table class="history-table backtest-compact-table"><thead><tr><th>روز</th><th>وضعیت گام سوم</th><th>جزئیات</th><th>سطل/نقطه</th><th>وضعیت مسیر روزانه</th></tr></thead><tbody>${rows.map((row) => {
+      const tone = row.status === TF_DAY_STATUS.OK ? 'gain' : row.status === TF_DAY_STATUS.FAILED ? 'loss' : '';
+      const daily = row.dayStatus === 'ok' ? 'معتبر' : row.dayStatus === 'liquidity' ? 'حذف نقدشوندگی' : row.dayStatus === 'missing' ? 'قیمت ناقص' : '—';
+      return `<tr class="${row.status === TF_DAY_STATUS.OK ? '' : 'history-missing'}"><td>${dateLabel(row.date)}</td><td class="${tone}">${TF_DAY_LABEL[row.status] || row.status}</td><td>${row.legs?.length ? esc(row.legs.join('، ')) : '—'}</td><td>${row.points ? fmt.int(row.points) : '—'}</td><td>${daily}</td></tr>`;
+    }).join('')}</tbody></table>`;
   }
 
   function paintTimeframe(loaded) {
@@ -1071,10 +1143,19 @@ export async function mount(root, { state }) {
 
     // نقاط نمودار: هر سطل یک نقطه. محور بر پایه اندیس است چون سطل‌ها چند روز
     // را پشت هم می‌چینند و ساعت واقعی در روز دوم دوباره از ۹:۰۰ شروع می‌شود.
-    const points = buckets.map((row) => ({
-      ...row, granularity: 'trade', timeLabel: rangeLabel(row),
+    // ── روزِ بی‌داده روی محور یک شکاف است، نه یک حذف ────────────────
+    //
+    // گزارش صاحب پروژه: «برخی روزها رو نمیاره.» پیش از این روزِ بی‌نقطه از
+    // خروجی می‌افتاد و نمودار دو روزِ غیرمجاور را مستقیم به هم وصل می‌کرد.
+    // معامله‌گر بیشینهٔ افت را از شکلِ همان خط می‌خواند؛ خطی که از روی یک
+    // هفتهٔ بی‌معامله پریده، افتِ کمتری نشان می‌دهد از آنچه واقعاً بود.
+    //
+    // ردیفِ شکاف هیچ عددی ندارد — نه صفر، نه قیمتِ حمل‌شده از روز قبل — و
+    // رسّام خودش خط را همان‌جا قطع می‌کند.
+    const points = intradayPathWithGaps(buckets, loaded?.coverage || []).map((row) => ({
+      ...row, granularity: 'trade', timeLabel: row.gap ? dateLabel(row.date) : rangeLabel(row),
       netPnl: row.closePnl, returnPct: row.returnPct,
-      ...Object.fromEntries(row.perLeg.flatMap((leg, index) => [[`legPnl${index}`, leg.netPnl], [`legPrice${index}`, leg.price]])),
+      ...Object.fromEntries((row.perLeg || []).flatMap((leg, index) => [[`legPnl${index}`, leg.netPnl], [`legPrice${index}`, leg.price]])),
     }));
     const legSeries = replay.priced.map((leg, index) => ({ key: `legPnl${index}`, label: `${faDigits(index + 1)} · ${nameOf(leg, 'پا')}`, color: LEG_COLORS[index % LEG_COLORS.length] }));
     chart($('bt-tf-pnl-chart'), points, [{ key: 'netPnl', label: 'آفست موقعیت', color: 'var(--accent)' }], { money: true, step: true });
@@ -1120,6 +1201,9 @@ export async function mount(root, { state }) {
     try {
       const loaded = await loadTimeframeDays();
       timeframeDays = loaded.days;
+      // جدول پوشش حتی وقتی هیچ روزی نقطه نساخته هم رسم می‌شود: کاربر باید
+      // بتواند ببیند **کدام** روز و **چرا**، نه فقط اینکه «چیزی پیدا نشد».
+      paintCoverage(loaded);
       if (!timeframeDays.length) {
         const why = `در هیچ روز این بازه، ریزمعامله کامل همه پاها پیدا نشد.${loadedSummary(loaded)}`;
         setStatus(why, true); tfNote(why, true); $('bt-tf-body').hidden = true; return;

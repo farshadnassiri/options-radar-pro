@@ -534,3 +534,100 @@ export function intradayEntryExitProfile(days = [], { legs = [], bucketSeconds =
     bestEntry: pickBest(entries), bestExit: pickBest(exits), best: bestCell,
   };
 }
+
+// ————————————————————————————————————————————————————————————————
+// پوششِ روزها در گام سوم — و شکافی که باید دیده شود.
+//
+// ═══ گزارش صاحب پروژه ═══
+//
+// «همه روزهای درون بازه را انگار پوشش نمیده و برخی روزها رو نمیاره.»
+//
+// درست بود، و دو علت داشت که هر دو یک ریشه دارند: روزِ بی‌داده **بی‌صدا**
+// حذف می‌شد.
+//
+// ۱. فهرستِ مرجع، روزهایی بود که مسیرِ روزانه وضعیت `ok` داده بود. روزِ
+//    `missing` یا `liquidity` اصلاً درخواست هم نمی‌شد — در حالی که نوارِ
+//    ریزمعامله منبعِ دیگری است و می‌تواند همان روز داده داشته باشد.
+//
+// ۲. روزی که نقطهٔ مشترک نمی‌ساخت، از خروجی می‌افتاد. پس نمودار دو روزِ
+//    غیرمجاور را مستقیم به هم وصل می‌کرد و پیوستگیِ سودوزیان، افت سرمایه و
+//    ریسکِ نگه‌داری، تصویرِ گمراه‌کننده می‌داد.
+//
+// چرا این مهم است و «جزئیات نمایشی» نیست: معامله‌گر از شکل همان خط،
+// بیشینهٔ افت را می‌خواند. خطی که از روی یک هفتهٔ بی‌معامله پریده، افتِ
+// کمتری نشان می‌دهد از آنچه واقعاً بوده.
+//
+// درمان هم دو نیمه دارد: هر روزِ معاملاتیِ بازه در فهرست بماند و **علتش**
+// نوشته شود، و روزِ بی‌داده روی محور یک **شکاف** باشد نه یک حذف.
+// ————————————————————————————————————————————————————————————————
+
+/** وضعیت هر روز در گام سوم. جدا از وضعیتِ مسیرِ روزانه، چون منبعشان جداست. */
+export const TF_DAY_STATUS = Object.freeze({
+  OK: 'ok',
+  FAILED: 'failed',
+  NO_BASE: 'noBase',
+  NO_LEGS: 'noLegs',
+  NO_POINTS: 'noPoints',
+  SKIPPED: 'skipped',
+});
+
+/**
+ * جملهٔ فارسی هر وضعیت.
+ *
+ * چهار علتِ متفاوت، چهار جمله. «خطای دریافت» یعنی دوباره تلاش کن؛ «نماد
+ * پایه معامله نشد» یعنی واقعیتِ بازار است و تلاش دوباره فایده ندارد. یک
+ * جملهٔ مشترک برای هر دو، تصمیمِ کاربر را خراب می‌کند.
+ */
+export const TF_DAY_LABEL = Object.freeze({
+  ok: 'معتبر',
+  failed: 'خطای دریافت',
+  noBase: 'نماد پایه معامله نشد',
+  noLegs: 'پای بی‌معامله',
+  noPoints: 'نقطهٔ مشترک نساخت',
+  skipped: 'بیرون از سقف بررسی',
+});
+
+/** شمارشِ هر وضعیت، به‌ترتیبِ ثابت — تا جملهٔ خلاصه هر بار یک شکل باشد. */
+export function coverageSummary(coverage = []) {
+  const counts = Object.fromEntries(Object.values(TF_DAY_STATUS).map((key) => [key, 0]));
+  for (const row of coverage || []) {
+    const status = String(row?.status || '');
+    if (status in counts) counts[status] += 1;
+  }
+  return { ...counts, total: (coverage || []).length };
+}
+
+/**
+ * سطل‌های واقعی، به‌علاوهٔ یک ردیفِ **خالی** برای هر روزِ بی‌داده.
+ *
+ * ردیفِ خالی هیچ عددی ندارد — نه صفر، نه قیمتِ حمل‌شده از روز قبل. رسّامِ
+ * نمودار ردیفِ بی‌عدد را شکاف می‌کشد و خط را قطع می‌کند، که همان چیزی است
+ * که باید: «این روز را نمی‌دانیم»، نه «این روز صفر بود».
+ *
+ * حملِ آخرین قیمت به روز بعد عمداً اینجا نیست. اگر روزی لازم شد، باید
+ * گزینهٔ صریحِ کاربر باشد نه رفتارِ خاموشِ پیش‌فرض — وگرنه عددی ساخته‌ایم
+ * که هیچ‌کس معامله‌اش نکرده (قاعدهٔ ۲-۴).
+ */
+export function intradayPathWithGaps(buckets = [], coverage = []) {
+  const byDate = new Map();
+  for (const row of buckets || []) {
+    const date = Number(row?.date);
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(row);
+  }
+  const out = [];
+  for (const day of coverage || []) {
+    const date = Number(day?.date);
+    const rows = byDate.get(date);
+    if (rows?.length) { out.push(...rows); continue; }
+    out.push({
+      date, gap: true, status: String(day?.status || TF_DAY_STATUS.NO_POINTS),
+      why: TF_DAY_LABEL[day?.status] || TF_DAY_LABEL.noPoints,
+      startSecond: INTRADAY_START_SECOND, endSecond: INTRADAY_END_SECOND,
+      timeLabel: '', observations: 0, seconds: 0, perLeg: [],
+      openPnl: NaN, closePnl: NaN, highPnl: NaN, lowPnl: NaN,
+      changePnl: NaN, stepPnl: NaN, returnPct: NaN, basePrice: NaN, basePct: NaN, volume: NaN,
+    });
+  }
+  return out;
+}
