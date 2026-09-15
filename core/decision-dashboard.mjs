@@ -828,6 +828,41 @@ export function mergeUnderlyingTrades(universe = {}, observed = []) {
 
 export const PAIRED_SORT_DEFAULT = Object.freeze({ key: 'strike', side: null, dir: 1 });
 
+// ————————————————————————————————————————————————————————————————
+// جای ردیف نماد پایه در زنجیرهٔ دوطرفه.
+//
+// ═══ چرا این یک تصمیم است و از رابط بیرون کشیده شد ═══
+//
+// گزارش صاحب پروژه: «نماد پایه در یک ردیف در زنجیره قرارداد نمی‌آید.»
+// علتش این بود که در رابط، ردیفِ نماد پایه به **جایگاهِ** خط قیمت جاری گره
+// خورده بود — فقط وقتی رسم می‌شد که `findIndex` جایی بین دو اعمال پیدا
+// کند. پس با مرتب‌کردن روی هر ستونِ دیگر، یا وقتی قیمت جاری بیرون از کل
+// نردبان بود، کلاً ناپدید می‌شد.
+//
+// دو ادعای جدا در هم رفته بودند:
+//
+//   «خط قیمت جاری بین دو اعمالِ در بر گیرنده» — ادعای **جایگاهی**، و فقط
+//   در نردبانِ اعمال معنی دارد.
+//
+//   «ردیف نماد پایه با آخرین قیمتش» — ادعای **اطلاعاتی**، و همیشه درست
+//   است، در هر ترتیبی.
+//
+// پس ردیف همیشه هست و فقط جایش عوض می‌شود. اینجا خالص است تا همین قاعده
+// مستقیم آزمون شود، نه از دل `innerHTML` بیرون کشیده شود.
+// ————————————————————————————————————————————————————————————————
+export function spotRowPlacement(rows = [], { spot = NaN, sort = PAIRED_SORT_DEFAULT } = {}) {
+  const ladder = (sort?.key || 'strike') === 'strike';
+  const price = Number(spot);
+  // ترتیب غیرنردبانی: جایگاه ادعا نمی‌کنیم، ولی ردیف را هم حذف نمی‌کنیم.
+  if (!ladder || !Number.isFinite(price)) return { at: -1, head: true, tail: false };
+  const at = Number(sort?.dir) < 0
+    ? rows.findIndex((row) => Number(row?.strike) < price)
+    : rows.findIndex((row) => Number(row?.strike) > price);
+  // قیمت جاری بیرون از نردبان است: ته همان سمت می‌نشیند، نه اینکه نیاید.
+  if (at < 0) return { at: -1, head: false, tail: true };
+  return { at, head: false, tail: false };
+}
+
 export function sortPairedChain(rows = [], sort = PAIRED_SORT_DEFAULT) {
   const key = sort?.key || 'strike';
   const dir = Number(sort?.dir) < 0 ? -1 : 1;

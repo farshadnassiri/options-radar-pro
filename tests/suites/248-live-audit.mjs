@@ -8,7 +8,7 @@ import { impliedVolWhy, bsPrice } from '../../core/bs.mjs';
 import { liveIvAt, liveQuoteIvSet, IV_WHY_LABEL } from '../../core/live-market.mjs';
 import {
   liveBaseList, liveOpenViewContracts, mergeUnderlyingTrades, contractAnalytics,
-  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT, twoSidedChain,
+  sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT, twoSidedChain, spotRowPlacement,
 } from '../../core/decision-dashboard.mjs';
 import { dashboardClock } from '../../core/watch-health.mjs';
 import { liveDayOf, liveDayRows, mergeLiveDay } from '../../core/live-day.mjs';
@@ -247,9 +247,17 @@ check('۲. هر سرستون دکمهٔ مرتب‌سازی است و سمتش �
   && mapD248.includes("localStorage.setItem('options-radar:market-map-paired-sort'"));
 // خط قیمت جاری «بین دو اعمالِ در بر گیرنده» است؛ در ترتیب دیگری جایی ندارد
 // و کشیدنش یعنی ادعای غلط.
-check('۲. خط قیمت جاری فقط در ترتیب نردبانی کشیده می‌شود',
-  mapD248.includes("const ladder = pairedSort.key === 'strike';")
-  && mapD248.includes('const spotAt = !ladder || !Number.isFinite(chain.spot) ? -1'));
+//
+// ولی این ادعا فقط دربارهٔ **جایگاه** است. نسخهٔ اول این ادعا، حذفِ کلِ
+// ردیف را هم قفل کرده بود — و همان، باگِ «نماد پایه در زنجیره نمی‌آید» را
+// ساخت. حالا قاعده در `spotRowPlacement` است و هر دو نیمه‌اش آزمون دارد.
+const placeRungs248 = [{ strike: 2040 }, { strike: 2160 }, { strike: 2280 }, { strike: 2400 }, { strike: 2520 }];
+check('۲. جایگاهِ «بین دو اعمال» فقط در ترتیب نردبانی ادعا می‌شود',
+  spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'strike', side: null, dir: 1 } }).at === 3
+  && spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'oi', side: 'call', dir: 1 } }).at === -1);
+check('۲. و رابط قاعدهٔ خودش را ندارد',
+  !mapD248.includes("const ladder = pairedSort.key === 'strike';")
+  && mapD248.includes('spotRowPlacement('));
 check('۱. نشانهٔ بارگذاری هم اسکلت دارد هم نوار در جریان',
   busy248.includes('export function busyBlock(') && busy248.includes('export function attachBusyBar(')
   && cssD248.includes('.busy-spin {') && cssD248.includes('.skeleton-bar {')
@@ -308,6 +316,41 @@ const cssE248 = readSrc('../ui/style.css');
 check('۱. و از هر ردیف دیگر جدا دیده می‌شود',
   cssE248.includes('.lmm-paired-spot td { padding: 0; background: color-mix(in srgb, var(--warn)')
   && cssE248.includes('.lmm-paired-spot strong {'));
+
+// ═══ ۱ (دور دوم). ردیفی که با مرتب‌سازی ناپدید می‌شد ═══
+//
+// گزارش صاحب پروژه: «نماد پایه در یک ردیف در زنجیره قرارداد نمی‌آید.»
+// دو ادعای متفاوت در هم رفته بودند: «خط قیمت جاری بین دو اعمالِ در بر
+// گیرنده» ادعای جایگاهی است و فقط در نردبانِ اعمال معنی دارد؛ «ردیف نماد
+// پایه با آخرین قیمتش» ادعای اطلاعاتی است و همیشه درست است. چون ردیف به
+// جایگاه گره خورده بود، هر ترتیب دیگری حذفش می‌کرد.
+//
+// ادعای قبلی فقط وجودِ رشتهٔ `lmm-paired-spot` را در فایل می‌سنجید، پس با
+// این باگ هم سبز می‌ماند. این‌ها خودِ قاعده را می‌سنجند.
+const shown248 = (place) => place.at >= 0 || place.head || place.tail;
+const asc248 = spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'strike', side: null, dir: 1 } });
+check('۱. در نردبان صعودی، ردیف بین دو اعمالِ در بر گیرنده می‌نشیند',
+  asc248.at === 3 && !asc248.head && !asc248.tail, JSON.stringify(asc248));
+const desc248 = spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'strike', side: null, dir: -1 } });
+check('۱. در نردبان نزولی هم همان دو اعمال را جدا می‌کند', desc248.at === 0);
+// هر سه حالتی که پیش از این ردیف را حذف می‌کردند:
+for (const [name, place] of [
+  ['مرتب بر ستون مشتق', spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'gapPct', side: 'call', dir: -1 } })],
+  ['قیمت جاری بیرون از نردبان', spotRowPlacement(placeRungs248, { spot: 9999, sort: { key: 'strike', side: null, dir: 1 } })],
+  ['قیمت پایهٔ نامعلوم', spotRowPlacement(placeRungs248, { spot: NaN, sort: PAIRED_SORT_DEFAULT })],
+]) {
+  check(`۱. با «${name}» ردیف نماد پایه همچنان رسم می‌شود`, shown248(place), JSON.stringify(place));
+}
+check('۱. ترتیب غیرنردبانی جایگاه ادعا نمی‌کند و ردیف را بالا می‌گذارد',
+  spotRowPlacement(placeRungs248, { spot: 2300, sort: { key: 'oi', side: 'put', dir: 1 } }).head === true);
+check('۱. قیمت بالاتر از کل نردبان، ردیف را ته جدول می‌گذارد نه بالا',
+  spotRowPlacement(placeRungs248, { spot: 9999, sort: { key: 'strike', side: null, dir: 1 } }).tail === true);
+check('۱. زنجیرهٔ خالی هم ردیف نماد پایه را نگه می‌دارد',
+  shown248(spotRowPlacement([], { spot: 2300, sort: PAIRED_SORT_DEFAULT })));
+// و رابط باید از همین قاعده بخواند، نه نسخهٔ خودش
+check('۱. رابط جای ردیف را از موتور می‌گیرد',
+  mapE248.includes('spotRowPlacement(ordered, { spot: chain.spot, sort: pairedSort })')
+  && mapE248.includes('place.head ? spotRow') && mapE248.includes('place.tail ? spotRow'));
 
 // ————— ۲ و ۳. قلم و عدد —————
 const fmtSrc248 = readSrc('../ui/fmt.mjs');
