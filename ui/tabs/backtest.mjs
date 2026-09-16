@@ -8,7 +8,7 @@ import {
 } from '/core/history.mjs';
 import {
   replayIntraday, summarizeIntraday, inIntradaySession,
-  bucketIntradayPath, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
+  bucketIntradayPath, observedBuckets, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
   intradayPathWithGaps, coverageSummary, baseGapSuspect, TF_DAY_STATUS, TF_DAY_LABEL,
 } from '/core/backtest.mjs';
 import {
@@ -682,10 +682,14 @@ export async function mount(root, { state }) {
       ? annotateBucketIv(bucketIntradayPath(timeframeDays, { bucketSeconds: timeframeSeconds }), { legs: replay.priced }, ivP())
       : [];
 
+    const observedTf = observedBuckets(tfBuckets);
     $('bt-iv-source').textContent = [
       `${fmt.int(daily.length)} روز`,
       intraday.length ? `${fmt.int(intraday.length)} نقطهٔ درون‌روز` : '',
-      tfBuckets.length ? `${fmt.int(tfBuckets.length)} سطل تایم‌فریم` : '',
+      // شمارِ *مشاهده‌شده*، نه شمارِ سطل: محورِ کامل ۲۱۰ سطل در روز دارد و
+      // بیشترشان قیمت ندارند. گفتن «۲۱۰ سطل تایم‌فریم» برای منبعِ تلاطم،
+      // عددی است که گمراه می‌کند.
+      observedTf.length ? `${fmt.int(observedTf.length)} سطل تایم‌فریم` : '',
     ].filter(Boolean).join(' · ') || '—';
 
     chart($('bt-iv-daily-chart'), ivRows(daily), series, { xLabel: 'روز', yLabel: 'تلاطم ضمنی (٪)' });
@@ -1199,7 +1203,7 @@ export async function mount(root, { state }) {
     // ردیفِ شکاف هیچ عددی ندارد — نه صفر، نه قیمتِ حمل‌شده از روز قبل — و
     // رسّام خودش خط را همان‌جا قطع می‌کند.
     const points = intradayPathWithGaps(buckets, loaded?.coverage || []).map((row) => ({
-      ...row, granularity: 'trade', timeLabel: row.gap ? dateLabel(row.date) : rangeLabel(row),
+      ...row, granularity: 'trade', timeLabel: row.dayGap ? dateLabel(row.date) : rangeLabel(row),
       netPnl: row.closePnl, returnPct: row.returnPct,
       ...Object.fromEntries((row.perLeg || []).flatMap((leg, index) => [[`legPnl${index}`, leg.netPnl], [`legPrice${index}`, leg.price]])),
     }));
