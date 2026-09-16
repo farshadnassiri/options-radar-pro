@@ -174,7 +174,8 @@ export function chart(host, points, series, {
     const when = row.granularity === 'trade'
       ? `${stamp} · ${faDigits(row.timeLabel ?? '')}`
       : faDigits(row.dateLabel || (Number.isFinite(Number(row.date)) ? historyDateLabel(row.date) : '—'));
-    tip.innerHTML = `<b>${when}</b>${series.map((item) => Number.isFinite(cell(row, item.key)) ? `<span style="--series:${item.color}"><i></i>${seriesLabel(item)}: <strong class="${signTone(cell(row, item.key))}">${tipLabel(cell(row, item.key))}</strong></span>` : '').join('')}`;
+    const dataStatus = row.dataStatusLabel ? `<em>${esc(row.dataStatusLabel)}</em>` : '';
+    tip.innerHTML = `<b>${when}</b>${dataStatus}${series.map((item) => Number.isFinite(cell(row, item.key)) ? `<span style="--series:${item.color}"><i></i>${seriesLabel(item)}: <strong class="${signTone(cell(row, item.key))}">${tipLabel(cell(row, item.key))}</strong></span>` : '').join('')}`;
     tip.hidden = false;
     const box = host.getBoundingClientRect();
     tip.style.left = `${Math.max(8, Math.min(box.width - 190, clientX - box.left + 12))}px`;

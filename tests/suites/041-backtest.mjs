@@ -128,4 +128,10 @@ group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فری�
     source40.includes('<th>وضعیت</th>')
     && source40.includes('<th>ارزش حمل‌شده</th>')
     && source40.includes('row.carriedAgeSec'));
+  check('هر چهار نمودار کل بازه از مسیر پیوسته و برچسب‌دار می‌خوانند',
+    source40.includes('timeframeChartPath(intradayPathWithGaps(')
+    && source40.includes('netPnl: row.chartPnl')
+    && source40.includes('basePrice: row.chartBasePrice')
+    && source40.includes('row.chartPerLeg')
+    && source40.includes('dataStatusLabel: row.chartStatus'));
 }

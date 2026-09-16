@@ -9,7 +9,7 @@ import {
 import {
   replayIntraday, summarizeIntraday, inIntradaySession,
   bucketIntradayPath, observedBuckets, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
-  TF_BUCKET_STATUS, TF_BUCKET_LABEL,
+  TF_BUCKET_STATUS, TF_BUCKET_LABEL, timeframeChartPath,
   intradayPathWithGaps, coverageSummary, baseGapSuspect, TF_DAY_STATUS, TF_DAY_LABEL,
 } from '/core/backtest.mjs';
 import {
@@ -1202,12 +1202,17 @@ export async function mount(root, { state }) {
     // معامله‌گر بیشینهٔ افت را از شکلِ همان خط می‌خواند؛ خطی که از روی یک
     // هفتهٔ بی‌معامله پریده، افتِ کمتری نشان می‌دهد از آنچه واقعاً بود.
     //
-    // ردیفِ شکاف هیچ عددی ندارد — نه صفر، نه قیمتِ حمل‌شده از روز قبل — و
-    // رسّام خودش خط را همان‌جا قطع می‌کند.
-    const points = intradayPathWithGaps(buckets, loaded?.coverage || []).map((row) => ({
+    // شکافِ یک روز کامل هیچ عددی ندارد و خط را قطع می‌کند. داخل یک روز،
+    // فقط پس از اولین مشاهده آخرین ارزش‌گذاری با برچسب «کهنه» ادامه می‌یابد؛
+    // قیمت روز قبل هیچ‌وقت به روز بعد حمل نمی‌شود.
+    const points = timeframeChartPath(intradayPathWithGaps(buckets, loaded?.coverage || [])).map((row) => ({
       ...row, granularity: 'trade', timeLabel: row.dayGap ? dateLabel(row.date) : rangeLabel(row),
-      netPnl: row.closePnl, returnPct: row.returnPct,
-      ...Object.fromEntries((row.perLeg || []).flatMap((leg, index) => [[`legPnl${index}`, leg.netPnl], [`legPrice${index}`, leg.price]])),
+      dataStatusLabel: row.chartStatus === TF_BUCKET_STATUS.CARRIED
+        ? `${TF_BUCKET_LABEL[TF_BUCKET_STATUS.CARRIED]} · ${fmt.int(Math.ceil(row.carriedAgeSec / 60))} دقیقه`
+        : row.chartStatus === TF_BUCKET_STATUS.OBSERVED ? TF_BUCKET_LABEL[TF_BUCKET_STATUS.OBSERVED] : row.why,
+      netPnl: row.chartPnl, returnPct: row.chartReturnPct,
+      basePrice: row.chartBasePrice, basePct: row.chartBasePct,
+      ...Object.fromEntries((row.chartPerLeg || []).flatMap((leg, index) => [[`legPnl${index}`, leg.netPnl], [`legPrice${index}`, leg.price]])),
     }));
     const legSeries = replay.priced.map((leg, index) => ({ key: `legPnl${index}`, label: `${faDigits(index + 1)} · ${nameOf(leg, 'پا')}`, color: LEG_COLORS[index % LEG_COLORS.length] }));
     // در «کل بازه» خالی‌بودنِ ابتدای/انتهای جلسه خودش اطلاعات است. رسّام

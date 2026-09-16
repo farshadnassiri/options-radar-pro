@@ -4,7 +4,7 @@
 
 import { check, near, group } from '../harness.mjs';
 import {
-  ENTRY_EXIT_MIN_BUCKET, INTRADAY_START_SECOND, TF_BUCKET_STATUS, bucketIntradayPath, intradayEntryExitProfile, intradayHoldingSummary, timeOfDayProfile,
+  ENTRY_EXIT_MIN_BUCKET, INTRADAY_START_SECOND, TF_BUCKET_STATUS, bucketIntradayPath, intradayEntryExitProfile, intradayHoldingSummary, timeframeChartPath, timeOfDayProfile,
 } from '../../core/backtest.mjs';
 import { chartHasEnough, chartWindow } from '../../ui/track-chart.mjs';
 
@@ -129,6 +129,18 @@ group('۳۹. تحلیل چندروزه روی تایم‌فریم انتخابی
     Number.isNaN(gapRow39.closePnl) && gapRow39.carriedPnl === 500, `${gapRow39.closePnl}/${gapRow39.carriedPnl}`);
   check('قیمتِ حمل‌شده سنّ خودش را همراه دارد',
     Number.isFinite(gapRow39.carriedAgeSec) && gapRow39.carriedAgeSec > 0, gapRow39.carriedAgeSec);
+  const continuous39 = timeframeChartPath(bucketIntradayPath(late39, { bucketSeconds: 60 }));
+  const firstChart39 = continuous39.findIndex((row) => Number.isFinite(row.chartPnl));
+  check('نمودار پس از اولین مشاهده با آخرین ارزش‌گذاری پیوسته می‌ماند',
+    firstChart39 > 0 && continuous39.slice(firstChart39).every((row) => Number.isFinite(row.chartPnl)));
+  check('نمودار پیش از اولین مشاهده هنوز عددی نمی‌سازد',
+    continuous39.slice(0, firstChart39).every((row) => Number.isNaN(row.chartPnl)));
+  const twoDaysChart39 = timeframeChartPath([
+    ...bucketIntradayPath(late39, { bucketSeconds: 5 * 60 }),
+    ...bucketIntradayPath([{ date: 20260804, points: [point39(S + 600, 700)] }], { bucketSeconds: 5 * 60 }),
+  ]);
+  const nextMorning39 = twoDaysChart39.find((row) => row.date === 20260804 && row.startSecond === S);
+  check('مقدار حمل‌شده از مرز روز عبور نمی‌کند', Number.isNaN(nextMorning39.chartPnl));
   // روزی که هیچ نقطه‌ای ندارد هیچ سطلی نمی‌گیرد: علتِ نبودِ داده را
   // «intradayPathWithGaps» در سطحِ روز می‌گوید، با برچسب. اگر اینجا ۲۱۰
   // سطلِ خالی بسازیم، آن ردیفِ توضیح‌دار دیگر ساخته نمی‌شود.
