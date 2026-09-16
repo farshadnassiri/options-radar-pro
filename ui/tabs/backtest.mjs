@@ -9,6 +9,7 @@ import {
 import {
   replayIntraday, summarizeIntraday, inIntradaySession,
   bucketIntradayPath, observedBuckets, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
+  TF_BUCKET_STATUS, TF_BUCKET_LABEL,
   intradayPathWithGaps, coverageSummary, baseGapSuspect, TF_DAY_STATUS, TF_DAY_LABEL,
 } from '/core/backtest.mjs';
 import {
@@ -1163,7 +1164,8 @@ export async function mount(root, { state }) {
     const seconds = timeframeSeconds;
     const buckets = bucketIntradayPath(timeframeDays, { bucketSeconds: seconds });
     annotateBucketIv(buckets, { legs: replay.priced }, ivP());
-    if (!buckets.length) {
+    const observed = observedBuckets(buckets);
+    if (!observed.length) {
       $('bt-tf-body').hidden = true;
       tfNote(`در هیچ روزی از این بازه، ثانیه‌ای پیدا نشد که همه پاها در آن قیمت مشاهده‌شده داشته باشند.${loadedSummary(loaded)}`,
         Boolean(loaded?.failed?.length));
@@ -1184,8 +1186,8 @@ export async function mount(root, { state }) {
       ['زمان در سود', `${fmt.pct(holding.positivePct)}٪ · ${hours(holding.positiveSeconds)}`, 'gain'],
       ['زمان در زیان', `${fmt.pct(holding.negativePct)}٪ · ${hours(holding.negativeSeconds)}`, 'loss'],
       ['روز سودده / زیان‌ده', `${fmt.int(holding.positiveDays)} / ${fmt.int(holding.negativeDays)}`, holding.positiveDays >= holding.negativeDays ? 'gain' : 'loss'],
-      ['بهترین سطل', `${fmt.money(Math.max(...buckets.map((row) => row.highPnl)))}`, 'gain'],
-      ['بدترین سطل', `${fmt.money(Math.min(...buckets.map((row) => row.lowPnl)))}`, 'loss'],
+      ['بهترین سطل', `${fmt.money(Math.max(...observed.map((row) => row.highPnl)))}`, 'gain'],
+      ['بدترین سطل', `${fmt.money(Math.min(...observed.map((row) => row.lowPnl)))}`, 'loss'],
       ['بهترین بازه ورود', matrix.bestEntry ? `${faDigits(clockLabel(matrix.bestEntry.second).slice(0, 5))} · میانه ${fmt.money(matrix.bestEntry.medianPnl)}` : 'نمونه کافی نیست', matrix.bestEntry ? 'gain' : ''],
       ['بهترین بازه خروج', matrix.bestExit ? `${faDigits(clockLabel(matrix.bestExit.second).slice(0, 5))} · میانه ${fmt.money(matrix.bestExit.medianPnl)}` : 'نمونه کافی نیست', matrix.bestExit ? 'gain' : ''],
     ];
@@ -1208,10 +1210,14 @@ export async function mount(root, { state }) {
       ...Object.fromEntries((row.perLeg || []).flatMap((leg, index) => [[`legPnl${index}`, leg.netPnl], [`legPrice${index}`, leg.price]])),
     }));
     const legSeries = replay.priced.map((leg, index) => ({ key: `legPnl${index}`, label: `${faDigits(index + 1)} · ${nameOf(leg, 'پا')}`, color: LEG_COLORS[index % LEG_COLORS.length] }));
-    chart($('bt-tf-pnl-chart'), points, [{ key: 'netPnl', label: 'آفست موقعیت', color: 'var(--accent)' }], { money: true, step: true });
-    chart($('bt-tf-leg-chart'), points, legSeries, { money: true, step: true });
-    chart($('bt-tf-return-chart'), points, [{ key: 'returnPct', label: 'بازده استراتژی', color: 'var(--accent)' }, { key: 'basePct', label: 'تغییر نماد پایه', color: 'var(--cmp1)' }], { step: true });
-    chart($('bt-tf-base-chart'), points, [{ key: 'basePrice', label: 'قیمت نماد پایه', color: 'var(--cmp2)' }], { money: true, step: true });
+    // در «کل بازه» خالی‌بودنِ ابتدای/انتهای جلسه خودش اطلاعات است. رسّام
+    // عمومی معمولاً این فضای مرده را می‌بُرد، اما اینجا باید ۹:۰۰ تا ۱۲:۳۰
+    // سر جایش بماند. یک مشاهدهٔ تنها هم نقطه است، نه «نمودار نداریم».
+    const fullSession = { preserveEmptyEdges: true, allowSingle: true };
+    chart($('bt-tf-pnl-chart'), points, [{ key: 'netPnl', label: 'آفست موقعیت', color: 'var(--accent)' }], { money: true, step: true, ...fullSession });
+    chart($('bt-tf-leg-chart'), points, legSeries, { money: true, step: true, ...fullSession });
+    chart($('bt-tf-return-chart'), points, [{ key: 'returnPct', label: 'بازده استراتژی', color: 'var(--accent)' }, { key: 'basePct', label: 'تغییر نماد پایه', color: 'var(--cmp1)' }], { step: true, ...fullSession });
+    chart($('bt-tf-base-chart'), points, [{ key: 'basePrice', label: 'قیمت نماد پایه', color: 'var(--cmp2)' }], { money: true, step: true, ...fullSession });
 
     $('bt-tf-holding').innerHTML = `<table class="history-table backtest-compact-table"><thead><tr><th>روز</th><th>نقطه</th><th>مشاهده‌شده</th><th>در سود</th><th>درصد در سود</th><th>باز</th><th>بسته</th><th>بیشینه</th><th>کمینه</th><th>بازده پایان</th><th>تغییر پایه</th></tr></thead><tbody>${holding.days.map((row) => `<tr><td>${dateLabel(row.date)}</td><td>${fmt.int(row.points)}</td><td>${hours(row.observedSeconds)}</td><td>${hours(row.positiveSeconds)}</td><td class="${signTone(row.positivePct - 50)}">${fmt.pct(row.positivePct)}٪</td><td class="${signTone(row.openPnl)}">${fmt.money(row.openPnl)}</td><td class="${signTone(row.closePnl)}">${fmt.money(row.closePnl)}</td><td class="gain">${fmt.money(row.bestPnl)}</td><td class="loss">${fmt.money(row.worstPnl)}</td><td class="${signTone(row.closeReturnPct)}">${fmt.pct(row.closeReturnPct)}٪</td><td class="${signTone(row.basePct)}">${fmt.pct(row.basePct)}٪</td></tr>`).join('')}</tbody></table>`;
 
@@ -1241,7 +1247,16 @@ export async function mount(root, { state }) {
     const legHeads = replay.priced.map((leg, index) => `<th>قیمت ${faDigits(index + 1)}</th><th>اثر ${faDigits(index + 1)}</th><th>تلاطم ${faDigits(index + 1)}</th>`).join('');
     const shown = buckets.slice(-400);
     $('bt-tf-count').textContent = `${fmt.int(shown.length)} از ${fmt.int(buckets.length)} سطل`;
-    $('bt-tf-table').innerHTML = `<table class="history-table backtest-tape-table"><thead><tr><th>روز</th><th>بازه</th><th>مشاهده</th><th>باز</th><th>بسته</th><th>بیشینه</th><th>کمینه</th><th>تغییر سطل</th><th>تغییر پیاپی</th><th>بازده</th><th>پایه</th><th>حجم پاها</th>${legHeads}</tr></thead><tbody>${shown.map((row) => `<tr><td>${dateLabel(row.date)}</td><td>${rangeLabel(row)}</td><td>${fmt.int(row.observations)}</td><td class="${signTone(row.openPnl)}">${fmt.money(row.openPnl)}</td><td class="${signTone(row.closePnl)}">${fmt.money(row.closePnl)}</td><td class="gain">${fmt.money(row.highPnl)}</td><td class="loss">${fmt.money(row.lowPnl)}</td><td class="${signTone(row.changePnl)}">${fmt.money(row.changePnl)}</td><td class="${signTone(row.stepPnl)}">${Number.isFinite(row.stepPnl) ? fmt.money(row.stepPnl) : '—'}</td><td class="${signTone(row.returnPct)}">${fmt.pct(row.returnPct)}٪</td><td>${fmt.money(row.basePrice)}</td><td>${fmt.int(row.volume)}</td>${row.perLeg.map((leg) => `<td>${fmt.money(leg.price)}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td><td>${ivCell(leg.ivPct)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    $('bt-tf-table').innerHTML = `<table class="history-table backtest-tape-table"><thead><tr><th>روز</th><th>بازه</th><th>وضعیت</th><th>مشاهده</th><th>ارزش حمل‌شده</th><th>سن حمل</th><th>باز</th><th>بسته</th><th>بیشینه</th><th>کمینه</th><th>تغییر سطل</th><th>تغییر پیاپی</th><th>بازده</th><th>پایه</th><th>حجم پاها</th>${legHeads}</tr></thead><tbody>${shown.map((row) => {
+      const missingLegCells = replay.priced.map(() => '<td>—</td><td>—</td><td>—</td>').join('');
+      const legCells = row.perLeg.length
+        ? row.perLeg.map((leg) => `<td>${fmt.money(leg.price)}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td><td>${ivCell(leg.ivPct)}</td>`).join('')
+        : missingLegCells;
+      const bucketState = row.status === TF_BUCKET_STATUS.OBSERVED
+        ? TF_BUCKET_LABEL[TF_BUCKET_STATUS.OBSERVED]
+        : TF_BUCKET_LABEL[row.status] || 'فاقد قیمت کامل';
+      return `<tr class="${row.status === TF_BUCKET_STATUS.OBSERVED ? '' : 'history-missing'}"><td>${dateLabel(row.date)}</td><td>${rangeLabel(row)}</td><td>${bucketState}</td><td>${fmt.int(row.observations)}</td><td class="${signTone(row.carriedPnl)}">${Number.isFinite(row.carriedPnl) ? fmt.money(row.carriedPnl) : '—'}</td><td>${Number.isFinite(row.carriedAgeSec) ? `${fmt.int(Math.ceil(row.carriedAgeSec / 60))} دقیقه` : '—'}</td><td class="${signTone(row.openPnl)}">${fmt.money(row.openPnl)}</td><td class="${signTone(row.closePnl)}">${fmt.money(row.closePnl)}</td><td class="gain">${fmt.money(row.highPnl)}</td><td class="loss">${fmt.money(row.lowPnl)}</td><td class="${signTone(row.changePnl)}">${fmt.money(row.changePnl)}</td><td class="${signTone(row.stepPnl)}">${Number.isFinite(row.stepPnl) ? fmt.money(row.stepPnl) : '—'}</td><td class="${signTone(row.returnPct)}">${fmt.pct(row.returnPct)}٪</td><td>${fmt.money(row.basePrice)}</td><td>${fmt.int(row.volume)}</td>${legCells}</tr>`;
+    }).join('')}</tbody></table>`;
   }
 
   async function runTimeframe() {
