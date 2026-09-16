@@ -1922,7 +1922,7 @@ export async function mount(root, { state, api }) {
     const detail = $('pb-detail'); detail.hidden = false;
     const replay = replayHistory(replayArgs(item));
     if (!replay.ok) { detail.innerHTML = `<section class="card"><p class="empty-note">${esc(replay.error)}</p></section>`; return; }
-    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">ادامه در آزمایشگاه آپشن</button><button type="button" class="ghost" id="pb-live-watch">رصد زنده با معاملات امروز</button><button type="button" class="ghost" id="pb-greeks-watch">رصد یونانی و تلاطم</button></div></div><div id="pb-detail-result"></div></section>
+    detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">ادامه در آزمایشگاه آپشن</button><button type="button" class="ghost" id="pb-live-watch">رصد زنده با معاملات امروز</button></div></div><div id="pb-detail-result"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">قیمت دستی واقعی برای هر قرارداد</p><h2>بازمحاسبه بدون دست‌کاری قیمت سایر پاها</h2></div><button type="button" class="primary" id="pb-manual-run">بازمحاسبه دستی</button></div><div class="portfolio-manual">${replay.priced.map((leg, index) => `<label>${fmt.int(index + 1)} · ${esc(nameOf(leg, 'پایه'))}<input type="number" min="0" step="1" data-manual="${index}" value="${leg.price}"></label>`).join('')}</div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">حساسیت، در کنار سود</p><h2>یونانی‌ها و تلاطم این ترکیب</h2></div><span id="pb-greeks-state">—</span></div><p class="portfolio-note" id="pb-greeks-note"></p><div class="backtest-kpis" id="pb-greeks-kpis"></div><div class="history-analysis-grid"><div><div class="section-head"><h3>خلاصهٔ یونانی موقعیت</h3></div><div id="pb-greeks-summary" class="history-table-wrap"></div></div><div><div class="section-head"><h3>خلاصهٔ تلاطم</h3></div><div id="pb-vol-summary" class="history-table-wrap"></div></div></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">تایم‌فریم پایین</p><h2>همین ترکیب، ساعت‌به‌ساعت روز سنجش</h2></div><button type="button" class="ghost" id="pb-intraday-run">سنجش ساعت‌به‌ساعت</button></div><p class="portfolio-note" id="pb-intraday-note">فقط ریزمعاملهٔ پاهای همین ترکیب و نماد پایه گرفته می‌شود، نه کل تابلو. ساعتی که هر سه پا تا آن لحظه معامله نشده باشند، ردیف نمی‌سازد — قیمت پایانی روز یا قیمت دیروز جایش نمی‌نشیند.</p><div id="pb-intraday" class="history-table-wrap"></div></section>
@@ -1938,12 +1938,6 @@ export async function mount(root, { state, api }) {
     };
     detail.querySelector('#pb-watch').onclick = () => watchInBacktest(item, false);
     detail.querySelector('#pb-live-watch').onclick = () => watchInBacktest(item, true);
-    // همان نقشهٔ انتقال، فقط با مقصد دیگر. هر دو تب یک ورودی می‌خواهند و
-    // قرارداد دوم یعنی دو جا که باید هم‌زمان به‌روز بمانند.
-    detail.querySelector('#pb-greeks-watch').onclick = () => {
-      const plan = handoffPlanFor(item, false);
-      goHandoff(state, { ...plan, to: 'greeks-watch' }, 'greeks-watch');
-    };
     detail.querySelector('#pb-intraday-run').onclick = () => renderIntraday(item);
     const updateSensitivity = () => renderSensitivity(item, replayArgs(item));
     detail.querySelector('#pb-shock-range').oninput = updateSensitivity;

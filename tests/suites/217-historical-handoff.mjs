@@ -8,7 +8,7 @@ check('بازهٔ قدیمی به مقصد می‌رسد، حتی در رصد ز
   JSON.stringify(handoffRange({ ...plan, live: true })) === JSON.stringify({ from: 20240622, to: 20240918 }));
 check('انتقال خودکار و مقصد دیگر بازهٔ ساختگی ندارند',
   handoffRange({ ...plan, entryDate: 'auto' }) === null
-  && handoffRange({ ...plan, to: 'greeks-watch' }) === null
+  && handoffRange({ ...plan, to: 'watchtower' }) === null
   && handoffRange({ ...plan, entryDate: 20250101 }) === null);
 
 const baseRows = [{ date: 20240918, last: 18000 }, { date: 20240622, last: 17000 }];

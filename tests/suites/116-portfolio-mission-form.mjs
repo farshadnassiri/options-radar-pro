@@ -62,9 +62,12 @@ group('۱۱۵. پوسته UI مأموریت — مرحله نخست');
   const icons = readSrc('../ui/icons.mjs');
   const tab = readSrc('../ui/tabs/portfolio-time.mjs');
   const css = readSrc('../ui/style.css');
-  check('تب مستقل به‌صورت lazy در ریل ثبت شده',
-    app.includes("id: 'portfolio-time'") && app.includes("mod: '/ui/tabs/portfolio-time.mjs'"));
-  check('تب آیکون هم‌خانواده سبد دارد', icons.includes("'portfolio-time': 'layers'"));
+  // تبِ «استودیوی سفر زمانی سبد» به خواستهٔ صاحب پروژه از فهرست کناری
+  // برداشته شد. ماژول و منطقش روی دیسک مانده‌اند، ولی هیچ ردیفی و هیچ
+  // آیکونی در رابط به آن نمی‌رسد — و همین را باید سنجید، نه عکسش.
+  check('تب سفر زمانی سبد دیگر در ریل ثبت نیست',
+    !app.includes("id: 'portfolio-time'") && !app.includes("mod: '/ui/tabs/portfolio-time.mjs'"));
+  check('و آیکون ریلی هم برایش نمانده', !icons.includes("'portfolio-time':"));
   check('مرحله نخست همه ورودی‌های خواسته‌شده را دارد',
     ['pt-capital', 'pt-reserve', 'pt-base', 'pt-start-date', 'pt-start-time',
       'pt-end-date', 'pt-end-time', 'pt-grain', 'pt-save-step']

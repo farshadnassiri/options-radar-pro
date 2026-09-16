@@ -37,8 +37,13 @@ group('۶۵. جمع و باز کردن پنل سمت راست با یک دکمه
     && !/opacity: 0/.test(collapsed[0]));
   check('عرض نوار بیرون‌زده از توکن خودِ ریل می‌آید',
     /--rail-stub: \d+px;/.test(cssSrc65));
-  check('در حالت جمع فقط جست‌وجو و فهرست پنهان می‌شوند، نه دکمه',
-    /\.shell\[data-rail-collapsed="true"\] \.rail-search,\s*\.shell\[data-rail-collapsed="true"\] \.rail-list \{ display: none; \}/.test(cssSrc65)
+  // پیش از این، جمع کردن هم جست‌وجو و هم **کلِ فهرست** را پنهان می‌کرد؛
+  // یعنی تنها دکمهٔ باقی‌مانده «باز کن» بود و قابلیت فقط راهِ برگشت به
+  // خودش را داشت. حالا فهرست می‌ماند: هر تب یک آیکونِ کلیک‌شدنی است و
+  // فقط نام و دستگیره پنهان می‌شوند.
+  check('در حالت جمع فقط نام و دستگیره پنهان می‌شوند، نه فهرست و نه دکمه',
+    /\.shell\[data-rail-collapsed="true"\] \.rail-row \.tab-name,\s*\.shell\[data-rail-collapsed="true"\] \.rail-row-grip \{ display: none; \}/.test(cssSrc65)
+    && !/\.shell\[data-rail-collapsed="true"\] \.rail-list \{[^}]*display: none/.test(cssSrc65)
     && !/\.shell\[data-rail-collapsed="true"\] \.rail-toggle \{[^}]*display: none/.test(cssSrc65));
   check('روی موبایل هم ریل جمع‌شده ناپدید نمی‌شود',
     !/\.shell\[data-rail-collapsed="true"\] \.rail \{ display: none; \}/.test(cssSrc65));

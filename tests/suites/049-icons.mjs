@@ -6,7 +6,7 @@ import * as uiFmt48 from '../../ui/fmt.mjs';
 import { check, group, readSrc } from '../harness.mjs';
 import { CATALOG, GROUPS as STRAT_GROUPS48 } from '../../strategies/catalog.mjs';
 import { signTone } from '../../ui/fmt.mjs';
-import { GROUP_ICON, TAB_ICON, icon, sectionIcon } from '../../ui/icons.mjs';
+import { GROUP_ICON, TAB_ICON, icon } from '../../ui/icons.mjs';
 
 
 // ═══════════════════════════ ۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی ═══════════════════════════
@@ -23,7 +23,11 @@ group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
   check('برابر فارسی برای جست‌وجو نگه داشته شده',
     CATALOG.every((d) => typeof d.fa === 'string' && d.fa.length > 0));
   const appSrc48 = readSrc('../ui/app.mjs');
-  check('جست‌وجوی ریل نام فارسی را هم می‌بیند', appSrc48.includes("${t.def?.fa || ''}"));
+  // جست‌وجو از ریل به صفحهٔ «در جست‌وجوی استراتژی‌ها» رفت. برابر فارسی
+  // همچنان باید دیده شود، وگرنه کسی که «کاوردکال» را می‌شناسد هیچ راهی
+  // برای پیدا کردنش ندارد — فقط جایش عوض شده، نه خودش.
+  check('جست‌وجوی استراتژی نام فارسی را هم می‌بیند',
+    readSrc('../ui/tabs/strategy-explorer.mjs').includes("${def.fa || ''}"));
 
   // ——— جزیرهٔ جهت‌دار ———
   //
@@ -62,29 +66,42 @@ group('۴۸. نام انگلیسی، رنگ منفی، و ریل آیکونی');
   check('آیکون رنگ را از متن می‌گیرد، نه رنگ ثابت',
     icon('coins').includes('stroke="currentColor"') && !/stroke="#/.test(icon('coins')));
   check('آیکون ناشناخته به‌جای شکستن، نقطه می‌دهد', icon('چیزی-که-نیست').includes('<circle'));
-  check('بخش بی‌گروه هم آیکون می‌گیرد',
-    sectionIcon('پایه') === 'sliders' && sectionIcon('موقعیت من') === 'briefcase');
-  // پیش‌فرض «همه بسته» فقط وقتی درست است که نبودِ کلید از آرایهٔ خالی جدا
-  // شود، وگرنه کاربری که همه را باز کرده هر بار دوباره بسته می‌بیند.
-  check('نبودِ کلید حافظه با آرایهٔ خالی یکی گرفته نمی‌شود',
-    appSrc48.includes('if (raw == null) return new Set(allSections);'));
+  // سرگروهی در ریل نمانده که آیکون بخواهد؛ آیکون حالا مالِ خودِ تب است.
+  check('هر تبِ ریل آیکون خودش را دارد، نه آیکونِ یک بخش',
+    ['settings', 'live-market', 'history', 'backtest', 'portfolio-backtest',
+      'strategy-explorer', 'watchtower', 'logs', 'positions', 'roll']
+      .every((id) => TAB_ICON[id]),
+    ['settings', 'live-market', 'history', 'backtest', 'portfolio-backtest',
+      'strategy-explorer', 'watchtower', 'logs', 'positions', 'roll']
+      .filter((id) => !TAB_ICON[id]).join(' , ') || 'همه');
+  // سرگروه و حالتِ تاشو از ریل رفت: ده ردیفِ تخت، هرکدام خودش دکمهٔ تب.
+  // آنچه در حافظهٔ مرورگر ماند «کدام بخش باز است» نیست، «ترتیب ردیف‌ها»ست.
+  check('حالت تاشوی سرگروه‌ها از ریل برداشته شد',
+    !appSrc48.includes('FOLD_KEY') && !appSrc48.includes('revealSection'));
   check('برچسب «n پا» از ریل برداشته شد', !appSrc48.includes('پا</span>'));
-  check('باز شدن تب، گروه بسته‌اش را باز می‌کند',
-    appSrc48.includes('if (folded.has(t.section)) { revealSection(t.section); buildRail(); }'));
-  // آکاردئون: با ده سرگروه و چهل تب، «چند بخشِ هم‌زمان باز» یعنی ستون کناری
-  // بلندتر از صفحه می‌شود و کاربر برای رسیدن به سرگروه بعدی از کنار فهرستی
-  // رد می‌شود که کاری با آن ندارد.
-  check('باز شدن یک بخش، بقیه بخش‌های باز را می‌بندد',
-    /function revealSection\(sec\) \{[\s\S]*?folded\.add\(other\)[\s\S]*?folded\.delete\(sec\);/.test(appSrc48));
+  // شناسه‌ای که دیگر نیست باید دور ریخته شود و تبِ تازه — که در حافظهٔ
+  // کاربرِ قدیمی نیست — به ته فهرست برود، نه اینکه ناپدید شود.
+  check('ترتیب ذخیره‌شده، تبِ حذف‌شده را دور می‌ریزد و تبِ تازه را گم نمی‌کند',
+    appSrc48.includes('const valid = ordered.filter((id) => defaultIds.includes(id));')
+    && appSrc48.includes('const missing = defaultIds.filter((id) => !valid.includes(id));'));
+  check('ردیف‌های ریل با کشیدن جابه‌جا می‌شوند',
+    appSrc48.includes("b.draggable = true;") && appSrc48.includes('function moveRailTab('));
+  // کشیدن با ماوس تنها راهِ چیدن نیست؛ بی این، کاربرِ صفحه‌کلید هیچ راهی به
+  // این قابلیت ندارد.
+  check('همان جابه‌جایی با صفحه‌کلید هم ممکن است',
+    appSrc48.includes("if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;"));
   // `stage` خودش جعبهٔ پیمایش است؛ `scrollIntoView` پیمایش داخلی‌اش را صفر
   // نمی‌کند و تب تازه از جایی که تب قبلی رهایش کرده بود شروع می‌شد.
   check('تب تازه از سطر اول شروع می‌شود، نه از جای تب قبلی',
     (appSrc48.match(/stage\.scrollTop = 0;/g) || []).length >= 2);
   // رنگ بخش از توکن‌های خودِ پوسته می‌آید، وگرنه پوستهٔ تیره باید جدا رنگ
   // بگیرد و همان پراکندگی‌ای می‌شود که نگهبان ۴ جلویش را گرفته.
-  check('رنگ هر بخش ریل از توکن پوسته می‌آید، نه از رنگ سخت‌کد',
-    /const SECTION_TONE = \{[\s\S]*?\};/.test(appSrc48)
-    && !/SECTION_TONE = \{[\s\S]*?#[0-9a-fA-F]{3}/.test(appSrc48));
+  // رنگ دیگر مالِ «بخش» نیست چون بخشی نمانده؛ مالِ خودِ تب است. در ریلِ
+  // جمع‌شده که فقط آیکون دیده می‌شود، همین رنگ تنها چیزی است که ردیف‌ها را
+  // از هم جدا می‌کند.
+  check('رنگ هر ردیف ریل از توکن پوسته می‌آید، نه از رنگ سخت‌کد',
+    /const TAB_TONE = \{[\s\S]*?\};/.test(appSrc48)
+    && !/TAB_TONE = \{[\s\S]*?#[0-9a-fA-F]{3}/.test(appSrc48));
   const styleSrc48 = readSrc('../ui/style.css');
   check('تب باز، رنگ بخش خودش را می‌گیرد نه یک رنگ همیشگی',
     /\.tab-btn\[aria-current="true"\] \{[^}]*var\(--sec\)/.test(styleSrc48));

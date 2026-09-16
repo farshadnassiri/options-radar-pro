@@ -35,6 +35,16 @@ const PATHS = {
   arrow: '<path d="M5 19L19 5"/><path d="M11 5h8v8"/>',
   // مثلث CSS قبلی نه ضخامتش با بقیهٔ خانواده می‌خواند نه چرخشش نرم بود.
   chevron: '<path d="M15 6l-6 6 6 6"/>',
+  // دستگیرهٔ کشیدن. تا پیش از این نامش در ریل صدا زده می‌شد ولی مسیری
+  // نداشت، پس به نقطهٔ پیش‌فرض می‌افتاد — یعنی چیزی که «بگیر و بکش» را
+  // نمی‌گفت.
+  grip: '<circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/>',
+  // دیده‌بان شرطی زنگ است نه مثلثِ خطا: «دفتر خطاها» مثلث دارد و در ریلِ
+  // جمع‌شده که فقط آیکون دیده می‌شود، دو آیکونِ یکسان یعنی دو تبِ
+  // تشخیص‌ناپذیر.
+  bell: '<path d="M18 16H6l1.4-2.2V10a4.6 4.6 0 0 1 9.2 0v3.8L18 16z"/><path d="M10.5 19a1.6 1.6 0 0 0 3 0"/>',
+  // جست‌وجوی استراتژی‌ها: ذره‌بین، چون کارِ همان صفحه گشتن است.
+  search: '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20"/>',
 };
 
 /** یک آیکون از خانواده، آماده برای درج در HTML. */
@@ -54,15 +64,8 @@ export const GROUP_ICON = {
 
 /** آیکون تب‌هایی که استراتژی نیستند. */
 export const TAB_ICON = {
-  bereket: 'clock', settings: 'sliders', chain: 'grid', 'live-market': 'wave', 'open-view': 'wave', history: 'clock', backtest: 'play',
-  'portfolio-backtest': 'layers', 'portfolio-time': 'layers', top: 'trophy', logs: 'alert',
+  settings: 'sliders', chain: 'grid', 'live-market': 'wave', 'open-view': 'wave', history: 'clock', backtest: 'play',
+  'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert',
+  'strategy-explorer': 'search', watchtower: 'bell',
   positions: 'briefcase', roll: 'rotate',
 };
-
-/** آیکون سرگروه ریل، بر پایهٔ نام بخش. */
-export function sectionIcon(section, groupKey) {
-  if (groupKey && GROUP_ICON[groupKey]) return GROUP_ICON[groupKey];
-  if (section === 'پایه') return 'sliders';
-  if (section === 'موقعیت من') return 'briefcase';
-  return 'dot';
-}

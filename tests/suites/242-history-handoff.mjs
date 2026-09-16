@@ -55,16 +55,17 @@ check('ردیفِ زنده دست‌نخورده ماند — «auto» و مبن
 check('و `live` فراخواننده برای ردیف زنده محترم است',
   handoffPlan(liveRow, { live: true }).live === true);
 
-const gwPast = strategyLinkPlan(pastRow, { to: 'greeks-watch', strategyId: 'bull-call-spread' });
-const gwLive = strategyLinkPlan(liveRow, { to: 'greeks-watch', strategyId: 'bull-call-spread' });
-check('رصد یونانی برای ردیفِ تاریخی «زنده» نمی‌شود', gwPast.live === false);
-check('و روزِ مبدأ را می‌گیرد', gwPast.entryDate === 20260906 && gwPast.entryBasis === 'CLOSE');
-check('ولی ردیفِ زنده همچنان `live: true` است و تاریخ نمی‌فرستد',
-  gwLive.live === true && gwLive.entryDate === undefined);
-check('مقصدهای دیگر هم روزِ تاریخی را می‌گیرند',
-  strategyLinkPlan(pastRow, { to: 'spread-radar' }).entryDate === 20260906);
+// «رصد یونانی» و «رادار فاصله» از برنامه حذف شدند، پس مقصدشان هم. همان
+// ادعا — روزِ ردیفِ تاریخی همراه نقشه می‌رود و ردیفِ زنده چیزی اضافه
+// نمی‌فرستد — روی مقصدهای باقی‌مانده سنجیده می‌شود.
+check('مقصدِ حذف‌شده اصلاً نقشه نمی‌سازد',
+  strategyLinkPlan(pastRow, { to: 'greeks-watch' }) === null
+  && strategyLinkPlan(pastRow, { to: 'spread-radar' }) === null);
+check('ردیفِ تاریخی روزِ مبدأ را همراه نقشه می‌برد',
+  strategyLinkPlan(pastRow, { to: 'backtest', strategyId: 'bull-call-spread' }).entryDate === 20260906
+  && strategyLinkPlan(pastRow, { to: 'backtest', strategyId: 'bull-call-spread' }).entryBasis === 'CLOSE');
 check('و برای ردیف زنده چیزی اضافه نمی‌شود',
-  strategyLinkPlan(liveRow, { to: 'spread-radar' }).entryDate === undefined);
+  strategyLinkPlan(liveRow, { to: 'backtest', strategyId: 'bull-call-spread' }).entryDate === undefined);
 // دیده‌بان شرطی نقشهٔ خودش را دارد؛ افزودنِ تاریخ نباید بقیه‌اش را بشکند.
 const wt = strategyLinkPlan(pastRow, { to: 'watchtower' });
 check('دیده‌بان شرطی هم سالم ماند', !!wt.ruleName && Array.isArray(wt.conditions));

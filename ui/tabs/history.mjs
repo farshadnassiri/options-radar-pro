@@ -331,7 +331,7 @@ export async function mount(root, { state }) {
       </section>
 
       <section class="card">
-        <div class="section-head"><div><p class="eyebrow">حساسیت، در کنار سود</p><h2>یونانی‌ها و تلاطم در طول مسیر</h2></div><button type="button" class="ghost" id="h-to-greeks">رصد کامل در تب یونانی</button></div>
+        <div class="section-head"><div><p class="eyebrow">حساسیت، در کنار سود</p><h2>یونانی‌ها و تلاطم در طول مسیر</h2></div></div>
         <p class="note" id="h-greeks-note"></p>
         <div class="backtest-kpis" id="h-greeks-kpis"></div>
         <div class="backtest-chart-grid" id="h-greeks-charts"></div>
@@ -526,19 +526,6 @@ export async function mount(root, { state }) {
    * می‌خواهند — نماد، استراتژی، قراردادها، روز ورود — و ساختن یک قرارداد
    * دوم برای همین داده، یعنی دو جا که باید هم‌زمان به‌روز بمانند.
    */
-  $('h-to-greeks').addEventListener('click', () => {
-    const def = byId(strategySelect.value);
-    if (!currentReplay || !currentArgs) { setStatus('ابتدا یک موقعیت را تحلیل کن.', true); return; }
-    goHandoff(state, {
-      ...historyHandoffPlan({
-        ua: analysisUa || ua, strategyId: def?.id || '', strategyName: def?.name || '',
-        replay: currentReplay, args: currentArgs, comboName: $('h-selected-label').textContent,
-        live: $('h-scope').value === SCOPE_LIVE,
-      }),
-      to: 'greeks-watch',
-    }, 'greeks-watch');
-  });
-
   function changeMatrixZoom(delta) {
     matrixZoom = Math.min(2.5, Math.max(0.75, Math.round((matrixZoom + delta) * 100) / 100));
     applyMatrixZoom();
