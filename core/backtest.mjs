@@ -461,6 +461,39 @@ export function observedBuckets(rows = []) {
 }
 
 /**
+ * مسیرِ نمایشیِ پیوسته برای نمودارهای «کل بازه».
+ *
+ * سطلِ بی‌معامله عدد تازه‌ای ندارد؛ اما بعد از اولین سطلِ مشاهده‌شده می‌شود
+ * آخرین ارزش‌گذاری را با برچسبِ صریحِ «حمل‌شده» نمایش داد. این تابع آن
+ * مقدار را در خانه‌های `chart*` می‌گذارد تا دادهٔ خامِ سطل دست‌نخورده بماند.
+ * با عوض‌شدن روز یا رسیدن به شکاف روزانه، حمل صفر می‌شود؛ بنابراین قیمت
+ * روز قبل هرگز وارد روز بعد نمی‌شود و پیش از اولین مشاهده هم عددی نداریم.
+ */
+export function timeframeChartPath(rows = []) {
+  let activeDate = null;
+  let lastObserved = null;
+  return (rows || []).map((row) => {
+    const date = Number(row?.date) || null;
+    if (row?.dayGap || date !== activeDate) {
+      activeDate = date;
+      lastObserved = null;
+    }
+    if (row?.status === TF_BUCKET_STATUS.OBSERVED) lastObserved = row;
+    const carried = row?.status === TF_BUCKET_STATUS.CARRIED && Boolean(lastObserved);
+    const source = row?.status === TF_BUCKET_STATUS.OBSERVED ? row : carried ? lastObserved : null;
+    return {
+      ...row,
+      chartStatus: source ? (carried ? TF_BUCKET_STATUS.CARRIED : TF_BUCKET_STATUS.OBSERVED) : row?.status,
+      chartPnl: source ? source.closePnl : NaN,
+      chartReturnPct: source ? source.returnPct : NaN,
+      chartBasePrice: source ? source.basePrice : NaN,
+      chartBasePct: source ? source.basePct : NaN,
+      chartPerLeg: source ? (source.perLeg || []) : [],
+    };
+  });
+}
+
+/**
  * چه مدت در سود بود و چه مدت در زیان — به تفکیک روز و در کل.
  *
  * واحد، ثانیهٔ مشاهده‌شده است، نه ثانیهٔ تقویمی: بین دو معامله هیچ مشاهده‌ای

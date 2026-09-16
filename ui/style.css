@@ -646,6 +646,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 }
 .backtest-tip[hidden] { display: none; }
 .backtest-tip b { color: var(--ink); font-family: var(--mono); }
+.backtest-tip em { color: var(--muted); font-style: normal; font-size: .78rem; }
 .backtest-tip strong.gain { color: var(--gain); }
 .backtest-tip strong.loss { color: var(--loss); }
 /* ——— تلاطم ضمنی پاها در بک‌تست ——— */
