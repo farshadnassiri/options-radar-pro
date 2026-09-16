@@ -119,6 +119,21 @@ export async function mount(root, { state, api }) {
     </div>`;
 
   const holder = root.querySelector('#groups');
+  // سهمِ پرشدهٔ ریلِ اسلایدر. CSS نمی‌تواند نسبتِ مقدار به بازه را حساب
+  // کند، پس همین یک درصد را JS می‌نشاند و بقیهٔ شکل در شیوه‌نامه می‌ماند.
+  // اگر این تابع هرگز صدا نشود، ریل خالیِ سالم است نه خراب — مقدارِ
+  // پیش‌فرضِ `--fill` صفر است.
+  const paintRange = (r) => {
+    if (!r) return;
+    const min = Number(r.min);
+    const max = Number(r.max);
+    const value = Number(r.value);
+    const share = max > min && Number.isFinite(value)
+      ? Math.min(100, Math.max(0, ((value - min) / (max - min)) * 100))
+      : 0;
+    r.style.setProperty('--fill', `${share}%`);
+  };
+
   const nav = root.querySelector('#settings-nav');
   const inputs = new Map();
   const navByCard = new Map();
@@ -185,21 +200,22 @@ export async function mount(root, { state, api }) {
       const node = wrap.querySelector(`#${id}`);
       const rangeNode = wrap.querySelector(`#${id}-r`);
       inputs.set(f.key, { field: f, node, rangeNode });
+      paintRange(rangeNode);
 
       if (f.kind === 'num' || f.kind === 'pct') {
         const clamp = (v) => Math.min(f.max ?? Infinity, Math.max(f.min ?? -Infinity, v));
         node.addEventListener('input', () => {
           const v = Number(node.value);
-          if (rangeNode && Number.isFinite(v)) rangeNode.value = clamp(v);
+          if (rangeNode && Number.isFinite(v)) { rangeNode.value = clamp(v); paintRange(rangeNode); }
         });
-        rangeNode?.addEventListener('input', () => { node.value = rangeNode.value; });
+        rangeNode?.addEventListener('input', () => { node.value = rangeNode.value; paintRange(rangeNode); });
         for (const btn of wrap.querySelectorAll('.step-btn')) {
           btn.addEventListener('click', () => {
             const step = f.step || 1;
             const cur = Number(node.value) || 0;
             const next = clamp(cur + Number(btn.dataset.dir) * step);
             node.value = next;
-            if (rangeNode) rangeNode.value = next;
+            if (rangeNode) { rangeNode.value = next; paintRange(rangeNode); }
           });
         }
       }
@@ -274,7 +290,7 @@ export async function mount(root, { state, api }) {
     for (const [key, { field, node, rangeNode }] of inputs) {
       if (field.kind === 'bool') node.checked = !!next[key];
       else node.value = next[key];
-      if (rangeNode) rangeNode.value = next[key];
+      if (rangeNode) { rangeNode.value = next[key]; paintRange(rangeNode); }
     }
   };
 
