@@ -314,18 +314,104 @@ function groupByBucket(points, width) {
  * ورودی `days` آرایه‌ای از `{ date, points }` است — خروجی `replayIntraday`
  * برای هر روز. خروجی، یک ردیف به‌ازای هر سطلِ دارای مشاهده، به‌ترتیب زمان.
  */
+/** وضعیت یک سطل روی محورِ کاملِ جلسه. */
+export const TF_BUCKET_STATUS = Object.freeze({
+  // در این سطل قیمتِ کاملِ همهٔ پاها مشاهده شد.
+  OBSERVED: 'observed',
+  // پیش از اولین قیمتِ کاملِ آن روز. عددی وجود ندارد و ساخته هم نمی‌شود.
+  BEFORE_FIRST: 'beforeFirst',
+  // پس از اولین قیمتِ کامل، ولی در خودِ این سطل معامله‌ای نبود. آخرین
+  // قیمتِ مشاهده‌شده در `carriedPnl` هست، با سنّش در `carriedAgeSec`.
+  CARRIED: 'carried',
+});
+
+export const TF_BUCKET_LABEL = Object.freeze({
+  [TF_BUCKET_STATUS.OBSERVED]: 'قیمت کامل',
+  [TF_BUCKET_STATUS.BEFORE_FIRST]: 'پیش از اولین قیمت کامل',
+  [TF_BUCKET_STATUS.CARRIED]: 'قیمت کهنه، حمل‌شده',
+});
+
 export function bucketIntradayPath(days = [], { bucketSeconds = 15 * 60 } = {}) {
   const width = bucketWidth(bucketSeconds, 15 * 60);
   const out = [];
   let previousClose = NaN;
   for (const day of days || []) {
     const groups = groupByBucket(day?.points, width);
-    for (const start of [...groups.keys()].sort((a, b) => a - b)) {
+    // روزی که هیچ نقطه‌ای ندارد، هیچ سطلی هم نمی‌گیرد. علتش «چرا این روز
+    // داده ندارد» است و آن را `intradayPathWithGaps` در سطحِ *روز* می‌گوید
+    // — با برچسبِ علت. اگر اینجا ۲۱۰ سطلِ خالی برایش بسازیم، آن ردیفِ
+    // توضیح‌دار دیگر ساخته نمی‌شود و «نمی‌دانیم چرا» جایش را به سکوت
+    // می‌دهد.
+    if (!groups.size) continue;
+
+    const observed = [...groups.keys()].sort((a, b) => a - b);
+    const firstObserved = observed[0];
+    const lastObserved = observed.at(-1);
+    let carriedPnl = NaN;
+    let carriedSecond = NaN;
+
+    // ═══ محورِ کاملِ جلسه، نه فقط سطل‌هایی که مشاهده دارند ═══
+    //
+    // گزارش صاحب پروژه: برای استرانگلِ کم‌معامله که اولین قیمتِ کاملش
+    // ساعت ۱۲:۲۵ تشکیل می‌شود، نمودار از ۱۲:۲۵ شروع می‌شد — چون حلقه روی
+    // «سطل‌های موجود» می‌چرخید، نه روی خودِ بازه. یعنی در تایم‌فریم پنج
+    // دقیقه‌ای یک سطل دیده می‌شد به‌جای چهل‌ودو تا.
+    //
+    // حالا حلقه روی خودِ جلسه است، پس شمارِ سطلِ هر روز ثابت است:
+    //
+    //   ۱ دقیقه ۲۱۰ · ۵ دقیقه ۴۲ · ۱۵ دقیقه ۱۴ · ۳۰ دقیقه ۷ · ۶۰ دقیقه ۴
+    //
+    // (سطلِ آخرِ شصت‌دقیقه‌ای نیم‌ساعته است، چون جلسه ۱۲:۳۰ تمام می‌شود.)
+    //
+    // ═══ و چرا سطلِ خالی عدد نمی‌گیرد ═══
+    //
+    // دو بندِ خواسته در ظاهر با هم می‌جنگیدند: «آخرین قیمت را تا سطل بعد
+    // حمل کن» و «نمودار نباید قیمتِ ۱۲:۲۵ را به گذشته تعمیم دهد». هر دو
+    // برقرارند، چون در دو **خانهٔ جدا** می‌نشینند:
+    //
+    //   closePnl     فقط از مشاهدهٔ واقعیِ همان سطل. سطلِ بی‌مشاهده NaN
+    //                می‌ماند، پس رسّام خط را همان‌جا قطع می‌کند و هیچ
+    //                قیمتی به گذشته یا آینده کشیده نمی‌شود.
+    //   carriedPnl   آخرین قیمتِ کاملِ مشاهده‌شده، با `carriedAgeSec` که
+    //                می‌گوید چند ثانیه از آن گذشته. جدول می‌تواند نشانش
+    //                دهد، صریحاً با برچسبِ «کهنه».
+    //
+    // اگر هر دو یک خانه بودند، حملِ قیمت بی‌صدا به خطِ نمودار می‌نشست و
+    // همان عددِ ساختگی‌ای می‌شد که قاعدهٔ ۲-۴ منع می‌کند.
+    //
+    // پیش از اولین قیمتِ کامل، حتی `carriedPnl` هم وجود ندارد: آنجا هیچ
+    // قیمتی مشاهده نشده که حمل شود. پس‌نگری دقیقاً همان‌جا شروع می‌شد.
+    for (let start = INTRADAY_START_SECOND; start < INTRADAY_END_SECOND; start += width) {
+      const endSecond = Math.min(INTRADAY_END_SECOND, start + width);
       const list = groups.get(start);
+      if (!list) {
+        const before = start < firstObserved;
+        // پس از آخرین مشاهدهٔ روز هم «حمل‌شده» است، نه «پیش از اولین»:
+        // قیمتی مشاهده شده بود و سنّش دارد بزرگ می‌شود.
+        const carried = !before && Number.isFinite(carriedPnl);
+        out.push({
+          date: day.date, startSecond: start, endSecond,
+          timeLabel: '', observations: 0, seconds: 0,
+          gap: true,
+          status: before ? TF_BUCKET_STATUS.BEFORE_FIRST : TF_BUCKET_STATUS.CARRIED,
+          why: before ? TF_BUCKET_LABEL[TF_BUCKET_STATUS.BEFORE_FIRST] : TF_BUCKET_LABEL[TF_BUCKET_STATUS.CARRIED],
+          openPnl: NaN, closePnl: NaN, highPnl: NaN, lowPnl: NaN,
+          changePnl: NaN, stepPnl: NaN,
+          openReturnPct: NaN, returnPct: NaN, basePrice: NaN, basePct: NaN,
+          volume: 0, trades: 0, baseVolume: 0,
+          freshPct: NaN, maxAgeSec: NaN,
+          carriedPnl: carried ? carriedPnl : NaN,
+          carriedAgeSec: carried ? Math.max(0, endSecond - carriedSecond) : NaN,
+          afterLast: !before && start > lastObserved,
+          perLeg: [],
+        });
+        continue;
+      }
       const first = list[0], last = list.at(-1);
       const values = list.map((row) => row.netPnl);
       out.push({
         date: day.date, startSecond: start, endSecond: Math.min(INTRADAY_END_SECOND, start + width),
+        status: TF_BUCKET_STATUS.OBSERVED,
         timeLabel: last.timeLabel, observations: list.length,
         seconds: Math.max(0, last.second - first.second),
         openPnl: first.netPnl, closePnl: last.netPnl,
@@ -350,9 +436,28 @@ export function bucketIntradayPath(days = [], { bucketSeconds = 15 * 60 } = {}) 
         })),
       });
       previousClose = last.netPnl;
+      carriedPnl = last.netPnl;
+      carriedSecond = last.second;
     }
   }
   return out;
+}
+
+/**
+ * فقط سطل‌هایی که قیمتِ کاملِ مشاهده‌شده دارند.
+ *
+ * محورِ کاملِ جلسه برای **نمودار و جدول** لازم است: بی آن، روزی که اولین
+ * قیمتش ساعت ۱۲:۲۵ تشکیل می‌شود از ۱۲:۲۵ شروع می‌شد. ولی هر آماری که
+ * روی «شمارِ سطل» بایستد، با سطل‌های خالی بی‌معنی می‌شود — «۲۱۰ سطل
+ * تایم‌فریم» وقتی دو تایشان معامله داشته‌اند، عددی است که گمراه می‌کند.
+ *
+ * پس هر جا سنجه‌ای از سطل‌ها ساخته می‌شود (تلاطم ضمنی، شمارِ منبع)، از
+ * این گذر می‌کند؛ و هر جا محور لازم است، از خودِ خروجی.
+ */
+export function observedBuckets(rows = []) {
+  return (rows || []).filter((row) => (row?.status
+    ? row.status === TF_BUCKET_STATUS.OBSERVED
+    : num(row?.observations) > 0));
 }
 
 /**
@@ -646,7 +751,11 @@ export function intradayPathWithGaps(buckets = [], coverage = []) {
     const rows = byDate.get(date);
     if (rows?.length) { out.push(...rows); continue; }
     out.push({
-      date, gap: true, status: String(day?.status || TF_DAY_STATUS.NO_POINTS),
+      // `dayGap` از شکافِ سطحِ *روز* حرف می‌زند: کلِ روز داده نداشت و علتش
+      // در `why` نوشته شده. سطلِ خالیِ درون‌روز هم `gap` دارد ولی `dayGap`
+      // ندارد — و این تفاوت لازم است، چون برچسبِ یکی تاریخ است و برچسبِ
+      // دیگری بازهٔ ساعت.
+      date, gap: true, dayGap: true, status: String(day?.status || TF_DAY_STATUS.NO_POINTS),
       why: TF_DAY_LABEL[day?.status] || TF_DAY_LABEL.noPoints,
       startSecond: INTRADAY_START_SECOND, endSecond: INTRADAY_END_SECOND,
       timeLabel: '', observations: 0, seconds: 0, perLeg: [],
