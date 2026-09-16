@@ -6,6 +6,7 @@ import { check, near, group } from '../harness.mjs';
 import {
   ENTRY_EXIT_MIN_BUCKET, INTRADAY_START_SECOND, TF_BUCKET_STATUS, bucketIntradayPath, intradayEntryExitProfile, intradayHoldingSummary, timeOfDayProfile,
 } from '../../core/backtest.mjs';
+import { chartHasEnough, chartWindow } from '../../ui/track-chart.mjs';
 
 
 // ═══════════════════════════ ۳۹. تحلیل چندروزه روی تایم‌فریم انتخابی ═══════════════════════════
@@ -101,6 +102,19 @@ group('۳۹. تحلیل چندروزه روی تایم‌فریم انتخابی
   check('سطلِ ۱۲:۲۵ مشاهده‌شده است و عددِ واقعی دارد',
     noon39.status === TF_BUCKET_STATUS.OBSERVED && noon39.openPnl === 500 && noon39.closePnl === 520,
     `${noon39.openPnl}/${noon39.closePnl}`);
+
+  // هسته ۴۲ سطل ساخته بود، اما رسّام عمومی دو سرِ خالی را می‌برید و همان
+  // یک سطل ۱۲:۲۵ دوباره تمام عرض نمودار می‌شد؛ با یک نقطه حتی کل نمودار را
+  // «نمونه کافی نیست» اعلام می‌کرد. «کل بازه» باید پنجره کامل را نگه دارد.
+  const chartPoints39 = lateRows.map((row) => ({ ...row, netPnl: row.closePnl }));
+  const chartSeries39 = [{ key: 'netPnl' }];
+  const trimmed39 = chartWindow(chartPoints39, chartSeries39);
+  const full39 = chartWindow(chartPoints39, chartSeries39, { preserveEmptyEdges: true });
+  check('رسّام معمولی هنوز فضای خالی دو سر را می‌بُرد', trimmed39.rows.length === 1);
+  check('رسّام کل بازه هر ۴۲ خانه محور را نگه می‌دارد',
+    full39.rows.length === 42 && full39.filledCount === 1, `${full39.rows.length}/${full39.filledCount}`);
+  check('یک مشاهده برای کل بازه قابل رسم است، ولی برای نمودار معمولی نه',
+    chartHasEnough(full39, { allowSingle: true }) && !chartHasEnough(full39));
 
   // ═══ پس از اولین قیمت، حمل می‌شود — ولی در خانهٔ جدا ═══
   //

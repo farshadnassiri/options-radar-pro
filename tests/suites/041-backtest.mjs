@@ -116,4 +116,16 @@ group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فری�
     source40.includes("getLiveTape(codes)") && source40.includes('liveDate = Number(loaded.liveDate) || 0;'));
   check('اگر ماتریس روی سطل درشت‌تر ساخته شود، همان‌جا گفته می‌شود',
     source40.includes('matrix.bucketSeconds !== matrix.requestedBucketSeconds'));
+  check('نمودارهای کل بازه محور کامل جلسه و تک‌مشاهده را نگه می‌دارند',
+    source40.includes('const fullSession = { preserveEmptyEdges: true, allowSingle: true };')
+    && source40.includes("chart($('bt-tf-pnl-chart')")
+    && source40.includes('...fullSession }'));
+  check('بهترین و بدترین سطل فقط از سطل‌های دارای مشاهده محاسبه می‌شوند',
+    source40.includes('const observed = observedBuckets(buckets);')
+    && source40.includes('Math.max(...observed.map((row) => row.highPnl))')
+    && source40.includes('Math.min(...observed.map((row) => row.lowPnl))'));
+  check('جدول کل بازه، خالی واقعی را از قیمت کهنهٔ حمل‌شده جدا می‌کند',
+    source40.includes('<th>وضعیت</th>')
+    && source40.includes('<th>ارزش حمل‌شده</th>')
+    && source40.includes('row.carriedAgeSec'));
 }

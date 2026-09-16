@@ -58,19 +58,45 @@ const cell = (row, key) => {
   return Number.isFinite(value) ? value : NaN;
 };
 
-export function chart(host, points, series, { money = false, count = false, timeScale = false, step = false, xLabel, yLabel } = {}) {
+/**
+ * پنجرهٔ زمانی‌ای که رسّام باید نگه دارد.
+ *
+ * نمودارهای معمولی فضای خالیِ دو سر را می‌بُرند. «کل بازه» استثناست:
+ * همان فضای خالی اطلاعات است — می‌گوید از ۹:۰۰ تا اولین قیمت کامل چه‌قدر
+ * از جلسه گذشته. این تصمیم خالص بیرون کشیده شده تا بدون DOM آزموده شود.
+ */
+export function chartWindow(points = [], series = [], { preserveEmptyEdges = false } = {}) {
+  const filled = points.map((point) => series.some((item) => Number.isFinite(cell(point, item.key))));
+  const firstFilled = filled.indexOf(true);
+  if (firstFilled === -1) return { rows: [], filled: [], filledCount: 0 };
+  if (preserveEmptyEdges) return { rows: points, filled, filledCount: filled.filter(Boolean).length };
+  const lastFilled = filled.lastIndexOf(true);
+  return {
+    rows: points.slice(firstFilled, lastFilled + 1),
+    filled: filled.slice(firstFilled, lastFilled + 1),
+    filledCount: filled.slice(firstFilled, lastFilled + 1).filter(Boolean).length,
+  };
+}
+
+/** آیا شمارِ نقطه‌های واقعی برای رسم این مصرف‌کننده کافی است؟ */
+export const chartHasEnough = (window, { allowSingle = false } = {}) =>
+  Number(window?.filledCount) >= (allowSingle ? 1 : 2);
+
+export function chart(host, points, series, {
+  money = false, count = false, timeScale = false, step = false, xLabel, yLabel,
+  preserveEmptyEdges = false, allowSingle = false,
+} = {}) {
   // ── ردیفِ بی‌داده حذف نمی‌شود، فقط از دو سر بریده می‌شود ────────────
   //
   // پیش از این هر ردیفِ بی‌عدد از فهرست بیرون می‌رفت. نتیجه‌اش دو خطا با
   // هم بود: شکافِ میانی اصلاً دیده نمی‌شد، و در مقیاس اندیسی نقطه‌های
-  // بعدی به چپ می‌لغزیدند، پس محور زمان دروغ می‌گفت. حالا فقط ردیف‌های
-  // بی‌دادهٔ ابتدا و انتها بریده می‌شوند — آن‌ها فضای مرده‌اند، نه شکاف —
-  // و هر شکافِ میانی سرِ جایش می‌ماند.
-  const filled = points.map((point) => series.some((item) => Number.isFinite(cell(point, item.key))));
-  const firstFilled = filled.indexOf(true);
-  const rows = firstFilled === -1 ? [] : points.slice(firstFilled, filled.lastIndexOf(true) + 1);
-  if (rows.filter((_, index) => filled[firstFilled + index]).length < 2) {
-    host.innerHTML = '<p class="empty-note">برای نمودار دست‌کم دو نقطه معتبر لازم است.</p>'; return;
+  // بعدی به چپ می‌لغزیدند، پس محور زمان دروغ می‌گفت. در حالت معمول فقط
+  // ردیف‌های بی‌دادهٔ ابتدا و انتها بریده می‌شوند؛ مصرف‌کننده‌ای مثل «کل
+  // بازه» که همان فضای خالی برایش معنی دارد، آن‌ها را صریح نگه می‌دارد.
+  const window = chartWindow(points, series, { preserveEmptyEdges });
+  const rows = window.rows;
+  if (!chartHasEnough(window, { allowSingle })) {
+    host.innerHTML = `<p class="empty-note">برای نمودار دست‌کم ${allowSingle ? 'یک' : 'دو'} نقطه معتبر لازم است.</p>`; return;
   }
   const W = 900, H = 348, L = 104, R = 28, T = 28, B = 68;
   const values = rows.flatMap((row) => series.map((item) => cell(row, item.key)).filter(Number.isFinite));
