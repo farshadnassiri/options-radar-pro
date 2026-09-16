@@ -136,8 +136,29 @@ group('۲۰۱-ج. عدسی جمع‌شونده');
     /localStorage\.setItem\(LENS_KEY[\s\S]{0,80}catch/.test(tab201)
     && /localStorage\.getItem\(LENS_KEY[\s\S]{0,60}catch \{ return false; \}/.test(tab201));
   check('نوارِ جمع‌شده ارتفاع یک ردیف دارد، نه یک کارت',
-    style201.includes('.pb-lens { position: sticky; top: 0; z-index: 3; padding: 0; overflow: hidden; }')
+    /\.pb-lens \{[^}]*padding: 0[^}]*overflow: hidden/.test(style201)
     && style201.includes('.pb-lens-toggle { display: flex;'));
+  // ── قاعدهٔ تازه، ۱۴۰۵/۰۶/۲۶ ───────────────────────────────────────
+  //
+  // ادعای پیشین رشتهٔ CSS را عیناً قفل کرده بود، از جمله
+  // «position: sticky» — در حالی که آنچه *ادعا می‌کرد* ارتفاع بود.
+  // همان چسبندگی یک باگ بود: نوارِ عدسی و نوارِ تب هر دو با «top: 0» در
+  // یک قابِ پیمایش می‌چسبیدند و چسبندگی انباشته نمی‌شود — هر دو در همان
+  // نقطه پارک می‌کردند و ۶۰ پیکسل روی هم می‌افتادند. z-index نوارِ تب
+  // بالاتر بود، پس عدسی زیرش گم می‌شد و آنچه دیده می‌شد نیمهٔ این و
+  // نیمهٔ آن بود. صاحب پروژه گزارشش کرد و با اندازه‌گیری بازتولید شد.
+  //
+  // پس ادعا وارونه شد: عدسی **نباید** چسبان باشد.
+  check('عدسی چسبان نیست — با نوارِ تب در همان نقطه پارک می‌کرد',
+    !/\.pb-lens \{[^}]*position: sticky/.test(style201));
+  // و در همان قابِ پیمایش، تنها یک نوار حق دارد چسبان باشد. اگر کسی
+  // دوباره دومی را چسبان کند، همین‌جا قرمز می‌شود.
+  const stickyBars = [
+    ['.pb-lens', /\.pb-lens \{[^}]*position: sticky/],
+    ['#pb-tabs', /\.pb-skin #pb-tabs \{[^}]*position: sticky/],
+  ].filter(([, re]) => re.test(style201)).map(([name]) => name);
+  check('در قابِ این صفحه فقط یک نوار چسبان است',
+    stickyBars.length === 1, stickyBars.join('، ') || 'هیچ‌کدام');
 }
 
 // ═══ سرخط‌ها در نمای کل ═══

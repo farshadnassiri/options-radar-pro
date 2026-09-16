@@ -605,16 +605,15 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
   margin: 14px 0 18px;
 }
 .backtest-kpis article {
-  background: var(--panel); border: 1px solid var(--line-soft);
-  border-inline-start: 4px solid var(--accent);
-  border-radius: var(--radius-lg); padding: 14px 16px;
-  box-shadow: var(--shadow-2xs);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+  display: grid; grid-template-rows: auto 1fr;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-xl); padding: var(--space-4) var(--space-5);
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.backtest-kpis article.gain { border-top-color: var(--gain); }
-.backtest-kpis article.loss { border-top-color: var(--loss); }
-.backtest-kpis span { display: block; margin-bottom: 8px; color: var(--muted); font-size: var(--fs-xs); }
-.backtest-kpis b { font-size: var(--fs-lg); line-height: 1.7; }
+.backtest-kpis article:hover { box-shadow: var(--shadow-md); border-color: var(--line-input); }
+.backtest-kpis span { display: block; margin-bottom: 8px; color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
+.backtest-kpis b { align-self: end; font-size: var(--fs-2xl); font-weight: 800; line-height: 1.45; }
 .backtest-kpis .gain b, .backtest-kpis b.gain { color: var(--gain); }
 .backtest-kpis .loss b, .backtest-kpis b.loss { color: var(--loss); }
 .backtest-chart { min-height: 280px; }
@@ -704,15 +703,44 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 .backtest-export-size { color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .backtest-export-size:empty { display: none; }
 
-/* ── نوار زیرتب بک‌تست ──
+/* ── نوار زیرتب ──
    نوار افقی و کشویی است، نه چند سطر پیچیده: شانزده تب در چند سطر، هر بار
    که یکی انتخاب می‌شود ارتفاعش عوض می‌شود و محتوای زیرش بالا و پایین
-   می‌پرد. */
+   می‌پرد.
+
+   ═══ باگی که صاحب پروژه روی تصویر نشان داد ═══
+
+   تب‌ها عمودی بریده می‌شدند — نیمهٔ بالای متن پیدا نبود. علتش یک قاعدهٔ
+   خودِ CSS است که به چشم نمی‌آید:
+
+     «overflow-x: auto» نمی‌تواند با «overflow-y: visible» همزیستی کند؛
+     مرورگر محورِ دوم را هم به «auto» تبدیل می‌کند.
+
+   یعنی همین که یازده تب سرریز کردند و نوارِ پیمایشِ افقی ظاهر شد، آن نوار
+   از *ارتفاعِ فضای داخلی* برداشت؛ دکمهٔ ۳۶ پیکسلی دیگر جا نشد؛ و چون محورِ
+   عمودی هم «auto» شده بود، بریده شد — نه اسکرول خورد، بریده شد.
+
+   چرا اول بازتولید نشد: در مرورگرِ headless نوارِ پیمایش روی محتوا شناور
+   است و جا نمی‌گیرد. روی مرورگرِ دسکتاپ با نوارِ کلاسیک، می‌گیرد. پس
+   اندازه‌گیریِ من سالم نشان می‌داد و تصویرِ صاحب پروژه خراب — هر دو درست
+   بودند.
+
+   راهِ حل همان چیزی است که خودِ Untitled UI دارد («scrollbar-hide» در
+   styles/globals.css): نوارِ پیمایش پنهان می‌شود، پس هیچ ارتفاعی
+   برنمی‌دارد. کشیدن با چرخِ افقی و لمس سر جایش است، و تبِ انتخاب‌شده را
+   خودِ کد به دید می‌آورد.
+
+   «align-items: center» هم لازم است: با کشیده‌شدنِ پیش‌فرضِ flex، دکمه
+   می‌کوشد تمامِ ارتفاعِ فضای داخلی را بگیرد و هر کمبودِ ارتفاعی را به
+   بریدگی تبدیل می‌کند. */
 .subtabs {
-  display: flex; gap: 4px; padding: 5px; margin: 0 0 14px;
-  overflow-x: auto; scrollbar-width: thin;
+  display: flex; align-items: center; gap: 4px; padding: 5px; margin: 0 0 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--panel-2);
 }
+.subtabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .subtabs button {
   flex: 0 0 auto; min-height: 36px; padding: 6px 14px;
   border: 0; border-radius: var(--radius-pill);
@@ -1804,17 +1832,19 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
   margin: var(--space-3, 12px) 0 var(--space-4, 16px);
 }
 .history-kpi {
-  background: var(--panel); border: 1px solid var(--line-soft);
-  border-inline-start: 4px solid var(--accent);
-  border-radius: var(--radius-lg); padding: 14px 16px;
-  box-shadow: var(--shadow-2xs);
+  display: grid; grid-template-rows: auto 1fr;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-xl); padding: var(--space-4) var(--space-5);
+  box-shadow: var(--shadow-xs);
   transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
-.history-kpi:hover { box-shadow: var(--shadow-md); }
-.history-kpi span { display: block; margin-bottom: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 600; }
-.history-kpi b { font-family: var(--mono); font-size: var(--fs-2xl); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.4; }
-.history-kpi.gain { border-top-color: var(--gain); }
-.history-kpi.loss { border-top-color: var(--loss); }
+.history-kpi:hover { box-shadow: var(--shadow-md); border-color: var(--line-input); }
+.history-kpi span { display: block; margin-bottom: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
+.history-kpi b { align-self: end; font-family: var(--mono); font-size: var(--fs-2xl); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.4; }
+/* جهت را عدد می‌گوید، نه نوارِ کناری. پیش از این `border-top-color` عوض
+   می‌شد که روی نوارِ سمتِ شروع هیچ اثری نداشت. */
+.history-kpi.gain b { color: var(--gain); }
+.history-kpi.loss b { color: var(--loss); }
 .history-chart-grid,
 .history-analysis-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4, 16px); margin: var(--space-4, 16px) 0; }
 .history-chart { min-height: 220px; min-width: 0; overflow: visible; }
@@ -2073,8 +2103,14 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 .card > .note { margin: 0 0 14px; color: var(--muted); font-size: var(--fs-sm); line-height: var(--lh-normal); }
 
 /* ——— تب تنظیمات: نوار پرش و سلسله‌مراتب تایپوگرافی ——— */
+/* چسبندگی از **بالای قاب** حساب می‌شود، نه از بالای پنجره. «.stage» قابِ
+   پیمایشِ خودش است و هدر بیرونِ آن می‌ایستد، پس عددِ درست صفر است. پیش از
+   این ۴۶ بود — یک فاصلهٔ خالیِ ۴۶ پیکسلی که هیچ‌چیز پرش نمی‌کرد.
+
+   این را با اندازه‌گیریِ واقعی سنجیدم، نه با حدس: لبهٔ پایینِ هدر و لبهٔ
+   بالای قاب هر دو ۶۶٫۵ بودند، یعنی همپوشانی صفر. */
 .settings-nav {
-  position: sticky; top: 46px; z-index: 5;
+  position: sticky; top: 0; z-index: 5;
   display: flex; flex-wrap: wrap; gap: 2px;
   padding: 4px; margin-bottom: 16px;
   background: var(--ground);
@@ -2082,7 +2118,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
   -webkit-backdrop-filter: none;
   border: 1px solid var(--line); border-radius: var(--radius-lg);
 }
-.settings-card { scroll-margin-top: 108px; }
+.settings-card { scroll-margin-top: 56px; }
 .settings-card > h3 {
   font-size: var(--fs-2xl); padding-inline-start: 10px;
   border-inline-start: 3px solid var(--accent);
@@ -2374,7 +2410,7 @@ table.data th, table.data td {
   padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: start; white-space: nowrap;
 }
 table.data thead th {
-  position: sticky; top: 46px; z-index: 2;
+  position: sticky; top: 0; z-index: 2;
   background: var(--ground);
   font-size: var(--fs-xs); font-weight: 700; color: var(--muted);
   border-bottom: 1px solid var(--line); cursor: pointer; user-select: none;
@@ -2510,20 +2546,38 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
 
 /* ——— شاخص‌های کلیدی ——— */
 .kpis { display: grid; gap: var(--space-3, 12px); grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); margin-bottom: var(--space-4, 16px); }
+/* ═══ کارتِ عدد، الگوی «metrics» خودشان ═══
+
+   ایرادی که صاحب پروژه روی تصویر نشان داد: نوارِ رنگیِ چهارپیکسلی کنارِ
+   هر کارت. سه اشکال داشت و هر سه در تصویر دیده می‌شد:
+
+     ۱. روی *همهٔ* کارت‌ها بود، پس مثل ردیف‌های فهرست کناری، چیزی
+        نمی‌گفت — وقتی همه علامت دارند، علامت یعنی هیچ.
+     ۲. نوار سمتِ شروع بود ولی حالتِ سود و زیان `border-top-color` را
+        عوض می‌کرد؛ یعنی کلاسِ `.gain` عملاً روی نوار اثری نداشت و رنگِ
+        خطِ بالا را عوض می‌کرد که یک پیکسل بود و دیده نمی‌شد.
+     ۳. در کارتی که خودش گوشهٔ گرد دارد، نوارِ ضخیم در یک لبه، گردی را
+        در آن سمت می‌شکند و کارت «نیمه‌گرد» دیده می‌شود.
+
+   در الگوی خودشان کارتِ عدد هیچ نوارِ رنگی ندارد: سطحِ سفید، خطِ مویی،
+   گوشهٔ ۱۲، سایهٔ xs. جهتِ سود و زیان را **خودِ عدد** می‌گوید — همان جایی
+   که چشم به‌هرحال می‌رود. */
+/* ── عددها در یک ردیف هم‌تراز می‌مانند ──
+   برچسبِ بعضی کارت‌ها یک خط است و بعضی دو خط («استراتژی سنجیده‌شده»).
+   با چیدنِ ساده از بالا، عددِ کارتِ دوخطی یک خط پایین‌تر می‌افتد و ردیفِ
+   عددها پلکانی می‌شود — در عکسِ صفحه دقیقاً همین دیده شد. پس کارت دو
+   ردیف می‌شود: برچسب بالا، و عدد که *کفِ* کارت می‌نشیند. حالا هر چند خط
+   که برچسب باشد، عددها روی یک خط می‌مانند. */
 .kpi {
-  background: var(--panel); border: 1px solid var(--line-soft);
-  border-inline-start: 4px solid var(--accent);
-  border-radius: var(--radius-lg); padding: 14px 16px;
-  box-shadow: var(--shadow-2xs);
+  display: grid; grid-template-rows: auto 1fr; align-items: start;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-xl); padding: var(--space-4) var(--space-5);
+  box-shadow: var(--shadow-xs);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.kpi:hover { box-shadow: var(--shadow-md); }
-/* مرز رنگی سمت شروع، همان جهت سود/زیان کارت را از فاصله چشم می‌رساند،
-   بی‌آنکه رنگ‌آمیزی کل کارت ادعای اجرا یا داده کیفی دیگر را رنگ کند. */
-.kpi:has(.v.gain) { border-inline-start-color: var(--gain); }
-.kpi:has(.v.loss) { border-inline-start-color: var(--loss); }
-.kpi .k { font-size: var(--fs-sm); color: var(--muted); font-weight: 600; margin-bottom: 4px; }
-.kpi .v { font-family: var(--mono); font-size: var(--fs-3xl); font-weight: 900; font-variant-numeric: tabular-nums; direction: ltr; line-height: 1.3; }
+.kpi:hover { box-shadow: var(--shadow-md); border-color: var(--line-input); }
+.kpi .k { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; margin-bottom: 4px; }
+.kpi .v { align-self: end; font-family: var(--mono); font-size: var(--fs-3xl); font-weight: 900; font-variant-numeric: tabular-nums; direction: ltr; line-height: 1.3; }
 .kpi .v.gain { color: var(--gain); }
 .kpi .v.loss { color: var(--loss); }
 .kpi .s { font-size: var(--fs-xs); color: var(--muted); margin-top: 4px; }
@@ -3456,7 +3510,27 @@ td.gain, dd.gain { color: var(--gain); }
 /* عدسی جمع‌شونده: بسته که باشد یک نوار باریک است، نه یک کارت تمام‌قد.
    خلاصه روی خودِ نوار می‌ماند تا کاربر بدون بازکردنش بداند عددها روی چه
    مبنایی‌اند. */
-.pb-lens { position: sticky; top: 0; z-index: 3; padding: 0; overflow: hidden; }
+/* ═══ باگی که صاحب پروژه روی تصویر نشان داد ═══
+
+   «تب‌ها به هم ریختن، درست نشون داده نمیشن.»
+
+   علت: **دو عنصر هم‌زمان چسبان، هر دو با «top: 0»، در یک قابِ پیمایش.**
+   نوارِ عدسی همین‌جا، و نوارِ تب («#pb-tabs») چند خط پایین‌تر. چسبندگی
+   انباشته نمی‌شود — هر دو در *همان* نقطه پارک می‌کنند و روی هم می‌افتند.
+
+   با اندازه‌گیری بازتولید شد: هر دو در فاصلهٔ ۲۲ پیکسل از بالای قاب
+   می‌ایستند و **۶۰٫۱ پیکسل** همپوشانی دارند. z-index نوارِ تب بالاتر است
+   (۴ در برابر ۳)، پس نوارِ تب روی عدسی می‌نشیند و آنچه دیده می‌شود
+   نیمه‌ای از این و نیمه‌ای از آن است.
+
+   اصلاح: عدسی چسبان نیست. این هیچ‌چیزی را از دست نمی‌دهد — هر وقت هر دو
+   چسبیده بودند، عدسی *پیش از این هم* پشتِ نوارِ تب پنهان بود. چسبان‌ماندنش
+   فقط توهمِ یک قابلیت بود.
+
+   دو تشخیصِ پیشینم غلط بود و هر دو را با سنجش رد کردم: نه ارتفاعِ هدر
+   (هدر بیرونِ قاب می‌ایستد، همپوشانی صفر)، و نه نوارِ پیمایشِ افقی
+   (ارتفاعِ نوار رشد می‌کرد، چیزی بریده نمی‌شد). */
+.pb-lens { position: relative; z-index: 3; padding: 0; overflow: hidden; }
 .pb-lens[data-open="false"] { box-shadow: var(--shadow-2xs); }
 .pb-lens-toggle { display: flex; align-items: center; gap: var(--space-2); width: 100%;
   padding: 6px var(--space-3); background: none; border: 0; cursor: pointer;
@@ -3557,16 +3631,30 @@ td.gain, dd.gain { color: var(--gain); }
 
 /* سرخط‌ها — هر کارت یک سؤال با جوابش و دلیلش. کلیک‌شونده، چون هر سرخط
    دروازهٔ همان استراتژی است. */
-.pb-highlights { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
-.pb-highlight { display: flex; flex-direction: column; gap: 3px; align-items: stretch; text-align: start;
-  padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md);
-  background: var(--panel); cursor: pointer; }
-.pb-highlight:hover { border-color: var(--accent); background: var(--accent-soft); }
-.pb-highlight:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.pb-highlight-label { font-size: var(--fs-3xs); font-weight: 700; color: var(--accent-ink);
+/* ═══ کارتِ کلیک‌شدنی، الگوی کارتِ خودشان ═══
+
+   شبکه‌ای از ده کارت که هر کدام یک سؤال را جواب می‌دهند. سه چیز عوض شد:
+
+     ارتفاع   کارت‌ها پیش از این با محتوایشان کوتاه و بلند می‌شدند و
+              شبکه دندانه‌دار دیده می‌شد. `align-content: start` روی خودِ
+              کارت، متن را بالا می‌چیند و کارت‌های یک ردیف هم‌قد می‌مانند.
+     هاور     پرشدنِ کاملِ زمینه با رنگِ برند برداشته شد؛ در شبکه‌ای از ده
+              کارت، پرشدن بیش از حد پررنگ بود. حالا سایه یک پله بالا
+              می‌رود و کادر رنگِ برند می‌گیرد — همان «بالا آمدن» که در
+              کارتِ کلیک‌شدنیِ خودشان است.
+     تنفس     فاصلهٔ داخلی از ۱۲ به ۱۶، و کمینهٔ عرضِ ستون از ۲۱۰ به ۲۴۰
+              — در ۲۱۰ پیکسل، نامِ انگلیسیِ استراتژی‌ها می‌شکست. */
+.pb-highlights { display: grid; gap: var(--space-3); grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.pb-highlight { display: grid; gap: 4px; align-content: start; text-align: start;
+  padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl);
+  background: var(--panel); cursor: pointer; box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+.pb-highlight:hover { border-color: var(--accent); box-shadow: var(--shadow-md); }
+.pb-highlight:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+.pb-highlight-label { font-size: var(--fs-2xs); font-weight: 700; color: var(--accent-ink);
   text-transform: none; letter-spacing: normal; }
-.pb-highlight b { font-size: var(--fs-sm); color: var(--ink); }
-.pb-highlight-value { font-size: var(--fs-2xs); color: var(--muted); }
+.pb-highlight b { font-size: var(--fs-md); color: var(--ink); line-height: var(--lh-tight); }
+.pb-highlight-value { font-size: var(--fs-xs); color: var(--muted); }
 .pb-highlight-value em { font-style: normal; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
 .pb-highlight small { font-size: var(--fs-3xs); color: var(--muted); line-height: 1.5; }
 
@@ -4595,12 +4683,17 @@ table.data thead th {
 .pb-skin .pb-basket-row[data-single-run] { grid-template-columns: auto minmax(200px, 1.2fr) minmax(270px, 2.4fr) 96px auto; }
 
 /* ─── نوار تب ────────────────────────────────────────────────────── */
+/* همان بریدگی در پوستهٔ غربال هم بود، و این قاعده «scrollbar-width» را
+   دوباره روی «thin» می‌گذاشت — یعنی اصلاحِ قاعدهٔ پایه را خنثی می‌کرد.
+   نوارِ تبِ این صفحه یازده تب دارد و همان است که در تصویر بریده بود. */
 .pb-skin #pb-tabs {
   position: sticky; top: 0; z-index: 4;
-  gap: 2px; padding: 4px; border: var(--pb-hair);
-  border-radius: var(--radius-pill); background: var(--pb-tile);
-  box-shadow: var(--shadow-2xs); overflow-x: auto; scrollbar-width: thin;
+  align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line);
+  border-radius: var(--radius-pill); background: var(--panel);
+  box-shadow: var(--shadow-xs); overflow-x: auto;
+  scrollbar-width: none; -ms-overflow-style: none;
 }
+.pb-skin #pb-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .pb-skin #pb-tabs button {
   min-height: var(--control-h-sm); padding: 0 var(--space-4);
   border: 1px solid transparent; border-radius: var(--radius-pill);
@@ -4655,25 +4748,27 @@ table.data thead th {
 /* ─── کارت‌های عدد ──────────────────────────────────────────────── */
 .pb-skin .backtest-kpis { gap: var(--space-3); }
 .pb-skin .backtest-kpis article {
-  padding: var(--space-3) var(--space-4);
-  border: var(--pb-hair); border-radius: var(--radius-md);
-  background: var(--pb-tile); box-shadow: none;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--line); border-radius: var(--radius-xl);
+  background: var(--panel); box-shadow: var(--shadow-xs);
 }
 .pb-skin .backtest-kpis span { margin-bottom: 4px; font-size: var(--fs-2xs); font-weight: 600; }
 .pb-skin .backtest-kpis b {
-  font-family: var(--mono); font-size: var(--fs-xl); font-weight: 700;
+  font-family: var(--mono); font-size: var(--fs-2xl); font-weight: 800;
   font-variant-numeric: tabular-nums; direction: ltr; display: block; text-align: start;
 }
-.pb-skin .backtest-kpis article.gain { border-inline-start: var(--pb-rail) solid var(--gain); }
-.pb-skin .backtest-kpis article.loss { border-inline-start: var(--pb-rail) solid var(--loss); }
+/* جهت را عدد می‌گوید. نوارِ کناری برداشته شد — روی *همهٔ* کارت‌ها بود و
+   وقتی همه علامت دارند، علامت یعنی هیچ. */
+.pb-skin .backtest-kpis article.gain b { color: var(--gain); }
+.pb-skin .backtest-kpis article.loss b { color: var(--loss); }
 
 /* ─── سرخط‌ها ────────────────────────────────────────────────────── */
 .pb-skin .pb-highlight {
-  padding: var(--space-3); border: var(--pb-hair); border-radius: var(--radius-md);
-  background: var(--panel); transition: border-color var(--transition-fast),
-    background var(--transition-fast), transform var(--transition-fast);
+  padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl);
+  background: var(--panel); box-shadow: var(--shadow-xs);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.pb-skin .pb-highlight:hover { transform: translateY(-2px); border-color: var(--accent); }
+.pb-skin .pb-highlight:hover { border-color: var(--accent); box-shadow: var(--shadow-md); }
 .pb-skin .pb-highlight b { font-size: var(--fs-md); }
 .pb-skin .pb-highlight-value em { font-family: var(--mono); direction: ltr; }
 
