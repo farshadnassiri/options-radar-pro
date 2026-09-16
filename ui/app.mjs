@@ -3,11 +3,11 @@
 // قاعده تب تنبل: ماژول هر تب فقط لحظه اولین کلیک وارد می‌شود و اشتراک
 // عکس لحظه‌ای هم فقط برای تب باز برقرار می‌شود. تب بسته، هیچ هزینه‌ای ندارد.
 
-import { fmt, faDigits, faAgo, faClock, pageTitle, normFa, ltr } from '/ui/fmt.mjs';
+import { fmt, faAgo, faClock, pageTitle, ltr } from '/ui/fmt.mjs';
 import { defaults } from '/core/settings.mjs';
 import { CATALOG, GROUPS as SGROUPS } from '/strategies/catalog.mjs';
 import { mountCapacityPicker } from '/ui/expiries.mjs';
-import { icon, sectionIcon, TAB_ICON, GROUP_ICON } from '/ui/icons.mjs';
+import { icon, TAB_ICON } from '/ui/icons.mjs';
 import { installGlobalCapture, logError } from '/ui/errlog.mjs';
 import { linkLabelKey } from '/ui/feed-state.mjs';
 import { takeHandoff } from '/ui/handoff.mjs';
@@ -332,98 +332,91 @@ async function tickHealth() {
 // ————————————————————————————————— تب‌ها —————————————————————————————————
 
 const TABS = [
-  { id: 'settings', title: 'تنظیمات', section: 'پایه', mod: '/ui/tabs/settings.mjs', phase: 1 },
+  { id: 'settings', title: 'تنظیمات', mod: '/ui/tabs/settings.mjs', phase: 1 },
   // «دیده‌بان زنجیره» و «برترین موقعیت‌ها» تب مستقل ندارند: هر دو از همان
   // عکس لحظه‌ای بازار تغذیه می‌شوند که «رصد لحظه‌ای» می‌سازد و هر دو یک کار
   // می‌کنند — نگاه کلی پیش از تصمیم. حالا دو حالت از همان تب‌اند و ماژول
   // خودشان همان‌جا تنبل بار می‌شود؛ همان الگویی که «نگاه باز» دارد.
-  { id: 'live-market', title: 'رصد لحظه‌ای بازار', section: 'پایه', mod: '/ui/tabs/live-market.mjs', phase: 3 },
-  { id: 'history', title: 'تحلیل تاریخی استراتژی', section: 'پایه', mod: '/ui/tabs/history.mjs', phase: 3 },
-  // نام تازه، جست‌وجوی قدیمی را نباید بشکند: کاربر ماه‌ها این تب را
-  // «بک‌تست سریع» صدا کرده و همان را در جعبهٔ جست‌وجو می‌نویسد.
-  { id: 'backtest', title: '🔬 آزمایشگاه آپشن', alias: 'بک‌تست سریع backtest آزمایشگاه اپشن',
-    section: 'پایه', mod: '/ui/tabs/backtest.mjs', phase: 3 },
-  { id: 'portfolio-backtest', title: 'آزمون همه استراتژی‌ها', section: 'پایه', mod: '/ui/tabs/portfolio-backtest.mjs', phase: 3 },
-  // رصد یونانی، تب مستقل است نه پنلی در آزمایشگاه: آزمایشگاه دربارهٔ یک
-  // آزمون است و این دربارهٔ یک موقعیت در طول عمرش. کاربری که فقط می‌خواهد
-  // حساسیت‌ها را دنبال کند، نباید از میان پانزده پنلِ دیگر رد شود.
-  { id: 'greeks-watch', title: '📐 رصد یونانی و تلاطم', alias: 'یونانی گریک دلتا گاما وگا تتا رو تلاطم ضمنی تاریخی greeks',
-    section: 'پایه', mod: '/ui/tabs/greeks-watch.mjs', phase: 3 },
-  { id: 'bereket', title: '🍲 سفره پر برکت بازار', alias: 'سفر در زمان شبیه‌ساز جلسه تمرین یادگیری بازی گذشته bereket time machine',
-    section: 'پایه', mod: '/ui/tabs/bereket.mjs', phase: 3 },
-  { id: 'portfolio-time', title: '🧭 استودیوی سفر زمانی سبد', alias: 'پرتفوی سبد سفر زمان بازی بک تست سرمایه mission portfolio',
-    section: 'پایه', mod: '/ui/tabs/portfolio-time.mjs', phase: 3 },
-  // «فاصله» پرسشی است که در همهٔ خانواده‌های اسپرد و استرانگل یکی است و در
-  // هیچ تب موجودی موضوعِ اصلی نیست. پنلِ شانزدهم شدن در «آزمون همه
-  // استراتژی‌ها» یعنی کسی که فقط دنبال فاصله است از پانزده پنل رد شود.
-  { id: 'spread-radar', title: '📏 رادار فاصله', alias: 'اسپرد فاصله عرض استرانگل دهانه پر شدن باقی مانده هشدار آلارم spread gap width',
-    section: 'پایه', mod: '/ui/tabs/spread-radar.mjs', phase: 3 },
-  // «دیده‌بان شرطی» از رادار جدا است چون جهتش وارونه است: رادار از یک
-  // نماد شروع می‌کند و ترکیب‌هایش را نشان می‌دهد؛ این یکی از **شرط** شروع
-  // می‌کند و می‌گردد ببیند کدام ترکیب — در هر نمادی — به آن می‌خورد.
-  { id: 'watchtower', title: '🔔 دیده‌بان شرطی', alias: 'هشدار اعلان شرط فیلتر رصد چند نماد notification alert watch condition',
-    section: 'پایه', mod: '/ui/tabs/watchtower.mjs', phase: 3 },
-  { id: 'logs', title: 'دفتر خطاها', section: 'پایه', mod: '/ui/tabs/logs.mjs', phase: 1 },
+  { id: 'live-market', title: 'رصد لحظه‌ای بازار', mod: '/ui/tabs/live-market.mjs', phase: 3 },
+  { id: 'history', title: 'تحلیل تاریخی استراتژی', mod: '/ui/tabs/history.mjs', phase: 3 },
+  // نام تازه، نامِ قدیمی را نباید بی‌نشان بگذارد: کاربر ماه‌ها این تب را
+  // «بک‌تست سریع» صدا کرده. جعبهٔ جست‌وجوی ریل رفته، پس نامِ قدیمی جایی
+  // می‌نشیند که هنوز هست — عنوانِ راهنمای همان ردیف.
+  { id: 'backtest', title: '🔬 آزمایشگاه آپشن', alias: 'همان «بک‌تست سریع» سابق',
+    mod: '/ui/tabs/backtest.mjs', phase: 3 },
+  { id: 'portfolio-backtest', title: 'آزمون همه استراتژی‌ها', mod: '/ui/tabs/portfolio-backtest.mjs', phase: 3 },
+  // ═══ همهٔ استراتژی‌های زنده، پشت یک در ═══
+  //
+  // تا پیش از این، سی‌ویک استراتژیِ زنده نُه سرگروه در فهرست کناری داشتند و
+  // هر سرگروه یک زیرمنوی شناور. فهرست کناری عملاً فهرستِ استراتژی‌ها بود و
+  // شش تبِ کاری‌اش لای آن گم می‌شد. حالا یک در دارند و تقسیم‌بندی‌شان —
+  // همان نُه گروه — داخلِ همان صفحه به شکل تب است.
+  { id: 'strategy-explorer', title: 'در جست‌وجوی استراتژی‌ها',
+    mod: '/ui/tabs/strategy-explorer.mjs', phase: 3 },
+  // «دیده‌بان شرطی» از شرط شروع می‌کند و می‌گردد ببیند کدام ترکیب — در هر
+  // نمادی — به آن می‌خورد. جهتش وارونهٔ رادارِ تک‌نماد است، پس تب خودش را
+  // دارد.
+  { id: 'watchtower', title: '🔔 دیده‌بان شرطی', alias: 'هشدار و اعلان روی شرط',
+    mod: '/ui/tabs/watchtower.mjs', phase: 3 },
+  { id: 'logs', title: 'دفتر خطاها', mod: '/ui/tabs/logs.mjs', phase: 1 },
 ];
+TABS.push({ id: 'positions', title: 'موقعیت‌های من', phase: 7, mod: '/ui/tabs/positions.mjs' });
+TABS.push({ id: 'roll', title: 'تحلیل رول', phase: 7, mod: '/ui/tabs/roll.mjs' });
 
 // تب هر استراتژی از همان فهرست ساخته می‌شود و همه یک ماژول دارند. این نتیجه
 // مستقیم آن تصمیم معماری است: چون هیچ استراتژی محاسبه‌گر جدا ندارد، هیچ تبی
 // هم رابط جدا لازم ندارد.
-for (const [key, label] of Object.entries(SGROUPS)) {
+//
+// `rail: false` یعنی «هست ولی در فهرست کناری نیست»: نشانیِ `#covered-call`،
+// پیوندهای بین‌تبی و نقشهٔ انتقال همگی همچنان کار می‌کنند — فقط راهِ
+// **گشتن** دنبالشان از «در جست‌وجوی استراتژی‌ها» می‌گذرد، نه از یک ستونِ
+// چهل‌ردیفی. دکمه‌ای که به جایی نرسد بدتر از نبودِ دکمه است، پس حذفشان از
+// مسیریاب همراه حذفشان از فهرست نشد.
+for (const key of Object.keys(SGROUPS)) {
   for (const d of CATALOG.filter((s) => s.group === key)) {
     TABS.push({
-      id: d.id, title: d.name, section: label, phase: d.phase, def: d,
-      group: key, mod: '/ui/tabs/strategy.mjs',
+      id: d.id, title: d.name, phase: d.phase, def: d,
+      group: key, mod: '/ui/tabs/strategy.mjs', rail: false,
     });
   }
 }
-TABS.push({ id: 'positions', title: 'موقعیت‌های من', section: 'موقعیت من', phase: 7, mod: '/ui/tabs/positions.mjs' });
-TABS.push({ id: 'roll', title: 'تحلیل رول', section: 'موقعیت من', phase: 7, mod: '/ui/tabs/roll.mjs' });
+
+/** تب‌هایی که در فهرست کناری ردیف دارند — به ترتیبِ پیش‌فرضِ همین فهرست. */
+const RAIL_TABS = TABS.filter((t) => t.rail !== false);
 
 // ————————————————————————————————— فهرست کناری —————————————————————————————————
 //
-// ده‌ها تب در یک ستون، بدون کمک، یعنی پیمایش. سه چیز آن را قابل استفاده
-// می‌کند: جست‌وجو که فهرست را کوتاه می‌کند، بخش‌های تاشو که آنچه امروز کار
-// نداری را جمع می‌کند، و برچسب جهت هر استراتژی که بدون باز کردن تب می‌گوید
-// صعودی است یا نزولی یا خنثی.
+// ده ردیف، بدون سرگروه و بدون زیرمنو. تا پیش از این، رسیدن به هر تب دو کلیک
+// می‌خواست — یکی روی سرگروه، یکی روی خودِ تب — و پنلِ شناور روی محتوای
+// همان تبی می‌نشست که تازه باز شده بود. حالا هر ردیف خودش دکمهٔ تب است.
 //
-// حالت تاشو در حافظه مرورگر می‌ماند، وگرنه هر بار باز کردن صفحه از نو
-// همان کار دستی را می‌خواهد.
+// ترتیب ردیف‌ها دستِ کاربر است و در حافظهٔ مرورگر می‌ماند، وگرنه هر بار باز
+// کردن صفحه همان چیدنِ دستی را از نو می‌خواهد.
 
-const FOLD_KEY = 'rail:folded';
-const ORDER_KEY = 'rail:order';
+const ORDER_KEY = 'rail:order:tabs';
 const COLLAPSED_KEY = 'rail:collapsed';
 
 /**
- * وضعیت تاشدگی گروه‌های ریل.
+ * ترتیب ذخیره‌شدهٔ ردیف‌ها، پاک‌سازی‌شده.
+ *
+ * شناسه‌ای که دیگر وجود ندارد (تبِ حذف‌شده) دور ریخته می‌شود و تبِ تازه —
+ * که در حافظهٔ کاربرِ قدیمی نیست — به ته فهرست می‌رود، نه اینکه ناپدید شود.
  */
-const loadFolded = (allSections) => {
-  let raw = null;
-  try { raw = localStorage.getItem(FOLD_KEY); } catch { raw = null; }
-  if (raw == null) return new Set(allSections);
-  try { return new Set(JSON.parse(raw)); } catch { return new Set(allSections); }
-};
-const ALL_SECTIONS = [...new Set(TABS.map((t) => t.section))];
-const folded = loadFolded(ALL_SECTIONS);
-const saveFolded = () => {
-  try { localStorage.setItem(FOLD_KEY, JSON.stringify([...folded])); } catch { /* بی‌اهمیت */ }
-};
-
-const loadGroupOrder = (defaultSections) => {
+const loadTabOrder = (defaultIds) => {
   try {
     const raw = localStorage.getItem(ORDER_KEY);
-    if (!raw) return defaultSections;
+    if (!raw) return defaultIds;
     const ordered = JSON.parse(raw);
-    if (!Array.isArray(ordered)) return defaultSections;
-    const missing = defaultSections.filter((s) => !ordered.includes(s));
-    const valid = ordered.filter((s) => defaultSections.includes(s));
+    if (!Array.isArray(ordered)) return defaultIds;
+    const valid = ordered.filter((id) => defaultIds.includes(id));
+    const missing = defaultIds.filter((id) => !valid.includes(id));
     return [...valid, ...missing];
   } catch {
-    return defaultSections;
+    return defaultIds;
   }
 };
 
-const saveGroupOrder = (order) => {
+const saveTabOrder = (order) => {
   try { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); } catch { /* بی‌اهمیت */ }
 };
 
@@ -443,9 +436,6 @@ function updateRailCollapsed() {
     toggleBtn.title = label;
     toggleBtn.setAttribute('aria-label', label);
   }
-  if (isRailCollapsed) {
-    closeSubmenu();
-  }
   try { localStorage.setItem(COLLAPSED_KEY, isRailCollapsed ? 'true' : 'false'); } catch {}
 }
 
@@ -455,261 +445,119 @@ function toggleRail(force) {
 }
 
 /**
- * فقط یک بخش هم‌زمان باز می‌ماند.
+ * رنگ هر ردیف ریل — همه از توکن‌های خودِ پوسته.
+ *
+ * رنگ دیگر مالِ «بخش» نیست چون بخشی نمانده؛ مالِ خودِ تب است. با ریلِ
+ * جمع‌شده که فقط آیکون دیده می‌شود، همین رنگ تنها چیزی است که ردیف‌ها را
+ * از هم جدا می‌کند.
  */
-function revealSection(sec) {
-  for (const other of ALL_SECTIONS) {
-    if (other !== sec) folded.add(other);
-  }
-  folded.delete(sec);
-}
-
-/**
- * رنگ هر بخش ریل — همه از توکن‌های خودِ پوسته.
- */
-const SECTION_TONE = {
-  'پایه': '--accent',
-  'کسب درآمد': '--gain',
-  'اسپرد عمودی': '--cmp3',
-  'اسپرد تقویمی': '--cmp1',
-  'تلاطم': '--warn',
-  'باترفلای و کندور': '--cmp4',
-  'نسبت و بک‌اسپرد': '--loss',
-  'پوشش ریسک': '--gain',
-  'آربیتراژ و همبستگی': '--cmp2',
-  'موقعیت من': '--accent-2',
+const TAB_TONE = {
+  settings: '--accent',
+  'live-market': '--accent-2',
+  history: '--cmp1',
+  backtest: '--cmp3',
+  'portfolio-backtest': '--cmp4',
+  'strategy-explorer': '--gain',
+  watchtower: '--warn',
+  positions: '--cmp2',
+  roll: '--cmp2',
+  logs: '--loss',
 };
 
-/**
- * نام بخش، به شکلی که در گزینشگر CSS بنشیند.
- */
-const cssId = (text) => [...String(text)].map((ch) => ch.codePointAt(0).toString(36)).join('-');
-
-/** جهت هر استراتژی — یک نقطهٔ رنگی کنار نام، با عنوان راهنما. */
-function dirTone(def) {
-  const d = String(def?.dir || '');
-  if (/صعودی/.test(d)) return ['صعودی', 'up'];
-  if (/نزولی/.test(d)) return ['نزولی', 'down'];
-  if (/خنثی|بی‌جهت/.test(d)) return ['خنثی', 'flat'];
-  if (/تلاطم/.test(d)) return ['تلاطم', 'vol'];
-  return [null, null];
-}
-
-let railQuery = '';
 let railActiveId = null;
-let activeSubmenuSec = null;
 
-function closeSubmenu() {
-  activeSubmenuSec = null;
-  const sub = el('rail-submenu');
-  if (sub) sub.hidden = true;
-  const list = el('rail-list');
-  if (list) {
-    for (const grp of list.querySelectorAll('.rail-group')) {
-      grp.removeAttribute('data-open');
-      grp.querySelector('.rail-head')?.setAttribute('aria-expanded', 'false');
-    }
-  }
-}
-
-function openSubmenu(sec, headEl) {
-  const sub = el('rail-submenu');
-  if (!sub) return;
-  activeSubmenuSec = sec;
-
-  const list = el('rail-list');
-  if (list) {
-    for (const grp of list.querySelectorAll('.rail-group')) {
-      const isOpen = grp.dataset.secRaw === sec;
-      grp.toggleAttribute('data-open', isOpen);
-      grp.querySelector('.rail-head')?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    }
-  }
-
-  const q = normFa(railQuery).toLowerCase();
-  const matches = (t) => {
-    if (!q) return true;
-    const hay = normFa(`${t.title} ${t.alias || ''} ${t.def?.fa || ''} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
-    return hay.includes(q);
-  };
-  const tabs = TABS.filter((x) => x.section === sec && matches(x));
-
-  const toneVar = SECTION_TONE[sec] || '--accent';
-  sub.style.setProperty('--sec', `var(${toneVar})`);
-  sub.hidden = false;
-
-  const chipIcon = sectionIcon(sec, tabs[0]?.group);
-  sub.innerHTML = `
-    <div class="rail-submenu-head">
-      <span class="rail-submenu-chip">${icon(chipIcon, 'ic rail-head-ic')}</span>
-      <span class="rail-submenu-title">${sec}</span>
-      <span class="rail-submenu-count">${faDigits(tabs.length)} تب</span>
-      <button type="button" class="rail-submenu-close" id="rail-sub-close" title="بستن">✕</button>
-    </div>
-    <div class="rail-submenu-list" id="rail-sub-list"></div>
-  `;
-
-  sub.querySelector('#rail-sub-close').addEventListener('click', (e) => {
-    e.stopPropagation();
-    closeSubmenu();
-  });
-
-  const listEl = sub.querySelector('#rail-sub-list');
-  for (const t of tabs) {
-    const b = document.createElement('button');
-    b.className = 'tab-btn';
-    b.type = 'button';
-    b.dataset.tab = t.id;
-    b.dataset.locked = t.mod ? '0' : '1';
-    b.setAttribute('aria-current', current === t.id ? 'true' : 'false');
-    const infeasible = t.def && !t.def.feasible;
-    b.title = infeasible ? t.def.infeasibleWhy : (t.def?.note || t.def?.dir || t.title);
-    const [tone, cls] = dirTone(t.def);
-    const glyph = t.def ? GROUP_ICON[t.group] : TAB_ICON[t.id];
-    b.innerHTML = `
-      ${icon(glyph, 'ic tab-ic')}
-      <span class="tab-name">${ltr(t.title)}</span>
-      ${infeasible ? '<span class="tab-flag" title="اجرا در تابلو ممکن نیست">⃰</span>' : ''}
-      ${tone ? `<span class="tone-dot ${cls}" title="${tone}"></span>` : ''}`;
-    b.addEventListener('click', (e) => {
-      e.stopPropagation();
-      open(t.id);
-      // ═══ پنل کارش تمام شده، پس می‌رود ═══
-      //
-      // گزارش عملیاتیِ ۱۴۰۵/۰۶/۱۶: «بعد از انتخاب استراتژی، پنل گروه خودکار
-      // بسته نمی‌شود و وسط صفحه باقی می‌ماند. در تست، کلیک روی «اسکن» به
-      // دکمهٔ Naked Put زیر پنل برخورد کرد و استراتژی عوض شد.»
-      //
-      // بستنِ با کلیکِ بیرون این را نمی‌گرفت: کلیک روی خودِ دکمهٔ تب «بیرون»
-      // نیست، پس پنل باز می‌ماند و روی کنترل‌های همان تبی می‌نشست که تازه باز
-      // کرده بود — پنلی که راهِ رسیدن به مقصد است، جلوی مقصد ایستاده بود.
-      closeSubmenu();
-    });
-    listEl.appendChild(b);
-  }
-
-  // موقعیت‌دهی در سمت چپ ریل در چیدمان راست‌به‌چپ
-  const rect = headEl.getBoundingClientRect();
-  const rightPos = Math.max(12, window.innerWidth - rect.left + 10);
-  const topPos = Math.max(12, Math.min(rect.top - 4, window.innerHeight - 380));
-  sub.style.top = `${topPos}px`;
-  sub.style.right = `${rightPos}px`;
-}
-
-/** برجستگی صفحه‌کلید را روی دکمه‌ی متناظر می‌گذارد و در دید نگه می‌دارد. */
+/** برجستگی صفحه‌کلید را روی دکمهٔ متناظر می‌گذارد. */
 function setRailActive(id) {
   railActiveId = id;
-  const list = el('rail-submenu');
-  if (list && !list.hidden) {
-    for (const b of list.querySelectorAll('.tab-btn')) {
-      b.setAttribute('data-kbd-active', b.dataset.tab === id ? '1' : '0');
-    }
+  const list = el('rail-list');
+  if (!list) return;
+  for (const b of list.querySelectorAll('.tab-btn')) {
+    b.setAttribute('data-kbd-active', b.dataset.tab === id ? '1' : '0');
   }
+}
+
+/** ترتیب فعلی ردیف‌ها، همیشه از حافظه خوانده می‌شود نه از یک نسخهٔ کهنه. */
+const railOrder = () => loadTabOrder(RAIL_TABS.map((t) => t.id));
+
+/** ردیف `src` را درست جای ردیف `dst` می‌نشاند و بقیه را کنار می‌زند. */
+function moveRailTab(srcId, dstId) {
+  if (!srcId || !dstId || srcId === dstId) return false;
+  const order = railOrder();
+  const from = order.indexOf(srcId);
+  const to = order.indexOf(dstId);
+  if (from < 0 || to < 0) return false;
+  order.splice(from, 1);
+  order.splice(to, 0, srcId);
+  saveTabOrder(order);
+  return true;
 }
 
 function buildRail() {
   const list = el('rail-list');
-  const allSecs = [...new Set(TABS.map((t) => t.section))];
-  const sections = loadGroupOrder(allSecs);
-  const q = normFa(railQuery).toLowerCase();
+  if (!list) return;
+  const order = railOrder();
+  const tabs = order.map((id) => RAIL_TABS.find((t) => t.id === id)).filter(Boolean);
 
-  const matches = (t) => {
-    if (!q) return true;
-    const hay = normFa(`${t.title} ${t.alias || ''} ${t.def?.fa || ''} ${t.section} ${t.def?.dir || ''} ${t.def?.note || ''}`).toLowerCase();
-    return hay.includes(q);
-  };
-
-  let shown = 0;
   list.innerHTML = '';
-  for (const sec of sections) {
-    const tabs = TABS.filter((x) => x.section === sec && matches(x));
-    if (!tabs.length) continue;
-    shown += tabs.length;
+  for (const t of tabs) {
+    const b = document.createElement('button');
+    b.className = 'tab-btn rail-row';
+    b.type = 'button';
+    b.dataset.tab = t.id;
+    b.draggable = true;
+    b.setAttribute('aria-current', current === t.id ? 'true' : 'false');
+    b.setAttribute('data-kbd-active', railActiveId === t.id ? '1' : '0');
+    b.style.setProperty('--sec', `var(${TAB_TONE[t.id] || '--accent'})`);
+    // در ریلِ جمع‌شده فقط آیکون دیده می‌شود، پس عنوان راهنما تنها چیزی است
+    // که می‌گوید این آیکون کدام تب است. `alias` نامِ قدیمی یا واژه‌ای است که
+    // کاربر تب را با آن صدا می‌زند.
+    b.title = t.alias ? `${t.title} — ${t.alias}` : t.title;
+    b.innerHTML = `
+      <span class="rail-row-grip" title="جابجایی ترتیب">${icon('grip', 'ic rail-grip-ic')}</span>
+      <span class="rail-row-chip">${icon(TAB_ICON[t.id] || 'dot', 'ic tab-ic')}</span>
+      <span class="tab-name">${ltr(t.title)}</span>`;
 
-    const isOpen = activeSubmenuSec === sec;
-    const grp = document.createElement('section');
-    grp.className = 'rail-group';
-    grp.dataset.secRaw = sec;
-    grp.dataset.section = cssId(sec);
-    if (isOpen) grp.setAttribute('data-open', '1');
-    grp.style.setProperty('--sec', `var(${SECTION_TONE[sec] || '--accent'})`);
+    b.addEventListener('click', () => { open(t.id); });
 
-    // دراگ و دراپ برای جابجایی ردیف‌های منوی راست
-    grp.draggable = true;
-    grp.addEventListener('dragstart', (e) => {
-      e.dataTransfer.setData('text/plain', sec);
+    // ——— جابه‌جایی ردیف‌ها با کشیدن ———
+    b.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', t.id);
       e.dataTransfer.effectAllowed = 'move';
-      grp.classList.add('dragging');
+      b.classList.add('dragging');
     });
-    grp.addEventListener('dragend', () => {
-      grp.classList.remove('dragging');
-      list.querySelectorAll('.rail-group').forEach((g) => g.classList.remove('drag-over'));
+    b.addEventListener('dragend', () => {
+      b.classList.remove('dragging');
+      for (const other of list.querySelectorAll('.tab-btn')) other.classList.remove('drag-over');
     });
-    grp.addEventListener('dragover', (e) => {
+    b.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
-      grp.classList.add('drag-over');
+      b.classList.add('drag-over');
     });
-    grp.addEventListener('dragleave', () => {
-      grp.classList.remove('drag-over');
-    });
-    grp.addEventListener('drop', (e) => {
+    b.addEventListener('dragleave', () => { b.classList.remove('drag-over'); });
+    b.addEventListener('drop', (e) => {
       e.preventDefault();
-      grp.classList.remove('drag-over');
-      const srcSec = e.dataTransfer.getData('text/plain');
-      if (srcSec && srcSec !== sec) {
-        const curOrder = loadGroupOrder(allSecs);
-        const srcIdx = curOrder.indexOf(srcSec);
-        const dstIdx = curOrder.indexOf(sec);
-        if (srcIdx !== -1 && dstIdx !== -1) {
-          curOrder.splice(srcIdx, 1);
-          curOrder.splice(dstIdx, 0, srcSec);
-          saveGroupOrder(curOrder);
-          buildRail();
-          if (activeSubmenuSec) {
-            const targetHead = list.querySelector(`.rail-group[data-sec-raw="${activeSubmenuSec}"] .rail-head`);
-            if (targetHead) openSubmenu(activeSubmenuSec, targetHead);
-          }
-        }
-      }
+      b.classList.remove('drag-over');
+      if (moveRailTab(e.dataTransfer.getData('text/plain'), t.id)) buildRail();
     });
 
-    const head = document.createElement('button');
-    head.type = 'button';
-    head.className = 'rail-head';
-    head.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-    head.innerHTML = `
-      <span class="rail-head-grip" title="جابجایی ترتیب">${icon('grip', 'ic rail-grip-ic')}</span>
-      ${icon('chevron', 'ic caret')}
-      <span class="rail-head-chip">${icon(sectionIcon(sec, tabs[0]?.group), 'ic rail-head-ic')}</span>
-      <span class="rail-head-name">${sec}</span>
-      <span class="rail-head-n">${faDigits(tabs.length)}</span>`;
-
-    head.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (activeSubmenuSec === sec) {
-        closeSubmenu();
-      } else {
-        revealSection(sec);
-        saveFolded();
-        openSubmenu(sec, head);
-      }
+    // ——— همان جابه‌جایی، با صفحه‌کلید ———
+    //
+    // کشیدن با ماوس تنها راهِ چیدن نیست. کسی که با صفحه‌کلید کار می‌کند
+    // وگرنه هیچ راهی به این قابلیت ندارد.
+    b.addEventListener('keydown', (e) => {
+      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const cur = railOrder();
+      const at = cur.indexOf(t.id);
+      const next = e.key === 'ArrowUp' ? at - 1 : at + 1;
+      if (at < 0 || next < 0 || next >= cur.length) return;
+      e.preventDefault();
+      if (!moveRailTab(t.id, cur[next])) return;
+      buildRail();
+      el('rail-list')?.querySelector(`.tab-btn[data-tab="${t.id}"]`)?.focus();
     });
-    grp.appendChild(head);
-    list.appendChild(grp);
-  }
 
-  if (!shown) {
-    list.innerHTML = '<p class="rail-none">چیزی پیدا نشد.</p>';
-  }
-  el('rail-count').textContent = q
-    ? `${faDigits(shown)} از ${faDigits(TABS.length)}`
-    : `${faDigits(TABS.length)} تب`;
-
-  if (activeSubmenuSec) {
-    const activeHead = list.querySelector(`.rail-group[data-sec-raw="${activeSubmenuSec}"] .rail-head`);
-    if (activeHead) openSubmenu(activeSubmenuSec, activeHead);
-    else closeSubmenu();
+    list.appendChild(b);
   }
 }
 
@@ -725,11 +573,9 @@ let openGen = 0;
 async function open(id) {
   const t = TABS.find((x) => x.id === id);
   if (!t || current === id) return;
-  // گروه‌ها پیش‌فرض بسته‌اند، پس تبی که از بیرون باز می‌شود — پیوند مستقیم،
-  // تعویض از تب دیگر، انتقال به بک‌تست — می‌تواند در گروهی بسته گم بماند.
-  // باز کردن گروهش ذخیره نمی‌شود: تصمیمِ کاربر نبوده، پس نباید جای تصمیم او
-  // بنشیند.
-  if (folded.has(t.section)) { revealSection(t.section); buildRail(); }
+  // تبِ استراتژی ردیفی در فهرست کناری ندارد. حلقهٔ `aria-current` چند خط
+  // پایین‌تر روی **همهٔ** دکمه‌های تب می‌گردد، پس وقتی چنین تبی باز می‌شود
+  // هیچ ردیفی روشن نمی‌ماند — نه ردیفی که کاربر قبلاً زده بود.
   const gen = ++openGen;
   if (disposer) { try { disposer(); } catch {} disposer = null; }
   current = id;
@@ -804,27 +650,11 @@ el('theme-btn').addEventListener('click', () => {
 // تنها دکمهٔ جمع/باز پنل — روی نوار جمع‌شده هم همین یکی می‌ماند
 el('rail-toggle-btn').addEventListener('click', () => toggleRail());
 
-// بستن زیرمنو با کلیک بیرون
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('.rail') && !e.target.closest('.rail-submenu')) {
-    closeSubmenu();
-  }
-});
-
-// بستن زیرمنو با اسکرول ریل
-el('rail')?.addEventListener('scroll', () => {
-  if (activeSubmenuSec) closeSubmenu();
-}, { passive: true });
-
-el('rail-q').addEventListener('input', (e) => {
-  railQuery = e.target.value;
-  buildRail();
-});
-
-// میان‌بر صفحه‌کلید: بالا و پایین بین تب‌های فیلترشده، اینتر همان یکی را باز
-// می‌کند. آیتم برجسته با شناسه نگه داشته می‌شود نه اندیس، چون فهرست با هر
-// تایپ از نو ساخته می‌شود.
-el('rail-q').addEventListener('keydown', (e) => {
+// میان‌بر صفحه‌کلید روی خودِ ریل: بالا و پایین بین ردیف‌ها، اینتر همان یکی
+// را باز می‌کند. ردیف برجسته با شناسه نگه داشته می‌شود نه اندیس، چون فهرست
+// با هر جابه‌جایی از نو ساخته می‌شود.
+el('rail-list')?.addEventListener('keydown', (e) => {
+  if (e.altKey) return; // Alt+جهت‌نما جابه‌جایی ترتیب است، نه پیمایش
   const visible = [...el('rail-list').querySelectorAll('.tab-btn')];
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
@@ -834,16 +664,14 @@ el('rail-q').addEventListener('keydown', (e) => {
       ? Math.min(idx < 0 ? 0 : idx + 1, visible.length - 1)
       : Math.max(idx < 0 ? visible.length - 1 : idx - 1, 0);
     setRailActive(visible[idx].dataset.tab);
-    return;
+    visible[idx].focus();
   }
-  if (e.key !== 'Enter') return;
-  const target = visible.find((b) => b.dataset.tab === railActiveId) || visible[0];
-  if (target) open(target.dataset.tab);
 });
 
-// `/` یا Ctrl+K نشانگر را داخل جست‌وجوی فهرست می‌برد، هرجای صفحه که باشی —
-// جز وقتی همین حالا داخل یک ورودی دیگر تایپ می‌کنی، وگرنه «/» در آن ورودی
-// نوشته نمی‌شود.
+// `/` یا Ctrl+K جست‌وجوی استراتژی را باز می‌کند. جعبهٔ جست‌وجو از ریل
+// برداشته شد، پس میان‌بر به همان‌جایی می‌رود که حالا جست‌وجو آنجاست: تبِ
+// «در جست‌وجوی استراتژی‌ها». جز وقتی همین حالا داخل یک ورودی دیگر تایپ
+// می‌کنی، وگرنه «/» در آن ورودی نوشته نمی‌شود.
 document.addEventListener('keydown', (e) => {
   const isCombo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k';
   if (!isCombo && e.key !== '/') return;
@@ -851,9 +679,12 @@ document.addEventListener('keydown', (e) => {
   const typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
   if (e.key === '/' && typing) return;
   e.preventDefault();
-  const q = el('rail-q');
-  q.focus();
-  q.select();
+  // تب ممکن است هنوز باز نشده باشد؛ `open` ناهمگام است، پس نشانگر پس از
+  // سوار شدنِ صفحه داخل جعبه می‌رود، نه روی عنصری که هنوز نیست.
+  Promise.resolve(open('strategy-explorer')).then(() => {
+    const q = document.getElementById('sx-q');
+    if (q) { q.focus(); q.select(); }
+  });
 });
 
 // ————————————————————————————————— شروع —————————————————————————————————

@@ -30,15 +30,20 @@ group('۳۷. سپردن موقعیت به بک‌تست سریع');
     portfolioSource37.includes('id="pb-watch"') && portfolioSource37.includes("onclick = () => watchInBacktest(item, false)"));
   // فقط انتخاب‌ها منتقل می‌شوند، نه نتیجه‌ها؛ وگرنه دو تب می‌توانند دو عدد
   // نشان دهند و معلوم نباشد کدام مال کدام محاسبه است.
+  //
+  // نقشه در `handoffPlanFor` ساخته می‌شود، نه درجا داخلِ `goHandoff`: از
+  // وقتی مقصدِ دومِ همین ردیف حذف شد، تنها فراخوانِ باقی‌مانده همان تابع را
+  // صدا می‌زند. ادعا همان است، لنگرش عوض شده.
+  const planSrc37 = /const handoffPlanFor = \([\s\S]*?\n  \}\);/.exec(portfolioSource37)?.[0] || '';
+  check('نقشهٔ انتقال در یک تابع نام‌دار ساخته می‌شود', planSrc37.length > 0);
   for (const key of ['uaIns', 'strategyId', 'legIns', 'entryDate', 'exitDate', 'entryBasis', 'exitBasis', 'units']) {
-    check(`تحویل «${key}» را همراه می‌برد`, new RegExp(`^\\s*${key}:`, 'm').test(portfolioSource37.slice(portfolioSource37.indexOf('goHandoff(state, {'))));
+    check(`تحویل «${key}» را همراه می‌برد`, new RegExp(`^\\s*${key}:`, 'm').test(planSrc37));
   }
-  check('تحویل هیچ عدد نتیجه‌ای را کپی نمی‌کند',
-    !/goHandoff\(state, \{[\s\S]*?\}\);/.exec(portfolioSource37)[0].match(/netPnl|returnPct|capital/));
+  check('تحویل هیچ عدد نتیجه‌ای را کپی نمی‌کند', !/netPnl|returnPct|capital/.test(planSrc37));
   // انتقال دیگر تبِ همین صفحه را عوض نمی‌کند؛ `goHandoff` صفحهٔ تازه باز
   // می‌کند و فقط اگر نشد به مسیر قدیمی برمی‌گردد.
   check('آزمون همه استراتژی‌ها کاربر را به بک‌تست سریع می‌برد',
-    portfolioSource37.includes('goHandoff(state, {') && !portfolioSource37.includes("location.hash = 'backtest';"));
+    portfolioSource37.includes('goHandoff(state, handoffPlanFor(') && !portfolioSource37.includes("location.hash = 'backtest';"));
 
   check('بک‌تست سریع تحویل را برمی‌دارد و می‌چیند',
     backtestSource37.includes("state.handoff?.to === 'backtest'") && backtestSource37.includes('await applyHandoff(plan)'));

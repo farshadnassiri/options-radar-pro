@@ -93,6 +93,8 @@ group('۹۶. سنجش در یک لحظهٔ درون‌روز');
     && pbSrc.includes('seriesByIns: Object.keys(runSeriesByIns).length ? runSeriesByIns : seriesByIns'));
   check('آزمون همه استراتژی‌ها یونانی و تلاطم همان بازپخش را نشان می‌دهد',
     pbSrc.includes('annotateReplay(replay,') && pbSrc.includes("id=\"pb-greeks-kpis\""));
-  check('از آزمون همه استراتژی‌ها می‌شود به تب رصد یونانی رفت',
-    pbSrc.includes("to: 'greeks-watch' }, 'greeks-watch')"));
+  // همان دلیل: مقصد حذف شد، پس دکمه‌اش هم. یونانی‌های بازپخش همین‌جا
+  // می‌مانند و جای دیگری برای رفتن لازم نیست.
+  check('دکمهٔ رفتن به تب حذف‌شدهٔ رصد یونانی نمانده',
+    !pbSrc.includes("'greeks-watch'"));
 }
