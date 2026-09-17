@@ -2806,6 +2806,15 @@ label.check { display: inline-flex; align-items: center; gap: var(--space-2); cu
 .iv-rate > summary { cursor: pointer; font-weight: 700; font-size: var(--fs-sm); }
 .iv-rate .field { margin-top: 8px; max-width: 22rem; }
 
+/* کارت انتخاب قرارداد در تب خروجی دیتا. */
+.de-base-block { margin-bottom: 14px; }
+.de-base-block h4 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: var(--fs-sm); }
+.de-expiry { border: 1px solid var(--line-soft); border-radius: var(--radius-md); padding: 8px 10px; margin-bottom: 8px; }
+.de-expiry-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-size: var(--fs-xs); }
+.de-contract-grid { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.de-contract { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: var(--fs-xs); }
+.de-contract small { display: block; color: var(--muted); }
+
 /* نوار هشدار موقعیت‌ها — بالای صفحه، جمع‌شده در یک قاب نه پنج قاب جدا. */
 .pos-alert-bar {
   border: 1px solid var(--loss); border-radius: var(--radius-md);

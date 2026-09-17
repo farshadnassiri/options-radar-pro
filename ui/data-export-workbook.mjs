@@ -1,6 +1,8 @@
 // دفترکار تب «خروجی دیتا»: یک برگ برای هر ابزار، بدون ادغام ریزمعامله‌ها.
 
-import { DATA_EXPORT_KIND_LABEL, dataExportCoverageRows, dataExportTradeRows } from '../core/data-export.mjs';
+import {
+  DATA_EXPORT_KIND_LABEL, dataExportCoverageRows, dataExportOutcome, dataExportTradeRows,
+} from '../core/data-export.mjs';
 import { tradeTimeLabel } from '../core/backtest.mjs';
 import { sheet } from './xlsx.mjs';
 
@@ -12,18 +14,33 @@ export const DATA_EXPORT_HEADERS = [
   'اندازه قرارداد', 'ارزش با اندازه قرارداد (ریال)', 'وضعیت ابطال', 'منبع',
 ];
 
-export function buildDataExportSheets({ instruments = [], pairs = [], items = {}, range = {}, complete = false, note = '' } = {}) {
+export function buildDataExportSheets({
+  instruments = [], pairs = [], items = {}, range = {}, complete = false, note = '', outcome = null,
+} = {}) {
   const coverage = dataExportCoverageRows(instruments, pairs, items);
   const failed = coverage.filter((row) => row.status === 'خطا' || row.status === 'درخواست نرفت').length;
   const empty = coverage.filter((row) => row.status === 'بدون معامله').length;
+  const result = outcome || dataExportOutcome(pairs, items);
+  // ═══ چرا «صفر ریزمعامله» بالای برگ راهنما می‌نشیند ═══
+  //
+  // فایلِ گزارش‌شدهٔ صاحب پروژه ۸۳ برگ داشت و هیچ داده‌ای. برگ راهنما
+  // شمارِ شیت و جفت را می‌گفت ولی هیچ‌جا نمی‌گفت «هیچ‌کدام داده نیاورد» —
+  // و کسی که فایل را بعداً باز کند، باید همین را اول ببیند.
+  const verdict = result.blank
+    ? `هیچ ریزمعامله‌ای دریافت نشد${result.topReason ? ` — علت غالب: ${result.topReason[0]}` : ''}`
+    : `${result.trades} ریزمعامله از ${result.ok} ابزار/روز`;
   const summary = sheet('راهنما', ['شاخص', 'مقدار'], [
+    ['نتیجهٔ دریافت', verdict],
     ['از تاریخ', dateText(range.from)], ['تا تاریخ', dateText(range.to)],
     ['تعداد دارایی پایه', instruments.filter((item) => item.kind === 'underlying').length],
     ['تعداد قرارداد اختیار', instruments.filter((item) => item.kind !== 'underlying').length],
-    ['جفت ابزار/روز', pairs.length], ['بدون معامله', empty], ['خطا یا دریافت‌نشده', failed],
+    ['جفت ابزار/روز', pairs.length],
+    ['ابزار/روز دارای داده', result.ok],
+    ['بدون معامله', empty], ['خطا یا دریافت‌نشده', failed],
     ['پوشش دفتر قراردادها', complete ? 'کامل' : 'ناقص — همه قراردادها تضمین نمی‌شود'],
     ['یادداشت منبع', note || '—'],
     ['تعریف ردیف', 'هر ردیف یک اجرای گزارش‌شده بورس است؛ یک اجرای حجمی به واحدهای منفرد شکسته نمی‌شود.'],
+    ['بدون معامله در برابر خطا', 'برگ خالیِ یک قرارداد یعنی آن روز معامله‌ای نشده؛ برای تشخیص خطا به برگ «پوشش دریافت» نگاه کن.'],
   ], [150, 430]);
 
   const coverageSheet = sheet('پوشش دریافت', [

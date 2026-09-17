@@ -1,7 +1,12 @@
 // تب مستقل «خروجی دیتا» — کشف همه قراردادهای بازه و خروجی ریزمعامله.
 
 import { buildChain } from '/core/chain.mjs';
-import { dataExportPairBatches, dataExportPairs, dataExportTradeRows, discoverDataExportInstruments } from '/core/data-export.mjs';
+import {
+  DATA_EXPORT_BATCH_CAP, dataExportContractGroups, dataExportOutcome, dataExportPairBatches,
+  dataExportPairs, dataExportTradeRows, discoverDataExportInstruments,
+  selectedDataExportInstruments, splitPairBatch,
+} from '/core/data-export.mjs';
+import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
 import { LIVE_CODE_CAP } from '/core/trades-source.mjs';
 import { liveTapeCodes, liveTapeDay } from '/core/live-day.mjs';
@@ -9,7 +14,7 @@ import { tehranDateNumber } from '/core/tehran-day.mjs';
 import { fetchRangeUniverse, mountHistoryRange } from '/ui/history-range.mjs';
 import { buildDataExportSheets, dataExportFilename } from '/ui/data-export-workbook.mjs';
 import { downloadXlsx } from '/ui/xlsx.mjs';
-import { fmt } from '/ui/fmt.mjs';
+import { faDigits, fmt } from '/ui/fmt.mjs';
 import { logError } from '/ui/errlog.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -29,26 +34,99 @@ export async function mount(root, { state, api }) {
       <input class="de-search" type="search" id="de-search" placeholder="جست‌وجوی نماد پایه…" aria-label="جست‌وجوی نماد پایه">
       <div id="de-bases" class="de-base-grid" aria-label="نمادهای پایه"></div><p id="de-universe-note" class="note"></p>
     </section>
+    <section class="card" id="de-contract-card">
+      <div class="section-head"><div><p class="eyebrow">گام سوم</p><h3>قراردادهای هر پایه</h3></div><div class="de-actions"><button type="button" class="ghost" id="de-pick-all">انتخاب همه</button><button type="button" class="ghost" id="de-pick-none">پاک کردن انتخاب</button></div></div>
+      <p class="note">خروجی فقط از قراردادهایی ساخته می‌شود که اینجا تیک خورده‌اند. ریزمعاملهٔ <b>پایهٔ</b> هر قرارداد خودکار همراهش می‌آید — قیمتِ اختیار بی قیمتِ همان لحظهٔ پایه نیمی از داستان است.</p>
+      <div class="de-actions" style="margin-bottom:8px">
+        <label class="check" for="de-side"><span>نوع</span>
+          <select id="de-side"><option value="">کال و پوت</option><option value="call">فقط کال</option><option value="put">فقط پوت</option></select></label>
+        <input class="de-search" type="search" id="de-contract-search" placeholder="جست‌وجوی نماد قرارداد…" aria-label="جست‌وجوی قرارداد">
+      </div>
+      <div id="de-contracts"></div>
+      <p id="de-contract-note" class="note"></p>
+    </section>
     <section class="card">
-      <div class="section-head"><div><p class="eyebrow">گام سوم</p><h3>دریافت و ساخت Excel</h3></div></div>
+      <div class="section-head"><div><p class="eyebrow">گام چهارم</p><h3>دریافت و ساخت Excel</h3></div></div>
       <p class="note">برگ «راهنما» و «پوشش دریافت» کنار برگ مستقل هر پایه و هر قرارداد می‌آید. قرارداد بدون معامله هم برگ خودش را دارد تا نبود معامله با جاافتادن قرارداد اشتباه نشود.</p>
       <div class="de-actions"><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
       <p id="de-status" class="note" role="status" aria-live="polite"></p><div id="de-result" class="history-table-wrap"></div>
     </section>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
-  const basesHost = $('de-bases'), runBtn = $('de-run'), exportBtn = $('de-export'), stopBtn = $('de-stop');
+  const basesHost = $('de-bases'), contractsHost = $('de-contracts');
+  const runBtn = $('de-run'), exportBtn = $('de-export'), stopBtn = $('de-stop');
   let rangeUi = null, universe = null, controller = null, refreshTimer = null, loadSeq = 0, stopped = false;
   let prepared = null, exporting = false;
+  // ابزارهای کشف‌شدهٔ پایه‌های تیک‌خورده، و کدِ قراردادهایی که کاربر خواسته.
+  // انتخاب در یک `Set` می‌ماند نه در DOM: با عوض شدنِ پالایهٔ نوع یا
+  // جست‌وجو، کارتِ قراردادها از نو ساخته می‌شود و تیک‌های DOM می‌رفتند.
+  let discovered = [];
+  const picked = new Set();
   const setStatus = (text, error = false) => {
     $('de-status').textContent = text || '';
     $('de-status').toggleAttribute('data-error', error);
   };
   const selectedBases = () => [...basesHost.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+  const selectedInstruments = () => selectedDataExportInstruments(discovered, [...picked]);
   function updateRunState() {
-    runBtn.disabled = !universe || !selectedBases().length || Boolean(controller) || exporting;
+    runBtn.disabled = !universe || !picked.size || Boolean(controller) || exporting;
     exportBtn.disabled = !prepared || Boolean(controller) || exporting;
     $('de-universe-note').toggleAttribute('data-error', universe?.complete === false);
+  }
+
+  /**
+   * کارت قراردادها، گروه‌به‌گروه بر سررسید.
+   *
+   * قراردادِ تیک‌خورده‌ای که با عوض شدنِ پایه یا بازه دیگر وجود ندارد، از
+   * انتخاب پاک می‌شود — انتخابی که به ابزارِ نبوده اشاره کند، در گام بعد
+   * یک جفتِ بی‌جواب می‌سازد و کاربر علتش را نمی‌فهمد.
+   */
+  function paintContracts() {
+    const bases = selectedBases();
+    discovered = bases.length
+      ? discoverDataExportInstruments(universe?.rows || [], bases, { declaredSize: state.settings.contractSize })
+      : [];
+    const alive = new Set(discovered.filter((item) => item.kind !== 'underlying').map((item) => String(item.ins)));
+    for (const ins of [...picked]) if (!alive.has(ins)) picked.delete(ins);
+
+    const side = $('de-side').value;
+    const needle = $('de-contract-search').value.trim();
+    if (!bases.length) {
+      contractsHost.innerHTML = '<p class="empty-note">اول یک نماد پایه را از گام دوم انتخاب کن.</p>';
+      $('de-contract-note').textContent = '';
+      updateRunState();
+      return;
+    }
+    const baseNames = new Map(discovered.filter((item) => item.kind === 'underlying').map((item) => [String(item.ins), item.name]));
+    const blocks = [];
+    let shown = 0;
+    for (const baseIns of bases) {
+      const groups = dataExportContractGroups(discovered, baseIns)
+        .map((group) => ({
+          ...group,
+          contracts: group.contracts
+            .filter((item) => !side || item.kind === side)
+            .filter((item) => !needle || String(item.name).includes(needle)),
+        }))
+        .filter((group) => group.contracts.length);
+      if (!groups.length) continue;
+      const total = groups.reduce((sum, group) => sum + group.contracts.length, 0);
+      shown += total;
+      blocks.push(`<div class="de-base-block"><h4>${esc(baseNames.get(String(baseIns)) || 'پایه')}
+        <button type="button" class="ghost" data-base-all="${esc(baseIns)}">همهٔ ${fmt.int(total)} قرارداد</button></h4>
+        ${groups.map((group) => `<div class="de-expiry">
+          <div class="de-expiry-head"><b>${group.expiry ? faDigits(esc(historyDateLabel(group.expiry))) : 'سررسید نامعلوم'}</b>
+            <button type="button" class="ghost" data-expiry-all="${esc(baseIns)}|${group.expiry}">${fmt.int(group.contracts.length)} قرارداد</button></div>
+          <div class="de-contract-grid">${group.contracts.map((item) => `
+            <label class="de-contract"><input type="checkbox" data-contract="${esc(item.ins)}"${picked.has(String(item.ins)) ? ' checked' : ''}>
+              <span><b>${esc(item.name)}</b><small>${item.kind === 'call' ? 'کال' : 'پوت'}${item.strike ? ` · اعمال ${fmt.money(item.strike)}` : ''}</small></span></label>`).join('')}</div>
+        </div>`).join('')}</div>`);
+    }
+    contractsHost.innerHTML = blocks.length ? blocks.join('') : '<p class="empty-note">با این پالایه قراردادی نماند.</p>';
+    $('de-contract-note').textContent = picked.size
+      ? `${fmt.int(picked.size)} قرارداد انتخاب شده از ${fmt.int(shown)} قراردادِ نمایش‌داده‌شده. برگ پایه‌ها هم خودکار اضافه می‌شود.`
+      : `${fmt.int(shown)} قرارداد در دسترس است؛ هیچ‌کدام هنوز انتخاب نشده.`;
+    updateRunState();
   }
   function invalidatePrepared() {
     prepared = null;
@@ -66,7 +144,7 @@ export async function mount(root, { state, api }) {
       <label class="de-base" data-search="${esc(item.name)}"><input type="checkbox" value="${esc(item.ins)}"${keep.has(item.ins) ? ' checked' : ''}><span><b>${esc(item.name)}</b><small>${fmt.int(item.contracts)} قرارداد کال/پوت</small></span></label>`).join('') : '<p class="empty-note">در این بازه نماد پایه‌ای پیدا نشد.</p>';
     $('de-universe-note').textContent = payload?.note || '';
     universe = payload;
-    updateRunState();
+    paintContracts();
   }
   async function loadUniverse(range = rangeUi?.range) {
     if (!range) return;
@@ -89,26 +167,75 @@ export async function mount(root, { state, api }) {
     }
   }
 
-  async function fetchHistorical(pairs, items, signal) {
-    const batches = dataExportPairBatches(pairs);
-    for (let index = 0; index < batches.length; index += 1) {
-      const batch = batches[index];
-      setStatus(`در حال دریافت روزهای بسته‌شده: بسته ${fmt.int(index + 1)} از ${fmt.int(batches.length)}…`);
-      try {
-        const response = await fetch('/api/trades/batch', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-          body: JSON.stringify({ requests: batch.map(({ ins, date }) => ({ ins, date })) }),
-        });
-        const payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
-        for (const pair of batch) {
-          const hit = payload.items?.[pair.key];
-          items[pair.key] = hit && Array.isArray(hit.rows) ? { ...hit, source: 'history' } : { rows: [], error: hit?.error || 'پاسخ این ابزار/روز در بسته نبود', source: 'history' };
-        }
-      } catch (error) {
-        if (error.name === 'AbortError') throw error;
-        for (const pair of batch) items[pair.key] = { rows: [], error: error.message, source: 'history' };
+  /**
+   * یک بستهٔ ریزمعامله، با شکستنِ خودکار در صورت شکست.
+   *
+   * ═══ گزارشی که این تابع جوابش است ═══
+   *
+   * فایل صاحب پروژه ۸۳ برگ داشت و صفر ریزمعامله. هر ۷۷۸ ردیفِ برگ پوشش
+   * یک پیام داشت: پاسخ، صفحهٔ HTML یک دروازه بود نه JSON. یعنی **یک**
+   * درخواستِ بزرگ وسط راه قطع شده و همه‌چیز را با خودش برده بود.
+   *
+   * حالا بستهٔ شکست‌خورده نصف می‌شود و هر نیمه دوباره می‌رود. اگر علت
+   * زمان باشد، نیمه‌ها می‌رسند؛ اگر یک ابزارِ خاص باشد، نصف‌کردنِ پیاپی
+   * جدایش می‌کند و بقیه نجات پیدا می‌کنند. بستهٔ تک‌جفتی دیگر شکسته
+   * نمی‌شود — خطایش واقعاً مالِ همان جفت است و همان‌جا ثبت می‌شود.
+   */
+  // ═══ چرا شکستن هم سقف دارد ═══
+  //
+  // اگر دروازه واقعاً مرده باشد، نصف‌کردنِ پیاپی هر بسته را تا جفت‌های
+  // تکی می‌شکند: برای ۴۰۵ جفت یعنی صدها درخواستِ محکوم‌به‌شکست و چند
+  // دقیقه انتظار برای نتیجه‌ای که از درخواست پنجم معلوم بود. پس وقتی چند
+  // تلاشِ تک‌جفتیِ پیاپی با هم شکست خوردند، بقیهٔ بسته‌ها بی شکستن و با
+  // همان علت علامت می‌خورند. عدد کوچک است چون تشخیص باید سریع باشد، و
+  // اولین موفقیت صفرش می‌کند.
+  const GIVE_UP_AFTER = 5;
+  let soloFailures = 0;
+  let lastFailure = '';
+
+  async function fetchBatch(batch, items, signal, depth = 0) {
+    if (soloFailures >= GIVE_UP_AFTER) {
+      for (const pair of batch) {
+        items[pair.key] = { rows: [], error: lastFailure || 'دریافت پیاپی شکست خورد', source: 'history' };
       }
+      return false;
+    }
+    try {
+      const response = await fetch('/api/trades/batch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+        body: JSON.stringify({ requests: batch.map(({ ins, date }) => ({ ins, date })) }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
+      for (const pair of batch) {
+        const hit = payload.items?.[pair.key];
+        items[pair.key] = hit && Array.isArray(hit.rows)
+          ? { ...hit, source: 'history' }
+          : { rows: [], error: hit?.error || 'پاسخ این ابزار/روز در بسته نبود', source: 'history' };
+      }
+      soloFailures = 0;
+      return true;
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+      const halves = splitPairBatch(batch);
+      if (!halves.length) {
+        items[batch[0].key] = { rows: [], error: error.message, source: 'history' };
+        soloFailures += 1;
+        lastFailure = error.message;
+        return false;
+      }
+      setStatus(`بستهٔ ${fmt.int(batch.length)} تایی نرسید؛ نصف شد و دوباره می‌رود…`);
+      let all = true;
+      for (const half of halves) all = (await fetchBatch(half, items, signal, depth + 1)) && all;
+      return all;
+    }
+  }
+
+  async function fetchHistorical(pairs, items, signal) {
+    const batches = dataExportPairBatches(pairs, DATA_EXPORT_BATCH_CAP);
+    for (let index = 0; index < batches.length; index += 1) {
+      setStatus(`در حال دریافت روزهای بسته‌شده: بسته ${fmt.int(index + 1)} از ${fmt.int(batches.length)}…`);
+      await fetchBatch(batches[index], items, signal);
     }
   }
 
@@ -167,11 +294,10 @@ export async function mount(root, { state, api }) {
     $('de-result').innerHTML = `<p class="note">${headline}</p><table class="history-table"><thead><tr><th>پایه</th><th>شیت ابزار</th><th>نوع</th><th>ریزمعامله</th><th>روز خطادار</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
   }
   async function run() {
-    const bases = selectedBases();
     if (!universe) { setStatus('دفتر قراردادها هنوز دریافت نشده است.', true); return; }
-    if (!bases.length) { setStatus('دست‌کم یک نماد پایه را انتخاب کن.', true); return; }
+    if (!picked.size) { setStatus('دست‌کم یک قرارداد را از گام سوم انتخاب کن.', true); return; }
     const range = rangeUi.range;
-    const instruments = discoverDataExportInstruments(universe.rows, bases, { declaredSize: state.settings.contractSize });
+    const instruments = selectedInstruments();
     const pairs = dataExportPairs(instruments, tradingDays(range.from, range.to));
     if (!instruments.length || !pairs.length) { setStatus('برای این انتخاب ابزار/روزی برای دریافت ساخته نشد.', true); return; }
     invalidatePrepared(); clearTimeout(refreshTimer);
@@ -183,11 +309,24 @@ export async function mount(root, { state, api }) {
       await fetchHistorical(historical, items, controller.signal);
       await fetchLive(live, items, controller.signal);
       setStatus('داده‌ها آماده شد؛ در حال ساخت شیت‌های Excel…');
-      const sheets = buildDataExportSheets({ instruments, pairs, items, range, complete: universe.complete, note: universe.note || '' });
+      const outcome = dataExportOutcome(pairs, items);
+      const sheets = buildDataExportSheets({
+        instruments, pairs, items, range, complete: universe.complete, note: universe.note || '', outcome,
+      });
       prepared = { sheets, filename: dataExportFilename(range), instruments, pairs, items };
       paintResult(instruments, pairs, items);
-      const failed = Object.values(items).filter((item) => item?.error).length;
-      setStatus(`آمادهٔ خروجی: ${fmt.int(instruments.length)} شیت ابزار و ${fmt.int(failed)} ابزار/روز خطادار.${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}${failed ? ' خطاها در برگ پوشش نوشته شده‌اند.' : ''}`);
+      // ═══ چرا صفر بودنِ داده، خبرِ اول است ═══
+      //
+      // فایلِ گزارش‌شده «آمادهٔ خروجی» خوانده شد چون رابط فقط شیت‌ها را
+      // می‌شمرد. حالا اگر هیچ جفتی داده نیاورده باشد، جمله با همان شروع
+      // می‌شود و علتِ غالب هم کنارش می‌آید.
+      const head = outcome.blank
+        ? `هیچ ریزمعامله‌ای دریافت نشد — ${fmt.int(outcome.failed)} ابزار/روز خطا داد و ${fmt.int(outcome.empty)} تا بی‌معامله بود.`
+        : `آمادهٔ خروجی: ${fmt.int(outcome.trades)} ریزمعامله از ${fmt.int(outcome.ok)} ابزار/روز، در ${fmt.int(instruments.length)} شیت.`;
+      const why = outcome.topReason ? ` علت غالب: ${outcome.topReason[0]} (${fmt.int(outcome.topReason[1])} بار).` : '';
+      setStatus(`${head}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}`
+        + `${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}`,
+      outcome.blank);
     } catch (error) {
       if (error.name === 'AbortError') setStatus('دریافت با درخواست شما متوقف شد.', true);
       else { setStatus(`ساخت خروجی کامل نشد: ${error.message}`, true); logError('data-export', error); }
@@ -206,10 +345,57 @@ export async function mount(root, { state, api }) {
     } finally { exporting = false; updateRunState(); }
   }
 
-  basesHost.addEventListener('change', () => { invalidatePrepared(); updateRunState(); });
+  basesHost.addEventListener('change', () => { invalidatePrepared(); paintContracts(); });
+  contractsHost.addEventListener('change', (event) => {
+    const box = event.target.closest('[data-contract]');
+    if (!box) return;
+    if (box.checked) picked.add(String(box.dataset.contract)); else picked.delete(String(box.dataset.contract));
+    invalidatePrepared();
+    paintContracts();
+  });
+  contractsHost.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-base-all], [data-expiry-all]');
+    if (!button) return;
+    // دکمهٔ گروهی کلید است نه تیک: اگر همهٔ گروه انتخاب شده، همان دکمه
+    // برشان می‌دارد. دو دکمهٔ جدا برای یک کار، نوار را شلوغ می‌کند.
+    const baseIns = button.dataset.baseAll || String(button.dataset.expiryAll || '').split('|')[0];
+    const expiry = button.dataset.expiryAll ? Number(String(button.dataset.expiryAll).split('|')[1]) : null;
+    const side = $('de-side').value;
+    const needle = $('de-contract-search').value.trim();
+    const target = dataExportContractGroups(discovered, baseIns)
+      .filter((group) => expiry === null || group.expiry === expiry)
+      .flatMap((group) => group.contracts)
+      .filter((item) => !side || item.kind === side)
+      .filter((item) => !needle || String(item.name).includes(needle))
+      .map((item) => String(item.ins));
+    const allOn = target.length > 0 && target.every((ins) => picked.has(ins));
+    for (const ins of target) { if (allOn) picked.delete(ins); else picked.add(ins); }
+    invalidatePrepared();
+    paintContracts();
+  });
+  $('de-side').addEventListener('change', paintContracts);
+  $('de-contract-search').addEventListener('input', paintContracts);
+  /** قراردادهایی که همین حالا روی صفحه دیده می‌شوند — با پالایهٔ نوع و جست‌وجو. */
+  const visibleContracts = () => {
+    const side = $('de-side').value;
+    const needle = $('de-contract-search').value.trim();
+    return discovered
+      .filter((item) => item.kind !== 'underlying')
+      .filter((item) => !side || item.kind === side)
+      .filter((item) => !needle || String(item.name).includes(needle))
+      .map((item) => String(item.ins));
+  };
+  // «انتخاب همه» یعنی همهٔ آنچه **می‌بینی**. اگر پالایه را نادیده می‌گرفت،
+  // کاربری که روی «فقط کال» ایستاده بود با یک کلیک پوت‌ها را هم می‌گرفت و
+  // هیچ‌جا نمی‌فهمید — تا وقتی فایل بیرون بیاید.
+  $('de-pick-all').addEventListener('click', () => {
+    for (const ins of visibleContracts()) picked.add(ins);
+    invalidatePrepared(); paintContracts();
+  });
+  $('de-pick-none').addEventListener('click', () => { picked.clear(); invalidatePrepared(); paintContracts(); });
   $('de-search').addEventListener('input', (event) => { const q = event.target.value.trim(); for (const label of basesHost.querySelectorAll('.de-base')) label.hidden = q && !label.dataset.search.includes(q); });
-  $('de-all').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = true; invalidatePrepared(); updateRunState(); });
-  $('de-none').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = false; invalidatePrepared(); updateRunState(); });
+  $('de-all').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = true; invalidatePrepared(); paintContracts(); });
+  $('de-none').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = false; invalidatePrepared(); paintContracts(); });
   $('de-refresh').addEventListener('click', () => loadUniverse()); runBtn.addEventListener('click', run); exportBtn.addEventListener('click', exportPrepared); stopBtn.addEventListener('click', () => controller?.abort());
 
   await api.loadSettings();
