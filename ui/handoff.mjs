@@ -250,7 +250,53 @@ export const STRATEGY_LINK_TARGETS = [
     why: 'همین ترکیب را روی تاریخ بیازما — بازه، پاها و حجم از همین ردیف می‌روند.' },
   { to: 'watchtower', label: '🔔 دیده‌بان شرطی',
     why: 'برای همین ترکیب قاعده بگذار؛ شرط با عددِ همین لحظه پیش‌پر می‌شود.' },
+  { to: 'positions', label: '➕ افزودن به موقعیت‌های من',
+    why: 'همین ترکیب را به‌عنوان موقعیت اجراشده ثبت کن؛ قیمت ورود هر پا پیش‌پر می‌شود و پیش از ثبت قابل ویرایش است.' },
 ];
+
+/**
+ * پاهای یک ردیف، به مقیاس **یک دست**.
+ *
+ * `row.__legs` نسبتش در تعداد قرارداد ضرب شده (موتور از آنجا به بعد روی
+ * موقعیت کار می‌کند). موقعیت ثبت‌شده تعداد را جدا نگه می‌دارد و
+ * `markToMarket` خودش ضرب می‌کند، پس اگر نسبتِ ضرب‌شده منتقل شود، تعداد
+ * دو بار اعمال می‌شود و هر عدد پولیِ موقعیت `units` برابر می‌شود.
+ *
+ * سررسید و روزِ مانده از `legPrices` می‌آیند که هم‌ترتیبِ `__legs` است —
+ * هر دو از یک آرایهٔ قیمت‌خوردهٔ موتور ساخته شده‌اند. سررسیدِ واقعی لازم
+ * است تا روزِ مانده در هر روزِ آینده از تاریخ دربیاید، نه از تفریق.
+ */
+function positionLegs(row, units = 1) {
+  const scale = Math.max(1, Math.trunc(Number(units) || 1));
+  const priced = row?.legPrices || [];
+  return (row?.__legs || []).map((leg, at) => ({
+    kind: String(leg.kind || ''),
+    side: leg.side === 'sell' ? 'sell' : 'buy',
+    ratio: Math.max(1, Math.round((Number(leg.ratio) || 1) / scale)),
+    size: Math.max(0, Math.trunc(Number(leg.size) || 0)),
+    strike: Number(leg.strike) || 0,
+    days: Number.isFinite(Number(priced[at]?.days)) ? Number(priced[at].days) : Number(leg.days) || 0,
+    expiry: normalizeHistoryDate(priced[at]?.endDate),
+    price: Number(leg.price) || 0,
+    ins: String(leg.ins || ''),
+    name: String(leg.name || ''),
+  }));
+}
+
+/**
+ * آیا این ردیف را می‌شود به‌عنوان موقعیت ثبت کرد؟
+ *
+ * شرطش سخت‌تر از انتقال به بک‌تست است: آنجا فقط شناسه لازم است تا ترکیب
+ * دوباره پیدا شود، اینجا **قیمت ورودِ هر پا** هم لازم است چون سود و زیانِ
+ * فردا از همین عدد ساخته می‌شود. پای بی‌قیمت یعنی موقعیتی که هیچ‌وقت
+ * بازده‌اش درنمی‌آید.
+ */
+export function canAddPosition(row) {
+  const legs = row?.__legs || [];
+  if (!row?.uaIns || !legs.length) return false;
+  return legs.every((leg) => (Number(leg.price) > 0)
+    && (leg.kind === 'underlying' || String(leg.ins || '') !== ''));
+}
 
 /**
  * سنجه‌های دیده‌بان که معادلِ مستقیم در ردیفِ موتور دارند.
@@ -330,6 +376,24 @@ export function strategyLinkPlan(row, { to, strategyId = '', strategyName = '', 
       conditions: watchConditionsFrom(row),
     };
   }
+  // ═══ چرا اینجا قیمت هم منتقل می‌شود ═══
+  //
+  // قاعدهٔ این فایل «هیچ عددِ نتیجه‌ای منتقل نمی‌شود» است، و این نقض آن
+  // نیست: قیمت اجرای هر پا **ورودیِ** مقصد است، نه ادعایی که مقصد باید
+  // بازتولیدش کند — دقیقاً مثل آستانهٔ شرطِ دیده‌بان. مقصد آن را در فرم
+  // نشان می‌دهد و پیش از ثبت قابل ویرایش است، چون قیمت واقعیِ پرشدنِ
+  // سفارشِ کاربر می‌تواند با قیمت اجرای محاسبه‌شده فرق کند.
+  if (to === 'positions') {
+    return {
+      ...base,
+      legs: positionLegs(row, units),
+      qty: base.units,
+      // قیمت پایانیِ پایه، نه آخرین: مخرجِ ثابتِ بازده از پایانی ساخته
+      // می‌شود و `captureEntryRisk` همین را می‌خواهد.
+      entrySpot: Number(row.Sclose) || Number(row.S) || 0,
+      title: [base.strategyName, base.uaName].filter(Boolean).join(' '),
+    };
+  }
   return base;
 }
 
@@ -354,6 +418,7 @@ export function strategyLinkTargets(row, { strategyId = '' } = {}) {
   return STRATEGY_LINK_TARGETS.filter((item) => {
     if (item.to === 'backtest') return canHandoff(row);
     if (item.to === 'watchtower') return WATCHABLE.has(id) && watchConditionsFrom(row).length > 0;
+    if (item.to === 'positions') return canAddPosition(row);
     return true;
   });
 }

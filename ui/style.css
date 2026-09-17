@@ -2779,6 +2779,23 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .handoff-btn { cursor: pointer; font-weight: 700; }
 .handoff-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ——— پنل روند سود و زیان، در تب موقعیت‌های من ———
+   قاب نمودار ارتفاع صریح دارد: ECharts اندازه را از ظرف می‌گیرد و ظرفِ
+   بی‌ارتفاع، بومِ صفر می‌سازد — نموداری که سوار می‌شود ولی دیده نمی‌شود. */
+.pos-track-chart { width: 100%; height: 260px; margin: 10px 0 4px; }
+.mini-kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 2px; }
+.mini-kpi {
+  flex: 1 1 140px; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: var(--panel-2); padding: 8px 10px;
+}
+.mini-kpi .k { font-size: var(--fs-xs); color: var(--muted); font-weight: 700; }
+.mini-kpi .v {
+  font-family: var(--mono); font-size: var(--fs-lg); font-weight: 900;
+  font-variant-numeric: tabular-nums; direction: ltr; text-align: left;
+}
+.mini-kpi .v.gain { color: var(--gain); }
+.mini-kpi .v.loss { color: var(--loss); }
+
 /* ——— نمودار میله‌ای رصد بازار ——— */
 .market-chart-card { margin: 16px 0; }
 .market-metric { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }

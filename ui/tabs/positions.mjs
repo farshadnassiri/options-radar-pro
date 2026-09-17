@@ -2,14 +2,45 @@
 //
 // موقعیت‌هایی که واقعاً اجرا کرده‌ای، با قیمت ورود واقعی خودت. ارزش‌گذاری هر
 // لحظه یعنی هزینه بستن موقعیت در بازار، نه پریمیومی که گرفتی.
+//
+// ═══ از «عدد» به «روند» ═══
+//
+// این تب تا امروز یک عکس بود: کارتِ «سود و زیان جاری» می‌گفت همین حالا چقدر
+// در سود یا زیانی و هیچ نمی‌گفت این عدد از کجا آمده. همان موقعیت می‌توانست
+// دیروز دو برابر در سود باشد و کاربر هرگز نفهمد.
+//
+// حالا کنار هر عدد، سه روند هست — روزانه از تاریخچهٔ پایانی، درون‌روزی از
+// نوار معاملهٔ امروز، و دنبالهٔ همین جلسه از قیمت‌گیری هر پانزده ثانیه — و
+// یک ستونِ «تغییر امروز» که مبنایش آخرین روزِ **پیش از** امروز است، نه
+// حدس. موتورشان `core/position-track.mjs` است و قاعده‌اش یکی است: لحظه‌ای
+// که حتی یک پا در آن قیمت ندارد، نقطه نمی‌شود.
+//
+// ═══ سررسیدگذشته از باز جدا شد ═══
+//
+// بالادست گاهی آخرین قیمتِ قراردادِ منقضی را تکرار می‌کند و این تب آن را
+// مثل قیمتِ زنده می‌خورد: موقعیتی که ماه‌ها پیش تسویه شده بود، «سود و زیان
+// الان» داشت و در جمعِ سبد می‌نشست. حالا موقعیتِ سررسیدگذشته نه قیمت
+// می‌گیرد، نه ارزش‌گذاری می‌شود، و در جدول خودش با علتش می‌نشیند.
 
 import { markToMarket, captureEntryRisk, blankPosition } from '/core/positions.mjs';
-import { todayJalali, gregorianToJalali } from '/core/jalali.mjs';
+import {
+  positionOpenState, trackInstruments, dailyPnlSeries, intradayPnlSeries,
+  appendSessionTick, trackStats, changeSince,
+} from '/core/position-track.mjs';
+import {
+  TRACK_MODES, trackMode, trackRows, trackChartOption, trackStatsHtml, trackNote,
+} from '/ui/positions-track-view.mjs';
+import { chartGroup } from '/ui/chart-host.mjs';
+import { sparkline } from '/ui/gap-charts.mjs';
+import { draftFromPlan, intakeFormHtml, readIntake } from '/ui/positions-intake.mjs';
+import { editFormHtml, readEdit, needsEntryClose } from '/ui/positions-edit.mjs';
+import { historyDateLabel } from '/core/history.mjs';
+import { todayJalali, gregorianToJalali, parseJalali, daysSinceJalali } from '/core/jalali.mjs';
 import { marginParamsOf } from '/core/settings.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { fmt } from '/ui/table.mjs';
-import { faDigits, kpiTone } from '/ui/fmt.mjs';
+import { faDigits, faClock, kpiTone } from '/ui/fmt.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { ivParams } from '/core/leg-iv.mjs';
@@ -43,12 +74,40 @@ export async function mount(root, { state, api }) {
   });
   let positions = [];
   let quotesByIns = new Map();
+  let quotesAt = 0;
   let uaList = [];
   let feed = { status: 'idle', error: '' };
   let expanded = null;
   let chart = null;
   let chartRange = null;
   let chartFor = null;
+
+  // ——— روند ———
+  // تاریخچهٔ روزانهٔ همهٔ پاها، یک بار در هر بار بارگذاری. نوار درون‌روزی
+  // اما فقط با درخواست صریح کاربر گرفته می‌شود: `/api/live-trades` هر بار
+  // تازه می‌رود و گرفتنش در هر رفرشِ پانزده‌ثانیه‌ای، بارِ بالادست را بی
+  // آنکه کسی خواسته باشد چند برابر می‌کرد.
+  let dailyByIns = {};
+  let dailyNote = '';
+  let tapeByIns = {};
+  let tapeAt = 0;
+  let tapeNote = '';
+  const sessionTicks = new Map();
+  let trackModeId = TRACK_MODES[0].id;
+  const charts = chartGroup();
+  // پیش‌نویسِ رسیده از «در جست‌وجوی استراتژی‌ها»، و موقعیتِ در حال ویرایش.
+  let draft = null;
+  let draftNote = '';
+  let editing = null;
+
+  const todayNumber = () => tehranDateNumber();
+  const posKey = (p, at) => String(p?.id || `#${at}`);
+  /** تاریخ ورود به عدد فشردهٔ میلادی؛ صفر یعنی ثبت نشده. */
+  const entryDateNumber = (p) => {
+    const date = parseJalali(p?.entryDate);
+    if (!date) return 0;
+    return (date.getUTCFullYear() * 10000) + ((date.getUTCMonth() + 1) * 100) + date.getUTCDate();
+  };
 
   root.innerHTML = `
     <div class="page-head">
@@ -58,6 +117,17 @@ export async function mount(root, { state, api }) {
     </div>
 
     <div class="kpis" id="kpis"></div>
+
+    <section class="card" id="intake-card" style="display:none">
+      <h3 id="intake-title">ترکیب رسیده از جست‌وجوی استراتژی‌ها</h3>
+      <div id="intake"></div>
+      <div class="bar" style="margin-top:12px">
+        <button class="btn" id="intake-save">ثبت این موقعیت</button>
+        <button class="ghost" id="intake-drop">انصراف</button>
+        <span class="sp"></span>
+        <span id="intake-msg" class="saved" role="status" aria-live="polite"></span>
+      </div>
+    </section>
 
     <section class="card">
       <h3>افزودن موقعیت</h3>
@@ -71,13 +141,40 @@ export async function mount(root, { state, api }) {
     </section>
 
     <section class="card">
-      <h3>فهرست موقعیت‌ها</h3>
+      <h3>موقعیت‌های باز</h3>
+      <p class="note" id="daily-note"></p>
       <div class="scroll" style="max-height:none"><table class="data" id="list"></table></div>
+    </section>
+
+    <section class="card" id="gone-card" style="display:none">
+      <h3>سررسیدگذشته</h3>
+      <p class="note">این موقعیت‌ها دیگر قیمت نمی‌گیرند و ارزش‌گذاری نمی‌شوند. قرارداد پس از سررسید حذف می‌شود و اگر بالادست آخرین قیمتش را تکرار کند، آن قیمتِ معامله نیست. برای بایگانی می‌مانند، نه برای جمعِ سبد.</p>
+      <div class="scroll" style="max-height:none"><table class="data" id="gone-list"></table></div>
+    </section>
+
+    <section class="card" id="edit-card" style="display:none">
+      <h3 id="edit-title">ویرایش موقعیت</h3>
+      <div id="edit"></div>
+      <div class="bar" style="margin-top:12px">
+        <button class="btn" id="edit-save">ثبت ویرایش</button>
+        <button class="ghost" id="edit-cancel">انصراف</button>
+        <span class="sp"></span>
+        <span id="edit-msg" class="saved" role="status" aria-live="polite"></span>
+      </div>
     </section>
 
     <section class="card" id="det-card" style="display:none">
       <h3 id="det-title">جزئیات موقعیت</h3>
       <div class="detail" id="det"></div>
+    </section>
+
+    <section class="card" id="track-card" style="display:none">
+      <h3 id="track-title">روند سود و زیان</h3>
+      <div class="bar" id="track-modes" role="group" aria-label="سرچشمهٔ روند"></div>
+      <div id="track-stats"></div>
+      <div class="pos-track-chart" id="track-chart"></div>
+      <p class="note" id="track-note"></p>
+      <div class="bar" id="track-actions"></div>
     </section>`;
 
   // هر ظرف جدول، دکمهٔ خروجی خودش را می‌گیرد. ظرف‌ها در همین قالب‌اند حتی
@@ -329,38 +426,115 @@ export async function mount(root, { state, api }) {
     return { m, spot, quotes, fees, greeks: greeksOf(p, m, spot) };
   }
 
+  // ——————————————— روند ———————————————
+  //
+  // سری روزانه در هر رندر از نو ساخته می‌شود ولی در همان رندر کش می‌شود:
+  // جدول، کارت‌ها و پنل روند هر سه همان سری را می‌خواهند و ساختنش سه بار،
+  // سه پیمایش روی تاریخچهٔ همهٔ پاهاست.
+  let seriesCache = new Map();
+  function dailySeries(p, at) {
+    const key = posKey(p, at);
+    if (!seriesCache.has(key)) {
+      seriesCache.set(key, dailyPnlSeries(p, dailyByIns, {
+        fees: feesNow(), basis: 'CLOSE', from: entryDateNumber(p), to: todayNumber(),
+      }));
+    }
+    return seriesCache.get(key);
+  }
+
+  /**
+   * «سود و زیان امروز» — تغییر نسبت به آخرین روزِ **پیش از** امروز.
+   *
+   * مبنایش قیمت پایانیِ همان روز است، نه قیمتِ دیروزِ تابلو: `/api/infos`
+   * در ساعت بازار `close` را برای **امروز** می‌دهد، و اگر مبنا از آن ساخته
+   * می‌شد، «تغییر امروز» در طول روز با خودش هم نمی‌خواند.
+   */
+  const todayChange = (p, at, pnlTotal) =>
+    changeSince(dailySeries(p, at), { now: pnlTotal, date: todayNumber() });
+
   function render() {
-    const evals = positions.map((p) => ({ p, ...evalPos(p) }));
+    seriesCache = new Map();
+    const today = todayNumber();
+    const listed = positions.map((p, at) => ({ p, at, state: positionOpenState(p, today) }));
+    const openRows = listed.filter((x) => !x.state.expired);
+    const goneRows = listed.filter((x) => x.state.expired);
+    const evals = openRows.map(({ p, at, state }) => ({ p, at, state, ...evalPos(p) }));
+
+    // دنبالهٔ همین جلسه از همان ارزش‌گذاری‌ای می‌آید که جدول نشان می‌دهد؛
+    // کلیدش زمانِ **قیمت‌گیری** است نه زمانِ رندر، پس رندرِ دوباره با همان
+    // قیمت‌ها نقطهٔ تکراری نمی‌سازد.
+    if (quotesAt > 0) {
+      for (const { p, at, m, spot } of evals) {
+        const key = posKey(p, at);
+        sessionTicks.set(key, appendSessionTick(sessionTicks.get(key), {
+          at: quotesAt, pnlTotal: m.pnlTotal, pnl: m.pnl, spot,
+        }));
+      }
+    }
 
     // سلول یونانی: مرتبهٔ بزرگی این پنج عدد یکی نیست — گاما ۱۰ به توان منفی
     // هفت و وگا ریالی — پس `fmt.small` رقم اعشار را از خود عدد می‌گیرد.
     const gk = (value) => (Number.isFinite(value) ? fmt.small(value) : '—');
     const ivPctCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
-    const rows = evals.map(({ p, m, greeks }, i) => `
-      <tr data-i="${i}" style="cursor:pointer" tabindex="0" role="button" aria-label="جزئیات موقعیت ${p.title || '—'}">
+    const legsText = (p) => p.legs.map((l) => `${l.side === 'sell' ? '−' : '+'}${l.kind === 'underlying' ? 'سهم' : (l.kind === 'call' ? 'کال' : 'پوت') + ' ' + fmt.money(l.strike)}`).join(' ');
+    const moneyTone = (value) => `style="color:${value >= 0 ? 'var(--gain)' : 'var(--loss)'}"`;
+
+    const rows = evals.map(({ p, at, state, m, greeks }) => {
+      const change = todayChange(p, at, m.pnlTotal);
+      const trend = dailySeries(p, at).points.slice(-30).map((point) => point.pnlTotal);
+      return `
+      <tr data-i="${at}" style="cursor:pointer" tabindex="0" role="button" aria-label="جزئیات موقعیت ${p.title || '—'}">
         <td>${p.title || '—'}</td>
         <td>${displayName(p.uaName, p.uaIns, 'دارایی پایه بدون نام')}</td>
-        <td>${p.legs.map((l) => `${l.side === 'sell' ? '−' : '+'}${l.kind === 'underlying' ? 'سهم' : (l.kind === 'call' ? 'کال' : 'پوت') + ' ' + fmt.money(l.strike)}`).join(' ')}</td>
+        <td>${legsText(p)}</td>
         <td class="n">${fmt.int(p.qty)}</td>
         <td class="n">${p.entryDate ? faDigits(p.entryDate) : '—'}</td>
         <td class="n">${m.daysHeld == null ? '—' : fmt.int(m.daysHeld)}</td>
+        <td class="n">${state.known && Number.isFinite(state.daysToExpiry) ? fmt.int(state.daysToExpiry) : '—'}</td>
         <td class="n">${fmt.money(m.capital * p.qty)}</td>
         <td class="n">${fmt.money(m.currentMargin * p.qty)}</td>
-        <td class="n" style="color:${m.pnlTotal >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(m.pnlTotal)}</td>
+        <td class="n" ${moneyTone(m.pnlTotal)}>${fmt.money(m.pnlTotal)}</td>
+        <td class="n" ${change.available ? moneyTone(change.change) : ''}
+          title="${change.available ? `مبنا: ${faDigits(historyDateLabel(change.baseDate))}` : change.reason}">
+          ${change.available ? fmt.money(change.change) : '—'}</td>
+        <td>${sparkline(trend, { label: `روند سود و زیان ${p.title || ''}` })}</td>
         <td class="n">${fmt.pct(m.retPct)}</td>
         <td class="n">${fmt.pct(m.retMonthPct)}</td>
         <td class="n">${fmt.money(m.ifHeld.atSpot * p.qty)}</td>
         ${GREEKS.map(({ key }) => `<td class="n">${gk(greeks.greeks?.[key])}</td>`).join('')}
         <td class="n">${ivPctCell(greeks.meanIvPct)}</td>
-        <td><button class="ghost" data-del="${i}">حذف</button></td>
-      </tr>`).join('');
+        <td><button class="ghost" data-edit="${at}">ویرایش</button>
+            <button class="ghost" data-del="${at}">حذف</button></td>
+      </tr>`;
+    }).join('');
 
-    root.querySelector('#list').innerHTML = positions.length ? `
+    root.querySelector('#list').innerHTML = openRows.length ? `
       <thead><tr>
         <th>عنوان</th><th>پایه</th><th>پاها</th><th>تعداد</th><th>تاریخ ورود</th><th>روز</th>
-        <th>سرمایه روز ورود</th><th>وجه تضمین امروز</th><th>سود و زیان الان</th><th>بازده از ورود ٪</th><th>ماهانه ٪</th><th>اگر تا سررسید بماند</th>${GREEKS.map(({ label }) => `<th>${label}</th>`).join('')}<th>تلاطم ضمنی</th><th></th>
+        <th>روز تا سررسید</th>
+        <th>سرمایه روز ورود</th><th>وجه تضمین امروز</th><th>سود و زیان الان</th><th>تغییر امروز</th><th>روند</th><th>بازده از ورود ٪</th><th>ماهانه ٪</th><th>اگر تا سررسید بماند</th>${GREEKS.map(({ label }) => `<th>${label}</th>`).join('')}<th>تلاطم ضمنی</th><th></th>
       </tr></thead><tbody>${rows}</tbody>`
-      : '<tbody><tr><td style="padding:16px;color:var(--muted)">موقعیتی ثبت نشده. از فرم بالا اضافه کن.</td></tr></tbody>';
+      : `<tbody><tr><td style="padding:16px;color:var(--muted)">${positions.length ? 'همهٔ موقعیت‌های ثبت‌شده سررسیدگذشته‌اند.' : 'موقعیتی ثبت نشده. از فرم بالا اضافه کن، یا از «در جست‌وجوی استراتژی‌ها» یک ترکیب را بفرست اینجا.'}</td></tr></tbody>`;
+
+    // ——— سررسیدگذشته ———
+    // بی هیچ عدد زنده: نه سود و زیان، نه بازده، نه یونانی. آنچه می‌ماند
+    // همان چیزی است که کاربر خودش ثبت کرده بود.
+    root.querySelector('#gone-card').style.display = goneRows.length ? '' : 'none';
+    if (goneRows.length) {
+      root.querySelector('#gone-list').innerHTML = `
+        <thead><tr><th>عنوان</th><th>پایه</th><th>پاها</th><th>تعداد</th><th>تاریخ ورود</th><th>سررسید</th><th>وضعیت</th><th></th></tr></thead>
+        <tbody>${goneRows.map(({ p, at, state }) => `
+          <tr>
+            <td>${p.title || '—'}</td>
+            <td>${displayName(p.uaName, p.uaIns, 'دارایی پایه بدون نام')}</td>
+            <td>${legsText(p)}</td>
+            <td class="n">${fmt.int(p.qty)}</td>
+            <td class="n">${p.entryDate ? faDigits(p.entryDate) : '—'}</td>
+            <td class="n">${faDigits(historyDateLabel(state.expiry))}</td>
+            <td><span class="tag warn">${state.reason}</span></td>
+            <td><button class="ghost" data-del="${at}">حذف</button></td>
+          </tr>`).join('')}</tbody>`;
+    }
 
     for (const b of root.querySelectorAll('[data-del]')) {
       b.addEventListener('click', async (e) => {
@@ -374,8 +548,20 @@ export async function mount(root, { state, api }) {
         if (!confirm(`موقعیت «${p?.title || '—'}» برای همیشه حذف شود؟ این کار بازگشت‌پذیر نیست.`)) return;
         b.disabled = true;
         positions.splice(i, 1);
+        // نمایه‌ها جابه‌جا شدند؛ هر انتخابِ نمایه‌ای باید بسته شود وگرنه
+        // پنل باز، موقعیتِ دیگری را نشان می‌دهد بی‌آنکه کسی چیزی کلیک کند.
+        expanded = null;
+        editing = null;
         await save();
+        await loadDailies();
         render();
+      });
+    }
+    for (const b of root.querySelectorAll('[data-edit]')) {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        editing = Number(b.dataset.edit);
+        drawEdit();
       });
     }
     for (const tr of root.querySelectorAll('#list tbody tr[data-i]')) {
@@ -399,31 +585,46 @@ export async function mount(root, { state, api }) {
     const currentMargin = currentMarginComplete
       ? evals.reduce((a, x) => a + x.m.currentMargin * x.p.qty, 0)
       : NaN;
+    // جمعِ «تغییر امروز» فقط وقتی عدد است که **همهٔ** موقعیت‌های باز مبنای
+    // روز پیش داشته باشند. جمعِ نصفه، عددی می‌سازد که کوچک‌تر از واقعیت
+    // است و هیچ‌جا نمی‌گوید چرا — همان خطای «صفر به‌جای نداشته».
+    const changes = evals.map((x) => todayChange(x.p, x.at, x.m.pnlTotal));
+    const changeComplete = changes.length > 0 && changes.every((x) => x.available);
+    const changeSum = changeComplete ? changes.reduce((a, x) => a + x.change, 0) : NaN;
     // بدون موقعیت، سود و زیان جاری دقیقاً صفر است ولی چیزی برای «در سود
     // بودن» وجود ندارد؛ بدون سرمایه درگیر، بازده روی سرمایه هم نامعلوم
     // است (fmt.pct(NaN) → «—٪»). هر دو باید بی‌رنگ بمانند، نه سبز پیش‌فرض —
     // قبلاً یک isGain مشترک (tot>=0) به هر دو کارت می‌رسید و صفر موقعیت را
     // هم «در سود» رنگ می‌کرد.
-    const pnlGain = positions.length ? tot >= 0 : null;
+    const pnlGain = openRows.length ? tot >= 0 : null;
     const roiGain = cap > 0 ? tot >= 0 : null;
     root.querySelector('#kpis').innerHTML = [
-      ['موقعیت باز', fmt.int(positions.length), '', null],
+      ['موقعیت باز', fmt.int(openRows.length), goneRows.length ? `${faDigits(goneRows.length)} سررسیدگذشته` : '', null],
       ['سرمایه روز ورود', fmt.money(cap), capitalComplete ? 'ریال' : 'مبنای ورود ناقص است', null],
       ['وجه تضمین امروز', fmt.money(currentMargin), currentMarginComplete ? 'ریال' : 'قیمت پایانی ناقص است', null],
       ['سود و زیان جاری', fmt.money(tot), pnlGain == null ? '' : pnlGain ? 'در سود' : 'در زیان', pnlGain],
+      ['تغییر امروز', fmt.money(changeSum),
+        changeComplete ? 'نسبت به پایانی روز پیش' : 'مبنای روز پیش برای همهٔ موقعیت‌ها نیست',
+        changeComplete ? changeSum >= 0 : null],
       ['بازده از ورود', `${fmt.pct(cap > 0 ? (tot / cap) * 100 : NaN)}٪`, '', roiGain],
       ['قیمت‌گیری', quotesByIns.size ? `${fmt.int(quotesByIns.size)} نماد` : 'بی‌قیمت — قیمت‌گیری نشد', '', null],
     ].map(([k, v, sub, gain]) => `<div class="kpi"><div class="k">${k}</div>
       <div class="v ${kpiTone(k, gain)}">${v}</div><div class="s">${sub}</div></div>`).join('');
 
+    root.querySelector('#daily-note').textContent = dailyNote;
+    if (editing != null) drawEdit();
     if (expanded != null) drawDetail();
   }
 
   function drawDetail() {
     const p = positions[expanded];
-    if (!p) {
+    // موقعیتِ سررسیدگذشته پنل جزئیات ندارد: هر عددی که آنجا نوشته شود —
+    // بازده، وجه تضمین، یونانی — از قیمتی می‌آید که دیگر معامله نمی‌شود.
+    if (!p || positionOpenState(p, todayNumber()).expired) {
       root.querySelector('#det-card').style.display = 'none';
+      root.querySelector('#track-card').style.display = 'none';
       chart?.destroy(); chart = null; chartFor = null;
+      charts.disposeAll();
       return;
     }
     const { m, spot, fees, greeks } = evalPos(p);
@@ -511,6 +712,7 @@ export async function mount(root, { state, api }) {
       ...(sameRow && chartRange ? { initRange: chartRange } : {}),
     });
     chartFor = expanded;
+    drawTrack();
 
     const riskSave = root.querySelector('#entry-risk-save');
     if (riskSave) riskSave.addEventListener('click', async () => {
@@ -531,6 +733,205 @@ export async function mount(root, { state, api }) {
     });
   }
 
+  // ——————————————— پنل روند ———————————————
+  //
+  // سه سرچشمه، یک نمودار. سرچشمه را کاربر عوض می‌کند و هیچ‌کدام دیگری را
+  // پر نمی‌کند: اگر نوار امروز گرفته نشده باشد، حالت درون‌روزی **خالی**
+  // می‌ماند و می‌گوید چرا — نه اینکه سری روزانه را به‌جایش نشان دهد.
+  function trackSeriesOf(p, at, mode) {
+    if (mode === 'session') return { points: sessionTicks.get(posKey(p, at)) || [], gaps: [], reason: '' };
+    if (mode === 'intraday') return intradayPnlSeries(p, tapeByIns, { fees: feesNow(), date: todayNumber() });
+    return dailySeries(p, at);
+  }
+
+  const CHANGE_LABEL = {
+    daily: 'تغییر از اولین روزِ دارای قیمت کامل',
+    intraday: 'تغییر از اولین لحظهٔ امروز',
+    session: 'تغییر از ابتدای این جلسه',
+  };
+
+  function drawTrack() {
+    const at = expanded;
+    const p = positions[at];
+    const card = root.querySelector('#track-card');
+    if (!p) { card.style.display = 'none'; charts.disposeAll(); return; }
+    card.style.display = '';
+    const mode = trackMode(trackModeId).id;
+    root.querySelector('#track-title').textContent = `روند سود و زیان — ${p.title || '—'}`;
+    root.querySelector('#track-modes').innerHTML = TRACK_MODES.map((item) => `
+      <button type="button" class="ghost" data-track="${item.id}" title="${item.hint}"
+        aria-pressed="${item.id === mode ? 'true' : 'false'}">${item.label}</button>`).join('');
+
+    const series = trackSeriesOf(p, at, mode);
+    const rows = trackRows(series, mode);
+    const stats = trackStats(series.points || []);
+    root.querySelector('#track-stats').innerHTML = trackStatsHtml(stats, { changeLabel: CHANGE_LABEL[mode] });
+    const extra = mode === 'intraday' && tapeAt ? ` آخرین دریافت نوار: ${faClock(new Date(tapeAt))}.` : '';
+    root.querySelector('#track-note').textContent = `${trackNote(series, mode)}${extra}${tapeNote && mode === 'intraday' ? ` ${tapeNote}` : ''}`;
+
+    // نوار امروز فقط با درخواست صریح گرفته می‌شود، و هزینه‌اش پیش از کلیک
+    // نوشته می‌شود — نه بعدش. عددی که بعد از فشردن دکمه معلوم شود، هشدار
+    // نیست؛ عذرخواهی است.
+    const actions = root.querySelector('#track-actions');
+    const codes = trackInstruments(p);
+    actions.innerHTML = mode === 'intraday'
+      ? `<button class="ghost" id="tape-get">${tapeAt ? 'گرفتن دوبارهٔ نوار امروز' : 'گرفتن نوار امروز'}</button>
+         <span class="unit">${faDigits(codes.length)} قرارداد در یک درخواست</span>`
+      : '';
+
+    const host = root.querySelector('#track-chart');
+    if (rows.length) {
+      charts.set('track', host, (echarts, tokens) => trackChartOption(rows, tokens));
+    } else {
+      charts.disposeAll();
+      host.innerHTML = `<p class="empty-note">${trackNote(series, mode)}</p>`;
+    }
+
+    for (const button of root.querySelectorAll('[data-track]')) {
+      button.addEventListener('click', () => {
+        trackModeId = trackMode(button.dataset.track).id;
+        drawTrack();
+      });
+    }
+    const tapeBtn = root.querySelector('#tape-get');
+    if (tapeBtn) tapeBtn.addEventListener('click', async () => {
+      if (tapeBtn.disabled) return;
+      tapeBtn.disabled = true;
+      const label = tapeBtn.textContent;
+      tapeBtn.textContent = 'در حال دریافت…';
+      try { await loadTape(p); } finally { tapeBtn.disabled = false; tapeBtn.textContent = label; }
+      drawTrack();
+    });
+  }
+
+  // ——————————————— ویرایش ———————————————
+  function drawEdit() {
+    const p = positions[editing];
+    const card = root.querySelector('#edit-card');
+    if (!p) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    root.querySelector('#edit-title').textContent = `ویرایش موقعیت — ${p.title || '—'}`;
+    const host = root.querySelector('#edit');
+    // فرم فقط وقتی از نو ساخته می‌شود که موقعیتِ دیگری باشد. قیمت‌گیری هر
+    // پانزده ثانیه `render` را صدا می‌زند و ساختنِ دوبارهٔ فرم، هر چیزی را
+    // که کاربر تایپ کرده بود پاک می‌کرد.
+    if (host.dataset.for !== String(editing)) {
+      host.dataset.for = String(editing);
+      host.innerHTML = editFormHtml(p);
+    }
+  }
+
+  root.querySelector('#edit-cancel').addEventListener('click', () => {
+    editing = null;
+    root.querySelector('#edit').dataset.for = '';
+    root.querySelector('#edit-card').style.display = 'none';
+  });
+
+  const editMsg = root.querySelector('#edit-msg');
+  root.querySelector('#edit-save').addEventListener('click', async () => {
+    const p = positions[editing];
+    if (!p) return;
+    const read = readEdit(root.querySelector('#edit'), p);
+    if (!read.ok) { editMsg.textContent = read.reason; editMsg.style.color = 'var(--loss)'; return; }
+    const next = read.position;
+    const snapshot = captureEntryRisk(next, riskOptions());
+    if (!snapshot.available) { editMsg.textContent = snapshot.reason; editMsg.style.color = 'var(--loss)'; return; }
+    next.entryRisk = snapshot;
+    positions[editing] = next;
+    editing = null;
+    root.querySelector('#edit').dataset.for = '';
+    root.querySelector('#edit-card').style.display = 'none';
+    // تاریخ ورود ممکن است عوض شده باشد، پس بازهٔ تاریخچه هم عوض می‌شود.
+    await save();
+    await loadDailies();
+    flash('ویرایش ثبت شد.');
+    render();
+  });
+
+  // ——————————————— پذیرش ترکیب از جست‌وجوی استراتژی‌ها ———————————————
+  const intakeMsg = root.querySelector('#intake-msg');
+  function drawIntake() {
+    const card = root.querySelector('#intake-card');
+    if (!draft) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    root.querySelector('#intake-title').textContent = draft.comboName
+      ? `ترکیب رسیده — ${draft.title} · ${draft.comboName}`
+      : `ترکیب رسیده — ${draft.title}`;
+    const host = root.querySelector('#intake');
+    if (host.dataset.ready !== '1') { host.dataset.ready = '1'; host.innerHTML = intakeFormHtml(draft); }
+    intakeMsg.textContent = draftNote;
+    intakeMsg.style.color = 'var(--muted)';
+  }
+
+  function dropIntake() {
+    draft = null;
+    draftNote = '';
+    const host = root.querySelector('#intake');
+    host.dataset.ready = '';
+    host.innerHTML = '';
+    root.querySelector('#intake-card').style.display = 'none';
+  }
+
+  root.querySelector('#intake-drop').addEventListener('click', dropIntake);
+  root.querySelector('#intake-save').addEventListener('click', async () => {
+    if (!draft) return;
+    const read = readIntake(root.querySelector('#intake'), draft);
+    if (!read.ok) { intakeMsg.textContent = read.reason; intakeMsg.style.color = 'var(--loss)'; return; }
+    const position = { ...blankPosition(), ...read.position };
+    const snapshot = captureEntryRisk(position, riskOptions());
+    if (!snapshot.available) { intakeMsg.textContent = snapshot.reason; intakeMsg.style.color = 'var(--loss)'; return; }
+    position.entryRisk = snapshot;
+    positions.push(position);
+    dropIntake();
+    await save();
+    await loadDailies();
+    flash('موقعیت از ترکیب رسیده ثبت شد.');
+    render();
+    await priceAll();
+  });
+
+  /**
+   * قیمت پایانی امروزِ پاهای پیش‌نویس، برای خانهٔ «پایانی روز ورود».
+   *
+   * فقط وقتی معنی دارد که روز ورودِ پیش‌نویس همین امروز باشد — ردیفِ
+   * تاریخی روزِ دیگری دارد و قیمت پایانیِ امروز برای آن، عددِ غلط است. در
+   * آن حالت خانه خالی می‌ماند و کاربر خودش پرش می‌کند.
+   */
+  async function fillDraftCloses() {
+    if (!draft) return;
+    if (draft.entryDate !== todayJalali()) {
+      draftNote = 'روز ورود این ترکیب امروز نیست، پس قیمت پایانی روز ورود پیش‌پر نشد.';
+      return;
+    }
+    const needs = draft.legs.filter((leg) => needsEntryClose(leg) && leg.ins);
+    if (!needs.length) return;
+    try {
+      const infos = await (await fetch(`/api/infos?ins=${needs.map((leg) => leg.ins).join(',')}`)).json();
+      let filled = 0;
+      for (const leg of needs) {
+        const close = Number(infos[leg.ins]?.close);
+        if (close > 0) { leg.entryClose = close; filled += 1; }
+      }
+      draftNote = filled === needs.length
+        ? 'قیمت پایانی امروزِ پاهای فروش پیش‌پر شد.'
+        : `${faDigits(needs.length - filled)} پای فروش قیمت پایانی امروز نداشت؛ خانه‌اش را خودت پر کن.`;
+    } catch {
+      draftNote = 'قیمت پایانی امروز گرفته نشد؛ خانه‌های پایانی را خودت پر کن.';
+    }
+  }
+
+  async function takePlan() {
+    const plan = state.handoff?.to === 'positions' ? state.handoff : null;
+    if (!plan) return;
+    state.handoff = null;
+    const made = draftFromPlan(plan, { today: todayJalali() });
+    if (!made.ok) { flash(made.reason, true); return; }
+    draft = made.draft;
+    draftNote = '';
+    await fillDraftCloses();
+    drawIntake();
+  }
+
   // ——————————————— داده ———————————————
   async function load() {
     try { positions = await (await fetch('/api/positions')).json(); }
@@ -548,12 +949,63 @@ export async function mount(root, { state, api }) {
       migrated = true;
     }
     if (migrated) await save({ quiet: true });
+    await loadDailies();
     render();
   }
 
+  /**
+   * تاریخچهٔ روزانهٔ همهٔ پاها — یک درخواست دسته‌ای، نه یکی به‌ازای هر پا.
+   *
+   * `n` از قدیمی‌ترین روزِ ورودِ ثبت‌شده درمی‌آید، نه از یک عددِ ثابت:
+   * گرفتنِ همیشهٔ کلِ تاریخچه برای موقعیتی که دیروز باز شده، اسراف است و
+   * گرفتنِ سی روزِ ثابت برای موقعیتی که شش ماه باز بوده، روندش را می‌بُرد.
+   * حاشیهٔ ده روز برای تعطیلی‌هاست.
+   */
+  async function loadDailies() {
+    const codes = new Set();
+    for (const p of positions) for (const ins of trackInstruments(p)) codes.add(ins);
+    if (!codes.size) { dailyByIns = {}; dailyNote = ''; return; }
+    const held = positions.map((p) => Number(daysSinceJalali(p.entryDate)) || 0);
+    const need = Math.min(900, Math.max(30, ...held) + 10);
+    try {
+      const res = await (await fetch(`/api/dailies?ins=${[...codes].join(',')}&n=${need}`)).json();
+      dailyByIns = res && typeof res === 'object' ? res : {};
+      const empty = [...codes].filter((ins) => !(dailyByIns[ins]?.rows || []).length);
+      dailyNote = empty.length
+        ? `تاریخچهٔ روزانهٔ ${faDigits(empty.length)} قرارداد خالی آمد؛ روند و «تغییر امروز» برای موقعیتِ دربرگیرنده‌اش ساخته نمی‌شود.`
+        : `تاریخچهٔ روزانهٔ ${faDigits(codes.size)} قرارداد گرفته شد.`;
+    } catch (e) {
+      dailyByIns = {};
+      dailyNote = `تاریخچهٔ روزانه گرفته نشد: ${faDigits(e.message)}. روند روزانه و «تغییر امروز» تا دریافت بعدی خالی می‌مانند.`;
+    }
+  }
+
+  /** نوار ریزمعاملهٔ امروزِ یک موقعیت — فقط با درخواست صریح کاربر. */
+  async function loadTape(p) {
+    const codes = trackInstruments(p).slice(0, 24);
+    if (!codes.length) { tapeNote = 'شناسه‌ای برای گرفتن نوار نیست.'; return; }
+    try {
+      const res = await (await fetch(`/api/live-trades?ins=${codes.join(',')}`)).json();
+      if (res?.error) { tapeByIns = {}; tapeNote = faDigits(res.error); return; }
+      tapeByIns = res?.items || {};
+      tapeAt = Number(res?.at) || Date.now();
+      // بازارِ بسته و نمادِ بی‌معامله دو چیزند و نوارِ خالی هر دو را
+      // یک‌شکل نشان می‌دهد؛ پس فاز بازار همراه جمله می‌آید.
+      tapeNote = res?.market?.open === false ? `بازار باز نیست — ${faDigits(res.market.why || '')}` : '';
+    } catch (e) {
+      tapeByIns = {};
+      tapeNote = `نوار امروز گرفته نشد: ${faDigits(e.message)}`;
+    }
+  }
+
   async function priceAll() {
+    // قرارداد سررسیدگذشته قیمت گرفته نمی‌شود. هم بار بالادست بی‌جهت
+    // بیشتر می‌شد، هم پاسخش — که گاهی آخرین قیمتِ پیش از حذف است — به
+    // ارزش‌گذاری راه پیدا می‌کرد.
+    const today = todayNumber();
     const codes = new Set();
     for (const p of positions) {
+      if (positionOpenState(p, today).expired) continue;
       if (p.uaIns) codes.add(p.uaIns);
       for (const l of p.legs) if (l.ins) codes.add(l.ins);
     }
@@ -575,6 +1027,9 @@ export async function mount(root, { state, api }) {
           state: i2.state, staleSec: i2.staleSec, book: b,
         });
       }
+      // مهر زمانیِ همین دسته قیمت. دنبالهٔ جلسه با همین کلید نقطه می‌گیرد،
+      // پس رندرِ دوباره با قیمت‌های یکسان نقطهٔ تکراری نمی‌سازد.
+      quotesAt = Date.now();
       render();
     } catch { /* نوار بالا خبر می‌دهد */ }
   }
@@ -585,7 +1040,13 @@ export async function mount(root, { state, api }) {
   const offWatch = api.subscribeWatch((w) => pushRows(w, !w.changed));
 
   await load();
+  await takePlan();
   await priceAll();
   const timer = setInterval(priceAll, 15000);
-  return () => { offChain(); offWatch(); offFeed(); clearInterval(timer); clearTimeout(flashTimer); chart?.destroy(); };
+  return () => {
+    offChain(); offWatch(); offFeed();
+    clearInterval(timer); clearTimeout(flashTimer);
+    chart?.destroy();
+    charts.disposeAll();
+  };
 }
