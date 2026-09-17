@@ -61,6 +61,7 @@ import { tehranDateNumber } from '/core/live-day.mjs';
 import { normalizeHistoryDate } from '/core/history.mjs';
 import { GREEKS, monitorSnapshot, monitorStance } from '/core/monitor.mjs';
 import { emptyReason } from '/ui/feed-state.mjs';
+import { logError } from '/ui/errlog.mjs';
 
 const KINDS = [
   ['covered-call', 'کاوردکال — سهم + فروش کال'],
@@ -422,12 +423,38 @@ export async function mount(root, { state, api }) {
       if (!position.entryRisk.available) { flash(position.entryRisk.reason, true); return; }
       positions.push(position);
       await save();
+      await journal('open', position, { note: 'از فرم افزودن', price: optionPrice });
       flash('موقعیت افزوده شد.');
       render();
     } finally {
       addBtn.disabled = false;
     }
   });
+
+  /**
+   * یک ردیف در دفترچهٔ معاملات.
+   *
+   * ═══ چرا شکستش صدا نمی‌کند ═══
+   *
+   * دفترچه ثبتِ کناری است، نه بخشی از تراکنش. اگر نوشتنش شکست بخورد،
+   * موقعیت **باید** ذخیره شده بماند — وگرنه خرابیِ یک دفترِ ثانوی، کارِ
+   * اصلی کاربر را می‌خورد. شکست در دفتر خطا می‌نشیند و کاربر می‌تواند
+   * ردیفِ دستی بنویسد.
+   *
+   * زمان از سرور می‌آید، نه از اینجا: ساعتِ مرورگر می‌تواند عقب یا جلو
+   * باشد و ترتیبِ دفترچه تنها چیزی است که معنایش را نگه می‌دارد.
+   */
+  async function journal(action, p, extra = {}) {
+    try {
+      await fetch('/api/journal', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action, positionId: p?.id || '', title: p?.title || '',
+          uaName: p?.uaName || p?.uaIns || '', qty: p?.qty, ...extra,
+        }),
+      });
+    } catch (error) { logError('positions:journal', error); }
+  }
 
   async function save({ quiet = false } = {}) {
     try {
@@ -715,6 +742,9 @@ export async function mount(root, { state, api }) {
         // نابودش کند.
         if (!confirm(`موقعیت «${p?.title || '—'}» برای همیشه حذف شود؟ این کار بازگشت‌پذیر نیست.`)) return;
         b.disabled = true;
+        // ردیفِ دفترچه **پیش** از حذف نوشته می‌شود: بعدش عنوان و نماد و
+        // تعدادِ موقعیت دیگر در دست نیست و ردیف، به هیچ اشاره می‌کند.
+        await journal('delete', p, { note: 'حذف دستی از فهرست' });
         positions.splice(i, 1);
         // نمایه‌ها جابه‌جا شدند؛ هر انتخابِ نمایه‌ای باید بسته شود وگرنه
         // پنل باز، موقعیتِ دیگری را نشان می‌دهد بی‌آنکه کسی چیزی کلیک کند.
@@ -760,8 +790,10 @@ export async function mount(root, { state, api }) {
         // خودش می‌برد. اشتباهِ ثبت شدنی است، ولی بی‌پرسش نه.
         if (!confirm(`برگهٔ خروج «${p?.title || '—'}» پاک شود و موقعیت دوباره باز شمرده شود؟`)) return;
         b.disabled = true;
+        const hadExit = positions[i].exit?.date || '';
         delete positions[i].exit;
         await save();
+        await journal('reopen', positions[i], { detail: hadExit ? `برگهٔ خروج ${hadExit} پاک شد` : '' });
         render();
         await priceAll();
       });
@@ -1046,6 +1078,7 @@ export async function mount(root, { state, api }) {
     p.alert = made.alert;
     dropAlertForm();
     await save();
+    await journal('alert', p, { detail: 'شرط تازه ثبت شد' });
     flash('شرط ثبت شد.');
     render();
   });
@@ -1057,6 +1090,7 @@ export async function mount(root, { state, api }) {
     delete p.alert;
     dropAlertForm();
     await save();
+    await journal('alert', p, { detail: 'شرط‌ها برداشته شد' });
     flash('شرط‌های این موقعیت برداشته شد.');
     render();
   });
@@ -1093,7 +1127,14 @@ export async function mount(root, { state, api }) {
     // سنجش کارِ موتور است، نه فرم: همان قاعده‌ها باید در آزمون هم بگزند.
     const checked = validateExit(p, read);
     if (!checked.ok) { closeMsg.textContent = checked.reason; closeMsg.style.color = 'var(--loss)'; return; }
-    positions[closing] = { ...p, exit: checked.exit };
+    const closedPos = { ...p, exit: checked.exit };
+    positions[closing] = closedPos;
+    const done = realizedPnl(closedPos, { fees: feesNow() });
+    await journal('close', closedPos, {
+      note: checked.exit.note || '',
+      detail: `تاریخ خروج ${checked.exit.date}`,
+      pnlTotal: done.available ? done.pnlTotal : undefined,
+    });
     dropClose();
     // موقعیتِ بسته دیگر پنل جزئیات و روندِ زنده ندارد.
     expanded = null;
@@ -1138,6 +1179,10 @@ export async function mount(root, { state, api }) {
     if (!snapshot.available) { editMsg.textContent = snapshot.reason; editMsg.style.color = 'var(--loss)'; return; }
     next.entryRisk = snapshot;
     positions[editing] = next;
+    await journal('edit', next, {
+      note: next.note || '',
+      detail: `تعداد ${p.qty} ← ${next.qty} · تاریخ ورود ${p.entryDate} ← ${next.entryDate}`,
+    });
     editing = null;
     root.querySelector('#edit').dataset.for = '';
     root.querySelector('#edit-card').style.display = 'none';
@@ -1184,6 +1229,10 @@ export async function mount(root, { state, api }) {
     positions.push(position);
     dropIntake();
     await save();
+    await journal('open', position, {
+      note: 'از جست‌وجوی استراتژی‌ها',
+      detail: draft?.comboName || '',
+    });
     await loadDailies();
     flash('موقعیت از ترکیب رسیده ثبت شد.');
     render();
