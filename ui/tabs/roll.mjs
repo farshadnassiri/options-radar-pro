@@ -8,6 +8,9 @@
 // می‌گیرد و از همان موتور بازده مشترک می‌آید.
 
 import { rollAnalysis, markToMarket } from '/core/positions.mjs';
+import { rollFriction, rollPayback } from '/core/roll-cost.mjs';
+import { positionStatus } from '/core/position-close.mjs';
+import { tehranDateNumber } from '/core/live-day.mjs';
 import { impliedVol } from '/core/bs.mjs';
 import { mountPayoff, mountDiff } from '/ui/chart.mjs';
 import { fmt } from '/ui/table.mjs';
@@ -55,6 +58,11 @@ export async function mount(root, { state, api }) {
         <div class="field"><label for="exp2">هم‌زمان مقایسه با سررسید دیگر <span class="unit">اختیاری</span></label><select id="exp2"></select></div>
         <p class="note">نامزدهای این سررسید هم به جدول و نمودار زیر اضافه می‌شوند. چون آن‌وقت موقعیت پس از رول
           دیگر یک سررسید ندارد، تفاضل با تقریب بلک-شولز روی افق «امروز» سنجیده می‌شود، نه جبر دقیق سررسید.</p>
+        <label class="check" for="all-exp"><input type="checkbox" id="all-exp">
+          جست‌وجو در <b>همهٔ</b> سررسیدها</label>
+        <p class="note">تا امروز رتبه‌بندی فقط داخل یک سررسید (به‌علاوهٔ یک سررسید دلخواه) بود، پس گزینه‌ای که
+          دو سررسید آن‌طرف‌تر بهتر بود اصلاً دیده نمی‌شد. با این تیک، نامزدهای همهٔ سررسیدها در یک جدول
+          رتبه می‌گیرند — به قیمت جدولی بلندتر و درخواست قیمت بیشتر.</p>
       </section>
     </div>
 
@@ -111,15 +119,29 @@ export async function mount(root, { state, api }) {
   async function load() {
     try { positions = await (await fetch('/api/positions')).json(); }
     catch { positions = []; }
+    // رول فقط برای موقعیتِ **باز** معنی دارد: بسته‌شده دیگر پایی برای بستن
+    // ندارد و سررسیدگذشته قراردادش از تابلو حذف شده. نشان دادنشان در کشویی
+    // یعنی گزینه‌ای که انتخابش هیچ‌جا نمی‌رسد.
+    const today = tehranDateNumber();
+    positions = positions.filter((p) => positionStatus(p, today).id === 'open');
     el('#pos').innerHTML = positions.length
       ? positions.map((p, i) => `<option value="${i}">${p.title || 'موقعیت'} — ${baseName(p)}</option>`).join('')
-      : '<option value="">موقعیتی ثبت نشده</option>';
+      : '<option value="">موقعیت بازی ثبت نشده</option>';
     if (!positions.length) {
       el('#kpis').innerHTML = `<div class="kpi"><div class="k">موقعیت</div><div class="v">—</div>
-        <div class="s">اول در تب موقعیت‌های من یک موقعیت ثبت کن</div></div>`;
+        <div class="s">اول در تب موقعیت‌های من یک موقعیت باز ثبت کن</div></div>`;
       return;
     }
-    await pickPos(0);
+    // نقشهٔ رسیده از تب موقعیت‌ها: شناسه می‌آید، نه کپیِ رکورد — پس همیشه
+    // تازه‌ترین نسخهٔ همان موقعیت انتخاب می‌شود.
+    const plan = state.handoff?.to === 'roll' ? state.handoff : null;
+    if (plan) state.handoff = null;
+    const wanted = plan ? positions.findIndex((p) => String(p.id) === String(plan.positionId)) : -1;
+    if (plan && wanted < 0) {
+      el('#newnote').textContent = `موقعیت «${plan.title || plan.positionId}» در فهرست موقعیت‌های باز نیست — شاید بسته شده یا سررسیدش گذشته.`;
+    }
+    el('#pos').value = String(Math.max(0, wanted));
+    await pickPos(Math.max(0, wanted));
   }
 
   async function pickPos(i) {
@@ -155,11 +177,16 @@ export async function mount(root, { state, api }) {
     const ex = detail.expiries[Number(el('#exp').value) || 0];
     if (!ex || !cur) return;
     const put = cur.kind === 'put';
-    candidates = ex.strikes.map((st) => ({ st, q: put ? st.put : st.call, days: ex.days }));
+    // «همهٔ سررسیدها» جای هر دو کشویی را می‌گیرد: وقتی همه هستند، انتخابِ
+    // یک و دو معنایی ندارد و نگه داشتنشان فقط دو منبعِ حقیقت می‌سازد.
+    const everyExpiry = el('#all-exp').checked;
+    candidates = everyExpiry
+      ? detail.expiries.flatMap((exi) => exi.strikes.map((st) => ({ st, q: put ? st.put : st.call, days: exi.days })))
+      : ex.strikes.map((st) => ({ st, q: put ? st.put : st.call, days: ex.days }));
     // سررسید دوم اختیاری — نامزدهایش هم به همان فهرست تخت اضافه می‌شوند،
     // هر کدام days خودش را حمل می‌کند؛ rollAnalysis و نمودار پایین خودشان
     // بر مبنای همین فیلد تشخیص می‌دهند تک‌سررسیدی‌اند یا نه.
-    const ex2v = el('#exp2').value;
+    const ex2v = everyExpiry ? '' : el('#exp2').value;
     if (ex2v !== '') {
       const ex2 = detail.expiries[Number(ex2v)];
       if (ex2 && ex2.days !== ex.days) {
@@ -266,6 +293,18 @@ export async function mount(root, { state, api }) {
     el('#newnote').textContent =
       `هزینه بستن پای فعلی از عرضه: ${fmt.money(-r.closeCash)} — بستانکار پای تازه از تقاضا: ${fmt.money(r.newCash)}`;
 
+    // ——— اصطکاک اجرای رول ———
+    //
+    // «تفاضل» این هزینه را در جریان نقد دارد ولی به‌عنوان یک عدد جدا
+    // نمی‌گوید، و کاربری که دو نامزد با تفاضلِ نزدیک دارد نمی‌داند کدام
+    // اجرایش گران‌تر است.
+    const friction = rollFriction({
+      leg: cur, legQuote: quotes[closeIdx], newLeg, newQuote, fees, qty: p.qty,
+    });
+    const payback = rollPayback(friction, {
+      thetaBefore: curGreeks.greeks?.theta, thetaAfter: nextGreeks.greeks?.theta,
+    });
+
     const better = r.atSpot > 0;
     el('#kpis').innerHTML = [
       ['تفاضل در قیمت فعلی', fmt.money(r.atSpotTotal), better ? 'رول بهتر است' : 'نگه داشتن بهتر است', better ? 'gain' : 'loss'],
@@ -275,6 +314,13 @@ export async function mount(root, { state, api }) {
       ['سربه‌سری فعلی', fmt.money(r.curBreakevens[0]), '', ''],
       ['سربه‌سری پس از رول', fmt.money(r.nextBreakevens[0]), '', ''],
       ['مرز تصمیم', r.crossings.length ? r.crossings.map((x) => fmt.money(x)).join(' , ') : 'بی‌مرز', 'قیمت پایه', ''],
+      ['اصطکاک اجرای رول', friction.available ? fmt.money(-friction.total) : '—',
+        friction.available
+          ? (friction.spreadKnown ? 'کارمزد دو معامله + نیم‌اسپرد هر طرف' : 'فقط کارمزد — دفتر دوطرفه نبود')
+          : friction.reason,
+        friction.available ? 'loss' : ''],
+      ['جبران با تتا', payback.available ? `${fmt.num(payback.days)} روز` : '—',
+        payback.available ? 'اگر پایه و تلاطم تکان نخورند' : payback.reason, ''],
     ].map(([k, v, sub, c]) => `<div class="kpi"><div class="k">${k}</div><div class="v ${c}">${v}</div><div class="s">${sub}</div></div>`).join('');
 
     // ——— مقایسه همه نامزدهای رول، همین سررسید و سررسید دوم اختیاری ———
@@ -285,7 +331,8 @@ export async function mount(root, { state, api }) {
       const nl = { kind: cur.kind, side: cur.side, ratio: cur.ratio, size: cur.size, strike: c2.st.strike, days: c2.days, ins: c2.q.ins };
       const nq = quotesByIns.get(c2.q.ins) || { bid: c2.q.bid, ask: c2.q.ask, close: c2.q.close, last: c2.q.last };
       const r2 = rollAnalysis({ pos: p, quotes, closeIdx, newLeg: nl, newQuote: nq, opt: { fees, spot, basis: 'BOOK', sigma, rFree: s().rFree, divYield: s().divYield } });
-      return { i, strike: c2.st.strike, days: c2.days, r: r2 };
+      const f2 = rollFriction({ leg: cur, legQuote: quotes[closeIdx], newLeg: nl, newQuote: nq, fees, qty: p.qty });
+      return { i, strike: c2.st.strike, days: c2.days, r: r2, f: f2 };
     });
     const best = candRows.reduce((a, x) => (x.r.atSpot > a.r.atSpot ? x : a), candRows[0]);
     const bestIdx = best.i;
@@ -298,6 +345,7 @@ export async function mount(root, { state, api }) {
     root.querySelector('#cand').innerHTML = `
       <thead><tr>
         <th>اعمال</th>${multiExpiry ? '<th>سررسید</th>' : ''}<th>خالص نقدی رول</th><th>تفاضل در قیمت فعلی</th>
+        <th title="کارمزد دو معامله به‌علاوهٔ نیم‌اسپردی که هر طرف از آن عبور می‌کند">اصطکاک اجرا</th>
         <th>سقف سود پس از رول</th><th>سربه‌سری پس از رول</th><th></th>
       </tr></thead>
       <tbody>${candRows.map((x) => `
@@ -305,6 +353,7 @@ export async function mount(root, { state, api }) {
           <td class="n">${fmt.money(x.strike)}</td>${multiExpiry ? `<td class="n">${faDigits(x.days)} روز</td>` : ''}
           <td class="n">${fmt.money(x.r.netCashChange)}</td>
           <td class="n" style="color:${x.r.atSpot >= 0 ? 'var(--gain)' : 'var(--loss)'}">${fmt.money(x.r.atSpotTotal)}</td>
+          <td class="n" title="${x.f.available && !x.f.spreadKnown ? x.f.reason : ''}">${x.f.available ? fmt.money(-x.f.total) : '—'}${x.f.available && !x.f.spreadKnown ? '<span class="unit">؟</span>' : ''}</td>
           <td class="n">${fmt.money(x.r.nextMaxProfit)}</td>
           <td class="n">${fmt.money(x.r.nextBreakevens[0])}</td>
           <td>${x.i === bestIdx ? `<span class="tag ${bestTone}">بهترین تفاضل</span>` : ''}${x.i === candIdx ? '<span class="tag flat">انتخاب‌شده</span>' : ''}</td>
@@ -358,6 +407,15 @@ export async function mount(root, { state, api }) {
   el('#leg').addEventListener('change', () => fillNew());
   el('#exp').addEventListener('change', () => { fillNew(); priceAll(); });
   el('#exp2').addEventListener('change', () => { fillNew(); priceAll(); });
+  el('#all-exp').addEventListener('change', () => {
+    // با روشن شدنِ «همه»، دو کشویی سررسید معنایشان را از دست می‌دهند و
+    // خاموش می‌شوند — کنترلی که کاری نمی‌کند بدتر از نبودش است.
+    const every = el('#all-exp').checked;
+    el('#exp').disabled = every;
+    el('#exp2').disabled = every;
+    fillNew();
+    priceAll();
+  });
   el('#new').addEventListener('change', draw);
 
   const offChain = onChain(() => {});

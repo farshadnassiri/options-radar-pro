@@ -39,6 +39,7 @@ import {
 } from '../core/live-market.mjs';
 import { decisionDashboardSnapshot, mergeUnderlyingTrades } from '../core/decision-dashboard.mjs';
 import { makeUpstreamTally } from '../core/upstream-tally.mjs';
+import { JOURNAL_CAP, appendEntry, makeEntry, normalizeJournal } from '../core/journal.mjs';
 import { writeJsonAtomic } from './atomic-json.mjs';
 import { watchHealth } from '../core/watch-health.mjs';
 import { makeJobQueue } from './job-queue.mjs';
@@ -1594,6 +1595,37 @@ async function handle(req, res) {
     }
 
     // ——— موقعیت‌های واقعی تو ———
+    // ——— دفترچهٔ معاملات ———
+    //
+    // فقط افزودن. هیچ مسیری ردیف را عوض یا حذف نمی‌کند، و این محدودیت
+    // عمدی است: دفترچه‌ای که بشود اصلاحش کرد، همان حافظهٔ انتخابی است.
+    // اشتباه ثبت‌شده با یک ردیفِ اصلاحیِ تازه جبران می‌شود.
+    if (p === '/api/journal') {
+      const file = path.join(ROOT, 'data', 'journal.json');
+      const read = async () => {
+        try { return JSON.parse(await fs.readFile(file, 'utf8')); }
+        catch { return []; }
+      };
+      if (req.method === 'GET') {
+        const list = normalizeJournal(await read());
+        return sendJson(res, 200, { count: list.length, cap: JOURNAL_CAP, rows: list });
+      }
+      if (req.method === 'POST') {
+        const body = JSON.parse(await readBody(req, MAX_BODY) || 'null');
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          return sendJson(res, 400, { error: 'ردیف دفترچه لازم است' });
+        }
+        // زمان از سرور می‌آید نه از مرورگر: ساعتِ مرورگر می‌تواند عقب یا
+        // جلو باشد و ترتیبِ دفترچه تنها چیزی است که معنایش را نگه می‌دارد.
+        const made = makeEntry({ ...body, at: Date.now() });
+        if (!made.ok) return sendJson(res, 400, { error: made.why });
+        const list = appendEntry(await read(), made.entry);
+        await writeJsonAtomic(file, list, { space: 2 });
+        return sendJson(res, 200, { ok: true, entry: made.entry, count: list.length });
+      }
+      return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
+    }
+
     if (p === '/api/positions') {
       const file = path.join(ROOT, 'data', 'positions.json');
       if (req.method === 'GET') {

@@ -110,6 +110,30 @@ export const watchRef = (id) => REF_BY_ID.get(String(id ?? '')) || REF_BY_ID.get
 export const DEFAULT_WINDOW_DAYS = 5;
 export const DEFAULT_COOLDOWN_SEC = 120;
 
+/**
+ * چگونگیِ جمعِ شرط‌ها.
+ *
+ * ═══ چرا «یا» لازم شد ═══
+ *
+ * تا امروز شرط‌ها فقط با «و» جمع می‌شدند، و «و» با هر شرطِ تازه دامنه را
+ * **تنگ‌تر** می‌کند. کاربری که می‌خواست «خبرم کن اگر بازده خوب شد **یا**
+ * زیان بد شد» چاره‌ای جز ساختنِ دو قاعدهٔ جدا نداشت — دو ردیف که باید
+ * جداگانه روشن و خاموش و تنظیم می‌شدند، برای یک نگرانی.
+ *
+ * پیش‌فرض `all` است و رکوردهای قدیمی که این میدان را ندارند همان را
+ * می‌گیرند، پس رفتارِ هر قاعدهٔ ذخیره‌شده دقیقاً همان می‌ماند که بود.
+ */
+export const WATCH_MATCHES = [
+  ['all', 'همهٔ شرط‌ها (و)', 'و'],
+  ['any', 'دست‌کم یک شرط (یا)', 'یا'],
+];
+const MATCH_IDS = new Set(WATCH_MATCHES.map(([id]) => id));
+export const watchMatch = (id) => (MATCH_IDS.has(String(id ?? '')) ? String(id) : 'all');
+const matchJoin = (id) => (WATCH_MATCHES.find(([key]) => key === watchMatch(id)) || WATCH_MATCHES[0])[2];
+
+/** سقفِ تاریخچهٔ شلیک هر قاعده. */
+export const WATCH_HISTORY_CAP = 40;
+
 let ruleSeq = 0;
 const newId = (prefix) => `${prefix}${(ruleSeq += 1).toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -189,12 +213,39 @@ export function normalizeWatchRule(raw = {}) {
       strategyIds, baseIns,
       comboKey: String(raw.comboKey || ''),
       conditions,
+      match: watchMatch(raw.match),
+      // تاریخچه، دادهٔ رکورد است نه محاسبه: باید از یک جلسه به جلسهٔ بعد
+      // برسد، وگرنه «این قاعده مفید است یا پرسروصدا» هیچ‌وقت جواب ندارد.
+      history: normalizeHistory(raw.history),
       cooldownSec: Math.max(0, Math.trunc(num(raw.cooldownSec, DEFAULT_COOLDOWN_SEC))),
       sound: raw.sound === true,
       firedCount: Math.max(0, Math.trunc(num(raw.firedCount, 0))),
       lastFiredAt: num(raw.lastFiredAt, 0) || 0,
     },
   };
+}
+
+/**
+ * تاریخچهٔ شلیک — تازه‌ترین اول، و بریده به سقف.
+ *
+ * `basePrice` لحظهٔ شلیک ذخیره می‌شود و این تزیین نیست: بی آن، «بعد از این
+ * هشدار قیمت چه کرد» ساختنی نیست و قاعدهٔ پرسروصدا از قاعدهٔ به‌موقع جدا
+ * نمی‌شود. ردیفِ بی‌زمان نگه داشته نمی‌شود — تاریخچه‌ای که ترتیبش معلوم
+ * نباشد تاریخچه نیست.
+ */
+export function normalizeHistory(raw = []) {
+  const list = (Array.isArray(raw) ? raw : [])
+    .map((item) => ({
+      at: num(item?.at, 0),
+      comboKey: String(item?.comboKey || ''),
+      label: String(item?.label || ''),
+      baseName: String(item?.baseName || ''),
+      basePrice: num(item?.basePrice, NaN),
+      hits: Math.max(0, Math.trunc(num(item?.hits, 1))),
+    }))
+    .filter((item) => item.at > 0)
+    .sort((a, b) => b.at - a.at);
+  return list.slice(0, WATCH_HISTORY_CAP);
 }
 
 /** جملهٔ خوانای یک شرط. */
@@ -221,7 +272,7 @@ export function watchRuleNote(rule) {
   else if (rule?.strategyIds?.length) scope.push(`⁨${fa(rule.strategyIds.length)}⁩ استراتژی`);
   else scope.push('هر استراتژی');
   scope.push(rule?.baseIns?.length ? `⁨${fa(rule.baseIns.length)}⁩ نماد` : 'هر نماد');
-  const body = (rule?.conditions || []).map(conditionNote).join(' و ');
+  const body = (rule?.conditions || []).map(conditionNote).join(` ${matchJoin(rule?.match)} `);
   return `${scope.join(' · ')} — ${body}`;
 }
 
@@ -290,7 +341,12 @@ export function checkRule(rule, snapshot, prev = null, { previewCross = false } 
   const parts = (rule?.conditions || []).map((condition) => ({
     condition, ...checkCondition(condition, snapshot, prev, { previewCross }),
   }));
-  return { held: parts.length > 0 && parts.every((part) => part.held), parts };
+  if (!parts.length) return { held: false, parts, match: watchMatch(rule?.match) };
+  const match = watchMatch(rule?.match);
+  // در حالت «یا» هم همهٔ شرط‌ها سنجیده می‌شوند و `parts` کامل می‌ماند: متنِ
+  // هشدار باید بگوید **کدام** شرط زد، نه فقط اینکه قاعده زد.
+  const held = match === 'any' ? parts.some((part) => part.held) : parts.every((part) => part.held);
+  return { held, parts, match };
 }
 
 /**
@@ -330,9 +386,28 @@ export function evaluateWatch({ rules = [], snapshots = [], prev = {}, nowMs = 0
       });
     }
   }
-  const nextRules = rules.map((rule) => (touched.has(rule.id)
-    ? { ...rule, lastFiredAt: touched.get(rule.id), firedCount: (rule.firedCount || 0) + 1 }
-    : rule));
+  // ═══ چرا تاریخچه یک ردیف به‌ازای هر **شلیک** است، نه هر انطباق ═══
+  //
+  // یک شلیک می‌تواند ده ترکیب را با هم منطبق کند. ده ردیفِ هم‌زمان،
+  // تاریخچه را با یک رویداد پر می‌کند و سقفِ چهل‌تایی را در چهار شلیک
+  // می‌بلعد. پس یک ردیف، با شمارِ انطباق و نمایندهٔ نخستش.
+  const nextRules = rules.map((rule) => {
+    if (!touched.has(rule.id)) return rule;
+    const at = touched.get(rule.id);
+    const hits = matched.get(rule.id) || [];
+    const first = hits[0]?.snapshot || {};
+    return {
+      ...rule,
+      lastFiredAt: at,
+      firedCount: (rule.firedCount || 0) + 1,
+      history: normalizeHistory([{
+        at, hits: hits.length,
+        comboKey: first.key || '', label: first.label || '',
+        baseName: first.baseName || '',
+        basePrice: num(first.basePrice, NaN),
+      }, ...(rule.history || [])]),
+    };
+  });
   const nextPrev = { ...prev };
   for (const snapshot of snapshots) nextPrev[snapshot.key] = snapshot;
   return { fired, matched, rules: nextRules, prev: nextPrev };
@@ -490,4 +565,46 @@ export function ruleScopeUnion(rules = []) {
     if (!wantDefs.length) anyDef = true; else for (const one of wantDefs) strategyIds.add(one);
   }
   return { baseIns: [...baseIns], strategyIds: [...strategyIds], anyBase, anyDef };
+}
+
+/**
+ * خلاصهٔ تاریخچهٔ یک قاعده — «مفید بود یا پرسروصدا».
+ *
+ * ═══ چرا «قیمت پایه بعدش چه کرد» ═══
+ *
+ * شمارِ شلیک به‌تنهایی هیچ نمی‌گوید: قاعده‌ای که سی بار زده می‌تواند سی
+ * فرصت داده باشد یا سی بار مزاحم شده باشد. تنها چیزی که این دو را جدا
+ * می‌کند، حرکتِ پس از هشدار است.
+ *
+ * `basePriceNow` از فراخوان می‌آید چون قیمتِ امروز دادهٔ زنده است و این
+ * ماژول شبکه ندارد. بی آن، ستونِ حرکت **ساخته نمی‌شود** — نه اینکه صفر
+ * شود. و مقایسه فقط برای ردیف‌هایی است که قیمتِ لحظهٔ شلیکشان ثبت شده؛
+ * ردیف‌های قدیمی‌ترِ بی‌قیمت در `withoutPrice` شمرده می‌شوند.
+ */
+export function watchHistorySummary(rule, { basePriceNow = NaN } = {}) {
+  const list = normalizeHistory(rule?.history);
+  const now = num(basePriceNow, NaN);
+  const priced = list.filter((item) => item.basePrice > 0);
+  const moves = Number.isFinite(now) && now > 0
+    ? priced.map((item) => ({ ...item, movePct: ((now / item.basePrice) - 1) * 100 }))
+    : [];
+  const up = moves.filter((item) => item.movePct > 0).length;
+  const down = moves.filter((item) => item.movePct < 0).length;
+  return {
+    count: list.length,
+    totalFired: Math.max(0, Math.trunc(num(rule?.firedCount, 0))),
+    lastAt: list[0]?.at || 0,
+    rows: moves.length ? moves : list,
+    moveKnown: moves.length > 0,
+    withoutPrice: list.length - priced.length,
+    up, down,
+    medianMovePct: moves.length ? median(moves.map((item) => item.movePct)) : NaN,
+  };
+}
+
+function median(values = []) {
+  const sorted = [...values].sort((a, b) => a - b);
+  if (!sorted.length) return NaN;
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }

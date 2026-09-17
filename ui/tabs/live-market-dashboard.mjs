@@ -59,7 +59,8 @@ const timeLabel = (value) => {
 // و دو تکراری آشکار — «لبخند تلاطم» تابلو که عیناً نمای تب تلاطم است، و
 // «خالص وسعت» که همان روند درصد مثبت و منفی است با مقیاس دیگر.
 //
-// ۶۸ نما شد ۵۰. هیچ سؤالی بی‌جواب نماند؛ فقط هر سؤال یک جواب دارد.
+// ۶۸ نما شد ۵۰. هیچ سؤالی بی‌جواب نماند؛ فقط هر سؤال یک جواب دارد. (بعدها
+// سه نما اضافه شد که سؤالِ تازه داشتند، نه جوابِ دوم برای سؤالی قدیمی.)
 //
 // ستون چهارم (`kind`) شکل نما را می‌گوید و پنجمی، منبع ردیف.
 const pulseViews = [
@@ -92,6 +93,8 @@ const liquidityViews = [
   ['max-pain-curve', 'منحنی درد سررسید انتخابی', 'pain-curve', 'contracts', 'oi'],
   ['liquidity-heatmap', 'گرمانمای سررسید × فاصله اعمال', 'heatmap-value', 'contracts', 'value'],
   ['spread-table', 'فاصله مظنه دوطرفه', 'table-asc', 'contracts', 'spreadPct'],
+  ['spread-rank-table', 'تنگ‌ترین‌های تابلوی امروز', 'table-asc', 'contracts', 'spreadRankPct'],
+  ['expiry-traded-pct', 'نرخ معامله‌شدن هر سررسید', 'bar', 'expiries', 'tradedPct'],
   ['value-distribution', 'توزیع ارزش روی فاصله اعمال', 'histogram-money', 'contracts', 'value'],
   ['liquidity-tape', 'مسیر ارزش قرارداد', 'tape', 'contracts', 'value'],
 ];
@@ -178,6 +181,8 @@ const METRICS = {
   oiChangePct: ['تغییر موقعیت باز ٪', (value) => `${fmt.pct(value)}٪`],
   ivPct: ['تلاطم ضمنی ٪', (value) => `${fmt.pct(value)}٪`],
   spreadPct: ['فاصله مظنه ٪', (value) => `${fmt.pct(value)}٪`],
+  spreadRankPct: ['صدک فاصله مظنه در تابلوی امروز', (value) => `${fmt.pct(value)}٪`],
+  tradedPct: ['قرارداد معامله‌شده ٪', (value) => `${fmt.pct(value)}٪`],
   putCallOi: ['نسبت OI پوت به کال', fmt.num], putCallVolume: ['نسبت حجم پوت به کال', fmt.num],
   breakevenGapPct: ['فاصله تا سربه‌سر ٪', (value) => `${fmt.pct(value)}٪`],
   bandPct: ['باند سربه‌سر ٪ قیمت جاری', (value) => `${fmt.pct(value)}٪`],
@@ -226,6 +231,11 @@ const COLS_CONTRACT = [
   col('askQty', 'حجم عرضه', 'int', { group: 'مظنه' }),
   col('mid', 'میانه مظنه', 'money', { group: 'مظنه' }),
   col('spreadPct', 'فاصله مظنه ٪', 'pct', { group: 'مظنه', base: true, heat: 'loss' }),
+  // صدک، نه تاریخچه: دفترِ سفارشِ گذشته ذخیره نمی‌شود، پس «اسپرد امروز در
+  // برابر عادتِ خودِ این قرارداد» ساختنی نیست. آنچه ساختنی است، جای همین
+  // قرارداد در میان تابلوی امروز است — و برای تصمیمِ «اجرایش گران است یا
+  // نه» همان‌قدر کار می‌کند.
+  col('spreadRankPct', 'صدک فاصله مظنه ٪', 'pct', { group: 'مظنه', heat: 'loss' }),
   col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),

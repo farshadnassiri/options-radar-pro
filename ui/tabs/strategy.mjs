@@ -21,6 +21,8 @@ import { gregorianToJalali } from '/core/jalali.mjs';
 import { radarProfile, applyRadarFilters, filterLimit, isFlagFilter } from '/core/strategy-radar.mjs';
 import { makeTable, funnelBar, changedIds } from '/ui/table.mjs';
 import { fmt, faNum, faDigits, coverageInfo, signTone, ltr, offsetCell } from '/ui/fmt.mjs';
+import { ivByRate } from '/core/iv-rate-scan.mjs';
+import { ivRateTableHtml } from '/ui/iv-rate-view.mjs';
 import { makePicker } from '/ui/picker.mjs';
 import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
@@ -629,6 +631,13 @@ export async function mount(root, { tab, state, api }) {
         </table>
         ${past ? `<p class="note" style="color:var(--warn)">این ردیف از رصد تاریخیِ ${faDigits(historyDateLabel(r.historyDate))} است. دفترِ سفارشِ آن روز وجود ندارد، پس میانه، اسپرد، افت مظنه و عمق برایش ساخته نمی‌شوند — نه اینکه صفر باشند.</p>` : ''}
         <div id="manual-out"></div>
+        <!-- اثر نرخ بدون ریسک بر تلاطم — قلمِ بازِ «نرخ سراسری ۳۰٪».
+             تا امروز ستونِ خالیِ تلاطم فقط «—» بود و «—» هزار علت دارد. -->
+        <details class="iv-rate" id="iv-rate">
+          <summary>چرا تلاطم این پاها خالی است؟ — اثر نرخ بدون ریسک</summary>
+          <div class="field"><label for="iv-rate-leg">پا</label><select id="iv-rate-leg"></select></div>
+          <div id="iv-rate-out"></div>
+        </details>
       </div>
       <div>
         <dl class="kv">
@@ -785,6 +794,39 @@ export async function mount(root, { tab, state, api }) {
         <p class="note"${cmp.anyManual ? ' style="color:var(--warn)"' : ''}>${manualNote(cmp)}</p>`;
     }
     drawManual();
+
+    // ——— اثر نرخ بدون ریسک ———
+    //
+    // فقط پاهای اختیار: پای سهم پایه تلاطم ضمنی ندارد و گذاشتنش در کشویی
+    // یعنی گزینه‌ای که انتخابش یک جدول خالی می‌دهد.
+    const ivLegs = r.legPrices
+      .map((leg, at) => ({ leg, at }))
+      .filter(({ leg }) => leg.kind === 'call' || leg.kind === 'put');
+    const ivSelect = root.querySelector('#iv-rate-leg');
+    const ivOut = root.querySelector('#iv-rate-out');
+    if (!ivLegs.length) {
+      root.querySelector('#iv-rate').style.display = 'none';
+    } else {
+      root.querySelector('#iv-rate').style.display = '';
+      ivSelect.innerHTML = ivLegs.map(({ leg, at }) => `<option value="${at}">${leg.side === 'sell' ? 'فروش' : 'خرید'} ${leg.kind === 'call' ? 'کال' : 'پوت'} ${fmt.money(leg.strike)}</option>`).join('');
+      const drawIvRate = () => {
+        const at = Number(ivSelect.value) || ivLegs[0].at;
+        const leg = r.legPrices[at];
+        if (!leg) { ivOut.innerHTML = ''; return; }
+        const scan = ivByRate({
+          kind: leg.kind, price: leg.price, spot: r.S, strike: leg.strike,
+          days: Number.isFinite(leg.days) ? leg.days : r.days,
+          yearDays: s().dayCountYear, divYield: s().divYield, ivLo: s().ivLo, ivHi: s().ivHi,
+        });
+        ivOut.innerHTML = ivRateTableHtml(scan, {
+          currentRate: s().rFree,
+          legLabel: `${leg.side === 'sell' ? 'فروش' : 'خرید'} ${leg.kind === 'call' ? 'کال' : 'پوت'} ${fmt.money(leg.strike)}`,
+        });
+      };
+      ivSelect.addEventListener('change', drawIvRate);
+      drawIvRate();
+    }
+
     for (const input of root.querySelectorAll('.manual-price')) {
       input.addEventListener('input', (event) => {
         const at = Number(event.target.dataset.leg);

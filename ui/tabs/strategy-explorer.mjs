@@ -62,6 +62,8 @@ export async function mount(root, { state, api }) {
           <input type="search" id="sx-q" autocomplete="off"
             placeholder="نام استراتژی یا برابر فارسی‌اش… ( / )"
             aria-label="جست‌وجوی استراتژی">
+          <label class="check" for="sx-feasible"><input type="checkbox" id="sx-feasible">
+            فقط اجراپذیرها</label>
           <span class="sx-count" id="sx-count"></span>
         </div>
       </div>
@@ -80,6 +82,15 @@ export async function mount(root, { state, api }) {
   const noneNote = $('sx-none');
 
   let query = '';
+  // ═══ چرا ستارهٔ کنارِ نام کافی نبود ═══
+  //
+  // ساختارِ اجراناپذیر از قبل `⃰` می‌گرفت، ولی **در ترتیبِ فهرست با
+  // اجراپذیرها قاطی بود**. کاربری که دنبال چیزی برای امروز می‌گشت، سه
+  // دکمهٔ اول را می‌زد و هر سه به صفحه‌ای می‌رسیدند که می‌گفت «در تابلو
+  // ممکن نیست». حالا همیشه ته گروه می‌نشینند، و با این تیک کلاً کنار
+  // می‌روند. حذفِ همیشگی‌شان درست نبود: دانستنِ اینکه چنین ساختاری هست و
+  // چرا نمی‌شود، خودش خبر است.
+  let onlyFeasible = false;
   let pickedId = null;
   let dispose = null;
   // شمارندهٔ نسل: کلیک روی استراتژی دوم پیش از تمام شدنِ import/mount اولی،
@@ -90,7 +101,11 @@ export async function mount(root, { state, api }) {
 
   const visible = (key) => {
     const q = normFa(query).toLowerCase();
-    return CATALOG.filter((d) => d.group === key && (!q || haystack(d).includes(q)));
+    return CATALOG
+      .filter((d) => d.group === key && (!q || haystack(d).includes(q)))
+      .filter((d) => !onlyFeasible || d.feasible)
+      // ترتیب پایدار است: میان دو هم‌وضعیت، ترتیبِ خودِ کاتالوگ می‌ماند.
+      .sort((a, b) => (a.feasible === b.feasible ? 0 : (a.feasible ? -1 : 1)));
   };
 
   async function showStrategy(def) {
@@ -147,7 +162,8 @@ export async function mount(root, { state, api }) {
         host.appendChild(b);
       }
     }
-    $('sx-count').textContent = query
+    const filtered = query || onlyFeasible;
+    $('sx-count').textContent = filtered
       ? `${faDigits(shown)} از ${faDigits(CATALOG.length)}`
       : `${faDigits(CATALOG.length)} استراتژی`;
     noneNote.hidden = shown > 0;
@@ -164,14 +180,23 @@ export async function mount(root, { state, api }) {
   }));
   let bar = mountSubtabs($('sx-tabs'), tabsOf(), { root });
 
-  $('sx-q').addEventListener('input', (e) => {
-    query = e.target.value;
+  // برچسبِ گروه‌ها شمارِ همان گروه را دارد و با هر پالایه عوض می‌شود، پس
+  // `mountSubtabs` نوار را واقعاً از نو می‌سازد. تبِ فعلی نگه داشته می‌شود
+  // تا کاربر با هر حرفِ تایپ‌شده سر از گروه اول درنیاورد.
+  const repaint = () => {
     paintLists();
-    // برچسب‌ها عوض شده‌اند، پس `mountSubtabs` نوار را واقعاً از نو می‌سازد.
-    // تبِ فعلی را نگه می‌داریم تا کاربر با هر حرفِ تایپ‌شده سر از گروه اول
-    // درنیاورد.
     const keep = bar?.current;
     bar = mountSubtabs($('sx-tabs'), tabsOf(), { root, initial: keep }) || bar;
+  };
+
+  $('sx-feasible').addEventListener('change', (e) => {
+    onlyFeasible = e.target.checked;
+    repaint();
+  });
+
+  $('sx-q').addEventListener('input', (e) => {
+    query = e.target.value;
+    repaint();
   });
 
   return () => {

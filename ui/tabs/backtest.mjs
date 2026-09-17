@@ -17,6 +17,8 @@ import {
   annotateDailyGreeks,
 } from '/core/leg-iv.mjs';
 import { downloadBacktestExcel } from '/ui/backtest-export.mjs';
+import { addRun, makeRunRecord } from '/core/backtest-runs.mjs';
+import { readRuns, writeRuns, runsListHtml, runsCompareHtml } from '/ui/backtest-runs-view.mjs';
 import { mountSubtabs } from '/ui/subtabs.mjs';
 import {
   ANALYSIS_PANELS, analysisMarkup, paintAnalysis, installAnalysisControls,
@@ -109,6 +111,21 @@ export async function mount(root, { state }) {
     <div id="bt-range" class="step-first" data-step="۱"></div>
     <div class="backtest-form"><label class="step-next" data-step="۲">نماد پایه<select id="bt-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label>استراتژی<select id="bt-strategy"></select></label><label>تعداد واحد<input id="bt-units" type="number" min="1" max="10000" step="1" value="${Math.max(1, state.settings.qtyDefault || 1)}"></label><button type="button" class="primary" id="bt-load">دریافت روزهای قابل اجرا</button></div>
   </section>
+  <!-- بایگانی اجراها. بیرون از «بت-ورک» است و این جایش تصادفی نیست: کارش
+       مقایسهٔ اجراهای **گذشته** است و آن‌ها ربطی به نمادی که همین حالا
+       انتخاب شده ندارند، پس نباید پشت «دریافت تاریخچه» قفل بماند. -->
+  <section class="card" id="bt-runs-card">
+    <div class="section-head"><div><p class="eyebrow">مقایسهٔ دو تنظیم</p><h2>بایگانی اجراها</h2></div>
+      <div class="backtest-head-actions">
+        <input type="text" id="bt-run-label" placeholder="یادداشت این اجرا — اختیاری" style="min-width:16rem">
+        <button type="button" class="ghost" id="bt-run-save">بایگانی این اجرا</button>
+        <span id="bt-run-msg" role="status" aria-live="polite"></span>
+      </div></div>
+    <div id="bt-runs-list"></div>
+    <div class="bar" id="bt-runs-pick" style="flex-wrap:wrap;gap:12px;margin-top:10px"></div>
+    <div id="bt-runs-compare"></div>
+  </section>
+
   <section id="bt-work" hidden>
     <nav id="bt-subtabs"></nav>
     <div class="bt-panel" data-panel="bt-setup">
@@ -119,6 +136,7 @@ export async function mount(root, { state }) {
     <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت پاها در روز خروج</h2></div><span>همان قراردادهای ترکیب</span></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
     <section class="card backtest-runbar"><p id="bt-run-note">برای هر ثانیهٔ معامله بین ۹:۰۰ تا ۱۲:۳۰، آخرین قیمت مشاهده‌شده تمام پاها روی یک خط زمانی مشترک قرار می‌گیرد. این ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.</p><div class="backtest-run-actions"><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button><button type="button" class="ghost" id="bt-live">رصد زنده موقعیت از ورود تاریخی</button></div></section>
     </div>
+
     <section id="bt-result" hidden>
       <div class="bt-panel" data-panel="bt-overview" hidden>
       <section class="card backtest-overview"><div class="section-head"><div><p class="eyebrow">گام اول نتیجه</p><h2>عملکرد کلی این بازه</h2></div><span id="bt-overview-range">—</span></div>
@@ -1576,6 +1594,73 @@ export async function mount(root, { state }) {
     if (row && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDayIntraday(Number(row.dataset.day)); }
   });
   $('bt-tf-run').addEventListener('click', runTimeframe);
+
+  // ——————————————— بایگانی اجراها ———————————————
+  //
+  // ورودی‌ها و سرخطِ نتیجه ذخیره می‌شوند، نه مسیرِ روزانه: مسیر هزاران ردیف
+  // است و اگر ذخیره می‌شد، دو نسخه از یک حقیقت می‌داشتیم که با عوض شدنِ
+  // موتور از هم واگرا می‌شوند. برای مسیر کامل، همان خروجی اکسل هست.
+  let runs = readRuns();
+  let comparePick = ['', ''];
+
+  function paintRuns() {
+    $('bt-runs-list').innerHTML = runsListHtml(runs);
+    const options = (selected) => `<option value="">— انتخاب کن —</option>`
+      + runs.map((run) => `<option value="${run.id}" ${run.id === selected ? 'selected' : ''}>${escapeHtml(runLabelOf(run))}</option>`).join('');
+    $('bt-runs-pick').innerHTML = runs.length >= 2
+      ? `<div class="field"><label for="bt-run-a">اجرای اول</label><select id="bt-run-a">${options(comparePick[0])}</select></div>
+         <div class="field"><label for="bt-run-b">اجرای دوم</label><select id="bt-run-b">${options(comparePick[1])}</select></div>`
+      : '';
+    const a = runs.find((run) => run.id === comparePick[0]);
+    const b = runs.find((run) => run.id === comparePick[1]);
+    $('bt-runs-compare').innerHTML = runs.length >= 2 && a && b ? runsCompareHtml(a, b) : '';
+    for (const id of ['bt-run-a', 'bt-run-b']) {
+      const select = $(id);
+      if (!select) continue;
+      select.addEventListener('change', () => {
+        comparePick = [$('bt-run-a')?.value || '', $('bt-run-b')?.value || ''];
+        paintRuns();
+      });
+    }
+    for (const button of $('bt-runs-list').querySelectorAll('[data-run-drop]')) {
+      button.addEventListener('click', () => {
+        runs = runs.filter((run) => run.id !== button.dataset.runDrop);
+        writeRuns(runs);
+        paintRuns();
+      });
+    }
+  }
+
+  const runLabelOf = (run) => [run.uaName, run.strategyName || run.comboName,
+    new Date(run.at).toLocaleString('fa-IR')].filter(Boolean).join(' · ');
+  const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+  }[char]));
+
+  $('bt-run-save').addEventListener('click', () => {
+    const msg = $('bt-run-msg');
+    const record = makeRunRecord({
+      at: Date.now(),
+      uaName: ua?.name || '',
+      strategyName: strategySelect.selectedOptions[0]?.textContent || '',
+      comboName: $('bt-combo').selectedOptions[0]?.textContent || '',
+      from: replay?.rows?.[0]?.date || 0,
+      to: replay?.rows?.at(-1)?.date || 0,
+      entryBasis: entryRail.dataset.value, exitBasis: exitRail.dataset.value,
+      units: Math.max(1, Math.trunc(Number($('bt-units').value) || 1)),
+      replay, settings: state.settings, note: $('bt-run-label').value,
+    });
+    // اجرایی بی روزِ معتبر چیزی برای مقایسه ندارد؛ رکوردِ نصفه ساخته نمی‌شود.
+    if (!record) { msg.textContent = 'هنوز اجرایی با روز معتبر نداری که بایگانی شود.'; return; }
+    runs = addRun(runs, record);
+    msg.textContent = writeRuns(runs)
+      ? 'بایگانی شد.'
+      : 'حافظهٔ مرورگر در دسترس نیست؛ این اجرا فقط تا بستن صفحه می‌ماند.';
+    $('bt-run-label').value = '';
+    paintRuns();
+  });
+
+  paintRuns();
 
   /**
    * فایل جامع گام سوم.

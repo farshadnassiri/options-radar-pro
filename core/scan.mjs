@@ -83,6 +83,29 @@ export function unexecutableReason(row) {
   return 'noDepth';
 }
 
+/**
+ * چرا این استراتژی برای این نماد **هیچ** ردیفی نساخت.
+ *
+ * ═══ چرا لازم شد ═══
+ *
+ * فهرستِ «برترین موقعیت‌ها» ردیف‌های همهٔ استراتژی‌ها را با هم رتبه می‌کند.
+ * استراتژی‌ای که هیچ ردیفی نمی‌سازد، در آن فهرست **دیده نمی‌شود** — نه به
+ * این معنی که بد است، به این معنی که اصلاً حرفی نزده. و کاربر تفاوتِ «این
+ * ساختار امروز جواب نمی‌دهد» با «این ساختار امروز قیمتی برای سنجیده‌شدن
+ * نداشت» را از یک سطرِ غایب نمی‌فهمد.
+ *
+ * ترتیبِ شرط‌ها همان ترتیبِ `unexecutableReason` است: تنظیمِ کاربر بر
+ * نبودِ داده می‌چربد، چون اولی یک کلیک اصلاح می‌شود و دومی نمی‌شود.
+ */
+export function strategyMissReason(funnel = {}) {
+  if (!funnel.built) return 'برای این نماد ترکیبی از این ساختار ساخته نشد — قیمت اعمال یا سررسید لازمش در تابلو نیست';
+  if (funnel.refBasis > 0) return 'مبنای قیمت تو مرجع است، پس هیچ ردیفی اجرایی شمرده نشد';
+  if (funnel.noQuote > 0) return 'پای این ترکیب‌ها مظنهٔ قابل اجرا ندارد';
+  if (funnel.noDepth > 0) return 'عمق دفتر برای حجم خواسته‌شده کافی نبود';
+  if (funnel.filtered > 0) return 'همهٔ ترکیب‌ها به فیلترهای خودت خوردند';
+  return 'ردیفی نماند، بی آنکه سطلی پر شده باشد';
+}
+
 export function emptyFunnel() {
   return { built: 0, noQuote: 0, refBasis: 0, noDepth: 0, filtered: 0, kept: 0, blockedExpiry: 0, evaluated: 0, outOfWindow: 0 };
 }
@@ -326,21 +349,36 @@ export function scanAll({ defs, chain, uaKeys, settings, sigmaByUa = {}, sigmaSo
   // پیدا شد» را نمی‌گوید، «چند ترکیب از برش جان به در برد» را می‌گوید. با
   // topN=۵۰ و ۳۱ استراتژی، ۴۵۹۳ ترکیب «۳۲۸۸» گزارش می‌شد.
   let total = 0;
+  // ═══ چرا «بهترینِ هر ساختار» اینجا ساخته می‌شود، نه از خروجی ═══
+  //
+  // خروجیِ این تابع به `limit` بریده می‌شود. اگر بهترینِ هر ساختار از همان
+  // فهرستِ بریده درمی‌آمد، ساختاری که بهترین ردیفش رتبهٔ پنجاه‌ویکم بود
+  // کاملاً ناپدید می‌شد — و کاربر آن را «این ساختار امروز چیزی ندارد»
+  // می‌خواند، در حالی که داشت. `res.rows` هر استراتژی از قبل مرتب است، پس
+  // عضو صفرش واقعاً بهترینِ همان استراتژی است.
+  const byStrategy = [];
   for (const def of defs) {
     const res = scan({ def, chain, uaKeys, settings, sigmaByUa, sigmaSourceByUa, qty });
     for (const k of FUNNEL_KEYS) funnel[k] += res.funnel[k] || 0;
     total += res.total;
     rows.push(...res.rows);
+    byStrategy.push({
+      id: def.id, name: def.name, group: def.group,
+      best: res.rows[0] || null,
+      count: res.total,
+      funnel: res.funnel,
+      reason: res.rows.length ? '' : strategyMissReason(res.funnel),
+    });
   }
 
   const by = settings.rankBy || 'retMonthPct';
-  rows.sort((a, b) => {
-    const xf = Number.isFinite(a[by]) ? a[by] : -Infinity;
-    const yf = Number.isFinite(b[by]) ? b[by] : -Infinity;
-    return yf - xf;
-  });
+  const rank = (row) => (row && Number.isFinite(row[by]) ? row[by] : -Infinity);
+  rows.sort((a, b) => rank(b) - rank(a));
+  // ساختارِ بی‌ردیف ته فهرست می‌نشیند، نه اینکه حذف شود: «حرفی نزد» خودش
+  // خبر است و جایش در همان جدول است، با علتش.
+  byStrategy.sort((a, b) => rank(b.best) - rank(a.best));
 
-  return { rows: rows.slice(0, limit), total, funnel, ms: Date.now() - t0 };
+  return { rows: rows.slice(0, limit), byStrategy, rankBy: by, total, funnel, ms: Date.now() - t0 };
 }
 
 export { FUNNEL_KEYS };
