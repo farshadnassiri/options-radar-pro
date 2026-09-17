@@ -4,7 +4,7 @@
 
 import { check, group, readSrc } from '../harness.mjs';
 import {
-  STRATEGY_LINK_TARGETS, canHandoff, goHandoff, handoffEntryDate, handoffPlan,
+  STRATEGY_LINK_TARGETS, canAddPosition, canHandoff, goHandoff, handoffEntryDate, handoffPlan,
   strategyLinkPlan, strategyLinkTargets, watchConditionsFrom,
 } from '../../ui/handoff.mjs';
 import { normalizeCondition } from '../../core/watch-rule.mjs';
@@ -112,9 +112,14 @@ group('۵۱. نوار پیوند به بقیهٔ برنامه');
   const rowLink = {
     uaIns: '77', underlying: 'اهرم', legsText: '+۱ کال ۲۰۰۰۰  −۱ کال ۲۲۰۰۰',
     __legs: [
-      { kind: 'call', side: 'buy', strike: 20000, ins: 'c1' },
-      { kind: 'call', side: 'sell', strike: 22000, ins: 'c2' },
+      { kind: 'call', side: 'buy', ratio: 2, size: 1000, strike: 20000, price: 1800, ins: 'c1' },
+      { kind: 'call', side: 'sell', ratio: 2, size: 1000, strike: 22000, price: 900, ins: 'c2' },
     ],
+    legPrices: [
+      { endDate: 20260920, days: 33 },
+      { endDate: 20260920, days: 33 },
+    ],
+    Sclose: 9400,
     retMonthPct: 12.5, retMaxPct: 30, rewardRisk: 2.5,
     // زیان در موتور **اندازه** است (`analyzePayoff().maxLoss` مثبت
     // برمی‌گردد و برای فروشِ برهنه `Infinity` می‌شود).
@@ -130,22 +135,45 @@ group('۵۱. نوار پیوند به بقیهٔ برنامه');
   // «رصد یونانی و تلاطم» و «رادار فاصله» به خواستهٔ صاحب پروژه از برنامه
   // برداشته شدند، پس مقصدشان هم رفت: دکمه‌ای که به تبی برسد که دیگر در
   // مسیریاب نیست، هیچ کاری نمی‌کند و همان «دکمهٔ بی‌مقصد» است.
-  const ACCEPTING = ['backtest', 'watchtower'];
+  const ACCEPTING = ['backtest', 'watchtower', 'positions'];
   check('هر مقصدِ فهرست، تبی است که نقشه را می‌پذیرد',
     STRATEGY_LINK_TARGETS.every((item) => ACCEPTING.includes(item.to)));
   check('و هیچ مقصدی به تبِ حذف‌شده اشاره نمی‌کند',
     !STRATEGY_LINK_TARGETS.some((item) => ['greeks-watch', 'spread-radar'].includes(item.to)));
-  check('ردیفِ ساختارِ فاصله‌دار، هر دو مقصد را می‌گیرد',
-    targets.join(',') === 'backtest,watchtower');
+  check('ردیفِ ساختارِ فاصله‌دار، هر سه مقصد را می‌گیرد',
+    targets.join(',') === 'backtest,watchtower,positions', targets.join(','));
   // پذیرش، ادعای متنی نیست ولی تنها چیزی است که بی مرورگر سنجیدنی است:
   // هر تبِ مقصد باید در منبعش شناسهٔ خودش را از `state.handoff` بخواند.
   for (const [file, to] of [
     ['../ui/tabs/backtest.mjs', 'backtest'],
     ['../ui/tabs/watchtower.mjs', 'watchtower'],
+    ['../ui/tabs/positions.mjs', 'positions'],
   ]) {
     check(`تبِ «${to}» نقشهٔ خودش را از state برمی‌دارد`,
       readSrc(file).includes(`state.handoff?.to === '${to}'`));
   }
+  // ═══ چرا «افزودن به موقعیت‌های من» شرطِ سخت‌تری دارد ═══
+  //
+  // بک‌تست فقط شناسه می‌خواهد تا ترکیب را دوباره پیدا کند؛ موقعیتِ ثبت‌شده
+  // قیمتِ ورودِ هر پا را هم می‌خواهد، چون بازده و وجه تضمینِ فردا از همان
+  // یک عدد ساخته می‌شوند.
+  check('ردیف بی‌قیمت، دکمهٔ افزودن به موقعیت‌ها نمی‌گیرد',
+    !canAddPosition({ ...rowLink, __legs: [{ kind: 'call', side: 'buy', ins: 'c1', price: 0 }] }));
+  check('ردیف قیمت‌دار با شناسهٔ کامل، می‌گیرد', canAddPosition(rowLink));
+
+  // نسبتِ `__legs` در تعداد قرارداد ضرب شده؛ موقعیت تعداد را جدا نگه
+  // می‌دارد و `markToMarket` خودش ضرب می‌کند. اگر نسبتِ ضرب‌شده منتقل شود،
+  // تعداد دو بار اعمال می‌شود و هر عدد پولیِ موقعیت دو برابر می‌شود.
+  const posPlan = strategyLinkPlan(rowLink, { to: 'positions', strategyId: 'bull-call-spread', strategyName: 'بول کال', units: 2 });
+  check('نقشهٔ موقعیت، نسبت هر پا را به مقیاس یک دست برمی‌گرداند',
+    posPlan.legs.map((leg) => leg.ratio).join(',') === '1,1', posPlan.legs.map((leg) => leg.ratio).join(','));
+  check('تعداد قرارداد جدا منتقل می‌شود', posPlan.qty === 2, `${posPlan.qty}`);
+  check('قیمت ورود هر پا همراه نقشه می‌رود — ورودیِ مقصد است، نه نتیجه',
+    posPlan.legs.map((leg) => leg.price).join(',') === '1800,900');
+  check('سررسید واقعی هر پا از legPrices می‌آید، نه از تفریق روز',
+    posPlan.legs.every((leg) => leg.expiry === 20260920));
+  check('مبنای پایه، قیمت پایانی است نه آخرین', posPlan.entrySpot === 9400, `${posPlan.entrySpot}`);
+
   check('ردیف بی‌شناسهٔ قرارداد، مقصدِ بک‌تست نمی‌گیرد',
     !strategyLinkTargets({ ...rowLink, __legs: [{ kind: 'call', side: 'buy', ins: '' }] },
       { strategyId: 'bull-call-spread' }).some((x) => x.to === 'backtest'));
