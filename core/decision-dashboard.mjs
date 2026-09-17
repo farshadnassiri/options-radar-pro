@@ -87,6 +87,23 @@ function finishAggregate(row) {
   return out;
 }
 
+/**
+ * صدکِ یک اسپرد در میان اسپردهای مرتب‌شدهٔ امروز.
+ *
+ * تعریفش «چند درصدِ تابلو تنگ‌تر از این است» — پس صفر یعنی تنگ‌ترین. با
+ * یک نمونه، صدک معنا ندارد و `NaN` می‌شود: «تنگ‌ترینِ یک قرارداد» ادعایی
+ * دربارهٔ بازار نیست.
+ */
+export function spreadPercentile(sorted = [], value) {
+  if (!Number.isFinite(value) || sorted.length < 2) return NaN;
+  let below = 0;
+  for (const item of sorted) {
+    if (item < value) below += 1;
+    else break;
+  }
+  return (below / sorted.length) * 100;
+}
+
 /** یک عکس فشرده و قابل سریال‌سازی برای همه دامنه‌های داشبورد. */
 export function decisionDashboardSnapshot(rows, settings = {}) {
   const chain = buildChain(rows || []);
@@ -148,6 +165,26 @@ export function decisionDashboardSnapshot(rows, settings = {}) {
       }
       expiryMap.set(expiryKey, finishAggregate(expiryAgg));
     }
+  }
+
+  // ═══ اسپردِ امروز، نسبت به عادتِ **تابلوی امروز** ═══
+  //
+  // پرسش طبیعی این است: «این اسپرد نسبت به گذشتهٔ خودِ همین قرارداد تنگ
+  // است یا گشاد؟» جوابش را نمی‌شود داد و این محدودیت باید صریح نوشته شود:
+  // دفترِ سفارشِ روزهای گذشته **ذخیره نمی‌شود** — بالادست فقط پایانی و
+  // حجم و موقعیت باز را برای گذشته می‌دهد. ساختنِ «میانگینِ تاریخیِ اسپرد»
+  // از هر چیز دیگری، عددِ ساختگی است.
+  //
+  // آنچه **می‌شود** گفت و به همان اندازه برای تصمیم به کار می‌آید: جای این
+  // قرارداد در میان همهٔ قراردادهای دوطرفهٔ امروز. صدکِ ۱۰ یعنی «از ۹۰٪
+  // تابلو تنگ‌تر»، صدکِ ۹۵ یعنی «از ۹۵٪ تابلو گشادتر». قراردادِ بی‌دفترِ
+  // دوطرفه صدک نمی‌گیرد؛ نداشتن اسپرد، اسپردِ بد نیست.
+  const spreadSorted = contracts
+    .map((contract) => contract.spreadPct)
+    .filter((value) => Number.isFinite(value))
+    .sort((a, b) => a - b);
+  for (const contract of contracts) {
+    contract.spreadRankPct = spreadPercentile(spreadSorted, contract.spreadPct);
   }
 
   const expiries = [...expiryMap.values()].sort((a, b) => b.value - a.value || a.days - b.days);
