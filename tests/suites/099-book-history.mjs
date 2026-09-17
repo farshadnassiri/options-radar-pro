@@ -124,8 +124,12 @@ group('۹۸. دفتر سفارش تاریخی');
     normalizeBookEvents([{ hEven: 90000, number: 9, pMeDem: 1 }, { hEven: 90000, number: 0, pMeDem: 1 }]).length === 0);
 
   // ——— دروازهٔ مسیرهای تاریخ‌دار ———
-  check('هشت نوع تاریخی در جدول هست',
-    HISTORICAL_KINDS.length === 8 && HISTORICAL_KINDS.includes('book') && HISTORICAL_KINDS.includes('threshold'));
+  check('نه نوع تاریخی در جدول هست',
+    HISTORICAL_KINDS.length === 9 && HISTORICAL_KINDS.includes('book') && HISTORICAL_KINDS.includes('threshold'));
+  // مسیر دومِ ریزمعامله فقط پرچمِ آخرش فرق دارد و فقط وقتی به کار می‌رود
+  // که اولی فهرست خالی برگرداند — پاسخِ خالی نباید «بدون معامله» خوانده شود.
+  check('مسیر دوم ریزمعامله همان است با پرچم false',
+    historicalPath('tradesAlt', '123456', '20260802') === '/Trade/GetTradeHistory/123456/20260802/false');
   check('مسیر دفتر تاریخی درست ساخته می‌شود',
     historicalPath('book', '17765240', '20260521') === '/BestLimits/17765240/20260521');
   check('مسیر تک‌معامله همان مسیر قبلی می‌ماند',

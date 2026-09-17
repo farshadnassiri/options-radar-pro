@@ -2,9 +2,9 @@
 
 import { buildChain } from '/core/chain.mjs';
 import {
-  DATA_EXPORT_BATCH_CAP, dataExportContractGroups, dataExportOutcome, dataExportPairBatches,
-  dataExportPairs, dataExportTradeRows, discoverDataExportInstruments,
-  selectedDataExportInstruments, splitPairBatch,
+  DATA_EXPORT_BATCH_CAP, blankAuditSummary, dataExportBlankAudit, dataExportContractGroups,
+  dataExportOutcome, dataExportPairBatches, dataExportPairs, dataExportSessionRows,
+  dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments, splitPairBatch,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
@@ -48,7 +48,9 @@ export async function mount(root, { state, api }) {
     <section class="card">
       <div class="section-head"><div><p class="eyebrow">گام چهارم</p><h3>دریافت و ساخت Excel</h3></div></div>
       <p class="note">برگ «راهنما» و «پوشش دریافت» کنار برگ مستقل هر پایه و هر قرارداد می‌آید. قرارداد بدون معامله هم برگ خودش را دارد تا نبود معامله با جاافتادن قرارداد اشتباه نشود.</p>
-      <div class="de-actions"><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
+      <div class="de-actions"><button type="button" class="ghost" id="de-probe" disabled>آزمون یک ابزار/روز</button><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
+      <p class="note">«آزمون یک ابزار/روز» فقط یک قرارداد و یک روز را می‌گیرد و می‌گوید چه برگشت — به‌جای اینکه برای فهمیدن یک مشکل، چند دقیقه منتظر کل بازه بمانی.</p>
+      <p id="de-probe-out" class="note"></p>
       <p id="de-status" class="note" role="status" aria-live="polite"></p><div id="de-result" class="history-table-wrap"></div>
     </section>`;
 
@@ -70,6 +72,7 @@ export async function mount(root, { state, api }) {
   const selectedInstruments = () => selectedDataExportInstruments(discovered, [...picked]);
   function updateRunState() {
     runBtn.disabled = !universe || !picked.size || Boolean(controller) || exporting;
+    $('de-probe').disabled = runBtn.disabled;
     exportBtn.disabled = !prepared || Boolean(controller) || exporting;
     $('de-universe-note').toggleAttribute('data-error', universe?.complete === false);
   }
@@ -231,6 +234,36 @@ export async function mount(root, { state, api }) {
     }
   }
 
+  /**
+   * تابلوی روزانهٔ همان ابزارها — منبع دومی که «بی‌معامله» را می‌سنجد.
+   *
+   * ═══ چرا این درخواستِ اضافه ارزشش را دارد ═══
+   *
+   * یک درخواستِ دسته‌ای برای همهٔ ابزارها، در برابر ۵۹ ابزار/روزی که
+   * «بدون معامله» خوانده شده بودند بی آنکه کسی بتواند راست‌آزمایی کند.
+   * ردیفِ روزانه شمارِ معاملهٔ آن روز را دارد؛ اگر تابلو بگوید آن روز
+   * معامله شده و نوار صفر ردیف بدهد، دیگر حدس نیست.
+   *
+   * شکستش کارِ اصلی را نمی‌خورد: بی این، حکمِ خالی‌ها «نمی‌دانیم» می‌شود،
+   * نه «بی‌معامله».
+   */
+  async function fetchDaily(instruments, range, signal) {
+    const codes = [...new Set(instruments.map((item) => String(item.ins)).filter(Boolean))];
+    if (!codes.length) return {};
+    const span = Math.max(1, tradingDays(range.from, range.to).length);
+    setStatus('در حال گرفتن تابلوی روزانه برای راست‌آزمایی خالی‌ها…');
+    try {
+      const response = await fetch(`/api/dailies?ins=${codes.join(',')}&n=${span + 10}`, { cache: 'no-store', signal });
+      const payload = await response.json();
+      if (!response.ok || payload?.error) throw new Error(payload?.error || `پاسخ ${response.status}`);
+      return payload && typeof payload === 'object' ? payload : {};
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+      logError('data-export:daily', error);
+      return {};
+    }
+  }
+
   async function fetchHistorical(pairs, items, signal) {
     const batches = dataExportPairBatches(pairs, DATA_EXPORT_BATCH_CAP);
     for (let index = 0; index < batches.length; index += 1) {
@@ -284,14 +317,15 @@ export async function mount(root, { state, api }) {
 
   function paintResult(instruments, pairs, items, bytes = null) {
     const rows = instruments.map((item) => {
-      const count = dataExportTradeRows(item, pairs, items).length;
+      const split = dataExportSessionRows(dataExportTradeRows(item, pairs, items));
+      const count = split.rows.length;
       const failures = pairs.filter((pair) => pair.ins === item.ins && items[pair.key]?.error).length;
-      return `<tr><td>${esc(item.baseName)}</td><td>${esc(item.name)}</td><td>${item.kind === 'underlying' ? 'پایه' : item.kind === 'call' ? 'کال' : 'پوت'}</td><td class="n">${fmt.int(count)}</td><td class="n">${fmt.int(failures)}</td></tr>`;
+      return `<tr><td>${esc(item.baseName)}</td><td>${esc(item.name)}</td><td>${item.kind === 'underlying' ? 'پایه' : item.kind === 'call' ? 'کال' : 'پوت'}</td><td class="n">${fmt.int(count)}</td><td class="n">${fmt.int(split.outside)}</td><td class="n">${fmt.int(failures)}</td></tr>`;
     });
     const headline = Number.isFinite(bytes)
       ? `فایل با حجم ${fmt.int(Math.ceil(bytes / 1024))} کیلوبایت دانلود شد.`
       : 'داده آماده است؛ برای دریافت فایل روی «خروجی Excel» بزنید.';
-    $('de-result').innerHTML = `<p class="note">${headline}</p><table class="history-table"><thead><tr><th>پایه</th><th>شیت ابزار</th><th>نوع</th><th>ریزمعامله</th><th>روز خطادار</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+    $('de-result').innerHTML = `<p class="note">${headline}</p><table class="history-table"><thead><tr><th>پایه</th><th>شیت ابزار</th><th>نوع</th><th>ریزمعاملهٔ ۹ تا ۱۲:۳۰</th><th>بیرون از جلسه</th><th>روز خطادار</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
   }
   async function run() {
     if (!universe) { setStatus('دفتر قراردادها هنوز دریافت نشده است.', true); return; }
@@ -308,10 +342,13 @@ export async function mount(root, { state, api }) {
     try {
       await fetchHistorical(historical, items, controller.signal);
       await fetchLive(live, items, controller.signal);
+      const dailyByIns = await fetchDaily(instruments, range, controller.signal);
       setStatus('داده‌ها آماده شد؛ در حال ساخت شیت‌های Excel…');
       const outcome = dataExportOutcome(pairs, items);
+      const audit = dataExportBlankAudit(pairs, items, dailyByIns);
       const sheets = buildDataExportSheets({
-        instruments, pairs, items, range, complete: universe.complete, note: universe.note || '', outcome,
+        instruments, pairs, items, range, complete: universe.complete, note: universe.note || '',
+        outcome, audit,
       });
       prepared = { sheets, filename: dataExportFilename(range), instruments, pairs, items };
       paintResult(instruments, pairs, items);
@@ -320,17 +357,69 @@ export async function mount(root, { state, api }) {
       // فایلِ گزارش‌شده «آمادهٔ خروجی» خوانده شد چون رابط فقط شیت‌ها را
       // می‌شمرد. حالا اگر هیچ جفتی داده نیاورده باشد، جمله با همان شروع
       // می‌شود و علتِ غالب هم کنارش می‌آید.
+      const blanks = blankAuditSummary(audit);
       const head = outcome.blank
-        ? `هیچ ریزمعامله‌ای دریافت نشد — ${fmt.int(outcome.failed)} ابزار/روز خطا داد و ${fmt.int(outcome.empty)} تا بی‌معامله بود.`
+        ? `هیچ ریزمعامله‌ای دریافت نشد — ${fmt.int(outcome.failed)} ابزار/روز خطا داد و ${fmt.int(outcome.empty)} تا خالی برگشت.`
         : `آمادهٔ خروجی: ${fmt.int(outcome.trades)} ریزمعامله از ${fmt.int(outcome.ok)} ابزار/روز، در ${fmt.int(instruments.length)} شیت.`;
       const why = outcome.topReason ? ` علت غالب: ${outcome.topReason[0]} (${fmt.int(outcome.topReason[1])} بار).` : '';
-      setStatus(`${head}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}`
+      // «بی‌معامله» تا وقتی تابلوی روزانه تأییدش نکند، ادعا است نه واقعیت.
+      const blankWhy = blanks.missing
+        ? ` ${fmt.int(blanks.missing)} ابزار/روز تابلو معامله ثبت کرده ولی ریزمعامله‌اش نیامد`
+          + `${blanks.worst ? ` (بدترینش کد ${faDigits(blanks.worst.ins)} با ${fmt.int(blanks.worst.dailyTrades)} معامله)` : ''}`
+          + ` — این یعنی داده نرسیده، نه اینکه بازار ساکت بوده.`
+        : (blanks.quiet ? ` ${fmt.int(blanks.quiet)} ابزار/روزِ خالی با تابلوی روزانه تأیید شد.` : '');
+      setStatus(`${head}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}`
         + `${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}`,
-      outcome.blank);
+      outcome.blank || blanks.missing > 0);
     } catch (error) {
       if (error.name === 'AbortError') setStatus('دریافت با درخواست شما متوقف شد.', true);
       else { setStatus(`ساخت خروجی کامل نشد: ${error.message}`, true); logError('data-export', error); }
     } finally { controller = null; stopBtn.hidden = true; updateRunState(); }
+  }
+
+  /**
+   * یک ابزار و یک روز، و جوابِ خام.
+   *
+   * ═══ چرا این دکمه لازم شد ═══
+   *
+   * تشخیصِ «چرا خروجی خالی است» تا امروز یعنی اجرای کلِ بازه، چند دقیقه
+   * انتظار، و بعد خواندنِ برگ پوشش. برای یک پرسشِ بله/خیر، این گران است.
+   * اینجا همان مسیرِ واقعی — همان endpoint، همان تلاش دوم با پرچم دیگر —
+   * روی یک جفت می‌رود و هر چه برگشت را می‌گوید، از جمله اینکه تابلوی
+   * روزانهٔ همان روز چه ادعایی دارد.
+   */
+  async function probeOne() {
+    const out = $('de-probe-out');
+    const instruments = selectedInstruments();
+    const contract = instruments.find((item) => item.kind !== 'underlying');
+    if (!contract) { out.textContent = 'اول یک قرارداد انتخاب کن.'; return; }
+    const days = tradingDays(rangeUi.range.from, rangeUi.range.to);
+    const date = days[days.length - 1];
+    if (!date) { out.textContent = 'در این بازه روز معاملاتی نیست.'; return; }
+    out.textContent = `در حال آزمون ${contract.name} در ${faDigits(String(date))}…`;
+    try {
+      const response = await fetch('/api/trades/batch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requests: [{ ins: contract.ins, date }], fresh: true }),
+      });
+      const payload = await response.json();
+      if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
+      const hit = payload.items?.[`${date}:${contract.ins}`] || {};
+      const daily = await fetchDaily([contract], { from: date, to: date }, undefined);
+      const board = (daily?.[contract.ins]?.rows || []).find((row) => Math.trunc(Number(row.date)) === date);
+      const rows = Array.isArray(hit.rows) ? hit.rows.length : 0;
+      const boardText = board
+        ? `تابلوی روزانهٔ همان روز ${fmt.int(board.trades)} معامله و حجم ${fmt.int(board.vol)} می‌گوید`
+        : 'تابلوی روزانهٔ آن روز در دست نیست';
+      out.textContent = hit.error
+        ? `${contract.name} · ${faDigits(String(date))}: خطا — ${hit.error}`
+        : `${contract.name} · ${faDigits(String(date))}: ${fmt.int(rows)} ریزمعامله`
+          + `${hit.variant ? ` (پرچم ${hit.variant})` : ''}. ${boardText}.`
+          + `${!rows && board && Number(board.trades) > 0 ? ' یعنی داده نرسیده، نه اینکه بازار ساکت بوده.' : ''}`;
+    } catch (error) {
+      out.textContent = `آزمون انجام نشد: ${error.message}`;
+      logError('data-export:probe', error);
+    }
   }
 
   async function exportPrepared() {
@@ -396,7 +485,7 @@ export async function mount(root, { state, api }) {
   $('de-search').addEventListener('input', (event) => { const q = event.target.value.trim(); for (const label of basesHost.querySelectorAll('.de-base')) label.hidden = q && !label.dataset.search.includes(q); });
   $('de-all').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = true; invalidatePrepared(); paintContracts(); });
   $('de-none').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = false; invalidatePrepared(); paintContracts(); });
-  $('de-refresh').addEventListener('click', () => loadUniverse()); runBtn.addEventListener('click', run); exportBtn.addEventListener('click', exportPrepared); stopBtn.addEventListener('click', () => controller?.abort());
+  $('de-refresh').addEventListener('click', () => loadUniverse()); runBtn.addEventListener('click', run); $('de-probe').addEventListener('click', probeOne); exportBtn.addEventListener('click', exportPrepared); stopBtn.addEventListener('click', () => controller?.abort());
 
   await api.loadSettings();
   rangeUi = mountHistoryRange($('de-range'), { onApply: (range) => loadUniverse(range), quickEntry: true, compactNote: true });
