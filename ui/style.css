@@ -491,8 +491,6 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
   box-shadow: none;
 }
 .brand-name { font-weight: 800; font-size: var(--fs-3xl); }
-.brand-sub { color: var(--muted); font-size: var(--fs-md); white-space: nowrap; }
-@media (max-width: 900px) { .brand-sub { display: none; } }
 
 /* ——— بک‌تست سریع ——— */
 .backtest-hero {
