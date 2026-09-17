@@ -197,6 +197,29 @@ group('۸۷. دامنهٔ داده تا لحظهٔ جاری');
   check('قرارداد بی‌معاملهٔ امروز پرسیده نمی‌شود',
     !liveTapeCodes([board()], ['UA1', 'C1', 'P1'], { withContracts: true }).includes('P1'));
 
+  // ═══ «صفر» همیشه به معنی «معامله نشده» نیست ═══
+  //
+  // گزارش صاحب پروژه: منقضی‌ها درست کار می‌کنند، فعال‌ها نه. ردیف‌های
+  // ساخته‌شده از دفتر قراردادها عددِ گردش ندارند و میدان‌هایشان صفر است؛
+  // آن صفر یعنی «نمی‌دانیم». قراردادِ منقضی همهٔ روزهایش از مسیر تاریخی
+  // می‌آید و هرگز به اینجا نمی‌رسد، ولی قراردادِ فعال روزِ آخرین جلسه را
+  // از نوار می‌خواهد — و هیچ‌وقت پرسیده نمی‌شد.
+  const roster = {
+    uaInsCode: 'UA9', insCode_C: 'C9', insCode_P: 'P9',
+    zTotTran_C: 0, qTotTran5J_C: 0, zTotTran_P: 0, qTotTran5J_P: 0,
+    fromRoster: true,
+  };
+  check('ردیفِ دفتر، نبودِ مدرک را مدرکِ نبود نمی‌گیرد',
+    liveTapeCodes([roster], ['UA9', 'C9', 'P9'], { withContracts: true }).join(',') === 'UA9,C9,P9');
+  // همان ردیف، اگر واقعاً از تابلو آمده باشد، صفرش مدرک است.
+  check('ردیفِ تابلو با صفرِ صریح، همچنان پرسیده نمی‌شود',
+    liveTapeCodes([{ ...roster, fromRoster: false }], ['UA9', 'C9', 'P9'], { withContracts: true }).join(',') === 'UA9');
+  // ردیفی که اصلاً میدان گردش ندارد هم «نمی‌دانیم» است، نه «صفر».
+  check('ردیف بی‌میدانِ گردش هم پرسیده می‌شود',
+    liveTapeCodes([{ uaInsCode: 'UA8', insCode_C: 'C8' }], ['UA8', 'C8'], { withContracts: true }).join(',') === 'UA8,C8');
+  check('انتخاب‌نشده حتی با نبودِ مدرک هم وارد نمی‌شود',
+    !liveTapeCodes([roster], ['UA9'], { withContracts: true }).includes('C9'));
+
   // ——— چسباندن روی سری‌های روزانه ———
   const base87 = {
     UA1: [{ date: 20260208, close: 1000, last: 1005, first: 990, low: 985, high: 1010, vol: 5e5, trades: 400, value: 5e11 }],
