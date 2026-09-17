@@ -32,22 +32,27 @@ export async function mount(root, { state, api }) {
     <section class="card">
       <div class="section-head"><div><p class="eyebrow">گام سوم</p><h3>دریافت و ساخت Excel</h3></div></div>
       <p class="note">برگ «راهنما» و «پوشش دریافت» کنار برگ مستقل هر پایه و هر قرارداد می‌آید. قرارداد بدون معامله هم برگ خودش را دارد تا نبود معامله با جاافتادن قرارداد اشتباه نشود.</p>
-      <div class="de-actions"><button type="button" class="btn" id="de-run" disabled>دریافت ریزمعاملات و ساخت Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
+      <div class="de-actions"><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
       <p id="de-status" class="note" role="status" aria-live="polite"></p><div id="de-result" class="history-table-wrap"></div>
     </section>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
-  const basesHost = $('de-bases'), runBtn = $('de-run'), stopBtn = $('de-stop');
+  const basesHost = $('de-bases'), runBtn = $('de-run'), exportBtn = $('de-export'), stopBtn = $('de-stop');
   let rangeUi = null, universe = null, controller = null, refreshTimer = null, loadSeq = 0, stopped = false;
+  let prepared = null, exporting = false;
   const setStatus = (text, error = false) => {
     $('de-status').textContent = text || '';
     $('de-status').toggleAttribute('data-error', error);
   };
   const selectedBases = () => [...basesHost.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   function updateRunState() {
-    const complete = universe?.complete === true;
-    runBtn.disabled = !complete || !selectedBases().length || Boolean(controller);
-    $('de-universe-note').toggleAttribute('data-error', !complete && Boolean(universe));
+    runBtn.disabled = !universe || !selectedBases().length || Boolean(controller) || exporting;
+    exportBtn.disabled = !prepared || Boolean(controller) || exporting;
+    $('de-universe-note').toggleAttribute('data-error', universe?.complete === false);
+  }
+  function invalidatePrepared() {
+    prepared = null;
+    exportBtn.disabled = true;
   }
   function paintBases(payload) {
     const keep = new Set(selectedBases());
@@ -66,6 +71,7 @@ export async function mount(root, { state, api }) {
   async function loadUniverse(range = rangeUi?.range) {
     if (!range) return;
     const mine = ++loadSeq;
+    invalidatePrepared();
     clearTimeout(refreshTimer); runBtn.disabled = true;
     $('de-universe-note').textContent = 'در حال خواندن دفتر قراردادهای این بازه…';
     try {
@@ -73,9 +79,9 @@ export async function mount(root, { state, api }) {
       if (stopped || mine !== loadSeq) return;
       paintBases(payload);
       if (payload.build?.running) {
-        $('de-universe-note').textContent = `${payload.note || ''} ساخت دفتر ادامه دارد؛ پس از کامل شدن، خروجی فعال می‌شود.`;
+        $('de-universe-note').textContent = `${payload.note || ''} ساخت دفتر ادامه دارد؛ با پوشش فعلی هم می‌توانید خروجی بگیرید و محدودیت داخل فایل ثبت می‌شود.`;
         refreshTimer = setTimeout(() => loadUniverse(range), 4000);
-      } else if (!payload.complete) $('de-universe-note').textContent = `${payload.note || ''} پوشش دفتر کامل نیست؛ برای ادعای «همه قراردادها» خروجی تا تکمیل دفتر غیرفعال است.`;
+      } else if (!payload.complete) $('de-universe-note').textContent = `${payload.note || ''} پوشش دفتر کامل نیست؛ خروجی در دسترس است و این محدودیت داخل برگ راهنما ثبت می‌شود.`;
     } catch (error) {
       if (stopped || mine !== loadSeq) return;
       universe = null; basesHost.innerHTML = '<p class="empty-note">دفتر قراردادها دریافت نشد.</p>';
@@ -149,22 +155,26 @@ export async function mount(root, { state, api }) {
     }
   }
 
-  function paintResult(instruments, pairs, items, bytes) {
+  function paintResult(instruments, pairs, items, bytes = null) {
     const rows = instruments.map((item) => {
       const count = dataExportTradeRows(item, pairs, items).length;
       const failures = pairs.filter((pair) => pair.ins === item.ins && items[pair.key]?.error).length;
       return `<tr><td>${esc(item.baseName)}</td><td>${esc(item.name)}</td><td>${item.kind === 'underlying' ? 'پایه' : item.kind === 'call' ? 'کال' : 'پوت'}</td><td class="n">${fmt.int(count)}</td><td class="n">${fmt.int(failures)}</td></tr>`;
     });
-    $('de-result').innerHTML = `<p class="note">فایل با حجم ${fmt.int(Math.ceil(bytes / 1024))} کیلوبایت ساخته شد.</p><table class="history-table"><thead><tr><th>پایه</th><th>شیت ابزار</th><th>نوع</th><th>ریزمعامله</th><th>روز خطادار</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+    const headline = Number.isFinite(bytes)
+      ? `فایل با حجم ${fmt.int(Math.ceil(bytes / 1024))} کیلوبایت دانلود شد.`
+      : 'داده آماده است؛ برای دریافت فایل روی «خروجی Excel» بزنید.';
+    $('de-result').innerHTML = `<p class="note">${headline}</p><table class="history-table"><thead><tr><th>پایه</th><th>شیت ابزار</th><th>نوع</th><th>ریزمعامله</th><th>روز خطادار</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
   }
   async function run() {
     const bases = selectedBases();
-    if (!universe?.complete) { setStatus('دفتر قراردادها هنوز کامل نیست؛ خروجی کامل ساخته نمی‌شود.', true); return; }
+    if (!universe) { setStatus('دفتر قراردادها هنوز دریافت نشده است.', true); return; }
     if (!bases.length) { setStatus('دست‌کم یک نماد پایه را انتخاب کن.', true); return; }
     const range = rangeUi.range;
     const instruments = discoverDataExportInstruments(universe.rows, bases, { declaredSize: state.settings.contractSize });
     const pairs = dataExportPairs(instruments, tradingDays(range.from, range.to));
     if (!instruments.length || !pairs.length) { setStatus('برای این انتخاب ابزار/روزی برای دریافت ساخته نشد.', true); return; }
+    invalidatePrepared(); clearTimeout(refreshTimer);
     controller = new AbortController(); runBtn.disabled = true; stopBtn.hidden = false; $('de-result').innerHTML = '';
     const items = {}, today = tehranDateNumber();
     const historical = pairs.filter((pair) => pair.date < today), live = pairs.filter((pair) => pair.date === today);
@@ -172,23 +182,35 @@ export async function mount(root, { state, api }) {
     try {
       await fetchHistorical(historical, items, controller.signal);
       await fetchLive(live, items, controller.signal);
-      setStatus('داده‌ها آماده شد؛ در حال فشرده‌سازی فایل Excel…');
+      setStatus('داده‌ها آماده شد؛ در حال ساخت شیت‌های Excel…');
       const sheets = buildDataExportSheets({ instruments, pairs, items, range, complete: universe.complete, note: universe.note || '' });
-      const bytes = await downloadXlsx(dataExportFilename(range), sheets);
-      paintResult(instruments, pairs, items, bytes);
+      prepared = { sheets, filename: dataExportFilename(range), instruments, pairs, items };
+      paintResult(instruments, pairs, items);
       const failed = Object.values(items).filter((item) => item?.error).length;
-      setStatus(`خروجی ساخته شد: ${fmt.int(instruments.length)} شیت ابزار و ${fmt.int(failed)} ابزار/روز خطادار.${failed ? ' خطاها در برگ پوشش نوشته شده‌اند.' : ''}`);
+      setStatus(`آمادهٔ خروجی: ${fmt.int(instruments.length)} شیت ابزار و ${fmt.int(failed)} ابزار/روز خطادار.${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}${failed ? ' خطاها در برگ پوشش نوشته شده‌اند.' : ''}`);
     } catch (error) {
       if (error.name === 'AbortError') setStatus('دریافت با درخواست شما متوقف شد.', true);
       else { setStatus(`ساخت خروجی کامل نشد: ${error.message}`, true); logError('data-export', error); }
     } finally { controller = null; stopBtn.hidden = true; updateRunState(); }
   }
 
-  basesHost.addEventListener('change', updateRunState);
+  async function exportPrepared() {
+    if (!prepared) { setStatus('اول ریزمعاملات را آماده کنید.', true); return; }
+    exporting = true; updateRunState();
+    try {
+      const bytes = await downloadXlsx(prepared.filename, prepared.sheets);
+      paintResult(prepared.instruments, prepared.pairs, prepared.items, bytes);
+      setStatus('فایل Excel دانلود شد. برای دریافت دوباره می‌توانید همین دکمه را بزنید.');
+    } catch (error) {
+      setStatus(`دانلود خروجی انجام نشد: ${error.message}`, true); logError('data-export:download', error);
+    } finally { exporting = false; updateRunState(); }
+  }
+
+  basesHost.addEventListener('change', () => { invalidatePrepared(); updateRunState(); });
   $('de-search').addEventListener('input', (event) => { const q = event.target.value.trim(); for (const label of basesHost.querySelectorAll('.de-base')) label.hidden = q && !label.dataset.search.includes(q); });
-  $('de-all').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = true; updateRunState(); });
-  $('de-none').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = false; updateRunState(); });
-  $('de-refresh').addEventListener('click', () => loadUniverse()); runBtn.addEventListener('click', run); stopBtn.addEventListener('click', () => controller?.abort());
+  $('de-all').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = true; invalidatePrepared(); updateRunState(); });
+  $('de-none').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = false; invalidatePrepared(); updateRunState(); });
+  $('de-refresh').addEventListener('click', () => loadUniverse()); runBtn.addEventListener('click', run); exportBtn.addEventListener('click', exportPrepared); stopBtn.addEventListener('click', () => controller?.abort());
 
   await api.loadSettings();
   rangeUi = mountHistoryRange($('de-range'), { onApply: (range) => loadUniverse(range), quickEntry: true, compactNote: true });

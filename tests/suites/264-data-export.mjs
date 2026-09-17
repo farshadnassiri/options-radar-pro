@@ -64,5 +64,10 @@ group('۲۶۴. خروجی دیتای ریزمعاملات');
   const tab = readSrc('../ui/tabs/data-export.mjs');
   check('تب مستقل خروجی دیتا در مسیریاب ثبت شده', app.includes("id: 'data-export'") && app.includes("title: 'خروجی دیتا'"));
   check('تب از مسیر دسته‌ای تاریخی و نوار زنده استفاده می‌کند', tab.includes('/api/trades/batch') && tab.includes('/api/live-trades'));
-  check('خروجی واقعی xlsx دانلود می‌شود', tab.includes('downloadXlsx(dataExportFilename(range), sheets)'));
+  check('ناقص‌بودن دفتر، آماده‌سازی خروجی را قفل نمی‌کند',
+    tab.includes('runBtn.disabled = !universe ||') && !tab.includes("if (!universe?.complete)"));
+  check('دکمه مستقل خروجی Excel پس از آماده‌سازی فعال می‌شود',
+    tab.includes('id="de-export"') && tab.includes("exportBtn.addEventListener('click', exportPrepared)"));
+  check('خروجی واقعی xlsx فقط از دادهٔ آماده‌شده دانلود می‌شود',
+    tab.includes('downloadXlsx(prepared.filename, prepared.sheets)'));
 }
