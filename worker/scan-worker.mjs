@@ -121,13 +121,22 @@ function handleMessage(m) {
       defs, chain: ch, uaKeys: m.uaKeys, settings: m.settings,
       sigmaByUa: m.sigmaByUa || {}, sigmaSourceByUa: m.sigmaSourceByUa || {}, qty: m.qty, limit: m.limit,
     });
-    // شیء payoff تابع دارد و کلون نمی‌شود؛ فقط داده رسم را می‌فرستیم
-    for (const r of res.rows) {
+    // شیء payoff تابع دارد و کلون نمی‌شود؛ فقط داده رسم را می‌فرستیم.
+    //
+    // `byStrategy[].best` هم باید از همین در رد شود و این تکرار نیست:
+    // بهترینِ یک ساختار می‌تواند بیرونِ برشِ `limit` باشد، یعنی شیئی که در
+    // `res.rows` نیست. بی این حلقه، همان یک ردیف کلِ `postMessage` را با
+    // «could not be cloned» می‌انداخت و کاربر یک جدولِ خالیِ بی‌علت می‌دید.
+    const strip = (r) => {
+      if (!r) return;
       r.chart = { legs: r.__legs, netCash: r.netCash };
       delete r.payoff;
-    }
+    };
+    for (const r of res.rows) strip(r);
+    for (const item of res.byStrategy || []) strip(item.best);
     self.postMessage({
-      type: 'scan-all', id: m.id, rows: res.rows, funnel: res.funnel, ms: res.ms, total: res.total,
+      type: 'scan-all', id: m.id, rows: res.rows, byStrategy: res.byStrategy,
+      rankBy: res.rankBy, funnel: res.funnel, ms: res.ms, total: res.total,
     });
     return;
   }

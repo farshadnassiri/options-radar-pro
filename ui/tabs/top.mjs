@@ -18,6 +18,7 @@ import { mountPayoff, payoffAt } from '/ui/chart.mjs';
 import { sameUnderlyingCandidates, compareLabel, compareFullLabel, MAX_COMPARE } from '/ui/compare.mjs';
 import { canHandoff, handoffPlan, handoffButtonHtml, goHandoff } from '/ui/handoff.mjs';
 import { runScanAll, onChain, pushRows, chainState } from '/ui/scanner.mjs';
+import { strategyCompareHtml } from '/ui/strategy-compare-view.mjs';
 
 // ارزش معاملات هر پا، ستون جدا. اینجا برخلاف تب استراتژی هر چهار ستون
 // می‌مانند: ردیف‌ها از استراتژی‌های مختلف با تعداد پای متفاوت می‌آیند، پس
@@ -71,6 +72,14 @@ export async function mount(root, { state, api }) {
       <div id="funnel"></div>
     </section>
 
+    <section class="card" id="compare-card" style="display:none">
+      <h3>بهترین هر ساختار</h3>
+      <p class="note">جدول پایین ردیف‌ها را رتبه می‌کند و یک ساختار خوش‌شانس می‌تواند بیست ردیف اولش را پر کند.
+        اینجا هر ساختار دقیقاً یک ردیف دارد، پس پرسش «کدام <b>ساختار</b> برای این نماد بهتر است» جواب می‌گیرد.
+        روی هر ردیف کلیک کن تا همان ساختار در صفحهٔ خودش باز شود.</p>
+      <div class="scroll" style="max-height:50vh" id="compare"></div>
+    </section>
+
     <div id="table"></div>
 
     <section class="card" id="detail-card" style="margin-top:16px;display:none">
@@ -93,6 +102,31 @@ export async function mount(root, { state, api }) {
     all: COLUMNS, storeKey: 'top:default',
   });
   table.setEmptyMessage(NOT_SCANNED_MSG);
+
+  /**
+   * جدولِ «بهترینِ هر ساختار».
+   *
+   * `byStrategy` از خودِ موتور می‌آید و نه از `rows`: خروجی به `topN` بریده
+   * می‌شود و ساختاری که بهترین ردیفش بیرونِ آن برش بود، از این جدول کاملاً
+   * ناپدید می‌شد.
+   */
+  function drawCompare(byStrategy, rankBy) {
+    const card = root.querySelector('#compare-card');
+    const list = Array.isArray(byStrategy) ? byStrategy : [];
+    card.style.display = list.length ? '' : 'none';
+    if (!list.length) return;
+    const host = root.querySelector('#compare');
+    host.innerHTML = strategyCompareHtml(list, { rankBy: rankBy || s().rankBy });
+    for (const tr of host.querySelectorAll('tr[data-strategy]')) {
+      const open = () => { location.hash = tr.dataset.strategy; };
+      tr.addEventListener('click', open);
+      tr.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        open();
+      });
+    }
+  }
 
   function drawKpis() {
     const ok = rows.filter((r) => Number.isFinite(r.retMonthPct));
@@ -240,6 +274,7 @@ export async function mount(root, { state, api }) {
       const changed = changedIds(lastFullRows, rows, s().rankBy);
       for (const r of rows) r.__flash = changed.has(r.id);
       funnelBar(root.querySelector('#funnel'), res.funnel);
+      drawCompare(res.byStrategy, res.rankBy);
       table.set(rows);
       drawKpis();
       setStatus(`${fmt.int(res.ms)} میلی‌ثانیه — از ${fmt.int(res.total)} ردیف کل، ${fmt.int(rows.length)} نمایش.`);
