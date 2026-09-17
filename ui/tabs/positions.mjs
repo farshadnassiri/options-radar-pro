@@ -31,7 +31,7 @@ import {
   positionStatus, validateExit, realizedPnl, realizedSummary,
 } from '/core/position-close.mjs';
 import {
-  portfolioGreeks, expiryCalendar, breakevenRoom,
+  portfolioGreeks, expiryCalendar, breakevenRoom, portfolioDailySeries,
 } from '/core/positions-portfolio.mjs';
 import {
   TRACK_MODES, trackMode, trackRows, trackChartOption, trackStatsHtml, trackNote,
@@ -104,7 +104,11 @@ export async function mount(root, { state, api }) {
   let tapeNote = '';
   const sessionTicks = new Map();
   let trackModeId = TRACK_MODES[0].id;
+  // دو دستهٔ جدا: نمودارِ روندِ یک موقعیت با عوض شدنِ حالت آزاد و دوباره
+  // سوار می‌شود، ولی منحنیِ سبد باید سرِ جایش بماند. یک دستهٔ مشترک یعنی
+  // هر بار که پنل روند خالی می‌شد، منحنیِ سبد هم با آن می‌رفت.
   const charts = chartGroup();
+  const sumCharts = chartGroup();
   // پیش‌نویسِ رسیده از «در جست‌وجوی استراتژی‌ها»، و موقعیتِ در حال ویرایش.
   let draft = null;
   let draftNote = '';
@@ -158,6 +162,9 @@ export async function mount(root, { state, api }) {
     <section class="card" id="summary-card" style="display:none">
       <h3>نگاه سبد</h3>
       <div id="sum-greeks"></div>
+      <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">منحنی سود و زیان کل سبد</h4>
+      <div class="pos-track-chart" id="sum-chart"></div>
+      <p class="note" id="sum-chart-note"></p>
       <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">تقویم سررسید</h4>
       <div id="sum-calendar"></div>
     </section>
@@ -603,6 +610,28 @@ export async function mount(root, { state, api }) {
           greeks: greeks.greeks, incomplete: greeks.incomplete === true,
         })),
       ));
+      // منحنیِ سبد از همان سری‌های روزانهٔ تک‌تک موقعیت‌ها ساخته می‌شود —
+      // نه از یک محاسبهٔ دوم — تا جمعِ منحنی با جمعِ ستونِ جدول بخواند.
+      const curve = portfolioDailySeries(openRows.map(({ p, at }) => ({
+        title: p.title || 'موقعیت بی‌عنوان',
+        entryDate: entryDateNumber(p),
+        series: dailySeries(p, at),
+      })));
+      const curveRows = trackRows(curve, 'daily');
+      const curveHost = root.querySelector('#sum-chart');
+      if (curveRows.length) {
+        sumCharts.set('portfolio', curveHost, (echarts, tokens) => trackChartOption(curveRows, tokens, { name: 'سود و زیان سبد' }));
+      } else {
+        sumCharts.disposeAll();
+        curveHost.innerHTML = `<p class="empty-note">${curve.reason || 'نقطه‌ای برای منحنی سبد نیست'}</p>`;
+      }
+      root.querySelector('#sum-chart-note').textContent = [
+        trackNote(curve, 'daily'),
+        curve.skippedBefore
+          ? `منحنی از ${faDigits(historyDateLabel(curve.from))} شروع می‌شود — دیرترین روزِ ورودِ موقعیت‌های باز؛ ${faDigits(curve.skippedBefore)} روزِ قدیمی‌تر کنار گذاشته شد چون همهٔ موقعیت‌ها هنوز باز نشده بودند.`
+          : '',
+      ].filter(Boolean).join(' ');
+
       const marginByKey = new Map(evals.map(({ p, at, m }) => [posKey(p, at), m.currentMargin * p.qty]));
       root.querySelector('#sum-calendar').innerHTML = expiryCalendarHtml(expiryCalendar(
         openRows.map((x) => x.p),
@@ -1220,5 +1249,6 @@ export async function mount(root, { state, api }) {
     clearInterval(timer); clearTimeout(flashTimer);
     chart?.destroy();
     charts.disposeAll();
+    sumCharts.disposeAll();
   };
 }

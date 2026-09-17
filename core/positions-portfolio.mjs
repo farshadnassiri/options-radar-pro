@@ -29,6 +29,7 @@ export const SUMMARY_REASONS = {
   noSpot: 'قیمت پایه در دسترس نیست',
   noBreakeven: 'این موقعیت سربه‌سری ندارد',
   noExpiry: 'سررسیدی برای این موقعیت ثبت نشده',
+  noCommonDay: 'هیچ روزی نیست که همهٔ موقعیت‌های باز در آن قیمتِ کامل داشته باشند',
 };
 
 /**
@@ -160,4 +161,65 @@ export function breakevenRoomText(room) {
   if (room.tone === 'danger') return `پایه ${where} نزدیک‌ترین سربه‌سری است و کمتر از ${BE_DANGER_PCT}٪ فاصله دارد`;
   if (room.tone === 'warn') return `پایه ${where} نزدیک‌ترین سربه‌سری است، با کمتر از ${BE_WARN_PCT}٪ فاصله`;
   return `پایه ${where} نزدیک‌ترین سربه‌سری است، با فاصلهٔ راحت`;
+}
+
+/**
+ * منحنیِ سود و زیانِ کلِ سبد، روی یک محور.
+ *
+ * ═══ چرا پنجرهٔ مشترک، و نه «هرچه هست» ═══
+ *
+ * جمع‌زدنِ سودِ چند موقعیت فقط وقتی معنی دارد که هر عضوِ جمع در آن روز
+ * **وجود داشته باشد**. اگر موقعیتی که هفتهٔ پیش باز شده در روزهای قبلش صفر
+ * شمرده شود، منحنی یک پرشِ ساختگی در روزِ ورودش نشان می‌دهد که هیچ ربطی به
+ * بازار ندارد — و کاربر آن را «آن روز سود کردم» می‌خواند.
+ *
+ * پس منحنی از **دیرترین روزِ ورود** شروع می‌شود. روزهای پیش از آن حذف
+ * نمی‌شوند؛ در `from` و `skippedBefore` صریح اعلام می‌شوند تا کاربر بداند
+ * چرا منحنی‌اش کوتاه‌تر از قدیمی‌ترین موقعیتش است.
+ *
+ * و در همان پنجره، روزی که حتی یک موقعیت قیمتِ کامل ندارد **نقطه نمی‌شود**
+ * — با نامِ همان موقعیت در `gaps`. همان قاعدهٔ «جمعِ نصفه ساخته نمی‌شود»،
+ * این‌بار روی محور زمان.
+ */
+export function portfolioDailySeries(entries = []) {
+  const list = (Array.isArray(entries) ? entries : []).filter((item) => item && item.series);
+  if (!list.length) return { version: PORTFOLIO_SUMMARY_VERSION, points: [], gaps: [], from: 0, to: 0, skippedBefore: 0, reason: SUMMARY_REASONS.none };
+
+  // شروعِ پنجره: دیرترین روزِ ورود. موقعیتی که تاریخ ورودش ثبت نشده، از
+  // نخستین نقطهٔ سریِ خودش شروع می‌شود — همان روزی که برایش داده داریم.
+  const startOf = (item) => {
+    const entry = normalizeHistoryDate(item.entryDate);
+    if (entry) return entry;
+    const first = item.series.points?.[0]?.date;
+    return num(first, 0);
+  };
+  const starts = list.map(startOf).filter((date) => date > 0);
+  const from = starts.length ? Math.max(...starts) : 0;
+
+  const indexes = list.map((item) => new Map((item.series.points || []).map((point) => [point.date, point])));
+  const dates = new Set();
+  for (const index of indexes) for (const date of index.keys()) dates.add(date);
+  for (const item of list) for (const gap of item.series.gaps || []) dates.add(gap.date);
+
+  const ordered = [...dates].sort((a, b) => a - b);
+  const skippedBefore = ordered.filter((date) => from && date < from).length;
+  const window = ordered.filter((date) => !from || date >= from);
+
+  const points = [];
+  const gaps = [];
+  for (const date of window) {
+    const missing = list
+      .map((item, at) => (indexes[at].has(date) ? null : String(item.title || 'موقعیت بی‌عنوان')))
+      .filter(Boolean);
+    if (missing.length) { gaps.push({ date, missing }); continue; }
+    const total = list.reduce((sum, item, at) => sum + num(indexes[at].get(date).pnlTotal), 0);
+    points.push({ date, pnlTotal: total, counted: list.length });
+  }
+  return {
+    version: PORTFOLIO_SUMMARY_VERSION,
+    points, gaps, skippedBefore,
+    from, to: points.length ? points[points.length - 1].date : 0,
+    counted: list.length,
+    reason: points.length ? '' : SUMMARY_REASONS.noCommonDay,
+  };
 }

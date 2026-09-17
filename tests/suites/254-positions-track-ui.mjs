@@ -210,4 +210,8 @@ group('۲۵۴. تب موقعیت‌های من — روند، ویرایش، پ�
     src.includes('openRows.map((x) => x.p)') && src.includes('portfolioGreeks('));
   check('ستون اتاق سربه‌سر از سربه‌سری همان موقعیت می‌آید',
     src.includes('breakevenCell(breakevenRoom(spot, m.ifHeld.breakevens))'));
+  check('منحنی سبد از همان سری‌های روزانهٔ تک‌تک موقعیت‌ها ساخته می‌شود، نه از محاسبه‌ای دوم',
+    src.includes('series: dailySeries(p, at)') && src.includes('portfolioDailySeries('));
+  check('منحنی سبد دستهٔ نمودار جدا دارد تا با عوض شدن حالتِ روند از بین نرود',
+    src.includes('const sumCharts = chartGroup()') && src.includes("sumCharts.set('portfolio'"));
 }

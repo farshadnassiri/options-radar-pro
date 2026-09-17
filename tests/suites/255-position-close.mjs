@@ -9,7 +9,7 @@ import {
 } from '../../core/position-close.mjs';
 import {
   BE_DANGER_PCT, BE_WARN_PCT, SUMMARY_REASONS,
-  portfolioGreeks, expiryCalendar, breakevenRoom, breakevenRoomText,
+  portfolioGreeks, expiryCalendar, breakevenRoom, breakevenRoomText, portfolioDailySeries,
 } from '../../core/positions-portfolio.mjs';
 import { pnlFromPrices } from '../../core/position-track.mjs';
 import { markToMarket } from '../../core/positions.mjs';
@@ -153,6 +153,55 @@ group('۲۵۵. بستن موقعیت و نگاه سبد');
     breakevenRoom(100000, []).available === false && Number.isNaN(breakevenRoom(100000, []).roomPct));
   check('بی قیمت پایه هم عددی ساخته نمی‌شود',
     breakevenRoom(0, [100]).reason === SUMMARY_REASONS.noSpot);
+  // ——— منحنی سود و زیان کل سبد ———
+  const seriesOf = (points, gaps = []) => ({ points, gaps });
+  const curve = portfolioDailySeries([
+    {
+      title: 'قدیمی', entryDate: 20260801,
+      series: seriesOf([
+        { date: 20260801, pnlTotal: 10 },
+        { date: 20260901, pnlTotal: 30 },
+        { date: 20260902, pnlTotal: 40 },
+        { date: 20260903, pnlTotal: 50 },
+      ]),
+    },
+    {
+      title: 'تازه', entryDate: 20260901,
+      series: seriesOf([
+        { date: 20260901, pnlTotal: 5 },
+        { date: 20260903, pnlTotal: 15 },
+      ], [{ date: 20260902, missing: ['OPT'] }]),
+    },
+  ]);
+  // پنجرهٔ مشترک از دیرترین روزِ ورود شروع می‌شود، وگرنه منحنی در روزِ ورودِ
+  // موقعیت تازه یک پرشِ ساختگی می‌گرفت که هیچ ربطی به بازار ندارد.
+  check('منحنی سبد از دیرترین روز ورود شروع می‌شود',
+    curve.from === 20260901, `${curve.from}`);
+  check('روزهای پیش از پنجره حذف می‌شوند ولی شمرده و اعلام',
+    curve.skippedBefore === 1, `${curve.skippedBefore}`);
+  check('نقطهٔ سبد، جمعِ همان روزِ همهٔ موقعیت‌هاست',
+    curve.points.map((point) => point.pnlTotal).join(',') === '35,65',
+    curve.points.map((p) => p.pnlTotal).join(','));
+  check('روزی که یک موقعیت قیمتِ کامل ندارد، نقطهٔ سبد نمی‌سازد',
+    curve.gaps.length === 1 && curve.gaps[0].date === 20260902);
+  check('و نامِ همان موقعیت در شکاف می‌آید',
+    curve.gaps[0].missing.join(',') === 'تازه', curve.gaps[0].missing.join(','));
+  check('شمار موقعیت‌های هر نقطه ثبت می‌شود', curve.points[0].counted === 2);
+  const lonely = portfolioDailySeries([
+    { title: 'الف', entryDate: 20260901, series: seriesOf([{ date: 20260901, pnlTotal: 1 }]) },
+    { title: 'ب', entryDate: 20260902, series: seriesOf([{ date: 20260903, pnlTotal: 1 }]) },
+  ]);
+  check('بی روزِ مشترک، منحنی ساخته نمی‌شود و علتش گفته می‌شود',
+    lonely.points.length === 0 && lonely.reason === SUMMARY_REASONS.noCommonDay);
+  check('سبد خالی منحنی ندارد',
+    portfolioDailySeries([]).reason === SUMMARY_REASONS.none);
+  // تاریخ ورودِ ثبت‌نشده نباید پنجره را به ۰ ببرد و همه‌چیز را وارد کند.
+  const noEntry = portfolioDailySeries([
+    { title: 'بی‌تاریخ', series: seriesOf([{ date: 20260905, pnlTotal: 2 }, { date: 20260906, pnlTotal: 3 }]) },
+  ]);
+  check('موقعیت بی‌تاریخِ ورود از نخستین نقطهٔ خودش شروع می‌شود',
+    noEntry.from === 20260905 && noEntry.points.length === 2, `${noEntry.from}`);
+
   check('جملهٔ اتاق سربه‌سر، وضعیت را می‌گوید',
     breakevenRoomText(tight).includes('زیر') === false && breakevenRoomText(tight).includes('بالای'));
   check('و برای حالتِ نداشته، علت را', breakevenRoomText(breakevenRoom(100000, [])) === SUMMARY_REASONS.noBreakeven);
