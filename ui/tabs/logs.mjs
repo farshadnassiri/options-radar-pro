@@ -7,6 +7,7 @@
 import { fmt, faDigits } from '/ui/fmt.mjs';
 import { localRows, onError } from '/ui/errlog.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
+import { healthTableHtml } from '/ui/health-view.mjs';
 
 const esc = (v) => String(v ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c]));
@@ -49,6 +50,15 @@ export async function mount(root, { state }) {
 
     <section class="card">
       <div class="section-head">
+        <div><p class="eyebrow">سلامت داده</p><h3>بار بالادست، به تفکیک سرویس</h3></div>
+        <span id="health-age">—</span>
+      </div>
+      <p class="note">تا امروز گزارش‌ها «۲۰۸۲ درخواست» می‌گفتند بی آنکه معلوم باشد کدام سرویس آن را خورده و کدام‌یک خطا داده. این جدول همان تفکیک است.</p>
+      <div id="health-table"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
         <div><p class="eyebrow">تازه‌ترین اول</p><h3>رویدادها</h3></div>
         <span id="log-count">—</span>
       </div>
@@ -61,6 +71,7 @@ export async function mount(root, { state }) {
   let serverRows = [];
   let stats = null;
   let market = null;
+  let health = null;
 
   async function load() {
     try {
@@ -72,6 +83,14 @@ export async function mount(root, { state }) {
       serverRows = payload.rows || [];
       stats = payload;
       market = payload.market || null;
+      // سلامت جدا گرفته می‌شود چون دفترِ خطا و شمارندهٔ بار دو چیزند: دفتر
+      // می‌گوید چه خطایی رخ داد، شمارنده می‌گوید چقدر بار رفت — و سرویسی
+      // که خطا نداده هم بار داشته.
+      try {
+        const healthRes = await fetch('/api/health');
+        const healthBody = await healthRes.json();
+        health = healthRes.ok && !healthBody.error ? healthBody : null;
+      } catch { health = null; }
     } catch (e) {
       // خطای خواندنِ دفتر خطا در خودِ دفتر ثبت نمی‌شود — حلقه می‌سازد.
       serverRows = [];
@@ -106,6 +125,13 @@ export async function mount(root, { state }) {
           ? 'بازار باز است و حلقه دیده‌بان می‌چرخد.'
           : `بازار بسته است — ${market.why}. بیرون از ساعت بازار، جریان زنده چیزی نمی‌فرستد و برنامه از عکس آخرین جلسه استفاده می‌کند.`)
         : '—';
+
+    $('health-table').innerHTML = health
+      ? healthTableHtml(health.byEndpoint)
+      : '<p class="note">وضعیت سلامت گرفته نشد؛ همین یعنی سرور در دسترس نیست یا پاسخش خطا داد.</p>';
+    $('health-age').textContent = health
+      ? `${fmt.int(health.upSec)} ثانیه بالا · میانگین پاسخ بالادست ${fmt.int(health.avgUpstreamMs)} میلی‌ثانیه`
+      : '—';
 
     $('log-count').textContent = `${fmt.int(merged.length)} رویداد`;
     if (!merged.length) {

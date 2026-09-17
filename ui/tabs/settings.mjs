@@ -7,7 +7,8 @@
 import { SCHEMA, GROUPS, defaults } from '/core/settings.mjs';
 import { FORMULAS, FORMULA_GROUPS, STRATEGY_FORMULAS, SYMBOLS } from '/core/formulas.mjs';
 import { CATALOG, GROUPS as STRAT_GROUPS } from '/strategies/catalog.mjs';
-import { ltr } from '/ui/fmt.mjs';
+import { faDigits, fmt, ltr } from '/ui/fmt.mjs';
+import { BACKUP_PARTS, buildBackup, readBackup, restorePlan } from '/core/backup-bundle.mjs';
 
 const SCOPE_LABEL = { server: 'سرور', client: 'مرورگر', both: 'هر دو' };
 
@@ -110,6 +111,24 @@ export async function mount(root, { state, api }) {
     <nav class="settings-nav" id="settings-nav"></nav>
     <div id="groups"></div>
     <div id="formulas"></div>
+
+    <!-- پشتیبان و بازیابی. دادهٔ کاربر در سه جای مستقل زندگی می‌کند —
+         دیسک سرور، حافظهٔ مرورگر، و ترجیح‌های نما — و هیچ‌کدام نسخهٔ دوم
+         ندارند. موقعیت‌ها با قیمتِ ورودِ دستی از هیچ‌جا بازتولید نمی‌شوند. -->
+    <section class="card" id="backup-card">
+      <div class="section-head"><div><p class="eyebrow">نسخهٔ دوم</p><h3>پشتیبان و بازیابی</h3></div></div>
+      <p class="note">تنظیمات و موقعیت‌ها روی دیسک سرورند، قاعده‌های دیده‌بان و بایگانی اجراها در حافظهٔ مرورگر. یک پاک‌کردن دادهٔ سایت یا یک حذف پوشهٔ data، همه‌اش را می‌برد.
+        کشِ قیمت و تاریخچه در پشتیبان نمی‌آیند: از بالادست دوباره می‌آیند و بازیابی‌شان دادهٔ کهنه را روی تازه می‌نشاند.</p>
+      <div class="bar" style="flex-wrap:wrap;gap:10px;margin-top:10px">
+        <button class="btn sec" id="backup-save">گرفتن پشتیبان</button>
+        <label class="btn sec" for="backup-file" style="cursor:pointer">انتخاب فایل پشتیبان
+          <input type="file" id="backup-file" accept="application/json,.json" hidden></label>
+        <span class="sp"></span>
+        <span id="backup-msg" class="saved" role="status" aria-live="polite"></span>
+      </div>
+      <div id="backup-plan"></div>
+    </section>
+
     <div class="bar card" style="position:sticky;bottom:12px">
       <button class="btn" id="save">ذخیره تنظیمات</button>
       <button class="btn sec" id="reset">بازگشت به پیش‌فرض</button>
@@ -339,6 +358,140 @@ export async function mount(root, { state, api }) {
     } finally {
       clearCacheBtn.disabled = false;
     }
+  });
+
+  // ——————————————— پشتیبان و بازیابی ———————————————
+  //
+  // کلیدهای مرورگر با نام صریح نوشته می‌شوند، نه با پیمایشِ همهٔ
+  // `localStorage`: پیمایشِ کور، کلیدِ هر سایتِ دیگری روی همان مبدأ و هر
+  // کلیدِ موقتِ آینده را هم برمی‌دارد و در پشتیبان می‌گذارد.
+  const BROWSER_KEYS = {
+    watchRules: 'watchtower:rules',
+    backtestRuns: 'options-radar:backtest-runs',
+  };
+  const PREF_PREFIX = 'options-radar:';
+  // ترجیح‌های نما با پیشوند شناخته می‌شوند ولی دو کلیدِ بالا از آن جدا
+  // می‌مانند تا دو بار در بسته نیایند، و کلیدِ یک‌بارمصرفِ انتقال هم نه:
+  // عمرش ده دقیقه است و بازیابی‌اش بی‌معنی.
+  const PREF_SKIP = new Set([BROWSER_KEYS.backtestRuns]);
+  const PREF_SKIP_PREFIX = 'options-radar:handoff:';
+
+  const backupMsg = root.querySelector('#backup-msg');
+  const backupFlash = (text, bad = false) => {
+    backupMsg.textContent = text;
+    backupMsg.style.color = bad ? 'var(--loss)' : 'var(--gain)';
+  };
+  const ls = () => { try { return window.localStorage; } catch { return null; } };
+  const readJson = (key, fallback) => {
+    const store = ls();
+    if (!store) return fallback;
+    try { return JSON.parse(store.getItem(key) || 'null') ?? fallback; } catch { return fallback; }
+  };
+  const readPrefs = () => {
+    const store = ls();
+    if (!store) return {};
+    const out = {};
+    for (let at = 0; at < store.length; at += 1) {
+      const key = store.key(at);
+      if (!key?.startsWith(PREF_PREFIX)) continue;
+      if (PREF_SKIP.has(key) || key.startsWith(PREF_SKIP_PREFIX)) continue;
+      out[key] = store.getItem(key);
+    }
+    return out;
+  };
+
+  const currentParts = () => ({
+    settings: read(),
+    positions: null,
+    watchRules: readJson(BROWSER_KEYS.watchRules, []),
+    backtestRuns: readJson(BROWSER_KEYS.backtestRuns, []),
+    preferences: readPrefs(),
+  });
+
+  root.querySelector('#backup-save').addEventListener('click', async () => {
+    let positions = null;
+    try { positions = await (await fetch('/api/positions')).json(); }
+    catch { positions = null; }
+    const bundle = buildBackup({ ...currentParts(), positions, at: Date.now() });
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `options-radar-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    const parts = BACKUP_PARTS.filter((part) => bundle[part.key] != null).map((part) => part.label);
+    backupFlash(parts.length ? `پشتیبان گرفته شد: ${parts.join('، ')}.` : 'چیزی برای پشتیبان‌گیری نبود.');
+  });
+
+  root.querySelector('#backup-file').addEventListener('change', async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    let parsed = null;
+    try { parsed = JSON.parse(await file.text()); }
+    catch (error) { backupFlash(`فایل خوانده نشد: ${error.message}`, true); return; }
+    const checked = readBackup(parsed);
+    if (!checked.ok) { backupFlash(checked.why, true); root.querySelector('#backup-plan').innerHTML = ''; return; }
+
+    // بازیابی جایگزینی است نه ادغام، پس تأیید باید عددِ واقعی بگوید.
+    let positions = [];
+    try { positions = await (await fetch('/api/positions')).json(); } catch { positions = []; }
+    const plan = restorePlan(checked.bundle, { ...currentParts(), positions });
+    root.querySelector('#backup-plan').innerHTML = `
+      <table class="mini" style="margin-top:10px">
+        <thead><tr><th>بخش</th><th>الان</th><th>پس از بازیابی</th></tr></thead>
+        <tbody>${plan.map((row) => `<tr><td>${esc(row.label)}</td>
+          <td class="n">${fmt.int(row.from)}</td><td class="n">${fmt.int(row.to)}</td></tr>`).join('')}</tbody>
+      </table>
+      <p class="note">بازیابی <b>جایگزینی</b> است، نه ادغام: ادغام یعنی تصمیم دربارهٔ رکوردی که در هر دو هست ولی فرق دارد، و هر تصمیمی آنجا می‌تواند قیمت ورود واقعی را با نسخهٔ کهنه عوض کند.</p>`;
+
+    const what = plan.map((row) => `${row.label}: ${faDigits(row.from)} ← ${faDigits(row.to)}`).join('\n');
+    if (!confirm(`این بخش‌ها جایگزین می‌شوند و بازگشتی ندارند:\n\n${what}\n\nادامه؟`)) {
+      backupFlash('بازیابی انجام نشد.');
+      return;
+    }
+    const done = [];
+    const failed = [];
+    if (checked.bundle.settings) {
+      try { write(await api.putSettings(checked.bundle.settings)); done.push('تنظیمات'); }
+      catch (error) { failed.push(`تنظیمات (${error.message})`); }
+    }
+    if (checked.bundle.positions) {
+      try {
+        const response = await fetch('/api/positions', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(checked.bundle.positions),
+        });
+        if (!response.ok) throw new Error('سرور نپذیرفت');
+        done.push('موقعیت‌ها');
+      } catch (error) { failed.push(`موقعیت‌ها (${error.message})`); }
+    }
+    const store = ls();
+    if (store) {
+      try {
+        if (checked.bundle.watchRules) {
+          store.setItem(BROWSER_KEYS.watchRules, JSON.stringify(checked.bundle.watchRules));
+          done.push('قاعده‌های دیده‌بان');
+        }
+        if (checked.bundle.backtestRuns) {
+          store.setItem(BROWSER_KEYS.backtestRuns, JSON.stringify(checked.bundle.backtestRuns));
+          done.push('بایگانی اجراها');
+        }
+        for (const [key, value] of Object.entries(checked.bundle.preferences || {})) store.setItem(key, value);
+        if (checked.bundle.preferences) done.push('ترجیح‌های نما');
+      } catch (error) { failed.push(`حافظهٔ مرورگر (${error.message})`); }
+    } else if (checked.bundle.watchRules || checked.bundle.backtestRuns || checked.bundle.preferences) {
+      failed.push('حافظهٔ مرورگر در دسترس نیست');
+    }
+    // شکستِ نیمه پنهان نمی‌شود: بخشی که ننشسته باید نام ببرد، وگرنه کاربر
+    // فکر می‌کند همه‌چیز برگشته.
+    backupFlash(
+      failed.length
+        ? `بازیابی ناقص — انجام‌شده: ${done.join('، ') || 'هیچ'} · نشد: ${failed.join('، ')}`
+        : `بازیابی شد: ${done.join('، ')}. برای اثر کامل، صفحه را تازه کن.`,
+      failed.length > 0,
+    );
   });
 
   return () => { spy.disconnect(); window.removeEventListener('scroll', onScroll); clearTimeout(flashTimer); };
