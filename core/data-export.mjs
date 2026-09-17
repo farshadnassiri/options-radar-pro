@@ -2,6 +2,7 @@
 
 import { num } from './num.mjs';
 import { batchKey, BATCH_PAIR_CAP } from './trades-source.mjs';
+import { inIntradaySession } from './backtest.mjs';
 
 const n = (value) => num(value, 0);
 const code = (value) => String(value ?? '').trim();
@@ -246,6 +247,10 @@ export function dataExportTradeRows(instrument, pairs = [], items = {}) {
         contractSize: size > 0 ? size : NaN,
         contractValue: size > 0 ? price * quantity * size : NaN,
         canceled: row?.canceled === true, canceledKnown: row?.canceledKnown !== false,
+        // جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰. خواستهٔ صریح صاحب پروژه همین بازه
+        // است، ولی ردیفِ بیرونِ آن **حذف** نمی‌شود — علامت می‌خورد و شمارش
+        // می‌شود، تا «نبود» با «کنار گذاشته شد» اشتباه نشود.
+        inSession: inIntradaySession(row?.time),
         source: String(hit.source || 'history'),
       });
     }
@@ -269,4 +274,87 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {})
       error: String(hit?.error || ''), source: String(hit?.source || ''),
     };
   });
+}
+
+/**
+ * ریزمعامله‌های داخل جلسهٔ پیوسته، و شمارِ آنچه بیرون ماند.
+ *
+ * ═══ چرا جدا، و چرا شمارش ═══
+ *
+ * خواستهٔ صاحب پروژه «هر روز معاملاتی از ساعت ۹ الی ۱۲:۳۰» است. حذفِ
+ * بی‌صدای ردیف‌های بیرون از این بازه یعنی کاربر هیچ‌وقت نمی‌فهمد چیزی
+ * کنار گذاشته شده — و اگر روزی همهٔ ردیف‌ها بیرون بیفتند، برگ خالی را
+ * «بی‌معامله» می‌خواند. پس شمارش همراه می‌آید.
+ */
+export function dataExportSessionRows(rows = []) {
+  const all = Array.isArray(rows) ? rows : [];
+  const inside = all.filter((row) => row.inSession !== false);
+  return { rows: inside, outside: all.length - inside.length, total: all.length };
+}
+
+/**
+ * بازبینیِ ابزار/روزهای خالی، با تابلوی روزانه.
+ *
+ * ═══ چرا این تابع مهم‌ترین تکهٔ این قلم است ═══
+ *
+ * فایل گزارش‌شده برای ۵۹ ابزار/روز نوشت «بدون معامله» — از جمله برای خودِ
+ * نماد پایه در یک روز عادیِ بازار. برنامه راهی نداشت بفهمد این «واقعیتِ
+ * بازار» است یا «پاسخِ خالیِ بالادست»، و بدترین حالتِ ممکن را انتخاب کرد:
+ * سکوت.
+ *
+ * ولی همین برنامه منبعِ دومی دارد که جواب را می‌داند: ردیفِ روزانهٔ همان
+ * ابزار (`GetClosingPriceDailyList`) شمارِ معاملهٔ آن روز را دارد. اگر
+ * تابلو بگوید آن روز ۶٬۷۹۶ معامله شده و نوارِ ریزمعامله صفر ردیف بدهد،
+ * این دیگر حدس نیست — **اثباتِ** نرسیدنِ داده است.
+ *
+ * `dailyByIns` همان چیزی است که `/api/dailies` می‌دهد. نبودِ ردیفِ روزانه
+ * یعنی «نمی‌دانیم»، نه «بی‌معامله» — و همین‌طور هم گزارش می‌شود.
+ */
+export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}) {
+  const index = new Map();
+  for (const [ins, payload] of Object.entries(dailyByIns || {})) {
+    const map = new Map();
+    for (const row of payload?.rows || payload || []) {
+      const date = Math.trunc(n(row?.date));
+      if (date) map.set(date, row);
+    }
+    index.set(String(ins), map);
+  }
+  const out = [];
+  for (const pair of pairs || []) {
+    const hit = items?.[pair.key];
+    if (!hit || hit.error) continue;
+    if (Array.isArray(hit.rows) && hit.rows.length) continue;
+    const daily = index.get(String(pair.ins))?.get(Math.trunc(n(pair.date))) || null;
+    const trades = n(daily?.trades), volume = n(daily?.vol);
+    out.push({
+      key: pair.key, ins: String(pair.ins), date: pair.date,
+      known: Boolean(daily),
+      dailyTrades: daily ? trades : NaN,
+      dailyVolume: daily ? volume : NaN,
+      // سه حکم، و هیچ‌کدام «شاید» نیست.
+      verdict: !daily ? 'unknown' : (trades > 0 || volume > 0 ? 'missing' : 'quiet'),
+    });
+  }
+  return out;
+}
+
+export const BLANK_VERDICT_LABEL = {
+  missing: 'ریزمعامله نیامد — تابلو برای آن روز معامله ثبت کرده',
+  quiet: 'بدون معامله — تابلوی روزانه هم صفر است',
+  unknown: 'بدون معامله — تابلوی روزانه در دست نیست',
+};
+
+/** جمع‌بندیِ بازبینی، برای جملهٔ وضعیت و برگ راهنما. */
+export function blankAuditSummary(audit = []) {
+  const list = Array.isArray(audit) ? audit : [];
+  const missing = list.filter((row) => row.verdict === 'missing');
+  return {
+    total: list.length,
+    missing: missing.length,
+    quiet: list.filter((row) => row.verdict === 'quiet').length,
+    unknown: list.filter((row) => row.verdict === 'unknown').length,
+    // بیشترین معاملهٔ ازدست‌رفته، برای اینکه جمله یک نمونهٔ واقعی داشته باشد.
+    worst: missing.sort((a, b) => n(b.dailyTrades) - n(a.dailyTrades))[0] || null,
+  };
 }

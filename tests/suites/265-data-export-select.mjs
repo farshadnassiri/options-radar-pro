@@ -4,8 +4,9 @@
 
 import { check, group, readSrc } from '../harness.mjs';
 import {
-  DATA_EXPORT_BATCH_CAP, dataExportContractGroups, dataExportOutcome,
-  dataExportPairBatches, dataExportPairs, discoverDataExportInstruments,
+  BLANK_VERDICT_LABEL, DATA_EXPORT_BATCH_CAP, blankAuditSummary, dataExportBlankAudit,
+  dataExportContractGroups, dataExportOutcome, dataExportPairBatches, dataExportPairs,
+  dataExportSessionRows, dataExportTradeRows, discoverDataExportInstruments,
   selectedDataExportInstruments, splitPairBatch,
 } from '../../core/data-export.mjs';
 import { BATCH_PAIR_CAP } from '../../core/trades-source.mjs';
@@ -159,4 +160,101 @@ group('۲۶۵. جمع‌بندی صادقانهٔ دریافت');
     src.includes('for (const ins of visibleContracts()) picked.add(ins)'));
   check('سررسید در کارت قرارداد با رقم فارسی نوشته می‌شود',
     src.includes('faDigits(esc(historyDateLabel(group.expiry)))'));
+}
+
+group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خالی‌ها');
+{
+  const instrument = { ins: 'a', kind: 'call', name: 'ضهرم1', baseName: 'اهرم', size: 1000 };
+  const pairs = [{ ins: 'a', date: 20260916, key: '20260916:a' }];
+  const trade = (time) => ({ time, price: 100, quantity: 5, sequence: time, canceled: false, canceledKnown: true });
+  const items = {
+    '20260916:a': {
+      rows: [trade(84500), trade(90000), trade(103000), trade(123000), trade(123001), trade(130000)],
+    },
+  };
+  const rows = dataExportTradeRows(instrument, pairs, items);
+  check('هر ردیف علامتِ داخل یا بیرونِ جلسه می‌گیرد',
+    rows.every((row) => typeof row.inSession === 'boolean'));
+  const split = dataExportSessionRows(rows);
+  // ۰۸:۴۵ پیش‌گشایش، ۱۳:۰۰ پس از پایان، و ۱۲:۳۰:۰۱ یک ثانیه بعد از زنگ.
+  // مرز همان `inIntradaySession` کلِ برنامه است — یک تعریف از «جلسه»،
+  // نه یکی برای این تب و یکی برای بک‌تست.
+  check('فقط ۹:۰۰ تا ۱۲:۳۰ می‌ماند',
+    split.rows.map((row) => row.time).join(',') === '90000,103000,123000',
+    split.rows.map((r) => r.time).join(','));
+  check('مرزِ ۱۲:۳۰:۰۰ داخل شمرده می‌شود', split.rows.some((row) => row.time === 123000));
+  // حذف بی‌صدا یعنی کاربر نمی‌فهمد چیزی کنار رفته.
+  check('ردیف‌های بیرون از جلسه شمرده می‌شوند، نه بی‌صدا حذف',
+    split.outside === 3 && split.total === 6);
+  check('بی ردیف، شمارش صفر است و پرت نمی‌کند',
+    dataExportSessionRows([]).outside === 0);
+
+  // ——— راست‌آزمایی با تابلوی روزانه ———
+  const blankPairs = [
+    { ins: 'a', date: 20260916, key: '20260916:a' },
+    { ins: 'b', date: 20260916, key: '20260916:b' },
+    { ins: 'c', date: 20260916, key: '20260916:c' },
+    { ins: 'd', date: 20260916, key: '20260916:d' },
+  ];
+  const blankItems = {
+    '20260916:a': { rows: [] },                       // تابلو می‌گوید معامله شده
+    '20260916:b': { rows: [] },                       // تابلو هم صفر است
+    '20260916:c': { rows: [] },                       // تابلوی روزانه نداریم
+    '20260916:d': { rows: [], error: 'خطا' },         // خطا، نه خالی
+  };
+  const daily = {
+    a: { rows: [{ date: 20260916, trades: 6796, vol: 120000 }] },
+    b: { rows: [{ date: 20260916, trades: 0, vol: 0 }] },
+  };
+  const audit = dataExportBlankAudit(blankPairs, blankItems, daily);
+  check('فقط ابزار/روزهای خالی بازبینی می‌شوند — نه خطادارها',
+    audit.map((row) => row.ins).join(',') === 'a,b,c', audit.map((r) => r.ins).join(','));
+  // این همان چیزی است که فایل گزارش‌شده نمی‌توانست بگوید.
+  check('خالی‌ای که تابلو تکذیبش می‌کند، «نیامد» علامت می‌خورد',
+    audit.find((row) => row.ins === 'a').verdict === 'missing');
+  check('و شمار معاملهٔ تابلو همراهش می‌رود',
+    audit.find((row) => row.ins === 'a').dailyTrades === 6796);
+  check('خالی‌ای که تابلو تأییدش می‌کند، واقعاً بی‌معامله است',
+    audit.find((row) => row.ins === 'b').verdict === 'quiet');
+  // نبودِ تابلو یعنی نمی‌دانیم، نه بی‌معامله.
+  check('بی تابلوی روزانه، حکم «نامعلوم» است',
+    audit.find((row) => row.ins === 'c').verdict === 'unknown'
+    && audit.find((row) => row.ins === 'c').known === false);
+  check('هر حکم برچسب فارسی دارد',
+    audit.every((row) => (BLANK_VERDICT_LABEL[row.verdict] || '').length > 5));
+  // حجمِ بی‌شمارِ معامله هم تکذیب است.
+  check('حجم مثبت با شمارِ صفر هم «نیامد» است',
+    dataExportBlankAudit([blankPairs[0]], { '20260916:a': { rows: [] } },
+      { a: { rows: [{ date: 20260916, trades: 0, vol: 5000 }] } })[0].verdict === 'missing');
+
+  const summary = blankAuditSummary(audit);
+  check('جمع‌بندی سه حکم را جدا می‌شمارد',
+    summary.missing === 1 && summary.quiet === 1 && summary.unknown === 1);
+  check('بدترین مورد نیامدن، پرمعامله‌ترینش است', summary.worst.ins === 'a');
+  check('بی موردِ نیامده، بدترینی هم نیست', blankAuditSummary([]).worst === null);
+
+  // ——— قرارداد سرور و تب ———
+  const server = readSrc('../server/server.mjs');
+  // پاسخِ خالی نباید به حساب واقعیتِ بازار گذاشته شود.
+  check('پاسخ خالی یک بار با پرچم دیگر پرسیده می‌شود',
+    server.includes('historicalTradesAltPath(code, date)') && server.includes("variant: 'true'"));
+  check('و خطا دوباره پرسیده نمی‌شود — فقط خالی',
+    server.includes('if (rows.length) return [key, { rows, variant:'));
+  check('خالی‌بودنِ پس از هر دو مسیر علامت می‌خورد', server.includes('emptyBoth'));
+
+  const tab = readSrc('../ui/tabs/data-export.mjs');
+  check('تب تابلوی روزانه را برای راست‌آزمایی می‌گیرد',
+    tab.includes('fetchDaily(instruments, range') && tab.includes('/api/dailies?ins='));
+  check('شکست تابلوی روزانه کار اصلی را نمی‌خورد',
+    tab.includes("logError('data-export:daily', error)"));
+  check('جملهٔ وضعیت می‌گوید داده نرسیده، نه اینکه بازار ساکت بوده',
+    tab.includes('این یعنی داده نرسیده، نه اینکه بازار ساکت بوده'));
+  check('برگ هر ابزار فقط جلسهٔ پیوسته را می‌نویسد',
+    readSrc('../ui/data-export-workbook.mjs').includes('dataExportSessionRows(dataExportTradeRows('));
+  // تشخیصِ «چرا خالی است» نباید چند دقیقه اجرای کل بازه بخواهد.
+  check('آزمون یک ابزار/روز از همان مسیر واقعی می‌رود',
+    tab.includes("id=\"de-probe\"") && tab.includes('async function probeOne()')
+    && tab.includes("fetch('/api/trades/batch'"));
+  check('و آزمون از کش رد می‌شود تا پاسخِ کهنه را دوباره نگوید',
+    tab.includes('fresh: true'));
 }

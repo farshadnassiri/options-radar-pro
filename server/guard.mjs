@@ -35,6 +35,14 @@ export const HISTORICAL_PATHS = {
   closing:    (ins, date) => `/ClosingPrice/GetClosingPriceHistory/${ins}/${date}`,
   daily:      (ins, date) => `/ClosingPrice/GetClosingPriceDaily/${ins}/${date}`,
   trades:     (ins, date) => `/Trade/GetTradeHistory/${ins}/${date}/true`,
+  // ═══ چرا یک مسیرِ دومِ هم‌معنی ═══
+  //
+  // پرچمِ آخرِ `GetTradeHistory` در تابلو همیشه یک‌جور رفتار نمی‌کند: برای
+  // بعضی ابزار/روزها نسخهٔ `true` فهرست خالی برمی‌گرداند و همان درخواست با
+  // `false` ردیف دارد. تا امروز خالیِ اولی «بدون معامله» خوانده می‌شد و
+  // دومی هرگز پرسیده نمی‌شد — یعنی یک پاسخِ خالی، به حسابِ واقعیتِ بازار
+  // گذاشته می‌شد. این مسیر فقط وقتی به کار می‌رود که اولی خالی برگردد.
+  tradesAlt:  (ins, date) => `/Trade/GetTradeHistory/${ins}/${date}/false`,
   state:      (ins, date) => `/MarketData/GetInstrumentState/${ins}/${date}`,
   threshold:  (ins, date) => `/MarketData/GetStaticThreshold/${ins}/${date}`,
   instrument: (ins, date) => `/Instrument/GetInstrumentHistory/${ins}/${date}`,
@@ -66,6 +74,11 @@ export function validSessionId(x) {
 /** مسیر تاریخچه تک‌معامله؛ فقط پس از اعتبارسنجی اجزای مسیر ساخته می‌شود. */
 export function historicalTradesPath(ins, date) {
   return historicalPath('trades', ins, date);
+}
+
+/** همان، با پرچمِ دیگر — فقط برای وقتی که مسیر اول خالی برگردد. */
+export function historicalTradesAltPath(ins, date) {
+  return historicalPath('tradesAlt', ins, date);
 }
 
 /**

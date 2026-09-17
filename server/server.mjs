@@ -44,7 +44,7 @@ import { writeJsonAtomic } from './atomic-json.mjs';
 import { watchHealth } from '../core/watch-health.mjs';
 import { makeJobQueue } from './job-queue.mjs';
 import {
-  validIns, validCompactDate, historicalTradesPath, historicalPath, HISTORICAL_KINDS,
+  validIns, validCompactDate, historicalTradesPath, historicalTradesAltPath, historicalPath, HISTORICAL_KINDS,
   validSessionId, parseInsList, safeStaticPath, readBody, BodyTooLarge,
 } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
@@ -1121,11 +1121,28 @@ async function handle(req, res) {
       // رد شود. این راهِ فرار از سهمیه نیست: صفِ مشترک سرِ جایش است و
       // فراخوان فقط همان چند روزِ مشکوک را دوباره می‌پرسد.
       const fresh = body.fresh === true;
+      // ═══ چرا پاسخِ خالی یک بار دیگر پرسیده می‌شود ═══
+      //
+      // گزارش صاحب پروژه: فایل خروجی برای ۵۹ ابزار/روز نوشته بود «بدون
+      // معامله» — از جمله برای خودِ نماد پایه در یک روز عادیِ بازار، که
+      // قطعاً معامله داشته. یعنی فهرستِ خالیِ بالادست به حسابِ واقعیتِ
+      // بازار گذاشته می‌شد.
+      //
+      // پرچمِ آخرِ `GetTradeHistory` همیشه یک‌جور رفتار نمی‌کند. پس وقتی
+      // مسیر اول خالی برگشت، همان ابزار/روز یک بار با پرچمِ دیگر پرسیده
+      // می‌شود. این «تلاش تا موفقیت» نیست: دقیقاً یک تلاش دوم، و فقط برای
+      // خالی — نه برای خطا.
+      //
+      // و مهم‌تر: خروجی حالا می‌گوید کدام مسیر جواب داده و آیا خالی‌بودن
+      // پس از هر دو مسیر است. مصرف‌کننده بی این، نمی‌تواند «بی‌معامله» را
+      // از «نیامد» جدا کند.
       const one = async ({ key, code, date }) => {
+        const pull = async (path) => firstList(fresh ? await getFresh(path, 2, 6) : await get(path, S.ttlDailySec, 6));
         try {
-          const path = historicalTradesPath(code, date);
-          const rows = firstList(fresh ? await getFresh(path, 2, 6) : await get(path, S.ttlDailySec, 6));
-          return [key, { rows: normalizeTrades(rows) }];
+          const rows = normalizeTrades(await pull(historicalTradesPath(code, date)));
+          if (rows.length) return [key, { rows, variant: 'true' }];
+          const alt = normalizeTrades(await pull(historicalTradesAltPath(code, date)));
+          return [key, { rows: alt, variant: alt.length ? 'false' : 'both', emptyBoth: alt.length === 0 }];
         } catch (e) {
           return [key, { rows: [], error: `${e.name}: ${e.message}` }];
         }
