@@ -4895,3 +4895,42 @@ table.data thead th {
   font-size: var(--fs-xs); line-height: 1.95;
 }
 .pb-skin .pb-filter-note:empty { display: none; }
+
+/* خروجی دیتا — انتخاب چند پایه و گزارش فشردهٔ وضعیت دریافت. */
+.de-refresh,
+.de-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.de-refresh { margin-bottom: var(--space-3); }
+.de-actions { margin-top: var(--space-4); }
+.de-search { width: min(100%, 360px); }
+.de-base-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--space-2);
+  max-height: 280px;
+  overflow: auto;
+  padding: var(--space-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+.de-base {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  cursor: pointer;
+}
+.de-base:hover { border-color: var(--accent); }
+.de-base:focus-within { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.de-base input { grid-row: 1 / 3; accent-color: var(--accent); }
+.de-base span { color: var(--ink); font-weight: 750; }
+.de-base small { color: var(--muted); font-size: var(--fs-xs); }
+
+@media (max-width: 640px) {
+  .de-base-grid { grid-template-columns: 1fr; max-height: 240px; }
+  .de-search { width: 100%; }
+}

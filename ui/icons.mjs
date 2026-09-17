@@ -45,6 +45,7 @@ const PATHS = {
   bell: '<path d="M18 16H6l1.4-2.2V10a4.6 4.6 0 0 1 9.2 0v3.8L18 16z"/><path d="M10.5 19a1.6 1.6 0 0 0 3 0"/>',
   // جست‌وجوی استراتژی‌ها: ذره‌بین، چون کارِ همان صفحه گشتن است.
   search: '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5L20 20"/>',
+  download: '<path d="M12 3v12M7.5 10.5L12 15l4.5-4.5"/><path d="M4 18v3h16v-3"/>',
 };
 
 /** یک آیکون از خانواده، آماده برای درج در HTML. */
@@ -65,6 +66,7 @@ export const GROUP_ICON = {
 /** آیکون تب‌هایی که استراتژی نیستند. */
 export const TAB_ICON = {
   settings: 'sliders', chain: 'grid', 'live-market': 'wave', 'open-view': 'wave', history: 'clock', backtest: 'play',
+  'data-export': 'download',
   'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert',
   'strategy-explorer': 'search', watchtower: 'bell',
   positions: 'briefcase', roll: 'rotate',
