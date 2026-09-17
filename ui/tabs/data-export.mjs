@@ -8,9 +8,8 @@ import {
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
-import { LIVE_CODE_CAP } from '/core/trades-source.mjs';
+import { LIVE_CODE_CAP, splitTradeDays } from '/core/trades-source.mjs';
 import { liveTapeCodes, liveTapeDay } from '/core/live-day.mjs';
-import { tehranDateNumber } from '/core/tehran-day.mjs';
 import { fetchRangeUniverse, mountHistoryRange } from '/ui/history-range.mjs';
 import { buildDataExportSheets, dataExportFilename } from '/ui/data-export-workbook.mjs';
 import { downloadXlsx } from '/ui/xlsx.mjs';
@@ -272,19 +271,48 @@ export async function mount(root, { state, api }) {
     }
   }
 
-  async function fetchLive(pairs, items, signal) {
-    if (!pairs.length) return;
-    let payload;
+  /**
+   * روزی که نوار زندهٔ تابلو **واقعاً** مالِ آن است.
+   *
+   * ═══ اشتباهی که این تابع جبرانش می‌کند ═══
+   *
+   * این تب روزها را با `tehranDateNumber()` تقسیم می‌کرد: هرچه کوچک‌تر از
+   * «امروزِ تقویم» بود به مسیر تاریخی می‌رفت. ولی بالادست ریزمعاملهٔ یک
+   * جلسه را تا مدتی در مسیر تاریخی **نمی‌گذارد** — همان چیزی که ممیزی
+   * ۱۴۰۵/۰۶/۲۴ ثبت کرده و `core/trades-source.mjs` با نمونهٔ عددی نوشته:
+   *
+   *     اهرم   `/api/trades` ۰   ·   `/api/live-trades` ۱۰٬۷۶۱
+   *
+   * پنج‌شنبه که روز معاملاتی نیست، «امروزِ تقویم» ۱۷ است ولی نوار هنوز
+   * جلسهٔ چهارشنبه (۱۶) را دارد. با تقسیمِ تقویمی، ۱۶ به مسیر تاریخیِ
+   * هنوز-خالی می‌رفت و کل خروجی خالی درمی‌آمد — دقیقاً همان فایلی که
+   * تابلوی روزانه‌اش برای اهرم ۴۳٬۱۵۲ معامله ثبت کرده بود.
+   *
+   * پس تصمیم از `splitTradeDays` می‌آید — همان تابعی که آزمایشگاه آپشن از
+   * آن استفاده می‌کند — و ورودی‌اش `liveDate`ی است که خودِ تابلو تأیید
+   * کرده، نه ساعت مرورگر.
+   */
+  async function resolveLiveDay(signal) {
     try {
       const response = await fetch('/api/history/universe?build=0', { cache: 'no-store', signal });
-      payload = await response.json();
+      const payload = await response.json();
       if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
+      const day = liveTapeDay(payload);
+      return { payload, date: day.ok ? day.date : 0, why: day.why || '' };
     } catch (error) {
       if (error.name === 'AbortError') throw error;
-      for (const pair of pairs) items[pair.key] = { rows: [], error: `عکس امروز دریافت نشد: ${error.message}`, source: 'live' };
+      return { payload: null, date: 0, why: error.message };
+    }
+  }
+
+  async function fetchLive(pairs, items, signal, resolved) {
+    if (!pairs.length) return;
+    const payload = resolved?.payload;
+    if (!payload) {
+      for (const pair of pairs) items[pair.key] = { rows: [], error: `عکس امروز دریافت نشد: ${resolved?.why || 'نامعلوم'}`, source: 'live' };
       return;
     }
-    const day = liveTapeDay(payload);
+    const day = { ok: resolved.date > 0, date: resolved.date, why: resolved.why };
     if (!day.ok || !pairs.some((pair) => pair.date === day.date)) {
       for (const pair of pairs) items[pair.key] = { rows: [], error: `نوار امروز قابل انتساب نبود${day.why ? `: ${day.why}` : ''}`, source: 'live' };
       return;
@@ -336,12 +364,24 @@ export async function mount(root, { state, api }) {
     if (!instruments.length || !pairs.length) { setStatus('برای این انتخاب ابزار/روزی برای دریافت ساخته نشد.', true); return; }
     invalidatePrepared(); clearTimeout(refreshTimer);
     controller = new AbortController(); runBtn.disabled = true; stopBtn.hidden = false; $('de-result').innerHTML = '';
-    const items = {}, today = tehranDateNumber();
-    const historical = pairs.filter((pair) => pair.date < today), live = pairs.filter((pair) => pair.date === today);
-    for (const pair of pairs.filter((pair) => pair.date > today)) items[pair.key] = { rows: [], error: 'روز آینده است', source: '' };
+    const items = {};
     try {
+      // اول باید معلوم شود نوارِ زنده مالِ کدام روز است؛ تقسیمِ روزها به آن
+      // بستگی دارد، نه به ساعت مرورگر.
+      setStatus('در حال تشخیص روزِ نوار زنده…');
+      const resolved = await resolveLiveDay(controller.signal);
+      const { live: liveDates, history: historyDates, ahead } = splitTradeDays(
+        [...new Set(pairs.map((pair) => pair.date))], { liveDate: resolved.date },
+      );
+      const liveSet = new Set(liveDates), aheadSet = new Set(ahead), historySet = new Set(historyDates);
+      const historical = pairs.filter((pair) => historySet.has(pair.date));
+      const live = pairs.filter((pair) => liveSet.has(pair.date));
+      for (const pair of pairs.filter((pair) => aheadSet.has(pair.date))) {
+        items[pair.key] = { rows: [], error: 'روز آینده است', source: '' };
+      }
+      if (liveDates.length) setStatus(`نوار زنده مالِ ${faDigits(String(resolved.date))} است؛ همان روز از نوار گرفته می‌شود نه از مسیر تاریخی.`);
       await fetchHistorical(historical, items, controller.signal);
-      await fetchLive(live, items, controller.signal);
+      await fetchLive(live, items, controller.signal, resolved);
       const dailyByIns = await fetchDaily(instruments, range, controller.signal);
       setStatus('داده‌ها آماده شد؛ در حال ساخت شیت‌های Excel…');
       const outcome = dataExportOutcome(pairs, items);
@@ -398,22 +438,35 @@ export async function mount(root, { state, api }) {
     if (!date) { out.textContent = 'در این بازه روز معاملاتی نیست.'; return; }
     out.textContent = `در حال آزمون ${contract.name} در ${faDigits(String(date))}…`;
     try {
-      const response = await fetch('/api/trades/batch', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requests: [{ ins: contract.ins, date }], fresh: true }),
-      });
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
-      const hit = payload.items?.[`${date}:${contract.ins}`] || {};
+      // آزمون باید **همان** مسیری را برود که خروجی می‌رود، وگرنه چیزی را
+      // می‌سنجد که اجرا نمی‌شود: روزی که مالِ نوار زنده است، از مسیر
+      // تاریخی همیشه خالی است و آزمون هم همان خالی را گزارش می‌کرد.
+      const resolved = await resolveLiveDay(undefined);
+      const { live } = splitTradeDays([date], { liveDate: resolved.date });
+      let hit = {};
+      if (live.length) {
+        const items = {};
+        await fetchLive([{ ins: contract.ins, date, key: `${date}:${contract.ins}` }], items, undefined, resolved);
+        hit = items[`${date}:${contract.ins}`] || {};
+      } else {
+        const response = await fetch('/api/trades/batch', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requests: [{ ins: contract.ins, date }], fresh: true }),
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
+        hit = payload.items?.[`${date}:${contract.ins}`] || {};
+      }
       const daily = await fetchDaily([contract], { from: date, to: date }, undefined);
       const board = (daily?.[contract.ins]?.rows || []).find((row) => Math.trunc(Number(row.date)) === date);
       const rows = Array.isArray(hit.rows) ? hit.rows.length : 0;
       const boardText = board
         ? `تابلوی روزانهٔ همان روز ${fmt.int(board.trades)} معامله و حجم ${fmt.int(board.vol)} می‌گوید`
         : 'تابلوی روزانهٔ آن روز در دست نیست';
+      const via = hit.source === 'live' ? 'نوار زنده' : 'مسیر تاریخی';
       out.textContent = hit.error
-        ? `${contract.name} · ${faDigits(String(date))}: خطا — ${hit.error}`
-        : `${contract.name} · ${faDigits(String(date))}: ${fmt.int(rows)} ریزمعامله`
+        ? `${contract.name} · ${faDigits(String(date))} (${via}): خطا — ${hit.error}`
+        : `${contract.name} · ${faDigits(String(date))} (${via}): ${fmt.int(rows)} ریزمعامله`
           + `${hit.variant ? ` (پرچم ${hit.variant})` : ''}. ${boardText}.`
           + `${!rows && board && Number(board.trades) > 0 ? ' یعنی داده نرسیده، نه اینکه بازار ساکت بوده.' : ''}`;
     } catch (error) {

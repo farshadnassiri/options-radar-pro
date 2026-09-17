@@ -257,4 +257,26 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
     && tab.includes("fetch('/api/trades/batch'"));
   check('و آزمون از کش رد می‌شود تا پاسخِ کهنه را دوباره نگوید',
     tab.includes('fresh: true'));
+
+  // ═══ مهم‌ترین ادعای این دسته ═══
+  //
+  // بالادست ریزمعاملهٔ یک جلسه را تا مدتی در مسیر تاریخی نمی‌گذارد. تقسیمِ
+  // تقویمی (`tehranDateNumber`) روزِ آخرین جلسه را به آن مسیرِ هنوز-خالی
+  // می‌فرستاد و کل خروجی خالی درمی‌آمد. تصمیم باید از `splitTradeDays` با
+  // `liveDate`ی بیاید که خودِ تابلو تأیید کرده — همان کاری که آزمایشگاه
+  // آپشن می‌کند.
+  check('تقسیم روزها از splitTradeDays می‌آید، نه از ساعت مرورگر',
+    tab.includes('splitTradeDays(') && tab.includes('liveDate: resolved.date'));
+  // نامش فقط در توضیحِ «چه اشتباهی بود» مانده؛ وارد هم نمی‌شود، پس
+  // صدا زدنش ممکن نیست.
+  check('و این تب دیگر ساعت تقویم را وارد نمی‌کند',
+    !tab.includes("from '/core/tehran-day.mjs'"));
+  check('روزِ نوار زنده از خودِ پاسخ تابلو گرفته می‌شود',
+    tab.includes('liveTapeDay(payload)') && tab.includes('async function resolveLiveDay'));
+  check('نوار زنده دوباره درخواست نمی‌شود — همان پاسخِ حل‌شده مصرف می‌شود',
+    tab.includes('fetchLive(live, items, controller.signal, resolved)'));
+  // آزمون باید همان مسیری را برود که خروجی می‌رود.
+  check('آزمون یک ابزار/روز هم از همان تقسیم رد می‌شود',
+    tab.includes('const { live } = splitTradeDays([date], { liveDate: resolved.date })'));
+  check('و می‌گوید از کدام مسیر آمد', tab.includes("hit.source === 'live' ? 'نوار زنده' : 'مسیر تاریخی'"));
 }
