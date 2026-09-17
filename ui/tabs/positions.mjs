@@ -43,6 +43,7 @@ import {
 import { chartGroup } from '/ui/chart-host.mjs';
 import { sparkline } from '/ui/gap-charts.mjs';
 import { draftFromPlan, intakeFormHtml, readIntake } from '/ui/positions-intake.mjs';
+import { positionRollPlan, goHandoff } from '/ui/handoff.mjs';
 import { editFormHtml, readEdit, needsEntryClose } from '/ui/positions-edit.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { todayJalali, gregorianToJalali, parseJalali, daysSinceJalali } from '/core/jalali.mjs';
@@ -555,7 +556,8 @@ export async function mount(root, { state, api }) {
         ${breakevenCell(breakevenRoom(spot, m.ifHeld.breakevens))}
         ${GREEKS.map(({ key }) => `<td class="n">${gk(greeks.greeks?.[key])}</td>`).join('')}
         <td class="n">${ivPctCell(greeks.meanIvPct)}</td>
-        <td><button class="ghost" data-close="${at}">بستن</button>
+        <td>${positionRollPlan(p) ? `<button class="ghost" data-roll="${at}" title="همین موقعیت را در تب تحلیل رول باز کن">رول</button>` : ''}
+            <button class="ghost" data-close="${at}">بستن</button>
             <button class="ghost" data-edit="${at}">ویرایش</button>
             <button class="ghost" data-del="${at}">حذف</button></td>
       </tr>`;
@@ -684,6 +686,13 @@ export async function mount(root, { state, api }) {
         await save();
         await loadDailies();
         render();
+      });
+    }
+    for (const b of root.querySelectorAll('[data-roll]')) {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const plan = positionRollPlan(positions[Number(b.dataset.roll)]);
+        if (plan) goHandoff(state, plan, 'roll');
       });
     }
     for (const b of root.querySelectorAll('[data-close]')) {

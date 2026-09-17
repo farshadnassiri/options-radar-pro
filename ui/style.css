@@ -2794,6 +2794,11 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
 .mini-kpi .v.gain { color: var(--gain); }
 .mini-kpi .v.loss { color: var(--loss); }
 .mini-kpi .s { font-size: var(--fs-xs); color: var(--muted); margin-top: 2px; }
+/* برچسب چک‌باکس بیرون از پوستهٔ رادار — تا امروز فقط داخل `.gap-skin`
+   تعریف شده بود و هر تب دیگری که چک‌باکس می‌گذاشت، تیک و متنش دو خط
+   می‌شدند. */
+label.check { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+label.check input { margin: 0; }
 /* اتاق سربه‌سر: ردیفی که پایه‌اش به سربه‌سری نزدیک شده باید از دور دیده شود. */
 .data td.warn { color: var(--warn); }
 
