@@ -176,7 +176,36 @@ export function liveBaseCodes(rows = []) {
  * `withContracts` خاموش بماند، فقط پایه‌ها می‌آیند — همان چیزی که برای
  * «امروز در تقویم باشد» کافی است. روشن کردنش وقتی معنی دارد که فراخوان
  * قراردادهای **یک** نماد را می‌خواهد و کاربر خودش دکمهٔ دریافت را زده.
+ *
+ * ═══ و چرا «صفر» همیشه به معنی «معامله نشده» نیست ═══
+ *
+ * گزارش صاحب پروژه: «برای قراردادهای منقضی درست کار می‌کند، برای
+ * قراردادهای فعال نه.» علتش دقیقاً همین‌جا بود.
+ *
+ * ردیف‌هایی که از **دفتر قراردادها** ساخته می‌شوند (`rosterChainRows`)
+ * هیچ عدد معامله‌ای ندارند و میدان‌هایشان صریحاً صفر گذاشته می‌شود — چون
+ * دفتر فهرستِ وجود است، نه تابلوی گردش. آن صفر یعنی «نمی‌دانیم»، ولی این
+ * تابع آن را «معامله نشده» می‌خواند و قرارداد را از فهرستِ نوار بیرون
+ * می‌گذاشت.
+ *
+ * نتیجه‌اش همان عدم‌تقارنِ گزارش‌شده بود: قراردادِ منقضی همهٔ روزهایش از
+ * مسیر تاریخی می‌آید و هرگز به اینجا نمی‌رسد، ولی قراردادِ فعال دقیقاً
+ * روزِ آخرین جلسه — مهم‌ترین روزش — را از نوار می‌خواهد و هیچ‌وقت پرسیده
+ * نمی‌شد.
+ *
+ * پس مدرک سه حالت دارد، نه دو: «تابلو می‌گوید معامله شده» → بپرس،
+ * «تابلو می‌گوید نشده» → نپرس، «مدرکی نداریم» → بپرس. صرفه‌جویی جای خودش
+ * می‌ماند؛ فقط دیگر نبودِ مدرک را مدرکِ نبود نمی‌گیرد.
  */
+const tradedEvidence = (row, suffix) => {
+  // ردیفِ دفتر عددِ گردش ندارد. نبودِ مدرک، مدرکِ نبود نیست.
+  if (row?.fromRoster === true) return null;
+  const has = Object.prototype.hasOwnProperty.call(row || {}, `qTotTran5J_${suffix}`)
+    || Object.prototype.hasOwnProperty.call(row || {}, `zTotTran_${suffix}`);
+  if (!has) return null;
+  return n(row[`qTotTran5J_${suffix}`]) > 0 || n(row[`zTotTran_${suffix}`]) > 0;
+};
+
 export function liveTapeCodes(rows = [], wanted = [], { withContracts = false } = {}) {
   const want = wanted instanceof Set ? wanted : new Set((wanted || []).map((code) => String(code || '')));
   const out = new Set();
@@ -187,8 +216,9 @@ export function liveTapeCodes(rows = [], wanted = [], { withContracts = false } 
     for (const [key, suffix] of [['insCode_C', 'C'], ['insCode_P', 'P']]) {
       const ins = String(row?.[key] ?? '').trim();
       if (!ins || !want.has(ins)) continue;
-      // تابلو برای قرارداد مدرکِ معامله دارد؛ بی‌معامله را نمی‌پرسیم
-      if (n(row[`qTotTran5J_${suffix}`]) > 0 || n(row[`zTotTran_${suffix}`]) > 0) out.add(ins);
+      // فقط وقتی نمی‌پرسیم که تابلو **صریحاً** بگوید معامله نشده.
+      if (tradedEvidence(row, suffix) === false) continue;
+      out.add(ins);
     }
   }
   return [...out];
