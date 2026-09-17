@@ -2801,6 +2801,11 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
    تعریف شده بود و هر تب دیگری که چک‌باکس می‌گذاشت، تیک و متنش دو خط
    می‌شدند. */
 label.check { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+/* بخشِ «اثر نرخ بدون ریسک» در پنل جزئیات یک ترکیب. */
+.iv-rate { margin-top: 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-md); padding: 8px 12px; }
+.iv-rate > summary { cursor: pointer; font-weight: 700; font-size: var(--fs-sm); }
+.iv-rate .field { margin-top: 8px; max-width: 22rem; }
+
 /* نوار هشدار موقعیت‌ها — بالای صفحه، جمع‌شده در یک قاب نه پنج قاب جدا. */
 .pos-alert-bar {
   border: 1px solid var(--loss); border-radius: var(--radius-md);
