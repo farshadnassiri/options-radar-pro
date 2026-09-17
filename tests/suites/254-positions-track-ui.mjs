@@ -184,15 +184,30 @@ group('۲۵۴. تب موقعیت‌های من — روند، ویرایش، پ�
   // ——— قرارداد تب ———
   const src = readSrc('../ui/tabs/positions.mjs');
   check('تب نقشهٔ خودش را از state برمی‌دارد', src.includes("state.handoff?.to === 'positions'"));
-  check('موقعیت سررسیدگذشته قیمت نمی‌گیرد',
-    /positionOpenState\(p, today\)\.expired\) continue;/.test(src));
-  check('جدول باز و جدول سررسیدگذشته از هم جدا شده‌اند',
-    src.includes("filter((x) => !x.state.expired)") && src.includes("filter((x) => x.state.expired)"));
+  // فقط موقعیتِ باز قیمت می‌گیرد: سررسیدگذشته گاهی آخرین قیمتِ پیش از حذف
+  // را برمی‌گرداند و بسته‌شده عددش تحقق یافته.
+  check('فقط موقعیت باز قیمت می‌گیرد',
+    /positionStatus\(p, today\)\.id !== 'open'\) continue;/.test(src));
+  check('سه سطلِ باز، بسته‌شده و سررسیدگذشته از هم جدا شده‌اند',
+    src.includes("x.state.id === 'open'") && src.includes("x.state.id === 'closed'")
+    && src.includes("x.state.id === 'expired'"));
   check('جمع «تغییر امروز» فقط وقتی عدد است که همهٔ موقعیت‌ها مبنا داشته باشند',
     src.includes('changeComplete') && src.includes('every((x) => x.available)'));
   check('نوار درون‌روزی فقط با درخواست صریح گرفته می‌شود، نه در رفرش دوره‌ای',
     src.includes("id=\"tape-get\"") && !/setInterval\(loadTape/.test(src));
-  check('پنل جزئیات برای موقعیت سررسیدگذشته باز نمی‌شود',
-    src.includes('positionOpenState(p, todayNumber()).expired'));
+  check('پنل جزئیات فقط برای موقعیت باز باز می‌شود',
+    src.includes("positionStatus(p, todayNumber()).id !== 'open'"));
   check('نمودارها در پایان عمر تب آزاد می‌شوند', src.includes('charts.disposeAll()'));
+
+  // ——— بستن موقعیت و نگاه سبد، در همین تب ———
+  check('برگهٔ بستن با موتور سنجیده می‌شود، نه با اعتبارسنجی جداگانهٔ فرم',
+    src.includes('validateExit(p, read)'));
+  check('قیمت پیشنهادی خروج در لحظهٔ باز شدن برگه یخ می‌زند',
+    src.includes('closeSuggest = evalPos(') && !src.includes('closeSuggest = evals'));
+  check('بازکردن دوباره، برگهٔ خروج را با پرسش پاک می‌کند',
+    src.includes('data-reopen') && src.includes('delete positions[i].exit'));
+  check('نگاه سبد فقط از موقعیت‌های باز ساخته می‌شود',
+    src.includes('openRows.map((x) => x.p)') && src.includes('portfolioGreeks('));
+  check('ستون اتاق سربه‌سر از سربه‌سری همان موقعیت می‌آید',
+    src.includes('breakevenCell(breakevenRoom(spot, m.ifHeld.breakevens))'));
 }

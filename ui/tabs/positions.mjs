@@ -28,8 +28,18 @@ import {
   appendSessionTick, trackStats, changeSince,
 } from '/core/position-track.mjs';
 import {
+  positionStatus, validateExit, realizedPnl, realizedSummary,
+} from '/core/position-close.mjs';
+import {
+  portfolioGreeks, expiryCalendar, breakevenRoom,
+} from '/core/positions-portfolio.mjs';
+import {
   TRACK_MODES, trackMode, trackRows, trackChartOption, trackStatsHtml, trackNote,
 } from '/ui/positions-track-view.mjs';
+import { closeFormHtml, readClose, closedRowNote } from '/ui/positions-close.mjs';
+import {
+  portfolioGreeksHtml, expiryCalendarHtml, breakevenCell, realizedKpisHtml,
+} from '/ui/positions-summary-view.mjs';
 import { chartGroup } from '/ui/chart-host.mjs';
 import { sparkline } from '/ui/gap-charts.mjs';
 import { draftFromPlan, intakeFormHtml, readIntake } from '/ui/positions-intake.mjs';
@@ -99,6 +109,11 @@ export async function mount(root, { state, api }) {
   let draft = null;
   let draftNote = '';
   let editing = null;
+  // موقعیتِ در حالِ بستن، و قیمت‌های پیشنهادیِ خروجش در لحظهٔ باز شدنِ برگه.
+  // قیمتِ پیشنهادی **یخ می‌زند**: اگر هر پانزده ثانیه با مظنهٔ تازه عوض
+  // می‌شد، عددی که کاربر داشت تایپ می‌کرد زیر دستش می‌پرید.
+  let closing = null;
+  let closeSuggest = [];
 
   const todayNumber = () => tehranDateNumber();
   const posKey = (p, at) => String(p?.id || `#${at}`);
@@ -140,10 +155,35 @@ export async function mount(root, { state, api }) {
       </div>
     </section>
 
+    <section class="card" id="summary-card" style="display:none">
+      <h3>نگاه سبد</h3>
+      <div id="sum-greeks"></div>
+      <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">تقویم سررسید</h4>
+      <div id="sum-calendar"></div>
+    </section>
+
     <section class="card">
       <h3>موقعیت‌های باز</h3>
       <p class="note" id="daily-note"></p>
       <div class="scroll" style="max-height:none"><table class="data" id="list"></table></div>
+    </section>
+
+    <section class="card" id="close-card" style="display:none">
+      <h3 id="close-title">بستن موقعیت</h3>
+      <div id="close-form"></div>
+      <div class="bar" style="margin-top:12px">
+        <button class="btn" id="close-save">ثبت خروج</button>
+        <button class="ghost" id="close-cancel">انصراف</button>
+        <span class="sp"></span>
+        <span id="close-msg" class="saved" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section class="card" id="closed-card" style="display:none">
+      <h3>بسته‌شده</h3>
+      <p class="note">سود این‌ها تحقق یافته و دیگر با بازار تکان نمی‌خورد. عددشان از قیمت خروجی می‌آید که خودت ثبت کرده‌ای، نه از مظنهٔ امروز.</p>
+      <div id="closed-kpis"></div>
+      <div class="scroll" style="max-height:none"><table class="data" id="closed-list"></table></div>
     </section>
 
     <section class="card" id="gone-card" style="display:none">
@@ -455,9 +495,13 @@ export async function mount(root, { state, api }) {
   function render() {
     seriesCache = new Map();
     const today = todayNumber();
-    const listed = positions.map((p, at) => ({ p, at, state: positionOpenState(p, today) }));
-    const openRows = listed.filter((x) => !x.state.expired);
-    const goneRows = listed.filter((x) => x.state.expired);
+    // سه سطل، از یک تابع: بسته‌شده مقدم بر سررسیدگذشته است، چون موقعیتی که
+    // اسفند بسته شده با رسیدنِ سررسیدِ خرداد نباید بی‌صدا به بایگانی بپرد و
+    // سودِ تحقق‌یافته‌اش از جمع بیفتد.
+    const listed = positions.map((p, at) => ({ p, at, state: positionStatus(p, today) }));
+    const openRows = listed.filter((x) => x.state.id === 'open');
+    const closedRows = listed.filter((x) => x.state.id === 'closed');
+    const goneRows = listed.filter((x) => x.state.id === 'expired');
     const evals = openRows.map(({ p, at, state }) => ({ p, at, state, ...evalPos(p) }));
 
     // دنبالهٔ همین جلسه از همان ارزش‌گذاری‌ای می‌آید که جدول نشان می‌دهد؛
@@ -479,7 +523,7 @@ export async function mount(root, { state, api }) {
     const legsText = (p) => p.legs.map((l) => `${l.side === 'sell' ? '−' : '+'}${l.kind === 'underlying' ? 'سهم' : (l.kind === 'call' ? 'کال' : 'پوت') + ' ' + fmt.money(l.strike)}`).join(' ');
     const moneyTone = (value) => `style="color:${value >= 0 ? 'var(--gain)' : 'var(--loss)'}"`;
 
-    const rows = evals.map(({ p, at, state, m, greeks }) => {
+    const rows = evals.map(({ p, at, state, m, spot, greeks }) => {
       const change = todayChange(p, at, m.pnlTotal);
       const trend = dailySeries(p, at).points.slice(-30).map((point) => point.pnlTotal);
       return `
@@ -501,9 +545,11 @@ export async function mount(root, { state, api }) {
         <td class="n">${fmt.pct(m.retPct)}</td>
         <td class="n">${fmt.pct(m.retMonthPct)}</td>
         <td class="n">${fmt.money(m.ifHeld.atSpot * p.qty)}</td>
+        ${breakevenCell(breakevenRoom(spot, m.ifHeld.breakevens))}
         ${GREEKS.map(({ key }) => `<td class="n">${gk(greeks.greeks?.[key])}</td>`).join('')}
         <td class="n">${ivPctCell(greeks.meanIvPct)}</td>
-        <td><button class="ghost" data-edit="${at}">ویرایش</button>
+        <td><button class="ghost" data-close="${at}">بستن</button>
+            <button class="ghost" data-edit="${at}">ویرایش</button>
             <button class="ghost" data-del="${at}">حذف</button></td>
       </tr>`;
     }).join('');
@@ -512,9 +558,63 @@ export async function mount(root, { state, api }) {
       <thead><tr>
         <th>عنوان</th><th>پایه</th><th>پاها</th><th>تعداد</th><th>تاریخ ورود</th><th>روز</th>
         <th>روز تا سررسید</th>
-        <th>سرمایه روز ورود</th><th>وجه تضمین امروز</th><th>سود و زیان الان</th><th>تغییر امروز</th><th>روند</th><th>بازده از ورود ٪</th><th>ماهانه ٪</th><th>اگر تا سررسید بماند</th>${GREEKS.map(({ label }) => `<th>${label}</th>`).join('')}<th>تلاطم ضمنی</th><th></th>
+        <th>سرمایه روز ورود</th><th>وجه تضمین امروز</th><th>سود و زیان الان</th><th>تغییر امروز</th><th>روند</th><th>بازده از ورود ٪</th><th>ماهانه ٪</th><th>اگر تا سررسید بماند</th><th title="فاصلهٔ قیمت پایه تا نزدیک‌ترین سربه‌سری">اتاق سربه‌سر</th>${GREEKS.map(({ label }) => `<th>${label}</th>`).join('')}<th>تلاطم ضمنی</th><th></th>
       </tr></thead><tbody>${rows}</tbody>`
-      : `<tbody><tr><td style="padding:16px;color:var(--muted)">${positions.length ? 'همهٔ موقعیت‌های ثبت‌شده سررسیدگذشته‌اند.' : 'موقعیتی ثبت نشده. از فرم بالا اضافه کن، یا از «در جست‌وجوی استراتژی‌ها» یک ترکیب را بفرست اینجا.'}</td></tr></tbody>`;
+      : `<tbody><tr><td style="padding:16px;color:var(--muted)">${positions.length ? 'موقعیت بازی نمانده — همه یا بسته شده‌اند یا سررسیدشان گذشته.' : 'موقعیتی ثبت نشده. از فرم بالا اضافه کن، یا از «در جست‌وجوی استراتژی‌ها» یک ترکیب را بفرست اینجا.'}</td></tr></tbody>`;
+
+    // ——— بسته‌شده ———
+    const realized = realizedSummary(closedRows.map((x) => x.p), { fees: feesNow() });
+    root.querySelector('#closed-card').style.display = closedRows.length ? '' : 'none';
+    if (closedRows.length) {
+      root.querySelector('#closed-kpis').innerHTML = realizedKpisHtml(realized);
+      root.querySelector('#closed-list').innerHTML = `
+        <thead><tr><th>عنوان</th><th>پایه</th><th>پاها</th><th>تعداد</th><th>تاریخ ورود</th><th>تاریخ خروج</th>
+          <th>نگه‌داری</th><th>سود تحقق‌یافته</th><th>بازده ٪</th><th>ماهانه ٪</th><th>یادداشت</th><th></th></tr></thead>
+        <tbody>${closedRows.map(({ p, at }) => {
+    const done = realizedPnl(p, { fees: feesNow() });
+    return `
+          <tr>
+            <td>${p.title || '—'}</td>
+            <td>${displayName(p.uaName, p.uaIns, 'دارایی پایه بدون نام')}</td>
+            <td>${legsText(p)}</td>
+            <td class="n">${fmt.int(p.qty)}</td>
+            <td class="n">${p.entryDate ? faDigits(p.entryDate) : '—'}</td>
+            <td class="n">${faDigits(p.exit?.date || '—')}</td>
+            <td class="n">${closedRowNote(done)}</td>
+            <td class="n" ${done.available ? moneyTone(done.pnlTotal) : ''}>${done.available ? fmt.money(done.pnlTotal) : '—'}</td>
+            <td class="n">${fmt.pct(done.retPct)}</td>
+            <td class="n">${fmt.pct(done.retMonthPct)}</td>
+            <td>${p.exit?.note || '—'}</td>
+            <td><button class="ghost" data-reopen="${at}">بازکردن دوباره</button>
+                <button class="ghost" data-del="${at}">حذف</button></td>
+          </tr>`;
+  }).join('')}</tbody>`;
+    }
+
+    // ——— نگاه سبد ———
+    // فقط از موقعیت‌های **باز** ساخته می‌شود: بسته‌شده دیگر ریسکی ندارد و
+    // سررسیدگذشته دیگر قیمتی ندارد؛ جمع‌کردنشان در یونانی یا تقویم، عددی
+    // می‌سازد که هیچ تصمیمی از آن درنمی‌آید.
+    root.querySelector('#summary-card').style.display = openRows.length ? '' : 'none';
+    if (openRows.length) {
+      root.querySelector('#sum-greeks').innerHTML = portfolioGreeksHtml(portfolioGreeks(
+        evals.map(({ p, greeks }) => ({
+          title: p.title || 'موقعیت بی‌عنوان', qty: p.qty,
+          greeks: greeks.greeks, incomplete: greeks.incomplete === true,
+        })),
+      ));
+      const marginByKey = new Map(evals.map(({ p, at, m }) => [posKey(p, at), m.currentMargin * p.qty]));
+      root.querySelector('#sum-calendar').innerHTML = expiryCalendarHtml(expiryCalendar(
+        openRows.map((x) => x.p),
+        {
+          today, horizonDays: 90,
+          marginOf: (pos) => {
+            const at = positions.indexOf(pos);
+            return marginByKey.has(posKey(pos, at)) ? marginByKey.get(posKey(pos, at)) : NaN;
+          },
+        },
+      ));
+    }
 
     // ——— سررسیدگذشته ———
     // بی هیچ عدد زنده: نه سود و زیان، نه بازده، نه یونانی. آنچه می‌ماند
@@ -555,6 +655,32 @@ export async function mount(root, { state, api }) {
         await save();
         await loadDailies();
         render();
+      });
+    }
+    for (const b of root.querySelectorAll('[data-close]')) {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closing = Number(b.dataset.close);
+        // قیمتِ پیشنهادی همان لحظه یخ می‌زند و دیگر با رفرش عوض نمی‌شود.
+        closeSuggest = evalPos(positions[closing]).m.perLeg.map((leg) => leg.markPrice);
+        root.querySelector('#close-form').dataset.for = '';
+        drawClose();
+      });
+    }
+    for (const b of root.querySelectorAll('[data-reopen]')) {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (b.disabled) return;
+        const i = Number(b.dataset.reopen);
+        const p = positions[i];
+        // بازکردنِ دوباره، برگهٔ خروج را دور می‌ریزد و سودِ تحقق‌یافته را با
+        // خودش می‌برد. اشتباهِ ثبت شدنی است، ولی بی‌پرسش نه.
+        if (!confirm(`برگهٔ خروج «${p?.title || '—'}» پاک شود و موقعیت دوباره باز شمرده شود؟`)) return;
+        b.disabled = true;
+        delete positions[i].exit;
+        await save();
+        render();
+        await priceAll();
       });
     }
     for (const b of root.querySelectorAll('[data-edit]')) {
@@ -612,15 +738,17 @@ export async function mount(root, { state, api }) {
       <div class="v ${kpiTone(k, gain)}">${v}</div><div class="s">${sub}</div></div>`).join('');
 
     root.querySelector('#daily-note').textContent = dailyNote;
+    if (closing != null) drawClose();
     if (editing != null) drawEdit();
     if (expanded != null) drawDetail();
   }
 
   function drawDetail() {
     const p = positions[expanded];
-    // موقعیتِ سررسیدگذشته پنل جزئیات ندارد: هر عددی که آنجا نوشته شود —
-    // بازده، وجه تضمین، یونانی — از قیمتی می‌آید که دیگر معامله نمی‌شود.
-    if (!p || positionOpenState(p, todayNumber()).expired) {
+    // فقط موقعیتِ باز پنل جزئیات دارد: هر عددی که برای بسته‌شده یا
+    // سررسیدگذشته آنجا نوشته شود — بازده، وجه تضمین، یونانی — از مظنهٔ
+    // امروز می‌آید، برای موقعیتی که دیگر در بازار نیست.
+    if (!p || positionStatus(p, todayNumber()).id !== 'open') {
       root.querySelector('#det-card').style.display = 'none';
       root.querySelector('#track-card').style.display = 'none';
       chart?.destroy(); chart = null; chartFor = null;
@@ -803,6 +931,49 @@ export async function mount(root, { state, api }) {
       drawTrack();
     });
   }
+
+  // ——————————————— بستن موقعیت ———————————————
+  function drawClose() {
+    const p = positions[closing];
+    const card = root.querySelector('#close-card');
+    if (!p) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    root.querySelector('#close-title').textContent = `بستن موقعیت — ${p.title || '—'}`;
+    const host = root.querySelector('#close-form');
+    // مثل فرم ویرایش: رفرشِ پانزده‌ثانیه‌ای نباید آنچه کاربر تایپ کرده را
+    // پاک کند، پس فرم فقط با عوض شدنِ موقعیت از نو ساخته می‌شود.
+    if (host.dataset.for !== String(closing)) {
+      host.dataset.for = String(closing);
+      host.innerHTML = closeFormHtml(p, { today: todayJalali(), suggested: closeSuggest });
+    }
+  }
+
+  const closeMsg = root.querySelector('#close-msg');
+  const dropClose = () => {
+    closing = null;
+    closeSuggest = [];
+    root.querySelector('#close-form').dataset.for = '';
+    root.querySelector('#close-card').style.display = 'none';
+    closeMsg.textContent = '';
+  };
+  root.querySelector('#close-cancel').addEventListener('click', dropClose);
+  root.querySelector('#close-save').addEventListener('click', async () => {
+    const p = positions[closing];
+    if (!p) return;
+    const read = readClose(root.querySelector('#close-form'), p);
+    // سنجش کارِ موتور است، نه فرم: همان قاعده‌ها باید در آزمون هم بگزند.
+    const checked = validateExit(p, read);
+    if (!checked.ok) { closeMsg.textContent = checked.reason; closeMsg.style.color = 'var(--loss)'; return; }
+    positions[closing] = { ...p, exit: checked.exit };
+    dropClose();
+    // موقعیتِ بسته دیگر پنل جزئیات و روندِ زنده ندارد.
+    expanded = null;
+    editing = null;
+    await save();
+    flash('خروج ثبت شد؛ سود این موقعیت از این پس تحقق‌یافته است.');
+    render();
+    await priceAll();
+  });
 
   // ——————————————— ویرایش ———————————————
   function drawEdit() {
@@ -999,13 +1170,14 @@ export async function mount(root, { state, api }) {
   }
 
   async function priceAll() {
-    // قرارداد سررسیدگذشته قیمت گرفته نمی‌شود. هم بار بالادست بی‌جهت
-    // بیشتر می‌شد، هم پاسخش — که گاهی آخرین قیمتِ پیش از حذف است — به
-    // ارزش‌گذاری راه پیدا می‌کرد.
+    // فقط موقعیتِ باز قیمت می‌گیرد. سررسیدگذشته پاسخش گاهی آخرین قیمتِ
+    // پیش از حذف است و به ارزش‌گذاری راه پیدا می‌کرد؛ بسته‌شده هم عددش
+    // تحقق یافته و هیچ مظنه‌ای دیگر تکانش نمی‌دهد. هر دو فقط بارِ بی‌جهتِ
+    // بالادست بودند.
     const today = todayNumber();
     const codes = new Set();
     for (const p of positions) {
-      if (positionOpenState(p, today).expired) continue;
+      if (positionStatus(p, today).id !== 'open') continue;
       if (p.uaIns) codes.add(p.uaIns);
       for (const l of p.legs) if (l.ins) codes.add(l.ins);
     }
