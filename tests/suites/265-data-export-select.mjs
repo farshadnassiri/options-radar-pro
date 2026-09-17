@@ -147,7 +147,7 @@ group('۲۶۵. جمع‌بندی صادقانهٔ دریافت');
   check('تب از قراردادهای انتخاب‌شده جفت می‌سازد، نه از همهٔ پایه',
     src.includes('const instruments = selectedInstruments()'));
   check('بستهٔ شکست‌خورده نصف و دوباره فرستاده می‌شود',
-    src.includes('splitPairBatch(batch)') && src.includes('fetchBatch(half, items, signal, depth + 1)'));
+    src.includes('splitPairBatch(batch)') && src.includes('fetchBatch(half, items, signal, depth + 1, fresh)'));
   check('و بستهٔ تک‌جفتی خطایش را روی همان جفت می‌نشاند',
     src.includes('items[batch[0].key] = { rows: [], error: error.message'));
   check('صفر بودنِ داده، خبرِ اول جملهٔ وضعیت است',
@@ -273,6 +273,8 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
     !tab.includes("from '/core/tehran-day.mjs'"));
   check('روزِ نوار زنده از خودِ پاسخ تابلو گرفته می‌شود',
     tab.includes('liveTapeDay(payload)') && tab.includes('async function resolveLiveDay'));
+  check('روز تعطیل، تاریخ آخرین نوار را از اثرانگشت روزانه تأیید می‌کند',
+    tab.includes('inferLiveSessionDate(tape.items, daily)') && tab.includes("['holiday', 'before']"));
   check('نوار زنده دوباره درخواست نمی‌شود — همان پاسخِ حل‌شده مصرف می‌شود',
     tab.includes('fetchLive(live, items, controller.signal, resolved)'));
   // آزمون باید همان مسیری را برود که خروجی می‌رود.
@@ -288,4 +290,8 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
   // قاعده‌اش در دستهٔ ۰۸۸ قفل است؛ اینجا فقط مصرفش سنجیده می‌شود.
   check('تب برای روزِ زنده، قرارداد را هم از نوار می‌خواهد',
     tab.includes("liveTapeCodes(payload.rows, wanted, { withContracts: true })"));
+  check('قرارداد منقضیِ آخرین جلسه با نبودن در تابلوی امروز حذف نمی‌شود',
+    tab.includes("resolved?.inferred ? [...new Set([...boardCodes, ...wanted])] : boardCodes"));
+  check('خالی تاریخی که روزانه تکذیب کند دقیقاً با دریافت تازه تکرار می‌شود',
+    tab.includes("row.verdict === 'missing'") && tab.includes('fetchHistorical(staleHistorical, items, controller.signal, true)'));
 }

@@ -142,6 +142,35 @@ export function liveTapeDay(payload = {}) {
 }
 
 /**
+ * تاریخ جلسه‌ای که نوارِ نگه‌داشته‌شده در روز تعطیل/پیش از بازار به آن تعلق دارد.
+ *
+ * سرویس نوار تاریخ را داخل ردیف معامله نمی‌فرستد و در پنجشنبه/جمعه هم همان
+ * نوارِ آخرین جلسه را نگه می‌دارد. حدس تقویمی کافی نیست (تعطیلی رسمی ممکن
+ * است)؛ بنابراین اثرانگشت خود نوار ــ تعداد، حجم و OHLC ــ با ردیف‌های رسمی
+ * روزانه سنجیده می‌شود. اختلاف میان چند ابزار هم پاسخ صفر می‌دهد تا دادهٔ یک
+ * روز هرگز با مهر روز دیگری صادر نشود.
+ */
+export function inferLiveSessionDate(items = {}, dailyByIns = {}) {
+  const found = new Set();
+  const same = (a, b) => Number.isFinite(Number(a)) && Number(a) === Number(b);
+  for (const [ins, hit] of Object.entries(items || {})) {
+    if (hit?.error) continue;
+    const summary = hit?.summary || {};
+    if (!(n(summary.count) > 0) || !(n(summary.volume) > 0)) continue;
+    const rows = dailyByIns?.[ins]?.rows || dailyByIns?.[ins] || [];
+    const match = rows.find((row) => same(row?.trades, summary.count)
+      && same(row?.vol, summary.volume)
+      && same(row?.first, summary.firstPrice)
+      && same(row?.last, summary.lastPrice)
+      && same(row?.low, summary.low)
+      && same(row?.high, summary.high));
+    const date = normalizeHistoryDate(match?.date);
+    if (date) found.add(date);
+  }
+  return found.size === 1 ? [...found][0] : 0;
+}
+
+/**
  * کدِ نمادهای پایهٔ روی عکس تابلو.
  *
  * فراخوان با همین فهرست تصمیم می‌گیرد نوار کدام ابزارها را بگیرد. بدون
