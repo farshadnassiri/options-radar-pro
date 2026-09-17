@@ -28,7 +28,7 @@
 // می‌نشیند، یا هیچ‌وقت زنگ نمی‌زند یا صد بار می‌زند — و هر دو یعنی خاموشش
 // می‌کند.
 
-import { faDigits, fmt } from '/ui/fmt.mjs';
+import { faDigits, fmt, signTone } from '/ui/fmt.mjs';
 import { buildChain } from '/core/chain.mjs';
 import { byId } from '/strategies/catalog.mjs';
 import { flattenActiveContracts } from '/core/history.mjs';
@@ -39,9 +39,11 @@ import { gapVerdict } from '/core/spread-gap-series.mjs';
 import { buildRadarHistory, expiryShortfall, radarDataReport } from '/core/radar-history.mjs';
 import { comboMetrics } from '/core/radar-metrics.mjs';
 import {
-  ALERT_OPS, DEFAULT_COOLDOWN_SEC, DEFAULT_WINDOW_DAYS, WATCH_METRICS, WATCH_METRIC_GROUPS,
+  ALERT_OPS, DEFAULT_COOLDOWN_SEC, DEFAULT_WINDOW_DAYS,
+  WATCH_MATCHES, WATCH_METRICS, WATCH_METRIC_GROUPS,
   WATCH_REFS, conditionNote, evaluateWatch, normalizeCondition, normalizeWatchRule, ruleCoverage,
-  ruleScopeUnion, watchDistance, watchMetric, watchRef, watchRuleNote, watchSnapshot,
+  ruleScopeUnion, watchDistance, watchHistorySummary, watchMetric, watchRef, watchRuleNote,
+  watchSnapshot,
 } from '/core/watch-rule.mjs';
 import {
   BOOK_INS_CAP, LIVE_INS_CAP, LIVE_PRIORITIES, LIVE_SOURCES, bookQuoteBook, comboBookQuote,
@@ -120,7 +122,12 @@ export async function mount(root, { state }) {
   </section>
 
   <section class="card">
-    <div class="section-head"><div><p class="eyebrow">گام دو</p><h2>شرط‌ها — همه با «و»</h2></div><span id="wt-cond-count">—</span></div>
+    <div class="section-head"><div><p class="eyebrow">گام دو</p><h2>شرط‌ها</h2></div>
+      <label class="check">جمعِ شرط‌ها
+        <select id="wt-match">${WATCH_MATCHES.map(([id, label]) => `<option value="${esc(id)}">${esc(label)}</option>`).join('')}</select>
+      </label>
+      <span id="wt-cond-count">—</span></div>
+    <p class="note">«و» با هر شرطِ تازه دامنه را تنگ‌تر می‌کند، «یا» بازتر. برای «خبرم کن اگر بازده خوب شد <b>یا</b> زیان بد شد» تا امروز باید دو قاعدهٔ جدا می‌ساختی.</p>
     <div class="gap-form gap-rule-form">
       <label>سنجه<select id="wt-metric">${WATCH_METRIC_GROUPS.map((groupName) => `<optgroup label="${esc(groupName)}">${WATCH_METRICS.filter((row) => row.group === groupName).map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</optgroup>`).join('')}</select></label>
       <label>شرط<select id="wt-op">${ALERT_OPS.map((row) => `<option value="${esc(row.id)}">${esc(row.label)}</option>`).join('')}</select></label>
@@ -176,6 +183,9 @@ export async function mount(root, { state }) {
 
   let rangeUi = null, rangeJob = null, chain = new Map();
   let conditions = [], rules = readRules();
+  // نام پایه → آخرین قیمتِ دیده‌شده. فقط از همین جلسه؛ با بستن صفحه می‌رود
+  // و آن‌وقت ستونِ حرکت **ساخته نمی‌شود**، نه اینکه صفر شود.
+  const lastBasePrice = new Map();
   let built = [], matched = [], table = null;
   let activeLoad = null, mounted = true, universeVersion = 0;
   // ── رصد ───────────────────────────────────────────────────────────────
@@ -327,7 +337,10 @@ export async function mount(root, { state }) {
   });
 
   function paintConds() {
-    $('wt-cond-count').textContent = conditions.length ? `${fmt.int(conditions.length)} شرط` : 'هنوز شرطی نیست';
+    const joiner = $('wt-match').value === 'any' ? 'یا' : 'و';
+    $('wt-cond-count').textContent = conditions.length
+      ? `${fmt.int(conditions.length)} شرط، با «${joiner}»`
+      : 'هنوز شرطی نیست';
     $('wt-conds').innerHTML = conditions.length
       ? conditions.map((condition, at) => `<article class="wt-cond"><b>${esc(conditionNote(condition))}</b><button type="button" class="ghost danger" data-drop="${at}">حذف</button></article>`).join('')
       : '<p class="empty-note">هنوز شرطی نگذاشته‌ای. بی دست‌کم یک شرط، قاعده ساخته نمی‌شود.</p>';
@@ -441,6 +454,7 @@ export async function mount(root, { state }) {
     const rule = normalizeWatchRule({
       name: $('wt-name').value, conditions,
       strategyIds: pickedDefs(), baseIns: pickedBases(),
+      match: $('wt-match').value,
       cooldownSec: Number($('wt-cooldown').value), sound: $('wt-sound').checked,
     });
     if (!rule.ok) { setStatus(`قاعده ساخته نشد: ${rule.why}`, true); return; }
@@ -487,6 +501,7 @@ export async function mount(root, { state }) {
     const rule = normalizeWatchRule({
       name: $('wt-name').value || watchRuleNote({ conditions, strategyIds: pickedDefs(), baseIns: pickedBases() }),
       conditions, strategyIds: pickedDefs(), baseIns: pickedBases(),
+      match: $('wt-match').value,
       cooldownSec: Number($('wt-cooldown').value), sound: $('wt-sound').checked,
     });
     if (!rule.ok) { setStatus(`قاعده ذخیره نشد: ${rule.why}`, true); return; }
@@ -816,6 +831,14 @@ export async function mount(root, { state }) {
           row.verdict = row.daily.verdict; row.spot = row.daily.spot;
         }
       }
+      // قیمتِ زندهٔ هر پایه نگه داشته می‌شود تا کارتِ تاریخچه بتواند بگوید
+      // «بعد از آن هشدار، پایه چه کرد». بی این، تاریخچه فقط می‌شمارد و
+      // شمردن به‌تنهایی قاعدهٔ مفید را از قاعدهٔ پرسروصدا جدا نمی‌کند.
+      for (const snapshot of snapshots) {
+        if (snapshot.baseName && Number.isFinite(snapshot.basePrice)) {
+          lastBasePrice.set(snapshot.baseName, snapshot.basePrice);
+        }
+      }
       const verdict = evaluateWatch({ rules: watchRules, snapshots, prev: prevSnaps, nowMs: Date.now() });
       prevSnaps = verdict.prev;
       if (verdict.fired.length) {
@@ -898,8 +921,10 @@ export async function mount(root, { state }) {
       <footer>
         <small>${watchTimer ? (live.has(rule.id) ? 'در حال رصد' : 'در این ساخت داده ندارد') : 'رصد خاموش'} · ${rule.firedCount ? `${fmt.int(rule.firedCount)} بار زده` : 'هنوز نزده'} · آرامش ${fmt.int(rule.cooldownSec)} ثانیه${rule.sound ? ' · با صدا' : ''}</small>
         <button type="button" class="ghost" data-act="load">بارگذاری در فرم</button>
+        <button type="button" class="ghost" data-act="history">تاریخچهٔ شلیک</button>
         <button type="button" class="ghost danger" data-act="drop">حذف</button>
-      </footer></article>`).join('');
+      </footer>
+      <div class="wt-history" data-history hidden></div></article>`).join('');
     for (const card of $('wt-rules').querySelectorAll('.gap-rule')) {
       card.querySelector('[data-act="drop"]').addEventListener('click', () => {
         rules = rules.filter((rule) => rule.id !== card.dataset.rule);
@@ -911,11 +936,19 @@ export async function mount(root, { state }) {
         if (activeRules().length) startWatch();
         else { stopWatch(); setStatus('آخرین قاعدهٔ فعال حذف شد؛ رصد ایستاد.'); }
       });
+      card.querySelector('[data-act="history"]').addEventListener('click', () => {
+        const box = card.querySelector('[data-history]');
+        if (!box.hidden) { box.hidden = true; return; }
+        const rule = rules.find((one) => one.id === card.dataset.rule);
+        box.innerHTML = ruleHistoryHtml(rule);
+        box.hidden = false;
+      });
       card.querySelector('[data-act="load"]').addEventListener('click', () => {
         const rule = rules.find((one) => one.id === card.dataset.rule);
         if (!rule) return;
         conditions = [...rule.conditions];
         $('wt-name').value = rule.name || '';
+        $('wt-match').value = rule.match === 'any' ? 'any' : 'all';
         $('wt-cooldown').value = String(rule.cooldownSec);
         $('wt-sound').checked = !!rule.sound;
         for (const box of root.querySelectorAll('[data-def]')) box.checked = rule.strategyIds.includes(box.dataset.def);
@@ -924,6 +957,41 @@ export async function mount(root, { state }) {
         setStatus('قاعده در فرم بارگذاری شد؛ «ساخت و تطبیق» را بزن تا ببینی همین حالا روی چه چیزی می‌نشیند.');
       });
     }
+  }
+
+  /**
+   * تاریخچهٔ شلیک یک قاعده.
+   *
+   * شمارِ شلیک به‌تنهایی نمی‌گوید قاعده مفید بوده یا پرسروصدا؛ تنها چیزی
+   * که این دو را جدا می‌کند حرکتِ پایه **پس از** هشدار است. قیمتِ لحظهٔ
+   * شلیک روی خودِ ردیف ذخیره شده و قیمتِ امروز از همین جلسه می‌آید — اگر
+   * نداشته باشیمش، ستونِ حرکت ساخته نمی‌شود و علتش نوشته می‌شود.
+   */
+  function ruleHistoryHtml(rule) {
+    const baseName = (rule?.history || [])[0]?.baseName || '';
+    const summary = watchHistorySummary(rule, { basePriceNow: lastBasePrice.get(baseName) ?? NaN });
+    if (!summary.count) {
+      return `<p class="empty-note">این قاعده هنوز نزده${summary.totalFired ? '، یا تاریخچه‌اش پیش از افزوده‌شدنِ این دفتر بوده' : ''}.</p>`;
+    }
+    const rows = summary.rows.map((item) => `
+      <tr>
+        <td class="n">${faDigits(new Date(item.at).toLocaleString('fa-IR'))}</td>
+        <td>${esc(item.baseName || '—')}</td>
+        <td>${esc(item.label || item.comboKey || '—')}</td>
+        <td class="n">${fmt.int(item.hits)}</td>
+        <td class="n">${item.basePrice > 0 ? fmt.money(item.basePrice) : '—'}</td>
+        <td class="n ${Number.isFinite(item.movePct) ? signTone(item.movePct) : ''}">${Number.isFinite(item.movePct) ? `${fmt.pct(item.movePct)}٪` : '—'}</td>
+      </tr>`).join('');
+    const verdict = summary.moveKnown
+      ? `از ${fmt.int(summary.up + summary.down)} هشدارِ قیمت‌دار، ${fmt.int(summary.up)} تا پایه بعدش بالا رفت و ${fmt.int(summary.down)} تا پایین؛ میانهٔ حرکت ${fmt.pct(summary.medianMovePct)}٪.`
+      : 'حرکتِ پس از هشدار ساخته نشد: قیمتِ زندهٔ این پایه در همین جلسه دیده نشده.';
+    return `
+      <table class="mini">
+        <thead><tr><th>زمان</th><th>پایه</th><th>نمایندهٔ ترکیب</th><th>چند انطباق</th><th>قیمت پایه آن لحظه</th><th>حرکت تا حالا</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p class="note">${verdict}${summary.withoutPrice ? ` ${fmt.int(summary.withoutPrice)} ردیف قیمتِ لحظهٔ شلیک ندارد.` : ''}
+        «حرکت تا حالا» نسبت به قیمتِ همین حالا است، نه پیش‌بینی — می‌گوید اگر آن هشدار را جدی می‌گرفتی، بازار از آن نقطه به کدام سو رفته.</p>`;
   }
 
   function paintLog() {

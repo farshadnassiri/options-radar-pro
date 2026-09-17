@@ -44,6 +44,8 @@ import { chartGroup } from '/ui/chart-host.mjs';
 import { sparkline } from '/ui/gap-charts.mjs';
 import { draftFromPlan, intakeFormHtml, readIntake } from '/ui/positions-intake.mjs';
 import { positionRollPlan, goHandoff } from '/ui/handoff.mjs';
+import { checkPositionAlerts, normalizePositionAlert } from '/core/position-alert.mjs';
+import { alertFormHtml, readAlertForm, alertCell, alertBannerHtml } from '/ui/positions-alert-view.mjs';
 import { editFormHtml, readEdit, needsEntryClose } from '/ui/positions-edit.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { todayJalali, gregorianToJalali, parseJalali, daysSinceJalali } from '/core/jalali.mjs';
@@ -119,6 +121,7 @@ export async function mount(root, { state, api }) {
   // می‌شد، عددی که کاربر داشت تایپ می‌کرد زیر دستش می‌پرید.
   let closing = null;
   let closeSuggest = [];
+  let alerting = null;
 
   const todayNumber = () => tehranDateNumber();
   const posKey = (p, at) => String(p?.id || `#${at}`);
@@ -135,6 +138,8 @@ export async function mount(root, { state, api }) {
       <p>پریمیوم دریافتی تا سررسید سود تحقق‌یافته نیست. موقعیت فروش هر روز به قیمت روز بدهی است،
          پس ارزش‌گذاری اینجا هزینه بستن در بازار است.</p>
     </div>
+
+    <div id="alert-bar"></div>
 
     <div class="kpis" id="kpis"></div>
 
@@ -174,6 +179,19 @@ export async function mount(root, { state, api }) {
       <h3>موقعیت‌های باز</h3>
       <p class="note" id="daily-note"></p>
       <div class="scroll" style="max-height:none"><table class="data" id="list"></table></div>
+    </section>
+
+    <section class="card" id="alert-card" style="display:none">
+      <h3 id="alert-title">شرط روی این موقعیت</h3>
+      <p class="note">دیده‌بان شرطی از بازار شروع می‌کند و سنجه‌هایش سنجه‌های یک نامزد است. «سود <b>همین</b> موقعیت من» از قیمت ورودِ ثبت‌شدهٔ خودت می‌آید — عددی که بازار نمی‌داند و هیچ اسکنی بازتولیدش نمی‌کند.</p>
+      <div id="alert-form"></div>
+      <div class="bar" style="margin-top:12px">
+        <button class="btn" id="alert-save">ثبت شرط</button>
+        <button class="ghost" id="alert-clear">برداشتن شرط‌ها</button>
+        <button class="ghost" id="alert-cancel">انصراف</button>
+        <span class="sp"></span>
+        <span id="alert-msg" class="saved" role="status" aria-live="polite"></span>
+      </div>
     </section>
 
     <section class="card" id="close-card" style="display:none">
@@ -531,6 +549,23 @@ export async function mount(root, { state, api }) {
     const legsText = (p) => p.legs.map((l) => `${l.side === 'sell' ? '−' : '+'}${l.kind === 'underlying' ? 'سهم' : (l.kind === 'call' ? 'کال' : 'پوت') + ' ' + fmt.money(l.strike)}`).join(' ');
     const moneyTone = (value) => `style="color:${value >= 0 ? 'var(--gain)' : 'var(--loss)'}"`;
 
+    // شرط‌ها روی **همان** عددهایی سنجیده می‌شوند که جدول نشان می‌دهد؛ اگر
+    // دو منبع بود، زنگ روی عددی می‌زد که کاربر روی صفحه نمی‌بیند.
+    const alertHits = [];
+    const firingByIndex = new Map();
+    for (const { p, at, state, m, spot } of evals) {
+      const room = breakevenRoom(spot, m.ifHeld.breakevens);
+      const view = {
+        pnlTotal: m.pnlTotal, retPct: m.retPct,
+        roomPct: room.available ? room.roomPct : NaN,
+        daysToExpiry: state.daysToExpiry,
+      };
+      const result = checkPositionAlerts(p.alert, view);
+      firingByIndex.set(at, result.firing);
+      for (const hit of result.firing) alertHits.push({ ...hit, title: p.title || 'موقعیت' });
+    }
+    root.querySelector('#alert-bar').innerHTML = alertBannerHtml(alertHits);
+
     const rows = evals.map(({ p, at, state, m, spot, greeks }) => {
       const change = todayChange(p, at, m.pnlTotal);
       const trend = dailySeries(p, at).points.slice(-30).map((point) => point.pnlTotal);
@@ -554,9 +589,11 @@ export async function mount(root, { state, api }) {
         <td class="n">${fmt.pct(m.retMonthPct)}</td>
         <td class="n">${fmt.money(m.ifHeld.atSpot * p.qty)}</td>
         ${breakevenCell(breakevenRoom(spot, m.ifHeld.breakevens))}
+        ${alertCell(p, firingByIndex.get(at) || [])}
         ${GREEKS.map(({ key }) => `<td class="n">${gk(greeks.greeks?.[key])}</td>`).join('')}
         <td class="n">${ivPctCell(greeks.meanIvPct)}</td>
-        <td>${positionRollPlan(p) ? `<button class="ghost" data-roll="${at}" title="همین موقعیت را در تب تحلیل رول باز کن">رول</button>` : ''}
+        <td><button class="ghost" data-alert="${at}" title="شرط روی سود، بازده، فاصلهٔ سربه‌سری یا روز مانده">شرط</button>
+            ${positionRollPlan(p) ? `<button class="ghost" data-roll="${at}" title="همین موقعیت را در تب تحلیل رول باز کن">رول</button>` : ''}
             <button class="ghost" data-close="${at}">بستن</button>
             <button class="ghost" data-edit="${at}">ویرایش</button>
             <button class="ghost" data-del="${at}">حذف</button></td>
@@ -567,7 +604,7 @@ export async function mount(root, { state, api }) {
       <thead><tr>
         <th>عنوان</th><th>پایه</th><th>پاها</th><th>تعداد</th><th>تاریخ ورود</th><th>روز</th>
         <th>روز تا سررسید</th>
-        <th>سرمایه روز ورود</th><th>وجه تضمین امروز</th><th>سود و زیان الان</th><th>تغییر امروز</th><th>روند</th><th>بازده از ورود ٪</th><th>ماهانه ٪</th><th>اگر تا سررسید بماند</th><th title="فاصلهٔ قیمت پایه تا نزدیک‌ترین سربه‌سری">اتاق سربه‌سر</th>${GREEKS.map(({ label }) => `<th>${label}</th>`).join('')}<th>تلاطم ضمنی</th><th></th>
+        <th>سرمایه روز ورود</th><th>وجه تضمین امروز</th><th>سود و زیان الان</th><th>تغییر امروز</th><th>روند</th><th>بازده از ورود ٪</th><th>ماهانه ٪</th><th>اگر تا سررسید بماند</th><th title="فاصلهٔ قیمت پایه تا نزدیک‌ترین سربه‌سری">اتاق سربه‌سر</th><th title="شرط‌هایی که خودت روی این موقعیت گذاشته‌ای">شرط</th>${GREEKS.map(({ label }) => `<th>${label}</th>`).join('')}<th>تلاطم ضمنی</th><th></th>
       </tr></thead><tbody>${rows}</tbody>`
       : `<tbody><tr><td style="padding:16px;color:var(--muted)">${positions.length ? 'موقعیت بازی نمانده — همه یا بسته شده‌اند یا سررسیدشان گذشته.' : 'موقعیتی ثبت نشده. از فرم بالا اضافه کن، یا از «در جست‌وجوی استراتژی‌ها» یک ترکیب را بفرست اینجا.'}</td></tr></tbody>`;
 
@@ -688,6 +725,14 @@ export async function mount(root, { state, api }) {
         render();
       });
     }
+    for (const b of root.querySelectorAll('[data-alert]')) {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        alerting = Number(b.dataset.alert);
+        root.querySelector('#alert-form').dataset.for = '';
+        drawAlert();
+      });
+    }
     for (const b of root.querySelectorAll('[data-roll]')) {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -777,6 +822,7 @@ export async function mount(root, { state, api }) {
 
     root.querySelector('#daily-note').textContent = dailyNote;
     if (closing != null) drawClose();
+    if (alerting != null) drawAlert();
     if (editing != null) drawEdit();
     if (expanded != null) drawDetail();
   }
@@ -969,6 +1015,51 @@ export async function mount(root, { state, api }) {
       drawTrack();
     });
   }
+
+  // ——————————————— شرط روی موقعیت ———————————————
+  function drawAlert() {
+    const p = positions[alerting];
+    const card = root.querySelector('#alert-card');
+    if (!p) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    root.querySelector('#alert-title').textContent = `شرط روی موقعیت — ${p.title || '—'}`;
+    const host = root.querySelector('#alert-form');
+    if (host.dataset.for !== String(alerting)) {
+      host.dataset.for = String(alerting);
+      host.innerHTML = alertFormHtml(p);
+    }
+  }
+
+  const alertMsg = root.querySelector('#alert-msg');
+  const dropAlertForm = () => {
+    alerting = null;
+    root.querySelector('#alert-form').dataset.for = '';
+    root.querySelector('#alert-card').style.display = 'none';
+    alertMsg.textContent = '';
+  };
+  root.querySelector('#alert-cancel').addEventListener('click', dropAlertForm);
+  root.querySelector('#alert-save').addEventListener('click', async () => {
+    const p = positions[alerting];
+    if (!p) return;
+    const made = normalizePositionAlert(readAlertForm(root.querySelector('#alert-form')));
+    if (!made.ok) { alertMsg.textContent = made.why; alertMsg.style.color = 'var(--loss)'; return; }
+    p.alert = made.alert;
+    dropAlertForm();
+    await save();
+    flash('شرط ثبت شد.');
+    render();
+  });
+  root.querySelector('#alert-clear').addEventListener('click', async () => {
+    const p = positions[alerting];
+    if (!p) return;
+    // برداشتن شرط یعنی نبودنش، نه شرطِ خاموش: رکوردِ خاموش در جدول یک
+    // عددِ «⏸» می‌گذارد که کاربر باید بعداً بفهمد چیست.
+    delete p.alert;
+    dropAlertForm();
+    await save();
+    flash('شرط‌های این موقعیت برداشته شد.');
+    render();
+  });
 
   // ——————————————— بستن موقعیت ———————————————
   function drawClose() {

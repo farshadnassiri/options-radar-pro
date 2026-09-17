@@ -2801,6 +2801,17 @@ dl.kv dd { margin: 0; font-family: var(--mono); font-variant-numeric: tabular-nu
    تعریف شده بود و هر تب دیگری که چک‌باکس می‌گذاشت، تیک و متنش دو خط
    می‌شدند. */
 label.check { display: inline-flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+/* نوار هشدار موقعیت‌ها — بالای صفحه، جمع‌شده در یک قاب نه پنج قاب جدا. */
+.pos-alert-bar {
+  border: 1px solid var(--loss); border-radius: var(--radius-md);
+  background: var(--loss-soft); padding: 10px 14px; margin-bottom: 14px;
+}
+.pos-alert-bar b { color: var(--loss); }
+.pos-alert-bar ul { margin: 6px 0 0; padding-inline-start: 18px; }
+.pos-alert-bar li { font-size: var(--fs-sm); line-height: var(--lh-normal); }
+
+/* تاریخچهٔ شلیک یک قاعده، داخل کارت خودش. */
+.wt-history { margin-top: 10px; border-top: 1px solid var(--line-soft); padding-top: 10px; }
 label.check input { margin: 0; }
 /* اتاق سربه‌سر: ردیفی که پایه‌اش به سربه‌سری نزدیک شده باید از دور دیده شود. */
 .data td.warn { color: var(--warn); }
