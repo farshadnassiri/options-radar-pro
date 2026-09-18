@@ -5,7 +5,7 @@
 import { check, group, readSrc } from '../harness.mjs';
 import { historyPrice } from '../../core/history.mjs';
 import {
-  LIVE_DAY_PHASES, LIVE_DAY_SOURCES, LIVE_SOURCE_TAPE, liveDayOf, liveDayRows,
+  LIVE_DAY_PHASES, LIVE_DAY_SOURCES, LIVE_SOURCE_TAPE, inferLiveSessionDate, liveDayOf, liveDayRows,
   liveTapeCodes, liveTapeDay, mergeLiveDay, tehranDateNumber,
 } from '../../core/live-day.mjs';
 import { applyLiveScope, liveDaySnapshot, scopeNote } from '../../ui/live-scope.mjs';
@@ -70,6 +70,22 @@ group('۸۷. دامنهٔ داده تا لحظهٔ جاری');
     tehranDateNumber(Date.UTC(2026, 1, 9, 21, 0)) === 20260210,
     String(tehranDateNumber(Date.UTC(2026, 1, 9, 21, 0))));
   check('ساعت نامعتبر روز نمی‌سازد', tehranDateNumber(NaN) === 0);
+  const heldTape = {
+    UA1: { summary: { count: 700, volume: 900000, firstPrice: 1030, lastPrice: 1050, low: 1025, high: 1060 } },
+  };
+  const heldDaily = { UA1: { rows: [
+    { date: 20260208, trades: 650, vol: 800000, first: 1010, last: 1020, low: 1000, high: 1030 },
+    { date: 20260209, trades: 700, vol: 900000, first: 1030, last: 1050, low: 1025, high: 1060 },
+  ] } };
+  check('نوار نگه‌داشته‌شده در تعطیلی از اثرانگشت روزانه تاریخ می‌گیرد',
+    inferLiveSessionDate(heldTape, heldDaily) === 20260209);
+  check('شباهت ناقص، روز ساختگی تولید نمی‌کند',
+    inferLiveSessionDate(heldTape, { UA1: { rows: [{ ...heldDaily.UA1.rows[1], vol: 1 }] } }) === 0);
+  check('تعارض تاریخ میان ابزارها محتاطانه رد می‌شود', inferLiveSessionDate({
+    ...heldTape, UA2: { summary: { count: 1, volume: 2, firstPrice: 3, lastPrice: 3, low: 3, high: 3 } },
+  }, {
+    ...heldDaily, UA2: { rows: [{ date: 20260208, trades: 1, vol: 2, first: 3, last: 3, low: 3, high: 3 }] },
+  }) === 0);
 
   // ——— منبعِ عکس، نه فقط فازِ بازار ———
   //

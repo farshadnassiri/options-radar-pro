@@ -10,7 +10,7 @@ import {
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
 import { LIVE_CODE_CAP, splitTradeDays } from '/core/trades-source.mjs';
-import { liveTapeCodes, liveTapeDay } from '/core/live-day.mjs';
+import { inferLiveSessionDate, liveTapeCodes, liveTapeDay } from '/core/live-day.mjs';
 import { fetchRangeUniverse, mountHistoryRange } from '/ui/history-range.mjs';
 import { buildDataExportSheets, dataExportFilename } from '/ui/data-export-workbook.mjs';
 import { downloadXlsx } from '/ui/xlsx.mjs';
@@ -199,7 +199,7 @@ export async function mount(root, { state, api }) {
   let soloFailures = 0;
   let lastFailure = '';
 
-  async function fetchBatch(batch, items, signal, depth = 0) {
+  async function fetchBatch(batch, items, signal, depth = 0, fresh = false) {
     if (soloFailures >= GIVE_UP_AFTER) {
       for (const pair of batch) {
         items[pair.key] = { rows: [], error: lastFailure || 'دریافت پیاپی شکست خورد', source: 'history' };
@@ -209,7 +209,7 @@ export async function mount(root, { state, api }) {
     try {
       const response = await fetch('/api/trades/batch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-        body: JSON.stringify({ requests: batch.map(({ ins, date }) => ({ ins, date })) }),
+        body: JSON.stringify({ requests: batch.map(({ ins, date }) => ({ ins, date })), fresh }),
       });
       const payload = await response.json();
       if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
@@ -232,7 +232,7 @@ export async function mount(root, { state, api }) {
       }
       setStatus(`بستهٔ ${fmt.int(batch.length)} تایی نرسید؛ نصف شد و دوباره می‌رود…`);
       let all = true;
-      for (const half of halves) all = (await fetchBatch(half, items, signal, depth + 1)) && all;
+      for (const half of halves) all = (await fetchBatch(half, items, signal, depth + 1, fresh)) && all;
       return all;
     }
   }
@@ -267,11 +267,11 @@ export async function mount(root, { state, api }) {
     }
   }
 
-  async function fetchHistorical(pairs, items, signal) {
+  async function fetchHistorical(pairs, items, signal, fresh = false) {
     const batches = dataExportPairBatches(pairs, DATA_EXPORT_BATCH_CAP);
     for (let index = 0; index < batches.length; index += 1) {
       setStatus(`در حال دریافت روزهای بسته‌شده: بسته ${fmt.int(index + 1)} از ${fmt.int(batches.length)}…`);
-      await fetchBatch(batches[index], items, signal);
+      await fetchBatch(batches[index], items, signal, 0, fresh);
     }
   }
 
@@ -302,7 +302,32 @@ export async function mount(root, { state, api }) {
       const payload = await response.json();
       if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
       const day = liveTapeDay(payload);
-      return { payload, date: day.ok ? day.date : 0, why: day.why || '' };
+      if (day.ok) return { payload, date: day.date, why: day.why || '' };
+
+      // در روز تعطیل یا پیش از بازشدن بازار، تابلو و GetTrade هر دو نوارِ
+      // آخرین جلسه را نگه می‌دارند. liveTapeDay عمداً آن را «امروز» نمی‌زند؛
+      // اینجا تاریخ واقعی‌اش را با تطبیق اثرانگشت نوار و تابلوی روزانه پیدا
+      // می‌کنیم. این مسیر تعطیلی رسمی را هم درست می‌فهمد و حدس تقویمی نیست.
+      const mayHoldPrevious = ['holiday', 'before'].includes(String(payload?.market?.phase || ''))
+        && ['watch', 'snapshot'].includes(String(payload?.source || ''))
+        && payload?.archived !== true && payload?.boardUnavailable !== true;
+      if (!mayHoldPrevious) return { payload, date: 0, why: day.why || '' };
+      const codes = [...new Set((payload.rows || []).map((row) => String(row?.uaInsCode || '')).filter(Boolean))].slice(0, 3);
+      if (!codes.length) return { payload, date: 0, why: day.why || '' };
+      const [tapeResponse, dailyResponse] = await Promise.all([
+        fetch(`/api/live-trades?ins=${codes.join(',')}`, { cache: 'no-store', signal }),
+        fetch(`/api/dailies?ins=${codes.join(',')}&n=12`, { cache: 'no-store', signal }),
+      ]);
+      const [tape, daily] = await Promise.all([tapeResponse.json(), dailyResponse.json()]);
+      if (!tapeResponse.ok || tape?.error || !dailyResponse.ok || daily?.error) {
+        const why = tape?.error || daily?.error || `پاسخ ${!tapeResponse.ok ? tapeResponse.status : dailyResponse.status}`;
+        return { payload, date: 0, why: `${day.why || 'روز نوار روشن نیست'}؛ تطبیق آخرین جلسه نرسید: ${why}` };
+      }
+      const inferred = inferLiveSessionDate(tape.items, daily);
+      return {
+        payload, date: inferred, inferred: inferred > 0,
+        why: inferred ? 'تاریخ آخرین جلسه از تطبیق نوار و تابلوی روزانه تأیید شد' : `${day.why || 'روز نوار روشن نیست'}؛ اثرانگشت نوار با روزانه تطبیق نکرد`,
+      };
     } catch (error) {
       if (error.name === 'AbortError') throw error;
       return { payload: null, date: 0, why: error.message };
@@ -326,7 +351,12 @@ export async function mount(root, { state, api }) {
     for (const row of payload.rows || []) for (const key of ['uaInsCode', 'insCode_C', 'insCode_P']) {
       const ins = String(row?.[key] ?? ''); if (ins) present.add(ins);
     }
-    const codes = liveTapeCodes(payload.rows, wanted, { withContracts: true });
+    // در روز تعطیل، تابلوی «امروز» ممکن است قراردادِ منقضی‌شده در آخرین
+    // جلسه را دیگر فهرست نکند، در حالی که GetTrade هنوز نوار همان جلسه را
+    // دارد. برای روزی که با اثرانگشت تأیید شده، همهٔ ابزارهای انتخابی پرسیده
+    // می‌شوند؛ در جلسهٔ جاری همان پالایهٔ تابلو بار را کم نگه می‌دارد.
+    const boardCodes = liveTapeCodes(payload.rows, wanted, { withContracts: true });
+    const codes = resolved?.inferred ? [...new Set([...boardCodes, ...wanted])] : boardCodes;
     const requested = new Set(codes);
     for (const pair of pairs) if (!requested.has(pair.ins)) items[pair.key] = present.has(pair.ins) ? { rows: [], source: 'live' } : { rows: [], error: 'ابزار در تابلوی امروز پیدا نشد', source: 'live' };
     const parts = chunks(codes, LIVE_CODE_CAP);
@@ -387,6 +417,8 @@ export async function mount(root, { state, api }) {
     controller = new AbortController(); runBtn.disabled = true; stopBtn.hidden = false; $('de-result').innerHTML = '';
     const items = {};
     try {
+      soloFailures = 0;
+      lastFailure = '';
       // اول باید معلوم شود نوارِ زنده مالِ کدام روز است؛ تقسیمِ روزها به آن
       // بستگی دارد، نه به ساعت مرورگر.
       setStatus('در حال تشخیص روزِ نوار زنده…');
@@ -405,8 +437,22 @@ export async function mount(root, { state, api }) {
       await fetchLive(live, items, controller.signal, resolved);
       const dailyByIns = await fetchDaily(instruments, range, controller.signal);
       setStatus('داده‌ها آماده شد.');
-      const outcome = dataExportOutcome(pairs, items);
-      const audit = dataExportBlankAudit(pairs, items, dailyByIns);
+      let outcome = dataExportOutcome(pairs, items);
+      let audit = dataExportBlankAudit(pairs, items, dailyByIns);
+      // خالیِ تاریخی که تابلوی روزانه تکذیبش می‌کند غالباً پاسخِ خالیِ کش
+      // CDN است. همان جفت‌ها دقیقاً یک بار با cache-buster دوباره می‌روند؛
+      // نه همهٔ بازه، و نه خالی‌ای که تابلو واقعاً صفر اعلام کرده است.
+      const missingKeys = new Set(audit.filter((row) => row.verdict === 'missing'
+        && items[row.key]?.source === 'history').map((row) => row.key));
+      const staleHistorical = pairs.filter((pair) => missingKeys.has(pair.key));
+      if (staleHistorical.length) {
+        setStatus(`${fmt.int(staleHistorical.length)} ابزار/روز در تاریخچه خالی بود ولی تابلو معامله ثبت کرده؛ دریافت تازه در حال انجام است…`);
+        await fetchHistorical(staleHistorical, items, controller.signal, true);
+        outcome = dataExportOutcome(pairs, items);
+        audit = dataExportBlankAudit(pairs, items, dailyByIns);
+      }
+      // شیت‌ها اینجا ساخته نمی‌شوند: تایم‌فریم شکلِ نوشتن است نه دریافت، و
+      // ساختنشان در `exportPrepared` یعنی عوض‌کردنش دریافتِ دوباره نمی‌خواهد.
       prepared = { instruments, pairs, items, range, complete: universe.complete, note: universe.note || '', outcome, audit };
       paintResult(instruments, pairs, items);
       // ═══ چرا صفر بودنِ داده، خبرِ اول است ═══
