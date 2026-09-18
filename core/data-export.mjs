@@ -27,6 +27,7 @@ export function discoverDataExportInstruments(rows = [], selectedBases = [], { d
     old.activeFrom = starts.length ? Math.min(...starts) : 0;
     old.activeTo = Math.max(n(old.activeTo), n(item.activeTo));
     old.listingKnown = old.listingKnown === true || item.listingKnown === true;
+    old.listingOfficial = old.listingOfficial === true || item.listingOfficial === true;
   };
 
   for (const row of rows || []) {
@@ -36,7 +37,7 @@ export function discoverDataExportInstruments(rows = [], selectedBases = [], { d
     put({
       ins: baseIns, name: baseName, baseIns, baseName, kind: 'underlying',
       strike: null, expiry: null, activeFrom: n(row?.activeFrom), activeTo: n(row?.activeTo),
-      listingKnown: true, size: 1, sizeAssumed: false,
+      listingKnown: true, listingOfficial: true, size: 1, sizeAssumed: false,
     });
     const officialSize = n(row?.contractSize);
     const size = officialSize > 0 ? officialSize : n(declaredSize);
@@ -52,6 +53,8 @@ export function discoverDataExportInstruments(rows = [], selectedBases = [], { d
         activeFrom: n(row?.[`activeFrom_${suffix}`]) || n(row?.activeFrom),
         activeTo: n(row?.[`activeTo_${suffix}`]) || n(row?.activeTo),
         listingKnown: row?.[`listingKnown_${suffix}`] !== false,
+        // درست است که تاریخِ عرضه را داریم، یا فقط اولین روزِ دیده‌شدن را؟
+        listingOfficial: row?.[`listedOfficial_${suffix}`] === true,
         size: size > 0 ? size : 0,
         sizeAssumed: !(officialSize > 0),
       });
@@ -90,18 +93,87 @@ export function unknownListingContracts(instruments = []) {
     && (item.listingKnown === false || !(n(item.activeFrom) > 0)));
 }
 
+/**
+ * کفِ عمرِ هر قرارداد، از روی **سری** و نه از روی یک سمت.
+ *
+ * ═══ ممیزی فایلِ m5 اهرم ═══
+ *
+ * صاحب پروژه گفت خروجی کامل نیست. فایل نشان داد چرا: ۵۸ ابزار/روز اصلاً
+ * درخواست نرفته بودند، و هر ۵۸تا **پوت** بودند. `ضهرم7061` از ۲۰۲۶/۰۷/۲۵
+ * در فایل هست و `طهرم7061` از ۲۰۲۶/۰۸/۱۱ — سیزده روز معاملاتی دیرتر، با
+ * همان اعمال و همان سررسید. کال و پوتِ یک سری در یک روز عرضه می‌شوند، پس
+ * این سیزده روز اختلافِ عرضه نیست.
+ *
+ * علتش `contractLife` است: وقتی `listedFrom` در دفتر نیست، به `first`
+ * برمی‌گردد — اولین روزی که اسکنِ دفتر آن قرارداد را **دیده**. پوتِ
+ * کم‌معامله دیرتر دیده می‌شود، پس کرانِ پایینی‌اش سوگیریِ دیر دارد. این
+ * «نمی‌دانیم» نیست؛ یک مشاهده است که می‌دانیم از تاریخ عرضه جلوتر است.
+ *
+ * پس: اگر یک سمتِ سری تاریخ عرضهٔ **رسمی** دارد، همان کفِ هر دو سمت است.
+ * اگر هیچ‌کدام ندارند، زودترین مشاهدهٔ همان سری کف است — چون دیرترها
+ * قطعاً دیرند. هیچ تاریخی ساخته نمی‌شود و کفِ رسمیِ خودِ قرارداد دست
+ * نمی‌خورد؛ فقط مرزی که مشاهده ساخته بود با سریِ خودش هم‌تراز می‌شود.
+ */
+const seriesKey = (item) => (n(item?.expiry) > 0 && n(item?.strike) > 0
+  ? `${code(item.baseIns)}:${n(item.expiry)}:${n(item.strike)}` : '');
+
+export function dataExportListingFloors(instruments = []) {
+  const series = new Map();
+  for (const item of instruments || []) {
+    if (!item?.ins || item.kind === 'underlying') continue;
+    const key = seriesKey(item);
+    const from = n(item.activeFrom);
+    if (!key || !(from > 0) || item.listingKnown === false) continue;
+    const slot = series.get(key) || { official: 0, observed: 0 };
+    const field = item.listingOfficial === true ? 'official' : 'observed';
+    slot[field] = slot[field] > 0 ? Math.min(slot[field], from) : from;
+    series.set(key, slot);
+  }
+  const floors = new Map();
+  for (const item of instruments || []) {
+    if (!item?.ins || item.kind === 'underlying') continue;
+    const from = n(item.activeFrom);
+    if (!(from > 0)) continue;
+    if (item.listingOfficial === true) { floors.set(String(item.ins), from); continue; }
+    const slot = series.get(seriesKey(item));
+    const floor = slot ? (slot.official > 0 ? slot.official : slot.observed) : 0;
+    floors.set(String(item.ins), floor > 0 ? Math.min(from, floor) : from);
+  }
+  return floors;
+}
+
+/**
+ * چند قرارداد کفِ رسمی دارند، چند تا مشاهده‌ای، و کفِ سری چند ابزار/روز
+ * را برگرداند که پیش‌تر اصلاً درخواست نمی‌رفت.
+ */
+export function dataExportListingBasis(instruments = [], pairs = []) {
+  const byIns = new Map((instruments || []).filter((item) => item?.ins && item.kind !== 'underlying')
+    .map((item) => [String(item.ins), item]));
+  let official = 0, observed = 0, recovered = 0;
+  for (const item of byIns.values()) {
+    if (item.listingOfficial === true) official += 1; else observed += 1;
+  }
+  for (const pair of pairs || []) {
+    const item = byIns.get(String(pair.ins));
+    if (item && item.listingOfficial !== true && pair.date < n(item.activeFrom)) recovered += 1;
+  }
+  return { official, observed, recovered, total: byIns.size };
+}
+
 /** پایه در کل بازه و اختیار فقط در عمر ثبت‌شدهٔ خودش درخواست می‌شود. */
 export function dataExportPairs(instruments = [], dates = []) {
   const out = [], seen = new Set();
+  const floors = dataExportListingFloors(instruments);
   const orderedDates = [...new Set((dates || []).map((value) => Math.trunc(n(value))).filter(Boolean))].sort((a, b) => a - b);
   for (const date of orderedDates) {
     for (const item of instruments || []) {
       if (!item?.ins) continue;
       if (item.kind !== 'underlying') {
-        const from = n(item.activeFrom), to = n(item.activeTo) || n(item.expiry);
+        const own = n(item.activeFrom), to = n(item.activeTo) || n(item.expiry);
+        const from = floors.get(String(item.ins)) || own;
         // تاریخِ عرضهٔ نامعلوم یعنی نمی‌دانیم آن روز وجود داشته یا نه.
         // «نمی‌دانیم» درخواست نمی‌سازد.
-        if (item.listingKnown === false || !(from > 0)) continue;
+        if (item.listingKnown === false || !(own > 0)) continue;
         if (date < from || (to > 0 && date > to)) continue;
       }
       const key = batchKey(item.ins, date);
@@ -278,16 +350,21 @@ export function dataExportTradeRows(instrument, pairs = [], items = {}) {
       const canceled = row?.canceled === true;
       // ═══ چرا شرطِ حجم فقط برای معاملهٔ فعال است ═══
       //
-      // ممیزی فایل ۲۰۲۶/۰۶/۲۰ تا ۲۰۲۶/۰۹/۱۸: برگ «پوشش دریافت» ۱۲۲
-      // معاملهٔ باطل شمرد ولی ستون «تعداد باطل» برگ‌های ابزار جمعاً ۴۹ تا
-      // داشت — ۷۳ تای دیگر بی‌صدا افتاده بودند، و همان فایل در یک ستون
-      // ۱۲۲ می‌گفت و در ستونی دیگر ۴۹.
+      // `quantity > 0` برای انداختنِ ردیفِ بی‌قیمت گذاشته شده بود، ولی
+      // معاملهٔ باطل را هم می‌انداخت: بالادست برای آن `qTitTran` صفر
+      // می‌فرستد. ردیفی که بالادست صریحاً «باطل» خوانده یک مشاهده است و
+      // شمرده می‌شود؛ حجمش جایی جمع نمی‌شود چون سطل‌ساز پیش از جمع‌زدن از
+      // رویش می‌پرد، پس نگه‌داشتنش هیچ عددی را آلوده نمی‌کند.
       //
-      // علتش همین شرط بود: بالادست برای معاملهٔ باطل `qTitTran` صفر
-      // می‌فرستد، و `quantity > 0` که برای انداختنِ ردیفِ بی‌قیمت گذاشته
-      // شده بود، ردیفِ باطل را هم می‌انداخت. حجمِ باطل جایی جمع نمی‌شود
-      // (سطل‌ساز پیش از جمع‌زدن از رویش می‌پرد)، پس نگه‌داشتنش هیچ عددی را
-      // آلوده نمی‌کند و فقط شمارش را درست می‌کند.
+      // ═══ تصحیح ═══
+      //
+      // اولین تشخیصِ ممیزیِ ۲۰۲۶/۰۶/۲۰ تا ۲۰۲۶/۰۹/۱۸ این بود که همین شرط،
+      // علتِ اختلافِ ۱۲۲ و ۴۹ در شمارِ باطل است. غلط بود. ستونِ تازهٔ
+      // «بیرون از جلسه» در اجرای بعدی جواب را داد: مجموعش دقیقاً ۷۳ شد،
+      // همان اختلاف. معاملهٔ باطل را بورس **پس از** پایان جلسه ثبت
+      // می‌کند، پس جداسازِ ۹:۰۰ تا ۱۲:۳۰ آن را کنار می‌گذارد — درست، و
+      // حالا شمرده و گزارش‌شده. این شرط یک دامِ واقعیِ دیگر است که بسته
+      // شد، نه علتِ آن اختلاف.
       if (!(price > 0) || !(n(row?.time) > 0)) continue;
       if (!canceled && !(quantity > 0)) continue;
       out.push({

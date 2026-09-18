@@ -2,8 +2,8 @@
 
 import {
   BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, EMPTY_STATUS, blankAuditSummary, dataExportCandles,
-  dataExportCoverageRows, dataExportFrame, dataExportOutcome, dataExportRouteSplit,
-  dataExportSessionRows, dataExportTradeRows,
+  dataExportCoverageRows, dataExportFrame, dataExportListingBasis, dataExportOutcome,
+  dataExportRouteSplit, dataExportSessionRows, dataExportTradeRows,
 } from '../core/data-export.mjs';
 import { tradeTimeLabel } from '../core/backtest.mjs';
 import { historyDateLabel } from '../core/history.mjs';
@@ -82,6 +82,7 @@ export function buildDataExportSheets({
     ? `${blanks.missing} ابزار/روز تابلو معامله ثبت کرده ولی ریزمعامله نیامد · `
       + `${blanks.quiet} واقعاً بی‌معامله · ${blanks.unknown} بی تابلوی روزانه`
     : '—';
+  const basis = dataExportListingBasis(instruments, pairs);
   const route = dataExportRouteSplit(pairs, items);
   const routeLine = route.total
     ? `تاریخی: ${route.history.total} ابزار/روز، ${route.history.ok} داده آورد · `
@@ -114,6 +115,18 @@ export function buildDataExportSheets({
     ['ستون‌های مشتق', derived
       ? 'روشن — ارزش خام، اندازه قرارداد و ارزش با اندازه قرارداد در برگ هر ابزار آمده‌اند.'
       : 'خاموش برای کوچک‌ماندن فایل. هر سه حاصل‌ضرب ستون‌های موجودند و اندازهٔ قرارداد در برگ «پوشش دریافت» ستون دارد.'],
+    // ═══ چرا «مبنای تاریخ عرضه» یک سطر شد ═══
+    //
+    // ممیزی فایلِ m5: ۵۸ ابزار/روز اصلاً درخواست نرفته بودند و هر ۵۸تا
+    // پوت بودند، چون کرانِ پایینیِ عمرشان از اولین روزِ دیده‌شدن آمده بود
+    // نه از تاریخ عرضه. حالا کفِ سری آن‌ها را برمی‌گرداند — ولی تا وقتی
+    // اسکن دفتر تاریخ عرضهٔ رسمی را نیاورده، این هنوز یک **مشاهده** است و
+    // فایل باید همین را بگوید، نه اینکه مثل تاریخِ رسمی نشانش دهد.
+    ['مبنای تاریخ عرضه', basis.total
+      ? `${basis.official} قرارداد از ${basis.total} تاریخ عرضهٔ رسمی دارند`
+        + `${basis.observed ? ` · برای ${basis.observed} قرارداد آغازِ عمر از اولین روزِ دیده‌شدنِ دفتر آمده و با سریِ خودش (کال و پوتِ هم‌اعمال) هم‌تراز شده` : ''}`
+        + `${basis.recovered ? ` — ${basis.recovered} ابزار/روز که پیش از این هم‌ترازی اصلاً درخواست نمی‌رفت` : ''}`
+      : '—'],
     ['پوشش دفتر قراردادها', complete ? 'کامل' : 'ناقص — همه قراردادها تضمین نمی‌شود'],
     ['یادداشت منبع', note || '—'],
     ['تعریف ردیف', tf.seconds

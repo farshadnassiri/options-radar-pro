@@ -863,9 +863,16 @@ async function rosterRangeUniverse(from, to, boardRows) {
       activeFrom_C: call?.activeFrom || 0,
       activeTo_C: call?.activeTo || 0,
       listingKnown_C: call ? num(call.listedFrom, 0) > 0 || num(call.first, 0) > 0 : false,
+      // «می‌دانیم از کِی» با «تاریخِ عرضه را داریم» یکی نیست. `contractLife`
+      // وقتی `listedFrom` ندارد به `first` برمی‌گردد — اولین روزی که دفتر
+      // این قرارداد را **دیده**، که کرانِ پایینیِ سوگیردار است و نه تاریخ
+      // عرضه. `rosterInRange` این را در `lifeFromTrades` علامت می‌زند و تا
+      // امروز همین‌جا می‌افتاد، پس تب خروجی نمی‌توانست این دو را جدا کند.
+      listedOfficial_C: call ? call.lifeFromTrades !== true : false,
       activeFrom_P: put?.activeFrom || 0,
       activeTo_P: put?.activeTo || 0,
       listingKnown_P: put ? num(put.listedFrom, 0) > 0 || num(put.first, 0) > 0 : false,
+      listedOfficial_P: put ? put.lifeFromTrades !== true : false,
       expiresInside: alive.some((r) => r.expiresInside),
     });
   }

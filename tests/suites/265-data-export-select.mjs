@@ -330,3 +330,68 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
   check('خالی تاریخی که روزانه تکذیب کند دقیقاً با دریافت تازه تکرار می‌شود',
     tab.includes("row.verdict === 'missing'") && tab.includes('fetchHistorical(staleHistorical, items, controller.signal, true)'));
 }
+
+// ═══════════ کفِ عمرِ سری — ممیزی فایلِ m5 اهرم ═══════════
+//
+// صاحب پروژه گفت خروجی کامل نیست. فایل ۵۸ ابزار/روز داشت که اصلاً
+// درخواست نرفته بودند و هر ۵۸تا پوت بودند: `ضهرم7061` از ۲۰۲۶/۰۷/۲۵ در
+// فایل بود و `طهرم7061` از ۲۰۲۶/۰۸/۱۱، با همان اعمال و همان سررسید.
+// کال و پوتِ یک سری یک روز عرضه می‌شوند، پس آن سیزده روز اختلافِ عرضه
+// نبود — اختلافِ **دیده‌شدن** بود، چون پوتِ کم‌معامله دیرتر در اسکن
+// دفتر ظاهر می‌شود و `contractLife` بی `listedFrom` به `first` برمی‌گردد.
+group('۲۶۵. کفِ عمر از سری، نه از یک سمت');
+{
+  // عیناً پنج سریِ فایلِ صاحب پروژه: اولین روزِ درخواستِ کال و پوت.
+  const SEEN = {
+    7050: [20260725, 20260725], 7051: [20260725, 20260803], 7055: [20260725, 20260805],
+    7061: [20260725, 20260811], 7064: [20260901, 20260908],
+  };
+  const rows = Object.entries(SEEN).map(([strike, [call, put]]) => ({
+    uaInsCode: 'BASE', lval30_UA: 'اهرم', contractSize: 1000,
+    strikePrice: Number(strike) * 1000, expiryGregorian: 20261021,
+    activeFrom: 20260620, activeTo: 20260916,
+    insCode_C: `C${strike}`, lVal18AFC_C: `ضهرم${strike}`,
+    activeFrom_C: call, activeTo_C: 20260916, listingKnown_C: true, listedOfficial_C: false,
+    insCode_P: `P${strike}`, lVal18AFC_P: `طهرم${strike}`,
+    activeFrom_P: put, activeTo_P: 20260916, listingKnown_P: true, listedOfficial_P: false,
+  }));
+  const instruments = discoverDataExportInstruments(rows, ['BASE']);
+  const days = [20260725, 20260727, 20260728, 20260803, 20260805, 20260811, 20260901, 20260908];
+  const pairs = dataExportPairs(instruments, days);
+  const firstOf = (ins) => Math.min(...pairs.filter((pair) => pair.ins === ins).map((pair) => pair.date));
+
+  check('پوتِ دیرتر دیده‌شده از همان روزِ کالِ هم‌سری درخواست می‌رود',
+    firstOf('P7061') === 20260725 && firstOf('P7055') === 20260725 && firstOf('P7051') === 20260725);
+  check('و سریِ دیگر با کفِ خودش تراز می‌شود، نه با کفِ سریِ اول',
+    firstOf('P7064') === 20260901 && firstOf('C7064') === 20260901);
+  check('سریِ هم‌زمان دست نمی‌خورد',
+    firstOf('C7050') === 20260725 && firstOf('P7050') === 20260725);
+  // هیچ تاریخی ساخته نمی‌شود: کف از مشاهدهٔ همان سری می‌آید، پس هیچ جفتی
+  // پیش از زودترین مشاهدهٔ سری نمی‌رود.
+  check('هیچ جفتی پیش از زودترین مشاهدهٔ سریِ خودش نمی‌رود',
+    !pairs.some((pair) => pair.ins !== 'BASE'
+      && pair.date < Math.min(...SEEN[pair.ins.slice(1)])));
+
+  // کفِ **رسمی** قویتر از هر مشاهده است و هم‌ترازی به آن دست نمی‌زند.
+  const official = discoverDataExportInstruments([{
+    ...rows[0], listedOfficial_P: true, activeFrom_P: 20260803, insCode_P: 'P7051X',
+  }], ['BASE']);
+  check('قراردادی که تاریخ عرضهٔ رسمی دارد با مشاهدهٔ سری عقب کشیده نمی‌شود',
+    Math.min(...dataExportPairs(official, days)
+      .filter((pair) => pair.ins === 'P7051X').map((pair) => pair.date)) === 20260803);
+
+  // و فایل باید بگوید این کف از کجا آمده — وگرنه مشاهده مثل تاریخ رسمی خوانده می‌شود.
+  const basisSheet = buildDataExportSheets({
+    instruments, pairs, items: {}, range: { from: 20260725, to: 20260908 },
+  }).find((part) => part.name === 'راهنما');
+  const basisLine = String((basisSheet.rows.find((row) => row[0] === 'مبنای تاریخ عرضه') || [])[1] || '');
+  check('راهنما مبنای تاریخ عرضه را می‌گوید', basisLine.includes('اولین روزِ دیده‌شدنِ دفتر'));
+  check('و شمارِ ابزار/روزی که پیش از این درخواست نمی‌رفت را می‌آورد',
+    basisLine.includes('ابزار/روز که پیش از این هم‌ترازی اصلاً درخواست نمی‌رفت'));
+
+  // سرور باید این تفکیک را بفرستد، وگرنه تب همه را «رسمی» می‌بیند.
+  const server = readSrc('../server/server.mjs');
+  check('سرور رسمی‌بودنِ تاریخ عرضه را برای هر سمت جدا می‌فرستد',
+    server.includes('listedOfficial_C: call ? call.lifeFromTrades !== true : false')
+      && server.includes('listedOfficial_P: put ? put.lifeFromTrades !== true : false'));
+}
