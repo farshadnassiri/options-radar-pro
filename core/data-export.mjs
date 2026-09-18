@@ -24,6 +24,7 @@ export function discoverDataExportInstruments(rows = [], selectedBases = [], { d
     const starts = [old.activeFrom, item.activeFrom].filter((value) => n(value) > 0);
     old.activeFrom = starts.length ? Math.min(...starts) : 0;
     old.activeTo = Math.max(n(old.activeTo), n(item.activeTo));
+    old.listingKnown = old.listingKnown === true || item.listingKnown === true;
   };
 
   for (const row of rows || []) {
@@ -33,7 +34,7 @@ export function discoverDataExportInstruments(rows = [], selectedBases = [], { d
     put({
       ins: baseIns, name: baseName, baseIns, baseName, kind: 'underlying',
       strike: null, expiry: null, activeFrom: n(row?.activeFrom), activeTo: n(row?.activeTo),
-      size: 1, sizeAssumed: false,
+      listingKnown: true, size: 1, sizeAssumed: false,
     });
     const officialSize = n(row?.contractSize);
     const size = officialSize > 0 ? officialSize : n(declaredSize);
@@ -46,7 +47,9 @@ export function discoverDataExportInstruments(rows = [], selectedBases = [], { d
         baseIns, baseName, kind,
         strike: n(row?.strikePrice) || null,
         expiry: n(row?.expiryGregorian) || n(row?.endDate) || null,
-        activeFrom: n(row?.activeFrom), activeTo: n(row?.activeTo),
+        activeFrom: n(row?.[`activeFrom_${suffix}`]) || n(row?.activeFrom),
+        activeTo: n(row?.[`activeTo_${suffix}`]) || n(row?.activeTo),
+        listingKnown: row?.[`listingKnown_${suffix}`] !== false,
         size: size > 0 ? size : 0,
         sizeAssumed: !(officialSize > 0),
       });
@@ -81,7 +84,8 @@ export function discoverDataExportInstruments(rows = [], selectedBases = [], { d
  */
 export function unknownListingContracts(instruments = []) {
   return (instruments || []).filter((item) => item?.ins
-    && item.kind !== 'underlying' && !(n(item.activeFrom) > 0));
+    && item.kind !== 'underlying'
+    && (item.listingKnown === false || !(n(item.activeFrom) > 0)));
 }
 
 /** پایه در کل بازه و اختیار فقط در عمر ثبت‌شدهٔ خودش درخواست می‌شود. */
@@ -95,7 +99,7 @@ export function dataExportPairs(instruments = [], dates = []) {
         const from = n(item.activeFrom), to = n(item.activeTo) || n(item.expiry);
         // تاریخِ عرضهٔ نامعلوم یعنی نمی‌دانیم آن روز وجود داشته یا نه.
         // «نمی‌دانیم» درخواست نمی‌سازد.
-        if (!(from > 0)) continue;
+        if (item.listingKnown === false || !(from > 0)) continue;
         if (date < from || (to > 0 && date > to)) continue;
       }
       const key = batchKey(item.ins, date);
@@ -606,11 +610,12 @@ export function suspectEmptyDays(pairs = [], items = {}, { minPairs = SUSPECT_DA
  * یعنی دکمه‌ای که هیچ‌وقت فعال نمی‌شود. «چند درخواستِ ناموفق» هم گذراست و
  * خودش پاک نمی‌شود.
  *
- * پس فقط چیزهایی می‌بندند که **فهرستِ قراردادها را عوض می‌کنند**: روزِ
- * اسکن‌نشده، پاسِ کاتالوگ، مشخصاتِ قراردادهای بی‌معامله، و دفترِ نسخه‌قدیمی
- * که اصلاً از کاتالوگ عبور نکرده. هر کدام تمام می‌شوند و قفل باز می‌شود.
+ * پس فقط چیزهایی می‌بندند که **فهرستِ قراردادهای انتخابی را عوض می‌کنند**:
+ * روزِ اسکن‌نشده، پاسِ کاتالوگ، مشخصاتِ قرارداد انتخابیِ بی‌معامله و
+ * بی‌تاریخ، و دفترِ نسخه‌قدیمی که اصلاً از کاتالوگ عبور نکرده. هر کدام
+ * تمام می‌شوند و قفل باز می‌شود؛ شکستِ مشخصاتِ ابزار نامرتبط مانع نیست.
  */
-export function exportBlockers(universe = null) {
+export function exportBlockers(universe = null, instruments = null) {
   if (!universe) return [];
   const out = [];
   const missing = Math.max(0, Math.trunc(n(universe.missingDays)));
@@ -621,7 +626,19 @@ export function exportBlockers(universe = null) {
   if (scan.versionCurrent === false) out.push('دفتر با نسخهٔ قدیمی ساخته شده و از کاتالوگ ابزار عبور نکرده');
   else {
     if (scan.catalogComplete === false) out.push('پیمایش کاتالوگ ابزار تمام نشده');
-    if (scan.detailsComplete === false) out.push('مشخصات قراردادهای بی‌معامله کامل نشده');
+    if (scan.detailsComplete === false) {
+      // مشخصاتِ کلِ بازار نباید خروجیِ چند قراردادِ معلوم را نگه دارد.
+      // برای قراردادِ معامله‌شده `activeFrom` از اولین روزِ واقعی می‌آید
+      // و عمرش در این بازه معلوم است. فقط قراردادِ انتخابیِ بی‌تاریخ است
+      // که بدون پاس مشخصات نمی‌تواند با صداقت وارد بازه شود.
+      const scoped = Array.isArray(instruments);
+      const unknown = scoped ? unknownListingContracts(instruments) : [];
+      if (!scoped || unknown.length > 0) {
+        out.push(scoped
+          ? `${unknown.length} قراردادِ انتخابی هنوز تاریخ عرضهٔ معلوم ندارد`
+          : 'مشخصات قراردادهای بی‌معامله کامل نشده');
+      }
+    }
   }
   return out;
 }

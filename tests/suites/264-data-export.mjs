@@ -33,6 +33,18 @@ group('۲۶۴. خروجی دیتای ریزمعاملات');
   check('شمار کال و پوت هر سررسید جدا و واقعی گزارش می‌شود',
     grouped.length === 1 && grouped[0].callCount === 2 && grouped[0].putCount === 2);
 
+  const splitLife = discoverDataExportInstruments([{
+    uaInsCode: 'BASE', lval30_UA: 'اهرم', activeFrom: 20260101, activeTo: 20260103,
+    activeFrom_C: 20260102, activeTo_C: 20260103, listingKnown_C: true,
+    activeFrom_P: 20260101, activeTo_P: 20260103, listingKnown_P: false,
+    expiryGregorian: 20260103, strikePrice: 1200,
+    insCode_C: 'CALL3', lVal18AFC_C: 'ضهرم۳', insCode_P: 'PUT3', lVal18AFC_P: 'طهرم۳',
+  }], ['BASE']);
+  check('عمر و شاهدِ عرضهٔ کال و پوت جدا می‌ماند',
+    splitLife.find((item) => item.ins === 'CALL3').activeFrom === 20260102
+      && splitLife.find((item) => item.ins === 'CALL3').listingKnown === true
+      && splitLife.find((item) => item.ins === 'PUT3').listingKnown === false);
+
   const dates = [20251231, 20260101, 20260102, 20260103, 20260104];
   const pairs = dataExportPairs(instruments, dates);
   check('دارایی پایه برای تمام روزهای درخواستی جفت می‌شود', pairs.filter((item) => item.ins === 'BASE').length === 5);
@@ -69,6 +81,9 @@ group('۲۶۴. خروجی دیتای ریزمعاملات');
   const tab = readSrc('../ui/tabs/data-export.mjs');
   check('تب مستقل خروجی دیتا در مسیریاب ثبت شده', app.includes("id: 'data-export'") && app.includes("title: 'خروجی دیتا'"));
   check('تب از مسیر دسته‌ای تاریخی و نوار زنده استفاده می‌کند', tab.includes('/api/trades/batch') && tab.includes('/api/live-trades'));
+  check('سرور مرز و شاهدِ عرضهٔ هر سمت را جدا می‌فرستد',
+    readSrc('../server/server.mjs').includes('listingKnown_C:')
+      && readSrc('../server/server.mjs').includes('listingKnown_P:'));
   check('ناقص‌بودن دفتر، آماده‌سازی خروجی را قفل نمی‌کند',
     tab.includes('runBtn.disabled = !universe ||') && !tab.includes("if (!universe?.complete)"));
   check('دکمه مستقل خروجی Excel پس از آماده‌سازی فعال می‌شود',
