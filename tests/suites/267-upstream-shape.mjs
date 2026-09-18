@@ -94,8 +94,13 @@ group('۲۶۷. تفکیک مسیر در خروجی دیتا');
   check('برگ پوشش ستون «پاسخ بالادست» دارد', at > 0);
   check('و برای خالیِ تاریخی، شکلِ خامِ پاسخ را می‌نویسد',
     coverage.rows.filter((row) => row[at] === 'فهرست خالی').length === 5);
+  // ادعا با نامِ سرستون، نه شماره: ستونِ تازه نباید ادعای بی‌ربط را بشکند.
+  const dateAt = coverage.headers.indexOf('تاریخ میلادی');
   check('برای ردیفی که داده آورده چیزی ننوشته — جای خالی صادق است',
-    coverage.rows.filter((row) => row[5] === 20260916).every((row) => !row[at]));
+    coverage.rows.filter((row) => row[dateAt] === 20260916).every((row) => !row[at]));
+  check('و برگ پوشش تاریخ شمسی را کنار میلادی دارد',
+    coverage.headers.indexOf('تاریخ شمسی') === dateAt + 1
+      && coverage.rows.some((row) => row[dateAt + 1] === '1405/06/25'));
 
   // دو مسیرِ متفاوت باید هر دو دیده شوند، نه یکی.
   const twoShapes = buildDataExportSheets({
