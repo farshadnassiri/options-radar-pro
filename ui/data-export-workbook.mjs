@@ -1,8 +1,9 @@
-// دفترکار تب «خروجی دیتا»: یک برگ برای هر ابزار، بدون ادغام ریزمعامله‌ها.
+// دفترکار تب «خروجی دیتا»: یک برگ برای هر ابزار، در تایم‌فریم خواسته‌شده.
 
 import {
-  BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, blankAuditSummary, dataExportCoverageRows,
-  dataExportOutcome, dataExportSessionRows, dataExportTradeRows,
+  BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, blankAuditSummary, dataExportCandles,
+  dataExportCoverageRows, dataExportFrame, dataExportOutcome, dataExportSessionRows,
+  dataExportTradeRows,
 } from '../core/data-export.mjs';
 import { tradeTimeLabel } from '../core/backtest.mjs';
 import { sheet } from './xlsx.mjs';
@@ -10,15 +11,33 @@ import { sheet } from './xlsx.mjs';
 const dateText = (value) => String(Math.trunc(Number(value) || 0));
 const cancelText = (row) => row.canceledKnown ? (row.canceled ? 'باطل' : 'فعال') : 'نامعلوم';
 
+// ═══ چرا ستون‌های «مشتق» جدا شدند ═══
+//
+// گزارش صاحب پروژه: «فایل‌های اکسل سنگین و پرحجمی می‌سازد». سه ستونِ
+// «ارزش خام»، «اندازه قرارداد» و «ارزش با اندازه قرارداد» هیچ واقعیتِ
+// تازه‌ای ندارند — هر سه حاصل‌ضرب ستون‌هایی‌اند که همان‌جا هستند، و دو
+// تایشان عددهای ده تا سیزده رقمی‌اند که بدترین نسبت فشرده‌سازی را دارند.
+// اندازهٔ قرارداد هم در برگ «پوشش دریافت» ستون خودش را دارد، پس با
+// خاموش‌کردنشان هیچ عددی از دست نمی‌رود؛ فقط دوباره حساب نمی‌شود.
 export const DATA_EXPORT_HEADERS = [
-  'تاریخ میلادی', 'ساعت', 'شماره معامله', 'قیمت (ریال)', 'حجم', 'ارزش خام (ریال)',
-  'اندازه قرارداد', 'ارزش با اندازه قرارداد (ریال)', 'وضعیت ابطال', 'منبع',
+  'تاریخ میلادی', 'ساعت', 'شماره معامله', 'قیمت (ریال)', 'حجم', 'وضعیت ابطال', 'منبع',
+];
+export const DATA_EXPORT_DERIVED_HEADERS = [
+  'ارزش خام (ریال)', 'اندازه قرارداد', 'ارزش با اندازه قرارداد (ریال)',
+];
+export const DATA_EXPORT_CANDLE_HEADERS = [
+  'تاریخ میلادی', 'ساعت شروع', 'باز', 'بیشترین', 'کمترین', 'بسته', 'حجم',
+  'ارزش (ریال)', 'تعداد معامله', 'تعداد باطل', 'منبع',
+];
+export const DATA_EXPORT_CANDLE_DERIVED_HEADERS = [
+  'اندازه قرارداد', 'ارزش با اندازه قرارداد (ریال)',
 ];
 
 export function buildDataExportSheets({
   instruments = [], pairs = [], items = {}, range = {}, complete = false, note = '',
-  outcome = null, audit = [],
+  outcome = null, audit = [], frame = 'tick', derived = false,
 } = {}) {
+  const tf = dataExportFrame(frame);
   const coverage = dataExportCoverageRows(instruments, pairs, items);
   const failed = coverage.filter((row) => row.status === 'خطا' || row.status === 'درخواست نرفت').length;
   const empty = coverage.filter((row) => row.status === 'بدون معامله').length;
@@ -52,44 +71,71 @@ export function buildDataExportSheets({
     ['بازبینی خالی‌ها با تابلوی روزانه', blankLine],
     ...(blanks.worst ? [['بدترین مورد نیامدن', `کد ${blanks.worst.ins} در ${blanks.worst.date} — تابلو ${blanks.worst.dailyTrades} معامله`]] : []),
     ['پنجرهٔ ساعت', 'ردیف‌های برگ هر ابزار فقط جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰ است؛ شمار ردیف‌های بیرون از این بازه در برگ پوشش می‌آید.'],
+    ['تایم‌فریم', tf.seconds
+      ? `${tf.label} — هر ردیف یک سطل زمانی است که مبدأش ۹:۰۰ است. سطلِ بی‌معامله ردیف ندارد و هیچ قیمتی درون‌یابی نشده.`
+      : `${tf.label} — هر ردیف یک اجرای گزارش‌شدهٔ بورس است.`],
+    ['ستون‌های مشتق', derived
+      ? 'روشن — ارزش خام، اندازه قرارداد و ارزش با اندازه قرارداد در برگ هر ابزار آمده‌اند.'
+      : 'خاموش برای کوچک‌ماندن فایل. هر سه حاصل‌ضرب ستون‌های موجودند و اندازهٔ قرارداد در برگ «پوشش دریافت» ستون دارد.'],
     ['پوشش دفتر قراردادها', complete ? 'کامل' : 'ناقص — همه قراردادها تضمین نمی‌شود'],
     ['یادداشت منبع', note || '—'],
-    ['تعریف ردیف', 'هر ردیف یک اجرای گزارش‌شده بورس است؛ یک اجرای حجمی به واحدهای منفرد شکسته نمی‌شود.'],
+    ['تعریف ردیف', tf.seconds
+      ? 'هر ردیف یک شمع است: باز/بسته اولین و آخرین قیمتِ مشاهده‌شدهٔ همان سطل، و حجم و ارزش جمعِ معامله‌های باطل‌نشدهٔ آن.'
+      : 'هر ردیف یک اجرای گزارش‌شده بورس است؛ یک اجرای حجمی به واحدهای منفرد شکسته نمی‌شود.'],
     ['بدون معامله در برابر خطا', 'برگ خالیِ یک قرارداد یعنی آن روز معامله‌ای نشده؛ برای تشخیص خطا به برگ «پوشش دریافت» نگاه کن.'],
   ], [150, 430]);
 
   const auditByKey = new Map((audit || []).map((row) => [row.key, row]));
   const coverageSheet = sheet('پوشش دریافت', [
-    'نماد پایه', 'نماد ابزار', 'نوع', 'کد ابزار', 'تاریخ میلادی', 'کل ردیف',
+    'نماد پایه', 'نماد ابزار', 'نوع', 'کد ابزار', 'اندازه قرارداد', 'تاریخ میلادی', 'کل ردیف',
     'فعال', 'باطل', 'وضعیت', 'حکم خالی‌بودن', 'معاملهٔ تابلوی روزانه', 'مسیر', 'منبع', 'خطا',
   ], coverage.map((row) => {
     const seen = auditByKey.get(`${row.date}:${row.ins}`) || null;
     const hit = items?.[`${row.date}:${row.ins}`] || {};
     return [
-      row.baseName, row.name, DATA_EXPORT_KIND_LABEL[row.kind] || row.kind, row.ins, row.date,
+      row.baseName, row.name, DATA_EXPORT_KIND_LABEL[row.kind] || row.kind, row.ins,
+      Number.isFinite(row.size) && row.size > 0 ? row.size : '', row.date,
       row.rows, row.active, row.canceled, row.status,
       seen ? BLANK_VERDICT_LABEL[seen.verdict] : '—',
       seen && Number.isFinite(seen.dailyTrades) ? seen.dailyTrades : '',
       hit.variant ? `پرچم ${hit.variant}` : '',
       row.source, row.error,
     ];
-  }), [100, 120, 95, 140, 95, 75, 65, 65, 100, 250, 110, 85, 80, 260]);
+  }), [100, 120, 95, 140, 100, 95, 75, 65, 65, 100, 250, 110, 85, 80, 260]);
 
   const instrumentSheets = instruments.map((instrument) => {
     // خواستهٔ صریح: «هر روز معاملاتی از ساعت ۹ الی ۱۲:۳۰». ردیفِ بیرون از
     // این پنجره حذف می‌شود ولی شمارش‌شده — نه بی‌صدا.
     const { rows } = dataExportSessionRows(dataExportTradeRows(instrument, pairs, items));
-    if (rows.length > 1048575) throw new Error(`ریزمعاملهٔ ${instrument.name} از سقف یک شیت اکسل بیشتر است؛ بازه را کوتاه‌تر کن.`);
     const title = instrument.kind === 'underlying' ? `پایه ${instrument.name}` : instrument.name;
-    return sheet(title, DATA_EXPORT_HEADERS, rows.map((row) => [
-      row.date, tradeTimeLabel(row.time), row.sequence, row.price, row.quantity, row.rawValue,
-      row.contractSize, row.contractValue, cancelText(row), row.source,
-    ]), [95, 75, 85, 95, 80, 120, 95, 150, 90, 85]);
+    const size = instrument.kind === 'underlying' ? 1 : Number(instrument.size) || 0;
+    if (tf.seconds) {
+      const bars = dataExportCandles(rows, tf.seconds);
+      return sheet(title,
+        derived ? [...DATA_EXPORT_CANDLE_HEADERS, ...DATA_EXPORT_CANDLE_DERIVED_HEADERS] : DATA_EXPORT_CANDLE_HEADERS,
+        bars.map((bar) => [
+          bar.date, tradeTimeLabel(bar.time), bar.open, bar.high, bar.low, bar.close,
+          bar.volume, bar.value, bar.trades, bar.canceled, bar.source,
+          ...(derived ? [size > 0 ? size : NaN, size > 0 ? bar.value * size : NaN] : []),
+        ]),
+        [95, 85, 95, 95, 95, 95, 90, 130, 95, 85, 85, ...(derived ? [95, 150] : [])]);
+    }
+    if (rows.length > 1048575) throw new Error(`ریزمعاملهٔ ${instrument.name} از سقف یک شیت اکسل بیشتر است؛ بازه را کوتاه‌تر کن یا تایم‌فریم را بالا ببر.`);
+    return sheet(title,
+      derived ? [...DATA_EXPORT_HEADERS, ...DATA_EXPORT_DERIVED_HEADERS] : DATA_EXPORT_HEADERS,
+      rows.map((row) => [
+        row.date, tradeTimeLabel(row.time), row.sequence, row.price, row.quantity,
+        cancelText(row), row.source,
+        ...(derived ? [row.rawValue, row.contractSize, row.contractValue] : []),
+      ]),
+      [95, 75, 85, 95, 80, 90, 85, ...(derived ? [120, 95, 150] : [])]);
   });
 
   return [summary, coverageSheet, ...instrumentSheets];
 }
 
-export function dataExportFilename(range = {}) {
-  return `options-data-${dateText(range.from)}-${dateText(range.to)}`;
+export function dataExportFilename(range = {}, frame = 'tick') {
+  // نامِ فایل تایم‌فریم را می‌گوید، وگرنه دو اجرا با دو تفکیکِ متفاوت
+  // هم‌نام می‌شوند و در پوشهٔ دانلود از هم جدا نمی‌شوند.
+  return `options-data-${dateText(range.from)}-${dateText(range.to)}-${dataExportFrame(frame).id}`;
 }

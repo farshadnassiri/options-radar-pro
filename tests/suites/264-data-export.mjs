@@ -69,5 +69,6 @@ group('۲۶۴. خروجی دیتای ریزمعاملات');
   check('دکمه مستقل خروجی Excel پس از آماده‌سازی فعال می‌شود',
     tab.includes('id="de-export"') && tab.includes("exportBtn.addEventListener('click', exportPrepared)"));
   check('خروجی واقعی xlsx فقط از دادهٔ آماده‌شده دانلود می‌شود',
-    tab.includes('downloadXlsx(prepared.filename, prepared.sheets)'));
+    tab.includes('if (!prepared) { setStatus(\'اول ریزمعاملات را آماده کنید.\', true); return; }')
+      && tab.includes('await downloadXlsx(dataExportFilename(prepared.range, frame), sheets)'));
 }
