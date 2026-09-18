@@ -95,7 +95,17 @@ export async function mount(root, { state, api }) {
    * `complete=false` پیش از این دکمه را دائماً غیرفعال می‌کرد و برداشته
    * شد. روزهای نبودهٔ خارج از بازه کارِ این خروجی نیستند.
    */
-  const blockers = () => exportBlockers(universe);
+  // پاسِ مشخصات هزاران قراردادِ بی‌معاملهٔ نامرتبط، انتخابِ کاربر را قفل نمی‌کند.
+  // اگر خودِ قرارداد انتخابی تاریخ عرضه نداشته باشد، همان انتخاب دقیقاً مانع می‌شود.
+  const blockers = () => exportBlockers(universe, selectedInstruments());
+
+  function paintBlockerStatus() {
+    if (controller || exporting) return;
+    const why = blockers();
+    setStatus(why.length
+      ? `تا تکمیل دفتر، خروجی قفل است — ${faDigits(why.join('؛ '))}.`
+      : '');
+  }
 
   function updateRunState() {
     runBtn.disabled = !universe || !picked.size || Boolean(controller) || exporting
@@ -124,7 +134,7 @@ export async function mount(root, { state, api }) {
     if (!bases.length) {
       contractsHost.innerHTML = '<p class="empty-note">اول یک نماد پایه را از گام دوم انتخاب کن.</p>';
       $('de-contract-note').textContent = '';
-      updateRunState();
+      updateRunState(); paintBlockerStatus();
       return;
     }
     const baseNames = new Map(discovered.filter((item) => item.kind === 'underlying').map((item) => [String(item.ins), item.name]));
@@ -156,7 +166,7 @@ export async function mount(root, { state, api }) {
     $('de-contract-note').textContent = picked.size
       ? `${fmt.int(picked.size)} قرارداد انتخاب شده از ${fmt.int(shown)} قراردادِ نمایش‌داده‌شده. برگ پایه‌ها هم خودکار اضافه می‌شود.`
       : `${fmt.int(shown)} قرارداد در دسترس است؛ هیچ‌کدام هنوز انتخاب نشده.`;
-    updateRunState();
+    updateRunState(); paintBlockerStatus();
   }
   function invalidatePrepared() {
     prepared = null;
@@ -188,12 +198,7 @@ export async function mount(root, { state, api }) {
         refreshTimer = setTimeout(() => loadUniverse(range), 4000);
       } else if (!payload.complete) $('de-universe-note').textContent = `${payload.note || ''} پوشش دفتر کامل نیست؛ خروجی در دسترس است و این محدودیت داخل برگ راهنما ثبت می‌شود.`;
       // قفل باید همان‌جا که دکمه است دیده شود، نه فقط در یادداشت بالا.
-      const why = blockers();
-      setStatus(why.length
-        ? `تا تکمیل دفتر، خروجی قفل است — ${faDigits(why.join('؛ '))}.`
-          + ' با دفترِ نیمه‌تمام، فهرستِ قراردادها ناقص می‌ماند و تاریخ عرضهٔ بعضی‌شان نامعلوم است؛'
-          + ' ضمن اینکه اسکنِ پس‌زمینه همان سهمیهٔ بالادست را می‌خورد که دریافتِ ریزمعامله به آن نیاز دارد.'
-        : '');
+      paintBlockerStatus();
     } catch (error) {
       if (stopped || mine !== loadSeq) return;
       universe = null; basesHost.innerHTML = '<p class="empty-note">دفتر قراردادها دریافت نشد.</p>';
@@ -444,6 +449,8 @@ export async function mount(root, { state, api }) {
   async function run() {
     if (!universe) { setStatus('دفتر قراردادها هنوز دریافت نشده است.', true); return; }
     if (!picked.size) { setStatus('دست‌کم یک قرارداد را از گام سوم انتخاب کن.', true); return; }
+    const blocked = blockers();
+    if (blocked.length) { setStatus(`خروجی هنوز آماده نیست — ${faDigits(blocked.join('؛ '))}.`, true); return; }
     const range = rangeUi.range;
     const instruments = selectedInstruments();
     // قراردادِ بی‌تاریخِ عرضه جفت نمی‌سازد؛ ولی بی‌صدا هم نمی‌افتد.

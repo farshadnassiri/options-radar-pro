@@ -856,6 +856,16 @@ async function rosterRangeUniverse(from, to, boardRows) {
       ...row,
       activeFrom: Math.min(...alive.map((r) => r.activeFrom)),
       activeTo: Math.max(...alive.map((r) => r.activeTo)),
+      // عمرِ دو سمت لزوماً یک منبع ندارد: ممکن است کال معامله شده باشد و
+      // پوتِ بی‌معامله هنوز مشخصات رسمی نگرفته باشد. یک activeFrom مشترک
+      // آن پوت را به‌اشتباه «معلوم» جلوه می‌داد و قفلِ انتخاب‌محور را دور
+      // می‌زد. مرز و شاهدِ هر سمت جدا به تب خروجی می‌رسد.
+      activeFrom_C: call?.activeFrom || 0,
+      activeTo_C: call?.activeTo || 0,
+      listingKnown_C: call ? num(call.listedFrom, 0) > 0 || num(call.first, 0) > 0 : false,
+      activeFrom_P: put?.activeFrom || 0,
+      activeTo_P: put?.activeTo || 0,
+      listingKnown_P: put ? num(put.listedFrom, 0) > 0 || num(put.first, 0) > 0 : false,
       expiresInside: alive.some((r) => r.expiresInside),
     });
   }

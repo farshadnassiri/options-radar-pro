@@ -39,6 +39,10 @@ group('۲۶۸. تاریخ عرضهٔ نامعلوم درخواست نمی‌سا
 
   check('قراردادِ کنارگذاشته‌شده شمرده می‌شود، نه بی‌صدا بیفتد',
     unknownListingContracts(instruments).map((item) => item.name).join() === 'ضهرم4011');
+  check('تاریخِ فرضیِ اولِ بازه، قراردادِ بی‌شاهد را معلوم نمی‌کند',
+    unknownListingContracts([{ ins: 'c3', kind: 'call', activeFrom: 20240722, listingKnown: false }]).length === 1);
+  check('تاریخِ فرضیِ اولِ بازه برای قراردادِ بی‌شاهد درخواست نمی‌سازد',
+    dataExportPairs([{ ins: 'c3', kind: 'call', activeFrom: 20240722, listingKnown: false }], [20240722]).length === 0);
   check('پایه هرگز در این شمارش نمی‌آید',
     !unknownListingContracts(instruments).some((item) => item.kind === 'underlying'));
   check('قرارداد بی‌شناسه هم نمی‌آید',
@@ -135,6 +139,19 @@ group('۲۶۸. قفل تا تکمیلِ واقعیِ دفتر');
     exportBlockers(universe(0, { catalogComplete: false })).some((why) => why.includes('کاتالوگ')));
   check('مشخصاتِ ناتمام هم مانع است',
     exportBlockers(universe(0, { detailsComplete: false })).some((why) => why.includes('مشخصات')));
+  const knownSelection = [
+    { ins: 'B', kind: 'underlying' },
+    { ins: 'c1', kind: 'call', activeFrom: 20260701 },
+    { ins: 'p1', kind: 'put', activeFrom: 20260701 },
+  ];
+  check('مشخصاتِ نامرتبطِ کلِ بازار، انتخابِ تاریخ‌دار را قفل نمی‌کند',
+    exportBlockers(universe(0, { detailsComplete: false }), knownSelection).length === 0);
+  check('و فقط قراردادِ انتخابیِ بی‌تاریخ مانع می‌شود',
+    exportBlockers(universe(0, { detailsComplete: false }), [...knownSelection, { ins: 'c2', kind: 'call', activeFrom: 0 }])
+      .some((why) => why.includes('1 قراردادِ انتخابی')));
+  check('ناتمام‌بودن کاتالوگ حتی برای انتخابِ معلوم همچنان مانع است',
+    exportBlockers(universe(0, { catalogComplete: false, detailsComplete: false }), knownSelection)
+      .some((why) => why.includes('کاتالوگ')));
   check('دفترِ نسخه‌قدیمی مانع است و علتش را خودش می‌گوید',
     exportBlockers(universe(0, { versionCurrent: false })).join().includes('نسخهٔ قدیمی'));
   check('و نسخهٔ قدیمی دو مانعِ تکراری نمی‌سازد',
@@ -154,7 +171,7 @@ group('۲۶۸. قفل تا تکمیلِ واقعیِ دفتر');
 
   const tab = readSrc('../ui/tabs/data-export.mjs');
   check('تب روی همین فهرستِ موانع قفل می‌کند',
-    tab.includes('const blockers = () => exportBlockers(universe)')
+    tab.includes('const blockers = () => exportBlockers(universe, selectedInstruments())')
       && tab.includes('|| blockers().length > 0'));
   check('و همهٔ موانع را کنار دکمه می‌نویسد',
     tab.includes('تا تکمیل دفتر، خروجی قفل است'));
