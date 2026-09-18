@@ -60,6 +60,30 @@ export function discoverDataExportInstruments(rows = [], selectedBases = [], { d
   });
 }
 
+/**
+ * قراردادی که تاریخ عرضه‌اش نامعلوم است.
+ *
+ * ═══ چرا این دیگر «بی‌کران» خوانده نمی‌شود ═══
+ *
+ * ممیزی صاحب پروژه روی بازهٔ ۲۰۲۴/۰۷/۲۲ تا ۲۰۲۵/۰۱/۲۰: خروجی ۲۴ قرارداد
+ * اهرم داشت که هر ۲۴تا برای **هر ۱۳۱ روزِ** بازه درخواست رفته بودند —
+ * از جمله `ضهرم4011` که عرضه‌اش ۲۰۲۵/۰۲/۱۵ است، یعنی حدود یک ماه **پس
+ * از پایان بازه**. ۳٬۱۴۴ جفتِ ابزار/روز برای قراردادی رفت که آن روز اصلاً
+ * وجود نداشت.
+ *
+ * علتش این بود که `activeFrom === 0` مثل «کرانِ پایینی ندارد» رفتار
+ * می‌کرد، و سررسیدِ بعد از بازه هم کرانِ بالایی نمی‌ساخت. ولی صفر یعنی
+ * «دفتر نمی‌داند»، نه «از ازل بوده» — همان چیزی که قاعدهٔ ۲-۴ منع می‌کند،
+ * این‌بار در جهتِ زمان.
+ *
+ * پس قراردادِ بی‌تاریخِ عرضه از بازهٔ تاریخی بیرون می‌ماند و شمرده
+ * می‌شود. وقتی اسکنِ دفتر کامل شد، تاریخش می‌آید و خودش برمی‌گردد.
+ */
+export function unknownListingContracts(instruments = []) {
+  return (instruments || []).filter((item) => item?.ins
+    && item.kind !== 'underlying' && !(n(item.activeFrom) > 0));
+}
+
 /** پایه در کل بازه و اختیار فقط در عمر ثبت‌شدهٔ خودش درخواست می‌شود. */
 export function dataExportPairs(instruments = [], dates = []) {
   const out = [], seen = new Set();
@@ -69,7 +93,10 @@ export function dataExportPairs(instruments = [], dates = []) {
       if (!item?.ins) continue;
       if (item.kind !== 'underlying') {
         const from = n(item.activeFrom), to = n(item.activeTo) || n(item.expiry);
-        if ((from > 0 && date < from) || (to > 0 && date > to)) continue;
+        // تاریخِ عرضهٔ نامعلوم یعنی نمی‌دانیم آن روز وجود داشته یا نه.
+        // «نمی‌دانیم» درخواست نمی‌سازد.
+        if (!(from > 0)) continue;
+        if (date < from || (to > 0 && date > to)) continue;
       }
       const key = batchKey(item.ins, date);
       if (seen.has(key)) continue;
@@ -260,8 +287,33 @@ export function dataExportTradeRows(instrument, pairs = [], items = {}) {
   return out.sort((a, b) => a.date - b.date || a.time - b.time || a.sequence - b.sequence);
 }
 
+/**
+ * وضعیتِ یک ابزار/روزِ خالی — و چرا دیگر بی‌قید «بدون معامله» نیست.
+ *
+ * ═══ ممیزی صاحب پروژه ═══
+ *
+ * فایل گزارش‌شده ۳٬۲۱۷ ابزار/روز را «بدون معامله» خواند، در حالی که
+ * تابلوی روزانه دست‌کم ۶۷ تای آن‌ها را تکذیب می‌کرد و برای ۳٬۱۵۰ تای دیگر
+ * اصلاً تابلویی در دست نبود. یعنی برنامه یک ادعای **بازار** می‌کرد که
+ * فقط یک پاسخِ خالیِ بالادست بود.
+ *
+ * «بدون معامله» یک واقعیتِ بازار است و فقط وقتی نوشته می‌شود که منبعِ
+ * دومی — تابلوی روزانه — همان را بگوید. بی آن تأیید، آنچه می‌دانیم فقط
+ * این است که ریزمعامله‌ای نیامد.
+ */
+export const EMPTY_STATUS = {
+  quiet: 'بدون معامله',
+  missing: 'ریزمعامله نیامد',
+  unknown: 'خالی، تأییدنشده',
+};
+
+export function emptyStatusOf(verdict) {
+  return EMPTY_STATUS[verdict] || EMPTY_STATUS.unknown;
+}
+
 /** پوشش هر ابزار/روز؛ خالیِ معتبر با خطا یکی نمی‌شود. */
-export function dataExportCoverageRows(instruments = [], pairs = [], items = {}) {
+export function dataExportCoverageRows(instruments = [], pairs = [], items = {}, audit = []) {
+  const verdicts = new Map((audit || []).map((row) => [row.key, row.verdict]));
   const byIns = new Map((instruments || []).map((item) => [String(item.ins), item]));
   return (pairs || []).map((pair) => {
     const instrument = byIns.get(String(pair.ins)) || {}, hit = items?.[pair.key];
@@ -275,7 +327,8 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {})
       rows: hit && Array.isArray(hit.rows) ? rows.length : null,
       active: hit && Array.isArray(hit.rows) ? rows.filter((row) => row && row.canceled !== true).length : null,
       canceled: hit && Array.isArray(hit.rows) ? rows.filter((row) => row?.canceled === true).length : null,
-      status: !hit ? 'درخواست نرفت' : hit.error ? 'خطا' : rows.length ? 'داده آمد' : 'بدون معامله',
+      status: !hit ? 'درخواست نرفت' : hit.error ? 'خطا' : rows.length ? 'داده آمد'
+        : emptyStatusOf(verdicts.get(pair.key)),
       error: String(hit?.error || ''), source: String(hit?.source || ''),
     };
   });

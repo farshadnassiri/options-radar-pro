@@ -54,8 +54,10 @@ group('۲۶۴. خروجی دیتای ریزمعاملات');
   check('ارزش خام و قراردادی هر اجرا درست است', trades[0].rawValue === 50 && trades[0].contractValue === 50000);
   check('معاملهٔ باطل حذف نمی‌شود و نشانش حفظ می‌شود', trades[1].canceled === true);
   const coverage = dataExportCoverageRows(instruments, pairs, items);
-  check('روز بی‌معامله از روز دریافت‌نشده تفکیک می‌شود',
-    coverage.find((row) => row.ins === 'PUT1' && row.date === 20260101).status === 'بدون معامله'
+  // ممیزی: خالیِ بی‌تأییدِ تابلوی روزانه دیگر «بدون معامله» خوانده نمی‌شود —
+  // آن یک ادعای بازار است و ما فقط می‌دانیم ریزمعامله‌ای نیامد.
+  check('خالیِ تأییدنشده از روز دریافت‌نشده تفکیک می‌شود',
+    coverage.find((row) => row.ins === 'PUT1' && row.date === 20260101).status === 'خالی، تأییدنشده'
       && coverage.some((row) => row.status === 'درخواست نرفت'));
 
   const sheets = buildDataExportSheets({ instruments, pairs, items, range: { from: 20260101, to: 20260103 }, complete: true });

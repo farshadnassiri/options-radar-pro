@@ -140,7 +140,10 @@ group('۲۶۵. جمع‌بندی صادقانهٔ دریافت');
     String(blankSheets[0].rows[0][1]).includes('هیچ ریزمعامله‌ای دریافت نشد'));
   check('و علت غالب را هم می‌آورد', String(blankSheets[0].rows[0][1]).includes('دروازه'));
   check('برگِ خالیِ قرارداد از خطا جدا توضیح داده می‌شود',
-    sheets[0].rows.some((r) => String(r[0]).includes('بدون معامله در برابر خطا')));
+    sheets[0].rows.some((r) => String(r[0]).includes('برگ خالی یعنی چه')));
+  // و توضیحش دیگر برگِ خالی را «معامله‌ای نشده» نمی‌خواند.
+  check('و آن توضیح، خالی‌بودن را به نبودِ معامله ترجمه نمی‌کند',
+    sheets[0].rows.some((r) => String(r[1]).includes('ریزمعامله‌ای نیامد — نه اینکه معامله‌ای نشده')));
 
   // ——— قرارداد تب ———
   const src = readSrc('../ui/tabs/data-export.mjs');
