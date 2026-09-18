@@ -6,7 +6,7 @@ import {
   dataExportCandles, dataExportContractGroups, dataExportFrame, dataExportOutcome,
   dataExportPairBatches, dataExportPairs, dataExportRouteSplit, dataExportSessionRows,
   dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments,
-  splitPairBatch, suspectEmptyDays,
+  splitPairBatch, suspectEmptyDays, unknownListingContracts,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
@@ -75,8 +75,30 @@ export async function mount(root, { state, api }) {
   };
   const selectedBases = () => [...basesHost.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
   const selectedInstruments = () => selectedDataExportInstruments(discovered, [...picked]);
+  /**
+   * روزهای اسکن‌نشدهٔ همین بازه.
+   *
+   * ═══ چرا خروجی تا تکمیلِ اسکن قفل می‌شود ═══
+   *
+   * ممیزی صاحب پروژه: فایلِ بازهٔ شش‌ماهه اعلام می‌کرد «۱۳۰ روزِ کاری هنوز
+   * اسکن نشده» و با همان دفترِ ناقص خروجی گرفته بود — نتیجه‌اش هم فهرستِ
+   * ناقصِ قرارداد بود، هم تاریخ‌های عرضهٔ نامعلوم.
+   *
+   * و یک علتِ دوم که در خطِ زمانیِ همان فایل دیده می‌شود: اسکنِ پس‌زمینه
+   * همان سهمیهٔ بالادست را مصرف می‌کند که خروجی به آن نیاز دارد.
+   * ریزمعاملهٔ پایه تا ۲۰۲۴/۱۰/۱۶ **پیوسته** آمد و از ۲۰۲۴/۱۰/۱۹ به بعد
+   * هیچ — نه پنجرهٔ نگه‌داری (که انتهای تازه را نگه می‌دارد نه کهنه را)،
+   * بلکه ته‌کشیدنِ سهمیه وسط اجرا.
+   *
+   * قفل به **همین بازه** بسته است، نه به سلامتِ کلِ دفتر: قفلِ سراسریِ
+   * `complete=false` پیش از این دکمه را دائماً غیرفعال می‌کرد و برداشته
+   * شد. روزهای نبودهٔ خارج از بازه کارِ این خروجی نیستند.
+   */
+  const unscannedDays = () => Math.max(0, Math.trunc(Number(universe?.missingDays) || 0));
+
   function updateRunState() {
-    runBtn.disabled = !universe || !picked.size || Boolean(controller) || exporting;
+    runBtn.disabled = !universe || !picked.size || Boolean(controller) || exporting
+      || unscannedDays() > 0;
     exportBtn.disabled = !prepared || Boolean(controller) || exporting;
     $('de-universe-note').toggleAttribute('data-error', universe?.complete === false);
   }
@@ -164,6 +186,12 @@ export async function mount(root, { state, api }) {
         $('de-universe-note').textContent = `${payload.note || ''} ساخت دفتر ادامه دارد؛ با پوشش فعلی هم می‌توانید خروجی بگیرید و محدودیت داخل فایل ثبت می‌شود.`;
         refreshTimer = setTimeout(() => loadUniverse(range), 4000);
       } else if (!payload.complete) $('de-universe-note').textContent = `${payload.note || ''} پوشش دفتر کامل نیست؛ خروجی در دسترس است و این محدودیت داخل برگ راهنما ثبت می‌شود.`;
+      // قفل باید همان‌جا که دکمه است دیده شود، نه فقط در یادداشت بالا.
+      setStatus(unscannedDays()
+        ? `${fmt.int(unscannedDays())} روزِ کاریِ این بازه هنوز اسکن نشده است. تا کامل شدنش`
+          + ' خروجی قفل است: فهرستِ قراردادها ناقص می‌ماند، تاریخ عرضهٔ بعضی قراردادها نامعلوم است،'
+          + ' و اسکنِ پس‌زمینه همان سهمیهٔ بالادست را می‌خورد که دریافتِ ریزمعامله به آن نیاز دارد.'
+        : '');
     } catch (error) {
       if (stopped || mine !== loadSeq) return;
       universe = null; basesHost.innerHTML = '<p class="empty-note">دفتر قراردادها دریافت نشد.</p>';
@@ -416,6 +444,8 @@ export async function mount(root, { state, api }) {
     if (!picked.size) { setStatus('دست‌کم یک قرارداد را از گام سوم انتخاب کن.', true); return; }
     const range = rangeUi.range;
     const instruments = selectedInstruments();
+    // قراردادِ بی‌تاریخِ عرضه جفت نمی‌سازد؛ ولی بی‌صدا هم نمی‌افتد.
+    const unlisted = unknownListingContracts(instruments);
     const pairs = dataExportPairs(instruments, tradingDays(range.from, range.to));
     if (!instruments.length || !pairs.length) { setStatus('برای این انتخاب ابزار/روزی برای دریافت ساخته نشد.', true); return; }
     invalidatePrepared(); clearTimeout(refreshTimer);
@@ -515,6 +545,10 @@ export async function mount(root, { state, api }) {
           ? ` دورِ دومِ بی‌کش ${fmt.int(rescued)} ابزار/روز را نجات داد.`
           : ` دورِ دومِ بی‌کش روی ${fmt.int(suspectPairs.length)} ابزار/روز هم چیزی نیاورد.`)
         : '';
+      const unlistedNote = unlisted.length
+        ? ` ${fmt.int(unlisted.length)} قرارداد تاریخ عرضه‌اش در دفتر نیست و وارد بازه نشد —`
+          + ' «نمی‌دانیم کی عرضه شده» درخواستِ روزِ گذشته نمی‌سازد.'
+        : '';
       const head = outcome.blank
         ? `هیچ ریزمعامله‌ای دریافت نشد — ${fmt.int(outcome.failed)} ابزار/روز خطا داد و ${fmt.int(outcome.empty)} تا خالی برگشت.`
         : `آمادهٔ خروجی: ${fmt.int(outcome.trades)} ریزمعامله از ${fmt.int(outcome.ok)} ابزار/روز، در ${fmt.int(instruments.length)} شیت.`;
@@ -525,7 +559,7 @@ export async function mount(root, { state, api }) {
           + `${blanks.worst ? ` (بدترینش کد ${faDigits(blanks.worst.ins)} با ${fmt.int(blanks.worst.dailyTrades)} معامله)` : ''}`
           + ` — این یعنی داده نرسیده، نه اینکه بازار ساکت بوده.`
         : (blanks.quiet ? ` ${fmt.int(blanks.quiet)} ابزار/روزِ خالی با تابلوی روزانه تأیید شد.` : '');
-      setStatus(`${head}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}`
+      setStatus(`${head}${unlistedNote}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}`
         + `${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}`,
       outcome.blank || blanks.missing > 0 || Boolean(deadRoute));
     } catch (error) {

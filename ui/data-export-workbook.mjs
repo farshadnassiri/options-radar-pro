@@ -1,7 +1,7 @@
 // دفترکار تب «خروجی دیتا»: یک برگ برای هر ابزار، در تایم‌فریم خواسته‌شده.
 
 import {
-  BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, blankAuditSummary, dataExportCandles,
+  BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, EMPTY_STATUS, blankAuditSummary, dataExportCandles,
   dataExportCoverageRows, dataExportFrame, dataExportOutcome, dataExportRouteSplit,
   dataExportSessionRows, dataExportTradeRows,
 } from '../core/data-export.mjs';
@@ -58,9 +58,11 @@ export function buildDataExportSheets({
   outcome = null, audit = [], frame = 'tick', derived = false,
 } = {}) {
   const tf = dataExportFrame(frame);
-  const coverage = dataExportCoverageRows(instruments, pairs, items);
+  const coverage = dataExportCoverageRows(instruments, pairs, items, audit);
   const failed = coverage.filter((row) => row.status === 'خطا' || row.status === 'درخواست نرفت').length;
-  const empty = coverage.filter((row) => row.status === 'بدون معامله').length;
+  const empty = coverage.filter((row) => row.status !== 'داده آمد' && row.status !== 'خطا'
+    && row.status !== 'درخواست نرفت').length;
+  const confirmedQuiet = coverage.filter((row) => row.status === EMPTY_STATUS.quiet).length;
   const result = outcome || dataExportOutcome(pairs, items);
   // ═══ چرا «صفر ریزمعامله» بالای برگ راهنما می‌نشیند ═══
   //
@@ -94,7 +96,9 @@ export function buildDataExportSheets({
     ['تعداد قرارداد اختیار', instruments.filter((item) => item.kind !== 'underlying').length],
     ['جفت ابزار/روز', pairs.length],
     ['ابزار/روز دارای داده', result.ok],
-    ['بدون معامله', empty], ['خطا یا دریافت‌نشده', failed],
+    // «بدون معامله» فقط وقتی که تابلوی روزانه هم همان را بگوید.
+    ['خالی', `${empty} ابزار/روز — ${confirmedQuiet} تای آن با تابلوی روزانه «بدون معامله» تأیید شد`],
+    ['خطا یا دریافت‌نشده', failed],
     // ═══ چرا این خط بالاتر از همه‌چیز است ═══
     //
     // فایل گزارش‌شده ۱٬۳۱۶ ابزار/روز را از مسیر تاریخی خواست و هیچ‌کدام
@@ -115,7 +119,7 @@ export function buildDataExportSheets({
     ['تعریف ردیف', tf.seconds
       ? 'هر ردیف یک شمع است: باز/بسته اولین و آخرین قیمتِ مشاهده‌شدهٔ همان سطل، و حجم و ارزش جمعِ معامله‌های باطل‌نشدهٔ آن.'
       : 'هر ردیف یک اجرای گزارش‌شده بورس است؛ یک اجرای حجمی به واحدهای منفرد شکسته نمی‌شود.'],
-    ['بدون معامله در برابر خطا', 'برگ خالیِ یک قرارداد یعنی آن روز معامله‌ای نشده؛ برای تشخیص خطا به برگ «پوشش دریافت» نگاه کن.'],
+    ['برگ خالی یعنی چه', 'برگ خالی به‌خودی‌خود یعنی ریزمعامله‌ای نیامد — نه اینکه معامله‌ای نشده. ستون «وضعیت» در برگ «پوشش دریافت» این دو را از هم و از خطا جدا می‌کند.'],
   ], [150, 430]);
 
   const auditByKey = new Map((audit || []).map((row) => [row.key, row]));
