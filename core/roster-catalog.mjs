@@ -118,9 +118,10 @@ export function searchRow(raw) {
  * قابل‌اعتماد نیست».
  */
 export function scanSearch(payload) {
+  const matches = unwrapSearch(payload);
   const raws = [];
   let unsafe = 0;
-  for (const raw of unwrapSearch(payload)) {
+  for (const raw of matches) {
     const ins = pick(raw, 'insCode', 'InsCode');
     if (ins !== null && !safeId(ins)) { unsafe += 1; continue; }
     const row = searchRow(raw);
@@ -138,7 +139,7 @@ export function scanSearch(payload) {
   // پس همان `rosterIntake` که سابقهٔ روزانه از آن رد می‌شود، اینجا هم
   // رد می‌کند. یک در، یک قاعده.
   const take = rosterIntake(raws);
-  return { rows: take.rows, notOption: take.notOption, unparsed: take.unparsed, unsafe };
+  return { rows: take.rows, notOption: take.notOption, unparsed: take.unparsed, unsafe, matched: matches.length };
 }
 
 /** مشخصات ابزار از `GetInstrumentInfo`. */
@@ -206,6 +207,9 @@ export function optionSpec(payload) {
 export function searchTerms(rows = []) {
   const byBase = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
+    // اختیار تبعی خانوادهٔ دومی ندارد و نباید سبب جست‌وجوی زنجیرهٔ عادی
+    // یا نمایش در خروجی شود. فقط کال و پوت استاندارد عبارت می‌سازند.
+    if (row?.side !== 'call' && row?.side !== 'put') continue;
     const base = normalizeFa(row?.base);
     if (!base) continue;
     let set = byBase.get(base);

@@ -9,6 +9,7 @@ import {
   scanSearch, searchPath, searchRow, searchTerms, unwrapSearch,
 } from '../../core/roster-catalog.mjs';
 import { runRosterBuild } from '../../core/roster-build.mjs';
+import { scanBoardRows } from '../../core/roster-scan.mjs';
 import {
   contractLife, contractStatus, expiryRoll, makeRosterFile, mergeRoster, pairAudit,
   rosterHealth, rosterInRange, ROSTER_VERSION, STATUS_ACTIVE, STATUS_PENDING,
@@ -75,6 +76,7 @@ group('۲۱۱-ب. کاتالوگ ابزار — منبعی که سابقهٔ م�
     { insCode: 62630716381380677, lVal18AFC: 'ضهرم0111', lVal30: 'اختیارخ اهرم-20000-1404/01/27' },
   ] });
   check('فقط قرارداد نگه داشته می‌شود', got.rows.length === 1 && got.notOption === 1, JSON.stringify({ r: got.rows.length, n: got.notOption }));
+  check('شمار خام نتیجه برای تشخیص سقف جست‌وجو حفظ می‌شود', got.matched === 3, String(got.matched));
   // ردیفی که شناسه‌اش به‌شکل عددِ ناامن رسیده، **شمرده** می‌شود نه
   // استفاده. اگر بی‌صدا رد می‌شد، دفتر یک قرارداد کم داشت و کسی
   // نمی‌فهمید چرا.
@@ -110,9 +112,25 @@ group('۲۱۱-ج. عبارت‌های جست‌وجو از دادهٔ دیده�
   // نمی‌شود. پیشوند فقط از نمادی درمی‌آید که واقعاً دیده‌ایم — و همان
   // است که خواهرِ بی‌معاملهٔ یک قرارداد را پیدا می‌کند.
   check('پیشوندِ ندیده ساخته نمی‌شود', !ahrom.terms.includes('طهرم'), JSON.stringify(ahrom.terms));
+  const withoutTabaee = searchTerms([...rows, { base: 'فخوز', symbol: 'هفخوز۵۱۲', side: 'tabaee' }]);
+  check('اختیار تبعی عبارت جست‌وجوی زنجیرهٔ عادی نمی‌سازد',
+    !withoutTabaee.some((item) => item.base === 'فخوز'), JSON.stringify(withoutTabaee));
   check('عبارت‌ها بی‌تکرار و مرتب‌اند',
     flatTerms([...rows, ...rows]).length === new Set(flatTerms(rows)).size);
   check('ردیف بی‌پایه عبارتی نمی‌سازد', searchTerms([{ symbol: 'ضچیزی1' }]).length === 0);
+}
+
+group('۲۱۱-ج۲. قرارداد بی‌معاملهٔ تابلوی جاری بذر کاتالوگ می‌شود');
+{
+  const got = scanBoardRows([{
+    uaInsCode: '12345678901234567', lval30_UA: 'فباهنر', strikePrice: 8026,
+    expiryGregorian: 20260729, contractSize: 1000,
+    insCode_C: '21760708293277584', lVal18AFC_C: 'ظباهنر55',
+    lVal30_C: 'اختیارخ ت فباهنر-8026-05/05/07', insCode_P: '',
+  }]);
+  check('قرارداد تابلویی بدون سابقهٔ معامله از دفتر نمی‌افتد',
+    got.rows.length === 1 && got.rows[0].first === 0 && got.rows[0].base === 'فباهنر', JSON.stringify(got));
+  check('شناسهٔ پایه از تابلو همراه بذر می‌ماند', got.rows[0].uaIns === '12345678901234567');
 }
 
 group('۲۱۱-د. عمر قرارداد از مشخصات رسمی، نه اولین معامله');
@@ -237,7 +255,7 @@ group('۲۱۱-و. سلامت دفتر — «تمام شد» با «کامل» ی
     { ins: 'c', side: 'call', base: 'اهرم', strike: 1, expiry: 20250416 },
     { ins: 'p', side: 'put', base: 'اهرم', strike: 1, expiry: 20250416 },
   ];
-  const clean = { version: ROSTER_VERSION, scan: { catalogQueriesDone: 5, catalogQueriesFailed: 0, detailQueriesFailed: 0, dayQueriesFailed: 0, unsafeIdentifiers: 0 } };
+  const clean = { version: ROSTER_VERSION, scan: { catalogQueriesDone: 5, catalogQueriesFailed: 0, detailQueriesFailed: 0, dayQueriesFailed: 0, unsafeIdentifiers: 0, catalogComplete: true, detailsComplete: true } };
   check('دفترِ بی‌عیب کامل است', rosterHealth(clean, rows).complete === true, JSON.stringify(rosterHealth(clean, rows).reasons));
 
   check('نسخهٔ قدیمی هرگز کامل نیست',
@@ -252,7 +270,9 @@ group('۲۱۱-و. سلامت دفتر — «تمام شد» با «کامل» ی
   // اسکنر فقط روزهای دریافت‌نشده را می‌شمرد و از قراردادی که اصلاً در
   // منبع روزانه نبود خبر نداشت.
   check('اسکنِ بی‌پاسِ کاتالوگ کامل نیست',
-    rosterHealth({ ...clean, scan: { ...clean.scan, catalogQueriesDone: 0 } }, rows).complete === false);
+    rosterHealth({ ...clean, scan: { ...clean.scan, catalogQueriesDone: 0, catalogComplete: false } }, rows).complete === false);
+  check('پاس کاتالوگ قدیمی که سقف ۴۰تایی را نشکسته کامل نیست',
+    rosterHealth({ ...clean, scan: { ...clean.scan, catalogComplete: false } }, rows).complete === false);
   check('هر دلیل نوشته می‌شود، نه فقط یک پرچم',
     rosterHealth({ version: 1 }, [rows[0]]).reasons.length >= 2);
   check('پروندهٔ دفتر آمار اسکن را حمل می‌کند',
@@ -415,4 +435,40 @@ group('۲۱۱-ط. سقف درخواست و ایستِ به‌موقع');
   });
   check('ایستِ به‌موقع، کارِ تا آن لحظه را نگه می‌دارد',
     stoppedRun.rows.length > 0 && stoppedRun.stats.dayQueriesDone < 3, String(stoppedRun.stats.dayQueriesDone));
+}
+
+group('۲۱۱-ک. سقف ۴۰تایی جست‌وجو با شاخه‌های رقمی شکسته می‌شود');
+{
+  const root = 'ضتست';
+  const existing = [{
+    ins: '90000000000000001', symbol: `${root}1`, name: 'اختیارخ تست-1000-1405/01/01',
+    side: 'call', base: 'تست', strike: 1000, expiry: 20260321, first: 20260101, last: 20260101,
+  }];
+  const forty = Array.from({ length: 40 }, (_, index) => ({
+    insCode: String(91000000000000000n + BigInt(index)),
+    lVal18AFC: `${root}${100 + index}`,
+    lVal30: `اختیارخ تست-${1100 + index}-1405/01/01`,
+  }));
+  const asked = [];
+  const result = await runRosterBuild({
+    existing,
+    get: async (path) => {
+      const term = decodeURIComponent(path.split('/').pop());
+      asked.push(term);
+      return { instrumentSearch: term === root ? forty : [] };
+    },
+    limits: { maxTerms: 30, maxDetails: 0, maxRetryTerms: 0 },
+  });
+  check('رسیدن به ۴۰ نتیجه، ده شاخهٔ رقمی را جست‌وجو می‌کند',
+    Array.from({ length: 10 }, (_, digit) => `${root}${digit}`).every((term) => asked.includes(term)), asked.join(','));
+  check('پیمایش زیر سقف، کامل ثبت می‌شود', result.stats.catalogComplete === true, JSON.stringify(result.stats));
+
+  let catalogHits = 0;
+  const resumed = await runRosterBuild({
+    existing,
+    catalogAlreadyComplete: true,
+    get: async () => { catalogHits += 1; return { instrumentSearch: [] }; },
+  });
+  check('تکمیل مشخصات، کاتالوگ کامل را دوباره از اول نمی‌پیماید',
+    catalogHits === 0 && resumed.stats.catalogComplete === true, String(catalogHits));
 }

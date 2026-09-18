@@ -188,7 +188,7 @@ export function buildChain(rows) {
         vol: n(r.qTotTran5J_UA), trades: n(r.zTotTran_UA), value: n(r.qTotCap_UA),
         low: 0, high: 0, book: null, state: '', staleSec: NaN, depth: false,
         expiries: new Map(),
-        contracts: 0,
+        contracts: 0, callContracts: 0, putContracts: 0,
       };
       byUa.set(uaIns, ua);
     }
@@ -204,7 +204,10 @@ export function buildChain(rows) {
       // کلید سقف‌پر از تابلوی روز با تاریخ میلادی ساخته می‌شود. API دفتر
       // تاریخ هم‌ارز میلادی را صریح می‌دهد؛ همان باید کلید مشترک همهٔ مسیرها
       // باشد، وگرنه یک سررسید با دو عدد متفاوت هیچ‌وقت با تیکش جور نمی‌شود.
-      ex = { days, endDate: n(r.expiryGregorian) || n(r.endDate), strikes: new Map() };
+      ex = {
+        days, endDate: n(r.expiryGregorian) || n(r.endDate), strikes: new Map(),
+        contracts: 0, callCount: 0, putCount: 0, incomplete: 0,
+      };
       ua.expiries.set(days, ex);
     }
 
@@ -218,14 +221,24 @@ export function buildChain(rows) {
     // می‌ماند و پرچمش پایین است، تا لایه بالاتر که پیش‌فرض اعلامی کاربر را
     // دارد جایش بگذارد و ردیف را نشان‌دار کند.
     const specSize = n(r.contractSize);
+    const call = sideQuote(r, 'C');
+    const put = sideQuote(r, 'P');
     ex.strikes.set(strike, {
       strike,
       size: specSize > 0 ? specSize : 0,
       sizeFromSpec: specSize > 0,
-      call: sideQuote(r, 'C'),
-      put: sideQuote(r, 'P'),
+      call,
+      put,
     });
-    ua.contracts += 2;
+    const calls = call.ins ? 1 : 0;
+    const puts = put.ins ? 1 : 0;
+    ex.callCount += calls;
+    ex.putCount += puts;
+    ex.contracts += calls + puts;
+    ex.incomplete += calls !== puts ? 1 : 0;
+    ua.callContracts += calls;
+    ua.putContracts += puts;
+    ua.contracts += calls + puts;
   }
 
   // مرتب‌سازی: سررسید صعودی، قیمت اعمال صعودی
@@ -275,6 +288,7 @@ function rollupQuotes(u) {
     for (const st of ex.strikeList) {
       strikes.add(st.strike);
       for (const [q, isCall] of [[st.call, true], [st.put, false]]) {
+        if (!q.ins) continue;
         contracts += 1;
         if (q.bid > 0 || q.ask > 0) quoted += 1;
         if (isCall) {
@@ -384,6 +398,7 @@ export function chainStats(chain) {
       expiries.add(ex.days);
       for (const s of ex.strikeList) {
         for (const [q, isCall] of [[s.call, true], [s.put, false]]) {
+          if (!q.ins) continue;
           contracts += 1;
           if (q.bid > 0 || q.ask > 0) quoted += 1;
           vol += q.vol; oi += q.oi; value += q.value;
