@@ -28,7 +28,7 @@ import {
 import {
   completeRosterBaseIndex, contractStatus, makeRosterFile, missingDays, normalizeFa,
   pickUniverseSource, rangeSummary, rosterAt, rosterChainRows, rosterCoverage,
-  repairRosterBaseNames, rosterCovers, rosterHealth, rosterInRange, rosterNote, ROSTER_VERSION,
+  repairRosterBaseNames, repairRosterSides, rosterCovers, rosterHealth, rosterInRange, rosterNote, ROSTER_VERSION,
 } from '../core/option-roster.mjs';
 import { scanBoardRows, tradingDays } from '../core/roster-scan.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
@@ -564,7 +564,15 @@ async function readRoster() {
     const file = JSON.parse(await fs.readFile(ROSTER_FILE, 'utf8'));
     const repaired = repairRosterBaseNames(file?.rows);
     if (repaired.fixed) log(`دفتر قراردادها — نام پایهٔ ${repaired.fixed} ردیف قدیمی هنگام خواندن ترمیم شد`);
-    rosterCache = { mtime: stamp, rows: repaired.rows, file };
+    // ═══ چرا سمت هم هنگام خواندن ترمیم می‌شود ═══
+    //
+    // قاعدهٔ تشخیصِ اختیار تبعی عوض شد، ولی دفترِ روی دیسک همان `call`
+    // قدیمی را داشت و هیچ مسیری اصلاحش نمی‌کرد. بازسازیِ اجباری چند هزار
+    // درخواستِ بالادست است — همان سهمیه‌ای که کم داریم — و ترمیمِ هنگام
+    // خواندن هیچ درخواستی نمی‌برد.
+    const sides = repairRosterSides(repaired.rows);
+    if (sides.fixed) log(`دفتر قراردادها — سمتِ ${sides.fixed} ردیف قدیمی هنگام خواندن اصلاح شد`);
+    rosterCache = { mtime: stamp, rows: sides.rows, file };
   } catch (e) {
     log(`دفتر قراردادها خوانده نشد: ${e.message}`);
     rosterCache = { mtime: stamp, rows: [], file: null };

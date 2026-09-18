@@ -461,6 +461,47 @@ export function repairRosterBaseNames(rows = []) {
 }
 
 /**
+ * سمتِ ردیف، دوباره از نام و نماد — نه از آنچه در فایل نوشته شده.
+ *
+ * ═══ چرا ذخیره‌شده قابل اعتماد نیست ═══
+ *
+ * ممیزی صاحب پروژه: قاعدهٔ تشخیصِ تبعی درست شد، ولی دفترِ روی دیسک همان
+ * `side: 'call'` قدیمی را داشت و `mergeRoster` عمداً نگهش می‌داشت:
+ *
+ *     old: call  ·  fresh: tabaee  ·  merged: call
+ *
+ * یعنی فباهنر و فخوز تا ابد «۱ کال و صفر پوت» می‌ماندند مگر کسی کلِ دفتر
+ * را از نو بسازد. `side` یک **مشتق** است، نه یک مشاهده: از نام و نماد
+ * حساب می‌شود و هر وقت قاعده عوض شود باید دوباره حساب شود. نگه‌داشتنش
+ * مثل نگه‌داشتنِ حاصلِ یک ضرب بعد از عوض‌شدنِ یکی از عامل‌هاست.
+ *
+ * `null` یعنی «از این نام و نماد چیزی درنمی‌آید» — آن‌وقت مقدارِ قبلی سرِ
+ * جایش می‌ماند، چون نبودِ تشخیص دلیلِ پاک‌کردنِ چیزی نیست.
+ */
+export function rosterRowSide(row) {
+  return contractSide(row?.name ?? '', row?.symbol ?? '');
+}
+
+/**
+ * ترمیمِ سمتِ ردیف‌های قدیمی، هنگام خواندنِ دفتر.
+ *
+ * خواهرِ `repairRosterBaseNames` و به همان دلیل: بازسازیِ اجباریِ کلِ دفتر
+ * چند هزار درخواستِ بالادست است، و سهمیهٔ بالادست دقیقاً همان چیزی است که
+ * کم داریم. ترمیمِ هنگام خواندن هیچ درخواستی نمی‌برد.
+ */
+export function repairRosterSides(rows = []) {
+  let fixed = 0;
+  const list = Array.isArray(rows) ? rows : [];
+  const repaired = list.map((row) => {
+    const side = rosterRowSide(row);
+    if (!side || side === row?.side) return row;
+    fixed += 1;
+    return { ...row, side };
+  });
+  return fixed ? { rows: repaired, fixed } : { rows: list, fixed: 0 };
+}
+
+/**
  * دوقلوهایی که **جلوی ادغام را می‌گیرند**.
  *
  * ═══ چرا قاعده در هسته است و نه در ابزار ═══
@@ -508,6 +549,18 @@ export function mergeRoster(existing = [], incoming = []) {
   };
   for (const row of Array.isArray(existing) ? existing : []) put(row);
   for (const row of Array.isArray(incoming) ? incoming : []) put(row);
+  // ═══ چرا سمت **اینجا** دوباره حساب می‌شود ═══
+  //
+  // بالا `symbol` و `name` از ردیفِ تازه کامل می‌شوند؛ پیش از آن، حساب
+  // کردنِ سمت روی ردیفی که هنوز نامش را نگرفته جوابِ ناقص می‌دهد.
+  //
+  // و مهم‌تر: ردیفِ قدیمی همیشه برنده بود، پس سمتِ غلطِ ذخیره‌شده هرگز
+  // اصلاح نمی‌شد. `side` مشتق است نه مشاهده — با عوض شدنِ قاعده، عددِ
+  // ذخیره‌شده کهنه می‌شود، نه درست‌تر.
+  for (const row of byIns.values()) {
+    const side = rosterRowSide(row);
+    if (side && side !== row.side) row.side = side;
+  }
   return [...byIns.values()].sort((a, b) => (a.expiry - b.expiry) || (a.strike - b.strike) || a.ins.localeCompare(b.ins));
 }
 

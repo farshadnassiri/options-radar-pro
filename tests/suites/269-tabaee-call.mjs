@@ -12,7 +12,9 @@
 // می‌پرسید «از دفتر نیفتاده؟». سبزیِ CI تا وقتی ادعا نباشد، پوشش نیست.
 
 import { check, group, readSrc } from '../harness.mjs';
-import { SIDE_CALL, SIDE_PUT, SIDE_TABAEE, contractSide, expiryRoll } from '../../core/option-roster.mjs';
+import {
+  SIDE_CALL, SIDE_PUT, SIDE_TABAEE, contractSide, expiryRoll, mergeRoster, repairRosterSides,
+} from '../../core/option-roster.mjs';
 import { scanBoardRows } from '../../core/roster-scan.mjs';
 
 group('۲۶۹. تشخیص سمت');
@@ -98,4 +100,63 @@ group('۲۶۹. قاعده در کد نوشته شده');
   // فاصلهٔ پس از «ت» همان چیزی است که «اختیارخ تاصیکو» را نجات می‌دهد.
   check('الگوی نام، «ت» را کلمهٔ مستقل می‌خواهد',
     src.includes('/تبعی|اختیارف ت |اختیارخ ت /'));
+}
+
+group('۲۶۹. مهاجرتِ دفترِ قدیمی');
+{
+  // ═══ ممیزی، نوبت دوم ═══
+  //
+  // قاعده درست شد ولی دفترِ روی دیسک همان `call` قدیمی را داشت، و
+  // `mergeRoster` ردیفِ قدیمی را برنده می‌کرد:
+  //
+  //     old: call  ·  fresh: tabaee  ·  merged: call
+  //
+  // یعنی فباهنر و فخوز تا ابد «۱ کال و صفر پوت» می‌ماندند. `side` یک
+  // **مشتق** است نه یک مشاهده: با عوض شدنِ قاعده باید دوباره حساب شود.
+  const stale = {
+    ins: '21760708293277584', symbol: 'ظباهنر55',
+    name: 'اختیارخ ت فباهنر-8026-05/05/07', side: SIDE_CALL,
+    base: 'فباهنر', strike: 8026, expiry: 20260729,
+  };
+  const fresh = { ...stale, side: SIDE_TABAEE };
+
+  check('ادغام، سمتِ تازه را با قدیمی جایگزین نمی‌کند',
+    mergeRoster([stale], [fresh])[0].side === SIDE_TABAEE);
+  // و حتی بی ردیفِ تازه هم خودش را درست می‌کند.
+  check('دفترِ قدیمی بی هیچ ردیفِ تازه‌ای هم ترمیم می‌شود',
+    mergeRoster([stale], [])[0].side === SIDE_TABAEE);
+  check('و ترمیمِ هنگام خواندن همان کار را می‌کند',
+    repairRosterSides([stale]).fixed === 1
+      && repairRosterSides([stale]).rows[0].side === SIDE_TABAEE);
+
+  // ── مرزها: ترمیم نباید چیزی را خراب کند ────────────────────────────
+  const healthy = [
+    { ins: '2', symbol: 'ضهرم7050', name: 'اختیارخ اهرم-20000-1405/07/25', side: SIDE_CALL, base: 'اهرم', strike: 20000, expiry: 20261120 },
+    { ins: '3', symbol: 'طهرم7050', name: 'اختیارف اهرم-20000-1405/07/25', side: SIDE_PUT, base: 'اهرم', strike: 20000, expiry: 20261120 },
+  ];
+  check('ردیفِ سالم دست نمی‌خورد و شمرده هم نمی‌شود',
+    repairRosterSides(healthy).fixed === 0
+      && repairRosterSides(healthy).rows === healthy);
+  // «نمی‌دانیم» دلیلِ پاک‌کردنِ چیزی نیست.
+  const nameless = [{ ins: '4', symbol: '', name: '', side: SIDE_CALL }];
+  check('ردیفِ بی‌نام و بی‌نماد، سمتِ قبلی‌اش را از دست نمی‌دهد',
+    repairRosterSides(nameless).fixed === 0 && nameless[0].side === SIDE_CALL);
+  check('و ادغام هم سمتِ چنین ردیفی را پاک نمی‌کند',
+    mergeRoster(nameless, [])[0].side === SIDE_CALL);
+  check('فهرست خالی یا بدشکل ترمیم را نمی‌اندازد',
+    repairRosterSides([]).fixed === 0 && repairRosterSides(null).rows.length === 0);
+
+  // ── پیامد روی همان عددی که کاربر می‌بیند ───────────────────────────
+  //
+  // «فباهنر: ۱ کال، صفر پوت» از دفترِ قدیمی می‌آمد. با ترمیم، پایه اصلاً
+  // سریِ استاندارد ندارد و «تک‌سمت» هم شمرده نمی‌شود.
+  const rollBefore = expiryRoll([stale], 'فباهنر', 20260729);
+  const rollAfter = expiryRoll(repairRosterSides([stale]).rows, 'فباهنر', 20260729);
+  check('پیش از ترمیم، یک کالِ جعلی شمرده می‌شد',
+    rollBefore.call === 1 && rollBefore.tabaee === 0);
+  check('پس از ترمیم، نه کال دارد نه سریِ ناقص',
+    rollAfter.call === 0 && rollAfter.tabaee === 1 && rollAfter.incomplete === 0);
+
+  check('سرور هم هنگام خواندنِ دفتر ترمیم را صدا می‌زند',
+    readSrc('../server/server.mjs').includes('const sides = repairRosterSides(repaired.rows)'));
 }
