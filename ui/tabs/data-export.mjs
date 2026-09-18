@@ -6,7 +6,8 @@ import {
   dataExportCandles, dataExportContractGroups, dataExportFrame, dataExportOutcome,
   dataExportPairBatches, dataExportPairs, dataExportRouteSplit, dataExportSessionRows,
   dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments,
-  splitPairBatch, suspectEmptyDays, unknownListingContracts,
+  exportBlockers, instrumentsWithPairs, splitPairBatch, suspectEmptyDays,
+  unknownListingContracts,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
@@ -94,11 +95,11 @@ export async function mount(root, { state, api }) {
    * `complete=false` پیش از این دکمه را دائماً غیرفعال می‌کرد و برداشته
    * شد. روزهای نبودهٔ خارج از بازه کارِ این خروجی نیستند.
    */
-  const unscannedDays = () => Math.max(0, Math.trunc(Number(universe?.missingDays) || 0));
+  const blockers = () => exportBlockers(universe);
 
   function updateRunState() {
     runBtn.disabled = !universe || !picked.size || Boolean(controller) || exporting
-      || unscannedDays() > 0;
+      || blockers().length > 0;
     exportBtn.disabled = !prepared || Boolean(controller) || exporting;
     $('de-universe-note').toggleAttribute('data-error', universe?.complete === false);
   }
@@ -187,10 +188,11 @@ export async function mount(root, { state, api }) {
         refreshTimer = setTimeout(() => loadUniverse(range), 4000);
       } else if (!payload.complete) $('de-universe-note').textContent = `${payload.note || ''} پوشش دفتر کامل نیست؛ خروجی در دسترس است و این محدودیت داخل برگ راهنما ثبت می‌شود.`;
       // قفل باید همان‌جا که دکمه است دیده شود، نه فقط در یادداشت بالا.
-      setStatus(unscannedDays()
-        ? `${fmt.int(unscannedDays())} روزِ کاریِ این بازه هنوز اسکن نشده است. تا کامل شدنش`
-          + ' خروجی قفل است: فهرستِ قراردادها ناقص می‌ماند، تاریخ عرضهٔ بعضی قراردادها نامعلوم است،'
-          + ' و اسکنِ پس‌زمینه همان سهمیهٔ بالادست را می‌خورد که دریافتِ ریزمعامله به آن نیاز دارد.'
+      const why = blockers();
+      setStatus(why.length
+        ? `تا تکمیل دفتر، خروجی قفل است — ${faDigits(why.join('؛ '))}.`
+          + ' با دفترِ نیمه‌تمام، فهرستِ قراردادها ناقص می‌ماند و تاریخ عرضهٔ بعضی‌شان نامعلوم است؛'
+          + ' ضمن اینکه اسکنِ پس‌زمینه همان سهمیهٔ بالادست را می‌خورد که دریافتِ ریزمعامله به آن نیاز دارد.'
         : '');
     } catch (error) {
       if (stopped || mine !== loadSeq) return;
@@ -513,8 +515,12 @@ export async function mount(root, { state, api }) {
       const rescued = suspectPairs.filter((pair) => (items[pair.key]?.rows || []).length).length;
       // شیت‌ها اینجا ساخته نمی‌شوند: تایم‌فریم شکلِ نوشتن است نه دریافت، و
       // ساختنشان در `exportPrepared` یعنی عوض‌کردنش دریافتِ دوباره نمی‌خواهد.
-      prepared = { instruments, pairs, items, range, complete: universe.complete, note: universe.note || '', outcome, audit };
-      paintResult(instruments, pairs, items);
+      // ابزارِ بی‌جفت برگ نمی‌گیرد: قراردادی که وارد بازه نشده نباید برگِ
+      // خالی بسازد. «جفت داشتن» ملاک است نه «معامله داشتن» — قراردادِ
+      // زندهٔ بی‌معامله همچنان برگِ خالیِ خودش را دارد.
+      const sheetInstruments = instrumentsWithPairs(instruments, pairs);
+      prepared = { instruments: sheetInstruments, pairs, items, range, complete: universe.complete, note: universe.note || '', outcome, audit };
+      paintResult(sheetInstruments, pairs, items);
       // ═══ چرا صفر بودنِ داده، خبرِ اول است ═══
       //
       // فایلِ گزارش‌شده «آمادهٔ خروجی» خوانده شد چون رابط فقط شیت‌ها را
@@ -551,7 +557,7 @@ export async function mount(root, { state, api }) {
         : '';
       const head = outcome.blank
         ? `هیچ ریزمعامله‌ای دریافت نشد — ${fmt.int(outcome.failed)} ابزار/روز خطا داد و ${fmt.int(outcome.empty)} تا خالی برگشت.`
-        : `آمادهٔ خروجی: ${fmt.int(outcome.trades)} ریزمعامله از ${fmt.int(outcome.ok)} ابزار/روز، در ${fmt.int(instruments.length)} شیت.`;
+        : `آمادهٔ خروجی: ${fmt.int(outcome.trades)} ریزمعامله از ${fmt.int(outcome.ok)} ابزار/روز، در ${fmt.int(sheetInstruments.length)} شیت.`;
       const why = outcome.topReason ? ` علت غالب: ${outcome.topReason[0]} (${fmt.int(outcome.topReason[1])} بار).` : '';
       // «بی‌معامله» تا وقتی تابلوی روزانه تأییدش نکند، ادعا است نه واقعیت.
       const blankWhy = blanks.missing

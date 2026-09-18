@@ -948,6 +948,16 @@ export function rosterHealth(file, rows = []) {
       detailQueriesFailed: num(stats.detailQueriesFailed, 0),
       unsafeIdentifiers: num(stats.unsafeIdentifiers, 0),
       noTradeContracts: num(stats.noTradeContracts, 0),
+      // ═══ چرا این سه پرچمِ خام هم بیرون می‌آیند ═══
+      //
+      // `complete` یک «و»ی همه‌چیز است و بعضی اجزایش هرگز درست نمی‌شوند:
+      // «۶۶ جفتِ ناقص کال/پوت» واقعیتِ بازار است (سریِ رسمیِ تک‌سمت)، نه
+      // کارِ نیمه‌تمام. مصرف‌کننده‌ای که می‌خواهد تا **تکمیلِ ساخت** صبر
+      // کند — نه تا بی‌عیب‌شدنِ بازار — باید بتواند این دو را جدا کند،
+      // وگرنه یا زود شروع می‌کند یا هرگز.
+      catalogComplete: stats.catalogComplete === true,
+      detailsComplete: stats.detailsComplete === true,
+      versionCurrent: version >= ROSTER_VERSION,
     },
   };
 }

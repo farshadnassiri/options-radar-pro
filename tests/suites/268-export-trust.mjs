@@ -12,7 +12,7 @@
 import { check, group, readSrc } from '../harness.mjs';
 import {
   EMPTY_STATUS, dataExportCoverageRows, dataExportPairs, emptyStatusOf,
-  unknownListingContracts,
+  exportBlockers, instrumentsWithPairs, unknownListingContracts,
 } from '../../core/data-export.mjs';
 import { buildDataExportSheets } from '../../ui/data-export-workbook.mjs';
 
@@ -99,14 +99,15 @@ group('۲۶۸. خالیِ تأییدنشده «بدون معامله» نیست'
     !guide.rows.some((row) => row[0] === 'بدون معامله'));
 }
 
-group('۲۸. دروازهٔ اجرا تا تکمیل اسکن');
+group('۲۶۸. دروازهٔ اجرا');
 {
   const tab = readSrc('../ui/tabs/data-export.mjs');
-  check('دکمهٔ اجرا با روزِ اسکن‌نشدهٔ همین بازه قفل می‌شود',
-    tab.includes('|| unscannedDays() > 0')
-      && tab.includes("Number(universe?.missingDays)"));
+  // خودِ قفل و فهرستِ موانعش در گروهِ «قفل تا تکمیلِ واقعیِ دفتر» پایین‌تر
+  // سنجیده می‌شود؛ اینجا فقط اینکه دکمه واقعاً به آن بسته است.
+  check('دکمهٔ اجرا به فهرستِ موانع بسته است',
+    tab.includes('|| blockers().length > 0'));
   check('و علتش همان‌جا که دکمه است نوشته می‌شود',
-    tab.includes('روزِ کاریِ این بازه هنوز اسکن نشده است'));
+    tab.includes('تا تکمیل دفتر، خروجی قفل است'));
   // قفلِ سراسریِ `complete=false` عمداً برنگشت: پیش از این دکمه را دائماً
   // غیرفعال می‌کرد و صاحب پروژه برش داشت.
   check('قفل به بازه بسته است، نه به سلامتِ کلِ دفتر',
@@ -114,4 +115,80 @@ group('۲۸. دروازهٔ اجرا تا تکمیل اسکن');
   check('قراردادِ بی‌تاریخِ عرضه در جملهٔ وضعیت گفته می‌شود',
     tab.includes('const unlisted = unknownListingContracts(instruments)')
       && tab.includes('تاریخ عرضه‌اش در دفتر نیست و وارد بازه نشد'));
+}
+
+group('۲۶۸. قفل تا تکمیلِ واقعیِ دفتر');
+{
+  const scan = (patch) => ({ versionCurrent: true, catalogComplete: true, detailsComplete: true, ...patch });
+  const universe = (missingDays, patch) => ({ missingDays, health: { scan: scan(patch) } });
+
+  check('دفترِ تمام‌شده هیچ مانعی ندارد', exportBlockers(universe(0, {})).length === 0);
+  check('روزِ اسکن‌نشده مانع است',
+    exportBlockers(universe(131, {}))[0].includes('۱۳۱'.replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+      || exportBlockers(universe(131, {}))[0].includes('131'));
+
+  // ═══ ایرادی که ممیزی گرفت ═══
+  //
+  // روزها تمام شده‌اند ولی پاس کاتالوگ یا مشخصات هنوز می‌دود؛ تا امروز
+  // دکمه در همین حالت فعال می‌شد و فهرستِ قرارداد ناقص می‌ماند.
+  check('پاسِ ناتمامِ کاتالوگ با missingDays=0 هم مانع است',
+    exportBlockers(universe(0, { catalogComplete: false })).some((why) => why.includes('کاتالوگ')));
+  check('مشخصاتِ ناتمام هم مانع است',
+    exportBlockers(universe(0, { detailsComplete: false })).some((why) => why.includes('مشخصات')));
+  check('دفترِ نسخه‌قدیمی مانع است و علتش را خودش می‌گوید',
+    exportBlockers(universe(0, { versionCurrent: false })).join().includes('نسخهٔ قدیمی'));
+  check('و نسخهٔ قدیمی دو مانعِ تکراری نمی‌سازد',
+    exportBlockers(universe(0, { versionCurrent: false, catalogComplete: false, detailsComplete: false })).length === 1);
+
+  // ═══ و چرا قفل روی خودِ `complete` گذاشته نشد ═══
+  //
+  // آن پرچم «۶۶ جفتِ ناقص کال/پوت» را هم می‌شمارد، که واقعیتِ بازار است
+  // (سریِ رسمیِ تک‌سمت) و هرگز درست نمی‌شود. قفل روی آن یعنی دکمه‌ای که
+  // هیچ‌وقت فعال نمی‌شود — همان چیزی که یک بار برداشته شد.
+  check('جفتِ ناقصِ کال/پوت مانعِ خروجی نیست — واقعیتِ بازار است، نه کارِ نیمه‌تمام',
+    exportBlockers({ missingDays: 0, health: { complete: false, reasons: ['۶۶ جفت ناقص کال/پوت'], scan: scan({}) } }).length === 0);
+  check('درخواستِ ناموفقِ گذرا هم دکمه را برای همیشه قفل نمی‌کند',
+    exportBlockers({ missingDays: 0, health: { complete: false, scan: scan({ dayQueriesFailed: 3 }) } }).length === 0);
+  check('دفترِ بی‌گزارشِ سلامت ادعایی نمی‌سازد',
+    exportBlockers({ missingDays: 0 }).length === 0 && exportBlockers(null).length === 0);
+
+  const tab = readSrc('../ui/tabs/data-export.mjs');
+  check('تب روی همین فهرستِ موانع قفل می‌کند',
+    tab.includes('const blockers = () => exportBlockers(universe)')
+      && tab.includes('|| blockers().length > 0'));
+  check('و همهٔ موانع را کنار دکمه می‌نویسد',
+    tab.includes('تا تکمیل دفتر، خروجی قفل است'));
+}
+
+group('۲۶۸. ابزارِ بی‌جفت برگ نمی‌گیرد');
+{
+  const instruments = [
+    { ins: 'B', name: 'اهرم', kind: 'underlying' },
+    { ins: 'c1', name: 'ضهرم4011', kind: 'call' },
+    { ins: 'c2', name: 'ضهرم3010', kind: 'call' },
+  ];
+  const pairs = [
+    { ins: 'B', date: 20240722, key: '20240722:B' },
+    { ins: 'c2', date: 20240722, key: '20240722:c2' },
+  ];
+  const kept = instrumentsWithPairs(instruments, pairs).map((item) => item.name);
+  check('قراردادی که وارد بازه نشده برگ نمی‌گیرد', !kept.includes('ضهرم4011'));
+  check('پایه و قراردادِ داخل بازه می‌مانند', kept.join() === 'اهرم,ضهرم3010');
+
+  // ملاک «جفت داشتن» است نه «معامله داشتن»: برگِ خالیِ قراردادِ زندهٔ
+  // بی‌معامله یک واقعیت است و عمداً ساخته می‌شود.
+  const sheets = buildDataExportSheets({
+    instruments: instrumentsWithPairs(instruments, pairs), pairs,
+    items: { '20240722:B': { rows: [{ price: 1, quantity: 1, time: 90000 }], source: 'history' },
+      '20240722:c2': { rows: [], source: 'history' } },
+    range: { from: 20240722, to: 20240722 }, complete: true,
+  });
+  const names = sheets.map((part) => part.name);
+  check('فایل برگِ قراردادِ بیرونِ بازه را ندارد', !names.includes('ضهرم4011'));
+  check('ولی برگِ خالیِ قراردادِ زندهٔ بی‌معامله را دارد',
+    names.includes('ضهرم3010') && sheets.find((part) => part.name === 'ضهرم3010').rows.length === 0);
+
+  check('تب همین فهرستِ فیلترشده را به فایل می‌دهد',
+    readSrc('../ui/tabs/data-export.mjs').includes('const sheetInstruments = instrumentsWithPairs(instruments, pairs)')
+      && readSrc('../ui/tabs/data-export.mjs').includes('prepared = { instruments: sheetInstruments,'));
 }
