@@ -2,7 +2,9 @@
 
 import { num } from './num.mjs';
 import { batchKey, BATCH_PAIR_CAP } from './trades-source.mjs';
-import { INTRADAY_START_SECOND, inIntradaySession, tradeSecond } from './backtest.mjs';
+import {
+  INTRADAY_END_SECOND, INTRADAY_START_SECOND, inIntradaySession, tradeSecond,
+} from './backtest.mjs';
 
 const n = (value) => num(value, 0);
 const code = (value) => String(value ?? '').trim();
@@ -273,13 +275,27 @@ export function dataExportTradeRows(instrument, pairs = [], items = {}) {
     if (!hit || hit.error || !Array.isArray(hit.rows)) continue;
     for (const row of hit.rows) {
       const price = n(row?.price), quantity = n(row?.quantity);
-      if (!(price > 0) || !(quantity > 0) || !(n(row?.time) > 0)) continue;
+      const canceled = row?.canceled === true;
+      // ═══ چرا شرطِ حجم فقط برای معاملهٔ فعال است ═══
+      //
+      // ممیزی فایل ۲۰۲۶/۰۶/۲۰ تا ۲۰۲۶/۰۹/۱۸: برگ «پوشش دریافت» ۱۲۲
+      // معاملهٔ باطل شمرد ولی ستون «تعداد باطل» برگ‌های ابزار جمعاً ۴۹ تا
+      // داشت — ۷۳ تای دیگر بی‌صدا افتاده بودند، و همان فایل در یک ستون
+      // ۱۲۲ می‌گفت و در ستونی دیگر ۴۹.
+      //
+      // علتش همین شرط بود: بالادست برای معاملهٔ باطل `qTitTran` صفر
+      // می‌فرستد، و `quantity > 0` که برای انداختنِ ردیفِ بی‌قیمت گذاشته
+      // شده بود، ردیفِ باطل را هم می‌انداخت. حجمِ باطل جایی جمع نمی‌شود
+      // (سطل‌ساز پیش از جمع‌زدن از رویش می‌پرد)، پس نگه‌داشتنش هیچ عددی را
+      // آلوده نمی‌کند و فقط شمارش را درست می‌کند.
+      if (!(price > 0) || !(n(row?.time) > 0)) continue;
+      if (!canceled && !(quantity > 0)) continue;
       out.push({
         date: pair.date, time: Math.trunc(n(row.time)), sequence: Math.trunc(n(row.sequence)),
         price, quantity, rawValue: price * quantity,
         contractSize: size > 0 ? size : NaN,
         contractValue: size > 0 ? price * quantity * size : NaN,
-        canceled: row?.canceled === true, canceledKnown: row?.canceledKnown !== false,
+        canceled, canceledKnown: row?.canceledKnown !== false,
         // جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰. خواستهٔ صریح صاحب پروژه همین بازه
         // است، ولی ردیفِ بیرونِ آن **حذف** نمی‌شود — علامت می‌خورد و شمارش
         // می‌شود، تا «نبود» با «کنار گذاشته شد» اشتباه نشود.
@@ -315,7 +331,18 @@ export function emptyStatusOf(verdict) {
   return EMPTY_STATUS[verdict] || EMPTY_STATUS.unknown;
 }
 
-/** پوشش هر ابزار/روز؛ خالیِ معتبر با خطا یکی نمی‌شود. */
+/**
+ * پوشش هر ابزار/روز؛ خالیِ معتبر با خطا یکی نمی‌شود.
+ *
+ * ═══ چرا «بیرون از جلسه» ستون دارد ═══
+ *
+ * برگ راهنما همین حالا هم می‌نویسد «شمار ردیف‌های بیرون از این بازه در
+ * برگ پوشش می‌آید» — ولی چنین ستونی در فایل نبود. `dataExportSessionRows`
+ * عدد را می‌ساخت و دفترکار دورش می‌ریخت، پس تنها جایی که دیده می‌شد صفحهٔ
+ * تب بود، نه فایلی که کاربر نگه می‌دارد. کسی که فایل را باز می‌کرد
+ * می‌دید «کل ردیف» با جمعِ ردیف‌های برگ ابزار نمی‌خواند و هیچ ستونی
+ * تفاوت را توضیح نمی‌داد.
+ */
 export function dataExportCoverageRows(instruments = [], pairs = [], items = {}, audit = []) {
   const verdicts = new Map((audit || []).map((row) => [row.key, row.verdict]));
   const byIns = new Map((instruments || []).map((item) => [String(item.ins), item]));
@@ -331,6 +358,8 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {},
       rows: hit && Array.isArray(hit.rows) ? rows.length : null,
       active: hit && Array.isArray(hit.rows) ? rows.filter((row) => row && row.canceled !== true).length : null,
       canceled: hit && Array.isArray(hit.rows) ? rows.filter((row) => row?.canceled === true).length : null,
+      outside: hit && Array.isArray(hit.rows)
+        ? rows.filter((row) => !inIntradaySession(row?.time)).length : null,
       status: !hit ? 'درخواست نرفت' : hit.error ? 'خطا' : rows.length ? 'داده آمد'
         : emptyStatusOf(verdicts.get(pair.key)),
       error: String(hit?.error || ''), source: String(hit?.source || ''),
@@ -492,7 +521,19 @@ export function dataExportCandles(rows = [], seconds = 60) {
   const byBucket = new Map();
   const order = [];
   for (const row of rows || []) {
-    const second = tradeSecond(row?.time);
+    // ═══ چرا ثانیه به بازهٔ جلسه چفت می‌شود ═══
+    //
+    // `inIntradaySession` پایان جلسه را **شامل** می‌گیرد، پس معاملهٔ
+    // حراج پایانی دقیقاً روی ۱۲:۳۰:۰۰ می‌نشیند. بی چفت‌کردن، همان یک
+    // ثانیه سطلِ پانزدهمی به نام ۱۲:۳۰ می‌سازد که فقط یک ثانیه از جلسه
+    // را می‌پوشاند: فایل ممیزی‌شده برای نماد پایه ۱۲ چنین ردیفی داشت، هر
+    // کدام با ۱ تا ۷ معامله، کنار ۱۴ سطلِ واقعی روز.
+    //
+    // بقیهٔ برنامه این را ندارد چون `bucketStartSecond` در
+    // `core/backtest.mjs` همین چفت را دارد؛ نبودنش اینجا یعنی شمعِ خروجی
+    // با شمعِ بازپخش و آزمون تاریخی هم‌ردیف نمی‌شود.
+    const second = Math.min(Math.max(tradeSecond(row?.time), INTRADAY_START_SECOND),
+      INTRADAY_END_SECOND - 1);
     const start = INTRADAY_START_SECOND + (Math.floor((second - INTRADAY_START_SECOND) / width) * width);
     const key = `${row.date}:${start}`;
     let bar = byBucket.get(key);
