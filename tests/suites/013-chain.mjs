@@ -48,6 +48,16 @@ group('۱۲. زنجیره و ترکیب‌سازی');
   check('آمار زنجیره: قرارداد و دارای مظنه', st.contracts === 22 && st.quoted === 20,
     `قرارداد ${st.contracts} | مظنه ${st.quoted}`);
 
+  const halfRow = { ...mkRow(120000, 30, 500, 400, '3', 'تک‌سمت'), insCode_P: '', lVal18AFC_P: '' };
+  const halfChain = buildChain([halfRow]);
+  const halfUa = halfChain.get('3');
+  check('زنجیرهٔ تک‌سمت قرارداد خیالی نمی‌شمارد',
+    halfUa.contracts === 1 && halfUa.callContracts === 1 && halfUa.putContracts === 0
+      && halfUa.expiryList[0].incomplete === 1,
+    JSON.stringify({ contracts: halfUa.contracts, call: halfUa.callContracts, put: halfUa.putContracts }));
+  check('آمار کل و فهرست بازار هم فقط سمت واقعی را می‌شمارند',
+    chainStats(halfChain).contracts === 1 && underlyingList(halfChain)[0].contracts === 1);
+
   const s2 = { ...defaults(), comboWindowPct: 25, wingsEqualWidth: true, greeksInScan: false };
 
   // کاوردکال: یک ترکیب به ازای هر قیمت اعمال هر سررسید

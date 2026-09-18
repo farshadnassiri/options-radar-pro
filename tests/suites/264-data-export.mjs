@@ -3,7 +3,7 @@
 import { check, group, readSrc } from '../harness.mjs';
 import {
   dataExportCoverageRows, dataExportPairBatches, dataExportPairs,
-  dataExportTradeRows, discoverDataExportInstruments,
+  dataExportTradeRows, discoverDataExportInstruments, dataExportContractGroups,
 } from '../../core/data-export.mjs';
 import { buildDataExportSheets } from '../../ui/data-export-workbook.mjs';
 
@@ -29,6 +29,9 @@ group('۲۶۴. خروجی دیتای ریزمعاملات');
       && instruments.filter((item) => item.kind === 'put').length === 2);
   check('نماد پایهٔ انتخاب‌نشده وارد خروجی نمی‌شود', !instruments.some((item) => item.ins === 'OTHER'));
   check('اندازه رسمی قرارداد نگه داشته می‌شود', instruments.find((item) => item.ins === 'CALL1').size === 1000);
+  const grouped = dataExportContractGroups(instruments, 'BASE');
+  check('شمار کال و پوت هر سررسید جدا و واقعی گزارش می‌شود',
+    grouped.length === 1 && grouped[0].callCount === 2 && grouped[0].putCount === 2);
 
   const dates = [20251231, 20260101, 20260102, 20260103, 20260104];
   const pairs = dataExportPairs(instruments, dates);

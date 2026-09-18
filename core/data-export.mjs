@@ -152,6 +152,8 @@ export function dataExportContractGroups(instruments = [], baseIns = '') {
     .sort((a, b) => (a[0] || Infinity) - (b[0] || Infinity))
     .map(([expiry, list]) => ({
       expiry,
+      callCount: list.filter((item) => item.kind === 'call').length,
+      putCount: list.filter((item) => item.kind === 'put').length,
       contracts: list.sort((a, b) => (n(a.strike) - n(b.strike))
         || a.kind.localeCompare(b.kind)
         || String(a.name).localeCompare(String(b.name), 'fa')),

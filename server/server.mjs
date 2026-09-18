@@ -27,9 +27,9 @@ import {
 import {
   completeRosterBaseIndex, contractStatus, makeRosterFile, missingDays, normalizeFa,
   pickUniverseSource, rangeSummary, rosterAt, rosterChainRows, rosterCoverage,
-  repairRosterBaseNames, rosterCovers, rosterHealth, rosterInRange, rosterNote,
+  repairRosterBaseNames, rosterCovers, rosterHealth, rosterInRange, rosterNote, ROSTER_VERSION,
 } from '../core/option-roster.mjs';
-import { tradingDays } from '../core/roster-scan.mjs';
+import { scanBoardRows, tradingDays } from '../core/roster-scan.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
 import { infoPath, instrumentInfo, optionSpec, optionSpecPath } from '../core/roster-catalog.mjs';
 import { readJsonSafe } from '../core/json-safe.mjs';
@@ -681,11 +681,9 @@ async function writeRoster(rows, days, { from = 0, to = 0, scan = null } = {}) {
 /**
  * آیا ساختِ تازه لازم است — و چرا نباید فقط «جفتِ ناقص» ملاک باشد.
  *
- * دو محرک معتبر است: روزِ نبوده، و پاسِ کاتالوگی که هرگز اجرا نشده. سومی
- * وسوسه‌انگیز است و غلط: «هنوز جفتِ ناقص داریم». سازنده در همان اجرا یک
- * پاسِ دوم برای ناقص‌ها می‌زند؛ اگر بعدش هم ناقص ماند یعنی جست‌وجو آن
- * سمت را ندارد. اگر این را محرک می‌گرفتیم، هر درخواستِ رابط یک اسکنِ
- * کامل راه می‌انداخت و بالادست را تا ابد می‌کوبید.
+ * سه محرک معتبر است: روزِ نبوده، نسخه/پاس کاتالوگ قدیمی، و مشخصات رسمی
+ * ناتمام. «هنوز جفت ناقص داریم» به‌تنهایی محرک نیست: بعد از پیمایش کامل
+ * ممکن است قرارداد تعدیل‌شده واقعاً یک‌طرفه باشد و شناسه‌ای نباید ساخت.
  *
  * سردکردن هم لازم است: پاسِ کاتالوگی که همین حالا شکست خورد، با
  * درخواست بعدی دوباره شروع نمی‌شود.
@@ -695,7 +693,11 @@ const ROSTER_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
 function rosterNeedsBuild(file, missingCount) {
   if (rosterBuild.running) return false;
   if (missingCount > 0) return true;
-  if (num(file?.scan?.catalogQueriesDone, 0) > 0) return false;
+  const scan = file?.scan || {};
+  const stale = num(file?.version, 0) < ROSTER_VERSION
+    || scan.catalogComplete !== true
+    || scan.detailsComplete !== true;
+  if (!stale) return false;
   const since = rosterBuild.finishedAt ? Date.now() - rosterBuild.finishedAt : Infinity;
   return since > ROSTER_RETRY_COOLDOWN_MS;
 }
@@ -708,20 +710,27 @@ async function buildRoster(from, to) {
   // پاس کاتالوگ حتی وقتی همهٔ روزها هست هم لازم است: قراردادِ بی‌معامله
   // در هیچ روزی نبوده، پس «همهٔ روزها را داریم» یعنی «همهٔ معامله‌ها را
   // داریم»، نه «همهٔ قراردادها را».
-  const needCatalog = !num(file?.scan?.catalogQueriesDone, 0);
-  if (!want.length && !needCatalog && !firstBuild) return rosterBuild;
+  const catalogAlreadyComplete = num(file?.version, 0) >= ROSTER_VERSION
+    && file?.scan?.catalogComplete === true;
+  const needDetails = file?.scan?.detailsComplete !== true;
+  const needBuild = !catalogAlreadyComplete || needDetails;
+  if (!want.length && !needBuild && !firstBuild) return rosterBuild;
 
   rosterBuild = {
     running: true, from: Number(from), to: Number(to), total: want.length, done: 0,
     failed: 0, startedAt: Date.now(), finishedAt: 0, lastError: '', added: 0,
     stage: 'day', stageDone: 0, stageTotal: want.length,
   };
-  log(`ساخت دفتر قراردادها — ${want.length} روزِ نبوده از ${from} تا ${to}${needCatalog ? ' + پاس کاتالوگ' : ''}`);
+  log(`ساخت دفتر قراردادها — ${want.length} روزِ نبوده از ${from} تا ${to}`
+    + `${catalogAlreadyComplete ? '' : ' + پاس کاتالوگ'}${needDetails ? ' + مشخصات ناتمام' : ''}`);
 
   (async () => {
+    const seed = scanBoardRows(await boardRowsForIndex()).rows;
     const result = await runRosterBuild({
       days: want,
       existing: rosterCache.rows,
+      seed,
+      catalogAlreadyComplete,
       scannedDays: rosterCache.file?.days || [],
       get: (path) => get(path, ROSTER_SCAN_TTL, ROSTER_SCAN_PRIORITY),
       onProgress: (p) => {

@@ -12,7 +12,7 @@ import {
 
 group('۲۰۷-الف. خواندن نام قرارداد');
 {
-  check('نسخهٔ ساختار اعلام شده', ROSTER_VERSION === 2);
+  check('نسخهٔ ساختار اعلام شده', ROSTER_VERSION === 3);
 
   // ── سمت، از نام و نماد ──────────────────────────────────────────────
   check('«اختیارخ» کال است', contractSide('اختیارخ ذوب-260-1405/06/18', 'ضذوب6009') === SIDE_CALL);
@@ -134,7 +134,7 @@ group('۲۰۷-ب. ردیف دفتر و ادغام');
 
   const file = makeRosterFile([older, newer], { scannedFrom: 20250101, scannedTo: 20250520, at: 7 });
   check('پروندهٔ دفتر نسخه، شمار و بازهٔ اسکن دارد',
-    file.version === 2 && file.count === 1 && file.scannedFrom === 20250101 && file.at === 7);
+    file.version === ROSTER_VERSION && file.count === 1 && file.scannedFrom === 20250101 && file.at === 7);
 }
 
 group('۲۰۷-ج. سررسید یک مرزِ متحرک است، نه پرچم ثابت');

@@ -28,7 +28,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { tradingDays } from '../core/roster-scan.mjs';
+import { scanBoardRows, tradingDays } from '../core/roster-scan.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
 import { readJsonSafe } from '../core/json-safe.mjs';
 import { writeJsonAtomicSync } from '../server/atomic-json.mjs';
@@ -99,16 +99,32 @@ async function main() {
       scanned = Array.isArray(cp?.scanned) ? cp.scanned : [];
       console.log(`ادامه از checkpoint — ${fa(scanned.length)} روزِ انجام‌شده، ${fa(rows.length)} قرارداد`);
     } catch { /* checkpoint خراب، از نو */ }
+  } else if (fs.existsSync(ROSTER_FILE)) {
+    try {
+      const current = JSON.parse(fs.readFileSync(ROSTER_FILE, 'utf8'));
+      rows = Array.isArray(current?.rows) ? current.rows : [];
+      scanned = Array.isArray(current?.days) ? current.days : [];
+      console.log(`ادامه از دفتر موجود — ${fa(scanned.length)} روزِ انجام‌شده، ${fa(rows.length)} قرارداد`);
+    } catch { /* دفتر خراب، از نو */ }
   }
 
   const base = baseUrl();
   const want = missingDays({ days: scanned, scannedFrom: 0, scannedTo: 0 }, days);
   console.log(`اسکن ${fa(want.length)} روزِ نبوده از ${fa(days.length)} روزِ کاری، روی ${base}`);
 
+  let seed = [];
+  try {
+    seed = scanBoardRows(await getJson(`${base}/Instrument/GetInstrumentOptionMarketWatch/0`)).rows;
+    console.log(`بذر تابلوی جاری: ${fa(seed.length)} قرارداد استاندارد/تبعی برای کشف پیشوندها`);
+  } catch (e) {
+    console.warn(`تابلوی جاری برای بذر دفتر نرسید: ${e.message}`);
+  }
+
   let lastLine = 0;
   const result = await runRosterBuild({
     days: want,
     existing: rows,
+    seed,
     scannedDays: scanned,
     // نام `path` نیست، چون `node:path` بالای همین فایل وارد شده و سایه‌انداختن
     // روی آن دقیقاً همان اشتباهی را نامرئی می‌کند که در دفتر خطای سرور

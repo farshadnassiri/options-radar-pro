@@ -29,8 +29,8 @@ import { num } from './num.mjs';
 
 /** سقف‌های پیش‌فرض. عبور از این‌ها یعنی بالادست را کوبیدن. */
 export const BUILD_LIMITS = {
-  maxTerms: 400,        // عبارت جست‌وجو در هر اجرا
-  maxDetails: 1500,     // قرارداد بی‌معامله که مشخصاتش گرفته می‌شود
+  maxTerms: 10000,      // عبارت جست‌وجو در هر اجرا؛ شامل شاخه‌های رفع سقف ۴۰تایی
+  maxDetails: 5000,     // قرارداد بی‌معاملهٔ مرتبط با پوشش که مشخصاتش گرفته می‌شود
   maxRetryTerms: 120,   // عبارتِ جفتِ ناقص، در پاس دوم
 };
 
@@ -39,9 +39,15 @@ const emptyStats = () => ({
   catalogQueriesDone: 0, catalogQueriesFailed: 0,
   detailQueriesDone: 0, detailQueriesFailed: 0,
   unsafeIdentifiers: 0, noTradeContracts: 0,
+  detailDeferred: 0,
   catalogFound: 0, retryTerms: 0,
+  catalogComplete: false, detailsComplete: false,
   truncated: [],
 });
+
+// پاسخ جست‌وجوی TSETMC حداکثر ۴۰ ردیف دارد و هیچ پرچم صفحه‌بندی نمی‌دهد.
+// رسیدن دقیق به این عدد یعنی «ممکن است ادامه داشته باشد»، نه «تمام شد».
+const SEARCH_RESULT_CAP = 40;
 
 /**
  * اجرای کامل ساخت.
@@ -56,6 +62,7 @@ const emptyStats = () => ({
 export async function runRosterBuild({
   days = [],
   existing = [],
+  seed = [],
   scannedDays = [],
   get,
   onProgress = () => {},
@@ -64,11 +71,16 @@ export async function runRosterBuild({
   // چهارصدم یعنی از نو — و دو سال یعنی پانصد درخواست.
   onCheckpoint = () => {},
   checkpointEvery = 25,
+  catalogConcurrency = 6,
+  detailConcurrency = 6,
+  catalogAlreadyComplete = false,
   limits = BUILD_LIMITS,
   stopped = () => false,
 } = {}) {
   const stats = emptyStats();
   let rows = Array.isArray(existing) ? existing.slice() : [];
+  const before = rows.length;
+  rows = mergeRoster(rows, Array.isArray(seed) ? seed : []);
   const scanned = [...scannedDays];
   let sinceSave = 0;
   const save = (force = false) => {
@@ -76,7 +88,6 @@ export async function runRosterBuild({
     sinceSave = 0;
     onCheckpoint({ rows, scanned: [...new Set(scanned)].sort((a, b) => a - b), stats });
   };
-  const before = rows.length;
   const total = days.length;
 
   // ── مرحلهٔ ۱: سابقهٔ روزانه ────────────────────────────────────────
@@ -100,10 +111,18 @@ export async function runRosterBuild({
   // نام پایه: «اهرم» مکانیکی به «طهرم» تبدیل نمی‌شود و هیچ قاعده‌ای هم
   // نیست که این کار را درست انجام دهد.
   const terms = flatTerms(rows);
-  const useTerms = terms.slice(0, limits.maxTerms);
-  if (terms.length > useTerms.length) stats.truncated.push(`عبارت جست‌وجو: ${useTerms.length} از ${terms.length}`);
   const seenTerms = new Set();
-  await runTerms(useTerms);
+  const symbolRoots = new Set();
+  const rememberRoot = (row) => {
+    if (row?.side !== 'call' && row?.side !== 'put') return '';
+    const root = String(row?.symbol ?? '').match(/^[^\d\s]+/)?.[0] || '';
+    if (root.length >= 2) symbolRoots.add(root);
+    return root;
+  };
+  rows.forEach(rememberRoot);
+  let catalogTruncated = false;
+  if (!catalogAlreadyComplete) await runTerms(terms);
+  stats.catalogComplete = catalogAlreadyComplete || (!catalogTruncated && stats.catalogQueriesFailed === 0);
 
   // ── مرحلهٔ ۳: مشخصات رسمی قراردادِ بی‌معامله ────────────────────────
   // ── چه کسی مشخصات لازم دارد ────────────────────────────────────────
@@ -117,37 +136,51 @@ export async function runRosterBuild({
   // برای هر بیست‌وهشت قرارداد بیست‌وهشت درخواست می‌رفت به‌جای شش.
   const noTrade = rows.filter((row) => !(num(row.first, 0) > 0));
   stats.noTradeContracts = noTrade.length;
-  const needDetail = noTrade.filter((row) => !(num(row.listedFrom, 0) > 0));
+  // قراردادِ منقضی پیش از آغاز پوشش فعلی، در هیچ بازهٔ پوشش‌داده‌شده‌ای
+  // ظاهر نمی‌شود؛ گرفتن دو مشخصات رسمی برای هزاران قرارداد قدیمی فقط بار
+  // می‌سازد. اگر کاربر بازه را عقب ببرد، `scanned` هم عقب می‌رود و همان
+  // قراردادها در اجرای بعدی خودکار وارد نامزدهای مشخصات می‌شوند.
+  const coveredFrom = scanned.length ? Math.min(...scanned) : 0;
+  const relevantNoTrade = coveredFrom > 0
+    ? noTrade.filter((row) => num(row.expiry, 0) >= coveredFrom)
+    : noTrade;
+  stats.detailDeferred = noTrade.length - relevantNoTrade.length;
+  const needDetail = relevantNoTrade.filter((row) => !(num(row.listedFrom, 0) > 0));
   const useDetail = needDetail.slice(0, limits.maxDetails);
   if (needDetail.length > useDetail.length) stats.truncated.push(`مشخصات: ${useDetail.length} از ${needDetail.length}`);
 
-  for (const row of useDetail) {
+  const detailCap = Math.max(1, Math.trunc(detailConcurrency) || 1);
+  for (let at = 0; at < useDetail.length; at += detailCap) {
     if (stopped()) return finish();
-    try {
-      let id = row.id;
-      if (!id) {
-        const info = instrumentInfo(await get(infoPath(row.ins)));
-        if (info?.id) id = info.id;
-        if (info?.contractSize > 0) row.contractSize = info.contractSize;
-        if (info?.uaIns) row.uaIns = info.uaIns;
+    const batch = useDetail.slice(at, at + detailCap);
+    await Promise.all(batch.map(async (row) => {
+      try {
+        let id = row.id;
+        if (!id) {
+          const info = instrumentInfo(await get(infoPath(row.ins)));
+          if (info?.id) id = info.id;
+          if (info?.contractSize > 0) row.contractSize = info.contractSize;
+          if (info?.uaIns) row.uaIns = info.uaIns;
+        }
+        if (!id) throw new Error('شناسهٔ ابزار به دست نیامد');
+        const spec = optionSpec(await get(optionSpecPath(id)));
+        if (!spec) throw new Error('مشخصات قرارداد خالی بود');
+        row.id = id;
+        if (spec.listedFrom > 0) row.listedFrom = spec.listedFrom;
+        if (spec.listedTo > 0) row.listedTo = spec.listedTo;
+        if (spec.strike > 0 && !(row.strike > 0)) row.strike = spec.strike;
+        if (spec.contractSize > 0) row.contractSize = spec.contractSize;
+        if (spec.uaIns) row.uaIns = spec.uaIns;
+        stats.detailQueriesDone += 1;
+      } catch (e) {
+        stats.detailQueriesFailed += 1;
+        stats.lastError = `مشخصات ${row.ins}: ${e.message}`;
       }
-      if (!id) throw new Error('شناسهٔ ابزار به دست نیامد');
-      const spec = optionSpec(await get(optionSpecPath(id)));
-      if (!spec) throw new Error('مشخصات قرارداد خالی بود');
-      row.id = id;
-      if (spec.listedFrom > 0) row.listedFrom = spec.listedFrom;
-      if (spec.listedTo > 0) row.listedTo = spec.listedTo;
-      if (spec.strike > 0 && !(row.strike > 0)) row.strike = spec.strike;
-      if (spec.contractSize > 0) row.contractSize = spec.contractSize;
-      if (spec.uaIns) row.uaIns = spec.uaIns;
-      stats.detailQueriesDone += 1;
-    } catch (e) {
-      stats.detailQueriesFailed += 1;
-      stats.lastError = `مشخصات ${row.ins}: ${e.message}`;
-    }
+      save();
+    }));
     onProgress({ stage: 'detail', done: stats.detailQueriesDone + stats.detailQueriesFailed, total: useDetail.length, rows: rows.length, stats });
-    save();
   }
+  stats.detailsComplete = needDetail.length === useDetail.length && stats.detailQueriesFailed === 0;
 
   // ── مرحلهٔ ۴: کنترل جفت، و یک پاس دوم برای ناقص‌ها ──────────────────
   //
@@ -157,28 +190,69 @@ export async function runRosterBuild({
   const audit = pairAudit(rows);
   const retry = audit.terms.filter((term) => !seenTerms.has(term)).slice(0, limits.maxRetryTerms);
   stats.retryTerms = retry.length;
-  if (retry.length) await runTerms(retry);
+  if (!catalogAlreadyComplete && retry.length) await runTerms(retry);
 
   return finish();
 
   async function runTerms(list) {
-    for (const term of list) {
+    const queue = [...new Set(list)];
+    const queued = new Set(queue);
+    let at = 0;
+    while (at < queue.length) {
+      if (seenTerms.size >= limits.maxTerms) {
+        catalogTruncated = true;
+        stats.truncated.push(`عبارت جست‌وجو: سقف ${limits.maxTerms} از ${queue.length}`);
+        break;
+      }
       if (stopped()) return;
-      if (seenTerms.has(term)) continue;
-      seenTerms.add(term);
-      try {
-        const got = scanSearch(await get(searchPath(term)));
+      const batch = [];
+      const cap = Math.max(1, Math.trunc(catalogConcurrency) || 1);
+      while (at < queue.length && batch.length < cap && seenTerms.size < limits.maxTerms) {
+        const term = queue[at++];
+        if (seenTerms.has(term)) continue;
+        seenTerms.add(term);
+        batch.push(term);
+      }
+      const responses = await Promise.all(batch.map(async (term) => {
+        try { return { term, got: scanSearch(await get(searchPath(term))) }; }
+        catch (error) { return { term, error }; }
+      }));
+      for (const { term, got, error } of responses) {
+        if (error) {
+          stats.catalogQueriesFailed += 1;
+          stats.lastError = `جست‌وجوی «${term}»: ${error.message}`;
+          save();
+          continue;
+        }
         stats.unsafeIdentifiers += got.unsafe;
         const grew = mergeRoster(rows, got.rows);
         stats.catalogFound += grew.length - rows.length;
         rows = grew;
         stats.catalogQueriesDone += 1;
-      } catch (e) {
-        stats.catalogQueriesFailed += 1;
-        stats.lastError = `جست‌وجوی «${term}»: ${e.message}`;
+        for (const row of got.rows) {
+          const root = rememberRoot(row);
+          if (root && !queued.has(root) && !seenTerms.has(root)) {
+            queued.add(root);
+            queue.push(root);
+          }
+        }
+
+        // جست‌وجوی پیشوندی که به سقف خورده با رقم بعدی شکسته می‌شود.
+        // نماد قرارداد بعد از پیشوند حرفی همیشه با رقم ادامه دارد؛ بنابراین
+        // ده شاخه همهٔ نتایج واقعی را می‌پوشانند، بدون ساختن هیچ شناسه‌ای.
+        const root = [...symbolRoots].find((candidate) => term === candidate
+          || (term.startsWith(candidate) && /^\d+$/.test(term.slice(candidate.length))));
+        if (root && got.matched >= SEARCH_RESULT_CAP) {
+          for (let digit = 0; digit <= 9; digit += 1) {
+            const child = `${term}${digit}`;
+            if (queued.has(child) || seenTerms.has(child)) continue;
+            queued.add(child);
+            queue.push(child);
+          }
+        }
+        save();
       }
-      onProgress({ stage: 'catalog', done: seenTerms.size, total: list.length, rows: rows.length, stats });
-      save();
+      onProgress({ stage: 'catalog', done: seenTerms.size, total: queue.length, rows: rows.length, stats });
     }
   }
 

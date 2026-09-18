@@ -39,10 +39,10 @@ import { gregorianToJalali, jalaliToGregorian } from './jalali.mjs';
 import { safeId } from './json-safe.mjs';
 
 /** نسخهٔ ساختار پروندهٔ دفتر. اگر شکل عوض شد، خواننده باید بفهمد. */
-// نسخهٔ ۲: عمر قرارداد از مشخصات رسمی می‌آید، نه از اولین معامله. پروندهٔ
-// نسخهٔ ۱ خوانده می‌شود ولی هرگز «کامل» شمرده نمی‌شود — چون اصلاً از
-// کاتالوگ ابزار عبور نکرده و قراردادهای بی‌معامله داخلش نیستند.
-export const ROSTER_VERSION = 2;
+// نسخهٔ ۳: نتیجهٔ محدودِ ۴۰تایی جست‌وجوی TSETMC با شاخه‌های رقمی کامل
+// می‌شود. نسخه‌های پیشین ممکن است برای نمادهای پرقرارداد فقط ۴۰ نتیجهٔ
+// نخست هر پیشوند را داشته باشند، پس کامل شمرده نمی‌شوند.
+export const ROSTER_VERSION = 3;
 
 export const SIDE_CALL = 'call';
 export const SIDE_PUT = 'put';
@@ -921,8 +921,14 @@ export function rosterHealth(file, rows = []) {
   if (failed > 0) reasons.push(`${failed} درخواست ناموفق`);
   if (audit.incomplete > 0) reasons.push(`${audit.incomplete} جفت ناقص کال/پوت`);
   if (num(stats.unsafeIdentifiers, 0) > 0) reasons.push(`${stats.unsafeIdentifiers} شناسهٔ ناامن کنار گذاشته شد`);
-  if (!num(stats.catalogQueriesDone, 0) && version >= ROSTER_VERSION) {
+  if (!num(stats.catalogQueriesDone, 0) && stats.catalogComplete !== true && version >= ROSTER_VERSION) {
     reasons.push('پاس کاتالوگ ابزار اجرا نشده');
+  }
+  if (version >= ROSTER_VERSION && stats.catalogComplete !== true) {
+    reasons.push('پیمایش کامل کاتالوگ ابزار تأیید نشده');
+  }
+  if (version >= ROSTER_VERSION && stats.detailsComplete !== true) {
+    reasons.push('مشخصات رسمی همهٔ قراردادهای بی‌معامله کامل نشده');
   }
 
   return {
