@@ -9,7 +9,7 @@
 
 import { check, group, readSrc } from '../harness.mjs';
 import { UPSTREAM_SHAPE, upstreamShape, upstreamShapeLabel } from '../../core/upstream-shape.mjs';
-import { dataExportRouteSplit } from '../../core/data-export.mjs';
+import { dataExportRouteSplit, suspectEmptyDays } from '../../core/data-export.mjs';
 import { buildDataExportSheets } from '../../ui/data-export-workbook.mjs';
 
 group('۲۶۷. شکلِ پاسخ بالادست');
@@ -94,8 +94,13 @@ group('۲۶۷. تفکیک مسیر در خروجی دیتا');
   check('برگ پوشش ستون «پاسخ بالادست» دارد', at > 0);
   check('و برای خالیِ تاریخی، شکلِ خامِ پاسخ را می‌نویسد',
     coverage.rows.filter((row) => row[at] === 'فهرست خالی').length === 5);
+  // ادعا با نامِ سرستون، نه شماره: ستونِ تازه نباید ادعای بی‌ربط را بشکند.
+  const dateAt = coverage.headers.indexOf('تاریخ میلادی');
   check('برای ردیفی که داده آورده چیزی ننوشته — جای خالی صادق است',
-    coverage.rows.filter((row) => row[5] === 20260916).every((row) => !row[at]));
+    coverage.rows.filter((row) => row[dateAt] === 20260916).every((row) => !row[at]));
+  check('و برگ پوشش تاریخ شمسی را کنار میلادی دارد',
+    coverage.headers.indexOf('تاریخ شمسی') === dateAt + 1
+      && coverage.rows.some((row) => row[dateAt + 1] === '1405/06/25'));
 
   // دو مسیرِ متفاوت باید هر دو دیده شوند، نه یکی.
   const twoShapes = buildDataExportSheets({
@@ -127,4 +132,56 @@ group('۲۶۷. مصرف در سرور و تب');
       && !tab.includes('n=${span + 10}'));
   check('و صفرِ یک مسیرِ کامل در جملهٔ وضعیت خبرِ اول است',
     tab.includes('const deadRoute =') && tab.includes('هیچ خطایی هم نداد'));
+}
+
+group('۲۶۷. روزِ سراسر خالی، دورِ دوم می‌بیند');
+{
+  // گزارش: «خروجی صرفاً دیتای روز آخر معاملاتی را می‌دهد؛ کل بازه را بده.»
+  const day = (date, rows) => rows.map((count, i) => ({
+    pair: { ins: `i${i}`, date, key: `${date}:i${i}` },
+    hit: { rows: Array.from({ length: count }, () => ({ price: 1 })), source: 'history' },
+  }));
+  const build = (...groups) => {
+    const pairs = [], items = {};
+    for (const one of groups) for (const { pair, hit } of one) { pairs.push(pair); items[pair.key] = hit; }
+    return { pairs, items };
+  };
+
+  // روزی که هیچ ابزارش — حتی پایه — معامله ندارد، واقعیتِ بازار نیست.
+  const allEmpty = build(day(20260620, [0, 0, 0]), day(20260621, [0, 5, 0]));
+  check('روزِ سراسر خالی مشکوک است', suspectEmptyDays(allEmpty.pairs, allEmpty.items).join() === '20260620');
+  check('و روزی که یک ابزارش داده دارد مشکوک نیست',
+    !suspectEmptyDays(allEmpty.pairs, allEmpty.items).includes(20260621));
+
+  // یک قراردادِ کم‌معامله که تنها ابزارِ آن روز است، مدرکِ کافی نیست.
+  const lonely = build(day(20260622, [0]));
+  check('روزِ تک‌ابزارهٔ خالی مشکوک شمرده نمی‌شود', suspectEmptyDays(lonely.pairs, lonely.items).length === 0);
+
+  // روزی که خطا داشته، علتِ خودش را دارد و «خالیِ مشکوک» خواندنش پنهان‌کردنِ آن است.
+  const withError = build(day(20260623, [0, 0]));
+  withError.items['20260623:i1'] = { rows: [], error: 'دروازه', source: 'history' };
+  check('روزِ خطادار مشکوک شمرده نمی‌شود', suspectEmptyDays(withError.pairs, withError.items).length === 0);
+
+  // دور دوم دقیقاً یک بار است، وگرنه اجرا بی‌پایان می‌شود.
+  const already = build(day(20260624, [0, 0]));
+  for (const key of Object.keys(already.items)) already.items[key].retried = true;
+  check('جفتی که یک بار دوباره پرسیده شده، دوباره پرسیده نمی‌شود',
+    suspectEmptyDays(already.pairs, already.items).length === 0);
+
+  // نوار زنده مسیر خودش را دارد و وارد این شمارش نمی‌شود.
+  const live = build(day(20260916, [0, 0]));
+  for (const key of Object.keys(live.items)) live.items[key].source = 'live';
+  check('روزِ نوار زنده وارد شمارشِ مسیر تاریخی نمی‌شود',
+    suspectEmptyDays(live.pairs, live.items).length === 0);
+  check('جفتِ بی‌پاسخ هم وارد نمی‌شود — آن «درخواست نرفت» است، نه خالی',
+    suspectEmptyDays([{ ins: 'x', date: 20260625, key: 'k' }], {}).length === 0);
+
+  const tab = readSrc('../ui/tabs/data-export.mjs');
+  check('تب روزهای سراسر خالی را بی‌کش دوباره می‌پرسد',
+    tab.includes('const suspectDays = new Set(suspectEmptyDays(pairs, items))')
+      && tab.includes('await fetchHistorical(suspectPairs, items, controller.signal, true)'));
+  check('و جفتِ دوباره‌پرسیده‌شده علامت می‌خورد تا دور سوم نبیند',
+    tab.includes('retried: fresh') && tab.includes('!items[pair.key]?.retried'));
+  check('و جملهٔ وضعیت می‌گوید دورِ دوم چه کرد',
+    tab.includes('دورِ دومِ بی‌کش') && tab.includes('const rescued ='));
 }

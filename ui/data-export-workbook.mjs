@@ -6,9 +6,28 @@ import {
   dataExportSessionRows, dataExportTradeRows,
 } from '../core/data-export.mjs';
 import { tradeTimeLabel } from '../core/backtest.mjs';
+import { historyDateLabel } from '../core/history.mjs';
 import { sheet } from './xlsx.mjs';
 
 const dateText = (value) => String(Math.trunc(Number(value) || 0));
+// ═══ چرا تاریخ شمسی کنار میلادی می‌نشیند، نه به‌جایش ═══
+//
+// خواستهٔ صریح صاحب پروژه. میلادی می‌ماند چون همان است که از بالادست
+// آمده و کلیدِ تطبیق با هر منبع دیگری است؛ شمسی اضافه می‌شود چون کسی که
+// فایل را می‌خواند با آن فکر می‌کند. جایگزینی یکی با دیگری، یک واقعیتِ
+// موجود را حذف می‌کرد.
+//
+// رقم لاتین می‌ماند و نه فارسی: این خانه در اکسل مرتب و پالایه می‌شود و
+// «۱۴۰۵/۰۶/۲۵» نه مرتب می‌شود نه با تایپِ کاربر جور درمی‌آید. قاعدهٔ رقمِ
+// فارسی برای نمایشِ برنامه است، نه برای دادهٔ داخل فایل — بقیهٔ ستون‌های
+// همین فایل هم لاتین‌اند.
+//
+// تاریخِ نادرست خانهٔ **خالی** می‌گیرد، نه «—»: خانهٔ نانوشته در اکسل
+// خالی است و همان است که قاعدهٔ ۲-۴ می‌خواهد.
+const jalaliText = (value) => {
+  const label = historyDateLabel(value);
+  return label === '—' ? '' : label;
+};
 const cancelText = (row) => row.canceledKnown ? (row.canceled ? 'باطل' : 'فعال') : 'نامعلوم';
 
 // ═══ چرا ستون‌های «مشتق» جدا شدند ═══
@@ -20,14 +39,15 @@ const cancelText = (row) => row.canceledKnown ? (row.canceled ? 'باطل' : 'ف
 // اندازهٔ قرارداد هم در برگ «پوشش دریافت» ستون خودش را دارد، پس با
 // خاموش‌کردنشان هیچ عددی از دست نمی‌رود؛ فقط دوباره حساب نمی‌شود.
 export const DATA_EXPORT_HEADERS = [
-  'تاریخ میلادی', 'ساعت', 'شماره معامله', 'قیمت (ریال)', 'حجم', 'وضعیت ابطال', 'منبع',
+  'تاریخ میلادی', 'تاریخ شمسی', 'ساعت', 'شماره معامله', 'قیمت (ریال)', 'حجم',
+  'وضعیت ابطال', 'منبع',
 ];
 export const DATA_EXPORT_DERIVED_HEADERS = [
   'ارزش خام (ریال)', 'اندازه قرارداد', 'ارزش با اندازه قرارداد (ریال)',
 ];
 export const DATA_EXPORT_CANDLE_HEADERS = [
-  'تاریخ میلادی', 'ساعت شروع', 'باز', 'بیشترین', 'کمترین', 'بسته', 'حجم',
-  'ارزش (ریال)', 'تعداد معامله', 'تعداد باطل', 'منبع',
+  'تاریخ میلادی', 'تاریخ شمسی', 'ساعت شروع', 'باز', 'بیشترین', 'کمترین', 'بسته',
+  'حجم', 'ارزش (ریال)', 'تعداد معامله', 'تعداد باطل', 'منبع',
 ];
 export const DATA_EXPORT_CANDLE_DERIVED_HEADERS = [
   'اندازه قرارداد', 'ارزش با اندازه قرارداد (ریال)',
@@ -68,7 +88,8 @@ export function buildDataExportSheets({
     : '—';
   const summary = sheet('راهنما', ['شاخص', 'مقدار'], [
     ['نتیجهٔ دریافت', verdict],
-    ['از تاریخ', dateText(range.from)], ['تا تاریخ', dateText(range.to)],
+    ['از تاریخ', `${dateText(range.from)}${jalaliText(range.from) ? ` — ${jalaliText(range.from)} شمسی` : ''}`],
+    ['تا تاریخ', `${dateText(range.to)}${jalaliText(range.to) ? ` — ${jalaliText(range.to)} شمسی` : ''}`],
     ['تعداد دارایی پایه', instruments.filter((item) => item.kind === 'underlying').length],
     ['تعداد قرارداد اختیار', instruments.filter((item) => item.kind !== 'underlying').length],
     ['جفت ابزار/روز', pairs.length],
@@ -99,7 +120,8 @@ export function buildDataExportSheets({
 
   const auditByKey = new Map((audit || []).map((row) => [row.key, row]));
   const coverageSheet = sheet('پوشش دریافت', [
-    'نماد پایه', 'نماد ابزار', 'نوع', 'کد ابزار', 'اندازه قرارداد', 'تاریخ میلادی', 'کل ردیف',
+    'نماد پایه', 'نماد ابزار', 'نوع', 'کد ابزار', 'اندازه قرارداد',
+    'تاریخ میلادی', 'تاریخ شمسی', 'کل ردیف',
     'فعال', 'باطل', 'وضعیت', 'حکم خالی‌بودن', 'معاملهٔ تابلوی روزانه', 'مسیر',
     'پاسخ بالادست', 'منبع', 'خطا',
   ], coverage.map((row) => {
@@ -107,7 +129,8 @@ export function buildDataExportSheets({
     const hit = items?.[`${row.date}:${row.ins}`] || {};
     return [
       row.baseName, row.name, DATA_EXPORT_KIND_LABEL[row.kind] || row.kind, row.ins,
-      Number.isFinite(row.size) && row.size > 0 ? row.size : '', row.date,
+      Number.isFinite(row.size) && row.size > 0 ? row.size : '',
+      row.date, jalaliText(row.date),
       row.rows, row.active, row.canceled, row.status,
       seen ? BLANK_VERDICT_LABEL[seen.verdict] : '—',
       seen && Number.isFinite(seen.dailyTrades) ? seen.dailyTrades : '',
@@ -117,7 +140,7 @@ export function buildDataExportSheets({
         ? `${hit.upstream} / ${hit.upstreamAlt}` : hit.upstream) : '',
       row.source, row.error,
     ];
-  }), [100, 120, 95, 140, 100, 95, 75, 65, 65, 100, 250, 110, 85, 200, 80, 260]);
+  }), [100, 120, 95, 140, 100, 95, 95, 75, 65, 65, 100, 250, 110, 85, 200, 80, 260]);
 
   const instrumentSheets = instruments.map((instrument) => {
     // خواستهٔ صریح: «هر روز معاملاتی از ساعت ۹ الی ۱۲:۳۰». ردیفِ بیرون از
@@ -130,21 +153,22 @@ export function buildDataExportSheets({
       return sheet(title,
         derived ? [...DATA_EXPORT_CANDLE_HEADERS, ...DATA_EXPORT_CANDLE_DERIVED_HEADERS] : DATA_EXPORT_CANDLE_HEADERS,
         bars.map((bar) => [
-          bar.date, tradeTimeLabel(bar.time), bar.open, bar.high, bar.low, bar.close,
+          bar.date, jalaliText(bar.date), tradeTimeLabel(bar.time),
+          bar.open, bar.high, bar.low, bar.close,
           bar.volume, bar.value, bar.trades, bar.canceled, bar.source,
           ...(derived ? [size > 0 ? size : NaN, size > 0 ? bar.value * size : NaN] : []),
         ]),
-        [95, 85, 95, 95, 95, 95, 90, 130, 95, 85, 85, ...(derived ? [95, 150] : [])]);
+        [95, 95, 85, 95, 95, 95, 95, 90, 130, 95, 85, 85, ...(derived ? [95, 150] : [])]);
     }
     if (rows.length > 1048575) throw new Error(`ریزمعاملهٔ ${instrument.name} از سقف یک شیت اکسل بیشتر است؛ بازه را کوتاه‌تر کن یا تایم‌فریم را بالا ببر.`);
     return sheet(title,
       derived ? [...DATA_EXPORT_HEADERS, ...DATA_EXPORT_DERIVED_HEADERS] : DATA_EXPORT_HEADERS,
       rows.map((row) => [
-        row.date, tradeTimeLabel(row.time), row.sequence, row.price, row.quantity,
-        cancelText(row), row.source,
+        row.date, jalaliText(row.date), tradeTimeLabel(row.time), row.sequence,
+        row.price, row.quantity, cancelText(row), row.source,
         ...(derived ? [row.rawValue, row.contractSize, row.contractValue] : []),
       ]),
-      [95, 75, 85, 95, 80, 90, 85, ...(derived ? [120, 95, 150] : [])]);
+      [95, 95, 75, 85, 95, 80, 90, 85, ...(derived ? [120, 95, 150] : [])]);
   });
 
   return [summary, coverageSheet, ...instrumentSheets];

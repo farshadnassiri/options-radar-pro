@@ -116,8 +116,12 @@ group('۲۶۶. برگ خروجی در تایم‌فریم و ستون‌های �
   const callBars = barSheets.find((part) => part.name === 'ضهرم۱');
   check('برگ خام شصت ردیف دارد و برگ پنج‌دقیقه‌ای دو ردیف',
     callRaw.rows.length === 60 && callBars.rows.length === 2);
-  check('سرستون شمع، OHLC است',
-    callBars.headers.slice(2, 6).join(',') === 'باز,بیشترین,کمترین,بسته');
+  // ادعا با **نامِ** سرستون بسته می‌شود نه با شماره: افزودنِ یک ستون
+  // نباید ادعایی را بشکند که اصلاً دربارهٔ آن ستون نیست.
+  const col = (part, name) => part.headers.indexOf(name);
+  const ohlc = ['باز', 'بیشترین', 'کمترین', 'بسته'].map((name) => col(callBars, name));
+  check('سرستون شمع، OHLC پشت سر هم است',
+    ohlc.every((at) => at > 0) && ohlc.every((at, i) => i === 0 || at === ohlc[i - 1] + 1));
 
   // ── ستون‌های مشتق: پیش‌فرض خاموش، و هیچ‌کدام واقعیتِ تازه ندارند.
   check('ستون‌های مشتق پیش‌فرض خاموش‌اند',
@@ -127,9 +131,40 @@ group('۲۶۶. برگ خروجی در تایم‌فریم و ستون‌های �
     derived.headers.includes('ارزش خام (ریال)')
       && derived.headers.includes('اندازه قرارداد')
       && derived.headers.includes('ارزش با اندازه قرارداد (ریال)'));
+  // `at` بالای همین دسته سازندهٔ HHMMSS است؛ این یکی نامِ خودش را دارد.
+  const cell = (name) => derived.headers.indexOf(name);
+  const first = derived.rows[0];
   check('و عددشان دقیقاً حاصل‌ضرب همان ستون‌های موجود است',
-    derived.rows[0][7] === derived.rows[0][3] * derived.rows[0][4]
-      && derived.rows[0][9] === derived.rows[0][7] * derived.rows[0][8]);
+    first[cell('ارزش خام (ریال)')] === first[cell('قیمت (ریال)')] * first[cell('حجم')]
+      && first[cell('ارزش با اندازه قرارداد (ریال)')]
+        === first[cell('ارزش خام (ریال)')] * first[cell('اندازه قرارداد')]);
+
+  // ═══ تاریخ شمسی کنار میلادی ═══
+  //
+  // خواستهٔ صریح صاحب پروژه. میلادی حذف نمی‌شود — کلیدِ تطبیق با هر منبع
+  // دیگری همان است — و شمسی کنارش می‌آید، در برگ خام و شمع و پوشش.
+  for (const [label, part] of [['خام', callRaw], ['شمع', callBars]]) {
+    const g = col(part, 'تاریخ میلادی'), j = col(part, 'تاریخ شمسی');
+    check(`برگ ${label} هر دو تاریخ را دارد و شمسی درست کنار میلادی است`,
+      g === 0 && j === 1);
+    check(`و تاریخ شمسیِ برگ ${label} برابرِ همان روز میلادی است`,
+      part.rows.every((row) => row[g] === 20260901 && row[j] === '1405/06/10'));
+  }
+  const cover = rawSheets.find((part) => part.name === 'پوشش دریافت');
+  check('برگ پوشش هم تاریخ شمسی دارد',
+    col(cover, 'تاریخ شمسی') === col(cover, 'تاریخ میلادی') + 1
+      && cover.rows.every((row) => row[col(cover, 'تاریخ شمسی')] === '1405/06/10'));
+  const guideRange = buildDataExportSheets({ ...base }).find((part) => part.name === 'راهنما');
+  const fromText = String((guideRange.rows.find((row) => row[0] === 'از تاریخ') || [])[1] || '');
+  check('راهنما هم بازه را با هر دو تقویم می‌گوید',
+    fromText.includes('20260901') && fromText.includes('1405/06/10'));
+  // تاریخِ نادرست خانهٔ خالی می‌گیرد، نه متنِ ساختگی.
+  const bad = buildDataExportSheets({
+    instruments, pairs: [{ ins: 'CALL1', date: 0, key: '0:CALL1' }],
+    items: { '0:CALL1': { rows: [], source: 'history' } }, range: {},
+  }).find((part) => part.name === 'پوشش دریافت');
+  check('تاریخِ نادرست خانهٔ شمسیِ خالی می‌گیرد، نه «—»',
+    bad.rows[0][col(bad, 'تاریخ شمسی')] === '');
 
   // اندازهٔ قرارداد باید حتی با ستون‌های خاموش داخل فایل بماند، وگرنه
   // «هیچ عددی از دست نمی‌رود» یک ادعای ناراست است.

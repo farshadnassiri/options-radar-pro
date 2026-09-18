@@ -487,3 +487,53 @@ export function dataExportRouteSplit(pairs = [], items = {}) {
   }
   return out;
 }
+
+/**
+ * روزهایی که خالی‌بودنشان واقعیتِ بازار نیست.
+ *
+ * ═══ چرا «روز»، و نه «ابزار/روز» ═══
+ *
+ * گزارش صاحب پروژه: «خروجی صرفاً دیتای روز آخر معاملاتی را می‌دهد.» فایل
+ * همین را نشان داد — ۱٬۳۱۶ ابزار/روز از مسیر تاریخی، همه خالی، صفر خطا،
+ * و تنها دادهٔ فایل از نوار زندهٔ آخرین جلسه.
+ *
+ * یک قراردادِ کم‌معامله می‌تواند یک روز هیچ معامله‌ای نداشته باشد؛ این
+ * واقعیتِ بازار است. ولی یک **روزِ معاملاتیِ کامل** که در آن هیچ‌کدام از
+ * ابزارهای انتخابی — از جمله خودِ نماد پایه — حتی یک معامله نداشته
+ * باشند، واقعیتِ بازار نیست. تابلوی روزانه هم همین را می‌گوید: ۳۶٬۱۳۴
+ * معامله برای همان پایه در همان روز.
+ *
+ * پس خالی‌بودنِ **سراسریِ یک روز** خودش مدرک است و لازم نیست منتظر تأییدِ
+ * تابلوی روزانه بماند — تابلویی که برای قراردادِ منقضی اغلب در دست نیست.
+ *
+ * و چرا این مهم است: تلاش دوباره با `fresh` به نشانیِ بالادست یک
+ * cache-buster می‌چسباند. اگر لبهٔ CDN یک پاسخِ خالیِ کهنه را نگه داشته
+ * باشد — که ۲۰۰ و JSON معتبر است و هیچ‌جا خطا به نظر نمی‌رسد — تنها همین
+ * از کنارش رد می‌شود.
+ *
+ * روزی که حتی یک خطا داشته باشد اینجا نمی‌آید: آن خطا علتِ خودش را دارد
+ * و مسیر خودش را، و «خالیِ مشکوک» خواندنش پنهان‌کردنِ آن است.
+ */
+export const SUSPECT_DAY_MIN_PAIRS = 2;
+
+export function suspectEmptyDays(pairs = [], items = {}, { minPairs = SUSPECT_DAY_MIN_PAIRS } = {}) {
+  const byDay = new Map();
+  for (const pair of pairs || []) {
+    const hit = items?.[pair.key];
+    // فقط روزهایی که از مسیر تاریخی رفته‌اند. نوار زنده مسیر دیگری دارد.
+    if (!hit || String(hit.source || '') !== 'history') continue;
+    const day = Math.trunc(n(pair.date));
+    if (!day) continue;
+    if (!byDay.has(day)) byDay.set(day, { total: 0, empty: 0, failed: 0, retried: 0 });
+    const seen = byDay.get(day);
+    seen.total += 1;
+    if (hit.error) seen.failed += 1;
+    else if (!(Array.isArray(hit.rows) && hit.rows.length)) seen.empty += 1;
+    if (hit.retried === true) seen.retried += 1;
+  }
+  return [...byDay.entries()]
+    .filter(([, seen]) => seen.total >= minPairs && seen.failed === 0
+      && seen.empty === seen.total && seen.retried === 0)
+    .map(([day]) => day)
+    .sort((a, b) => a - b);
+}
