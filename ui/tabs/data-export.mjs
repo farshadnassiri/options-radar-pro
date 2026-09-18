@@ -23,7 +23,7 @@ const chunks = (list, size) => Array.from({ length: Math.ceil(list.length / size
 
 export async function mount(root, { state, api }) {
   root.innerHTML = `
-    <div class="page-head"><h2>خروجی دیتا</h2><p>تمام قراردادهای کال و پوتِ فعال در بازه را از دفتر تاریخی کشف می‌کند، ریزمعاملات خودِ پایه و هر قرارداد را می‌گیرد و برای هر ابزار یک شیت جدا در فایل فشردهٔ Excel می‌سازد.</p></div>
+    <div class="page-head"><h2>خروجی دیتا</h2><p>تمام قراردادهای اختیار معاملهٔ استانداردِ فعال در بازه—معامله‌شده یا بی‌معامله—را از دفتر تاریخی کشف می‌کند؛ اختیار تبعی وارد این فهرست نمی‌شود. ریزمعاملات خودِ پایه و هر قرارداد در شیت جدا می‌آید.</p></div>
     <section class="card">
       <div class="section-head"><div><p class="eyebrow">گام اول</p><h3>بازه تاریخی</h3></div></div>
       <div id="de-range"></div><div class="de-refresh"><button type="button" class="ghost" id="de-refresh">تازه‌سازی دفتر قراردادها</button></div>
@@ -117,7 +117,7 @@ export async function mount(root, { state, api }) {
       blocks.push(`<div class="de-base-block"><h4>${esc(baseNames.get(String(baseIns)) || 'پایه')}
         <button type="button" class="ghost" data-base-all="${esc(baseIns)}">همهٔ ${fmt.int(total)} قرارداد</button></h4>
         ${groups.map((group) => `<div class="de-expiry">
-          <div class="de-expiry-head"><b>${group.expiry ? faDigits(esc(historyDateLabel(group.expiry))) : 'سررسید نامعلوم'}</b>
+          <div class="de-expiry-head"><b>${group.expiry ? faDigits(esc(historyDateLabel(group.expiry))) : 'سررسید نامعلوم'} · کال ${fmt.int(group.callCount)} · پوت ${fmt.int(group.putCount)}${group.callCount !== group.putCount ? ' · اختلاف رسمی کاتالوگ' : ''}</b>
             <button type="button" class="ghost" data-expiry-all="${esc(baseIns)}|${group.expiry}">${fmt.int(group.contracts.length)} قرارداد</button></div>
           <div class="de-contract-grid">${group.contracts.map((item) => `
             <label class="de-contract"><input type="checkbox" data-contract="${esc(item.ins)}"${picked.has(String(item.ins)) ? ' checked' : ''}>
@@ -137,13 +137,10 @@ export async function mount(root, { state, api }) {
   function paintBases(payload) {
     const keep = new Set(selectedBases());
     const values = [...buildChain(payload?.rows || []).values()]
-      .map((item) => ({
-        ...item,
-        contracts: (item.expiryList || []).reduce((sum, expiry) => sum + (expiry.strikeList || []).length * 2, 0),
-      }))
+      .map((item) => ({ ...item }))
       .sort((a, b) => a.name.localeCompare(b.name, 'fa'));
     basesHost.innerHTML = values.length ? values.map((item) => `
-      <label class="de-base" data-search="${esc(item.name)}"><input type="checkbox" value="${esc(item.ins)}"${keep.has(item.ins) ? ' checked' : ''}><span><b>${esc(item.name)}</b><small>${fmt.int(item.contracts)} قرارداد کال/پوت</small></span></label>`).join('') : '<p class="empty-note">در این بازه نماد پایه‌ای پیدا نشد.</p>';
+      <label class="de-base" data-search="${esc(item.name)}"><input type="checkbox" value="${esc(item.ins)}"${keep.has(item.ins) ? ' checked' : ''}><span><b>${esc(item.name)}</b><small>${fmt.int(item.contracts)} قرارداد · کال ${fmt.int(item.callContracts)} · پوت ${fmt.int(item.putContracts)}</small></span></label>`).join('') : '<p class="empty-note">در این بازه نماد پایه‌ای پیدا نشد.</p>';
     $('de-universe-note').textContent = payload?.note || '';
     universe = payload;
     paintContracts();

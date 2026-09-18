@@ -116,6 +116,42 @@ export function scanDay(payload, date) {
   return { date: day, instruments: raw.length, ...intake };
 }
 
+/**
+ * تابلوی جاری → بذر دفتر.
+ *
+ * تابلو قراردادِ گشایش‌شدهٔ بی‌معامله را هم می‌شناسد؛ سابقهٔ روزانه نه.
+ * این ردیف‌ها «معامله‌شده» علامت نمی‌خورند و فقط راهی می‌شوند تا پیشوند
+ * نمادشان کاتالوگ را کامل کند. اختیار تبعی بعدتر در `rosterIntake` با
+ * سمت جدا شناخته می‌شود و وارد زنجیرهٔ عادی نخواهد شد.
+ */
+export function scanBoardRows(payload) {
+  let rows = [];
+  if (Array.isArray(payload)) rows = payload;
+  else if (payload && typeof payload === 'object') {
+    rows = Object.values(payload).find((value) => Array.isArray(value)) || [];
+  }
+  const raw = [];
+  for (const row of rows) {
+    for (const suffix of ['C', 'P']) {
+      const ins = row?.[`insCode_${suffix}`];
+      if (!ins) continue;
+      raw.push({
+        ins,
+        symbol: row?.[`lVal18AFC_${suffix}`] ?? '',
+        name: row?.[`lVal30_${suffix}`] ?? '',
+        base: row?.lval30_UA ?? row?.lVal30_UA ?? '',
+        strike: row?.strikePrice,
+        expiry: row?.expiryGregorian ?? row?.endDate,
+        contractSize: row?.contractSize,
+        uaIns: row?.uaInsCode,
+        fromCatalog: true,
+      });
+    }
+  }
+  const intake = rosterIntake(raw);
+  return { instruments: raw.length, ...intake };
+}
+
 /** روزهای یک بازه — پنجشنبه و جمعه انداخته می‌شوند، بورس تهران بسته است. */
 export function tradingDays(from, to) {
   const parse = (v) => {

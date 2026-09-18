@@ -145,7 +145,7 @@ group('۲۱۰-د. سرور: بازه، ساخت خودکار، و پوششی ک�
   // ناقص می‌ماند.
   const trigger = src.slice(src.indexOf('function rosterNeedsBuild'), src.indexOf('async function buildRoster'));
   check('نبودِ پاس کاتالوگ هم ساخت را راه می‌اندازد',
-    /catalogQueriesDone/.test(trigger) && /missingCount > 0/.test(trigger));
+    /catalogComplete/.test(trigger) && /missingCount > 0/.test(trigger));
   // «هنوز جفت ناقص داریم» محرک نیست: سازنده در همان اجرا یک پاس دوم
   // می‌زند، و اگر این محرک بود هر درخواستِ رابط یک اسکن کامل راه
   // می‌انداخت و بالادست را تا ابد می‌کوبید.
