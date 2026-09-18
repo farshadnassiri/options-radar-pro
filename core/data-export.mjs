@@ -2,7 +2,7 @@
 
 import { num } from './num.mjs';
 import { batchKey, BATCH_PAIR_CAP } from './trades-source.mjs';
-import { inIntradaySession } from './backtest.mjs';
+import { INTRADAY_START_SECOND, inIntradaySession, tradeSecond } from './backtest.mjs';
 
 const n = (value) => num(value, 0);
 const code = (value) => String(value ?? '').trim();
@@ -268,6 +268,9 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {})
     const rows = Array.isArray(hit?.rows) ? hit.rows : [];
     return {
       baseName: instrument.baseName || '', name: instrument.name || '', kind: instrument.kind || '',
+      // اندازهٔ قرارداد اینجا می‌آید تا وقتی ستون‌های مشتق خاموش‌اند،
+      // ضریبِ لازم برای بازساختنشان همچنان داخل فایل باشد.
+      size: instrument.kind === 'underlying' ? 1 : n(instrument.size),
       ins: String(pair.ins), date: pair.date,
       rows: hit && Array.isArray(hit.rows) ? rows.length : null,
       active: hit && Array.isArray(hit.rows) ? rows.filter((row) => row && row.canceled !== true).length : null,
@@ -316,7 +319,14 @@ export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}) {
   const index = new Map();
   for (const [ins, payload] of Object.entries(dailyByIns || {})) {
     const map = new Map();
-    for (const row of payload?.rows || payload || []) {
+    // ═══ چرا این‌قدر محتاط ═══
+    //
+    // بازبینی یک **کمکِ** تشخیصی است، نه خودِ خروجی. یک پاسخِ بدشکل از
+    // تابلوی روزانه نباید کلِ فایلِ آماده را ببرد — و یک بار دقیقاً همین
+    // شد: پاسخی بی `rows` به `for…of` رسید و «object is not iterable»
+    // تمام اجرا را انداخت، در حالی که همهٔ ریزمعامله‌ها در دست بود.
+    const list = Array.isArray(payload) ? payload : (Array.isArray(payload?.rows) ? payload.rows : []);
+    for (const row of list) {
       const date = Math.trunc(n(row?.date));
       if (date) map.set(date, row);
     }
@@ -359,4 +369,94 @@ export function blankAuditSummary(audit = []) {
     // بیشترین معاملهٔ ازدست‌رفته، برای اینکه جمله یک نمونهٔ واقعی داشته باشد.
     worst: missing.sort((a, b) => n(b.dailyTrades) - n(a.dailyTrades))[0] || null,
   };
+}
+
+/**
+ * تایم‌فریم خروجی — از ریزمعاملهٔ خام تا شمعِ ساعتی.
+ *
+ * ═══ چرا این گزینه، پاسخِ «فایل سنگین است» است ═══
+ *
+ * فایلِ سنگین از ستون اضافه سنگین نشده؛ از **ردیف** سنگین شده. یک روزِ
+ * پرمعاملهٔ یک پایه به‌تنهایی ده‌ها هزار ریزمعامله دارد، و بازهٔ یک‌ماهه
+ * روی ده قرارداد یعنی میلیون‌ها ردیف. هیچ فشرده‌سازی‌ای این را کوچک
+ * نمی‌کند، چون داده واقعاً همان‌قدر است.
+ *
+ * تنها راهِ صادقانهٔ کوچک‌کردن، **کم‌کردنِ تفکیک زمانی** است — نه حذفِ
+ * تصادفیِ ردیف. شمعِ یک‌دقیقه‌ای همان روز را با حدود ۲۱۰ ردیف نشان می‌دهد
+ * به‌جای ده‌ها هزار، و هیچ‌چیزِ مشاهده‌شده‌ای را جا نمی‌اندازد: باز،
+ * بیشترین، کمترین، بسته، حجم، ارزش و شمارِ معامله، همه از ردیف‌های واقعی.
+ *
+ * `tick` سرِ جایش می‌ماند و پیش‌فرض هم هست: کسی که ریزترین حالت را
+ * می‌خواهد، همان را می‌گیرد.
+ */
+export const DATA_EXPORT_FRAMES = [
+  { id: 'tick', label: 'ریزمعامله (خام)', seconds: 0 },
+  { id: 'm1', label: 'شمع ۱ دقیقه', seconds: 60 },
+  { id: 'm5', label: 'شمع ۵ دقیقه', seconds: 300 },
+  { id: 'm15', label: 'شمع ۱۵ دقیقه', seconds: 900 },
+  { id: 'm30', label: 'شمع ۳۰ دقیقه', seconds: 1800 },
+  { id: 'm60', label: 'شمع ۶۰ دقیقه', seconds: 3600 },
+];
+
+export function dataExportFrame(id = 'tick') {
+  return DATA_EXPORT_FRAMES.find((frame) => frame.id === String(id ?? '')) || DATA_EXPORT_FRAMES[0];
+}
+
+/**
+ * شمع‌های یک ابزار از ریزمعامله‌هایش.
+ *
+ * ═══ سه قاعده‌ای که این تابع نمی‌شکند ═══
+ *
+ * ۱. **سطلِ بی‌معامله ساخته نمی‌شود.** دقیقه‌ای که هیچ معامله‌ای نداشته،
+ *    ردیف ندارد — نه ردیفی با قیمتِ شمعِ قبل. جای خالی صادق است و
+ *    این همان چیزی است که قاعدهٔ ۲-۴ می‌خواهد.
+ * ۲. **معاملهٔ باطل در قیمت نمی‌نشیند.** ردیفی که بالادست صریحاً «باطل»
+ *    خوانده، از باز/بیشترین/کمترین/بسته و از حجم بیرون است — ولی
+ *    شمرده می‌شود و ستون خودش را دارد، تا حذفش دیده شود.
+ * ۳. **سطلی که فقط باطل داشته، حذف نمی‌شود.** ردیفش می‌آید با خانه‌های
+ *    قیمتِ خالی و شمارِ باطل — وگرنه کاربر فکر می‌کند آن دقیقه ساکت بوده.
+ *
+ * مبدأ سطل‌ها ۹:۰۰ است، پس شمعِ پنج‌دقیقه‌ای همیشه روی ۹:۰۰، ۹:۰۵، … می‌افتد
+ * و دو اجرا با بازه‌های متفاوت، شمعِ هم‌زمانِ قابل‌مقایسه می‌دهند.
+ *
+ * ═══ چرا `tradeSecond` و نه خودِ عدد ═══
+ *
+ * زمانِ بالادست `HHMMSS` است نه ثانیه: ۹:۰۰:۱۰ عدد ۹۰۰۱۰ است. سطل‌بندی
+ * روی همان عدد، مرزها را وسط ثانیهٔ ۶۰ تا ۹۹ می‌شکند و شمعِ بی‌معنا
+ * می‌سازد. پس اول به ثانیه ترجمه می‌شود و برچسبِ سطل دوباره `HHMMSS`.
+ */
+const hhmmss = (second) => {
+  const value = Math.max(0, Math.trunc(second));
+  return (Math.floor(value / 3600) * 10000) + (Math.floor((value % 3600) / 60) * 100) + (value % 60);
+};
+
+export function dataExportCandles(rows = [], seconds = 60) {
+  const width = Math.max(1, Math.trunc(n(seconds)));
+  const byBucket = new Map();
+  const order = [];
+  for (const row of rows || []) {
+    const second = tradeSecond(row?.time);
+    const start = INTRADAY_START_SECOND + (Math.floor((second - INTRADAY_START_SECOND) / width) * width);
+    const key = `${row.date}:${start}`;
+    let bar = byBucket.get(key);
+    if (!bar) {
+      bar = {
+        date: row.date, second: start, time: hhmmss(start),
+        open: NaN, high: NaN, low: NaN, close: NaN,
+        volume: 0, value: 0, trades: 0, canceled: 0, source: String(row.source || ''),
+      };
+      byBucket.set(key, bar);
+      order.push(bar);
+    }
+    if (row.canceled === true) { bar.canceled += 1; continue; }
+    const price = n(row.price), quantity = n(row.quantity);
+    if (!Number.isFinite(bar.open)) bar.open = price;
+    bar.high = Number.isFinite(bar.high) ? Math.max(bar.high, price) : price;
+    bar.low = Number.isFinite(bar.low) ? Math.min(bar.low, price) : price;
+    bar.close = price;
+    bar.volume += quantity;
+    bar.value += price * quantity;
+    bar.trades += 1;
+  }
+  return order.sort((a, b) => a.date - b.date || a.second - b.second);
 }

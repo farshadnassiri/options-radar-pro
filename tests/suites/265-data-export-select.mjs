@@ -251,12 +251,39 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
     tab.includes('این یعنی داده نرسیده، نه اینکه بازار ساکت بوده'));
   check('برگ هر ابزار فقط جلسهٔ پیوسته را می‌نویسد',
     readSrc('../ui/data-export-workbook.mjs').includes('dataExportSessionRows(dataExportTradeRows('));
-  // تشخیصِ «چرا خالی است» نباید چند دقیقه اجرای کل بازه بخواهد.
-  check('آزمون یک ابزار/روز از همان مسیر واقعی می‌رود',
-    tab.includes("id=\"de-probe\"") && tab.includes('async function probeOne()')
-    && tab.includes("fetch('/api/trades/batch'"));
-  check('و آزمون از کش رد می‌شود تا پاسخِ کهنه را دوباره نگوید',
-    tab.includes('fresh: true'));
+  // ═══ یک پاسخِ بدشکل نباید فایلِ آماده را ببرد ═══
+  //
+  // بازبینیِ خالی‌ها کمکِ تشخیصی است، نه خودِ خروجی. یک بار پاسخی از
+  // تابلوی روزانه بی `rows` رسید و `for…of` رویش «object is not iterable»
+  // داد — کلِ اجرا افتاد در حالی که هر ریزمعامله در دست بود.
+  const oddPairs = [{ ins: 'c1', date: 20260916, key: '20260916:c1' }];
+  const oddItems = { '20260916:c1': { rows: [] } };
+  let threw = false;
+  let verdicts = [];
+  try {
+    verdicts = dataExportBlankAudit(oddPairs, oddItems, { c1: { ins: 'c1', error: 'دروازه' } })
+      .concat(dataExportBlankAudit(oddPairs, oddItems, { c1: null }))
+      .concat(dataExportBlankAudit(oddPairs, oddItems, { c1: 'رشته' }));
+  } catch { threw = true; }
+  check('پاسخِ بدشکلِ تابلوی روزانه بازبینی را نمی‌اندازد', !threw && verdicts.length === 3);
+  check('و چنین موردی «نمی‌دانیم» خوانده می‌شود، نه «بی‌معامله»',
+    verdicts.every((row) => row.verdict === 'unknown' && row.known === false));
+  // آرایهٔ برهنه هم شکلِ معتبری است و باید خوانده شود.
+  check('تابلوی روزانه به شکل آرایهٔ برهنه هم خوانده می‌شود',
+    dataExportBlankAudit(oddPairs, oddItems, { c1: [{ date: 20260916, trades: 12 }] })[0].verdict === 'missing');
+
+  // دکمهٔ «آزمون یک ابزار/روز» به خواست صاحب پروژه برداشته شد؛ کارش را
+  // برگ «پوشش دریافت» برای همهٔ جفت‌ها می‌کند، نه یکی.
+  check('تشخیصِ «چرا خالی است» دیگر به دکمهٔ آزمون وابسته نیست',
+    !tab.includes('de-probe') && !tab.includes('probeOne')
+      && readSrc('../ui/data-export-workbook.mjs').includes('حکم خالی‌بودن'));
+  // مسیر انبوه پیش‌فرض از کش می‌خورد تا اجرای دوبارهٔ یک بازه به بالادست
+  // فشار نیاورد؛ کش فقط برای خالیِ **تکذیب‌شده** دور زده می‌شود، نه همه.
+  check('مسیر انبوه پیش‌فرض از کش می‌خورد',
+    tab.includes('async function fetchHistorical(pairs, items, signal, fresh = false)'));
+  check('و فقط خالیِ تکذیب‌شدهٔ تاریخی یک بار بی‌کش تکرار می‌شود',
+    tab.includes('await fetchHistorical(staleHistorical, items, controller.signal, true)')
+      && tab.includes("row.verdict === 'missing'"));
 
   // ═══ مهم‌ترین ادعای این دسته ═══
   //
@@ -277,10 +304,13 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
     tab.includes('inferLiveSessionDate(tape.items, daily)') && tab.includes("['holiday', 'before']"));
   check('نوار زنده دوباره درخواست نمی‌شود — همان پاسخِ حل‌شده مصرف می‌شود',
     tab.includes('fetchLive(live, items, controller.signal, resolved)'));
-  // آزمون باید همان مسیری را برود که خروجی می‌رود.
-  check('آزمون یک ابزار/روز هم از همان تقسیم رد می‌شود',
-    tab.includes('const { live } = splitTradeDays([date], { liveDate: resolved.date })'));
-  check('و می‌گوید از کدام مسیر آمد', tab.includes("hit.source === 'live' ? 'نوار زنده' : 'مسیر تاریخی'"));
+  // ═══ چرا دکمهٔ «آزمون یک ابزار/روز» رفت ═══
+  //
+  // آن دکمه ابزارِ عیب‌یابیِ سه نوبتِ خرابیِ خروجی بود و کارش را کرد؛ حالا
+  // برگ «پوشش دریافت» همان را با ستون‌های «مسیر» و «حکم خالی‌بودن» برای
+  // **همهٔ** جفت‌ها می‌گوید، نه یکی. صاحب پروژه صریح خواست برداشته شود.
+  check('دکمهٔ آزمون یک ابزار/روز دیگر در تب نیست',
+    !tab.includes('de-probe') && !tab.includes('probeOne'));
 
   // ═══ چرا منقضی‌ها کار می‌کردند و فعال‌ها نه ═══
   //

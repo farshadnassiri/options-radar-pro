@@ -2,9 +2,10 @@
 
 import { buildChain } from '/core/chain.mjs';
 import {
-  DATA_EXPORT_BATCH_CAP, blankAuditSummary, dataExportBlankAudit, dataExportContractGroups,
-  dataExportOutcome, dataExportPairBatches, dataExportPairs, dataExportSessionRows,
-  dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments, splitPairBatch,
+  DATA_EXPORT_BATCH_CAP, DATA_EXPORT_FRAMES, blankAuditSummary, dataExportBlankAudit,
+  dataExportCandles, dataExportContractGroups, dataExportFrame, dataExportOutcome,
+  dataExportPairBatches, dataExportPairs, dataExportSessionRows, dataExportTradeRows,
+  discoverDataExportInstruments, selectedDataExportInstruments, splitPairBatch,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
@@ -47,9 +48,13 @@ export async function mount(root, { state, api }) {
     <section class="card">
       <div class="section-head"><div><p class="eyebrow">گام چهارم</p><h3>دریافت و ساخت Excel</h3></div></div>
       <p class="note">برگ «راهنما» و «پوشش دریافت» کنار برگ مستقل هر پایه و هر قرارداد می‌آید. قرارداد بدون معامله هم برگ خودش را دارد تا نبود معامله با جاافتادن قرارداد اشتباه نشود.</p>
-      <div class="de-actions"><button type="button" class="ghost" id="de-probe" disabled>آزمون یک ابزار/روز</button><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
-      <p class="note">«آزمون یک ابزار/روز» فقط یک قرارداد و یک روز را می‌گیرد و می‌گوید چه برگشت — به‌جای اینکه برای فهمیدن یک مشکل، چند دقیقه منتظر کل بازه بمانی.</p>
-      <p id="de-probe-out" class="note"></p>
+      <div class="de-actions" style="margin-bottom:8px">
+        <label class="check" for="de-frame"><span>تایم‌فریم</span>
+          <select id="de-frame">${DATA_EXPORT_FRAMES.map((frame) => `<option value="${frame.id}">${esc(frame.label)}</option>`).join('')}</select></label>
+        <label class="check" for="de-derived"><input type="checkbox" id="de-derived"><span>ستون‌های مشتق (ارزش خام، اندازه و ارزش قرارداد)</span></label>
+      </div>
+      <p class="note" id="de-frame-note">تایم‌فریم فقط شکل <b>خروجی</b> را عوض می‌کند، نه دریافت را: ریزمعامله همیشه کامل گرفته می‌شود و شمع از روی همان ساخته می‌شود، پس عوض‌کردنش دریافت دوباره نمی‌خواهد. سطلِ بی‌معامله ردیف نمی‌گیرد و هیچ قیمتی درون‌یابی نمی‌شود.</p>
+      <div class="de-actions"><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
       <p id="de-status" class="note" role="status" aria-live="polite"></p><div id="de-result" class="history-table-wrap"></div>
     </section>`;
 
@@ -71,7 +76,6 @@ export async function mount(root, { state, api }) {
   const selectedInstruments = () => selectedDataExportInstruments(discovered, [...picked]);
   function updateRunState() {
     runBtn.disabled = !universe || !picked.size || Boolean(controller) || exporting;
-    $('de-probe').disabled = runBtn.disabled;
     exportBtn.disabled = !prepared || Boolean(controller) || exporting;
     $('de-universe-note').toggleAttribute('data-error', universe?.complete === false);
   }
@@ -370,17 +374,34 @@ export async function mount(root, { state, api }) {
     }
   }
 
+  /**
+   * جدول نتیجه، با ستونِ «ردیف خروجی» کنار شمارِ ریزمعامله.
+   *
+   * ═══ چرا هر دو عدد ═══
+   *
+   * گزارش صاحب پروژه دربارهٔ حجم فایل بود، و تنها اهرمِ صادقانهٔ حجم،
+   * تفکیکِ زمانی است. برای اینکه انتخابِ تایم‌فریم حدس نباشد، همین‌جا —
+   * پیش از ساختِ فایل — گفته می‌شود که با این تایم‌فریم هر شیت چند ردیف
+   * می‌شود. حجم فایل تقریباً با جمعِ همین ستون خطی است.
+   */
   function paintResult(instruments, pairs, items, bytes = null) {
+    const frame = dataExportFrame($('de-frame').value);
+    let ticks = 0, out = 0;
     const rows = instruments.map((item) => {
       const split = dataExportSessionRows(dataExportTradeRows(item, pairs, items));
       const count = split.rows.length;
+      const written = frame.seconds ? dataExportCandles(split.rows, frame.seconds).length : count;
+      ticks += count; out += written;
       const failures = pairs.filter((pair) => pair.ins === item.ins && items[pair.key]?.error).length;
-      return `<tr><td>${esc(item.baseName)}</td><td>${esc(item.name)}</td><td>${item.kind === 'underlying' ? 'پایه' : item.kind === 'call' ? 'کال' : 'پوت'}</td><td class="n">${fmt.int(count)}</td><td class="n">${fmt.int(split.outside)}</td><td class="n">${fmt.int(failures)}</td></tr>`;
+      return `<tr><td>${esc(item.baseName)}</td><td>${esc(item.name)}</td><td>${item.kind === 'underlying' ? 'پایه' : item.kind === 'call' ? 'کال' : 'پوت'}</td><td class="n">${fmt.int(count)}</td><td class="n">${fmt.int(written)}</td><td class="n">${fmt.int(split.outside)}</td><td class="n">${fmt.int(failures)}</td></tr>`;
     });
+    const shrink = frame.seconds && ticks > out
+      ? ` با «${frame.label}» خروجی ${fmt.int(out)} ردیف می‌شود به‌جای ${fmt.int(ticks)} — حدود ${fmt.int(Math.round(ticks / Math.max(1, out)))} برابر کوچک‌تر.`
+      : '';
     const headline = Number.isFinite(bytes)
-      ? `فایل با حجم ${fmt.int(Math.ceil(bytes / 1024))} کیلوبایت دانلود شد.`
-      : 'داده آماده است؛ برای دریافت فایل روی «خروجی Excel» بزنید.';
-    $('de-result').innerHTML = `<p class="note">${headline}</p><table class="history-table"><thead><tr><th>پایه</th><th>شیت ابزار</th><th>نوع</th><th>ریزمعاملهٔ ۹ تا ۱۲:۳۰</th><th>بیرون از جلسه</th><th>روز خطادار</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+      ? `فایل با حجم ${fmt.int(Math.ceil(bytes / 1024))} کیلوبایت دانلود شد.${shrink}`
+      : `داده آماده است؛ برای دریافت فایل روی «خروجی Excel» بزنید.${shrink}`;
+    $('de-result').innerHTML = `<p class="note">${headline}</p><table class="history-table"><thead><tr><th>پایه</th><th>شیت ابزار</th><th>نوع</th><th>ریزمعاملهٔ ۹ تا ۱۲:۳۰</th><th>ردیف خروجی</th><th>بیرون از جلسه</th><th>روز خطادار</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
   }
   async function run() {
     if (!universe) { setStatus('دفتر قراردادها هنوز دریافت نشده است.', true); return; }
@@ -412,7 +433,7 @@ export async function mount(root, { state, api }) {
       await fetchHistorical(historical, items, controller.signal);
       await fetchLive(live, items, controller.signal, resolved);
       const dailyByIns = await fetchDaily(instruments, range, controller.signal);
-      setStatus('داده‌ها آماده شد؛ در حال ساخت شیت‌های Excel…');
+      setStatus('داده‌ها آماده شد.');
       let outcome = dataExportOutcome(pairs, items);
       let audit = dataExportBlankAudit(pairs, items, dailyByIns);
       // خالیِ تاریخی که تابلوی روزانه تکذیبش می‌کند غالباً پاسخِ خالیِ کش
@@ -427,11 +448,9 @@ export async function mount(root, { state, api }) {
         outcome = dataExportOutcome(pairs, items);
         audit = dataExportBlankAudit(pairs, items, dailyByIns);
       }
-      const sheets = buildDataExportSheets({
-        instruments, pairs, items, range, complete: universe.complete, note: universe.note || '',
-        outcome, audit,
-      });
-      prepared = { sheets, filename: dataExportFilename(range), instruments, pairs, items };
+      // شیت‌ها اینجا ساخته نمی‌شوند: تایم‌فریم شکلِ نوشتن است نه دریافت، و
+      // ساختنشان در `exportPrepared` یعنی عوض‌کردنش دریافتِ دوباره نمی‌خواهد.
+      prepared = { instruments, pairs, items, range, complete: universe.complete, note: universe.note || '', outcome, audit };
       paintResult(instruments, pairs, items);
       // ═══ چرا صفر بودنِ داده، خبرِ اول است ═══
       //
@@ -459,70 +478,25 @@ export async function mount(root, { state, api }) {
   }
 
   /**
-   * یک ابزار و یک روز، و جوابِ خام.
+   * ساختِ فایل از دادهٔ آماده، در تایم‌فریمِ همین حالا.
    *
-   * ═══ چرا این دکمه لازم شد ═══
+   * ═══ چرا شیت‌ها اینجا ساخته می‌شوند و نه در `run` ═══
    *
-   * تشخیصِ «چرا خروجی خالی است» تا امروز یعنی اجرای کلِ بازه، چند دقیقه
-   * انتظار، و بعد خواندنِ برگ پوشش. برای یک پرسشِ بله/خیر، این گران است.
-   * اینجا همان مسیرِ واقعی — همان endpoint، همان تلاش دوم با پرچم دیگر —
-   * روی یک جفت می‌رود و هر چه برگشت را می‌گوید، از جمله اینکه تابلوی
-   * روزانهٔ همان روز چه ادعایی دارد.
+   * تایم‌فریم هیچ ربطی به **دریافت** ندارد: ریزمعامله همیشه کامل گرفته
+   * می‌شود و شمع صرفاً شکلِ نوشتنِ همان است. اگر شیت‌ها موقع دریافت ساخته
+   * می‌شدند، عوض‌کردنِ تایم‌فریم یعنی چند دقیقه دریافتِ دوباره برای داده‌ای
+   * که همین‌جا در دست است.
    */
-  async function probeOne() {
-    const out = $('de-probe-out');
-    const instruments = selectedInstruments();
-    const contract = instruments.find((item) => item.kind !== 'underlying');
-    if (!contract) { out.textContent = 'اول یک قرارداد انتخاب کن.'; return; }
-    const days = tradingDays(rangeUi.range.from, rangeUi.range.to);
-    const date = days[days.length - 1];
-    if (!date) { out.textContent = 'در این بازه روز معاملاتی نیست.'; return; }
-    out.textContent = `در حال آزمون ${contract.name} در ${faDigits(String(date))}…`;
-    try {
-      // آزمون باید **همان** مسیری را برود که خروجی می‌رود، وگرنه چیزی را
-      // می‌سنجد که اجرا نمی‌شود: روزی که مالِ نوار زنده است، از مسیر
-      // تاریخی همیشه خالی است و آزمون هم همان خالی را گزارش می‌کرد.
-      const resolved = await resolveLiveDay(undefined);
-      const { live } = splitTradeDays([date], { liveDate: resolved.date });
-      let hit = {};
-      if (live.length) {
-        const items = {};
-        await fetchLive([{ ins: contract.ins, date, key: `${date}:${contract.ins}` }], items, undefined, resolved);
-        hit = items[`${date}:${contract.ins}`] || {};
-      } else {
-        const response = await fetch('/api/trades/batch', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requests: [{ ins: contract.ins, date }], fresh: true }),
-        });
-        const payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
-        hit = payload.items?.[`${date}:${contract.ins}`] || {};
-      }
-      const daily = await fetchDaily([contract], { from: date, to: date }, undefined);
-      const board = (daily?.[contract.ins]?.rows || []).find((row) => Math.trunc(Number(row.date)) === date);
-      const rows = Array.isArray(hit.rows) ? hit.rows.length : 0;
-      const boardText = board
-        ? `تابلوی روزانهٔ همان روز ${fmt.int(board.trades)} معامله و حجم ${fmt.int(board.vol)} می‌گوید`
-        : 'تابلوی روزانهٔ آن روز در دست نیست';
-      const via = hit.source === 'live' ? 'نوار زنده' : 'مسیر تاریخی';
-      out.textContent = hit.error
-        ? `${contract.name} · ${faDigits(String(date))} (${via}): خطا — ${hit.error}`
-        : `${contract.name} · ${faDigits(String(date))} (${via}): ${fmt.int(rows)} ریزمعامله`
-          + `${hit.variant ? ` (پرچم ${hit.variant})` : ''}. ${boardText}.`
-          + `${!rows && board && Number(board.trades) > 0 ? ' یعنی داده نرسیده، نه اینکه بازار ساکت بوده.' : ''}`;
-    } catch (error) {
-      out.textContent = `آزمون انجام نشد: ${error.message}`;
-      logError('data-export:probe', error);
-    }
-  }
-
   async function exportPrepared() {
     if (!prepared) { setStatus('اول ریزمعاملات را آماده کنید.', true); return; }
     exporting = true; updateRunState();
     try {
-      const bytes = await downloadXlsx(prepared.filename, prepared.sheets);
+      const frame = $('de-frame').value, derived = $('de-derived').checked;
+      const sheets = buildDataExportSheets({ ...prepared, frame, derived });
+      const bytes = await downloadXlsx(dataExportFilename(prepared.range, frame), sheets);
       paintResult(prepared.instruments, prepared.pairs, prepared.items, bytes);
-      setStatus('فایل Excel دانلود شد. برای دریافت دوباره می‌توانید همین دکمه را بزنید.');
+      setStatus(`فایل Excel در تایم‌فریم «${dataExportFrame(frame).label}» دانلود شد.`
+        + ' تایم‌فریم را عوض کنید و دوباره همین دکمه را بزنید — دریافت دوباره لازم نیست.');
     } catch (error) {
       setStatus(`دانلود خروجی انجام نشد: ${error.message}`, true); logError('data-export:download', error);
     } finally { exporting = false; updateRunState(); }
@@ -556,6 +530,10 @@ export async function mount(root, { state, api }) {
     invalidatePrepared();
     paintContracts();
   });
+  // تایم‌فریم دادهٔ گرفته‌شده را باطل نمی‌کند — فقط برآوردِ ردیف عوض می‌شود.
+  $('de-frame').addEventListener('change', () => {
+    if (prepared) paintResult(prepared.instruments, prepared.pairs, prepared.items);
+  });
   $('de-side').addEventListener('change', paintContracts);
   $('de-contract-search').addEventListener('input', paintContracts);
   /** قراردادهایی که همین حالا روی صفحه دیده می‌شوند — با پالایهٔ نوع و جست‌وجو. */
@@ -579,7 +557,7 @@ export async function mount(root, { state, api }) {
   $('de-search').addEventListener('input', (event) => { const q = event.target.value.trim(); for (const label of basesHost.querySelectorAll('.de-base')) label.hidden = q && !label.dataset.search.includes(q); });
   $('de-all').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = true; invalidatePrepared(); paintContracts(); });
   $('de-none').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = false; invalidatePrepared(); paintContracts(); });
-  $('de-refresh').addEventListener('click', () => loadUniverse()); runBtn.addEventListener('click', run); $('de-probe').addEventListener('click', probeOne); exportBtn.addEventListener('click', exportPrepared); stopBtn.addEventListener('click', () => controller?.abort());
+  $('de-refresh').addEventListener('click', () => loadUniverse()); runBtn.addEventListener('click', run); exportBtn.addEventListener('click', exportPrepared); stopBtn.addEventListener('click', () => controller?.abort());
 
   await api.loadSettings();
   rangeUi = mountHistoryRange($('de-range'), { onApply: (range) => loadUniverse(range), quickEntry: true, compactNote: true });
