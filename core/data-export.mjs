@@ -460,3 +460,30 @@ export function dataExportCandles(rows = [], seconds = 60) {
   }
   return order.sort((a, b) => a.date - b.date || a.second - b.second);
 }
+
+/**
+ * چند ابزار/روز از هر مسیر رفت، و چند تا از هر مسیر داده آورد.
+ *
+ * ═══ چرا این تفکیک، خبرِ اول است ═══
+ *
+ * فایل گزارش‌شدهٔ نوبت پنجم ۱٬۳۴۹ جفت داشت؛ ۱٬۳۱۶ از مسیر تاریخی رفتند و
+ * **هیچ‌کدام** داده نیاوردند، و هر ۲ ردیفِ دارای داده از نوار زنده آمدند.
+ * این جمله کلِ تشخیص است — ولی برای رسیدن به آن باید ۱٬۳۴۹ ردیفِ برگ پوشش
+ * را دستی دسته‌بندی می‌کردی. وقتی یک **مسیر کامل** صفر می‌آورد، آن دیگر
+ * «بازارِ ساکت» نیست و باید در نگاه اول دیده شود.
+ */
+export function dataExportRouteSplit(pairs = [], items = {}) {
+  const make = () => ({ total: 0, ok: 0, empty: 0, failed: 0, trades: 0 });
+  const out = { history: make(), live: make(), unknown: make(), total: 0 };
+  for (const pair of pairs || []) {
+    const hit = items?.[pair.key];
+    const source = String(hit?.source || '');
+    const bucket = source === 'live' ? out.live : (source === 'history' ? out.history : out.unknown);
+    bucket.total += 1;
+    out.total += 1;
+    if (!hit || hit.error) { bucket.failed += 1; continue; }
+    const rows = Array.isArray(hit.rows) ? hit.rows.length : 0;
+    if (rows) { bucket.ok += 1; bucket.trades += rows; } else bucket.empty += 1;
+  }
+  return out;
+}
