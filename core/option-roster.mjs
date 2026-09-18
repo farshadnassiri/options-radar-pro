@@ -46,8 +46,29 @@ export const ROSTER_VERSION = 3;
 
 export const SIDE_CALL = 'call';
 export const SIDE_PUT = 'put';
-/** اختیار فروش تبعی — ناشر می‌فروشد، در زنجیرهٔ عادی بازار نیست. */
+/**
+ * اختیار تبعی — ناشر می‌فروشد و در زنجیرهٔ عادی بازار نیست.
+ *
+ * هر دو جهت اینجا می‌نشینند: تبعیِ **فروش** (نماد «ه») و تبعیِ **خرید**
+ * (نماد «ظ»، نام «اختیارخ ت»). جهتشان جدا نگه داشته نمی‌شود چون هیچ
+ * مصرف‌کننده‌ای به آن نیاز ندارد؛ آنچه اهمیت دارد این است که هیچ‌کدام
+ * کالِ استاندارد یا پوتِ استاندارد نیستند و وارد زنجیره نمی‌شوند.
+ */
 export const SIDE_TABAEE = 'tabaee';
+
+/**
+ * نشانهٔ تبعی‌بودن در **نام**.
+ *
+ * ═══ چرا «ت» تنها، و با فاصلهٔ دو طرف ═══
+ *
+ * نامِ پایه‌ها با «ت» شروع می‌شوند: تاصیکو، تپکو، ترانس، تلیسه. الگویی که
+ * فقط «اختیارخ ت» بخواهد، «اختیارخ تاصیکو» را هم می‌گیرد و یک کالِ سالم
+ * را تبعی می‌خواند. فاصلهٔ پس از «ت» همین را می‌بندد: «ت» باید کلمهٔ
+ * مستقل باشد.
+ *
+ * «تبعی» کامل هم پذیرفته می‌شود، چون هیچ نماد پایه‌ای این نام را ندارد.
+ */
+const TABAEE_NAME = /تبعی|اختیارف ت |اختیارخ ت /;
 
 const FA_DIGITS = /[۰-۹٠-٩]/g;
 const FA_MAP = { '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9', '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9' };
@@ -88,21 +109,26 @@ export function contractSide(name, symbol = '') {
   const sym = normalizeFa(symbol);
   if (!/اختیار/.test(text)) return null;
 
+  // تبعی اول سنجیده می‌شود، وگرنه «اختیارخ ت باهنر» به «اختیارخ» می‌افتد
+  // و کالِ استاندارد خوانده می‌شود — همان چیزی که ممیزی گرفت.
   let byName = null;
-  if (/اختیار\s*ف/.test(text)) byName = /اختیار\s*ف\s*\.?\s*ت\b|اختیارف ت /.test(text) ? SIDE_TABAEE : SIDE_PUT;
+  if (TABAEE_NAME.test(text)) byName = SIDE_TABAEE;
+  else if (/اختیار\s*ف/.test(text)) byName = SIDE_PUT;
   else if (/اختیار\s*خ/.test(text)) byName = SIDE_CALL;
 
   let bySym = null;
   if (sym.startsWith('ض')) bySym = SIDE_CALL;
   else if (sym.startsWith('ط')) bySym = SIDE_PUT;
-  else if (sym.startsWith('ه')) bySym = SIDE_TABAEE;
+  // «ه» تبعیِ فروش، «ظ» تبعیِ خرید. هر دو بیرونِ زنجیره‌اند.
+  else if (sym.startsWith('ه') || sym.startsWith('ظ')) bySym = SIDE_TABAEE;
 
   if (byName && bySym) {
     if (byName === bySym) return byName;
-    // تبعی هم «اختیار فروش» است؛ نمادش «ه» و نامش «اختیارف ت». وقتی نام
-    // کوتاه شده و «ت» را از دست داده، نماد حرفِ آخر را می‌زند.
-    if (byName === SIDE_PUT && bySym === SIDE_TABAEE) return SIDE_TABAEE;
-    if (byName === SIDE_TABAEE && bySym === SIDE_PUT) return SIDE_TABAEE;
+    // تبعی از هر دو نشانه قوی‌تر است: نامِ کوتاه‌شده «ت» را از دست
+    // می‌دهد و نمادِ «ظ»/«ه» تنها چیزی است که می‌ماند — و برعکس، نامی که
+    // صریح «تبعی» می‌گوید با نمادِ «ض»/«ط» هم تبعی می‌ماند.
+    if (byName === SIDE_TABAEE || bySym === SIDE_TABAEE) return SIDE_TABAEE;
+    // «ض» با نامِ «اختیارف» تناقضِ واقعی است، نه انتخاب.
     return null;
   }
   return byName || bySym || null;
