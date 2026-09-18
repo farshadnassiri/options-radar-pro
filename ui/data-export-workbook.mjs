@@ -2,8 +2,8 @@
 
 import {
   BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, blankAuditSummary, dataExportCandles,
-  dataExportCoverageRows, dataExportFrame, dataExportOutcome, dataExportSessionRows,
-  dataExportTradeRows,
+  dataExportCoverageRows, dataExportFrame, dataExportOutcome, dataExportRouteSplit,
+  dataExportSessionRows, dataExportTradeRows,
 } from '../core/data-export.mjs';
 import { tradeTimeLabel } from '../core/backtest.mjs';
 import { sheet } from './xlsx.mjs';
@@ -60,6 +60,12 @@ export function buildDataExportSheets({
     ? `${blanks.missing} ابزار/روز تابلو معامله ثبت کرده ولی ریزمعامله نیامد · `
       + `${blanks.quiet} واقعاً بی‌معامله · ${blanks.unknown} بی تابلوی روزانه`
     : '—';
+  const route = dataExportRouteSplit(pairs, items);
+  const routeLine = route.total
+    ? `تاریخی: ${route.history.total} ابزار/روز، ${route.history.ok} داده آورد · `
+      + `نوار زنده: ${route.live.total} ابزار/روز، ${route.live.ok} داده آورد`
+      + `${route.history.total && !route.history.ok ? ' — هیچ روزِ بسته‌شده‌ای داده نیاورد' : ''}`
+    : '—';
   const summary = sheet('راهنما', ['شاخص', 'مقدار'], [
     ['نتیجهٔ دریافت', verdict],
     ['از تاریخ', dateText(range.from)], ['تا تاریخ', dateText(range.to)],
@@ -68,6 +74,12 @@ export function buildDataExportSheets({
     ['جفت ابزار/روز', pairs.length],
     ['ابزار/روز دارای داده', result.ok],
     ['بدون معامله', empty], ['خطا یا دریافت‌نشده', failed],
+    // ═══ چرا این خط بالاتر از همه‌چیز است ═══
+    //
+    // فایل گزارش‌شده ۱٬۳۱۶ ابزار/روز را از مسیر تاریخی خواست و هیچ‌کدام
+    // داده نیاورد، ولی برای فهمیدنش باید ۱٬۳۴۹ ردیفِ برگ پوشش را دستی
+    // دسته‌بندی می‌کردی. یک خط همان را می‌گوید.
+    ['تفکیک مسیر', routeLine],
     ['بازبینی خالی‌ها با تابلوی روزانه', blankLine],
     ...(blanks.worst ? [['بدترین مورد نیامدن', `کد ${blanks.worst.ins} در ${blanks.worst.date} — تابلو ${blanks.worst.dailyTrades} معامله`]] : []),
     ['پنجرهٔ ساعت', 'ردیف‌های برگ هر ابزار فقط جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰ است؛ شمار ردیف‌های بیرون از این بازه در برگ پوشش می‌آید.'],
@@ -88,7 +100,8 @@ export function buildDataExportSheets({
   const auditByKey = new Map((audit || []).map((row) => [row.key, row]));
   const coverageSheet = sheet('پوشش دریافت', [
     'نماد پایه', 'نماد ابزار', 'نوع', 'کد ابزار', 'اندازه قرارداد', 'تاریخ میلادی', 'کل ردیف',
-    'فعال', 'باطل', 'وضعیت', 'حکم خالی‌بودن', 'معاملهٔ تابلوی روزانه', 'مسیر', 'منبع', 'خطا',
+    'فعال', 'باطل', 'وضعیت', 'حکم خالی‌بودن', 'معاملهٔ تابلوی روزانه', 'مسیر',
+    'پاسخ بالادست', 'منبع', 'خطا',
   ], coverage.map((row) => {
     const seen = auditByKey.get(`${row.date}:${row.ins}`) || null;
     const hit = items?.[`${row.date}:${row.ins}`] || {};
@@ -99,9 +112,12 @@ export function buildDataExportSheets({
       seen ? BLANK_VERDICT_LABEL[seen.verdict] : '—',
       seen && Number.isFinite(seen.dailyTrades) ? seen.dailyTrades : '',
       hit.variant ? `پرچم ${hit.variant}` : '',
+      // خالیِ بی‌شرح همان چیزی است که چهار نوبت تشخیص را کور کرد.
+      hit.upstream ? (hit.upstreamAlt && hit.upstreamAlt !== hit.upstream
+        ? `${hit.upstream} / ${hit.upstreamAlt}` : hit.upstream) : '',
       row.source, row.error,
     ];
-  }), [100, 120, 95, 140, 100, 95, 75, 65, 65, 100, 250, 110, 85, 80, 260]);
+  }), [100, 120, 95, 140, 100, 95, 75, 65, 65, 100, 250, 110, 85, 200, 80, 260]);
 
   const instrumentSheets = instruments.map((instrument) => {
     // خواستهٔ صریح: «هر روز معاملاتی از ساعت ۹ الی ۱۲:۳۰». ردیفِ بیرون از

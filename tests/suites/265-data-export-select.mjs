@@ -238,8 +238,10 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
   // پاسخِ خالی نباید به حساب واقعیتِ بازار گذاشته شود.
   check('پاسخ خالی یک بار با پرچم دیگر پرسیده می‌شود',
     server.includes('historicalTradesAltPath(code, date)') && server.includes("variant: 'true'"));
+  // پرچم دوم فقط برای **خالی** است: پرتابِ مسیر اول مستقیم به `catch`
+  // می‌رود و خطا برمی‌گرداند، نه خالیِ بی‌شرح.
   check('و خطا دوباره پرسیده نمی‌شود — فقط خالی',
-    server.includes('if (rows.length) return [key, { rows, variant:'));
+    server.includes("if (first.rows.length) return [key, { rows: first.rows, variant: 'true' }];"));
   check('خالی‌بودنِ پس از هر دو مسیر علامت می‌خورد', server.includes('emptyBoth'));
 
   const tab = readSrc('../ui/tabs/data-export.mjs');

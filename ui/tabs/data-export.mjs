@@ -4,8 +4,9 @@ import { buildChain } from '/core/chain.mjs';
 import {
   DATA_EXPORT_BATCH_CAP, DATA_EXPORT_FRAMES, blankAuditSummary, dataExportBlankAudit,
   dataExportCandles, dataExportContractGroups, dataExportFrame, dataExportOutcome,
-  dataExportPairBatches, dataExportPairs, dataExportSessionRows, dataExportTradeRows,
-  discoverDataExportInstruments, selectedDataExportInstruments, splitPairBatch,
+  dataExportPairBatches, dataExportPairs, dataExportRouteSplit, dataExportSessionRows,
+  dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments,
+  splitPairBatch,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
@@ -250,10 +251,17 @@ export async function mount(root, { state, api }) {
   async function fetchDaily(instruments, range, signal) {
     const codes = [...new Set(instruments.map((item) => String(item.ins)).filter(Boolean))];
     if (!codes.length) return {};
-    const span = Math.max(1, tradingDays(range.from, range.to).length);
     setStatus('در حال گرفتن تابلوی روزانه برای راست‌آزمایی خالی‌ها…');
     try {
-      const response = await fetch(`/api/dailies?ins=${codes.join(',')}&n=${span + 10}`, { cache: 'no-store', signal });
+      // ═══ چرا `n=0` و نه شمارِ روزهای بازه ═══
+      //
+      // `n` شمارِ آخرین ردیف‌های روزانه است و این تب تنها جایی بود که
+      // عددی می‌فرستاد؛ بقیه `n=0` یعنی «کلِ تاریخِ موجود» می‌خواهند. برای
+      // قراردادِ **منقضی** آن شمار از عمرِ خودِ قرارداد بیشتر می‌شد و
+      // تابلوی روزانه‌اش نمی‌آمد — در فایل گزارش‌شده ۸۴۷ ابزار/روز «تابلوی
+      // روزانه در دست نیست» گرفتند، یعنی راست‌آزمایی برای دوسومِ جفت‌ها
+      // کور بود، دقیقاً همان‌جا که به آن نیاز داشتیم.
+      const response = await fetch(`/api/dailies?ins=${codes.join(',')}&n=0`, { cache: 'no-store', signal });
       const payload = await response.json();
       if (!response.ok || payload?.error) throw new Error(payload?.error || `پاسخ ${response.status}`);
       return payload && typeof payload === 'object' ? payload : {};
@@ -458,6 +466,25 @@ export async function mount(root, { state, api }) {
       // می‌شمرد. حالا اگر هیچ جفتی داده نیاورده باشد، جمله با همان شروع
       // می‌شود و علتِ غالب هم کنارش می‌آید.
       const blanks = blankAuditSummary(audit);
+      // ═══ وقتی یک مسیرِ کامل صفر می‌آورد ═══
+      //
+      // گزارش نوبت پنجم: ۱٬۳۱۶ ابزار/روزِ تاریخی، همه خالی، صفر خطا — و
+      // جملهٔ وضعیت فقط گفت «۲ ابزار/روز داده آورد». صفرِ یک **مسیرِ
+      // کامل** بازارِ ساکت نیست؛ خبرِ اول است و باید همان‌جا گفته شود،
+      // با شکلِ خامِ پاسخی که بالادست داد.
+      const route = dataExportRouteSplit(pairs, items);
+      const deadRoute = route.history.total >= 5 && route.history.ok === 0 && route.history.failed === 0
+        ? (() => {
+          const shapes = new Map();
+          for (const pair of pairs) {
+            const text = String(items[pair.key]?.upstream || '');
+            if (text) shapes.set(text, (shapes.get(text) || 0) + 1);
+          }
+          const top = [...shapes.entries()].sort((a, b) => b[1] - a[1])[0];
+          return ` هیچ‌کدام از ${fmt.int(route.history.total)} ابزار/روزِ مسیر تاریخی داده نیاورد و هیچ خطایی هم نداد`
+            + `${top ? ` — بالادست برای ${fmt.int(top[1])} تایشان «${top[0]}» برگرداند` : ''}.`;
+        })()
+        : '';
       const head = outcome.blank
         ? `هیچ ریزمعامله‌ای دریافت نشد — ${fmt.int(outcome.failed)} ابزار/روز خطا داد و ${fmt.int(outcome.empty)} تا خالی برگشت.`
         : `آمادهٔ خروجی: ${fmt.int(outcome.trades)} ریزمعامله از ${fmt.int(outcome.ok)} ابزار/روز، در ${fmt.int(instruments.length)} شیت.`;
@@ -468,9 +495,9 @@ export async function mount(root, { state, api }) {
           + `${blanks.worst ? ` (بدترینش کد ${faDigits(blanks.worst.ins)} با ${fmt.int(blanks.worst.dailyTrades)} معامله)` : ''}`
           + ` — این یعنی داده نرسیده، نه اینکه بازار ساکت بوده.`
         : (blanks.quiet ? ` ${fmt.int(blanks.quiet)} ابزار/روزِ خالی با تابلوی روزانه تأیید شد.` : '');
-      setStatus(`${head}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}`
+      setStatus(`${head}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}`
         + `${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}`,
-      outcome.blank || blanks.missing > 0);
+      outcome.blank || blanks.missing > 0 || Boolean(deadRoute));
     } catch (error) {
       if (error.name === 'AbortError') setStatus('دریافت با درخواست شما متوقف شد.', true);
       else { setStatus(`ساخت خروجی کامل نشد: ${error.message}`, true); logError('data-export', error); }

@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
 import { num } from '../core/num.mjs';
 import { normalizeTrades } from '../core/backtest.mjs';
+import { upstreamShape, upstreamShapeLabel } from '../core/upstream-shape.mjs';
 import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
   makeArchive, chainRowsFrom, archiveNote, archiveBoardDownNote, archiveQuality, archiveName, validArchiveDate,
@@ -1145,13 +1146,29 @@ async function handle(req, res) {
       // و مهم‌تر: خروجی حالا می‌گوید کدام مسیر جواب داده و آیا خالی‌بودن
       // پس از هر دو مسیر است. مصرف‌کننده بی این، نمی‌تواند «بی‌معامله» را
       // از «نیامد» جدا کند.
+      // ═══ چرا خالی دیگر بی‌شرح برنمی‌گردد ═══
+      //
+      // نوبت پنجمِ گزارش: ۱٬۳۱۶ ابزار/روز از مسیر تاریخی، همه خالی، صفر
+      // خطا — و هیچ‌کس نمی‌توانست بگوید بالادست «معامله‌ای نبود» گفت یا
+      // چیزی داد که اصلاً فهرست معامله نیست. `firstList` هر دو را یک `[]`
+      // می‌کند. حالا شکلِ خامِ پاسخ همراه خالی می‌آید و در برگ پوشش
+      // می‌نشیند، تا اجرای بعدی تشخیص باشد نه حدسِ تازه.
       const one = async ({ key, code, date }) => {
-        const pull = async (path) => firstList(fresh ? await getFresh(path, 2, 6) : await get(path, S.ttlDailySec, 6));
+        const pull = async (path) => {
+          const data = fresh ? await getFresh(path, 2, 6) : await get(path, S.ttlDailySec, 6);
+          return { rows: normalizeTrades(firstList(data)), shape: upstreamShape(data) };
+        };
         try {
-          const rows = normalizeTrades(await pull(historicalTradesPath(code, date)));
-          if (rows.length) return [key, { rows, variant: 'true' }];
-          const alt = normalizeTrades(await pull(historicalTradesAltPath(code, date)));
-          return [key, { rows: alt, variant: alt.length ? 'false' : 'both', emptyBoth: alt.length === 0 }];
+          const first = await pull(historicalTradesPath(code, date));
+          if (first.rows.length) return [key, { rows: first.rows, variant: 'true' }];
+          const alt = await pull(historicalTradesAltPath(code, date));
+          if (alt.rows.length) return [key, { rows: alt.rows, variant: 'false' }];
+          return [key, {
+            rows: [], variant: 'both', emptyBoth: true,
+            // شکلِ **هر دو** مسیر، چون ممکن است فقط یکی‌شان بدقلق باشد.
+            upstream: upstreamShapeLabel(first.shape),
+            upstreamAlt: upstreamShapeLabel(alt.shape),
+          }];
         } catch (e) {
           return [key, { rows: [], error: `${e.name}: ${e.message}` }];
         }
