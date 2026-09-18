@@ -6,7 +6,7 @@ import {
   dataExportCandles, dataExportContractGroups, dataExportFrame, dataExportOutcome,
   dataExportPairBatches, dataExportPairs, dataExportRouteSplit, dataExportSessionRows,
   dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments,
-  splitPairBatch,
+  splitPairBatch, suspectEmptyDays,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
@@ -214,8 +214,8 @@ export async function mount(root, { state, api }) {
       for (const pair of batch) {
         const hit = payload.items?.[pair.key];
         items[pair.key] = hit && Array.isArray(hit.rows)
-          ? { ...hit, source: 'history' }
-          : { rows: [], error: hit?.error || 'پاسخ این ابزار/روز در بسته نبود', source: 'history' };
+          ? { ...hit, source: 'history', retried: fresh }
+          : { rows: [], error: hit?.error || 'پاسخ این ابزار/روز در بسته نبود', source: 'history', retried: fresh };
       }
       soloFailures = 0;
       return true;
@@ -456,6 +456,31 @@ export async function mount(root, { state, api }) {
         outcome = dataExportOutcome(pairs, items);
         audit = dataExportBlankAudit(pairs, items, dailyByIns);
       }
+      // ═══ دور دوم برای روزهایی که **سراسر** خالی آمدند ═══
+      //
+      // گزارش: «خروجی صرفاً دیتای روز آخر معاملاتی را می‌دهد؛ کل بازه را
+      // بده.» یک قراردادِ کم‌معامله می‌تواند روزی بی‌معامله باشد، ولی یک
+      // روزِ معاملاتیِ کامل که هیچ ابزارِ انتخابی — حتی خودِ پایه — در آن
+      // معامله‌ای نداشته باشد، واقعیتِ بازار نیست.
+      //
+      // دور اول بالا فقط جفت‌هایی را دوباره می‌پرسید که تابلوی روزانه
+      // تکذیبشان کرده بود؛ برای قراردادِ منقضی آن تابلو اغلب در دست نیست
+      // و همان جفت‌ها هرگز دور دوم نمی‌دیدند. خالی‌بودنِ سراسریِ یک روز
+      // خودش مدرک است و به تأیید تابلو نیاز ندارد.
+      //
+      // `fresh` به نشانیِ بالادست cache-buster می‌چسباند — تنها راهِ رد
+      // شدن از پاسخِ خالیِ کهنه‌ای که لبهٔ CDN نگه داشته و همه‌جا ۲۰۰ و
+      // JSON معتبر به نظر می‌رسد. هر جفت حداکثر یک دور دوم می‌بیند.
+      const suspectDays = new Set(suspectEmptyDays(pairs, items));
+      const suspectPairs = pairs.filter((pair) => suspectDays.has(pair.date) && !items[pair.key]?.retried);
+      if (suspectPairs.length) {
+        setStatus(`${fmt.int(suspectDays.size)} روزِ معاملاتی سراسر خالی آمد — این واقعیتِ بازار نیست؛`
+          + ` ${fmt.int(suspectPairs.length)} ابزار/روز بی‌کش دوباره پرسیده می‌شود…`);
+        await fetchHistorical(suspectPairs, items, controller.signal, true);
+        outcome = dataExportOutcome(pairs, items);
+        audit = dataExportBlankAudit(pairs, items, dailyByIns);
+      }
+      const rescued = suspectPairs.filter((pair) => (items[pair.key]?.rows || []).length).length;
       // شیت‌ها اینجا ساخته نمی‌شوند: تایم‌فریم شکلِ نوشتن است نه دریافت، و
       // ساختنشان در `exportPrepared` یعنی عوض‌کردنش دریافتِ دوباره نمی‌خواهد.
       prepared = { instruments, pairs, items, range, complete: universe.complete, note: universe.note || '', outcome, audit };
@@ -485,6 +510,11 @@ export async function mount(root, { state, api }) {
             + `${top ? ` — بالادست برای ${fmt.int(top[1])} تایشان «${top[0]}» برگرداند` : ''}.`;
         })()
         : '';
+      const secondPass = suspectPairs.length
+        ? (rescued
+          ? ` دورِ دومِ بی‌کش ${fmt.int(rescued)} ابزار/روز را نجات داد.`
+          : ` دورِ دومِ بی‌کش روی ${fmt.int(suspectPairs.length)} ابزار/روز هم چیزی نیاورد.`)
+        : '';
       const head = outcome.blank
         ? `هیچ ریزمعامله‌ای دریافت نشد — ${fmt.int(outcome.failed)} ابزار/روز خطا داد و ${fmt.int(outcome.empty)} تا خالی برگشت.`
         : `آمادهٔ خروجی: ${fmt.int(outcome.trades)} ریزمعامله از ${fmt.int(outcome.ok)} ابزار/روز، در ${fmt.int(instruments.length)} شیت.`;
@@ -495,7 +525,7 @@ export async function mount(root, { state, api }) {
           + `${blanks.worst ? ` (بدترینش کد ${faDigits(blanks.worst.ins)} با ${fmt.int(blanks.worst.dailyTrades)} معامله)` : ''}`
           + ` — این یعنی داده نرسیده، نه اینکه بازار ساکت بوده.`
         : (blanks.quiet ? ` ${fmt.int(blanks.quiet)} ابزار/روزِ خالی با تابلوی روزانه تأیید شد.` : '');
-      setStatus(`${head}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}`
+      setStatus(`${head}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}`
         + `${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}`,
       outcome.blank || blanks.missing > 0 || Boolean(deadRoute));
     } catch (error) {
