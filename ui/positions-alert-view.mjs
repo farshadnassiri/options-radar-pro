@@ -8,6 +8,7 @@
 
 import { POSITION_ALERTS, positionAlertSummary } from '../core/position-alert.mjs';
 import { faDigits, fmt } from './fmt.mjs';
+import { icon } from './icons.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -44,9 +45,9 @@ export function alertCell(pos, firing = []) {
   const summary = positionAlertSummary(pos?.alert);
   if (!summary.count) return '<td class="n">—</td>';
   if (firing.length) {
-    return `<td class="n loss" title="${esc(firing.map((one) => one.label).join('، '))}">🔔 ${faDigits(firing.length)}</td>`;
+    return `<td class="n loss" title="${esc(firing.map((one) => one.label).join('، '))}">${icon('bell', 'ic ic-cell')}${faDigits(firing.length)}</td>`;
   }
-  return `<td class="n" title="${esc(summary.text)}">${summary.enabled ? '' : '⏸ '}${faDigits(summary.count)}</td>`;
+  return `<td class="n" title="${esc(summary.text)}">${summary.enabled ? '' : icon('pause', 'ic ic-cell')}${faDigits(summary.count)}</td>`;
 }
 
 /**

@@ -383,6 +383,13 @@ body { direction: rtl; height: 100vh; overflow: hidden; display: flex; flex-dire
 
 b, strong { font-weight: 700; }
 code, pre { font-family: var(--mono-code); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
+/* آیکونِ درونِ خانهٔ جدول: کنارِ رقم می‌نشیند، نه بالای خطِ آن. اندازه‌اش
+   از `em` می‌آید تا با فونتِ همان خانه کوچک و بزرگ شود، و `vertical-align`
+   منفی مرکزِ آیکون را روی مرکزِ رقم می‌برد. */
+.ic-cell {
+  width: 1.05em; height: 1.05em; vertical-align: -.2em;
+  margin-inline-end: 5px; flex: none;
+}
 .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: embed; }
 /* ═══ هر عددی، خوانا و بولد ═══
    خواستهٔ صاحب پروژه: «کلیهٔ ارقام خوانا و بولد باشد در هر جا». وزن ۷۰۰
