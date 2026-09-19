@@ -260,21 +260,6 @@
   --fs-chart-lg: 19.5px;
   --fs-axis: 18px;
 
-  /* ═══ از شیشه به کاغذ ═══
-     پوستهٔ پیشین شیشه‌ای بود: سطحِ نیمه‌شفاف، تاری پس‌زمینه، لبهٔ درخشان.
-     روی صفحه‌ای که تمامش جدول و عدد است سه هزینه داشت: پس‌زمینهٔ متغیرِ
-     زیرِ متن، کنتراستِ ناپایدارِ عدد، و رنگی که با رنگِ **داده** رقابت
-     می‌کند. این توکن‌ها نگه داشته شدند ولی خنثی، تا هیچ جزئی نشکند. */
-  --glass: var(--panel);
-  --glass-2: var(--panel);
-  --glass-edge: transparent;
-  --glass-sheen: transparent;
-  --glass-blur: 0px;
-  --glass-blur-lg: 0px;
-  --ambient-1: transparent;
-  --ambient-2: transparent;
-  --ambient-3: transparent;
-  --glow-accent: none;
 
   --lh-tight: 1.5;
   --lh-normal: 1.75;
@@ -373,18 +358,6 @@ body[data-theme="board"] {
   --focus-ring: 0 0 0 4px color-mix(in srgb, var(--accent-2) 30%, transparent);
   --focus-ring-error: 0 0 0 4px color-mix(in srgb, var(--er-500) 30%, transparent);
 
-  /* پوستهٔ تیره هم مات است. تیره‌بودن خودش عمق می‌سازد؛ شیشه رویش فقط
-     کنتراستِ متن را بی‌ثبات می‌کرد. */
-  --glass: var(--panel);
-  --glass-2: var(--panel);
-  --glass-edge: transparent;
-  --glass-sheen: transparent;
-  --glass-blur: 0px;
-  --glass-blur-lg: 0px;
-  --ambient-1: transparent;
-  --ambient-2: transparent;
-  --ambient-3: transparent;
-  --glow-accent: none;
   --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394979c' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
 }
 
@@ -478,9 +451,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
   flex: none;
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 10px 20px;
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  background: var(--panel);
   border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
   box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 4%, transparent);
 }
@@ -638,8 +609,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 .backtest-tip {
   position: absolute; z-index: 25; display: grid; gap: 5px; min-width: 180px; max-width: 270px;
   padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  border-radius: var(--radius-md); background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.6); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  border-radius: var(--radius-md); background: var(--panel);
   box-shadow: var(--shadow-lg); pointer-events: none; font-size: var(--fs-xs);
 }
 .backtest-tip[hidden] { display: none; }
@@ -893,7 +863,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 .pt-hero::after { content: ''; position: absolute; z-index: -1; inset: auto -5% -80% auto; width: 360px; aspect-ratio: 1; border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); border-radius: 50%; box-shadow: 0 0 0 38px color-mix(in srgb, var(--accent) 5%, transparent), 0 0 0 78px color-mix(in srgb, var(--accent) 4%, transparent); }
 .pt-hero h1 { margin: 0 0 var(--space-2); font-size: var(--fs-4xl); line-height: var(--lh-tight); }
 .pt-hero p { max-width: 800px; margin: 0; color: var(--muted); line-height: var(--lh-normal); }
-.pt-hero-orbit { display: grid; grid-template-columns: auto auto; align-items: center; gap: 6px 9px; min-width: 150px; padding: 14px 18px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line)); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--panel) 84%, transparent); box-shadow: var(--shadow-sm); }
+.pt-hero-orbit { display: grid; grid-template-columns: auto auto; align-items: center; gap: 6px 9px; min-width: 150px; padding: 14px 18px; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line)); border-radius: var(--radius-lg); background: var(--panel); box-shadow: var(--shadow-sm); }
 .pt-hero-orbit b { display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-family: var(--mono); }
 .pt-hero-orbit span { color: var(--ink-2); font-weight: 800; }
 .pt-hero-orbit i { grid-column: 1; justify-self: center; width: 1px; height: 14px; background: var(--accent); }
@@ -1034,7 +1004,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 .pt-budget-track .margin { background: var(--warn); }
 .pt-budget-track .flex { background: var(--accent); opacity: .45; }
 .pt-budget-values { display: grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap: var(--space-2); }
-.pt-budget-values article { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: color-mix(in srgb, var(--panel) 85%, transparent); }
+.pt-budget-values article { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
 .pt-budget-values span, .pt-budget-values small, .pt-budget > p { color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-normal); }
 .pt-budget-values b { color: var(--ink-2); font-family: var(--mono); font-size: var(--fs-lg); }
 .pt-budget > p { margin: 0; }
@@ -1053,7 +1023,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 .pt-allocation-summary { display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: linear-gradient(135deg, var(--panel-2), color-mix(in srgb, var(--accent) 6%, var(--panel))); }
 .pt-allocation-summary h3 { margin: 0; }
 .pt-allocation-totals { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: var(--space-2); }
-.pt-allocation-totals article { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: color-mix(in srgb, var(--panel) 88%, transparent); }
+.pt-allocation-totals article { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
 .pt-allocation-totals span, .pt-allocation-totals small { color: var(--muted); font-size: var(--fs-xs); }
 .pt-allocation-totals b { color: var(--ink-2); font-family: var(--mono); font-size: var(--fs-lg); }
 .pt-allocation-totals b[data-error] { color: var(--loss); }
@@ -1061,7 +1031,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 .pt-final-review, .pt-snapshot { display: grid; gap: var(--space-3); margin: var(--space-5) 0; padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-xl); background: linear-gradient(135deg, var(--panel-2), color-mix(in srgb, var(--accent) 6%, var(--panel))); }
 .pt-final-review h3, .pt-snapshot h3 { margin: 0; }
 .pt-final-review-grid { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: var(--space-2); }
-.pt-final-review-grid article { display: grid; grid-template-columns: 1fr auto; gap: 6px var(--space-2); align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: color-mix(in srgb, var(--panel) 88%, transparent); }
+.pt-final-review-grid article { display: grid; grid-template-columns: 1fr auto; gap: 6px var(--space-2); align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); }
 .pt-final-review-grid article:last-child { grid-column: 1 / -1; }
 .pt-final-review-grid span { grid-column: 1 / -1; color: var(--muted); font-size: var(--fs-xs); }
 .pt-final-review-grid b { color: var(--ink-2); line-height: var(--lh-normal); }
@@ -1463,8 +1433,6 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
   border-radius: var(--radius-xl);
   border: 1px solid var(--line);
   background: var(--panel);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   box-shadow: var(--shadow-xs);
   padding: 0 0 16px;
   overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; direction: ltr;
@@ -1795,8 +1763,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
   position: sticky; top: 0; z-index: 20;
   display: grid; gap: 9px; margin: 0 0 14px; padding: 11px 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 52%, var(--line)); border-radius: 12px;
-  background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: 0 8px 26px rgba(22, 32, 44, .14);
-  backdrop-filter: blur(var(--glass-blur));
+  background: var(--panel); box-shadow: 0 8px 26px rgba(22, 32, 44, .14);
 }
 .history-frozen[data-folded="1"] .frozen-facts,
 .history-frozen[data-folded="1"] .frozen-legs { display: none; }
@@ -1872,8 +1839,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 .history-tooltip {
   position: absolute; z-index: 25; width: max-content; max-width: 260px; display: grid; gap: 5px;
   padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.6); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  background: var(--panel);
   box-shadow: var(--shadow-lg);
   color: var(--ink-2); font-size: var(--fs-xs); line-height: var(--lh-normal); pointer-events: none;
 }
@@ -2116,8 +2082,6 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
   display: flex; flex-wrap: wrap; gap: 2px;
   padding: 4px; margin-bottom: 16px;
   background: var(--ground);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   border: 1px solid var(--line); border-radius: var(--radius-lg);
 }
 .settings-card { scroll-margin-top: 56px; }
@@ -2649,9 +2613,7 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
 .chart-hover-tooltip {
   position: absolute; z-index: 25; display: grid; gap: 6px; width: max-content; max-width: 260px;
   padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  background: var(--panel);
   box-shadow: var(--shadow-lg);
   color: var(--ink-2); font-size: var(--fs-xs); line-height: var(--lh-normal); pointer-events: none;
 }
@@ -3253,8 +3215,7 @@ td.gain, dd.gain { color: var(--gain); }
   position: absolute; z-index: 25; inset-block-start: 10px; display: grid; gap: 5px;
   min-width: 160px; max-width: 270px; padding: 10px 14px; transform: translateX(-50%);
   border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.6); -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
+  background: var(--panel);
   box-shadow: var(--shadow-lg); color: var(--ink-2); font-size: var(--fs-xs); pointer-events: none;
 }
 .live-market-tip b { color: var(--ink); font-family: var(--mono); }
@@ -3975,8 +3936,8 @@ button.ghost.danger:hover:not(:disabled) { background: var(--loss-soft); }
   border-radius: var(--radius-pill);
   /* سطحِ خودش را دارد، نه شفافیتِ روی لکهٔ رنگی. سنجش نشان داد روی لکهٔ
      آبیِ سرصفحه نسبت کنتراست به ۳٫۶۶ می‌رسید — زیر کف ۴٫۵. */
-  background: var(--glass);
-  border: 1px solid var(--glass-edge);
+  background: var(--panel);
+  border: 1px solid var(--line);
   color: var(--ink-2);
   font-size: .76rem;
   white-space: nowrap;
@@ -4227,123 +4188,72 @@ td.rich { padding-block: var(--space-1); }
 .gap-skin .gap-log-row small { grid-column: 1 / -1; color: var(--muted); font-size: .7rem; }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   پوستهٔ شیشه‌ای — بازطراحی ظاهر (خواستهٔ ۱۴۰۵/۰۶/۱۳)
+   لایهٔ عمق — آنچه از «پوستهٔ شیشه‌ای» ماند (جارو‌شده ۱۴۰۵/۰۶/۲۸)
 
-   این بلوک عمداً **آخر** است و عمداً بر پایه‌ها می‌نشیند. جایگزین‌کردنِ
-   خودِ قاعده‌های پایه، چهارهزار خط شیوه‌نامه را دست می‌زد که هر کدامشان
-   یک باگِ حل‌شده پشتش دارد. یک لایه روی همان‌ها، همان ظاهر را عوض می‌کند
-   بی آنکه هیچ‌کدام از آن تصمیم‌ها را دور بریزد — و برگرداندنش هم حذفِ
-   همین یک بلوک است.
+   پوستهٔ شیشه‌ای (۱۴۰۵/۰۶/۱۳) یک لایهٔ آخر بود که سطح و لبه و نور را از
+   توکن‌های `--glass-*` می‌گرفت. بعدتر همان توکن‌ها **خنثی** شدند —
+   `--glass-edge` و `--glass-sheen` شدند `transparent`، `--glass-blur` شد
+   `0px` و `--glow-accent` شد `none` — ولی قاعده‌ها سرِ جایشان ماندند. و
+   چون این لایه آخرِ شیوه‌نامه است، همان قاعده‌ها لبهٔ **پایه** را هم بی‌صدا
+   پاک می‌کردند. سه‌تایش در مرورگر اندازه گرفته شد:
 
-   قاعده‌های این لایه سه چیزند و بس: سطح، لبه، و نور. هر چیز دیگری —
-   چیدمان، فاصله، ترتیب — دست‌نخورده می‌ماند.
+     · `.ghost` پایه کادرِ `--line-input` و سایهٔ برجسته دارد؛ اینجا
+       `border: 1px solid var(--glass-edge)` رویش می‌نشست و رنگِ محاسبه‌شدهٔ
+       کادر `rgba(0, 0, 0, 0)` می‌شد — یعنی هر دکمهٔ ثانویهٔ برنامه، از
+       «انتخاب همه» تا «پوسته»، اصلاً دکمه به نظر نمی‌رسید.
+     · `box-shadow: var(--glow-accent), inset …` با `none` در آغازِ فهرست،
+       **کلِ** اعلان را بی‌اعتبار می‌کند؛ پس دکمهٔ اصلی و تبِ انتخاب‌شده هم
+       لبهٔ داخلی‌شان را از دست داده بودند.
+     · `.card`، `.pill`، `.subtabs`، `.rail` و سرستونِ جدول همین را داشتند:
+       سطحِ پایه درست بود و یک قاعدهٔ شفاف رویش می‌نشست.
+
+   خطِ زیرِ هدر یک بار دستی وصله شده بود (همان قاعدهٔ `.top` پایین) ولی
+   بقیه جارو نشده بود. حالا شد: هر قاعده‌ای که فقط با توکنِ خنثی رنگ می‌زد
+   حذف شد تا لایهٔ پایه دوباره دیده شود، و آنچه ماند یا کارِ خودش را دارد
+   یا عمق را با توکنِ واقعی می‌سازد. `backdrop-filter` هم نماند: با
+   `blur(0px)` هیچ‌وقت چیزی نبود و فقط بار پردازشی داشت.
    ═══════════════════════════════════════════════════════════════════════ */
-
-/* ——— نورِ محیط ———
-   لایه‌های تصویرِ پس‌زمینهٔ خودِ `body`، نه یک شبه‌عنصر.
-   نسخهٔ اول `body::before` با `z-index: -1` بود. شبه‌عنصرِ منفی **پشتِ
-   زمینهٔ والدش** می‌نشیند، پس تا وقتی body رنگ داشت لکه‌ها دیده نمی‌شدند.
-   رنگ به `html` منتقل شد و لکه‌ها ظاهر شدند — و یک اشکالِ بدتر ساختند که
-   فقط با سنجش پیدا شد: `--ground` پوستهٔ تیره روی
-   `body[data-theme="board"]` تعریف شده، پس `html` هرگز آن را نمی‌بیند و
-   زمینه در پوستهٔ تیره **روشن** می‌ماند. عنوانِ سفیدِ صفحه روی آن به
-   نسبت کنتراست ۱٫۱۸ رسید؛ یعنی عملاً نامرئی.
-   لایه‌بندی روی خودِ body هر دو را با هم حل می‌کند: تصویر روی رنگ می‌نشیند
-   و هر دو از یک عنصر خوانده می‌شوند، پس پوسته درست کار می‌کند و هیچ
-   ترتیبِ لایه‌ای هم لازم نیست.
-   `fixed` است تا با پیمایشِ صحنه حرکت نکند. */
-body {
-  background-color: var(--ground);
-  background-image:
-    radial-gradient(58vw 46vh at 82% -6%, var(--ambient-1), transparent 62%),
-    radial-gradient(52vw 40vh at 8% 12%, var(--ambient-2), transparent 60%),
-    radial-gradient(46vw 44vh at 50% 108%, var(--ambient-3), transparent 62%);
-  background-attachment: fixed;
-  background-repeat: no-repeat;
-}
-
-/* صحنه و پوسته باید بگذارند آن نور دیده شود. */
-.stage,
-.shell { background: transparent; }
 
 /* ——— `hidden` باید مخفی کند ———
    `.subtabs` مقدار `display: flex` می‌گذارد و همان، `display: none` که
    مرورگر برای صفت `hidden` می‌دهد را می‌شکند. نتیجه‌اش در «رادار فاصله»
-   یک جعبهٔ خالیِ شیشه‌ای بود که پیش از هر بارگذاری وسط صفحه می‌نشست و
-   هیچ‌چیز داخلش نبود — نماگرفت نشانش داد.
+   یک جعبهٔ خالی بود که پیش از هر بارگذاری وسط صفحه می‌نشست و هیچ‌چیز
+   داخلش نبود — نماگرفت نشانش داد.
    قاعده عمداً سراسری است: هر جزء دیگری هم که روزی `display` بگیرد، همین
    دام را دارد. `!important` اینجا درست است چون `hidden` یک ادعای صریحِ
    نشانه‌گذاری است، نه سلیقهٔ شیوه‌نامه. */
 [hidden] { display: none !important; }
 
-/* ——— نوار بالا ——— */
-/* قاعدهٔ دوم، بازماندهٔ پوستهٔ شیشه‌ای. وقتی توکن‌های شیشه خنثی شدند،
-   `--glass-edge` شد `transparent` — یعنی این قاعده خطِ زیرِ هدر را که
-   قاعدهٔ بالایی گذاشته بود، بی‌صدا **پاک می‌کرد**. در عکسِ صفحه هدر هیچ
-   مرزی با محتوا نداشت و روی آن شناور بود.
+/* صحنه و پوسته زمینهٔ خودشان را دوباره نمی‌زنند؛ همان `--ground` بدنه. */
+.stage,
+.shell { background: transparent; }
 
-   حالا همان چیزی است که هدرِ برنامهٔ Untitled UI است: سطحِ مات، یک خطِ
-   مویی زیرش، بی سایه. هدر شناور نیست — سقفِ صفحه است. */
+/* ——— نوار بالا ———
+   هدرِ مات با یک خطِ مویی زیرش، بی سایه و بی تاری. هدر شناور نیست — سقفِ
+   صفحه است. این قاعده روزی وصلهٔ همان دامِ بالا بود و حالا خودش تعریفِ
+   هدر است. */
 .top {
   background: var(--panel);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   border-bottom: 1px solid var(--line);
   box-shadow: none;
 }
 
-/* ——— ستون استراتژی‌ها ——— */
-.rail {
-  background: var(--glass);
-  border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
-  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--glass-sheen);
-}
+/* ——— سطحِ پرِ برند: تنها جایی که عمق خرج می‌شود ———
+   شیب و لبهٔ داخلی فقط روی کنترلِ **پرشده** می‌نشیند — دکمهٔ اصلی و تبِ
+   انتخاب‌شده — چون تنها همان‌ها «فشردنی» ادعا می‌کنند. کارت و نشان و
+   ورودی تخت می‌مانند؛ وقتی همه برجسته باشند، برجستگی یعنی هیچ.
 
-/* ——— کارت ———
-   دو سایه، نه یکی: بیرونی عمق می‌دهد و درونیِ بالا، ضخامتِ لبه را. با یک
-   سایه، کارت «شناور» می‌شود ولی شیشه‌ای نه. */
-.card {
-  /* دو لایه: نوارِ نورِ کوتاه در بالای کارت، روی سطحِ نیمه‌شفاف. سطحِ
-     یکدست، حتی نیمه‌شفاف، باز هم «کاغذ» خوانده می‌شود؛ نورِ جهت‌دار است
-     که شیشه‌اش می‌کند.
-     نوار با **پیکسل** تمام می‌شود نه با درصد. نسخهٔ اول درصدی بود
-     (`transparent 42%`) و در کارتِ بلند، آن ۴۲٪ روی متن می‌افتاد: در
-     پوستهٔ تیره کلِ ردیفِ برچسب‌ها زیر یک مهِ خاکستری رفت و «حالت بررسی»
-     و «سررسیدهای قابل بررسی» خاکستری‌روی‌خاکستری شدند. نماگرفتِ پوستهٔ
-     تیره همان را نشان داد. با واحد ثابت، نوار همیشه بالای کارت می‌ماند و
-     به متن نمی‌رسد، کارت هر چه بلند باشد. */
-  background:
-    linear-gradient(180deg,
-      color-mix(in srgb, var(--glass-sheen) 42%, transparent),
-      transparent 72px),
-    var(--glass);
-  border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
-  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--glass-sheen);
-  transition: box-shadow var(--transition-med), border-color var(--transition-med),
-              transform var(--transition-med);
-}
-.card:hover {
-  border-color: color-mix(in srgb, var(--accent) 22%, var(--glass-edge));
-  box-shadow: var(--shadow-md), inset 0 1px 0 var(--glass-sheen);
-}
-
-/* ——— دکمهٔ اصلی ———
-   شیب، نه رنگِ تخت. و درخششی هم‌رنگِ خودش، نه سایهٔ خاکستری: سایهٔ خاکستری
-   زیر یک دکمهٔ بنفش، رنگ را کدر می‌کند. */
+   فهرست سایه دیگر با متغیرِ `none`دار شروع نمی‌شود، پس معتبر است. */
 .btn, .primary {
   background: linear-gradient(160deg, var(--accent-2), var(--accent));
   border: 1px solid color-mix(in srgb, var(--accent-active) 55%, transparent);
-  box-shadow: var(--glow-accent), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 28%, transparent);
+  box-shadow: var(--shadow-xs), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 28%, transparent);
   transition: background var(--transition-fast), box-shadow var(--transition-fast),
               transform var(--transition-fast), border-color var(--transition-fast);
 }
 .btn:hover, .primary:hover {
   background: linear-gradient(160deg, var(--accent), var(--accent-hover));
-  box-shadow: var(--glow-accent), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 38%, transparent);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 38%, transparent);
   transform: translateY(-1px);
 }
 .btn:active, .primary:active {
@@ -4352,97 +4262,9 @@ body {
   transform: none;
 }
 .btn:disabled, .primary:disabled { box-shadow: none; transform: none; }
-
-/* ——— دکمهٔ دوم و دکمهٔ سبک: شیشه، نه سطحِ پر ——— */
-.ghost, .btn.sec, .btn-sec {
-  background: var(--glass-2);
-  border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  box-shadow: inset 0 1px 0 var(--glass-sheen);
-}
-.ghost:hover, .btn.sec:hover, .btn-sec:hover {
-  background: color-mix(in srgb, var(--accent) 12%, var(--glass-2));
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-}
-.ghost[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accent) 18%, var(--glass-2));
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-}
-.ghost:disabled:hover { background: var(--glass-2); border-color: var(--glass-edge); }
-
-/* ——— ورودی و کشویی ———
-   ورودی تنها جایی است که شیشه **فرو رفته** است نه برجسته: سایهٔ درونی
-   به‌جای لبهٔ روشن. همین یک وارونگی، «اینجا می‌شود نوشت» را از «اینجا
-   می‌شود فشرد» جدا می‌کند، بی آنکه رنگی اضافه شود. */
-.field input, .field select,
-select, input[type="text"], input[type="search"], input[type="number"], input[type="date"],
-textarea {
-  background-color: var(--glass-2);
-  border: 1px solid color-mix(in srgb, var(--line-input) 60%, transparent);
-  box-shadow: inset 0 1px 3px color-mix(in srgb, var(--ink) 7%, transparent);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.3);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.3);
-}
-.field input:focus, .field select:focus,
-select:focus, input[type="text"]:focus, input[type="search"]:focus,
-input[type="number"]:focus, input[type="date"]:focus, textarea:focus {
-  background-color: var(--glass);
-  border-color: var(--accent);
-  box-shadow: var(--focus-ring), inset 0 1px 3px color-mix(in srgb, var(--ink) 5%, transparent);
-}
-.field input:disabled, .field select:disabled,
-select:disabled, input:disabled {
-  background-color: color-mix(in srgb, var(--panel-2) 55%, transparent);
-  box-shadow: none;
-}
-
-/* ——— نشان و تراشه ——— */
-.pill {
-  background: var(--glass-2);
-  border: 1px solid var(--glass-edge);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  box-shadow: inset 0 1px 0 var(--glass-sheen);
-}
-.capacity > summary {
-  background: var(--glass-2);
-  border-color: var(--glass-edge);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-}
-.capacity-panel {
-  background: var(--glass);
-  border-color: var(--glass-edge);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
-  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--glass-sheen);
-}
-
-/* ——— نوار زیرتب: کنترلِ قطعه‌ای ——— */
-.subtabs {
-  padding: 4px;
-  border: 1px solid var(--glass-edge);
-  border-radius: var(--radius-pill);
-  background: var(--glass-2);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  box-shadow: inset 0 1px 3px color-mix(in srgb, var(--ink) 6%, transparent);
-}
 .subtabs button[aria-selected="true"] {
   background: linear-gradient(160deg, var(--accent-2), var(--accent));
-  box-shadow: var(--glow-accent), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 28%, transparent);
-}
-
-/* ——— سرستون جدول: نوارِ مه‌آلود ———
-   ردیف‌ها زیرش رد می‌شوند و کم‌رنگ دیده می‌شوند؛ همان چیزی که «این ستون
-   ثابت است» را بی خطِ اضافه می‌گوید. */
-table.data thead th {
-  background: var(--glass);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
-  border-bottom: 1px solid var(--glass-edge);
-  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: var(--shadow-xs), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 28%, transparent);
 }
 
 /* ——— خانهٔ راستِ سرِ بخش، جای بی‌نهایت متن نیست ———
@@ -4475,75 +4297,15 @@ table.data thead th {
   text-decoration: none;
 }
 
-/* ——— اجزای رادار فاصله، بر همان زبان ——— */
-.gap-skin .gap-kpi,
-.gap-skin .gap-rule {
-  background: var(--glass-2);
-  border-color: var(--glass-edge);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
-  box-shadow: inset 0 1px 0 var(--glass-sheen);
-}
-.gap-skin .gap-table th {
-  background: var(--glass);
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.6);
-  border-bottom: 1px solid var(--glass-edge);
-}
-.gap-alarm-card {
-  background: var(--glass);
-  border-color: var(--glass-edge);
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(1.7);
-  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--glass-sheen);
-}
-
-/* ——— سه احتیاط ———
-
-   ۱. `backdrop-filter` روی سخت‌افزار ضعیف گران است. کاربری که «حرکت کمتر»
-      را در سیستم‌عاملش خواسته، معمولاً همان کاربر است؛ پس تاری برداشته
-      می‌شود و سطح‌ها پر می‌شوند. خواناییِ متن هیچ تغییری نمی‌کند.
-   ۲. چاپ، شیشه ندارد. سطحِ نیمه‌شفاف روی کاغذ سفید یعنی متنِ کم‌رنگ.
-   ۳. مرورگری که `backdrop-filter` ندارد، سطحِ نیمه‌شفاف را روی هر چیزی
-      که پشتش باشد نشان می‌دهد — یعنی متن روی متن. برای آن، سطح‌ها پرند. */
-@media (prefers-reduced-motion: reduce) {
-  .top, .rail, .card, .ghost, .btn.sec, .btn-sec, .pill, .subtabs,
-  table.data thead th, .capacity > summary, .capacity-panel,
-  .gap-skin .gap-kpi, .gap-skin .gap-rule, .gap-skin .gap-table th, .gap-alarm-card {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-  }
-  .card, .top, .rail, .capacity-panel, .gap-alarm-card { background: var(--panel); }
-  .ghost, .btn.sec, .btn-sec, .pill, .subtabs, .capacity > summary,
-  .gap-skin .gap-kpi, .gap-skin .gap-rule { background: var(--panel-2); }
-  table.data thead th, .gap-skin .gap-table th { background: var(--panel-2); }
-  .btn:hover, .primary:hover { transform: none; }
-}
-
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .top, .rail, .card, .capacity-panel, .gap-alarm-card { background: var(--panel); }
-  .ghost, .btn.sec, .btn-sec, .pill, .subtabs, .capacity > summary,
-  .gap-skin .gap-kpi, .gap-skin .gap-rule { background: var(--panel-2); }
-  table.data thead th, .gap-skin .gap-table th { background: var(--panel-2); }
-  /* ورودی‌ها جدا، و با `background-color` نه `background`.
-     میان‌بر `background` تصویرِ پس‌زمینه را هم صفر می‌کند، و فلشِ کشویی
-     دقیقاً یک `background-image` است — پس همین یک خط، در هر مرورگرِ بدونِ
-     `backdrop-filter` فلشِ همهٔ کشویی‌ها را بی‌صدا پاک می‌کرد. نگهبان ۱۱
-     برای همین هست و همین را گرفت. */
-  .field input, .field select, select, input[type="text"], input[type="search"],
-  input[type="number"], input[type="date"], textarea { background-color: var(--panel-2); }
-}
-
+/* چاپ: سطحِ سفید و بی سایه. */
 @media print {
-  body { background-image: none; }
   .top, .rail, .card, .ghost, .btn, .primary, .pill, .subtabs,
   table.data thead th, .gap-skin .gap-kpi, .gap-skin .gap-rule {
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
     background: var(--panel);
     box-shadow: none;
   }
 }
+
 /* ————— زنجیرهٔ دوطرفه ————— */
 .lmm-chain-tools { display: flex; flex-wrap: wrap; gap: 10px; }
 .lmm-paired-wrap { overflow: auto; max-height: 620px; border: 1px solid var(--line-soft); border-radius: var(--radius-md); }
