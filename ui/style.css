@@ -30,6 +30,28 @@
   --g-900: #181d27;
   --g-950: #0a0d12;
 
+  /* خاکستریِ سرد — پلهٔ «Gray (modern)» رسمی، همان‌قدر رسمی که پلهٔ بالا.
+     چرا دو رمپِ خاکستری لازم شد: پلهٔ خنثای بالا برای **متن** ساخته شده و
+     خوب هم کار می‌کند، ولی سه سطحِ صفحه را که از رویش گرفتیم — زمینه
+     `#fafafa`، کارت `#ffffff`، سطحِ دوم `#f5f5f5` — کمتر از ۳٪ از هم
+     فاصله داشتند. یعنی کارت هیچ‌وقت «روی» چیزی ننشست؛ صفحه یک ورقِ سفیدِ
+     یکدست بود با چند خطِ مو. پوستهٔ تیره این مشکل را نداشت (۹۵۰/۹۰۰/۸۰۰)
+     و در نماگرفت هم تنها پوسته‌ای بود که عمق داشت.
+
+     این رمپ ته‌رنگ آبی دارد، همان چیزی که کامنتِ بالای این فایل از رمپِ
+     خنثی می‌خواست: «صفحهٔ پر از جدول را سرد و مالی نشان دهد نه اداری».
+     فقط **سطح و خط** از اینجا می‌آیند؛ متن همان رمپِ خنثی می‌ماند. */
+  --gm-25: #fcfcfd;
+  --gm-50: #f8fafc;
+  --gm-100: #eef2f6;
+  --gm-200: #e3e8ef;
+  --gm-300: #cdd5df;
+  --gm-400: #9aa4b2;
+  --gm-700: #364152;
+  --gm-800: #202939;
+  --gm-900: #121926;
+  --gm-950: #0d121c;
+
   /* برند: پلهٔ «Teal» رسمی. پلهٔ ۶۰۰ همان #0E9384 است. */
   --b-25: #f6fefc;
   --b-50: #f0fdf9;
@@ -75,18 +97,21 @@
      سطحِ دوم پلهٔ ۵۰، جداکنندهٔ کارت پلهٔ ۲۰۰ و کادرِ ورودی پلهٔ ۳۰۰. دو
      وزنِ خط از همین‌جا می‌آید و دیگر سلیقه‌ای نیست: خطی که *جدا می‌کند*
      نازک‌تر از خطی است که *دورِ چیزی را می‌گیرد*. */
-  --ground: var(--g-50);
+  /* سه پلهٔ واقعی: زمینه، کارت، و سطحِ دومِ درونِ کارت. فاصلهٔ زمینه تا
+     کارت حالا ۶٪ است نه ۲٪، پس کارت بی آنکه سایه‌اش را بلند کنیم «روی»
+     صفحه می‌نشیند — همان کاری که پوستهٔ تیره از اول می‌کرد. */
+  --ground: #f1f4f8;
   --panel: #ffffff;
-  --panel-2: var(--g-100);
+  --panel-2: var(--gm-50);
   /* `--line` جداکنندهٔ کارت و ردیف جدول است (border-secondary)، `--line-input`
      کادرِ ورودی و دکمهٔ ثانویه (border-primary)، و `--line-soft` نازک‌ترین
      پله برای تقسیم‌های درونی (border-tertiary). `--line-strong` پیش از این
      در چهار جا صدا زده می‌شد ولی هیچ‌جا تعریف نشده بود — یعنی محورِ نمودار
      و دستهٔ اسکرول‌بار عملاً بی‌رنگ بودند. */
-  --line: var(--g-200);
-  --line-soft: var(--g-100);
-  --line-input: var(--g-300);
-  --line-strong: var(--g-300);
+  --line: var(--gm-200);
+  --line-soft: var(--gm-100);
+  --line-input: var(--gm-300);
+  --line-strong: var(--gm-300);
   --ink: var(--g-900);
   --ink-2: var(--g-700);
   --muted: var(--g-600);
@@ -182,9 +207,13 @@
      کاملاً تخت بود. در زبانِ Untitled UI سایه تزئین نیست، *نقش* دارد:
      `xs` روی هر چیزی که خودش یک سطح است (کارت، ورودی، دکمه، جدول)،
      و پله‌های بلندتر فقط برای چیزی که واقعاً شناور است. */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .05);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, .1), 0 1px 2px -1px rgba(0, 0, 0, .1);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, .1), 0 2px 4px -2px rgba(0, 0, 0, .06);
+  /* رنگِ سایه سرمه‌ای است نه سیاه — همان `rgba(16, 24, 40, …)`ی که خودِ
+     Untitled UI می‌گذارد. سیاهِ خالص زیر یک سطحِ سفید خاکستریِ گِلی
+     می‌سازد؛ سرمه‌ای با ته‌رنگِ همان زمینه می‌خواند و سایه «کثیف» دیده
+     نمی‌شود. */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, .06);
+  --shadow-sm: 0 1px 3px rgba(16, 24, 40, .1), 0 1px 2px -1px rgba(16, 24, 40, .08);
+  --shadow-md: 0 4px 8px -2px rgba(16, 24, 40, .1), 0 2px 4px -2px rgba(16, 24, 40, .06);
   --shadow-lg: 0 12px 16px -4px rgba(0, 0, 0, .08), 0 4px 6px -2px rgba(0, 0, 0, .03), 0 2px 2px -1px rgba(0, 0, 0, .04);
   --shadow-xl: 0 20px 24px -4px rgba(0, 0, 0, .08), 0 8px 8px -4px rgba(0, 0, 0, .03), 0 3px 3px -1.5px rgba(0, 0, 0, .04);
   --shadow-2xl: 0 24px 48px -12px rgba(0, 0, 0, .18), 0 4px 4px -2px rgba(0, 0, 0, .04);
@@ -205,17 +234,25 @@
      ۱۲؛ نشان و برچسب `rounded-full`. پیش از این دکمه ۶ بود و کارت ۱۲، و
      همین دو پیکسل اختلاف باعث می‌شد دکمه کنارِ کارت «کوچک‌تر از حد» دیده
      شود. حالا یک زبانِ شکلی برای کل برنامه. */
+  /* ── گردی، بازنگری ۱۴۰۵/۰۶/۲۸ ──
+     صاحب پروژه پوسته را با «یک سایت مدرن مثل اسپاتیفای» سنجید. یکی از دو
+     چیزی که آن زبان را از پوستهٔ اداری جدا می‌کند همین است: کارت گردتر
+     است و دکمه **قرص** است، نه مستطیلِ کمی‌گرد. پله‌ها یک قدم بالا رفتند
+     و `--radius-control` از یک عددِ ثابت به قرص تبدیل شد؛ ورودی جدا
+     ماند (`--radius-input`) چون کادرِ متنِ قرصی، متن را از لبه دور
+     می‌کند و ردیفِ ارقام را می‌شکند. */
   --radius-xxs: 2px;
   --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
-  --radius-3xl: 20px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
+  --radius-3xl: 26px;
   --radius-pill: 9999px;
-  --radius-control: 8px;
+  --radius-control: var(--radius-pill);
+  --radius-input: 10px;
   /* شتاب‌گیریِ خودشان: ۱۰۰ میلی‌ثانیه خطی برای حالتِ فشار (دکمه، ردیف،
      تب) و پله‌های کندتر برای چیزی که باز و بسته می‌شود. */
   --transition-fast: .1s linear;
@@ -285,33 +322,44 @@ body[data-theme="board"] {
   --g-900: #13161b;
   --g-950: #0c0e12;
 
-  /* نگاشتِ تیرهٔ خودشان: سطحِ اصلی پلهٔ ۹۵۰، کارت پلهٔ ۹۰۰، سطحِ سوم ۸۰۰،
-     کادرِ ورودی ۷۰۰. متن از ۵۰ شروع می‌شود نه از سفیدِ خالص. */
-  --ground: var(--g-950);
-  --panel: var(--g-900);
-  --panel-2: var(--g-800);
-  --line: var(--g-800);
-  --line-soft: #191d24;
-  --line-input: var(--g-700);
-  --line-strong: var(--g-700);
+  /* ═══ سه سطحِ واقعی، نه سه سایه‌روشنِ نزدیک ═══
+     خواستهٔ صاحب پروژه (۱۴۰۵/۰۶/۲۸): «یک سایت مدرن مثل اسپاتیفای این
+     مدلی نیست». در آن زبان عمق از **اختلافِ روشناییِ سطح** می‌آید نه از
+     خط: زمینه تقریباً سیاه، کارت یک پلهٔ محسوس روشن‌تر، و سطحِ سومِ درونِ
+     کارت یک پلهٔ دیگر. خط فقط جایی می‌ماند که مرزِ دو سطحِ هم‌روشنایی
+     است، و نازک و کم‌رنگ.
+
+     پله‌های پیشین (۹۵۰/۹۰۰/۸۰۰ از رمپِ سرد) همین کار را می‌کردند ولی
+     فاصله‌شان کم بود و ته‌رنگِ آبی داشتند؛ این‌ها زغالِ خنثی‌اند با فاصلهٔ
+     بازتر، پس کارت بی هیچ سایه‌ای هم «روی» صفحه می‌نشیند. */
+  --ground: #0a0b0d;
+  --panel: #15171b;
+  --panel-2: #1e2127;
+  --line: #262a31;
+  --line-soft: #1b1e24;
+  --line-input: #363b44;
+  --line-strong: #454b56;
   --ink: var(--g-50);
   --ink-2: var(--g-300);
   --muted: var(--g-400);
   --muted-2: var(--g-500);
-  /* پلهٔ برند در پوستهٔ تیره جابه‌جا می‌شود، وارونه نمی‌شود: پرکردن همچنان
-     ۶۰۰ است (تا دکمهٔ اصلی در دو پوسته یک رنگ باشد) ولی فشار *روشن‌تر*
-     می‌کند نه تیره‌تر — روی زمینهٔ سیاه، تیره‌ترشدن یعنی ناپدیدشدن. و
-     `--accent-ink` تا پلهٔ ۴۰۰ بالا می‌رود، چون متنِ برند روی سطحِ تیره با
-     پلهٔ ۶۰۰ زیر کف ۴٫۵ می‌ماند. */
-  --accent: var(--b-600);
-  --accent-hover: var(--b-500);
-  --accent-active: var(--b-400);
+  /* ═══ برند روی زغال یک پله بالا می‌رود ═══
+     پیش از این پرکردن در هر دو پوسته پلهٔ ۶۰۰ (#0e9384) بود «تا دکمهٔ
+     اصلی در دو پوسته یک رنگ باشد». روی زمینهٔ #0a0b0d آن رنگ ۳٫۱:۱
+     کنتراست دارد و دکمهٔ اصلی خاموش دیده می‌شود — همان چیزی که پوسته را
+     «بیسیک» نشان می‌داد. پلهٔ ۴۰۰ روی همان زمینه ۹٫۱:۱ می‌دهد و متنِ روی
+     خودش تیره می‌شود؛ این همان کاری است که هر پوستهٔ تیرهٔ مدرن با رنگِ
+     برندش می‌کند. دولایگیِ توکن نشکسته: نقش هنوز به پلهٔ خامِ برند بسته
+     است، فقط به پلهٔ دیگری. */
+  --accent: var(--b-400);
+  --accent-hover: var(--b-300);
+  --accent-active: var(--b-500);
   --accent-ink: var(--b-400);
   --accent-soft: var(--b-950);
   --accent-soft-2: var(--b-900);
   --accent-line: var(--b-800);
   --accent-2: var(--b-500);
-  --on-accent: #ffffff;
+  --on-accent: #04211e;
   --btn-inner-edge: rgba(255, 255, 255, .14);
   /* وضعیت‌ها یک پله روشن‌تر از پوستهٔ روشن: پلهٔ ۴۰۰ برای خودِ رنگ و ۹۵۰
      برای زمینهٔ نرم — همان چیزی که در `theme.css` خودشان نوشته شده. */
@@ -1488,19 +1536,26 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
    رنگِ اوست. ولی وقتی ریل باز است، متن تب را می‌گوید و رنگِ زمینه فقط
    نویز اضافه می‌کرد. */
 .rail-row {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 7px 8px; margin: 0 0 2px;
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 10px; margin: 0 0 3px;
   background: transparent; border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--ink-2); font: inherit; font-size: var(--fs-sm); font-weight: 700;
+  border-radius: var(--radius-md);
+  color: var(--muted); font: inherit; font-size: var(--fs-sm); font-weight: 700;
   text-align: start; cursor: pointer; position: relative;
   transition: color var(--transition-fast), background var(--transition-fast),
               border-color var(--transition-fast);
 }
-.rail-row:hover { color: var(--ink); background: var(--ground); }
+.rail-row:hover { color: var(--ink); background: var(--panel-2); }
+/* ردیفِ باز، تنها جای فهرست است که رنگِ برند می‌گیرد: یک نوارِ کوتاه در
+   لبهٔ شروع به‌علاوهٔ سطحِ روشن‌تر. نوار لازم است چون در پوستهٔ تیره
+   اختلافِ دو سطحِ نزدیک، از گوشهٔ چشم دیده نمی‌شود؛ خطِ رنگی می‌شود. */
 .rail-row[aria-current="true"] {
   color: var(--ink); font-weight: 800;
   background: var(--panel-2);
+}
+.rail-row[aria-current="true"]::after {
+  content: ""; position: absolute; inset-inline-start: 0; inset-block: 22%;
+  width: 3px; border-radius: var(--radius-pill); background: var(--accent);
 }
 .rail-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .rail-row[data-kbd-active="1"] { box-shadow: inset 0 0 0 2px var(--accent-line); }
@@ -2051,9 +2106,18 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
 .empty p { margin: 0; max-width: 352px; line-height: var(--lh-normal); }
 
 /* ——— اجزای مشترک ——— */
-.page-head { margin-bottom: 18px; }
-.page-head h2 { margin: 0; font-size: var(--fs-4xl); font-weight: 800; line-height: var(--lh-tight); }
-.page-head p { margin: 4px 0 0; color: var(--muted); max-width: 74ch; }
+/* تیترِ صفحه در پوستهٔ تازه «اعلام» می‌کند، نه «برچسب می‌زند»: درشت‌تر،
+   سنگین‌تر، و با فاصلهٔ حرفیِ کمی منفی که تیترِ بولدِ درشت را جمع نگه
+   می‌دارد. متنِ زیرش عمداً کوتاه‌تر می‌شکند تا تیتر تنها چیزی باشد که از
+   دور دیده می‌شود. */
+.page-head { margin-bottom: var(--space-6); }
+.page-head h2 {
+  /* بی `letter-spacing`: خط فارسی وصل است و هر مقدارِ منفی، پیوندِ حرف‌ها
+     را می‌شکند. درشتی و وزن، کارِ tracking را اینجا می‌کنند. نگهبان ۵ همین
+     را قفل کرده و درست هم قفل کرده. */
+  margin: 0; font-size: var(--fs-hero); font-weight: 900; line-height: 1.25;
+}
+.page-head p { margin: 8px 0 0; color: var(--muted); max-width: 68ch; font-size: var(--fs-md); }
 
 /* کارت روی کاغذِ آبی‌ته می‌نشیند: سفیدِ سطح، خطِ مویی، و یک سایه کم‌رمق.
    کادر دیگر نیمه‌شفاف نیست — با `--line` تازه که خودش روشن است،
@@ -2061,13 +2125,13 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
    و فقط سایه نگهش می‌داشت. */
 .card {
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-xs);
-  padding: 20px 22px; margin-bottom: var(--space-4, 16px);
+  border-radius: var(--radius-xl); box-shadow: var(--shadow-xs);
+  padding: 22px 24px; margin-bottom: var(--space-5, 20px);
   transition: box-shadow var(--transition-med), border-color var(--transition-med);
 }
 .card:hover { box-shadow: var(--shadow-md); }
 .card > h3 {
-  margin: 0 0 6px; font-size: var(--fs-xl); font-weight: 800;
+  margin: 0 0 6px; font-size: var(--fs-2xl); font-weight: 800;
   display: flex; align-items: center; gap: 8px;
 }
 .card > h3 .scope {
@@ -2290,10 +2354,17 @@ select:disabled, input:disabled {
   min-height: var(--control-h, 40px);
   background: var(--accent);
   color: var(--on-accent); border: 1px solid transparent; border-radius: var(--radius-control);
-  padding: 8px 18px; font: inherit; font-weight: 700; font-size: var(--fs-sm); cursor: pointer;
+  padding: 9px 22px; font: inherit; font-weight: 800; font-size: var(--fs-sm); cursor: pointer;
   box-shadow: var(--shadow-xs-skeuo);
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast),
+              color var(--transition-fast), box-shadow var(--transition-fast),
+              transform var(--transition-fast);
 }
+/* فشارِ کوچکِ زیرِ انگشت. بزرگ‌نمایی روی *دکمه* می‌نشیند نه روی کارت:
+   کارت در جای خودش می‌ماند و فقط چیزی که فشرده می‌شود واکنش نشان
+   می‌دهد. «حرکت کمتر» همین را خاموش می‌کند (قاعده‌اش پایین‌تر هست). */
+.btn:hover, .primary:hover { transform: scale(1.02); }
+.btn:active, .primary:active { transform: scale(.98); }
 /* ماسک با `currentColor` نوشته شده نه با سیاهِ ثابت: ماسکِ CSS فقط کانالِ
    آلفا را می‌خواند، پس هر رنگِ مات کار می‌کند — و این‌طور هیچ رنگِ
    سخت‌کدشده‌ای بیرون از بلوکِ توکن نمی‌ماند. */
@@ -2355,12 +2426,13 @@ select:disabled, input:disabled {
 .ghost {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: var(--control-h-sm, 36px);
+  transition: transform var(--transition-fast);
   background: var(--panel); border: 1px solid var(--line-input); color: var(--ink-2);
   box-shadow: var(--shadow-xs-skeuo);
   border-radius: var(--radius-control); padding: 6px 12px; font: inherit; font-size: var(--fs-xs); font-weight: 700; cursor: pointer;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.ghost:hover { background: var(--ground); color: var(--ink); }
+.ghost:hover { background: var(--panel-2); color: var(--ink); border-color: var(--line-strong); transform: scale(1.02); }
 .ghost:active { background: var(--panel-2); color: var(--ink); }
 .ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ghost[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); font-weight: 800; }
@@ -2518,7 +2590,12 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
 }
 
 /* ——— شاخص‌های کلیدی ——— */
-.kpis { display: grid; gap: var(--space-3, 12px); grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); margin-bottom: var(--space-4, 16px); }
+/* ── چرا کمینهٔ ستون از ۱۶۰ به ۲۱۰ رفت ──
+   با ۱۶۰، هفت کاشیِ «موقعیت‌های من» در یک ردیفِ ۱۶۰۰ پیکسلی جا می‌شدند و
+   برچسبِ دوکلمه‌ای («سرمایه روز ورود»، «وجه تضمین امروز») دو خط می‌شد؛
+   کاشی‌ها ارتفاعِ نابرابر می‌گرفتند و ردیفِ عددها پلکانی می‌شد. با ۲۱۰
+   ردیف **می‌شکند** نه برچسب — و شکستنِ ردیف چیزی از دست نمی‌دهد. */
+.kpis { display: grid; gap: var(--space-3, 12px); grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); margin-bottom: var(--space-5, 20px); }
 /* ═══ کارتِ عدد، الگوی «metrics» خودشان ═══
 
    ایرادی که صاحب پروژه روی تصویر نشان داد: نوارِ رنگیِ چهارپیکسلی کنارِ
@@ -2542,18 +2619,47 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
    ردیف می‌شود: برچسب بالا، و عدد که *کفِ* کارت می‌نشیند. حالا هر چند خط
    که برچسب باشد، عددها روی یک خط می‌مانند. */
 .kpi {
-  display: grid; grid-template-rows: auto 1fr; align-items: start;
+  display: grid; grid-template-rows: auto 1fr auto; align-items: start;
+  /* ارتفاعِ کف، تا هفت کاشیِ هم‌ردیف یک بلوکِ منظم باشند؛ بی آن، کاشیِ
+     بی‌زیرنویس کوتاه‌تر می‌ماند و ردیف دندانه‌دار می‌شود. عددِ کف از
+     بلندترین ترکیبِ ممکن آمده: برچسبِ یک‌خطی + عددِ `--fs-4xl` + نشان. */
+  min-height: 118px;
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius-xl); padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-xl); padding: var(--space-4) var(--space-4) var(--space-3);
   box-shadow: var(--shadow-xs);
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+              background var(--transition-fast);
 }
-.kpi:hover { box-shadow: var(--shadow-md); border-color: var(--line-input); }
-.kpi .k { font-size: var(--fs-sm); color: var(--muted); font-weight: 700; margin-bottom: 4px; }
-.kpi .v { align-self: end; font-family: var(--mono); font-size: var(--fs-3xl); font-weight: 900; font-variant-numeric: tabular-nums; direction: ltr; line-height: 1.3; }
+/* هاورِ کاشی سطح را یک پله بالا می‌برد، نه سایه را: در پوستهٔ تیره سایه
+   روی زمینهٔ تقریباً سیاه دیده نمی‌شود و کاشی بی‌واکنش می‌ماند. */
+.kpi:hover { background: var(--panel-2); border-color: var(--line-input); box-shadow: var(--shadow-sm); }
+.kpi .k { font-size: var(--fs-xs); color: var(--muted); font-weight: 700; margin-bottom: var(--space-2); }
+/* عدد، چیزی است که از آن‌سوی اتاق باید خوانده شود — یک پله درشت‌تر از
+   پیش. `letter-spacing` عمداً نیست: همان اعلان روی خانه‌های فارسیِ کنارش
+   هم می‌افتد و خط را تکه‌تکه می‌کند (نگهبان ۵). */
+.kpi .v {
+  align-self: end; font-family: var(--mono); font-size: var(--fs-4xl); font-weight: 900;
+  font-variant-numeric: tabular-nums; direction: ltr; line-height: 1.2;
+  overflow-wrap: anywhere;
+}
 .kpi .v.gain { color: var(--gain); }
 .kpi .v.loss { color: var(--loss); }
-.kpi .s { font-size: var(--fs-xs); color: var(--muted); margin-top: 4px; }
+/* زیرنویس یک **نشان** است نه یک جملهٔ کم‌رنگ: واحد، علتِ نبودِ عدد، یا
+   وضعیت. با سطحِ خودش از عدد جدا می‌شود و دیگر دنبالهٔ آن خوانده نمی‌شود. */
+/* نشان یک خط است. علتِ بلند («مبنای روز پیش برای همهٔ موقعیت‌ها نیست»)
+   در `title` می‌ماند و روی کاشی با «…» بریده می‌شود — کاشی نباید برای یک
+   جملهٔ توضیحی قد بکشد و ردیف را به هم بریزد. */
+.kpi .s {
+  justify-self: start; max-width: 100%; margin-top: var(--space-2);
+  padding: 2px 10px; border-radius: var(--radius-pill);
+  background: var(--panel-2); color: var(--muted);
+  font-size: var(--fs-2xs); font-weight: 700; line-height: 1.8;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.kpi .s:empty { display: none; }
+.kpi:hover .s { background: var(--ground); }
+.kpi .v.gain + .s { background: var(--gain-soft); color: var(--gain); }
+.kpi .v.loss + .s { background: var(--loss-soft); color: var(--loss); }
 
 /* ——— نمودار بازده: امضای صفحه ——— */
 .payoff { width: 100%; height: auto; display: block; }
@@ -4251,28 +4357,10 @@ td.rich { padding-block: var(--space-1); }
    ورودی تخت می‌مانند؛ وقتی همه برجسته باشند، برجستگی یعنی هیچ.
 
    فهرست سایه دیگر با متغیرِ `none`دار شروع نمی‌شود، پس معتبر است. */
-.btn, .primary {
-  background: linear-gradient(160deg, var(--accent-2), var(--accent));
-  border: 1px solid color-mix(in srgb, var(--accent-active) 55%, transparent);
-  box-shadow: var(--shadow-xs), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 28%, transparent);
-  transition: background var(--transition-fast), box-shadow var(--transition-fast),
-              transform var(--transition-fast), border-color var(--transition-fast);
-}
-.btn:hover, .primary:hover {
-  background: linear-gradient(160deg, var(--accent), var(--accent-hover));
-  box-shadow: var(--shadow-sm), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 38%, transparent);
-  transform: translateY(-1px);
-}
-.btn:active, .primary:active {
-  background: linear-gradient(160deg, var(--accent-active), var(--accent));
-  box-shadow: inset 0 2px 6px color-mix(in srgb, var(--accent-active) 55%, transparent);
-  transform: none;
-}
+/* گرادیانِ دکمه برداشته شد: رنگِ برندِ **تخت و پررنگ** زبانِ پوستهٔ تازه
+   است. شیب روی قرصِ کوچک فقط رنگ را کدر می‌کرد. لبهٔ داخلیِ `::before`
+   سرِ جایش ماند — همان یک خط است که قرص را از یک لکهٔ رنگی جدا می‌کند. */
 .btn:disabled, .primary:disabled { box-shadow: none; transform: none; }
-.subtabs button[aria-selected="true"] {
-  background: linear-gradient(160deg, var(--accent-2), var(--accent));
-  box-shadow: var(--shadow-xs), inset 0 1px 0 color-mix(in srgb, var(--on-accent) 28%, transparent);
-}
 
 /* ——— خانهٔ راستِ سرِ بخش، جای بی‌نهایت متن نیست ———
    `#gr-status` جمله‌های بلند می‌نویسد («۰ نماد پایه در این بازه؛ …») و در

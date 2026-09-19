@@ -637,12 +637,28 @@ async function open(id) {
 const THEME_NAME = { ledger: 'دفتر', board: 'تابلو' };
 const THEME_NEXT = { ledger: 'board', board: 'ledger' };
 
-function applyTheme(name) {
+/**
+ * پوسته را اعمال می‌کند؛ `persist` فقط وقتی درست است که **کاربر** انتخاب
+ * کرده باشد.
+ *
+ * ═══ باگی که این پارامتر جوابش است ═══
+ *
+ * بوت دو بار پوسته می‌گذاشت: یک‌بار پیش از رسیدنِ تنظیمات (تا صفحه سفید
+ * چشمک نزند) و یک‌بار بعدش با `state.settings.theme`. ولی همان تماسِ اول
+ * مقدارِ پیش‌فرض را در `localStorage` **می‌نوشت** — پس در تماسِ دوم
+ * `getTheme()` دیگر خالی نبود و همیشه بر تنظیماتِ سرور غالب می‌شد.
+ *
+ * نتیجه‌اش این بود که گزینهٔ «پوسته» در تب تنظیمات روی هیچ مرورگری که
+ * یک‌بار صفحه را باز کرده بود اثر نداشت — نه خطایی، نه پیامی. با عوض‌شدنِ
+ * پیش‌فرض به «تابلو» همین دام دیده شد: صفحه با وجود پیش‌فرضِ تیره، روشن
+ * بالا می‌آمد. حالا فقط کلیکِ دکمه می‌نویسد.
+ */
+function applyTheme(name, { persist = true } = {}) {
   document.body.dataset.theme = name;
   // حافظه خصوصی/محدودشده مرورگر می‌تواند پرتاب کند؛ اگر همین‌جا بی‌نگهبان
   // بترکد، خط‌های زیرش (به‌روزرسانی برچسب دکمه) هرگز اجرا نمی‌شوند — پوسته
   // بصری عوض می‌شود ولی دکمه همچنان وضعیت قبلی را نشان می‌دهد
-  try { localStorage.setItem('theme', name); } catch { /* حافظه پر یا قفل */ }
+  if (persist) try { localStorage.setItem('theme', name); } catch { /* حافظه پر یا قفل */ }
   const btn = el('theme-btn');
   btn.textContent = `پوسته: ${THEME_NAME[name] || name}`;
   btn.title = `تعویض به پوسته ${THEME_NAME[THEME_NEXT[name]] || ''}`;
@@ -703,11 +719,11 @@ document.addEventListener('wheel', (event) => {
   if (select && document.activeElement === select) select.blur();
 }, { passive: true, capture: true });
 
-applyTheme(getTheme() || 'ledger');
+applyTheme(getTheme() || 'board', { persist: false });
 updateRailCollapsed();
 buildRail();
 await loadSettings();
-applyTheme(getTheme() || state.settings.theme || 'ledger');
+applyTheme(getTheme() || state.settings.theme || 'board', { persist: false });
 tickHealth();
 setInterval(tickHealth, 3000);
 

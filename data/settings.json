@@ -54,7 +54,7 @@
   "volDays": 120,
   "tradingDaysYr": 240,
   "shockPct": 10,
-  "theme": "ledger",
+  "theme": "board",
   "persianDigits": false,
   "topN": 200
 }
