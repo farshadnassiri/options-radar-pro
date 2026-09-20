@@ -119,7 +119,7 @@ group('۲۶۷. مصرف در سرور و تب');
     server.includes('upstream: upstreamShapeLabel(first.shape)')
       && server.includes('upstreamAlt: upstreamShapeLabel(alt.shape)'));
   check('و خطا همچنان خطا می‌ماند، نه خالیِ بی‌شرح',
-    server.includes('return [key, { rows: [], error: `${e.name}: ${e.message}` }];'));
+    server.includes('return { rows: [], error: `${e.name}: ${e.message}` };'));
 
   const tab = readSrc('../ui/tabs/data-export.mjs');
   // ═══ چرا `n=0` ═══
@@ -128,7 +128,7 @@ group('۲۶۷. مصرف در سرور و تب');
   // قراردادِ منقضی تابلوی روزانه‌اش نمی‌آمد و راست‌آزماییِ خالی‌ها برای
   // ۸۴۷ ابزار/روز کور می‌شد — دقیقاً همان‌جا که لازمش داشتیم.
   check('تابلوی روزانه با کلِ تاریخِ موجود خواسته می‌شود',
-    tab.includes("/api/dailies?ins=${codes.join(',')}&n=0")
+    tab.includes("/api/dailies?ins=${batches[index].join(',')}&n=0")
       && !tab.includes('n=${span + 10}'));
   check('و صفرِ یک مسیرِ کامل در جملهٔ وضعیت خبرِ اول است',
     tab.includes('const deadRoute =') && tab.includes('هیچ خطایی هم نداد'));

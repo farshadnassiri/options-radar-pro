@@ -4,6 +4,7 @@ import {
   BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, EMPTY_STATUS, blankAuditSummary, dataExportCandles,
   dataExportCoverageRows, dataExportFrame, dataExportListingBasis, dataExportOutcome,
   dataExportRouteSplit, dataExportSessionRows, dataExportTradeRows,
+  DEFAULT_SESSION_WINDOW, clockLabel,
 } from '../core/data-export.mjs';
 import { tradeTimeLabel } from '../core/backtest.mjs';
 import { historyDateLabel } from '../core/history.mjs';
@@ -48,20 +49,57 @@ export const DATA_EXPORT_DERIVED_HEADERS = [
 export const DATA_EXPORT_CANDLE_HEADERS = [
   'تاریخ میلادی', 'تاریخ شمسی', 'ساعت شروع', 'باز', 'بیشترین', 'کمترین', 'بسته',
   'حجم', 'ارزش (ریال)', 'تعداد معامله', 'تعداد باطل', 'منبع',
+  // در جدولِ پیوسته، سطلِ ساختگی باید خودش را معرفی کند: خانه‌های قیمتش
+  // خالی است و بی این ستون، «خالی» با «نیامد» یکی دیده می‌شود.
+  'معامله شد',
 ];
+
+// ═══════════════ سقفِ یک شیت، و چرا دیگر پرتاب نمی‌کند ═══════════════
+//
+// معیار پذیرشِ ۸ ممیزی: «خروجی بزرگ به چند بخش تقسیم شود و مجموع
+// رکوردها با دادهٔ معتبر ورودی برابر بماند.»
+//
+// رفتار قبلی صادق بود ولی بن‌بست: از ۱٬۰۴۸٬۵۷۵ ردیف بیشتر، **خطا**. برشِ
+// بی‌صدا نبود — و همین خوب بود — ولی کاربری که کلِ بازه را می‌خواست هیچ
+// راهی جز کوتاه‌کردنِ بازه نداشت، یعنی خواستهٔ اصلی برآورده نمی‌شد.
+//
+// حالا همان ابزار چند برگ می‌گیرد: «اهرم»، «اهرم (۲)»، … هر برگ سرستونِ
+// خودش را دارد و ترتیبِ ردیف‌ها دست‌نخورده می‌ماند، پس چسباندنشان همان
+// جدولِ اول است. هیچ ردیفی نه حذف می‌شود نه تکرار.
+export const SHEET_ROW_CAP = 1048575;
+
+const faNumber = (value) => String(value).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
+
+export function splitSheets(title, headers, rows, widths, cap = SHEET_ROW_CAP) {
+  const size = Math.max(1, Math.trunc(Number(cap) || 0) || SHEET_ROW_CAP);
+  if (rows.length <= size) return [sheet(title, headers, rows, widths)];
+  const parts = [];
+  for (let at = 0; at < rows.length; at += size) {
+    const index = (at / size) + 1;
+    parts.push(sheet(index === 1 ? title : `${title} (${faNumber(index)})`,
+      headers, rows.slice(at, at + size), widths));
+  }
+  return parts;
+}
 export const DATA_EXPORT_CANDLE_DERIVED_HEADERS = [
   'اندازه قرارداد', 'ارزش با اندازه قرارداد (ریال)',
 ];
 
 export function buildDataExportSheets({
   instruments = [], pairs = [], items = {}, range = {}, complete = false, note = '',
-  outcome = null, audit = [], frame = 'tick', derived = false,
+  outcome = null, audit = [], frame = 'tick', derived = false, dailyMissing = [],
+  window = DEFAULT_SESSION_WINDOW, continuous = false,
 } = {}) {
   const tf = dataExportFrame(frame);
   const coverage = dataExportCoverageRows(instruments, pairs, items, audit);
   const failed = coverage.filter((row) => row.status === 'خطا' || row.status === 'درخواست نرفت').length;
-  const empty = coverage.filter((row) => row.status !== 'داده آمد' && row.status !== 'خطا'
-    && row.status !== 'درخواست نرفت').length;
+  // ═══ چرا شمارش از `rows` می‌آید و نه از متنِ وضعیت ═══
+  //
+  // وضعیت حالا حکمِ بازبینی است و هفت مقدار دارد، نه سه تا. شمردنِ «خالی»
+  // با «هر چیزی که داده‌آمد نیست» پس از بند ۳ غلط می‌شد: پاسخِ **ناقص**
+  // ردیف دارد ولی برچسبش «داده آمد» نیست، و اگر خالی شمرده شود همان
+  // اشتباهِ وارونه ساخته می‌شود. شکلِ پاسخ را `rows` می‌گوید، نه برچسب.
+  const empty = coverage.filter((row) => row.rows === 0).length;
   const confirmedQuiet = coverage.filter((row) => row.status === EMPTY_STATUS.quiet).length;
   const result = outcome || dataExportOutcome(pairs, items);
   // ═══ چرا «صفر ریزمعامله» بالای برگ راهنما می‌نشیند ═══
@@ -78,9 +116,17 @@ export function buildDataExportSheets({
   // فایل گزارش‌شده ۵۹ ابزار/روز را «بدون معامله» خواند، از جمله خودِ نماد
   // پایه را در یک روز عادیِ بازار. تابلوی روزانه همان را تکذیب می‌کند، و
   // این سطر همان تکذیب است.
+  // ═══ چرا این خط هفت عدد شد ═══
+  //
+  // بند ۳ ممیزی: بازبینی فقط پاسخ‌های **کاملاً خالی** را می‌دید، پس فایل
+  // هیچ‌جا نمی‌توانست بگوید یک ابزار/روز «آمد ولی بریده آمد». حالا هر
+  // ابزار/روزِ پاسخ‌گرفته حکمی دارد و همه‌شان اینجا شمرده می‌شوند —
+  // «تطبیق‌شده» هم، چون بی آن، نبودِ ایراد با نبودِ بررسی یکی دیده می‌شود.
   const blankLine = blanks.total
-    ? `${blanks.missing} ابزار/روز تابلو معامله ثبت کرده ولی ریزمعامله نیامد · `
-      + `${blanks.quiet} واقعاً بی‌معامله · ${blanks.unknown} بی تابلوی روزانه`
+    ? `${blanks.matched} تطبیق‌شده · ${blanks.partial} ناقص · `
+      + `${blanks.missing} تابلو معامله ثبت کرده ولی ریزمعامله نیامد · `
+      + `${blanks.quiet} واقعاً بی‌معامله · ${blanks.surplus} تضاد با تابلو · `
+      + `${blanks.open} جلسه تمام‌نشده · ${blanks.unknown} بی تابلوی روزانه`
     : '—';
   const basis = dataExportListingBasis(instruments, pairs);
   const route = dataExportRouteSplit(pairs, items);
@@ -107,8 +153,39 @@ export function buildDataExportSheets({
     // دسته‌بندی می‌کردی. یک خط همان را می‌گوید.
     ['تفکیک مسیر', routeLine],
     ['بازبینی خالی‌ها با تابلوی روزانه', blankLine],
+    // ═══ چرا «انجام نشد» سطرِ خودش را دارد ═══
+    //
+    // ممیزی ۱۴۰۵/۰۶/۲۹ بند ۴: سقفِ ۲۰۰تاییِ `/api/dailies` بی‌صدا می‌بُرید،
+    // پس برای انتخابی بزرگ‌تر، انتهای فهرست **راست‌آزمایی نمی‌شد** و
+    // خالی‌هایش «تابلوی روزانه در دست نیست» می‌گرفتند — که همان حکمِ
+    // «نمی‌دانیم» است ولی علتش دریافتِ ما بود، نه بالادست. این دو باید
+    // در فایل از هم جدا بمانند.
+    ['راست‌آزمایی انجام‌نشده', (dailyMissing || []).length
+      ? `${(dailyMissing || []).length} ابزار تابلوی روزانه‌شان پاسخ نگرفت، پس خالی‌هایشان راست‌آزمایی نشد`
+      : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت'],
     ...(blanks.worst ? [['بدترین مورد نیامدن', `کد ${blanks.worst.ins} در ${blanks.worst.date} — تابلو ${blanks.worst.dailyTrades} معامله`]] : []),
-    ['پنجرهٔ ساعت', 'ردیف‌های برگ هر ابزار فقط جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰ است؛ شمار ردیف‌های بیرون از این بازه در ستون «بیرون از جلسه» برگ پوشش می‌آید.'],
+    ...(blanks.worstPartial ? [['بدترین پاسخِ ناقص',
+      `کد ${blanks.worstPartial.ins} در ${blanks.worstPartial.date} — تابلو ${blanks.worstPartial.dailyTrades} معامله`
+      + ` و ${blanks.worstPartial.dailyVolume} حجم، نوار ${blanks.worstPartial.tapeTrades} معامله`
+      + ` و ${blanks.worstPartial.tapeVolume} حجم`]] : []),
+    // «چند ردیف آمد» اثباتِ «کامل آمد» نیست، و فایل باید همین را بنویسد.
+    ['معیار کامل‌بودن', 'هر ابزار/روز با شمارِ معاملهٔ فعال و حجمِ تابلوی روزانهٔ همان روز سنجیده می‌شود.'
+      + ' حجم معیارِ اول است چون معاملهٔ باطل حجمش صفر است؛ اختلافِ شمار تا اندازهٔ ردیف‌های باطل توضیح دارد و بیشتر از آن «ناقص» است.'
+      + ' روزی که جلسه‌اش تمام نشده سنجیده نمی‌شود.'],
+    // ═══ چرا این سطر عددِ واقعیِ اجرا را می‌نویسد ═══
+    //
+    // بند ۶ ممیزی: متنِ راهنما «۹:۰۰ تا ۱۲:۳۰» را **ثابت** نوشته بود، پس
+    // اگر روزی پنجره عوض می‌شد فایل همچنان عددِ قدیمی را ادعا می‌کرد.
+    // حالا پنجره یک مقدار است و پالایه، شمع‌سازی و همین جمله از یک جا
+    // می‌خوانند.
+    ['پنجرهٔ ساعت', `ردیف‌های برگ هر ابزار فقط ${clockLabel(window.start)} تا ${clockLabel(window.end)}`
+      + ' (شاملِ ثانیهٔ پایان) است؛ شمار ردیف‌های بیرون از این بازه در ستون «بیرون از جلسه» برگ پوشش می‌آید.'
+      + `${window.custom ? ' این پنجره را خودِ شما انتخاب کرده‌اید، پیش‌فرض ۰۹:۰۰:۰۰ تا ۱۲:۳۰:۰۰ است.' : ''}`],
+    ['جدول زمانی', continuous
+      ? 'پیوسته — هر سطلِ پنجره ردیف دارد، حتی سطلی که معامله‌ای نداشته.'
+        + ' سطلِ بی‌معامله خانه‌های قیمتش **خالی** است و ستون «معامله شد» آن را «خیر» می‌خواند؛'
+        + ' هیچ قیمتی درون‌یابی یا از سطل قبل تکرار نشده.'
+      : 'فشرده — فقط سطلی که معامله داشته ردیف دارد. برای جدولِ تمام‌دقیقه‌ها گزینهٔ «جدول زمانی پیوسته» را روشن کنید.'],
     ['تایم‌فریم', tf.seconds
       ? `${tf.label} — هر ردیف یک سطل زمانی است که مبدأش ۹:۰۰ است. سطلِ بی‌معامله ردیف ندارد و هیچ قیمتی درون‌یابی نشده. معاملهٔ حراج پایانی (۱۲:۳۰:۰۰) در سطلِ آخرِ همان روز می‌نشیند، نه در سطلی تازه.`
       : `${tf.label} — هر ردیف یک اجرای گزارش‌شدهٔ بورس است.`],
@@ -170,26 +247,25 @@ export function buildDataExportSheets({
     ];
   }), [100, 120, 95, 140, 100, 95, 95, 75, 65, 65, 95, 100, 250, 110, 100, 200, 80, 260]);
 
-  const instrumentSheets = instruments.map((instrument) => {
-    // خواستهٔ صریح: «هر روز معاملاتی از ساعت ۹ الی ۱۲:۳۰». ردیفِ بیرون از
-    // این پنجره حذف می‌شود ولی شمارش‌شده — نه بی‌صدا.
-    const { rows } = dataExportSessionRows(dataExportTradeRows(instrument, pairs, items));
+  const instrumentSheets = instruments.flatMap((instrument) => {
+    // ردیفِ بیرون از پنجره حذف می‌شود ولی شمارش‌شده — نه بی‌صدا.
+    const { rows } = dataExportSessionRows(dataExportTradeRows(instrument, pairs, items, window));
     const title = instrument.kind === 'underlying' ? `پایه ${instrument.name}` : instrument.name;
     const size = instrument.kind === 'underlying' ? 1 : Number(instrument.size) || 0;
     if (tf.seconds) {
-      const bars = dataExportCandles(rows, tf.seconds);
-      return sheet(title,
+      const bars = dataExportCandles(rows, tf.seconds, { window, continuous });
+      return splitSheets(title,
         derived ? [...DATA_EXPORT_CANDLE_HEADERS, ...DATA_EXPORT_CANDLE_DERIVED_HEADERS] : DATA_EXPORT_CANDLE_HEADERS,
         bars.map((bar) => [
           bar.date, jalaliText(bar.date), tradeTimeLabel(bar.time),
           bar.open, bar.high, bar.low, bar.close,
           bar.volume, bar.value, bar.trades, bar.canceled, bar.source,
+          bar.traded === false ? 'خیر' : 'بله',
           ...(derived ? [size > 0 ? size : NaN, size > 0 ? bar.value * size : NaN] : []),
         ]),
-        [95, 95, 85, 95, 95, 95, 95, 90, 130, 95, 85, 85, ...(derived ? [95, 150] : [])]);
+        [95, 95, 85, 95, 95, 95, 95, 90, 130, 95, 85, 85, 80, ...(derived ? [95, 150] : [])]);
     }
-    if (rows.length > 1048575) throw new Error(`ریزمعاملهٔ ${instrument.name} از سقف یک شیت اکسل بیشتر است؛ بازه را کوتاه‌تر کن یا تایم‌فریم را بالا ببر.`);
-    return sheet(title,
+    return splitSheets(title,
       derived ? [...DATA_EXPORT_HEADERS, ...DATA_EXPORT_DERIVED_HEADERS] : DATA_EXPORT_HEADERS,
       rows.map((row) => [
         row.date, jalaliText(row.date), tradeTimeLabel(row.time), row.sequence,

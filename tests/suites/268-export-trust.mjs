@@ -81,7 +81,13 @@ group('۲۶۸. خالیِ تأییدنشده «بدون معامله» نیست'
     statusOf(20241226) === EMPTY_STATUS.quiet);
   check('خالیِ بی‌تابلو «تأییدنشده» می‌ماند — نه ادعای بازار',
     statusOf(20241227) === EMPTY_STATUS.unknown);
-  check('ردیفِ دارای داده دست نمی‌خورد', statusOf(20241228) === 'داده آمد');
+  // ═══ چرا این ادعا وارونه شد ═══
+  //
+  // پیش از بند ۳ ممیزی، هر پاسخِ غیرخالی «داده آمد» بود — یعنی ستونی که
+  // باید کامل‌بودن را بگوید، کامل‌بودن را فرض می‌کرد. حالا ردیفی که
+  // بازبینی حکمی برایش ندارد «تأییدنشده» است، نه «کامل».
+  check('ردیفِ دارای دادهٔ بی‌حکم، «تأییدنشده» است نه «کامل»',
+    statusOf(20241228) === 'داده آمد، تأییدنشده');
   // بی بازبینی هیچ ادعایی دربارهٔ بازار نمی‌شود.
   check('بی تابلوی روزانه، هیچ خالی‌ای «بدون معامله» خوانده نمی‌شود',
     dataExportCoverageRows(instruments, pairs, items).every((row) => row.status !== EMPTY_STATUS.quiet));
@@ -207,5 +213,5 @@ group('۲۶۸. ابزارِ بی‌جفت برگ نمی‌گیرد');
 
   check('تب همین فهرستِ فیلترشده را به فایل می‌دهد',
     readSrc('../ui/tabs/data-export.mjs').includes('const sheetInstruments = instrumentsWithPairs(instruments, pairs)')
-      && readSrc('../ui/tabs/data-export.mjs').includes('prepared = { instruments: sheetInstruments,'));
+      && readSrc('../ui/tabs/data-export.mjs').includes('instruments: sheetInstruments, pairs, items, range,'));
 }

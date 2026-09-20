@@ -34,7 +34,15 @@ export async function loadHistoricalDailies(codes, baseIns, fetcher = fetch, { o
         for (const ins of part) {
           const value = payload[ins];
           seriesByIns[ins] = Array.isArray(value?.rows) ? value.rows : [];
-          const error = value?.error || value?.fallbackError || (!Array.isArray(value?.rows) ? 'پاسخ معتبر این ابزار دریافت نشد' : '');
+          // ═══ چرا `fallbackNote` هم خطا شمرده می‌شود ═══
+          //
+          // بند ۵ ممیزی: منبع جایگزین یک endpoint **تک‌روزه** است و
+          // حلقهٔ بازه ندارد. برگشتنِ «چند ردیف» اثبات نمی‌کند روزِ
+          // خواسته‌شده در دست است — و نمونهٔ واقعی نشان داد می‌تواند یک
+          // عکسِ پیش‌جلسه با قیمتِ دیروز باشد. سرور حالا می‌گوید پوشش داد
+          // یا نه؛ سکوت در برابر این پیام یعنی همان ادعای بی‌پشتوانه.
+          const error = value?.error || value?.fallbackError || value?.fallbackNote
+            || (!Array.isArray(value?.rows) ? 'پاسخ معتبر این ابزار دریافت نشد' : '');
           if (error) errors[ins] = String(error);
         }
       } catch (error) {

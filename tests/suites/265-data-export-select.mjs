@@ -243,8 +243,10 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
     server.includes('historicalTradesAltPath(code, date)') && server.includes("variant: 'true'"));
   // پرچم دوم فقط برای **خالی** است: پرتابِ مسیر اول مستقیم به `catch`
   // می‌رود و خطا برمی‌گرداند، نه خالیِ بی‌شرح.
+  // پرچمِ دوم فقط پس از **خالی** می‌آید؛ پرتابِ مسیر اول مستقیم به
+  // `catch` می‌رود. شرط روی `first.rows.length` همین را می‌گوید.
   check('و خطا دوباره پرسیده نمی‌شود — فقط خالی',
-    server.includes("if (first.rows.length) return [key, { rows: first.rows, variant: 'true' }];"));
+    /if \(first\.rows\.length\) \{[\s\S]{0,200}variant: 'true'/.test(server));
   check('خالی‌بودنِ پس از هر دو مسیر علامت می‌خورد', server.includes('emptyBoth'));
 
   const tab = readSrc('../ui/tabs/data-export.mjs');

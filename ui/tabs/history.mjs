@@ -386,6 +386,9 @@ export async function mount(root, { state }) {
   const entrySelect = $('h-entry'), exitSelect = $('h-exit'), status = $('h-status');
   const loadBtn = $('h-load'), runBtn = $('h-run'), exportBtn = $('h-export');
   let chain = new Map(), ua = null, analysisUa = null, contracts = [], seriesByIns = {}, dates = [];
+  // خطای تک‌تکِ ابزارها، جدا از سری‌ها. پاسخِ موفقِ دسته‌ای می‌تواند داخلش
+  // خطای یک ابزار را حمل کند؛ دور ریختنش همان بند ۷ ممیزی است.
+  let seriesErrors = {};
   // روز جاریِ چسبانده‌شده. صفر یعنی همه‌چیز بسته‌شده است.
   let liveDate = 0;
   let currentReplay = null, currentArgs = null, autoRows = [], selectedAuto = null;
@@ -589,7 +592,7 @@ export async function mount(root, { state }) {
   }
 
   function invalidateLoadedHistory() {
-    analysisUa = null; contracts = []; seriesByIns = {}; dates = []; liveDate = 0;
+    analysisUa = null; contracts = []; seriesByIns = {}; seriesErrors = {}; dates = []; liveDate = 0;
     rollingArgs = null; rollingResult = null; setRollingCandidates([]);
     runBtn.disabled = true; exportBtn.disabled = true;
     $('h-days-range').hidden = true; $('h-legs-card').hidden = true; $('h-results').hidden = true;
@@ -730,9 +733,32 @@ export async function mount(root, { state }) {
         if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
         return payload;
       }));
+      // ═══ چرا خطای هر ابزار جدا نگه داشته می‌شود ═══
+      //
+      // بند ۷ ممیزیِ ۱۴۰۵/۰۶/۲۹: سرور خطای هر ابزار را **داخل** پاسخِ
+      // موفقِ دسته‌ای می‌فرستد، ولی اینجا فقط `value.rows || []` ذخیره
+      // می‌شد. پس شکستِ شبکهٔ یک قرارداد دقیقاً شبیه «آن قرارداد داده‌ای
+      // نداشت» دیده می‌شد، با وجود اینکه درخواستِ HTTP موفق بوده.
+      //
+      // نتیجه‌اش بدتر از یک پیامِ گمشده است: تاریخ‌هایی که پاسخ نگرفته‌اند
+      // از سری می‌افتند و بازه **کامل** به نظر می‌رسد. سکوت اینجا یعنی
+      // ساختنِ یک تاریخچهٔ بی‌شکاف از دادهٔ شکاف‌دار.
       seriesByIns = {};
+      seriesErrors = {};
       for (const payload of payloads) {
-        for (const [ins, value] of Object.entries(payload)) seriesByIns[ins] = value.rows || [];
+        for (const [ins, value] of Object.entries(payload)) {
+          seriesByIns[ins] = value?.rows || [];
+          const why = value?.error || value?.fallbackError || value?.fallbackNote
+            || (!Array.isArray(value?.rows) ? 'پاسخ معتبر این ابزار دریافت نشد' : '');
+          if (why) seriesErrors[ins] = String(why);
+        }
+      }
+      // کدی که اصلاً کلیدی در پاسخ ندارد هم «نیامد» است، نه «خالی بود».
+      for (const code of codes) {
+        if (!Object.prototype.hasOwnProperty.call(seriesByIns, code)) {
+          seriesByIns[code] = [];
+          seriesErrors[code] = 'پاسخی برای این ابزار نیامد';
+        }
       }
       // روز جاری پس از فهرست بسته‌شده می‌نشیند، نه به‌جای آن. اگر نچسبد،
       // `applyLiveScope` همان سری‌های ورودی را برمی‌گرداند و تحلیل دقیقاً
@@ -759,7 +785,13 @@ export async function mount(root, { state }) {
       $('h-rolling-leg-value').value = $('h-leg-value').value;
       $('h-rolling-leg-volume').value = $('h-leg-volume').value;
       const withData = codes.filter((code) => seriesByIns[code]?.length).length;
-      setStatus(`تاریخچه ${fmt.int(withData)} از ${fmt.int(codes.length)} نماد آماده است.`);
+      // «نیامد» و «خالی بود» دو چیزند و جمله هر دو را جدا می‌گوید، وگرنه
+      // کاربر شکستِ دریافت را کم‌معاملگیِ نماد می‌خواند.
+      const failed = codes.filter((code) => seriesErrors[code]).length;
+      const firstWhy = failed ? seriesErrors[codes.find((code) => seriesErrors[code])] : '';
+      setStatus(`تاریخچه ${fmt.int(withData)} از ${fmt.int(codes.length)} نماد آماده است.`
+        + (failed ? ` ${fmt.int(failed)} نماد پاسخ نگرفت (${firstWhy}) — این خالی‌بودنِ بازار نیست.` : ''),
+      failed > 0);
     } catch (error) {
       setStatus(`دریافت تاریخچه کامل نشد: ${error.message}`, true);
     } finally {

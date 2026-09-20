@@ -8,6 +8,7 @@
 // می‌گیرد و از همان موتور بازده مشترک می‌آید.
 
 import { rollAnalysis, markToMarket } from '/core/positions.mjs';
+import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
 import { rollFriction, rollPayback } from '/core/roll-cost.mjs';
 import { positionStatus } from '/core/position-close.mjs';
 import { tehranDateNumber } from '/core/live-day.mjs';
@@ -207,11 +208,23 @@ export async function mount(root, { state, api }) {
       ...candidates.map((c) => c.q.ins).filter(Boolean)].filter(Boolean));
     if (!codes.size) return;
     try {
-      const q = [...codes].slice(0, 180).join(',');
-      const [books, infos] = await Promise.all([
-        fetch(`/api/books?ins=${q}`).then((r) => r.json()),
-        fetch(`/api/infos?ins=${q}`).then((r) => r.json()),
-      ]);
+      // ═══ چرا `slice(0, 180)` رفت ═══
+      //
+      // ممیزی ۱۴۰۵/۰۶/۲۹ بند ۴: این برش خودش یک حذفِ بی‌صدا بود —
+      // نامزدِ صدوهشتادویکم بی‌قیمت می‌ماند و در جدول «بی‌مظنه» دیده
+      // می‌شد، انگار بازار برایش قیمتی نداشته. حالا همه می‌روند، دسته‌دسته.
+      const all = [...codes];
+      const bookParts = [], infoParts = [];
+      for (const batch of insBatches(all, INS_CAP.books)) {
+        const q = batch.join(',');
+        const [b, i] = await Promise.all([
+          fetch(`/api/books?ins=${q}`).then((r) => r.json()),
+          fetch(`/api/infos?ins=${q}`).then((r) => r.json()),
+        ]);
+        bookParts.push(b); infoParts.push(i);
+      }
+      const books = mergeInsPayloads(all, bookParts).payload;
+      const infos = mergeInsPayloads(all, infoParts).payload;
       for (const ins of codes) {
         const b = books[ins]?.book || [];
         const i2 = infos[ins] || {};

@@ -7,11 +7,12 @@ import {
   dataExportPairBatches, dataExportPairs, dataExportRouteSplit, dataExportSessionRows,
   dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments,
   exportBlockers, instrumentsWithPairs, splitPairBatch, suspectEmptyDays,
-  unknownListingContracts,
+  unknownListingContracts, clockLabel, sessionWindow,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
 import { LIVE_CODE_CAP, splitTradeDays } from '/core/trades-source.mjs';
+import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
 import { inferLiveSessionDate, liveTapeCodes, liveTapeDay } from '/core/live-day.mjs';
 import { fetchRangeUniverse, mountHistoryRange } from '/ui/history-range.mjs';
 import { buildDataExportSheets, dataExportFilename } from '/ui/data-export-workbook.mjs';
@@ -55,12 +56,28 @@ export async function mount(root, { state, api }) {
           <select id="de-frame">${DATA_EXPORT_FRAMES.map((frame) => `<option value="${frame.id}">${esc(frame.label)}</option>`).join('')}</select></label>
         <label class="check" for="de-derived"><input type="checkbox" id="de-derived"><span>ستون‌های مشتق (ارزش خام، اندازه و ارزش قرارداد)</span></label>
       </div>
-      <p class="note" id="de-frame-note">تایم‌فریم فقط شکل <b>خروجی</b> را عوض می‌کند، نه دریافت را: ریزمعامله همیشه کامل گرفته می‌شود و شمع از روی همان ساخته می‌شود، پس عوض‌کردنش دریافت دوباره نمی‌خواهد. سطلِ بی‌معامله ردیف نمی‌گیرد و هیچ قیمتی درون‌یابی نمی‌شود.</p>
+      <div class="de-actions" style="margin-bottom:8px">
+        <label class="check" for="de-from-time"><span>از ساعت</span>
+          <input type="time" id="de-from-time" step="1" value="09:00:00"></label>
+        <label class="check" for="de-to-time"><span>تا ساعت</span>
+          <input type="time" id="de-to-time" step="1" value="12:30:00"></label>
+        <label class="check" for="de-continuous"><input type="checkbox" id="de-continuous"><span>جدول زمانی پیوسته (سطلِ بی‌معامله هم ردیف بگیرد)</span></label>
+      </div>
+      <p class="note" id="de-frame-note">تایم‌فریم فقط شکل <b>خروجی</b> را عوض می‌کند، نه دریافت را: ریزمعامله همیشه کامل گرفته می‌شود و شمع از روی همان ساخته می‌شود، پس عوض‌کردنش دریافت دوباره نمی‌خواهد. پنجرهٔ ساعت هم همین‌طور است و در پالایه، شمع‌سازی و برگ راهنما یکسان اعمال می‌شود. جدول پیوسته سطلِ بی‌معامله را با خانه‌های قیمتِ <b>خالی</b> می‌آورد و ستون «معامله شد» آن را «خیر» می‌خواند — هیچ قیمتی درون‌یابی یا از سطل قبل تکرار نمی‌شود.</p>
+      <p class="note" id="de-window-note" hidden></p>
       <div class="de-actions"><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
       <p id="de-status" class="note" role="status" aria-live="polite"></p><div id="de-result" class="history-table-wrap"></div>
     </section>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
+  /**
+   * پنجرهٔ ساعتِ همین حالا، از ورودی‌های کاربر.
+   *
+   * ورودیِ نامعتبر بی‌صدا به پیش‌فرض نمی‌افتد: `sessionWindow` دلیلش را
+   * می‌دهد و همان‌جا زیرِ کنترل‌ها نوشته می‌شود. سکوت در این مورد یعنی
+   * کاربر فکر کند انتخابش اعمال شده، در حالی که نشده.
+   */
+  const currentWindow = () => sessionWindow($('de-from-time').value, $('de-to-time').value);
   const basesHost = $('de-bases'), contractsHost = $('de-contracts');
   const runBtn = $('de-run'), exportBtn = $('de-export'), stopBtn = $('de-stop');
   let rangeUi = null, universe = null, controller = null, refreshTimer = null, loadSeq = 0, stopped = false;
@@ -283,6 +300,9 @@ export async function mount(root, { state, api }) {
    * شکستش کارِ اصلی را نمی‌خورد: بی این، حکمِ خالی‌ها «نمی‌دانیم» می‌شود،
    * نه «بی‌معامله».
    */
+  // کدهایی که تابلوی روزانه‌شان پاسخ نگرفت. «نیامد» است، نه «نداشت».
+  let dailyMissing = [];
+
   async function fetchDaily(instruments, range, signal) {
     const codes = [...new Set(instruments.map((item) => String(item.ins)).filter(Boolean))];
     if (!codes.length) return {};
@@ -296,10 +316,37 @@ export async function mount(root, { state, api }) {
       // تابلوی روزانه‌اش نمی‌آمد — در فایل گزارش‌شده ۸۴۷ ابزار/روز «تابلوی
       // روزانه در دست نیست» گرفتند، یعنی راست‌آزمایی برای دوسومِ جفت‌ها
       // کور بود، دقیقاً همان‌جا که به آن نیاز داشتیم.
-      const response = await fetch(`/api/dailies?ins=${codes.join(',')}&n=0`, { cache: 'no-store', signal });
-      const payload = await response.json();
-      if (!response.ok || payload?.error) throw new Error(payload?.error || `پاسخ ${response.status}`);
-      return payload && typeof payload === 'object' ? payload : {};
+      // ═══ چرا دسته‌بندی، و چرا شمارشِ گمشده ═══
+      //
+      // ممیزی ۱۴۰۵/۰۶/۲۹ بند ۴: اینجا **همهٔ** کدها یکجا می‌رفتند و سقفِ
+      // ۲۰۰تاییِ سرور بی‌صدا می‌بُرید. برای انتخابی بزرگ‌تر از ۲۰۰ ابزار،
+      // راست‌آزماییِ خالی‌ها برای انتهای فهرست کور می‌شد — یعنی همان
+      // سازوکاری که باید «داده نیامد» را از «بی‌معامله» جدا کند، خودش
+      // خاموش بود، و کاربر هیچ نشانه‌ای نمی‌دید.
+      //
+      // حالا سرور اضافه‌درخواست را رد می‌کند و این تب خودش دسته می‌کند؛
+      // و پس از جمع‌کردن، کدِ بی‌پاسخ **نام برده می‌شود** نه اینکه به
+      // «تابلوی روزانه در دست نیست» ترجمه شود.
+      const batches = insBatches(codes, INS_CAP.dailies);
+      const parts = [];
+      for (let index = 0; index < batches.length; index += 1) {
+        if (batches.length > 1) {
+          setStatus(`در حال گرفتن تابلوی روزانه: بسته ${fmt.int(index + 1)} از ${fmt.int(batches.length)}…`);
+        }
+        const response = await fetch(`/api/dailies?ins=${batches[index].join(',')}&n=0`, { cache: 'no-store', signal });
+        const payload = await response.json();
+        if (!response.ok || payload?.error) throw new Error(payload?.error || `پاسخ ${response.status}`);
+        parts.push(payload && typeof payload === 'object' ? payload : {});
+      }
+      const merged = mergeInsPayloads(codes, parts);
+      if (merged.missing.length) {
+        // بالا نمی‌رود که اجرا را بیندازد؛ ثبت می‌شود تا در لاگ دیده شود
+        // و در برگ راهنما شمرده شود.
+        logError('data-export:daily-missing',
+          new Error(`${merged.missing.length} ابزار از تابلوی روزانه پاسخ نگرفتند`));
+      }
+      dailyMissing = merged.missing;
+      return merged.payload;
     } catch (error) {
       if (error.name === 'AbortError') throw error;
       logError('data-export:daily', error);
@@ -429,11 +476,14 @@ export async function mount(root, { state, api }) {
    */
   function paintResult(instruments, pairs, items, bytes = null) {
     const frame = dataExportFrame($('de-frame').value);
+    const window = currentWindow();
+    const continuous = $('de-continuous').checked;
     let ticks = 0, out = 0;
     const rows = instruments.map((item) => {
-      const split = dataExportSessionRows(dataExportTradeRows(item, pairs, items));
+      const split = dataExportSessionRows(dataExportTradeRows(item, pairs, items, window));
       const count = split.rows.length;
-      const written = frame.seconds ? dataExportCandles(split.rows, frame.seconds).length : count;
+      const written = frame.seconds
+        ? dataExportCandles(split.rows, frame.seconds, { window, continuous }).length : count;
       ticks += count; out += written;
       const failures = pairs.filter((pair) => pair.ins === item.ins && items[pair.key]?.error).length;
       return `<tr><td>${esc(item.baseName)}</td><td>${esc(item.name)}</td><td>${item.kind === 'underlying' ? 'پایه' : item.kind === 'call' ? 'کال' : 'پوت'}</td><td class="n">${fmt.int(count)}</td><td class="n">${fmt.int(written)}</td><td class="n">${fmt.int(split.outside)}</td><td class="n">${fmt.int(failures)}</td></tr>`;
@@ -481,19 +531,34 @@ export async function mount(root, { state, api }) {
       await fetchLive(live, items, controller.signal, resolved);
       const dailyByIns = await fetchDaily(instruments, range, controller.signal);
       setStatus('داده‌ها آماده شد.');
+      // ═══ کدام روز «هنوز تمام نشده» است ═══
+      //
+      // تابلوی روزانهٔ روزِ جاری لحظه‌ای است و نوار هنوز پر می‌شود؛ تطبیق
+      // شمار و حجم برای آن روز معنا ندارد و «ناقص» خواندنش ادعای غلط است.
+      // فقط فازِ `open` چنین است: در `after` جلسه بسته شده و تطبیق دوباره
+      // معنادار می‌شود.
+      const openDates = String(resolved.payload?.market?.phase || '') === 'open' && resolved.date
+        ? [resolved.date] : [];
       let outcome = dataExportOutcome(pairs, items);
-      let audit = dataExportBlankAudit(pairs, items, dailyByIns);
+      let audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
       // خالیِ تاریخی که تابلوی روزانه تکذیبش می‌کند غالباً پاسخِ خالیِ کش
       // CDN است. همان جفت‌ها دقیقاً یک بار با cache-buster دوباره می‌روند؛
       // نه همهٔ بازه، و نه خالی‌ای که تابلو واقعاً صفر اعلام کرده است.
-      const missingKeys = new Set(audit.filter((row) => row.verdict === 'missing'
+      //
+      // ═══ و پاسخِ **نیمه‌کامل** هم همین‌جا دوباره پرسیده می‌شود ═══
+      //
+      // بند ۳ ممیزی: نوارِ یک‌ردیفی در برابر تابلوی هزارمعامله‌ای «موفق»
+      // شمرده می‌شد و هیچ تلاش دوباره‌ای نمی‌گرفت. یک پاسخِ بریده هم یک
+      // دریافتِ شکست‌خورده است، فقط با ظاهرِ موفق — پس دقیقاً همان یک دورِ
+      // بی‌کش را می‌گیرد که خالیِ تکذیب‌شده می‌گیرد.
+      const missingKeys = new Set(audit.filter((row) => (row.verdict === 'missing' || row.verdict === 'partial')
         && items[row.key]?.source === 'history').map((row) => row.key));
       const staleHistorical = pairs.filter((pair) => missingKeys.has(pair.key));
       if (staleHistorical.length) {
-        setStatus(`${fmt.int(staleHistorical.length)} ابزار/روز در تاریخچه خالی بود ولی تابلو معامله ثبت کرده؛ دریافت تازه در حال انجام است…`);
+        setStatus(`${fmt.int(staleHistorical.length)} ابزار/روز با تابلوی روزانه نخواند (خالی یا ناقص)؛ دریافت تازه در حال انجام است…`);
         await fetchHistorical(staleHistorical, items, controller.signal, true);
         outcome = dataExportOutcome(pairs, items);
-        audit = dataExportBlankAudit(pairs, items, dailyByIns);
+        audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
       }
       // ═══ دور دوم برای روزهایی که **سراسر** خالی آمدند ═══
       //
@@ -517,7 +582,7 @@ export async function mount(root, { state, api }) {
           + ` ${fmt.int(suspectPairs.length)} ابزار/روز بی‌کش دوباره پرسیده می‌شود…`);
         await fetchHistorical(suspectPairs, items, controller.signal, true);
         outcome = dataExportOutcome(pairs, items);
-        audit = dataExportBlankAudit(pairs, items, dailyByIns);
+        audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
       }
       const rescued = suspectPairs.filter((pair) => (items[pair.key]?.rows || []).length).length;
       // شیت‌ها اینجا ساخته نمی‌شوند: تایم‌فریم شکلِ نوشتن است نه دریافت، و
@@ -526,7 +591,13 @@ export async function mount(root, { state, api }) {
       // خالی بسازد. «جفت داشتن» ملاک است نه «معامله داشتن» — قراردادِ
       // زندهٔ بی‌معامله همچنان برگِ خالیِ خودش را دارد.
       const sheetInstruments = instrumentsWithPairs(instruments, pairs);
-      prepared = { instruments: sheetInstruments, pairs, items, range, complete: universe.complete, note: universe.note || '', outcome, audit };
+      prepared = {
+        instruments: sheetInstruments, pairs, items, range,
+        complete: universe.complete, note: universe.note || '', outcome, audit,
+        // فهرستِ کدهایی که تابلوی روزانه‌شان نیامد، تا برگ راهنما بتواند
+        // بگوید راست‌آزمایی برای چند ابزار انجام نشده.
+        dailyMissing: [...dailyMissing],
+      };
       paintResult(sheetInstruments, pairs, items);
       // ═══ چرا صفر بودنِ داده، خبرِ اول است ═══
       //
@@ -572,9 +643,28 @@ export async function mount(root, { state, api }) {
           + `${blanks.worst ? ` (بدترینش کد ${faDigits(blanks.worst.ins)} با ${fmt.int(blanks.worst.dailyTrades)} معامله)` : ''}`
           + ` — این یعنی داده نرسیده، نه اینکه بازار ساکت بوده.`
         : (blanks.quiet ? ` ${fmt.int(blanks.quiet)} ابزار/روزِ خالی با تابلوی روزانه تأیید شد.` : '');
-      setStatus(`${head}${unlistedNote}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}`
+      // ═══ چرا «ناقص» جملهٔ خودش را دارد ═══
+      //
+      // پاسخِ نیمه‌کامل نه خالی است نه کامل، و تا وقتی اسمش گفته نشود
+      // کاربر فایل را «آماده» می‌خواند. عددِ حجمِ جامانده کنارش می‌آید
+      // چون همان است که بزرگی مشکل را نشان می‌دهد.
+      const partialWhy = blanks.partial
+        ? ` ${fmt.int(blanks.partial)} ابزار/روز داده آورد ولی از تابلوی روزانه کمتر بود`
+          + `${blanks.worstPartial ? ` (بدترینش کد ${faDigits(blanks.worstPartial.ins)}: ${fmt.int(blanks.worstPartial.volumeGap)} واحد حجم کمتر)` : ''}`
+          + ` — پاسخِ بریده، نه بازارِ کم‌معامله.`
+        : '';
+      const matchedWhy = blanks.matched
+        ? ` ${fmt.int(blanks.matched)} ابزار/روز با تابلوی روزانه تطبیق کامل شد.` : '';
+      // کدی که تابلوی روزانه‌اش اصلاً پاسخ نگرفت، «بی‌معامله» نیست و
+      // «تأییدنشده» هم نیست — راست‌آزمایی‌اش انجام **نشده**. سکوت در این
+      // مورد همان بند ۴ ممیزی است.
+      const dailyGap = dailyMissing.length
+        ? ` ${fmt.int(dailyMissing.length)} ابزار تابلوی روزانه‌اش پاسخ نگرفت، پس راست‌آزماییِ خالی‌هایشان انجام نشد.`
+        : '';
+      setStatus(`${head}${unlistedNote}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}${partialWhy}${matchedWhy}${dailyGap}`
         + `${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}`,
-      outcome.blank || blanks.missing > 0 || Boolean(deadRoute));
+      outcome.blank || blanks.missing > 0 || blanks.partial > 0
+        || dailyMissing.length > 0 || Boolean(deadRoute));
     } catch (error) {
       if (error.name === 'AbortError') setStatus('دریافت با درخواست شما متوقف شد.', true);
       else { setStatus(`ساخت خروجی کامل نشد: ${error.message}`, true); logError('data-export', error); }
@@ -596,11 +686,14 @@ export async function mount(root, { state, api }) {
     exporting = true; updateRunState();
     try {
       const frame = $('de-frame').value, derived = $('de-derived').checked;
-      const sheets = buildDataExportSheets({ ...prepared, frame, derived });
+      const window = currentWindow(), continuous = $('de-continuous').checked;
+      const sheets = buildDataExportSheets({ ...prepared, frame, derived, window, continuous });
       const bytes = await downloadXlsx(dataExportFilename(prepared.range, frame), sheets);
       paintResult(prepared.instruments, prepared.pairs, prepared.items, bytes);
-      setStatus(`فایل Excel در تایم‌فریم «${dataExportFrame(frame).label}» دانلود شد.`
-        + ' تایم‌فریم را عوض کنید و دوباره همین دکمه را بزنید — دریافت دوباره لازم نیست.');
+      setStatus(`فایل Excel در تایم‌فریم «${dataExportFrame(frame).label}»`
+        + ` و پنجرهٔ ${faDigits(clockLabel(window.start))} تا ${faDigits(clockLabel(window.end))} دانلود شد`
+        + `${sheets.length > prepared.instruments.length + 2 ? ` — ابزارِ پرردیف به چند برگ تقسیم شد (${fmt.int(sheets.length)} برگ).` : '.'}`
+        + ' تایم‌فریم و ساعت را عوض کنید و دوباره همین دکمه را بزنید — دریافت دوباره لازم نیست.');
     } catch (error) {
       setStatus(`دانلود خروجی انجام نشد: ${error.message}`, true); logError('data-export:download', error);
     } finally { exporting = false; updateRunState(); }
@@ -635,9 +728,22 @@ export async function mount(root, { state, api }) {
     paintContracts();
   });
   // تایم‌فریم دادهٔ گرفته‌شده را باطل نمی‌کند — فقط برآوردِ ردیف عوض می‌شود.
-  $('de-frame').addEventListener('change', () => {
+  // ═══ چرا هیچ‌کدام از این‌ها دادهٔ گرفته‌شده را باطل نمی‌کند ═══
+  //
+  // تایم‌فریم و پنجرهٔ ساعت هر دو شکلِ **نوشتن**‌اند، نه دریافت: ریزمعامله
+  // همیشه کامل گرفته می‌شود. پس عوض‌کردنشان فقط برآوردِ ردیف را دوباره
+  // می‌کشد و هیچ درخواستی به بالادست نمی‌فرستد.
+  const repaintEstimate = () => {
+    const window = currentWindow();
+    const note = $('de-window-note');
+    note.hidden = !window.note;
+    note.textContent = window.note;
+    note.toggleAttribute('data-error', Boolean(window.note));
     if (prepared) paintResult(prepared.instruments, prepared.pairs, prepared.items);
-  });
+  };
+  for (const id of ['de-frame', 'de-from-time', 'de-to-time', 'de-continuous']) {
+    $(id).addEventListener('change', repaintEstimate);
+  }
   $('de-side').addEventListener('change', paintContracts);
   $('de-contract-search').addEventListener('input', paintContracts);
   /** قراردادهایی که همین حالا روی صفحه دیده می‌شوند — با پالایهٔ نوع و جست‌وجو. */

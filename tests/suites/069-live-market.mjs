@@ -63,7 +63,7 @@ group('۶۸. رصد لحظه‌ای بازار و IV هر معامله');
   check('endpoint زنده با cache-buster و سقف ۲۴ ابزار از GetTrade می‌خواند',
     server68.includes("p === '/api/live-trades'")
     && server68.includes('`/Trade/GetTrade/${code}`')
-    && server68.includes("parseInsList(u.searchParams.get('ins'), 24)")
+    && server68.includes("insListOrReject(res, u.searchParams.get('ins'), 24, 'نوار زنده')")
     && server68.includes("_=${Date.now()}`"));
   check('رصد لحظه‌ای یک تب پایه تنبل است',
     app68.includes("id: 'live-market'") && app68.includes("mod: '/ui/tabs/live-market.mjs'"));

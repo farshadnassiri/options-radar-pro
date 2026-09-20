@@ -34,8 +34,71 @@ export function canceledFlag(row) {
   return null;                                   // بالادست چیزی نگفته است
 }
 
+// ═══════════════════ تکرارِ دقیق در نوار بالادست ═══════════════════
+//
+// ممیزی ۱۴۰۵/۰۶/۲۹: نوارِ زندهٔ اهرم در ۲۰۲۶۰۹۲۰ برای شماره‌های ۲۲۹ تا
+// ۲۳۳ **دو** ردیف داشت، هر جفت با ساعت، قیمت، حجم و پرچمِ ابطالِ یکسان.
+// نتیجه: ۱٬۸۰۰ معامله و حجم ۶٬۶۶۴٬۴۸۶ در برابر ۱٬۷۹۵ و ۶٬۶۶۰٬۴۲۹ روی
+// تابلوی همان روز. اختلافِ ۴٬۰۵۷ واحد دقیقاً همان پنج تکرار بود.
+//
+// پس مشکلِ این برنامه فقط «افتادگی» نبود؛ **اضافه‌شماری** هم بود، و چون
+// شمع‌ساز و خلاصهٔ نوار هر ردیف را جمع می‌زنند، یک ردیفِ تکراری در هر
+// عددِ پایین‌دستی می‌نشیند.
+//
+// ═══ چرا «هم‌شماره» کافی نیست و «هم‌ردیف» لازم است ═══
+//
+// حذف بر پایهٔ `sequence` تنها، دو چیز را خراب می‌کند:
+//
+// ۱. بالادست برای ردیفِ بی‌`nTran` صفر می‌فرستد و `Number(r.nTran) || 0`
+//    همه‌شان را صفر می‌کند؛ حذفِ هم‌شماره یعنی از هر پاسخِ بی‌شماره فقط
+//    یک ردیف می‌ماند.
+// ۲. اگر روزی بالادست **اصلاح** یا **ابطالِ** یک معامله را با همان شماره
+//    و محتوای متفاوت بفرستد، حذفِ کورکورانه آن اصلاح را بی‌صدا می‌خورد.
+//
+// پس معیار، برابریِ **همهٔ** میدان‌های نرمال‌شده است. دو ردیفِ هم‌شماره با
+// محتوای متفاوت هر دو می‌مانند و در `conflicts` علامت می‌خورند: تضاد
+// پنهان نمی‌شود، فقط گزارش می‌شود.
+const tradeIdentity = (row) => `${row.sequence}|${row.time}|${row.quantity}`
+  + `|${row.price}|${row.canceled ? 1 : 0}|${row.canceledKnown ? 1 : 0}`;
+
+/**
+ * نرمال‌سازی + حذفِ تکرارِ دقیق، با شرحِ آنچه افتاد.
+ *
+ * خروجی: `{ rows, duplicates, conflicts }`
+ *  - `rows` ردیف‌های یکتا، مرتب بر زمان و سپس شماره.
+ *  - `duplicates` شمارِ ردیف‌هایی که کپیِ کاملِ یک ردیفِ پیشین بودند.
+ *  - `conflicts` شماره‌هایی که بیش از یک محتوای متفاوت داشتند؛ هیچ‌کدام
+ *    حذف نشده‌اند.
+ */
+export function dedupeTrades(rows = []) {
+  const seen = new Set();
+  const contentBySequence = new Map();
+  const conflicted = new Set();
+  const out = [];
+  let duplicates = 0;
+  for (const row of rows || []) {
+    const identity = tradeIdentity(row);
+    if (seen.has(identity)) { duplicates += 1; continue; }
+    seen.add(identity);
+    // شمارهٔ صفر یعنی «بالادست شماره نداد»، نه «شمارهٔ ۰». تضادِ آن
+    // معنایی ندارد و شمرده نمی‌شود.
+    if (row.sequence > 0) {
+      const before = contentBySequence.get(row.sequence);
+      if (before === undefined) contentBySequence.set(row.sequence, identity);
+      else if (before !== identity) conflicted.add(row.sequence);
+    }
+    out.push(row);
+  }
+  return { rows: out, duplicates, conflicts: [...conflicted].sort((a, b) => a - b) };
+}
+
 export function normalizeTrades(rows = []) {
-  return rows.map((r) => {
+  return normalizeTradesDetailed(rows).rows;
+}
+
+/** همان نرمال‌سازی، ولی با شمارشِ تکرار و فهرستِ تضاد برای گزارش. */
+export function normalizeTradesDetailed(rows = []) {
+  const mapped = rows.map((r) => {
     const flag = canceledFlag(r);
     return {
       sequence: Number(r.nTran) || 0, time: Number(r.hEven) || 0,
@@ -44,6 +107,8 @@ export function normalizeTrades(rows = []) {
     };
   }).filter((r) => r.price > 0 && r.time > 0)
     .sort((a, b) => a.time - b.time || a.sequence - b.sequence);
+  const deduped = dedupeTrades(mapped);
+  return { ...deduped, raw: mapped.length };
 }
 
 /** زمان HHMMSS را به ثانیه از ابتدای روز تبدیل می‌کند. */
