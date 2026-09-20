@@ -116,8 +116,9 @@ group('۲۶۷. مصرف در سرور و تب');
 {
   const server = readSrc('../server/server.mjs');
   check('سرور شکلِ پاسخ را فقط برای خالیِ هر دو پرچم همراه می‌کند',
-    server.includes('upstream: upstreamShapeLabel(first.shape)')
-      && server.includes('upstreamAlt: upstreamShapeLabel(alt.shape)'));
+    /if \(!decided\.emptyBoth\) return decided;/.test(server)
+      && server.includes('upstream: upstreamShapeLabel(first?.shape)')
+      && server.includes('upstreamAlt: alt ? upstreamShapeLabel(alt.shape)'));
   check('و خطا همچنان خطا می‌ماند، نه خالیِ بی‌شرح',
     server.includes('return { rows: [], error: `${e.name}: ${e.message}` };'));
 

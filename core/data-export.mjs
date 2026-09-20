@@ -503,7 +503,8 @@ export function coverageStatusOf(verdict, hasRows) {
  * می‌دید «کل ردیف» با جمعِ ردیف‌های برگ ابزار نمی‌خواند و هیچ ستونی
  * تفاوت را توضیح نمی‌داد.
  */
-export function dataExportCoverageRows(instruments = [], pairs = [], items = {}, audit = []) {
+export function dataExportCoverageRows(instruments = [], pairs = [], items = {}, audit = [],
+  window = DEFAULT_SESSION_WINDOW) {
   const verdicts = new Map((audit || []).map((row) => [row.key, row.verdict]));
   const byIns = new Map((instruments || []).map((item) => [String(item.ins), item]));
   return (pairs || []).map((pair) => {
@@ -518,8 +519,21 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {},
       rows: hit && Array.isArray(hit.rows) ? rows.length : null,
       active: hit && Array.isArray(hit.rows) ? rows.filter((row) => row && row.canceled !== true).length : null,
       canceled: hit && Array.isArray(hit.rows) ? rows.filter((row) => row?.canceled === true).length : null,
+      // ═══ F-02: دو مفهوم، دو ستون ═══
+      //
+      // آزمونِ عملی: با پنجرهٔ انتخابیِ ۹:۳۰ تا ۱۲:۳۰، برگ ابزارِ اهرم
+      // ۱٬۵۰۰ ردیف از ۲٬۵۲۱ ردیفِ دریافت‌شده نوشت و ستونِ «بیرون از
+      // جلسه» **صفر** گفت — چون با بازهٔ ثابتِ ۹:۰۰ تا ۱۲:۳۰ سنجیده
+      // می‌شد. پس کاربر نمی‌توانست اختلافِ «کل ردیف» و «ردیفِ صادرشده»
+      // را از همان ستون بفهمد.
+      //
+      // هر دو عدد معنی دارند و هیچ‌کدام جای دیگری را نمی‌گیرد:
+      //   outside       بیرون از جلسهٔ رسمیِ بازار (۹:۰۰ تا ۱۲:۳۰)
+      //   outsideWindow بیرون از پنجره‌ای که کاربر برای همین فایل خواست
       outside: hit && Array.isArray(hit.rows)
         ? rows.filter((row) => !inIntradaySession(row?.time)).length : null,
+      outsideWindow: hit && Array.isArray(hit.rows)
+        ? rows.filter((row) => !inSessionWindow(row?.time, window)).length : null,
       status: !hit ? 'درخواست نرفت' : hit.error ? 'خطا'
         : coverageStatusOf(verdicts.get(pair.key), rows.length > 0),
       error: String(hit?.error || ''), source: String(hit?.source || ''),

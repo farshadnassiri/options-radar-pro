@@ -20,7 +20,8 @@ import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
 import { num } from '../core/num.mjs';
 import { normalizeTrades, normalizeTradesDetailed } from '../core/backtest.mjs';
-import { coversDailyDate, trustedDailyRows } from '../core/daily-trust.mjs';
+import { closingCoverage, coversDailyDate, trustedDailyRows } from '../core/daily-trust.mjs';
+import { chooseTape, dailyExpectation } from '../core/tape-choice.mjs';
 import { upstreamShape, upstreamShapeLabel } from '../core/upstream-shape.mjs';
 import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
@@ -398,43 +399,68 @@ function insListOrReject(res, raw, max, label) {
 //
 // خروجی همیشه وضعیت را می‌گوید، نه فقط ردیف‌ها:
 //   variant     کدام پرچم جواب داد («true» / «false» / «both» یعنی هیچ‌کدام)
+//   complete    با تابلوی روزانه تطبیق کامل شد یا نه
+//   verified    اصلاً مرجعی برای سنجش در دست بود یا نه
+//   shortfall   چقدر کم آمد (شمار و حجم)، وقتی تطبیق نشد
 //   emptyBoth   پس از هر دو مسیر خالی ماند
 //   upstream*   شکلِ خامِ پاسخِ هر دو مسیر، برای تشخیصِ اجرای بعدی
 //   duplicates  شمارِ ردیف‌های کاملاً تکراری که انداخته شدند
 //   conflicts   شماره‌هایی که دو محتوای متفاوت داشتند (هیچ‌کدام حذف نشده)
+//
+// ═══ چرا یک درخواستِ سومِ ارزان اضافه شد ═══
+//
+// مرجعِ روزانه (`GetClosingPriceDaily`) یک رکوردِ کوچک است و روزِ
+// بسته‌شده دیگر عوض نمی‌شود، پس با TTL بلند کش می‌شود. هزینه‌اش در برابر
+// چیزی که می‌خرد ناچیز است: بی آن، هیچ راهی نیست بفهمیم پاسخِ غیرخالیِ
+// در دست، کاملِ آن روز است یا بریده‌اش — و آزمونِ عملی نشان داد در هر
+// شش نمونه بریده بود.
+//
+// مرجع **هم‌زمان** با مسیر اول گرفته می‌شود، نه پس از آن، تا وقتی مسیر
+// اول کامل باشد هیچ رفت‌وبرگشتِ اضافه‌ای به تأخیر اضافه نکند.
 async function fetchHistoricalTape(code, date, { fresh = false } = {}) {
   const pull = async (pathname) => {
     const data = fresh ? await getFresh(pathname, 2, 6) : await get(pathname, S.ttlDailySec, 6);
     const detail = normalizeTradesDetailed(firstList(data));
     return { ...detail, shape: upstreamShape(data) };
   };
+  // مرجع هرگز اجرا را نمی‌اندازد: نبودش «نمی‌دانیم» است، نه خطا. قرارداد
+  // منقضی اغلب تابلوی روزانهٔ تاریخ‌دار ندارد و آن حالت باید کار کند.
+  const reference = async () => {
+    try {
+      return dailyExpectation(await get(historicalPath('daily', code, date), S.ttlDailySec, 7));
+    } catch {
+      return { known: false, trades: 0, volume: 0, value: 0 };
+    }
+  };
   try {
-    const first = await pull(historicalTradesPath(code, date));
-    if (first.rows.length) {
-      return {
-        rows: first.rows, variant: 'true',
-        duplicates: first.duplicates, conflicts: first.conflicts,
-      };
-    }
-    // «تلاش تا موفقیت» نیست: دقیقاً یک تلاش دوم، و فقط برای خالی — نه
-    // برای خطا. خطا بالا می‌رود تا با «بی‌معامله» اشتباه نشود.
+    const [first, expect] = await Promise.all([pull(historicalTradesPath(code, date)), reference()]);
+    const tried = [{ variant: 'true', ...first }];
+    // ═══ چرا «غیرخالی» دیگر بس نیست ═══
+    //
+    // F-01: مسیر `true` برای اهرم/۲۰۲۶۰۹۱۹ ۲٬۵۲۱ معامله داد و مسیر
+    // `false` همان روز ۷٬۷۳۶ — برابرِ تابلو. منطقِ قبلی («اگر اولی ردیف
+    // داشت، همان») ۵٬۲۱۵ معامله را دور می‌ریخت. حالا فقط **تطبیق با
+    // تابلو** جلوی درخواستِ دوم را می‌گیرد.
+    const decided = chooseTape(tried, expect);
+    if (decided.complete) return withUpstream(decided, first, null);
+
     const alt = await pull(historicalTradesAltPath(code, date));
-    if (alt.rows.length) {
-      return {
-        rows: alt.rows, variant: 'false',
-        duplicates: alt.duplicates, conflicts: alt.conflicts,
-      };
-    }
-    return {
-      rows: [], variant: 'both', emptyBoth: true,
-      duplicates: 0, conflicts: [],
-      // شکلِ **هر دو** مسیر، چون ممکن است فقط یکی‌شان بدقلق باشد.
-      upstream: upstreamShapeLabel(first.shape),
-      upstreamAlt: upstreamShapeLabel(alt.shape),
-    };
+    tried.push({ variant: 'false', ...alt });
+    return withUpstream(chooseTape(tried, expect), first, alt);
   } catch (e) {
     return { rows: [], error: `${e.name}: ${e.message}` };
   }
+}
+
+/** شکلِ خامِ پاسخ‌ها را فقط وقتی همراه می‌کند که خالی مانده باشیم. */
+function withUpstream(decided, first, alt) {
+  if (!decided.emptyBoth) return decided;
+  return {
+    ...decided,
+    // شکلِ **هر دو** مسیر، چون ممکن است فقط یکی‌شان بدقلق باشد.
+    upstream: upstreamShapeLabel(first?.shape),
+    upstreamAlt: alt ? upstreamShapeLabel(alt.shape) : '',
+  };
 }
 
 /**
@@ -1551,6 +1577,29 @@ async function handle(req, res) {
         if (kind === 'trades') {
           const tape = await fetchHistoricalTape(code, date);
           return [code, { ins: code, ...tape, count: tape.rows?.length ?? 0 }];
+        }
+        // ═══ F-03: پاسخِ `closing` بی وضعیتِ پوشش برنمی‌گردد ═══
+        //
+        // یک رکوردِ پیش‌جلسه با HTTP ۲۰۰ نباید «سابقهٔ قیمتِ آن روز»
+        // خوانده شود. رکوردِ خام دست‌نخورده می‌ماند — فقط کنارش گفته
+        // می‌شود پوششِ پایانِ روز تأیید شد یا نه.
+        if (kind === 'closing') {
+          const upstreamPath = historicalPath(kind, code, date);
+          if (!upstreamPath) return [code, { ins: code, error: 'کد ابزار نامعتبر' }];
+          try {
+            const [raw, expect] = await Promise.all([
+              get(upstreamPath, S.ttlDailySec, 6),
+              (async () => {
+                try {
+                  return dailyExpectation(await get(historicalPath('daily', code, date), S.ttlDailySec, 7));
+                } catch { return { known: false, trades: 0, volume: 0, value: 0 }; }
+              })(),
+            ]);
+            const rows = firstList(raw);
+            return [code, { ins: code, rows, count: rows.length, coverage: closingCoverage(rows, expect) }];
+          } catch (e) {
+            return [code, { ins: code, error: `${e.name}: ${e.message}` }];
+          }
         }
         const upstream = historicalPath(kind, code, date);
         if (!upstream) return [code, { ins: code, error: 'کد ابزار نامعتبر' }];

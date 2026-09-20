@@ -97,3 +97,57 @@ export function coversDailyDate(rows = [], date = 0) {
   if (!wanted) return false;
   return (rows || []).some((row) => Math.trunc(Number(row?.date) || 0) === wanted);
 }
+
+// ═══════════════ پوششِ پاسخِ `closing`، و چرا لازم شد ═══════════════
+//
+// F-03 آزمونِ عملی ۱۴۰۵/۰۶/۲۹. برای اهرم در `20260919`:
+//
+//   /api/hist?kind=closing  →  HTTP 200، `count:1`
+//   {"dEven":0,"hEven":61206,"pClosing":75064,"zTotTran":0,"qTotTran5J":0}
+//
+// همان روز، روزانهٔ تاریخ‌دار پایانیِ ۷۳٬۵۲۷ و ۷٬۷۳۶ معامله و ۷۳٬۳۰۵٬۲۲۴
+// حجم می‌داد؛ و ۷۵٬۰۶۴ قیمتِ **دیروز** بود. یعنی آن یک رکورد، عکسِ
+// پیش‌جلسه بود و اطلاعاتِ پایانِ روز را نداشت — ولی پاسخ با ۲۰۰ و یک
+// رکورد برمی‌گشت و هیچ‌جا نمی‌گفت پوشش ندارد.
+//
+// ═══ چرا `dEven:0` به‌تنهایی مدرکِ خرابی نیست ═══
+//
+// در همان آزمون، ضهرم۶۰۴۰ برای `20260916` از همین endpoint **۲۱۰** رکورد
+// داد که رکوردِ پایانی‌اش در ۱۲:۲۹:۴۴ با ۲۴۶ معامله و ۲٬۸۲۸ حجم دقیقاً
+// با تابلو می‌خواند — و **همهٔ** آن ۲۱۰ رکورد هم `dEven:0` داشتند. پس
+// تاریخِ داخلیِ صفر قراردادِ این endpoint است، نه نشانهٔ نقص.
+//
+// چیزی که این دو را از هم جدا می‌کند، ساعتِ رکوردها و بیشینهٔ شمار/حجمِ
+// داخلشان است، سنجیده با تابلوی روزانه. همین‌جا حساب می‌شود و پاسخ آن را
+// حمل می‌کند — بی آنکه رکوردِ خامی حذف شود.
+export function closingCoverage(rows = [], expect = { known: false }) {
+  const list = (Array.isArray(rows) ? rows : []).filter((row) => row && typeof row === 'object');
+  if (!list.length) {
+    return { records: 0, complete: false, verified: Boolean(expect?.known), preSessionOnly: false,
+      note: 'هیچ رکوردی نیامد' };
+  }
+  const seconds = list.map((row) => dailySecond(row.hEven)).filter((s) => s > 0);
+  const maxTrades = Math.max(0, ...list.map((row) => Number(row.zTotTran) || 0));
+  const maxVolume = Math.max(0, ...list.map((row) => Number(row.qTotTran5J) || 0));
+  const preSessionOnly = seconds.length > 0 && seconds.every((s) => s < SESSION_START_SECOND);
+  const complete = Boolean(expect?.known)
+    && maxTrades === Number(expect.trades) && maxVolume === Number(expect.volume);
+
+  const note = complete
+    ? 'پوششِ پایانِ روز تأیید شد — بیشینهٔ شمار و حجم با تابلوی روزانه می‌خواند'
+    : preSessionOnly
+      ? 'فقط عکسِ پیش‌جلسه — پوششِ پایانِ روز در این پاسخ نیست'
+      : expect?.known
+        ? `پوششِ پایانِ روز تأیید نشد — بیشینهٔ این پاسخ ${maxTrades} معامله و ${maxVolume} حجم،`
+          + ` تابلو ${Number(expect.trades)} و ${Number(expect.volume)}`
+        : 'تابلوی روزانه در دست نیست، پس پوششِ این پاسخ سنجیده نشد';
+
+  return {
+    records: list.length,
+    firstSecond: seconds.length ? Math.min(...seconds) : 0,
+    lastSecond: seconds.length ? Math.max(...seconds) : 0,
+    maxTrades, maxVolume, preSessionOnly,
+    complete, verified: Boolean(expect?.known),
+    note,
+  };
+}

@@ -10,6 +10,8 @@ import { tradeTimeLabel } from '../core/backtest.mjs';
 import { historyDateLabel } from '../core/history.mjs';
 import { sheet } from './xlsx.mjs';
 
+const n = (value) => Math.trunc(Number(value) || 0);
+
 const dateText = (value) => String(Math.trunc(Number(value) || 0));
 // ═══ چرا تاریخ شمسی کنار میلادی می‌نشیند، نه به‌جایش ═══
 //
@@ -91,7 +93,7 @@ export function buildDataExportSheets({
   window = DEFAULT_SESSION_WINDOW, continuous = false,
 } = {}) {
   const tf = dataExportFrame(frame);
-  const coverage = dataExportCoverageRows(instruments, pairs, items, audit);
+  const coverage = dataExportCoverageRows(instruments, pairs, items, audit, window);
   const failed = coverage.filter((row) => row.status === 'خطا' || row.status === 'درخواست نرفت').length;
   // ═══ چرا شمارش از `rows` می‌آید و نه از متنِ وضعیت ═══
   //
@@ -179,7 +181,9 @@ export function buildDataExportSheets({
     // حالا پنجره یک مقدار است و پالایه، شمع‌سازی و همین جمله از یک جا
     // می‌خوانند.
     ['پنجرهٔ ساعت', `ردیف‌های برگ هر ابزار فقط ${clockLabel(window.start)} تا ${clockLabel(window.end)}`
-      + ' (شاملِ ثانیهٔ پایان) است؛ شمار ردیف‌های بیرون از این بازه در ستون «بیرون از جلسه» برگ پوشش می‌آید.'
+      + ' (شاملِ ثانیهٔ پایان) است؛ شمار ردیف‌های بیرون از این بازه در ستون'
+      + ' «خارج از پنجرهٔ انتخابی» برگ پوشش می‌آید، و ستون «خارج از جلسهٔ بازار» همان شمار را'
+      + ' نسبت به جلسهٔ رسمیِ ۰۹:۰۰ تا ۱۲:۳۰ می‌دهد.'
       + `${window.custom ? ' این پنجره را خودِ شما انتخاب کرده‌اید، پیش‌فرض ۰۹:۰۰:۰۰ تا ۱۲:۳۰:۰۰ است.' : ''}`],
     ['جدول زمانی', continuous
       ? 'پیوسته — هر سطلِ پنجره ردیف دارد، حتی سطلی که معامله‌ای نداشته.'
@@ -227,8 +231,11 @@ export function buildDataExportSheets({
   const coverageSheet = sheet('پوشش دریافت', [
     'نماد پایه', 'نماد ابزار', 'نوع', 'کد ابزار', 'اندازه قرارداد',
     'تاریخ میلادی', 'تاریخ شمسی', 'کل ردیف',
-    'فعال', 'باطل', 'بیرون از جلسه', 'وضعیت', 'حکم خالی‌بودن',
-    'معاملهٔ تابلوی روزانه', 'پرچم درخواست', 'پاسخ بالادست', 'منبع', 'خطا',
+    // دو ستون، چون دو مفهوم‌اند: جلسهٔ رسمیِ بازار، و پنجره‌ای که کاربر
+    // برای همین فایل انتخاب کرده. یکی‌کردنشان همان F-02 بود.
+    'فعال', 'باطل', 'خارج از جلسهٔ بازار', 'خارج از پنجرهٔ انتخابی',
+    'وضعیت', 'حکم خالی‌بودن',
+    'معاملهٔ تابلوی روزانه', 'کسریِ نسبت به تابلو', 'پرچم درخواست', 'پاسخ بالادست', 'منبع', 'خطا',
   ], coverage.map((row) => {
     const seen = auditByKey.get(`${row.date}:${row.ins}`) || null;
     const hit = items?.[`${row.date}:${row.ins}`] || {};
@@ -236,16 +243,24 @@ export function buildDataExportSheets({
       row.baseName, row.name, DATA_EXPORT_KIND_LABEL[row.kind] || row.kind, row.ins,
       Number.isFinite(row.size) && row.size > 0 ? row.size : '',
       row.date, jalaliText(row.date),
-      row.rows, row.active, row.canceled, row.outside, row.status,
+      row.rows, row.active, row.canceled, row.outside, row.outsideWindow, row.status,
       seen ? BLANK_VERDICT_LABEL[seen.verdict] : '—',
       seen && Number.isFinite(seen.dailyTrades) ? seen.dailyTrades : '',
+      // ═══ F-01: کسری، وقتی هیچ مسیری با تابلو نخواند ═══
+      //
+      // سرور حالا پاسخ‌ها را با تابلوی روزانه می‌سنجد و اگر هیچ‌کدام
+      // تطبیق نکرد، پرحجم‌ترین را با عددِ کسری برمی‌گرداند. بی این ستون،
+      // فایل «بهترینِ آنچه داریم» را مثل «همهٔ آنچه هست» نشان می‌داد.
+      hit.complete === false && hit.shortfall
+        ? `${n(hit.shortfall.trades)} معامله / ${n(hit.shortfall.volume)} حجم`
+        : (hit.complete === true ? 'تطبیق کامل' : ''),
       hit.variant ? `پرچم ${hit.variant}` : '',
       // خالیِ بی‌شرح همان چیزی است که چهار نوبت تشخیص را کور کرد.
       hit.upstream ? (hit.upstreamAlt && hit.upstreamAlt !== hit.upstream
         ? `${hit.upstream} / ${hit.upstreamAlt}` : hit.upstream) : '',
       row.source, row.error,
     ];
-  }), [100, 120, 95, 140, 100, 95, 95, 75, 65, 65, 95, 100, 250, 110, 100, 200, 80, 260]);
+  }), [100, 120, 95, 140, 100, 95, 95, 75, 65, 65, 110, 120, 100, 250, 110, 140, 100, 200, 80, 260]);
 
   const instrumentSheets = instruments.flatMap((instrument) => {
     // ردیفِ بیرون از پنجره حذف می‌شود ولی شمارش‌شده — نه بی‌صدا.
