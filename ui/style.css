@@ -251,7 +251,11 @@
   --radius-2xl: 22px;
   --radius-3xl: 26px;
   --radius-pill: 9999px;
-  --radius-control: var(--radius-pill);
+  /* ── قرص برگشت به ۱۰، ۱۴۰۵/۰۶/۲۸ ──
+     قرصِ کامل در ماکتِ «استودیو» بود؛ صاحب پروژه ماکتِ «کیت» را انتخاب کرد
+     که حرفه‌ای‌تر و کم‌تزئین‌تر است: کنترل ۱۰، کارت ۱۴، و فقط تراشه و نشان
+     گردِ کامل می‌مانند. یک زبانِ شکلی، نه سه‌تا. */
+  --radius-control: 10px;
   --radius-input: 10px;
   /* شتاب‌گیریِ خودشان: ۱۰۰ میلی‌ثانیه خطی برای حالتِ فشار (دکمه، ردیف،
      تب) و پله‌های کندتر برای چیزی که باز و بسته می‌شود. */
@@ -2125,7 +2129,7 @@ td.n, .tbl-body td.n, .lmm-paired td, .data td.n {
    و فقط سایه نگهش می‌داشت. */
 .card {
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius-xl); box-shadow: var(--shadow-xs);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-xs);
   padding: 22px 24px; margin-bottom: var(--space-5, 20px);
   transition: box-shadow var(--transition-med), border-color var(--transition-med);
 }
@@ -2452,11 +2456,14 @@ table.data { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
    خطِ زیرِ سرستون هم از دو پیکسل به یک برگشت — دو پیکسل در جدولی که
    خودش ده‌ها خط افقی دارد، یک خطِ دومِ ناخواسته می‌سازد. */
 table.data th, table.data td {
-  padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: start; white-space: nowrap;
+  padding: 12px 14px; border-bottom: 1px solid var(--line-soft); text-align: start; white-space: nowrap;
 }
 table.data thead th {
   position: sticky; top: 0; z-index: 2;
-  background: var(--ground);
+  /* سرستون روی سطحِ کارت می‌نشیند. با `--ground` در پوستهٔ تیره از خودِ
+     کارت **تیره‌تر** می‌شد و «فرورفته» دیده می‌شد؛ پلهٔ دومِ سطح درست است
+     و در هر دو پوسته کار می‌کند. */
+  background: var(--panel-2);
   font-size: var(--fs-xs); font-weight: 700; color: var(--muted);
   border-bottom: 1px solid var(--line); cursor: pointer; user-select: none;
   transition: color var(--transition-fast), background var(--transition-fast);
@@ -2595,7 +2602,25 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
    برچسبِ دوکلمه‌ای («سرمایه روز ورود»، «وجه تضمین امروز») دو خط می‌شد؛
    کاشی‌ها ارتفاعِ نابرابر می‌گرفتند و ردیفِ عددها پلکانی می‌شد. با ۲۱۰
    ردیف **می‌شکند** نه برچسب — و شکستنِ ردیف چیزی از دست نمی‌دهد. */
-.kpis { display: grid; gap: var(--space-3, 12px); grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); margin-bottom: var(--space-5, 20px); }
+/* ── نوارِ آمارِ خطی (ماکت ۶) ──
+   ردیفِ کاشی‌ها هفت‌تا بود و سه‌تایش عددِ سنجیدنی نبود: «۱ سررسیدگذشته»،
+   «۱۲ نماد قیمت‌خورده»، «۴ شرطِ برقرار». کاشی، وزنِ یک عددِ مهم را دارد؛
+   وقتی هفت‌تا کنار هم باشند هیچ‌کدام مهم نیست. این‌ها حالا یک نوارِ خطی‌اند
+   زیر کاشی‌ها: خوانده می‌شوند، ولی وزن نمی‌گیرند. */
+.kpi-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px;
+  margin: calc(-1 * var(--space-2)) 2px var(--space-5);
+  color: var(--muted); font-size: var(--fs-xs);
+}
+.kpi-meta b { color: var(--ink); font-variant-numeric: tabular-nums; direction: ltr; font-weight: 800; }
+.kpi-meta i { width: 1px; height: 12px; background: var(--line); font-style: normal; }
+.kpi-meta .warn { color: var(--warn); font-weight: 700; }
+
+/* `auto-fit` نه `auto-fill`: با `auto-fill` ظرف برای ستون‌های **خالی** هم
+   جا نگه می‌دارد، پس چهار کاشی در عرضِ پنج‌تایی، یک حفرهٔ خالی کنارشان
+   می‌ساختند و ردیف ناتمام دیده می‌شد. `auto-fit` ستون‌های خالی را جمع
+   می‌کند و همان چهارتا عرض را پر می‌کنند. */
+.kpis { display: grid; gap: var(--space-3, 12px); grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin-bottom: var(--space-5, 20px); }
 /* ═══ کارتِ عدد، الگوی «metrics» خودشان ═══
 
    ایرادی که صاحب پروژه روی تصویر نشان داد: نوارِ رنگیِ چهارپیکسلی کنارِ
@@ -2625,7 +2650,7 @@ table th.th-drop { box-shadow: inset 3px 0 var(--accent); }
      بلندترین ترکیبِ ممکن آمده: برچسبِ یک‌خطی + عددِ `--fs-4xl` + نشان. */
   min-height: 118px;
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: var(--radius-xl); padding: var(--space-4) var(--space-4) var(--space-3);
+  border-radius: var(--radius-lg); padding: var(--space-4) var(--space-4) var(--space-3);
   box-shadow: var(--shadow-xs);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
               background var(--transition-fast);
