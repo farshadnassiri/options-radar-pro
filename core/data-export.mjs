@@ -398,14 +398,38 @@ export function dataExportTradeRows(instrument, pairs = [], items = {}) {
  * دومی — تابلوی روزانه — همان را بگوید. بی آن تأیید، آنچه می‌دانیم فقط
  * این است که ریزمعامله‌ای نیامد.
  */
+// ═══ چرا «داده آمد» از این جدول رفت ═══
+//
+// ممیزی ۱۴۰۵/۰۶/۲۹ بند ۳: ستونِ وضعیت برای هر پاسخِ غیرخالی «داده آمد»
+// می‌نوشت. نوارِ یک‌ردیفی در برابر تابلوی هزارمعامله‌ای همان برچسب را
+// می‌گرفت که یک دریافتِ کامل — یعنی خودِ ستونی که باید کامل‌بودن را
+// بگوید، کامل‌بودن را **فرض** می‌کرد.
+//
+// حالا وضعیت همیشه از حکمِ بازبینی می‌آید، چه ردیف داشته باشد چه نه.
 export const EMPTY_STATUS = {
+  matched: 'کامل — با تابلو تطبیق شد',
+  partial: 'ناقص — کمتر از تابلو',
   quiet: 'بدون معامله',
   missing: 'ریزمعامله نیامد',
+  surplus: 'تضاد با تابلو',
+  open: 'جلسه تمام نشده',
   unknown: 'خالی، تأییدنشده',
 };
 
 export function emptyStatusOf(verdict) {
   return EMPTY_STATUS[verdict] || EMPTY_STATUS.unknown;
+}
+
+/**
+ * وضعیتِ یک ابزار/روز در برگ پوشش.
+ *
+ * `hasRows` فقط شکلِ پاسخ را می‌گوید؛ حکم را بازبینی می‌دهد. وقتی بازبینی
+ * حکمی ندارد (تابلوی روزانه نیامده) پاسخِ دارای ردیف «داده آمد، تأییدنشده»
+ * است — نه «کامل». این تفاوت کلِ بند ۳ ممیزی است.
+ */
+export function coverageStatusOf(verdict, hasRows) {
+  if (verdict && EMPTY_STATUS[verdict]) return EMPTY_STATUS[verdict];
+  return hasRows ? 'داده آمد، تأییدنشده' : EMPTY_STATUS.unknown;
 }
 
 /**
@@ -437,8 +461,8 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {},
       canceled: hit && Array.isArray(hit.rows) ? rows.filter((row) => row?.canceled === true).length : null,
       outside: hit && Array.isArray(hit.rows)
         ? rows.filter((row) => !inIntradaySession(row?.time)).length : null,
-      status: !hit ? 'درخواست نرفت' : hit.error ? 'خطا' : rows.length ? 'داده آمد'
-        : emptyStatusOf(verdicts.get(pair.key)),
+      status: !hit ? 'درخواست نرفت' : hit.error ? 'خطا'
+        : coverageStatusOf(verdicts.get(pair.key), rows.length > 0),
       error: String(hit?.error || ''), source: String(hit?.source || ''),
     };
   });
@@ -478,7 +502,10 @@ export function dataExportSessionRows(rows = []) {
  * `dailyByIns` همان چیزی است که `/api/dailies` می‌دهد. نبودِ ردیفِ روزانه
  * یعنی «نمی‌دانیم»، نه «بی‌معامله» — و همین‌طور هم گزارش می‌شود.
  */
-export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}) {
+export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}, openDateList = []) {
+  // روزی که جلسه‌اش هنوز تمام نشده، تطبیق‌پذیر نیست: تابلوی روزانه‌اش
+  // لحظه‌ای است و نوار هنوز پر می‌شود. «ناقص» خواندنش ادعای غلط است.
+  const openDates = new Set((openDateList || []).map((date) => Math.trunc(n(date))).filter(Boolean));
   const index = new Map();
   for (const [ins, payload] of Object.entries(dailyByIns || {})) {
     const map = new Map();
@@ -499,38 +526,109 @@ export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}) {
   for (const pair of pairs || []) {
     const hit = items?.[pair.key];
     if (!hit || hit.error) continue;
-    if (Array.isArray(hit.rows) && hit.rows.length) continue;
+    const rows = Array.isArray(hit.rows) ? hit.rows : null;
+    if (!rows) continue;
     const daily = index.get(String(pair.ins))?.get(Math.trunc(n(pair.date))) || null;
-    const trades = n(daily?.trades), volume = n(daily?.vol);
+    const dailyTrades = n(daily?.trades), dailyVolume = n(daily?.vol);
+    // ═══ چرا معاملهٔ باطل جدا شمرده می‌شود ═══
+    //
+    // ردیفی که بالادست «باطل» خوانده حجمش صفر است و در هیچ جمعی نمی‌نشیند،
+    // ولی یک **مشاهده** است و شمرده می‌شود. اگر شمارِ نوار با شمارِ تابلو
+    // نخواند، تفاوتی به اندازهٔ همین ردیف‌ها می‌تواند توضیح داشته باشد؛
+    // پس هر دو عدد بیرون می‌آیند و حکم روی هر دو سنجیده می‌شود.
+    const active = rows.filter((row) => row && row.canceled !== true);
+    const tapeTrades = active.length;
+    const tapeCanceled = rows.length - active.length;
+    const tapeVolume = active.reduce((sum, row) => sum + n(row?.quantity), 0);
     out.push({
       key: pair.key, ins: String(pair.ins), date: pair.date,
       known: Boolean(daily),
-      dailyTrades: daily ? trades : NaN,
-      dailyVolume: daily ? volume : NaN,
-      // سه حکم، و هیچ‌کدام «شاید» نیست.
-      verdict: !daily ? 'unknown' : (trades > 0 || volume > 0 ? 'missing' : 'quiet'),
+      dailyTrades: daily ? dailyTrades : NaN,
+      dailyVolume: daily ? dailyVolume : NaN,
+      tapeTrades, tapeCanceled, tapeVolume,
+      tradeGap: daily ? dailyTrades - tapeTrades : NaN,
+      volumeGap: daily ? dailyVolume - tapeVolume : NaN,
+      verdict: coverageVerdict({
+        daily: Boolean(daily), dailyTrades, dailyVolume,
+        tapeTrades, tapeCanceled, tapeVolume,
+        sessionOpen: openDates.has(Math.trunc(n(pair.date))),
+      }),
     });
   }
   return out;
 }
 
+/**
+ * حکمِ یک ابزار/روز — و چرا شش تا است، نه سه تا.
+ *
+ * ═══ ایرادِ بند ۳ ممیزی ═══
+ *
+ * بازبینی فقط برای پاسخ‌های **کاملاً خالی** اجرا می‌شد. بازتولیدِ ممیزی:
+ * تابلوی روزانه ۱٬۰۰۰ معامله و ۱۰٬۰۰۰ حجم می‌گفت و نوار **یک** معامله در
+ * ۱۰:۳۰ با حجم ۱۰ داشت — و برنامه هیچ ایرادی برنمی‌گرداند و وضعیت «داده
+ * آمد» می‌داد. یعنی «چند ردیف آمد» با «کامل آمد» یکی شمرده می‌شد.
+ *
+ * حالا هر ابزار/روزی که پاسخ گرفته سنجیده می‌شود، با معیارهای هم‌معنا:
+ *
+ *   matched   حجم و شمارِ فعال با تابلو می‌خوانند
+ *   partial   داده آمد ولی از تابلو کمتر است — پاسخِ نیمه‌کامل
+ *   missing   نوار خالی است و تابلو معامله ثبت کرده
+ *   quiet     نوار خالی است و تابلو هم صفر — واقعاً بی‌معامله
+ *   surplus   نوار داده دارد و تابلو صفر می‌گوید؛ تضادِ دو منبع
+ *   open      جلسهٔ آن روز هنوز تمام نشده، پس تطبیق معنا ندارد
+ *   unknown   تابلوی روزانه در دست نیست — «نمی‌دانیم»، نه «بی‌معامله»
+ *
+ * ═══ چرا حجم معیارِ اول است ═══
+ *
+ * شمارِ تابلو ممکن است معاملهٔ باطل را بشمارد یا نشمارد و ما از بیرون
+ * نمی‌دانیم کدام؛ ولی حجمِ باطل صفر است، پس حجم معیارِ تمیزتری است. وقتی
+ * حجم دقیقاً می‌خواند، اختلافِ شمار تا اندازهٔ ردیف‌های باطل توضیح دارد و
+ * حکم «تطبیق‌شده» می‌ماند. اختلافِ بیشتر از آن، دیگر توضیح ندارد.
+ */
+export function coverageVerdict({
+  daily = false, dailyTrades = 0, dailyVolume = 0,
+  tapeTrades = 0, tapeCanceled = 0, tapeVolume = 0, sessionOpen = false,
+} = {}) {
+  if (sessionOpen) return 'open';
+  if (!daily) return tapeTrades ? 'unknown' : 'unknown';
+  const boardTraded = dailyTrades > 0 || dailyVolume > 0;
+  if (!tapeTrades) return boardTraded ? 'missing' : 'quiet';
+  if (!boardTraded) return 'surplus';
+  const volumeMatches = tapeVolume === dailyVolume;
+  const countExplained = Math.abs(dailyTrades - tapeTrades) <= tapeCanceled;
+  if (volumeMatches && countExplained) return 'matched';
+  return 'partial';
+}
+
 export const BLANK_VERDICT_LABEL = {
+  matched: 'تطبیق‌شده — شمار و حجم با تابلوی روزانه می‌خوانند',
+  partial: 'ناقص — داده آمد ولی از تابلوی روزانه کمتر است',
   missing: 'ریزمعامله نیامد — تابلو برای آن روز معامله ثبت کرده',
   quiet: 'بدون معامله — تابلوی روزانه هم صفر است',
-  unknown: 'بدون معامله — تابلوی روزانه در دست نیست',
+  surplus: 'تضاد — نوار داده دارد ولی تابلوی روزانه صفر است',
+  open: 'جلسه هنوز تمام نشده — تطبیق معنا ندارد',
+  unknown: 'نامعلوم — تابلوی روزانه در دست نیست',
 };
 
 /** جمع‌بندیِ بازبینی، برای جملهٔ وضعیت و برگ راهنما. */
 export function blankAuditSummary(audit = []) {
   const list = Array.isArray(audit) ? audit : [];
-  const missing = list.filter((row) => row.verdict === 'missing');
+  const of = (verdict) => list.filter((row) => row.verdict === verdict);
+  const missing = of('missing');
+  const partial = of('partial');
   return {
     total: list.length,
     missing: missing.length,
-    quiet: list.filter((row) => row.verdict === 'quiet').length,
-    unknown: list.filter((row) => row.verdict === 'unknown').length,
+    partial: partial.length,
+    matched: of('matched').length,
+    quiet: of('quiet').length,
+    surplus: of('surplus').length,
+    open: of('open').length,
+    unknown: of('unknown').length,
     // بیشترین معاملهٔ ازدست‌رفته، برای اینکه جمله یک نمونهٔ واقعی داشته باشد.
-    worst: missing.sort((a, b) => n(b.dailyTrades) - n(a.dailyTrades))[0] || null,
+    worst: [...missing].sort((a, b) => n(b.dailyTrades) - n(a.dailyTrades))[0] || null,
+    // و بدترین پاسخِ نیمه‌کامل: آن که بیشترین حجمش جا مانده.
+    worstPartial: [...partial].sort((a, b) => n(b.volumeGap) - n(a.volumeGap))[0] || null,
   };
 }
 

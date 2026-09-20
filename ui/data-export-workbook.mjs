@@ -60,8 +60,13 @@ export function buildDataExportSheets({
   const tf = dataExportFrame(frame);
   const coverage = dataExportCoverageRows(instruments, pairs, items, audit);
   const failed = coverage.filter((row) => row.status === 'خطا' || row.status === 'درخواست نرفت').length;
-  const empty = coverage.filter((row) => row.status !== 'داده آمد' && row.status !== 'خطا'
-    && row.status !== 'درخواست نرفت').length;
+  // ═══ چرا شمارش از `rows` می‌آید و نه از متنِ وضعیت ═══
+  //
+  // وضعیت حالا حکمِ بازبینی است و هفت مقدار دارد، نه سه تا. شمردنِ «خالی»
+  // با «هر چیزی که داده‌آمد نیست» پس از بند ۳ غلط می‌شد: پاسخِ **ناقص**
+  // ردیف دارد ولی برچسبش «داده آمد» نیست، و اگر خالی شمرده شود همان
+  // اشتباهِ وارونه ساخته می‌شود. شکلِ پاسخ را `rows` می‌گوید، نه برچسب.
+  const empty = coverage.filter((row) => row.rows === 0).length;
   const confirmedQuiet = coverage.filter((row) => row.status === EMPTY_STATUS.quiet).length;
   const result = outcome || dataExportOutcome(pairs, items);
   // ═══ چرا «صفر ریزمعامله» بالای برگ راهنما می‌نشیند ═══
@@ -78,9 +83,17 @@ export function buildDataExportSheets({
   // فایل گزارش‌شده ۵۹ ابزار/روز را «بدون معامله» خواند، از جمله خودِ نماد
   // پایه را در یک روز عادیِ بازار. تابلوی روزانه همان را تکذیب می‌کند، و
   // این سطر همان تکذیب است.
+  // ═══ چرا این خط هفت عدد شد ═══
+  //
+  // بند ۳ ممیزی: بازبینی فقط پاسخ‌های **کاملاً خالی** را می‌دید، پس فایل
+  // هیچ‌جا نمی‌توانست بگوید یک ابزار/روز «آمد ولی بریده آمد». حالا هر
+  // ابزار/روزِ پاسخ‌گرفته حکمی دارد و همه‌شان اینجا شمرده می‌شوند —
+  // «تطبیق‌شده» هم، چون بی آن، نبودِ ایراد با نبودِ بررسی یکی دیده می‌شود.
   const blankLine = blanks.total
-    ? `${blanks.missing} ابزار/روز تابلو معامله ثبت کرده ولی ریزمعامله نیامد · `
-      + `${blanks.quiet} واقعاً بی‌معامله · ${blanks.unknown} بی تابلوی روزانه`
+    ? `${blanks.matched} تطبیق‌شده · ${blanks.partial} ناقص · `
+      + `${blanks.missing} تابلو معامله ثبت کرده ولی ریزمعامله نیامد · `
+      + `${blanks.quiet} واقعاً بی‌معامله · ${blanks.surplus} تضاد با تابلو · `
+      + `${blanks.open} جلسه تمام‌نشده · ${blanks.unknown} بی تابلوی روزانه`
     : '—';
   const basis = dataExportListingBasis(instruments, pairs);
   const route = dataExportRouteSplit(pairs, items);
@@ -118,6 +131,14 @@ export function buildDataExportSheets({
       ? `${(dailyMissing || []).length} ابزار تابلوی روزانه‌شان پاسخ نگرفت، پس خالی‌هایشان راست‌آزمایی نشد`
       : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت'],
     ...(blanks.worst ? [['بدترین مورد نیامدن', `کد ${blanks.worst.ins} در ${blanks.worst.date} — تابلو ${blanks.worst.dailyTrades} معامله`]] : []),
+    ...(blanks.worstPartial ? [['بدترین پاسخِ ناقص',
+      `کد ${blanks.worstPartial.ins} در ${blanks.worstPartial.date} — تابلو ${blanks.worstPartial.dailyTrades} معامله`
+      + ` و ${blanks.worstPartial.dailyVolume} حجم، نوار ${blanks.worstPartial.tapeTrades} معامله`
+      + ` و ${blanks.worstPartial.tapeVolume} حجم`]] : []),
+    // «چند ردیف آمد» اثباتِ «کامل آمد» نیست، و فایل باید همین را بنویسد.
+    ['معیار کامل‌بودن', 'هر ابزار/روز با شمارِ معاملهٔ فعال و حجمِ تابلوی روزانهٔ همان روز سنجیده می‌شود.'
+      + ' حجم معیارِ اول است چون معاملهٔ باطل حجمش صفر است؛ اختلافِ شمار تا اندازهٔ ردیف‌های باطل توضیح دارد و بیشتر از آن «ناقص» است.'
+      + ' روزی که جلسه‌اش تمام نشده سنجیده نمی‌شود.'],
     ['پنجرهٔ ساعت', 'ردیف‌های برگ هر ابزار فقط جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰ است؛ شمار ردیف‌های بیرون از این بازه در ستون «بیرون از جلسه» برگ پوشش می‌آید.'],
     ['تایم‌فریم', tf.seconds
       ? `${tf.label} — هر ردیف یک سطل زمانی است که مبدأش ۹:۰۰ است. سطلِ بی‌معامله ردیف ندارد و هیچ قیمتی درون‌یابی نشده. معاملهٔ حراج پایانی (۱۲:۳۰:۰۰) در سطلِ آخرِ همان روز می‌نشیند، نه در سطلی تازه.`

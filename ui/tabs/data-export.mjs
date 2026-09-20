@@ -512,19 +512,34 @@ export async function mount(root, { state, api }) {
       await fetchLive(live, items, controller.signal, resolved);
       const dailyByIns = await fetchDaily(instruments, range, controller.signal);
       setStatus('داده‌ها آماده شد.');
+      // ═══ کدام روز «هنوز تمام نشده» است ═══
+      //
+      // تابلوی روزانهٔ روزِ جاری لحظه‌ای است و نوار هنوز پر می‌شود؛ تطبیق
+      // شمار و حجم برای آن روز معنا ندارد و «ناقص» خواندنش ادعای غلط است.
+      // فقط فازِ `open` چنین است: در `after` جلسه بسته شده و تطبیق دوباره
+      // معنادار می‌شود.
+      const openDates = String(resolved.payload?.market?.phase || '') === 'open' && resolved.date
+        ? [resolved.date] : [];
       let outcome = dataExportOutcome(pairs, items);
-      let audit = dataExportBlankAudit(pairs, items, dailyByIns);
+      let audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
       // خالیِ تاریخی که تابلوی روزانه تکذیبش می‌کند غالباً پاسخِ خالیِ کش
       // CDN است. همان جفت‌ها دقیقاً یک بار با cache-buster دوباره می‌روند؛
       // نه همهٔ بازه، و نه خالی‌ای که تابلو واقعاً صفر اعلام کرده است.
-      const missingKeys = new Set(audit.filter((row) => row.verdict === 'missing'
+      //
+      // ═══ و پاسخِ **نیمه‌کامل** هم همین‌جا دوباره پرسیده می‌شود ═══
+      //
+      // بند ۳ ممیزی: نوارِ یک‌ردیفی در برابر تابلوی هزارمعامله‌ای «موفق»
+      // شمرده می‌شد و هیچ تلاش دوباره‌ای نمی‌گرفت. یک پاسخِ بریده هم یک
+      // دریافتِ شکست‌خورده است، فقط با ظاهرِ موفق — پس دقیقاً همان یک دورِ
+      // بی‌کش را می‌گیرد که خالیِ تکذیب‌شده می‌گیرد.
+      const missingKeys = new Set(audit.filter((row) => (row.verdict === 'missing' || row.verdict === 'partial')
         && items[row.key]?.source === 'history').map((row) => row.key));
       const staleHistorical = pairs.filter((pair) => missingKeys.has(pair.key));
       if (staleHistorical.length) {
-        setStatus(`${fmt.int(staleHistorical.length)} ابزار/روز در تاریخچه خالی بود ولی تابلو معامله ثبت کرده؛ دریافت تازه در حال انجام است…`);
+        setStatus(`${fmt.int(staleHistorical.length)} ابزار/روز با تابلوی روزانه نخواند (خالی یا ناقص)؛ دریافت تازه در حال انجام است…`);
         await fetchHistorical(staleHistorical, items, controller.signal, true);
         outcome = dataExportOutcome(pairs, items);
-        audit = dataExportBlankAudit(pairs, items, dailyByIns);
+        audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
       }
       // ═══ دور دوم برای روزهایی که **سراسر** خالی آمدند ═══
       //
@@ -548,7 +563,7 @@ export async function mount(root, { state, api }) {
           + ` ${fmt.int(suspectPairs.length)} ابزار/روز بی‌کش دوباره پرسیده می‌شود…`);
         await fetchHistorical(suspectPairs, items, controller.signal, true);
         outcome = dataExportOutcome(pairs, items);
-        audit = dataExportBlankAudit(pairs, items, dailyByIns);
+        audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
       }
       const rescued = suspectPairs.filter((pair) => (items[pair.key]?.rows || []).length).length;
       // شیت‌ها اینجا ساخته نمی‌شوند: تایم‌فریم شکلِ نوشتن است نه دریافت، و
@@ -609,15 +624,28 @@ export async function mount(root, { state, api }) {
           + `${blanks.worst ? ` (بدترینش کد ${faDigits(blanks.worst.ins)} با ${fmt.int(blanks.worst.dailyTrades)} معامله)` : ''}`
           + ` — این یعنی داده نرسیده، نه اینکه بازار ساکت بوده.`
         : (blanks.quiet ? ` ${fmt.int(blanks.quiet)} ابزار/روزِ خالی با تابلوی روزانه تأیید شد.` : '');
+      // ═══ چرا «ناقص» جملهٔ خودش را دارد ═══
+      //
+      // پاسخِ نیمه‌کامل نه خالی است نه کامل، و تا وقتی اسمش گفته نشود
+      // کاربر فایل را «آماده» می‌خواند. عددِ حجمِ جامانده کنارش می‌آید
+      // چون همان است که بزرگی مشکل را نشان می‌دهد.
+      const partialWhy = blanks.partial
+        ? ` ${fmt.int(blanks.partial)} ابزار/روز داده آورد ولی از تابلوی روزانه کمتر بود`
+          + `${blanks.worstPartial ? ` (بدترینش کد ${faDigits(blanks.worstPartial.ins)}: ${fmt.int(blanks.worstPartial.volumeGap)} واحد حجم کمتر)` : ''}`
+          + ` — پاسخِ بریده، نه بازارِ کم‌معامله.`
+        : '';
+      const matchedWhy = blanks.matched
+        ? ` ${fmt.int(blanks.matched)} ابزار/روز با تابلوی روزانه تطبیق کامل شد.` : '';
       // کدی که تابلوی روزانه‌اش اصلاً پاسخ نگرفت، «بی‌معامله» نیست و
       // «تأییدنشده» هم نیست — راست‌آزمایی‌اش انجام **نشده**. سکوت در این
       // مورد همان بند ۴ ممیزی است.
       const dailyGap = dailyMissing.length
         ? ` ${fmt.int(dailyMissing.length)} ابزار تابلوی روزانه‌اش پاسخ نگرفت، پس راست‌آزماییِ خالی‌هایشان انجام نشد.`
         : '';
-      setStatus(`${head}${unlistedNote}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}${dailyGap}`
+      setStatus(`${head}${unlistedNote}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}${partialWhy}${matchedWhy}${dailyGap}`
         + `${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}`,
-      outcome.blank || blanks.missing > 0 || dailyMissing.length > 0 || Boolean(deadRoute));
+      outcome.blank || blanks.missing > 0 || blanks.partial > 0
+        || dailyMissing.length > 0 || Boolean(deadRoute));
     } catch (error) {
       if (error.name === 'AbortError') setStatus('دریافت با درخواست شما متوقف شد.', true);
       else { setStatus(`ساخت خروجی کامل نشد: ${error.message}`, true); logError('data-export', error); }
