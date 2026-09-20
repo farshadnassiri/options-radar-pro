@@ -262,7 +262,16 @@ export async function mount(root, { state, api }) {
     try {
       const response = await fetch('/api/trades/batch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-        body: JSON.stringify({ requests: batch.map(({ ins, date }) => ({ ins, date })), fresh }),
+        body: JSON.stringify({
+          requests: batch.map(({ ins, date, key }) => {
+            const expect = expectationFor({ ins, date, key });
+            // فقط وقتی مرجع واقعاً در دست است؛ وگرنه سرور خودش می‌پرسد.
+            return expect.known
+              ? { ins, date, expect: { trades: expect.trades, volume: expect.volume } }
+              : { ins, date };
+          }),
+          fresh,
+        }),
       });
       const payload = await response.json();
       if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
@@ -564,9 +573,20 @@ export async function mount(root, { state, api }) {
         items[pair.key] = { rows: [], error: 'روز آینده است', source: '' };
       }
       if (liveDates.length) setStatus(`نوار زنده مالِ ${faDigits(String(resolved.date))} است؛ همان روز از نوار گرفته می‌شود نه از مسیر تاریخی.`);
+      // ═══ چرا تابلوی روزانه **اول** گرفته می‌شود ═══
+      //
+      // دو دلیل، و هر دو از فایلِ واقعیِ ۲۰۲۶۰۶۲۲ تا ۲۰۲۶۰۹۲۰ آمدند:
+      //
+      // ۱. **هزینه.** سرور برای سنجیدنِ هر ابزار/روز یک رکوردِ روزانه
+      //    لازم دارد. همین تب کلِ تاریخِ روزانهٔ همهٔ ابزارها را یکجا
+      //    می‌گیرد، پس فرستادنش همراه درخواست یعنی سرور آن را دوباره
+      //    نپرسد — برای آن فایل حدود ۲٬۷۰۰ درخواستِ بالادستِ کمتر.
+      // ۲. **حفاظت از دورِ اول.** `keepBetterTape` بی مرجع فقط
+      //    «پرحجم‌تر می‌ماند» را دارد؛ با مرجع، از همان دورِ اول
+      //    می‌فهمد کدام پاسخ واقعاً کامل است.
+      const dailyByIns = await fetchDaily(instruments, range, controller.signal);
       await fetchHistorical(historical, items, controller.signal);
       await fetchLive(live, items, controller.signal, resolved);
-      const dailyByIns = await fetchDaily(instruments, range, controller.signal);
       setStatus('داده‌ها آماده شد.');
       // ═══ کدام روز «هنوز تمام نشده» است ═══
       //

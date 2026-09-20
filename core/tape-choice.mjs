@@ -48,16 +48,39 @@ export function tapeMetrics(rows = []) {
  * `known:false` یعنی مرجعی در دست نیست — که «کامل است» معنی نمی‌دهد و
  * «ناقص است» هم نه. همین‌طور هم گزارش می‌شود.
  */
-export function dailyExpectation(raw) {
+export function dailyExpectation(raw, date = 0) {
+  const blank = (why = '') => ({ known: false, trades: 0, volume: 0, value: 0, ...(why ? { why } : {}) });
   const dict = raw && typeof raw === 'object'
     ? (Object.values(raw).find((v) => v && typeof v === 'object' && !Array.isArray(v)) || raw)
     : null;
-  if (!dict) return { known: false, trades: 0, volume: 0, value: 0 };
+  if (!dict) return blank();
+
+  // ═══ چرا تاریخِ خودِ رکورد سنجیده می‌شود ═══
+  //
+  // فایلِ واقعیِ ۲۰۲۶۰۶۲۲ تا ۲۰۲۶۰۹۲۰ این را لو داد: برای اهرم در
+  // `20260624` — که **روز معاملاتی نبود** — این endpoint رکوردِ
+  // آخرین جلسه (`20260920`، با ۱٬۷۹۵ معامله و ۶٬۶۶۰٬۴۲۹ حجم) را
+  // برگرداند، و ما آن را مرجعِ همان روز گرفتیم. نتیجه‌اش در برگ پوشش
+  // این شد که برای هفت روزِ تعطیلِ اهرم نوشت «۱٬۷۹۵ معامله کسری داریم» —
+  // عددی که هیچ‌جا وجود نداشت.
+  //
+  // این دقیقاً همان کلاسِ خطای بند ۵ ممیزیِ قبل است، یک endpoint آن‌طرف‌تر:
+  // **عکسِ بی‌تاریخ یا بدتاریخ، رکوردِ آن روز نیست.** آنجا برای
+  // `GetClosingPriceHistory` بسته شد و همین‌جا دوباره باز ماند.
+  //
+  // `dEven` در پاسخِ واقعی هست و همان تاریخِ درخواست‌شده را می‌گوید وقتی
+  // رکورد واقعی باشد. پس مقایسه‌اش قطعی است، نه حدس.
+  const wanted = Math.trunc(Number(date) || 0);
+  const stamped = Math.trunc(Number(dict.dEven) || 0);
+  if (wanted && stamped !== wanted) {
+    return blank(stamped
+      ? `تابلوی روزانه رکوردِ ${stamped} را داد، نه ${wanted}`
+      : `تابلوی روزانه تاریخ نداشت، پس مرجعِ ${wanted} نیست`);
+  }
+
   const trades = n(dict.zTotTran), volume = n(dict.qTotTran5J), value = n(dict.qTotCap);
   // روزی که تابلو برایش هیچ عددی ندارد، مرجع نیست.
-  if (!Number.isFinite(trades) || (!trades && !volume)) {
-    return { known: false, trades: 0, volume: 0, value: 0 };
-  }
+  if (!Number.isFinite(trades) || (!trades && !volume)) return blank();
   return { known: true, trades, volume, value };
 }
 
