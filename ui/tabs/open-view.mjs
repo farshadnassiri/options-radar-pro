@@ -418,11 +418,29 @@ export async function mount(root, { state }) {
         return { ...contract, size: sized.size, sizeAssumed: sized.assumed };
       });
       const codes = [String(ua.ins), ...contracts.map((contract) => String(contract.ins))]; closedSeriesByIns = {};
+      // ═══ بند ۷ ممیزی: خطای یک ابزار «نداشتنِ داده» نیست ═══
+      //
+      // پاسخِ دسته‌ای موفق است ولی می‌تواند داخلش خطای یک قرارداد را حمل
+      // کند. `result.rows || []` آن خطا را دور می‌ریخت و شکستِ شبکه را به
+      // «این قرارداد تاریخچه ندارد» ترجمه می‌کرد — و چون تاریخ‌های
+      // بی‌پاسخ از سری می‌افتند، بازه **کامل** هم به نظر می‌رسید.
+      const seriesErrors = {};
       for (const group of chunks(codes, 100)) {
         const response = await fetch(`/api/dailies?ins=${encodeURIComponent(group.join(','))}&n=0`), payload = await response.json();
         if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
-        for (const [ins, result] of Object.entries(payload)) closedSeriesByIns[ins] = result.rows || [];
+        for (const [ins, result] of Object.entries(payload)) {
+          closedSeriesByIns[ins] = result?.rows || [];
+          const why = result?.error || result?.fallbackError || result?.fallbackNote
+            || (!Array.isArray(result?.rows) ? 'پاسخ معتبر این ابزار دریافت نشد' : '');
+          if (why) seriesErrors[ins] = String(why);
+        }
+        for (const code of group) {
+          if (Object.prototype.hasOwnProperty.call(closedSeriesByIns, code)) continue;
+          closedSeriesByIns[code] = [];
+          seriesErrors[code] = 'پاسخی برای این ابزار نیامد';
+        }
       }
+      const failedCodes = codes.filter((code) => seriesErrors[code]);
       await applySelectedScope();
       const dates = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
       if (!dates.length) throw new Error('برای نماد پایه تاریخچه‌ای دریافت نشد');
@@ -430,6 +448,11 @@ export async function mount(root, { state }) {
       $('ov-from').innerHTML = options; $('ov-to').innerHTML = options; $('ov-from').disabled = false; $('ov-to').disabled = false;
       $('ov-from').value = String(dates[Math.max(0, dates.length - 20)]); $('ov-to').value = String(dates.at(-1)); computeDaily();
       if ($('ov-day-source').value === 'live') await loadDayIntraday();
+      // پس از `computeDaily` گفته می‌شود تا جملهٔ خودش را ننویسد رویش.
+      if (failedCodes.length) {
+        setStatus(`${faDigits(failedCodes.length)} قرارداد تاریخچه‌اش پاسخ نگرفت (${seriesErrors[failedCodes[0]]})`
+          + ' — این نبودِ داده در بازار نیست و تحلیلِ همان قراردادها ناقص است.', true);
+      }
     } catch (error) { setStatus(errorText(error, 'تاریخچه دریافت نشد.'), true); }
     finally { $('ov-load').disabled = false; }
   }

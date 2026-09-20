@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
 import { num } from '../core/num.mjs';
 import { normalizeTrades, normalizeTradesDetailed } from '../core/backtest.mjs';
+import { coversDailyDate, trustedDailyRows } from '../core/daily-trust.mjs';
 import { upstreamShape, upstreamShapeLabel } from '../core/upstream-shape.mjs';
 import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
@@ -1077,7 +1078,11 @@ function send(res, code, body, type = 'application/json; charset=utf-8') {
 const sendJson = (res, code, obj) => send(res, code, JSON.stringify(obj));
 
 const normalizeDailyRows = (rows) => rows.map((r) => ({
-  date: Number(r.dEven), close: Number(r.pClosing) || 0, last: Number(r.pDrCotVal) || 0,
+  // `hEven` همراه می‌آید چون دروازهٔ «عکس پیش‌جلسه» بی آن کور است: رکوردِ
+  // ۰۶:۱۲:۰۶ با صفر معامله از رکوردِ پایانِ روز جدا نمی‌شود. برای ردیفی
+  // که بالادست ساعت نمی‌دهد صفر می‌ماند و صفر مشکوک نیست.
+  date: Number(r.dEven), hEven: Number(r.hEven) || 0,
+  close: Number(r.pClosing) || 0, last: Number(r.pDrCotVal) || 0,
   low: Number(r.priceMin) || 0, high: Number(r.priceMax) || 0, first: Number(r.priceFirst) || 0,
   yday: Number(r.priceYesterday) || 0, vol: Number(r.qTotTran5J) || 0, trades: Number(r.zTotTran) || 0,
   // qTotCap ارزش معامله ثبت‌شده است. اگر بالادست آن را در تاریخچه ندهد،
@@ -1682,11 +1687,31 @@ async function handle(req, res) {
           // می‌ماند — جای هیچ ردیف ساختگی نیست.
           const histPath = `/ClosingPrice/GetClosingPriceHistory/${code}/${asOf}`;
           try {
-            const hist = normalizeDailyRows(firstList(await get(histPath, S.ttlDailySec, 6)));
+            // ═══ چرا پاسخِ این منبع صافی می‌خورد ═══
+            //
+            // بند ۵ ممیزی، نمونهٔ واقعیِ اهرم برای ۲۰۲۶۰۹۱۹: این endpoint
+            // یک رکورد با `dEven=0`، ساعت ۰۶:۱۲:۰۶، صفر معامله و قیمت
+            // ۷۵٬۰۶۴ داد — در حالی که پایانیِ همان روز ۷۳٬۵۲۷ بود و
+            // ۷۵٬۰۶۴ قیمتِ **روز قبل**. کد آن را به `date:0` تبدیل
+            // می‌کرد و چون آرایه خالی نبود `source:'history'` می‌داد،
+            // پس یک عکسِ پیش‌جلسه به‌جای روزانهٔ معتبر می‌نشست.
+            //
+            // حالا ردیفِ بی‌تاریخ و عکسِ پیش‌جلسه رد می‌شوند و — مهم‌تر —
+            // پاسخ می‌گوید آیا روزِ خواسته‌شده واقعاً پوشش داده شد.
+            // این endpoint تک‌روزه است و حلقهٔ بازه ندارد، پس «چند ردیف
+            // آمد» اثباتِ «روزِ گمشده برگشت» نیست.
+            const trusted = trustedDailyRows(normalizeDailyRows(firstList(await get(histPath, S.ttlDailySec, 6))));
+            const covers = coversDailyDate(trusted.rows, asOf);
             return [code, {
-              ins: code, rows: hist,
-              source: hist.length ? 'history' : 'list',
+              ins: code, rows: trusted.rows,
+              source: trusted.rows.length ? 'history' : 'list',
               fallbackTried: true,
+              fallbackCovers: covers,
+              ...(trusted.dropped ? { fallbackDropped: trusted.dropped, fallbackDropReasons: trusted.reasons } : {}),
+              ...(trusted.rows.length && !covers
+                ? { fallbackNote: `منبع جایگزین ${asOf} را پوشش نداد` } : {}),
+              ...(!trusted.rows.length && trusted.dropped
+                ? { fallbackNote: `منبع جایگزین ${trusted.dropped} ردیف داد و هیچ‌کدام روزانهٔ معتبر نبود` } : {}),
             }];
           } catch (e2) {
             return [code, {

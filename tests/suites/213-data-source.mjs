@@ -245,7 +245,7 @@ group('۲۱۳-و. مسیر سرور و رابط');
   check('و بی‌`asOf` هیچ درخواست اضافه‌ای نمی‌رود — رفتار قبلی دست‌نخورده',
     route.includes('const canFallback = validCompactDate(asOf);'));
   check('منبعِ هر ابزار در پاسخ برمی‌گردد تا فایل بتواند بگوید کدام جواب داد',
-    /source: hist\.length \? 'history' : 'list'/.test(route));
+    /source: trusted\.rows\.length \? 'history' : 'list'/.test(route));
   check('خطای منبع دوم قورت داده نمی‌شود — متنش حمل می‌شود، نه undefined',
     /fallbackError: `\$\{e2\.name\}: \$\{e2\.message\}`/.test(route));
   check('و اگر هر دو خالی بودند، هیچ ردیف ساختگی ساخته نمی‌شود',
