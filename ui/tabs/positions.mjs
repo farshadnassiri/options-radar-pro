@@ -143,6 +143,7 @@ export async function mount(root, { state, api }) {
     <div id="alert-bar"></div>
 
     <div class="kpis" id="kpis"></div>
+    <div class="kpi-meta" id="kpi-meta"></div>
 
     <section class="card" id="intake-card" style="display:none">
       <h3 id="intake-title">ترکیب رسیده از جست‌وجوی استراتژی‌ها</h3>
@@ -177,7 +178,13 @@ export async function mount(root, { state, api }) {
     </section>
 
     <section class="card">
-      <h3>موقعیت‌های باز</h3>
+      <!-- شمارِ ردیف کنارِ عنوان می‌نشیند، نه در جمله: چشم پیش از خواندنِ
+           جمله می‌خواهد بداند جدول چقدر است. کلاسِ «scope» همان نشانِ
+           کوچکِ کنارِ عنوانِ کارت است که جاهای دیگر هم به کار می‌رود.
+           (اینجا نشانهٔ کد با گیومه نوشته شده، نه با بک‌تیک: این کامنت
+           داخلِ یک رشتهٔ الگو است و بک‌تیک رشته را می‌بندد — همان اشتباه
+           یک‌بار شد و تب را «باز نشد» کرد، بی آنکه نحو خطا بدهد.) -->
+      <h3>موقعیت‌های باز<span class="scope" id="open-count" hidden></span></h3>
       <p class="note" id="daily-note"></p>
       <div class="scroll" style="max-height:none"><table class="data" id="list"></table></div>
     </section>
@@ -592,6 +599,10 @@ export async function mount(root, { state, api }) {
       for (const hit of result.firing) alertHits.push({ ...hit, title: p.title || 'موقعیت' });
     }
     root.querySelector('#alert-bar').innerHTML = alertBannerHtml(alertHits);
+    // شمارِ نوارِ خطی، **موقعیت** است نه شرط: یک موقعیت می‌تواند سه شرطِ
+    // هم‌زمان برقرار داشته باشد و «۳ شرطِ برقرار» آن را سه موقعیت نشان
+    // می‌دهد. ستون «شرط» جدول هم همین را می‌شمارد.
+    const firingCount = [...firingByIndex.values()].filter((list) => list.length).length;
 
     const rows = evals.map(({ p, at, state, m, spot, greeks }) => {
       const change = todayChange(p, at, m.pnlTotal);
@@ -839,25 +850,38 @@ export async function mount(root, { state, api }) {
     // هم «در سود» رنگ می‌کرد.
     const pnlGain = openRows.length ? tot >= 0 : null;
     const roiGain = cap > 0 ? tot >= 0 : null;
+    // ── چهار کاشی، نه هفت‌تا ──
+    //
+    // کاشی وزنِ یک عددِ مهم را دارد. با هفت کاشیِ هم‌اندازه هیچ‌کدام مهم
+    // نبود، و سه‌تایشان اصلاً عددِ سنجیدنی نبودند بلکه شمارشِ وضعیت بودند
+    // («۱۲ نماد قیمت‌خورده»، «۱ سررسیدگذشته»). آن‌ها به نوارِ خطیِ زیرِ
+    // ردیف رفتند: خوانده می‌شوند، ولی وزن نمی‌گیرند. چیزی حذف نشد.
     root.querySelector('#kpis').innerHTML = [
-      ['موقعیت باز', fmt.int(openRows.length), goneRows.length ? `${faDigits(goneRows.length)} سررسیدگذشته` : '', null],
-      ['سرمایه روز ورود', fmt.money(cap), capitalComplete ? 'ریال' : 'مبنای ورود ناقص است', null],
-      ['وجه تضمین امروز', fmt.money(currentMargin), currentMarginComplete ? 'ریال' : 'قیمت پایانی ناقص است', null],
-      ['سود و زیان جاری', fmt.money(tot), pnlGain == null ? '' : pnlGain ? 'در سود' : 'در زیان', pnlGain],
+      ['سود و زیان جاری', fmt.money(tot), pnlGain == null ? '' : pnlGain ? 'در سود · ریال' : 'در زیان · ریال', pnlGain],
       ['تغییر امروز', fmt.money(changeSum),
         changeComplete ? 'نسبت به پایانی روز پیش' : 'مبنای روز پیش برای همهٔ موقعیت‌ها نیست',
         changeComplete ? changeSum >= 0 : null],
-      ['بازده از ورود', `${fmt.pct(cap > 0 ? (tot / cap) * 100 : NaN)}٪`, '', roiGain],
-      // عدد در خانهٔ عدد، علت در خانهٔ نشان. پیش از این جملهٔ «بی‌قیمت —
-      // قیمت‌گیری نشد» در جای **عدد** و با اندازهٔ عدد می‌نشست و از کاشی
-      // بیرون می‌زد؛ در نماگرفت، همان یک کاشی ارتفاع کلِ ردیف را دو برابر
-      // کرده بود.
-      ['قیمت‌گیری', quotesByIns.size ? fmt.int(quotesByIns.size) : '—',
-        quotesByIns.size ? 'نماد قیمت خورده' : 'قیمت‌گیری نشد', null],
+      ['بازده از ورود', `${fmt.pct(cap > 0 ? (tot / cap) * 100 : NaN)}٪`,
+        capitalComplete && cap > 0 ? `روی ${fmt.money(cap)}` : 'مبنای ورود ناقص است', roiGain],
+      ['وجه تضمین امروز', fmt.money(currentMargin), currentMarginComplete ? 'ریال' : 'قیمت پایانی ناقص است', null],
     ].map(([k, v, sub, gain]) => `<div class="kpi"><div class="k">${k}</div>
       <div class="v ${kpiTone(k, gain)}">${v}</div>
       <div class="s" title="${sub}">${sub}</div></div>`).join('');
 
+    // نوارِ خطی: شمارشِ وضعیت، نه عددِ پولی. هر بخش فقط وقتی می‌آید که
+    // چیزی برای گفتن داشته باشد — «صفر سررسیدگذشته» خبر نیست.
+    root.querySelector('#kpi-meta').innerHTML = [
+      `موقعیت باز <b>${fmt.int(openRows.length)}</b>`,
+      quotesByIns.size
+        ? `قیمت‌گیری <b>${fmt.int(quotesByIns.size)}</b> نماد`
+        : '<span class="warn">قیمت‌گیری نشد</span>',
+      goneRows.length ? `سررسیدگذشته <b>${faDigits(goneRows.length)}</b>` : '',
+      firingCount ? `<span class="warn">${faDigits(firingCount)} شرطِ برقرار</span>` : '',
+    ].filter(Boolean).join('<i></i>');
+
+    const openCount = root.querySelector('#open-count');
+    openCount.textContent = openRows.length ? `${faDigits(openRows.length)} ردیف` : '';
+    openCount.hidden = !openRows.length;
     root.querySelector('#daily-note').textContent = dailyNote;
     if (closing != null) drawClose();
     if (alerting != null) drawAlert();
