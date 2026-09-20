@@ -417,7 +417,7 @@ function insListOrReject(res, raw, max, label) {
 //
 // مرجع **هم‌زمان** با مسیر اول گرفته می‌شود، نه پس از آن، تا وقتی مسیر
 // اول کامل باشد هیچ رفت‌وبرگشتِ اضافه‌ای به تأخیر اضافه نکند.
-async function fetchHistoricalTape(code, date, { fresh = false } = {}) {
+async function fetchHistoricalTape(code, date, { fresh = false, expect = null } = {}) {
   const pull = async (pathname) => {
     const data = fresh ? await getFresh(pathname, 2, 6) : await get(pathname, S.ttlDailySec, 6);
     const detail = normalizeTradesDetailed(firstList(data));
@@ -426,8 +426,15 @@ async function fetchHistoricalTape(code, date, { fresh = false } = {}) {
   // مرجع هرگز اجرا را نمی‌اندازد: نبودش «نمی‌دانیم» است، نه خطا. قرارداد
   // منقضی اغلب تابلوی روزانهٔ تاریخ‌دار ندارد و آن حالت باید کار کند.
   const reference = async () => {
+    // مرجعِ فرستاده‌شدهٔ مصرف‌کننده، اگر معتبر باشد، یک درخواستِ بالادست
+    // را صرفه‌جویی می‌کند. خروجی دیتا کلِ تابلوی روزانه را از قبل دارد و
+    // برای بازهٔ بزرگ همین چند هزار درخواست است.
+    if (expect && Number.isFinite(Number(expect.trades)) && Number.isFinite(Number(expect.volume))
+      && (Number(expect.trades) > 0 || Number(expect.volume) > 0)) {
+      return { known: true, trades: Number(expect.trades), volume: Number(expect.volume), value: 0 };
+    }
     try {
-      return dailyExpectation(await get(historicalPath('daily', code, date), S.ttlDailySec, 7));
+      return dailyExpectation(await get(historicalPath('daily', code, date), S.ttlDailySec, 7), date);
     } catch {
       return { known: false, trades: 0, volume: 0, value: 0 };
     }
@@ -1268,7 +1275,13 @@ async function handle(req, res) {
           return sendJson(res, 400, { error: 'هر درخواست باید کد ابزار رقمی و تاریخ هشت‌رقمی میلادی داشته باشد' });
         }
         const key = `${date}:${code}`;
-        if (!seen.has(key)) { seen.add(key); requests.push({ key, code, date }); }
+        // مرجع از مصرف‌کننده می‌آید ولی **باور نمی‌شود**: فقط دو عددِ
+        // متناهی از آن خوانده می‌شود و هر چیز دیگری کنار می‌رود.
+        const raw = item?.expect;
+        const expect = raw && Number.isFinite(Number(raw.trades)) && Number.isFinite(Number(raw.volume))
+          ? { trades: Math.max(0, Math.trunc(Number(raw.trades))), volume: Math.max(0, Math.trunc(Number(raw.volume))) }
+          : null;
+        if (!seen.has(key)) { seen.add(key); requests.push({ key, code, date, expect }); }
       }
       // ── تلاش دوباره، بی کش ────────────────────────────────────────
       //
@@ -1300,7 +1313,7 @@ async function handle(req, res) {
       // چیزی داد که اصلاً فهرست معامله نیست. `firstList` هر دو را یک `[]`
       // می‌کند. حالا شکلِ خامِ پاسخ همراه خالی می‌آید و در برگ پوشش
       // می‌نشیند، تا اجرای بعدی تشخیص باشد نه حدسِ تازه.
-      const one = async ({ key, code, date }) => [key, await fetchHistoricalTape(code, date, { fresh })];
+      const one = async ({ key, code, date, expect }) => [key, await fetchHistoricalTape(code, date, { fresh, expect })];
       return sendJson(res, 200, { count: requests.length, items: Object.fromEntries(await Promise.all(requests.map(one))) });
     }
 
@@ -1591,7 +1604,7 @@ async function handle(req, res) {
               get(upstreamPath, S.ttlDailySec, 6),
               (async () => {
                 try {
-                  return dailyExpectation(await get(historicalPath('daily', code, date), S.ttlDailySec, 7));
+                  return dailyExpectation(await get(historicalPath('daily', code, date), S.ttlDailySec, 7), date);
                 } catch { return { known: false, trades: 0, volume: 0, value: 0 }; }
               })(),
             ]);
