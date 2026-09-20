@@ -46,7 +46,7 @@ import { watchHealth } from '../core/watch-health.mjs';
 import { makeJobQueue } from './job-queue.mjs';
 import {
   validIns, validCompactDate, historicalTradesPath, historicalTradesAltPath, historicalPath, HISTORICAL_KINDS,
-  validSessionId, parseInsList, safeStaticPath, readBody, BodyTooLarge,
+  validSessionId, parseInsRequest, safeStaticPath, readBody, BodyTooLarge,
 } from './guard.mjs';
 import { evictOldest } from './cache.mjs';
 import { createLog } from './errlog.mjs';
@@ -346,6 +346,37 @@ function firstDict(obj) {
   if (!obj || typeof obj !== 'object') return {};
   for (const v of Object.values(obj)) if (v && typeof v === 'object' && !Array.isArray(v)) return v;
   return obj;
+}
+
+// ═══════════════ سقفِ ابزار: رد کن، نبُر ═══════════════
+//
+// ممیزی ۱۴۰۵/۰۶/۲۹، بند ۴: `parseInsList` با رسیدن به سقف حلقه را
+// می‌شکست — نه خطای «بزرگی درخواست»، نه فهرستِ حذف‌شده‌ها. ۲۰۱ شناسه
+// می‌رفت و ۲۰۰ تا برمی‌گشت، و شناسهٔ آخر هیچ‌جا گزارش نمی‌شد.
+//
+// چرا این از یک عددِ کم بدتر است: مصرف‌کننده‌ای که پاسخ را با کلیدِ کد
+// می‌خواند، برای کدِ حذف‌شده «کلیدی نبود» می‌بیند و آن را «داده‌ای نداشت»
+// می‌خواند. یعنی سقفِ مهارِ سرور به یک **ادعای دروغ دربارهٔ بازار**
+// ترجمه می‌شد.
+//
+// قاعدهٔ تازه: هر مسیرِ دسته‌ای یا همهٔ کدها را جواب می‌دهد، یا ۴۱۳ و
+// عددِ سقف. بریدن گزینه نیست. مصرف‌کننده خودش دسته‌بندی می‌کند و چون خطا
+// صریح است، دسته‌بندیِ نکرده در همان اجرای اول دیده می‌شود.
+function insListOrReject(res, raw, max, label) {
+  const parsed = parseInsRequest(raw, max);
+  if (parsed.overflow > 0) {
+    sendJson(res, 413, {
+      error: `${label}: سقف هر درخواست ${max} ابزار است و ${parsed.requested} تا آمد`
+        + ` — ${parsed.overflow} ابزار جا نمی‌شود. فهرست را دسته‌بندی کن.`,
+      max, requested: parsed.requested, overflow: parsed.overflow,
+    });
+    return null;
+  }
+  if (!parsed.codes.length) {
+    sendJson(res, 400, { error: 'دست‌کم یک کد ابزار معتبر لازم است' });
+    return null;
+  }
+  return parsed.codes;
 }
 
 // ═════════════ یک دریافت‌کننده برای همهٔ مسیرهای ریزمعاملهٔ تاریخی ═════════════
@@ -1109,8 +1140,8 @@ async function handle(req, res) {
     // کامل از شروع بازار است؛ مرورگر با sequence ردیف تازه را تشخیص می‌دهد.
     // سقف ۲۴ ابزار جلوی یک انتخاب اشتباه و کوبیدن API بالادست را می‌گیرد.
     if (p === '/api/live-trades') {
-      const codes = parseInsList(u.searchParams.get('ins'), 24);
-      if (!codes.length) return sendJson(res, 400, { error: 'دست‌کم یک کد ابزار معتبر لازم است' });
+      const codes = insListOrReject(res, u.searchParams.get('ins'), 24, 'نوار زنده');
+      if (!codes) return undefined;
       const one = async (code) => {
         try {
           // تکرارِ دقیق همین‌جا می‌افتد، وگرنه خلاصه و شمع‌ساز آن را
@@ -1531,8 +1562,8 @@ async function handle(req, res) {
         const [, body] = await one(ins);
         return sendJson(res, 200, { kind, date: Number(date), ...body });
       }
-      const codes = parseInsList(u.searchParams.get('ins'), 60);
-      if (!codes.length) return sendJson(res, 400, { error: 'دست‌کم یک کد ابزار لازم است' });
+      const codes = insListOrReject(res, u.searchParams.get('ins'), 60, `دستهٔ تاریخی «${kind}»`);
+      if (!codes) return undefined;
       const pairs = await Promise.all(codes.map(one));
       return sendJson(res, 200, { kind, date: Number(date), byIns: Object.fromEntries(pairs) });
     }
@@ -1636,7 +1667,8 @@ async function handle(req, res) {
     // `asOf` اختیاری است: بی آن رفتار دقیقاً مثل قبل می‌ماند و هیچ
     // درخواست اضافه‌ای نمی‌رود.
     if (p === '/api/dailies') {
-      const codes = parseInsList(u.searchParams.get('ins'), 200);
+      const codes = insListOrReject(res, u.searchParams.get('ins'), 200, 'تابلوی روزانهٔ دسته‌ای');
+      if (!codes) return undefined;
       const rawN = u.searchParams.get('n');
       const n = rawN == null || rawN === '' ? 0 : Math.max(0, Math.trunc(Number(rawN) || 0));
       const asOf = u.searchParams.get('asOf');
@@ -1676,7 +1708,9 @@ async function handle(req, res) {
 
     // ——— دریافت دسته‌ای: یک رفت و برگشت به‌جای چند ده تا ———
     if (p === '/api/books' || p === '/api/infos') {
-      const codes = parseInsList(u.searchParams.get('ins'), 200);
+      const codes = insListOrReject(res, u.searchParams.get('ins'), 200,
+        p === '/api/books' ? 'دفتر سفارشِ دسته‌ای' : 'اطلاعات جاریِ دسته‌ای');
+      if (!codes) return undefined;
       const wantBook = p === '/api/books';
       const one = async (code) => {
         try {

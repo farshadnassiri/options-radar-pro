@@ -12,6 +12,7 @@ import {
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
 import { LIVE_CODE_CAP, splitTradeDays } from '/core/trades-source.mjs';
+import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
 import { inferLiveSessionDate, liveTapeCodes, liveTapeDay } from '/core/live-day.mjs';
 import { fetchRangeUniverse, mountHistoryRange } from '/ui/history-range.mjs';
 import { buildDataExportSheets, dataExportFilename } from '/ui/data-export-workbook.mjs';
@@ -283,6 +284,9 @@ export async function mount(root, { state, api }) {
    * شکستش کارِ اصلی را نمی‌خورد: بی این، حکمِ خالی‌ها «نمی‌دانیم» می‌شود،
    * نه «بی‌معامله».
    */
+  // کدهایی که تابلوی روزانه‌شان پاسخ نگرفت. «نیامد» است، نه «نداشت».
+  let dailyMissing = [];
+
   async function fetchDaily(instruments, range, signal) {
     const codes = [...new Set(instruments.map((item) => String(item.ins)).filter(Boolean))];
     if (!codes.length) return {};
@@ -296,10 +300,37 @@ export async function mount(root, { state, api }) {
       // تابلوی روزانه‌اش نمی‌آمد — در فایل گزارش‌شده ۸۴۷ ابزار/روز «تابلوی
       // روزانه در دست نیست» گرفتند، یعنی راست‌آزمایی برای دوسومِ جفت‌ها
       // کور بود، دقیقاً همان‌جا که به آن نیاز داشتیم.
-      const response = await fetch(`/api/dailies?ins=${codes.join(',')}&n=0`, { cache: 'no-store', signal });
-      const payload = await response.json();
-      if (!response.ok || payload?.error) throw new Error(payload?.error || `پاسخ ${response.status}`);
-      return payload && typeof payload === 'object' ? payload : {};
+      // ═══ چرا دسته‌بندی، و چرا شمارشِ گمشده ═══
+      //
+      // ممیزی ۱۴۰۵/۰۶/۲۹ بند ۴: اینجا **همهٔ** کدها یکجا می‌رفتند و سقفِ
+      // ۲۰۰تاییِ سرور بی‌صدا می‌بُرید. برای انتخابی بزرگ‌تر از ۲۰۰ ابزار،
+      // راست‌آزماییِ خالی‌ها برای انتهای فهرست کور می‌شد — یعنی همان
+      // سازوکاری که باید «داده نیامد» را از «بی‌معامله» جدا کند، خودش
+      // خاموش بود، و کاربر هیچ نشانه‌ای نمی‌دید.
+      //
+      // حالا سرور اضافه‌درخواست را رد می‌کند و این تب خودش دسته می‌کند؛
+      // و پس از جمع‌کردن، کدِ بی‌پاسخ **نام برده می‌شود** نه اینکه به
+      // «تابلوی روزانه در دست نیست» ترجمه شود.
+      const batches = insBatches(codes, INS_CAP.dailies);
+      const parts = [];
+      for (let index = 0; index < batches.length; index += 1) {
+        if (batches.length > 1) {
+          setStatus(`در حال گرفتن تابلوی روزانه: بسته ${fmt.int(index + 1)} از ${fmt.int(batches.length)}…`);
+        }
+        const response = await fetch(`/api/dailies?ins=${batches[index].join(',')}&n=0`, { cache: 'no-store', signal });
+        const payload = await response.json();
+        if (!response.ok || payload?.error) throw new Error(payload?.error || `پاسخ ${response.status}`);
+        parts.push(payload && typeof payload === 'object' ? payload : {});
+      }
+      const merged = mergeInsPayloads(codes, parts);
+      if (merged.missing.length) {
+        // بالا نمی‌رود که اجرا را بیندازد؛ ثبت می‌شود تا در لاگ دیده شود
+        // و در برگ راهنما شمرده شود.
+        logError('data-export:daily-missing',
+          new Error(`${merged.missing.length} ابزار از تابلوی روزانه پاسخ نگرفتند`));
+      }
+      dailyMissing = merged.missing;
+      return merged.payload;
     } catch (error) {
       if (error.name === 'AbortError') throw error;
       logError('data-export:daily', error);
@@ -526,7 +557,13 @@ export async function mount(root, { state, api }) {
       // خالی بسازد. «جفت داشتن» ملاک است نه «معامله داشتن» — قراردادِ
       // زندهٔ بی‌معامله همچنان برگِ خالیِ خودش را دارد.
       const sheetInstruments = instrumentsWithPairs(instruments, pairs);
-      prepared = { instruments: sheetInstruments, pairs, items, range, complete: universe.complete, note: universe.note || '', outcome, audit };
+      prepared = {
+        instruments: sheetInstruments, pairs, items, range,
+        complete: universe.complete, note: universe.note || '', outcome, audit,
+        // فهرستِ کدهایی که تابلوی روزانه‌شان نیامد، تا برگ راهنما بتواند
+        // بگوید راست‌آزمایی برای چند ابزار انجام نشده.
+        dailyMissing: [...dailyMissing],
+      };
       paintResult(sheetInstruments, pairs, items);
       // ═══ چرا صفر بودنِ داده، خبرِ اول است ═══
       //
@@ -572,9 +609,15 @@ export async function mount(root, { state, api }) {
           + `${blanks.worst ? ` (بدترینش کد ${faDigits(blanks.worst.ins)} با ${fmt.int(blanks.worst.dailyTrades)} معامله)` : ''}`
           + ` — این یعنی داده نرسیده، نه اینکه بازار ساکت بوده.`
         : (blanks.quiet ? ` ${fmt.int(blanks.quiet)} ابزار/روزِ خالی با تابلوی روزانه تأیید شد.` : '');
-      setStatus(`${head}${unlistedNote}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}`
+      // کدی که تابلوی روزانه‌اش اصلاً پاسخ نگرفت، «بی‌معامله» نیست و
+      // «تأییدنشده» هم نیست — راست‌آزمایی‌اش انجام **نشده**. سکوت در این
+      // مورد همان بند ۴ ممیزی است.
+      const dailyGap = dailyMissing.length
+        ? ` ${fmt.int(dailyMissing.length)} ابزار تابلوی روزانه‌اش پاسخ نگرفت، پس راست‌آزماییِ خالی‌هایشان انجام نشد.`
+        : '';
+      setStatus(`${head}${unlistedNote}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}${dailyGap}`
         + `${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}`,
-      outcome.blank || blanks.missing > 0 || Boolean(deadRoute));
+      outcome.blank || blanks.missing > 0 || dailyMissing.length > 0 || Boolean(deadRoute));
     } catch (error) {
       if (error.name === 'AbortError') setStatus('دریافت با درخواست شما متوقف شد.', true);
       else { setStatus(`ساخت خروجی کامل نشد: ${error.message}`, true); logError('data-export', error); }

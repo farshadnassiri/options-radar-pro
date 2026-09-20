@@ -55,7 +55,7 @@ export const DATA_EXPORT_CANDLE_DERIVED_HEADERS = [
 
 export function buildDataExportSheets({
   instruments = [], pairs = [], items = {}, range = {}, complete = false, note = '',
-  outcome = null, audit = [], frame = 'tick', derived = false,
+  outcome = null, audit = [], frame = 'tick', derived = false, dailyMissing = [],
 } = {}) {
   const tf = dataExportFrame(frame);
   const coverage = dataExportCoverageRows(instruments, pairs, items, audit);
@@ -107,6 +107,16 @@ export function buildDataExportSheets({
     // دسته‌بندی می‌کردی. یک خط همان را می‌گوید.
     ['تفکیک مسیر', routeLine],
     ['بازبینی خالی‌ها با تابلوی روزانه', blankLine],
+    // ═══ چرا «انجام نشد» سطرِ خودش را دارد ═══
+    //
+    // ممیزی ۱۴۰۵/۰۶/۲۹ بند ۴: سقفِ ۲۰۰تاییِ `/api/dailies` بی‌صدا می‌بُرید،
+    // پس برای انتخابی بزرگ‌تر، انتهای فهرست **راست‌آزمایی نمی‌شد** و
+    // خالی‌هایش «تابلوی روزانه در دست نیست» می‌گرفتند — که همان حکمِ
+    // «نمی‌دانیم» است ولی علتش دریافتِ ما بود، نه بالادست. این دو باید
+    // در فایل از هم جدا بمانند.
+    ['راست‌آزمایی انجام‌نشده', (dailyMissing || []).length
+      ? `${(dailyMissing || []).length} ابزار تابلوی روزانه‌شان پاسخ نگرفت، پس خالی‌هایشان راست‌آزمایی نشد`
+      : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت'],
     ...(blanks.worst ? [['بدترین مورد نیامدن', `کد ${blanks.worst.ins} در ${blanks.worst.date} — تابلو ${blanks.worst.dailyTrades} معامله`]] : []),
     ['پنجرهٔ ساعت', 'ردیف‌های برگ هر ابزار فقط جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰ است؛ شمار ردیف‌های بیرون از این بازه در ستون «بیرون از جلسه» برگ پوشش می‌آید.'],
     ['تایم‌فریم', tf.seconds

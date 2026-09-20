@@ -207,5 +207,5 @@ group('۲۶۸. ابزارِ بی‌جفت برگ نمی‌گیرد');
 
   check('تب همین فهرستِ فیلترشده را به فایل می‌دهد',
     readSrc('../ui/tabs/data-export.mjs').includes('const sheetInstruments = instrumentsWithPairs(instruments, pairs)')
-      && readSrc('../ui/tabs/data-export.mjs').includes('prepared = { instruments: sheetInstruments,'));
+      && readSrc('../ui/tabs/data-export.mjs').includes('instruments: sheetInstruments, pairs, items, range,'));
 }

@@ -9,6 +9,7 @@
 // دریافت عمق دوباره مرتب می‌شوند.
 
 import { CATALOG } from '/strategies/catalog.mjs';
+import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
 import { logError } from '/ui/errlog.mjs';
 
 let worker = null;
@@ -148,15 +149,24 @@ export async function runScan({ defId, uaKeys, settings, qty, onStage }) {
     for (const c of r.legIns || []) codes.add(c);
     if (r.uaIns) codes.add(r.uaIns);
   }
-  const list = [...codes].slice(0, 180);
+  // برشِ ۱۸۰تایی برداشته شد: نمادِ بعد از آن بی‌مظنه به مرحلهٔ دو می‌رفت و
+  // آنجا از «عمق» می‌افتاد — یعنی یک سقفِ درخواست به یک حکمِ غلط دربارهٔ
+  // نقدشوندگی ترجمه می‌شد (ممیزی ۱۴۰۵/۰۶/۲۹، بند ۴).
+  const list = [...codes];
   if (!list.length) return endEarly('ردیف‌های مرحله یک نماد قابل استعلامی ندارند');
 
   try {
-    const q = list.join(',');
-    const [books, infos] = await Promise.all([
-      fetch(`/api/books?ins=${q}`).then((r) => r.json()),
-      fetch(`/api/infos?ins=${q}`).then((r) => r.json()),
-    ]);
+    const bookParts = [], infoParts = [];
+    for (const batch of insBatches(list, INS_CAP.books)) {
+      const q = batch.join(',');
+      const [b, i] = await Promise.all([
+        fetch(`/api/books?ins=${q}`).then((r) => r.json()),
+        fetch(`/api/infos?ins=${q}`).then((r) => r.json()),
+      ]);
+      bookParts.push(b); infoParts.push(i);
+    }
+    const books = mergeInsPayloads(list, bookParts).payload;
+    const infos = mergeInsPayloads(list, infoParts).payload;
     const data = {};
     for (const ins of list) {
       data[ins] = { ...(infos[ins] || {}), ...(books[ins] || {}) };

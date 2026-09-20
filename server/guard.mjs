@@ -82,22 +82,54 @@ export function historicalTradesAltPath(ins, date) {
 }
 
 /**
+ * فهرست کد جداشده با ویرگول، با شرحِ آنچه افتاد.
+ *
+ * ═══ چرا این تابع شرح می‌دهد و `parseInsList` فقط فهرست می‌دهد ═══
+ *
+ * ممیزی ۱۴۰۵/۰۶/۲۹: نسخهٔ قبلی با رسیدن به سقف حلقه را **می‌شکست** و
+ * ساکت برمی‌گشت — نه خطا، نه فهرستِ حذف‌شده‌ها. بازتولیدِ ۲۰۱ شناسه
+ * دقیقاً ۲۰۰ تا برگرداند و شناسهٔ دویست‌ویکم بی‌صدا ناپدید شد.
+ *
+ * پیامدش از یک عددِ کم بدتر است: خروجی دیتا همهٔ کدها را یکجا به
+ * `/api/dailies` می‌فرستد، پس برای بیش از ۲۰۰ ابزار **راست‌آزماییِ
+ * خالی‌ها** برای انتهای انتخاب کور می‌شد — یعنی دقیقاً همان سازوکاری که
+ * باید بگوید «داده نیامد»، خودش بی‌صدا از کار می‌افتاد.
+ *
+ * حالا شمارشِ سه‌گانه برمی‌گردد و سرور با آن تصمیم می‌گیرد:
+ *   codes      کدهای معتبرِ یکتا، تا سقف
+ *   requested  شمارِ کدهای معتبرِ یکتا پیش از سقف
+ *   invalid    شمارِ تکه‌هایی که اصلاً کد نبودند
+ *   overflow   چند کدِ معتبر به‌خاطر سقف جا ماندند
+ */
+export function parseInsRequest(raw, max = 200) {
+  const seen = new Set();
+  let invalid = 0;
+  for (const part of String(raw ?? '').split(',')) {
+    const code = part.trim();
+    if (!code) continue;
+    if (!validIns(code)) { invalid += 1; continue; }
+    seen.add(code);
+  }
+  const all = [...seen];
+  return {
+    codes: all.slice(0, max),
+    requested: all.length,
+    invalid,
+    overflow: Math.max(0, all.length - max),
+  };
+}
+
+/**
  * فهرست کد جداشده با ویرگول. هر چیزی که کد معتبر نیست دور ریخته می‌شود،
  * تکراری حذف می‌شود، و تعداد سقف می‌خورد.
  *
  * سقف اینجا نه برای امنیت که برای مهار است: هر کد یک درخواست بالادست است.
+ *
+ * برای مسیری که باید اضافه‌درخواست را **رد** کند نه ببُرد،
+ * `parseInsRequest` را صدا بزنید؛ این یکی فقط فهرست می‌دهد.
  */
 export function parseInsList(raw, max = 200) {
-  const out = [];
-  const seen = new Set();
-  for (const part of String(raw ?? '').split(',')) {
-    const code = part.trim();
-    if (!validIns(code) || seen.has(code)) continue;
-    seen.add(code);
-    out.push(code);
-    if (out.length >= max) break;
-  }
-  return out;
+  return parseInsRequest(raw, max).codes;
 }
 
 /**

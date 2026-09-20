@@ -50,6 +50,7 @@ import { editFormHtml, readEdit, needsEntryClose } from '/ui/positions-edit.mjs'
 import { historyDateLabel } from '/core/history.mjs';
 import { todayJalali, gregorianToJalali, parseJalali, daysSinceJalali } from '/core/jalali.mjs';
 import { marginParamsOf } from '/core/settings.mjs';
+import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { fmt } from '/ui/table.mjs';
@@ -1347,12 +1348,29 @@ export async function mount(root, { state, api }) {
     const held = positions.map((p) => Number(daysSinceJalali(p.entryDate)) || 0);
     const need = Math.min(900, Math.max(30, ...held) + 10);
     try {
-      const res = await (await fetch(`/api/dailies?ins=${[...codes].join(',')}&n=${need}`)).json();
-      dailyByIns = res && typeof res === 'object' ? res : {};
-      const empty = [...codes].filter((ins) => !(dailyByIns[ins]?.rows || []).length);
-      dailyNote = empty.length
+      // ═══ چرا دسته‌بندی ═══
+      //
+      // ممیزی ۱۴۰۵/۰۶/۲۹ بند ۴: اینجا همهٔ کدها یکجا می‌رفتند و سقفِ
+      // ۲۰۰تاییِ سرور بی‌صدا می‌بُرید — یعنی سبدِ بزرگ، قراردادهای
+      // انتهای فهرستش «تاریخچهٔ روزانه خالی آمد» می‌گرفتند در حالی که
+      // اصلاً پرسیده نشده بودند. سرور حالا صریح رد می‌کند و این حلقه
+      // دسته می‌کند.
+      const all = [...codes];
+      const parts = [];
+      for (const batch of insBatches(all, INS_CAP.dailies)) {
+        parts.push(await (await fetch(`/api/dailies?ins=${batch.join(',')}&n=${need}`)).json());
+      }
+      const merged = mergeInsPayloads(all, parts);
+      dailyByIns = merged.payload;
+      const empty = all.filter((ins) => !merged.missing.includes(ins)
+        && !(dailyByIns[ins]?.rows || []).length);
+      // «نیامد» و «خالی آمد» دو چیزند و جمله هر دو را جدا می‌گوید.
+      const missingNote = merged.missing.length
+        ? `تاریخچهٔ روزانهٔ ${faDigits(merged.missing.length)} قرارداد اصلاً پاسخ نگرفت. `
+        : '';
+      dailyNote = missingNote + (empty.length
         ? `تاریخچهٔ روزانهٔ ${faDigits(empty.length)} قرارداد خالی آمد؛ روند و «تغییر امروز» برای موقعیتِ دربرگیرنده‌اش ساخته نمی‌شود.`
-        : `تاریخچهٔ روزانهٔ ${faDigits(codes.size)} قرارداد گرفته شد.`;
+        : `تاریخچهٔ روزانهٔ ${faDigits(all.length - merged.missing.length)} قرارداد گرفته شد.`);
     } catch (e) {
       dailyByIns = {};
       dailyNote = `تاریخچهٔ روزانه گرفته نشد: ${faDigits(e.message)}. روند روزانه و «تغییر امروز» تا دریافت بعدی خالی می‌مانند.`;
@@ -1391,11 +1409,20 @@ export async function mount(root, { state, api }) {
     }
     if (!codes.size) return;
     try {
-      const q = [...codes].join(',');
-      const [books, infos] = await Promise.all([
-        fetch(`/api/books?ins=${q}`).then((r) => r.json()),
-        fetch(`/api/infos?ins=${q}`).then((r) => r.json()),
-      ]);
+      // همان دلیلِ `loadDailies`: مظنهٔ سبدِ بزرگ‌تر از ۲۰۰ ابزار بی‌صدا
+      // بریده می‌شد و قراردادِ انتهای فهرست بی‌قیمت می‌ماند.
+      const all = [...codes];
+      const bookParts = [], infoParts = [];
+      for (const batch of insBatches(all, INS_CAP.books)) {
+        const q = batch.join(',');
+        const [b, i] = await Promise.all([
+          fetch(`/api/books?ins=${q}`).then((r) => r.json()),
+          fetch(`/api/infos?ins=${q}`).then((r) => r.json()),
+        ]);
+        bookParts.push(b); infoParts.push(i);
+      }
+      const books = mergeInsPayloads(all, bookParts).payload;
+      const infos = mergeInsPayloads(all, infoParts).payload;
       quotesByIns = new Map();
       for (const ins of codes) {
         const b = books[ins]?.book || [];
