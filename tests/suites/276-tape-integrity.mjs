@@ -105,4 +105,18 @@ group('۲۷۶. یک مسیرِ مشترک برای ریزمعاملهٔ تاری
     server.includes("normalizeTradesDetailed(firstList(await getFresh(`/Trade/GetTrade/${code}`"));
   check('و شمارِ تکرار را به مصرف‌کننده می‌گوید',
     server.includes('rows, duplicates, conflicts, summary: summarizeLiveTrades(rows)'));
+
+  // ═══ معیار پذیرشِ ۱: وضعیتِ پوشش هم باید یکسان برسد ═══
+  //
+  // یکی‌شدنِ نتیجه کافی نیست؛ مصرف‌کننده باید بتواند «خالی پس از هر دو
+  // مسیر» را از «معامله نشد» جدا کند، وگرنه نقطهٔ سنجشِ بک‌تست برای
+  // ابزاری که داده‌اش نرسیده «معامله نشد» می‌نویسد.
+  const backtest = readSrc('../ui/tabs/portfolio-backtest.mjs');
+  check('بک‌تستِ سبد وضعیتِ پوشش را هم می‌خواند، نه فقط ردیف‌ها',
+    backtest.includes('payload.emptyBoth === true'));
+  check('و آن را «تأییدنشده» می‌خواند، نه «بی‌معامله»',
+    backtest.includes('این «بی‌معامله» نیست، «تأییدنشده» است'));
+  check('خطا و خالیِ هر دو مسیر جدا شمرده می‌شوند',
+    backtest.includes('let failed = 0, emptyBoth = 0;')
+      && backtest.includes('return { tape, failed, emptyBoth, total: codes.length };'));
 }

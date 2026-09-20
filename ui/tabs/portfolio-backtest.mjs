@@ -1988,21 +1988,29 @@ export async function mount(root, { state, api }) {
   async function fetchTape(date) {
     const codes = Object.keys(seriesByIns);
     const tape = {};
-    let failed = 0;
+    let failed = 0, emptyBoth = 0;
     for (const part of chunks(codes, 12)) {
       const settled = await Promise.allSettled(part.map(async (ins) => {
         const response = await fetch(`/api/trades?ins=${encodeURIComponent(ins)}&date=${date}`);
         const payload = await response.json();
         if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
-        return [ins, payload.rows || []];
+        // ═══ چرا `emptyBoth` تا اینجا می‌آید ═══
+        //
+        // `/api/trades` حالا هر دو پرچمِ بالادست را امتحان می‌کند و
+        // می‌گوید پس از **هر دو** خالی ماند یا نه. بی این، نقطهٔ سنجشِ
+        // بک‌تست «این ابزار معامله نشد» می‌نویسد برای ابزاری که فقط
+        // داده‌اش نرسیده — همان اشتباهی که بند ۱ ممیزی نشان داد.
+        return [ins, payload.rows || [], payload.emptyBoth === true];
       }));
       for (const item of settled) {
-        if (item.status === 'fulfilled') tape[item.value[0]] = item.value[1];
-        else failed += 1;
+        if (item.status !== 'fulfilled') { failed += 1; continue; }
+        const [ins, rows, blank] = item.value;
+        tape[ins] = rows;
+        if (blank) emptyBoth += 1;
       }
       setStatus(`دریافت ریزمعاملهٔ روز سنجش: ${fmt.int(Object.keys(tape).length)} از ${fmt.int(codes.length)} ابزار`);
     }
-    return { tape, failed, total: codes.length };
+    return { tape, failed, emptyBoth, total: codes.length };
   }
 
   /**
@@ -2019,12 +2027,13 @@ export async function mount(root, { state, api }) {
       return seriesByIns;
     }
     const label = MARK_MOMENTS.find(([value]) => value === second)?.[1] || '';
-    const { tape, failed, total } = await fetchTape(endDate);
+    const { tape, failed, emptyBoth, total } = await fetchTape(endDate);
     const result = applyIntradayMark(seriesByIns, marksAt(tape, second), { date: endDate, second });
     const note = markNote(result, { label, total });
-    $('pb-mark-note').textContent = failed
-      ? `${note} ریزمعاملهٔ ${fmt.int(failed)} ابزار دریافت نشد و آن‌ها هم قیمت نگرفتند.`
-      : note;
+    // خطا و «پس از هر دو مسیر خالی» دو چیزند و هیچ‌کدام «معامله نشد» نیست.
+    $('pb-mark-note').textContent = `${note}`
+      + (failed ? ` ریزمعاملهٔ ${fmt.int(failed)} ابزار دریافت نشد و آن‌ها هم قیمت نگرفتند.` : '')
+      + (emptyBoth ? ` ${fmt.int(emptyBoth)} ابزار پس از هر دو مسیرِ بالادست خالی برگشت — این «بی‌معامله» نیست، «تأییدنشده» است.` : '');
     $('pb-mark-state').textContent = result.marked ? `ساعت ${label} روز سنجش` : 'پایان روز سنجش';
     if (!result.marked) throw new Error(`تا ساعت ${label} هیچ ابزاری معامله نشده بود`);
     return result.series;
@@ -2176,7 +2185,11 @@ export async function mount(root, { state, api }) {
     button.disabled = true;
     try {
       setStatus('دریافت ریزمعاملهٔ روز سنجش…');
-      const { tape, failed, total } = await fetchTape(endDate);
+      const { tape, failed, emptyBoth, total } = await fetchTape(endDate);
+      if (emptyBoth) {
+        setStatus(`${fmt.int(emptyBoth)} از ${fmt.int(total)} ابزار پس از هر دو مسیرِ بالادست خالی برگشت؛`
+          + ' نقطه‌های سنجشِ آن‌ها بر دادهٔ تأییدنشده می‌نشیند.', true);
+      }
       const combos = payloadRows.map((row) => ({ id: row.id, legs: row.legs }));
       const payload = await runWorker({
         id: `intraday-${Date.now()}`, type: 'portfolio-intraday',
