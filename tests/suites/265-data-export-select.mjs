@@ -151,8 +151,11 @@ group('۲۶۵. جمع‌بندی صادقانهٔ دریافت');
     src.includes('const instruments = selectedInstruments()'));
   check('بستهٔ شکست‌خورده نصف و دوباره فرستاده می‌شود',
     src.includes('splitPairBatch(batch)') && src.includes('fetchBatch(half, items, signal, depth + 1, fresh)'));
+  // خطا هنوز روی همان جفت می‌نشیند، ولی از `keepBetterTape` می‌گذرد: پس
+  // از F-04، خطای تلاشِ دوباره دیگر ردیف‌های سالمِ دورِ قبل را نمی‌برد.
   check('و بستهٔ تک‌جفتی خطایش را روی همان جفت می‌نشاند',
-    src.includes('items[batch[0].key] = { rows: [], error: error.message'));
+    src.includes("keepBetterTape(items[batch[0].key],")
+      && src.includes("{ rows: [], error: error.message, source: 'history' }"));
   check('صفر بودنِ داده، خبرِ اول جملهٔ وضعیت است',
     src.includes('هیچ ریزمعامله‌ای دریافت نشد') && src.includes('outcome.blank'));
   // دروازهٔ مرده نباید به صدها درخواستِ محکوم‌به‌شکست تبدیل شود.
@@ -241,12 +244,14 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
   // پاسخِ خالی نباید به حساب واقعیتِ بازار گذاشته شود.
   check('پاسخ خالی یک بار با پرچم دیگر پرسیده می‌شود',
     server.includes('historicalTradesAltPath(code, date)') && server.includes("variant: 'true'"));
-  // پرچم دوم فقط برای **خالی** است: پرتابِ مسیر اول مستقیم به `catch`
-  // می‌رود و خطا برمی‌گرداند، نه خالیِ بی‌شرح.
-  // پرچمِ دوم فقط پس از **خالی** می‌آید؛ پرتابِ مسیر اول مستقیم به
-  // `catch` می‌رود. شرط روی `first.rows.length` همین را می‌گوید.
-  check('و خطا دوباره پرسیده نمی‌شود — فقط خالی',
-    /if \(first\.rows\.length\) \{[\s\S]{0,200}variant: 'true'/.test(server));
+  // ═══ این ادعا پس از F-01 معنایش عوض شد ═══
+  //
+  // پرچمِ دوم دیگر فقط برای **خالی** نیست: هر پاسخی که با تابلوی روزانه
+  // تطبیق نکند مسیر دوم را می‌طلبد، چون آزمونِ عملی نشان داد پاسخِ
+  // غیرخالیِ بریده هم واقعی است. آنچه عوض نشده این است که **خطا** دوباره
+  // پرسیده نمی‌شود: پرتابِ مسیر اول مستقیم به `catch` می‌رود.
+  check('فقط تطبیقِ کامل با تابلو جلوی مسیر دوم را می‌گیرد',
+    server.includes('if (decided.complete) return withUpstream(decided, first, null);'))
   check('خالی‌بودنِ پس از هر دو مسیر علامت می‌خورد', server.includes('emptyBoth'));
 
   const tab = readSrc('../ui/tabs/data-export.mjs');

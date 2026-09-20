@@ -13,6 +13,7 @@ import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
 import { LIVE_CODE_CAP, splitTradeDays } from '/core/trades-source.mjs';
 import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
+import { expectationFromDailyRow, keepBetterTape } from '/core/tape-choice.mjs';
 import { inferLiveSessionDate, liveTapeCodes, liveTapeDay } from '/core/live-day.mjs';
 import { fetchRangeUniverse, mountHistoryRange } from '/ui/history-range.mjs';
 import { buildDataExportSheets, dataExportFilename } from '/ui/data-export-workbook.mjs';
@@ -252,7 +253,9 @@ export async function mount(root, { state, api }) {
   async function fetchBatch(batch, items, signal, depth = 0, fresh = false) {
     if (soloFailures >= GIVE_UP_AFTER) {
       for (const pair of batch) {
-        items[pair.key] = { rows: [], error: lastFailure || 'دریافت پیاپی شکست خورد', source: 'history' };
+        items[pair.key] = keepBetterTape(items[pair.key],
+          { rows: [], error: lastFailure || 'دریافت پیاپی شکست خورد', source: 'history' },
+          expectationFor(pair));
       }
       return false;
     }
@@ -265,9 +268,22 @@ export async function mount(root, { state, api }) {
       if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
       for (const pair of batch) {
         const hit = payload.items?.[pair.key];
-        items[pair.key] = hit && Array.isArray(hit.rows)
+        const fresh0 = hit && Array.isArray(hit.rows)
           ? { ...hit, source: 'history', retried: fresh }
           : { rows: [], error: hit?.error || 'پاسخ این ابزار/روز در بسته نبود', source: 'history', retried: fresh };
+        // ═══ F-04: تلاشِ دوباره نباید دادهٔ موجود را پاک کند ═══
+        //
+        // بازتولیدِ ثبت‌شدهٔ آزمونِ عملی: همین درخواست با `fresh:false`
+        // برای اهرم/۲۰۲۶۰۹۱۹ ۲٬۵۲۱ ردیف داد و با `fresh:true` صفر؛
+        // `items[key].rows` از ۲٬۵۲۱ به صفر رسید و شیتِ آن روز خالی شد.
+        // تابلو همان لحظه هنوز ۷٬۷۳۶ معامله می‌گفت، پس «معامله نشده»
+        // توضیحِ آن صفر نبود — ناپایداریِ بالادست بود.
+        //
+        // `keepBetterTape` فقط وقتی جایگزین می‌کند که پاسخِ تازه بهتر
+        // باشد. نگه‌داشتنِ دادهٔ قبلی یعنی «از دستش ندادیم»، نه «کامل
+        // است»: پرچمِ تلاشِ ناموفق جدا حمل می‌شود و حکمِ پوشش سرِ جایش
+        // می‌ماند.
+        items[pair.key] = keepBetterTape(items[pair.key], fresh0, expectationFor(pair));
       }
       soloFailures = 0;
       return true;
@@ -275,7 +291,8 @@ export async function mount(root, { state, api }) {
       if (error.name === 'AbortError') throw error;
       const halves = splitPairBatch(batch);
       if (!halves.length) {
-        items[batch[0].key] = { rows: [], error: error.message, source: 'history' };
+        items[batch[0].key] = keepBetterTape(items[batch[0].key],
+          { rows: [], error: error.message, source: 'history' }, expectationFor(batch[0]));
         soloFailures += 1;
         lastFailure = error.message;
         return false;
@@ -302,6 +319,19 @@ export async function mount(root, { state, api }) {
    */
   // کدهایی که تابلوی روزانه‌شان پاسخ نگرفت. «نیامد» است، نه «نداشت».
   let dailyMissing = [];
+  // ═══ مرجعِ سنجش، برای اینکه تلاشِ دوباره ویرانگر نباشد ═══
+  //
+  // F-04: بی مرجع، «پاسخِ تازه» و «پاسخِ بهتر» یکی شمرده می‌شدند و یک
+  // صفرِ لحظه‌ایِ بالادست ۲٬۵۲۱ ردیفِ سالم را می‌برد. تابلوی روزانه همان
+  // چیزی است که می‌گوید کدام پاسخ به واقعیت نزدیک‌تر است.
+  //
+  // دورِ اول هنوز مرجعی ندارد (روزانه پس از آن گرفته می‌شود) و همان هم
+  // درست است: بی مرجع، `keepBetterTape` به «پرحجم‌تر می‌ماند» برمی‌گردد
+  // و خالی هرگز جای پر را نمی‌گیرد.
+  let dailyIndex = new Map();
+  const expectationFor = (pair) => expectationFromDailyRow(
+    dailyIndex.get(`${String(pair?.ins)}:${Math.trunc(Number(pair?.date) || 0)}`),
+  );
 
   async function fetchDaily(instruments, range, signal) {
     const codes = [...new Set(instruments.map((item) => String(item.ins)).filter(Boolean))];
@@ -346,6 +376,13 @@ export async function mount(root, { state, api }) {
           new Error(`${merged.missing.length} ابزار از تابلوی روزانه پاسخ نگرفتند`));
       }
       dailyMissing = merged.missing;
+      dailyIndex = new Map();
+      for (const [ins, value] of Object.entries(merged.payload)) {
+        for (const row of Array.isArray(value?.rows) ? value.rows : []) {
+          const date = Math.trunc(Number(row?.date) || 0);
+          if (date) dailyIndex.set(`${ins}:${date}`, row);
+        }
+      }
       return merged.payload;
     } catch (error) {
       if (error.name === 'AbortError') throw error;

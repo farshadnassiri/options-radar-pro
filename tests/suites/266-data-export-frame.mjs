@@ -271,12 +271,15 @@ group('۲۶۶. ممیزی خروجی m15 اهرم');
   const coverage = sheets.find((part) => part.name === 'پوشش دریافت');
   const colAt = (name) => coverage.headers.indexOf(name);
   const line = coverage.rows.find((row) => row[1] === 'ضهرم۱');
-  check('برگ پوشش ستون «بیرون از جلسه» دارد', colAt('بیرون از جلسه') > 0);
+  // ستون پس از F-02 دو تا شد و نامش صریح: یکی جلسهٔ رسمیِ بازار، یکی
+  // پنجره‌ای که کاربر برای همین فایل خواسته.
+  check('برگ پوشش ستون «خارج از جلسهٔ بازار» دارد', colAt('خارج از جلسهٔ بازار') > 0);
+  check('و ستون «خارج از پنجرهٔ انتخابی» هم', colAt('خارج از پنجرهٔ انتخابی') > 0);
   check('و عددش همان چیزی است که جداساز جلسه شمرده',
-    line[colAt('بیرون از جلسه')] === dataExportSessionRows(trades).outside
-      && line[colAt('بیرون از جلسه')] === 1);
-  check('و «کل ردیف» منهای «بیرون از جلسه» با ردیف‌های برگ ابزار می‌خواند',
-    line[colAt('کل ردیف')] - line[colAt('بیرون از جلسه')] === dataExportSessionRows(trades).rows.length);
+    line[colAt('خارج از جلسهٔ بازار')] === dataExportSessionRows(trades).outside
+      && line[colAt('خارج از جلسهٔ بازار')] === 1);
+  check('و «کل ردیف» منهای «خارج از جلسهٔ بازار» با ردیف‌های برگ ابزار می‌خواند',
+    line[colAt('کل ردیف')] - line[colAt('خارج از جلسهٔ بازار')] === dataExportSessionRows(trades).rows.length);
   check('ستونِ پرچمِ endpoint دیگر «مسیر» خوانده نمی‌شود',
     colAt('پرچم درخواست') > 0 && colAt('مسیر') === -1);
   check('و همان خانه هنوز پرچم را می‌گوید',
@@ -285,8 +288,9 @@ group('۲۶۶. ممیزی خروجی m15 اهرم');
     line[colAt('منبع')] === 'history');
   const guide = sheets.find((part) => part.name === 'راهنما');
   const valueOf = (key) => (guide.rows.find((row) => row[0] === key) || [])[1] || '';
-  check('راهنما ستونِ بیرون از جلسه را به نام صدا می‌زند',
-    valueOf('پنجرهٔ ساعت').includes('بیرون از جلسه'));
+  check('راهنما هر دو ستونِ بیرون‌ماندن را به نام صدا می‌زند',
+    valueOf('پنجرهٔ ساعت').includes('خارج از پنجرهٔ انتخابی')
+      && valueOf('پنجرهٔ ساعت').includes('خارج از جلسهٔ بازار'));
   check('و می‌گوید حراج پایانی سطلِ تازه نمی‌سازد',
     valueOf('تایم‌فریم').includes('حراج پایانی'));
 }
