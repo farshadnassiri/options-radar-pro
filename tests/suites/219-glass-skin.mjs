@@ -66,8 +66,8 @@ group('۲۱۹-الف. زمینه و پوسته از یک عنصر خوانده �
   // بی‌صدا نادیده گرفته می‌شود.
   const themed = ruleBody('body[data-theme="board"]') || '';
   const themedTokens = [...themed.matchAll(/(--[a-z0-9-]+):/g)].map((m) => m[1]);
-  check('پوستهٔ تیره دست‌کم زمینه، سطح و لکه‌های نور را بازتعریف می‌کند',
-    ['--ground', '--glass', '--ambient-1'].every((token) => themedTokens.includes(token)),
+  check('پوستهٔ تیره دست‌کم زمینه، سطح و خط را بازتعریف می‌کند',
+    ['--ground', '--panel', '--line'].every((token) => themedTokens.includes(token)),
     themedTokens.length ? `${themedTokens.length} توکن` : 'بلوک پوسته پیدا نشد');
 
   const htmlRules = [...noComments.matchAll(/(^|\})\s*html\s*\{([^}]*)\}/g)].map((m) => m[2]);
@@ -77,10 +77,14 @@ group('۲۱۹-الف. زمینه و پوسته از یک عنصر خوانده �
     themedOnHtml.length === 0,
     themedOnHtml.join(' | ').slice(0, 120));
 
-  const bodyRules = [...noComments.matchAll(/(^|\})\s*body\s*\{([^}]*)\}/g)].map((m) => m[2]);
-  check('زمینه و لکه‌های نور هر دو روی body می‌نشینند',
-    bodyRules.some((body) => /background-color:\s*var\(--ground\)/.test(body))
-    && bodyRules.some((body) => /var\(--ambient-1\)/.test(body)));
+  // لکه‌های نور رفتند (لایهٔ شیشه بازنشسته شد، دستهٔ ۲۷۱)، ولی خودِ
+  // شرطِ اشکال ۱ سرِ جایش است: زمینه باید روی همان عنصری بنشیند که
+  // توکنِ پوسته را می‌بیند، یعنی `body`.
+  const groundRules = [...noComments.matchAll(/(^|\})\s*(html,\s*body|body)\s*\{([^}]*)\}/g)].map((m) => m[3]);
+  check('زمینه روی body می‌نشیند، همان‌جا که توکنِ پوسته دیده می‌شود',
+    groundRules.some((body) => /background(-color)?:\s*var\(--ground\)/.test(body)));
+  check('لکه‌های نورِ خاموش دیگر روی body کشیده نمی‌شوند',
+    !groundRules.some((body) => /var\(--ambient/.test(body)));
 
   // شبه‌عنصرِ منفی پشتِ زمینهٔ والدش می‌نشیند و همان، نسخهٔ اول را
   // نامرئی کرد. لایه‌بندی روی خودِ عنصر این دام را ندارد.
@@ -89,20 +93,24 @@ group('۲۱۹-الف. زمینه و پوسته از یک عنصر خوانده �
 }
 
 
-group('۲۱۹-ب. نورِ کارت به متن نمی‌رسد');
+group('۲۱۹-ب. سطحِ کارت تخت است، و هیچ شیبی روی متنش نمی‌افتد');
 {
-  // ریشهٔ اشکال ۲: واحدِ درصدی روی کارتی که ارتفاعش را محتوا تعیین می‌کند،
-  // یعنی طولِ نوارِ نور با بلندیِ کارت رشد می‌کند و روی متن می‌افتد.
-  // آخرین `.card`، چون پوستهٔ شیشه‌ای لایه‌ای روی قاعدهٔ پایه است.
+  // ═══ چرا این ادعا وارونه شد (۱۴۰۵/۰۶/۲۸) ═══
+  //
+  // پیش از این، کارت یک نوارِ نورِ شیب‌دار داشت و ادعا این بود که آن نوار
+  // «با واحد ثابت تمام شود تا به متن نرسد» — چون نسخهٔ درصدی‌اش در کارتِ
+  // بلند روی برچسب‌ها می‌افتاد. حالا نوار اصلاً نیست: شیبش از
+  // `--glass-sheen` می‌آمد که خنثی (`transparent`) شده بود، پس یک
+  // `linear-gradient` نامرئی روی هر کارتِ برنامه کشیده می‌شد و فقط
+  // هزینه داشت.
+  //
+  // ادعا حذف نشد، وارونه شد: تا وقتی سطحِ کارت تخت است، اشکال ۲ ممکن
+  // نیست. اگر روزی کسی شیب را برگرداند، این ادعا قرمز می‌شود و همان‌جا
+  // باید دوباره واحدِ ثابت را قفل کند.
   const card = ruleBody('.card') || '';
-  // الگو عمداً `[^)]` ندارد: خودِ شیب `color-mix(...)` تودرتو دارد و هر
-  // الگویی که به پرانتز تکیه کند، پیش از رسیدن به نقطهٔ توقف می‌ایستد.
-  const sheen = card.match(/transparent\s+([0-9.]+)(px|%)\s*\)/);
-  check('نوارِ نورِ کارت با واحد ثابت تمام می‌شود، نه با درصد',
-    /linear-gradient/.test(card) && !!sheen && sheen[2] === 'px',
-    sheen ? `${sheen[1]}${sheen[2]}` : 'نقطهٔ توقفِ شیب پیدا نشد');
-  check('و کوتاه‌تر از آن است که به نخستین ردیف متن برسد',
-    !!sheen && Number(sheen[1]) <= 96, sheen ? `${sheen[1]}px` : '');
+  check('کارت سطحِ یکدستِ توکن‌دار دارد، نه شیب',
+    /background:\s*var\(--panel\)/.test(card) && !/linear-gradient/.test(card),
+    card.trim().slice(0, 60));
 }
 
 
@@ -114,35 +122,47 @@ group('۲۱۹-ج. `hidden` واقعاً مخفی می‌کند');
 }
 
 
-group('۲۱۹-د. شیشه، پشتیبان دارد');
+group('۲۱۹-د. شیشه‌ای نمانده که پشتیبان بخواهد');
 {
-  // سه محیطی که `backdrop-filter` در آن‌ها یا کار نمی‌کند یا نباید کار
-  // کند. بی پشتیبان، سطحِ نیمه‌شفاف روی هر چیزی که پشتش باشد می‌افتد —
-  // یعنی متن روی متن.
-  check('برای مرورگر بدون backdrop-filter، سطح‌ها پر می‌شوند',
-    /@supports not \(\(backdrop-filter/.test(noComments));
-  check('برای «حرکت کمتر»، تاری برداشته می‌شود',
-    /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,600}backdrop-filter:\s*none/.test(noComments));
-  check('و در چاپ، نه لکهٔ نور می‌ماند نه شیشه',
-    /@media print[\s\S]{0,400}background-image:\s*none/.test(noComments));
+  // ═══ چرا این گروه هم وارونه شد (۱۴۰۵/۰۶/۲۸) ═══
+  //
+  // سه پشتیبان داشتیم چون سطح‌ها نیمه‌شفاف بودند و `backdrop-filter`
+  // داشتند: مرورگرِ بی‌پشتیبانی، «حرکت کمتر»، و چاپ. هر سه برای این بود
+  // که متن روی متن نیفتد. حالا هیچ سطحی نه نیمه‌شفاف است نه تار، پس
+  // خودِ شرط از بین رفته — و ادعا باید همان را قفل کند، نه پشتیبانی که
+  // دیگر چیزی ندارد بپوشاند.
+  check('هیچ `backdrop-filter` نمانده — تاری صفر، فقط هزینهٔ پردازش بود',
+    !/backdrop-filter/.test(noComments));
+  // سقف عمداً ۵۰٪ است: رنگِ **پوششیِ** کم‌رمق (مثل هایلایتِ هاورِ ماتریس)
+  // هنوز مجاز است؛ آنچه ممنوع است سطحِ کارت‌نمایی است که خودش را سطح
+  // جا می‌زند و زمینه از زیرش رد می‌شود.
+  const sheer = [...noComments.matchAll(/background:\s*color-mix\(in srgb, var\(--panel\) (\d+)%, transparent\)/g)]
+    .filter((m) => Number(m[1]) >= 50);
+  check('هیچ سطحی نیمه‌شفاف نیست تا زمینه از زیرش رد شود',
+    sheer.length === 0, sheer.map((m) => `${m[1]}%`).join('، '));
+  check('چاپ همچنان سطحِ پر و بی‌سایه دارد',
+    /@media print[\s\S]{0,400}box-shadow:\s*none/.test(noComments));
 
-  // نگهبان ۱۱ همین را برای فلشِ کشویی می‌گیرد؛ این ادعا همان قاعده را از
-  // سمتِ پوستهٔ شیشه‌ای هم می‌بندد، چون بلوکِ پشتیبان دقیقاً همان‌جایی بود
-  // که میان‌بر `background` نوشته شد و فلش را پاک کرد.
-  const fallback = noComments.slice(noComments.indexOf('@supports not ((backdrop-filter'));
-  const inputRule = fallback.match(/input\[type="date"\][^{]*\{([^}]*)\}/);
-  check('و در همان پشتیبان، ورودی `background-color` می‌گیرد نه `background`',
-    !!inputRule && /background-color:/.test(inputRule[1]) && !/(^|;)\s*background\s*:/.test(inputRule[1]),
-    inputRule ? inputRule[1].trim() : 'قاعدهٔ ورودی پیدا نشد');
+  // نگهبان ۱۱ فلشِ کشویی را می‌گیرد: میان‌بر `background` تصویرِ پس‌زمینه
+  // را هم صفر می‌کند و فلش دقیقاً یک `background-image` است. بلوکی که
+  // آن دام را ساخته بود رفته؛ ادعا می‌ماند تا با هر بلوکِ تازه‌ای هم
+  // برقرار باشد.
+  const inputRules = [...noComments.matchAll(/input\[type="date"\][^{]*\{([^}]*)\}/g)].map((m) => m[1]);
+  const shorthand = inputRules.filter((body) => /(^|;)\s*background\s*:/.test(body));
+  check('هیچ قاعدهٔ ورودی با میان‌بر `background` فلشِ کشویی را پاک نمی‌کند',
+    shorthand.length === 0, shorthand.join(' | ').slice(0, 120));
 }
 
 
 group('۲۱۹-ه. زبانِ شکلی از توکن می‌آید');
 {
   const root = ruleBody(':root') || '';
+  // توکن‌های خنثای شیشه از هر دو پوسته برداشته شدند (دستهٔ ۲۷۱ کلاسِ
+  // خطایش را قفل می‌کند). ادعا اینجا می‌ماند تا برنگردند: توکنی که
+  // مقدارش `transparent` است، لبهٔ زیرش را بی‌صدا پاک می‌کند.
   for (const token of ['--glass', '--glass-2', '--glass-edge', '--glass-sheen',
     '--glass-blur', '--ambient-1', '--ambient-2', '--ambient-3', '--glow-accent']) {
-    check(`توکن ${token} در پوستهٔ روشن تعریف شده`, root.includes(`${token}:`));
+    check(`توکن ${token} دیگر تعریف نمی‌شود`, !root.includes(`${token}:`));
   }
   // ── جغجغهٔ تازه: پوسته مات است، نه شیشه‌ای ─────────────────────────
   //
@@ -152,11 +172,8 @@ group('۲۱۹-ه. زبانِ شکلی از توکن می‌آید');
   // و تاری نباید برگردد. هر دو در توکن‌اند، پس هر دو یک‌جا سنجیده می‌شوند.
   const radius = Number(root.match(/--radius-lg:\s*([0-9.]+)px/)?.[1]);
   check('گردی کارت از ۱۴ پیکسل بیشتر نمی‌شود', radius > 0 && radius <= 14, `${radius}px`);
-  const blur = root.match(/--glass-blur:\s*([0-9.]+)px/)?.[1];
-  check('تاری پس‌زمینه صفر است — سطح، کاغذ است نه شیشه', Number(blur) === 0, `${blur}px`);
-  for (const token of ['--ambient-1', '--ambient-2', '--ambient-3']) {
-    check(`لکهٔ نور ${token} خاموش است`, new RegExp(`${token}:\\s*transparent`).test(root));
-  }
+  check('تاری پس‌زمینه‌ای در کار نیست — سطح، کاغذ است نه شیشه',
+    !/backdrop-filter/.test(noComments));
   // ── جغجغه وارونه شد، ۱۴۰۵/۰۶/۲۶ ──────────────────────────────────
   //
   // ادعای پیشین این بود که «--shadow-sm باید none باشد» — قفلِ تصمیمِ

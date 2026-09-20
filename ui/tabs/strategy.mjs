@@ -9,6 +9,7 @@
 //   جدول مرتب‌شدنی ، پانل جزئیات ردیف
 
 import { byId } from '/strategies/catalog.mjs';
+import { icon } from '/ui/icons.mjs';
 import { COLUMNS, columnsForStrategy } from '/core/evaluate.mjs';
 import { analyzePayoff, scenarioGrid } from '/core/payoff.mjs';
 import { manualCompare, manualNote } from '/core/manual-price.mjs';
@@ -620,7 +621,7 @@ export async function mount(root, { tab, state, api }) {
         <!-- نوارِ پیوند: هر مقصد در صفحهٔ جدا باز می‌شود، پس جدولِ زنده
              پشتِ سر می‌ماند و کاربر جای خودش را از دست نمی‌دهد. -->
         <div class="detail-actions">${strategyLinkTargets(r, { strategyId: def.id }).map((item) => `
-          <button class="ghost" type="button" data-link="${item.to}" title="${item.why}">${item.label}</button>`).join('')}</div>
+          <button class="ghost" type="button" data-link="${item.to}" title="${item.why}">${icon(item.ic || 'dot')}${item.label}</button>`).join('')}</div>
         <div id="cmp-picker"></div>
         <h4 style="margin:14px 0 4px;font-size:var(--fs-xs)">قیمت و عمق هر پا</h4>
         <table class="mini">

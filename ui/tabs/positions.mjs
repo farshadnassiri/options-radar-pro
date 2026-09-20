@@ -848,9 +848,15 @@ export async function mount(root, { state, api }) {
         changeComplete ? 'نسبت به پایانی روز پیش' : 'مبنای روز پیش برای همهٔ موقعیت‌ها نیست',
         changeComplete ? changeSum >= 0 : null],
       ['بازده از ورود', `${fmt.pct(cap > 0 ? (tot / cap) * 100 : NaN)}٪`, '', roiGain],
-      ['قیمت‌گیری', quotesByIns.size ? `${fmt.int(quotesByIns.size)} نماد` : 'بی‌قیمت — قیمت‌گیری نشد', '', null],
+      // عدد در خانهٔ عدد، علت در خانهٔ نشان. پیش از این جملهٔ «بی‌قیمت —
+      // قیمت‌گیری نشد» در جای **عدد** و با اندازهٔ عدد می‌نشست و از کاشی
+      // بیرون می‌زد؛ در نماگرفت، همان یک کاشی ارتفاع کلِ ردیف را دو برابر
+      // کرده بود.
+      ['قیمت‌گیری', quotesByIns.size ? fmt.int(quotesByIns.size) : '—',
+        quotesByIns.size ? 'نماد قیمت خورده' : 'قیمت‌گیری نشد', null],
     ].map(([k, v, sub, gain]) => `<div class="kpi"><div class="k">${k}</div>
-      <div class="v ${kpiTone(k, gain)}">${v}</div><div class="s">${sub}</div></div>`).join('');
+      <div class="v ${kpiTone(k, gain)}">${v}</div>
+      <div class="s" title="${sub}">${sub}</div></div>`).join('');
 
     root.querySelector('#daily-note').textContent = dailyNote;
     if (closing != null) drawClose();

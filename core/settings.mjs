@@ -290,8 +290,10 @@ export const SCHEMA = [
     def: 10, min: 1, max: 60, step: 1, unit: 'درصد', label: 'شوک سناریو' },
 
   // ——— نمایش ———
+  // پیش‌فرض ۱۴۰۵/۰۶/۲۸ «تابلو» شد: صاحب پروژه پوستهٔ تیره را انتخاب کرد.
+  // «دفتر» می‌ماند و از همین‌جا یا دکمهٔ هدر برمی‌گردد.
   { key: 'theme', group: 'view', kind: 'pick', scope: 'client',
-    def: 'ledger', options: [['ledger', 'دفتر — روشن'], ['board', 'تابلو — تیره']], label: 'پوسته' },
+    def: 'board', options: [['ledger', 'دفتر — روشن'], ['board', 'تابلو — تیره']], label: 'پوسته' },
   { key: 'persianDigits', group: 'view', kind: 'bool', scope: 'client',
     def: false, label: 'ارقام فارسی' },
   { key: 'topN', group: 'view', kind: 'num', scope: 'client',
