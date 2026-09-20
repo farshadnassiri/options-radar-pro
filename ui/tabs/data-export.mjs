@@ -7,7 +7,7 @@ import {
   dataExportPairBatches, dataExportPairs, dataExportRouteSplit, dataExportSessionRows,
   dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments,
   exportBlockers, instrumentsWithPairs, splitPairBatch, suspectEmptyDays,
-  unknownListingContracts,
+  unknownListingContracts, clockLabel, sessionWindow,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
@@ -56,12 +56,28 @@ export async function mount(root, { state, api }) {
           <select id="de-frame">${DATA_EXPORT_FRAMES.map((frame) => `<option value="${frame.id}">${esc(frame.label)}</option>`).join('')}</select></label>
         <label class="check" for="de-derived"><input type="checkbox" id="de-derived"><span>ستون‌های مشتق (ارزش خام، اندازه و ارزش قرارداد)</span></label>
       </div>
-      <p class="note" id="de-frame-note">تایم‌فریم فقط شکل <b>خروجی</b> را عوض می‌کند، نه دریافت را: ریزمعامله همیشه کامل گرفته می‌شود و شمع از روی همان ساخته می‌شود، پس عوض‌کردنش دریافت دوباره نمی‌خواهد. سطلِ بی‌معامله ردیف نمی‌گیرد و هیچ قیمتی درون‌یابی نمی‌شود.</p>
+      <div class="de-actions" style="margin-bottom:8px">
+        <label class="check" for="de-from-time"><span>از ساعت</span>
+          <input type="time" id="de-from-time" step="1" value="09:00:00"></label>
+        <label class="check" for="de-to-time"><span>تا ساعت</span>
+          <input type="time" id="de-to-time" step="1" value="12:30:00"></label>
+        <label class="check" for="de-continuous"><input type="checkbox" id="de-continuous"><span>جدول زمانی پیوسته (سطلِ بی‌معامله هم ردیف بگیرد)</span></label>
+      </div>
+      <p class="note" id="de-frame-note">تایم‌فریم فقط شکل <b>خروجی</b> را عوض می‌کند، نه دریافت را: ریزمعامله همیشه کامل گرفته می‌شود و شمع از روی همان ساخته می‌شود، پس عوض‌کردنش دریافت دوباره نمی‌خواهد. پنجرهٔ ساعت هم همین‌طور است و در پالایه، شمع‌سازی و برگ راهنما یکسان اعمال می‌شود. جدول پیوسته سطلِ بی‌معامله را با خانه‌های قیمتِ <b>خالی</b> می‌آورد و ستون «معامله شد» آن را «خیر» می‌خواند — هیچ قیمتی درون‌یابی یا از سطل قبل تکرار نمی‌شود.</p>
+      <p class="note" id="de-window-note" hidden></p>
       <div class="de-actions"><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
       <p id="de-status" class="note" role="status" aria-live="polite"></p><div id="de-result" class="history-table-wrap"></div>
     </section>`;
 
   const $ = (id) => root.querySelector(`#${id}`);
+  /**
+   * پنجرهٔ ساعتِ همین حالا، از ورودی‌های کاربر.
+   *
+   * ورودیِ نامعتبر بی‌صدا به پیش‌فرض نمی‌افتد: `sessionWindow` دلیلش را
+   * می‌دهد و همان‌جا زیرِ کنترل‌ها نوشته می‌شود. سکوت در این مورد یعنی
+   * کاربر فکر کند انتخابش اعمال شده، در حالی که نشده.
+   */
+  const currentWindow = () => sessionWindow($('de-from-time').value, $('de-to-time').value);
   const basesHost = $('de-bases'), contractsHost = $('de-contracts');
   const runBtn = $('de-run'), exportBtn = $('de-export'), stopBtn = $('de-stop');
   let rangeUi = null, universe = null, controller = null, refreshTimer = null, loadSeq = 0, stopped = false;
@@ -460,11 +476,14 @@ export async function mount(root, { state, api }) {
    */
   function paintResult(instruments, pairs, items, bytes = null) {
     const frame = dataExportFrame($('de-frame').value);
+    const window = currentWindow();
+    const continuous = $('de-continuous').checked;
     let ticks = 0, out = 0;
     const rows = instruments.map((item) => {
-      const split = dataExportSessionRows(dataExportTradeRows(item, pairs, items));
+      const split = dataExportSessionRows(dataExportTradeRows(item, pairs, items, window));
       const count = split.rows.length;
-      const written = frame.seconds ? dataExportCandles(split.rows, frame.seconds).length : count;
+      const written = frame.seconds
+        ? dataExportCandles(split.rows, frame.seconds, { window, continuous }).length : count;
       ticks += count; out += written;
       const failures = pairs.filter((pair) => pair.ins === item.ins && items[pair.key]?.error).length;
       return `<tr><td>${esc(item.baseName)}</td><td>${esc(item.name)}</td><td>${item.kind === 'underlying' ? 'پایه' : item.kind === 'call' ? 'کال' : 'پوت'}</td><td class="n">${fmt.int(count)}</td><td class="n">${fmt.int(written)}</td><td class="n">${fmt.int(split.outside)}</td><td class="n">${fmt.int(failures)}</td></tr>`;
@@ -667,11 +686,14 @@ export async function mount(root, { state, api }) {
     exporting = true; updateRunState();
     try {
       const frame = $('de-frame').value, derived = $('de-derived').checked;
-      const sheets = buildDataExportSheets({ ...prepared, frame, derived });
+      const window = currentWindow(), continuous = $('de-continuous').checked;
+      const sheets = buildDataExportSheets({ ...prepared, frame, derived, window, continuous });
       const bytes = await downloadXlsx(dataExportFilename(prepared.range, frame), sheets);
       paintResult(prepared.instruments, prepared.pairs, prepared.items, bytes);
-      setStatus(`فایل Excel در تایم‌فریم «${dataExportFrame(frame).label}» دانلود شد.`
-        + ' تایم‌فریم را عوض کنید و دوباره همین دکمه را بزنید — دریافت دوباره لازم نیست.');
+      setStatus(`فایل Excel در تایم‌فریم «${dataExportFrame(frame).label}»`
+        + ` و پنجرهٔ ${faDigits(clockLabel(window.start))} تا ${faDigits(clockLabel(window.end))} دانلود شد`
+        + `${sheets.length > prepared.instruments.length + 2 ? ` — ابزارِ پرردیف به چند برگ تقسیم شد (${fmt.int(sheets.length)} برگ).` : '.'}`
+        + ' تایم‌فریم و ساعت را عوض کنید و دوباره همین دکمه را بزنید — دریافت دوباره لازم نیست.');
     } catch (error) {
       setStatus(`دانلود خروجی انجام نشد: ${error.message}`, true); logError('data-export:download', error);
     } finally { exporting = false; updateRunState(); }
@@ -706,9 +728,22 @@ export async function mount(root, { state, api }) {
     paintContracts();
   });
   // تایم‌فریم دادهٔ گرفته‌شده را باطل نمی‌کند — فقط برآوردِ ردیف عوض می‌شود.
-  $('de-frame').addEventListener('change', () => {
+  // ═══ چرا هیچ‌کدام از این‌ها دادهٔ گرفته‌شده را باطل نمی‌کند ═══
+  //
+  // تایم‌فریم و پنجرهٔ ساعت هر دو شکلِ **نوشتن**‌اند، نه دریافت: ریزمعامله
+  // همیشه کامل گرفته می‌شود. پس عوض‌کردنشان فقط برآوردِ ردیف را دوباره
+  // می‌کشد و هیچ درخواستی به بالادست نمی‌فرستد.
+  const repaintEstimate = () => {
+    const window = currentWindow();
+    const note = $('de-window-note');
+    note.hidden = !window.note;
+    note.textContent = window.note;
+    note.toggleAttribute('data-error', Boolean(window.note));
     if (prepared) paintResult(prepared.instruments, prepared.pairs, prepared.items);
-  });
+  };
+  for (const id of ['de-frame', 'de-from-time', 'de-to-time', 'de-continuous']) {
+    $(id).addEventListener('change', repaintEstimate);
+  }
   $('de-side').addEventListener('change', paintContracts);
   $('de-contract-search').addEventListener('input', paintContracts);
   /** قراردادهایی که همین حالا روی صفحه دیده می‌شوند — با پالایهٔ نوع و جست‌وجو. */

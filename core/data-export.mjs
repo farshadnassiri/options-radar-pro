@@ -337,8 +337,67 @@ export function dataExportOutcome(pairs = [], items = {}) {
   };
 }
 
+// ═══════════════ پنجرهٔ ساعت: ورودی، نه ثابت ═══════════════
+//
+// بند ۶ ممیزیِ ۱۴۰۵/۰۶/۲۹: پنجره **ثابت** ۹:۰۰ تا ۱۲:۳۰ بود و انتخابِ
+// ۹:۳۰ به‌عنوان آغاز در این مسیر اصلاً وجود نداشت؛ ورودیِ بازه در تب
+// مربوط به **تاریخ** است، نه ساعت. و چون سه جا (پالایه، شمع‌سازی و متنِ
+// برگ راهنما) هرکدام عددِ خودشان را داشتند، یک پنجرهٔ تازه باید در سه جا
+// عوض می‌شد — که یعنی روزی در دو جا عوض می‌شود.
+//
+// پس پنجره یک **مقدار** شد که از یک جا می‌آید و هر سه از آن می‌خوانند.
+// پیش‌فرضش همان ۹:۰۰ تا ۱۲:۳۰ است و پایان **شامل** می‌ماند، چون معاملهٔ
+// حراج پایانی دقیقاً روی ۱۲:۳۰:۰۰ می‌نشیند.
+export const DEFAULT_SESSION_WINDOW = Object.freeze({
+  start: INTRADAY_START_SECOND,
+  end: INTRADAY_END_SECOND,
+});
+
+/** `HH:MM` یا `HH:MM:SS` را به ثانیه ترجمه می‌کند؛ ورودیِ بد `NaN` است. */
+export function parseClock(text) {
+  const parts = String(text ?? '').trim().split(':');
+  if (parts.length < 2 || parts.length > 3) return NaN;
+  const [h, m, sec = '0'] = parts;
+  if (!/^\d{1,2}$/.test(h) || !/^\d{1,2}$/.test(m) || !/^\d{1,2}$/.test(sec)) return NaN;
+  const hour = Number(h), minute = Number(m), second = Number(sec);
+  if (hour > 23 || minute > 59 || second > 59) return NaN;
+  return (hour * 3600) + (minute * 60) + second;
+}
+
+export const clockLabel = (second) => {
+  const value = Math.max(0, Math.trunc(n(second)));
+  const pad = (x) => String(x).padStart(2, '0');
+  return `${pad(Math.floor(value / 3600))}:${pad(Math.floor((value % 3600) / 60))}:${pad(value % 60)}`;
+};
+
+/**
+ * پنجرهٔ معتبر از ورودیِ کاربر — یا پیش‌فرض، با گفتنِ اینکه چرا.
+ *
+ * ورودیِ نامعتبر **بی‌صدا** به پیش‌فرض نمی‌افتد: `note` می‌گوید چه شد.
+ * یک پنجرهٔ وارونه یا یک ساعتِ بدشکل که ساکت اصلاح شود، یعنی کاربر فکر
+ * می‌کند انتخابش اعمال شده در حالی که نشده — همان جنسِ خطایی که این
+ * ممیزی پر از آن است.
+ */
+export function sessionWindow(start, end) {
+  const from = parseClock(start), to = parseClock(end);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    return { ...DEFAULT_SESSION_WINDOW, custom: false, note: 'ساعت نامعتبر بود؛ پنجرهٔ پیش‌فرض اعمال شد' };
+  }
+  if (to <= from) {
+    return { ...DEFAULT_SESSION_WINDOW, custom: false, note: 'پایان پیش از آغاز بود؛ پنجرهٔ پیش‌فرض اعمال شد' };
+  }
+  const custom = from !== DEFAULT_SESSION_WINDOW.start || to !== DEFAULT_SESSION_WINDOW.end;
+  return { start: from, end: to, custom, note: '' };
+}
+
+/** آیا این ساعت داخل پنجره است. پایان **شامل** است. */
+export function inSessionWindow(value, window = DEFAULT_SESSION_WINDOW) {
+  const second = tradeSecond(value);
+  return second >= window.start && second <= window.end;
+}
+
 /** ریزمعامله‌های یک ابزار، با ارزش خام و ارزش مبتنی بر اندازه قرارداد. */
-export function dataExportTradeRows(instrument, pairs = [], items = {}) {
+export function dataExportTradeRows(instrument, pairs = [], items = {}, window = DEFAULT_SESSION_WINDOW) {
   const size = instrument?.kind === 'underlying' ? 1 : n(instrument?.size);
   const out = [];
   for (const pair of pairs || []) {
@@ -373,10 +432,10 @@ export function dataExportTradeRows(instrument, pairs = [], items = {}) {
         contractSize: size > 0 ? size : NaN,
         contractValue: size > 0 ? price * quantity * size : NaN,
         canceled, canceledKnown: row?.canceledKnown !== false,
-        // جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰. خواستهٔ صریح صاحب پروژه همین بازه
-        // است، ولی ردیفِ بیرونِ آن **حذف** نمی‌شود — علامت می‌خورد و شمارش
-        // می‌شود، تا «نبود» با «کنار گذاشته شد» اشتباه نشود.
-        inSession: inIntradaySession(row?.time),
+        // پنجرهٔ جلسه — پیش‌فرض ۹:۰۰ تا ۱۲:۳۰، ولی حالا ورودیِ کاربر است.
+        // ردیفِ بیرونِ آن **حذف** نمی‌شود: علامت می‌خورد و شمارش می‌شود،
+        // تا «نبود» با «کنار گذاشته شد» اشتباه نشود.
+        inSession: inSessionWindow(row?.time, window),
         source: String(hit.source || 'history'),
       });
     }
@@ -691,7 +750,9 @@ const hhmmss = (second) => {
   return (Math.floor(value / 3600) * 10000) + (Math.floor((value % 3600) / 60) * 100) + (value % 60);
 };
 
-export function dataExportCandles(rows = [], seconds = 60) {
+export function dataExportCandles(rows = [], seconds = 60, {
+  window = DEFAULT_SESSION_WINDOW, continuous = false,
+} = {}) {
   const width = Math.max(1, Math.trunc(n(seconds)));
   const byBucket = new Map();
   const order = [];
@@ -707,9 +768,8 @@ export function dataExportCandles(rows = [], seconds = 60) {
     // بقیهٔ برنامه این را ندارد چون `bucketStartSecond` در
     // `core/backtest.mjs` همین چفت را دارد؛ نبودنش اینجا یعنی شمعِ خروجی
     // با شمعِ بازپخش و آزمون تاریخی هم‌ردیف نمی‌شود.
-    const second = Math.min(Math.max(tradeSecond(row?.time), INTRADAY_START_SECOND),
-      INTRADAY_END_SECOND - 1);
-    const start = INTRADAY_START_SECOND + (Math.floor((second - INTRADAY_START_SECOND) / width) * width);
+    const second = Math.min(Math.max(tradeSecond(row?.time), window.start), window.end - 1);
+    const start = window.start + (Math.floor((second - window.start) / width) * width);
     const key = `${row.date}:${start}`;
     let bar = byBucket.get(key);
     if (!bar) {
@@ -717,6 +777,9 @@ export function dataExportCandles(rows = [], seconds = 60) {
         date: row.date, second: start, time: hhmmss(start),
         open: NaN, high: NaN, low: NaN, close: NaN,
         volume: 0, value: 0, trades: 0, canceled: 0, source: String(row.source || ''),
+        // سطلی که ردیف دارد، «معامله شد» است. سطلِ ساختگیِ پیوستگی پایین
+        // این پرچم را ندارد و خودش را معرفی می‌کند.
+        traded: true,
       };
       byBucket.set(key, bar);
       order.push(bar);
@@ -731,7 +794,41 @@ export function dataExportCandles(rows = [], seconds = 60) {
     bar.value += price * quantity;
     bar.trades += 1;
   }
-  return order.sort((a, b) => a.date - b.date || a.second - b.second);
+  if (!continuous) return order.sort((a, b) => a.date - b.date || a.second - b.second);
+
+  // ═══ جدول زمانیِ پیوسته ═══
+  //
+  // بند ۶ ممیزی: یک معامله در ۱۰:۳۰ تنها **یک** ردیفِ شمع می‌سازد، نه
+  // جدولِ تمام دقیقه‌های روز. برای نمایشِ پیوسته، سطلِ خالی باید ردیف
+  // داشته باشد — ولی با قیمتِ تهی و وضعیتِ روشن.
+  //
+  // ═══ قاعده‌ای که اینجا شکستنی نیست ═══
+  //
+  // سطلِ خالی **هیچ قیمتی نمی‌گیرد**: نه پایانیِ سطل قبل، نه میانگین، نه
+  // درون‌یابی. باز/بیشترین/کمترین/بسته `NaN` می‌مانند و حجم و ارزش صفر.
+  // قیمتِ ساختگی جای شکاف، دقیقاً همان چیزی است که قاعدهٔ «داده نداشته،
+  // نداشته بماند» منع می‌کند — و بدتر از شکاف است، چون شکاف دیده می‌شود
+  // و عددِ ساختگی نه.
+  //
+  // و «در این دقیقه معامله نشده» فقط وقتی قابلِ تأیید است که دریافتِ آن
+  // روز معتبر و کامل باشد؛ پرچمِ `traded` همین تفکیک را حمل می‌کند و
+  // حکمِ کامل‌بودنِ روز در برگ پوشش می‌نشیند.
+  const dates = [...new Set(order.map((bar) => bar.date))].sort((a, b) => a - b);
+  const filled = [];
+  for (const date of dates) {
+    const have = new Map(order.filter((bar) => bar.date === date).map((bar) => [bar.second, bar]));
+    const source = [...have.values()][0]?.source || '';
+    for (let start = window.start; start < window.end; start += width) {
+      const bar = have.get(start);
+      if (bar) { filled.push(bar); continue; }
+      filled.push({
+        date, second: start, time: hhmmss(start),
+        open: NaN, high: NaN, low: NaN, close: NaN,
+        volume: 0, value: 0, trades: 0, canceled: 0, source, traded: false,
+      });
+    }
+  }
+  return filled;
 }
 
 /**
