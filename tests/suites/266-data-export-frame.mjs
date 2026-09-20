@@ -6,8 +6,8 @@
 
 import { check, group, readSrc } from '../harness.mjs';
 import {
-  DATA_EXPORT_FRAMES, dataExportCandles, dataExportFrame, dataExportPairs,
-  dataExportTradeRows, discoverDataExportInstruments,
+  DATA_EXPORT_FRAMES, dataExportCandles, dataExportCoverageRows, dataExportFrame,
+  dataExportPairs, dataExportSessionRows, dataExportTradeRows, discoverDataExportInstruments,
 } from '../../core/data-export.mjs';
 import { tradeTimeLabel } from '../../core/backtest.mjs';
 
@@ -210,4 +210,83 @@ group('۲۶۶. تب خروجی دیتا');
     !/de-frame'\)\.addEventListener\('change', \(\) => \{\s*invalidatePrepared/.test(tab));
   check('جدول نتیجه ستون ردیف خروجی دارد', tab.includes('<th>ردیف خروجی</th>'));
   check('دکمهٔ آزمون یک ابزار/روز برداشته شد', !tab.includes('de-probe'));
+}
+
+// ═══════════ ممیزی فایلِ ۲۰۲۶/۰۶/۲۰ تا ۲۰۲۶/۰۹/۱۸ ═══════════
+//
+// صاحب پروژه خروجیِ m15 اهرم را فرستاد. سه چیز در خودِ فایل قابل اثبات
+// بود، و هر سه اینجا قفل می‌شوند:
+//
+//   ۱. برگ پوشش ۱۲۲ معاملهٔ باطل شمرد، ستون «تعداد باطل» برگ‌های ابزار
+//      جمعاً ۴۹ — یک فایل، دو عدد برای یک چیز.
+//   ۲. هر روز به‌جای ۱۴ سطلِ پانزده‌دقیقه‌ای، ۱۵ تا داشت: سطلِ اضافهٔ
+//      «۱۲:۳۰» فقط معاملهٔ حراج پایانی را داشت (۱ تا ۷ معامله).
+//   ۳. برگ راهنما وعدهٔ ستونی را می‌داد که در برگ پوشش نبود، و ستونی به
+//      نام «مسیر» داشت که محتوایش پرچمِ endpoint بود نه مسیر.
+group('۲۶۶. ممیزی خروجی m15 اهرم');
+{
+  const roster = [{
+    uaInsCode: 'BASE', lval30_UA: 'اهرم', activeFrom: 20260901, activeTo: 20260910,
+    expiryGregorian: 20260910, strikePrice: 20000, contractSize: 1000,
+    insCode_C: 'CALL1', lVal18AFC_C: 'ضهرم۱',
+  }];
+  const instruments = discoverDataExportInstruments(roster, ['BASE']);
+  const call = instruments.find((item) => item.kind === 'call');
+  const pairs = dataExportPairs(instruments, [20260901]);
+  // چهار ردیفِ هم‌شکلِ پاسخ واقعی: یکی بیرونِ جلسه، یکی باطلِ بی‌حجم،
+  // یکی عادی، و یکی حراج پایانی دقیقاً روی ۱۲:۳۰:۰۰.
+  const rows = [
+    { time: at((8 * 3600) + (59 * 60)), sequence: 1, price: 990, quantity: 5, canceled: false, canceledKnown: true },
+    { time: at(9 * 3600), sequence: 2, price: 1000, quantity: 2, canceled: false, canceledKnown: true },
+    { time: at((9 * 3600) + 5), sequence: 3, price: 1010, quantity: 0, canceled: true, canceledKnown: true },
+    { time: at((12 * 3600) + (30 * 60)), sequence: 4, price: 1200, quantity: 7, canceled: false, canceledKnown: true },
+  ];
+  const items = { '20260901:CALL1': { rows, source: 'history', variant: 'true' } };
+
+  // ── ۱. معاملهٔ باطل حجم ندارد، ولی همچنان یک معاملهٔ باطل است.
+  const trades = dataExportTradeRows(call, pairs, items);
+  check('معاملهٔ باطلِ بی‌حجم از ریزمعامله‌ها نمی‌افتد',
+    trades.filter((row) => row.canceled).length === 1);
+  const cover = dataExportCoverageRows(instruments, pairs, items)
+    .find((row) => row.ins === 'CALL1');
+  const bars = dataExportCandles(dataExportSessionRows(trades).rows, 900);
+  check('شمارِ باطلِ برگ پوشش با جمعِ ستونِ باطلِ برگ ابزار یکی است',
+    cover.canceled === 1 && bars.reduce((sum, bar) => sum + bar.canceled, 0) === cover.canceled);
+  check('و حجمِ باطل هنوز در هیچ شمعی جمع نمی‌شود',
+    bars.reduce((sum, bar) => sum + bar.volume, 0) === 9);
+
+  // ── ۲. حراج پایانی سطلِ پانزدهم نمی‌سازد.
+  check('معاملهٔ ۱۲:۳۰:۰۰ سطلِ تازه نمی‌سازد',
+    !bars.some((bar) => bar.time === 123000));
+  check('و در سطلِ آخرِ همان روز (۱۲:۱۵) می‌نشیند',
+    bars[bars.length - 1].time === 121500 && bars[bars.length - 1].close === 1200);
+  check('پس روزِ پانزده‌دقیقه‌ای بیش از ۱۴ سطل نمی‌گیرد',
+    dataExportCandles(dataExportSessionRows(trades).rows, 900).length <= 14);
+
+  // ── ۳. ستونی که راهنما وعده‌اش را می‌داد، و ستونی که نامش غلط بود.
+  const sheets = buildDataExportSheets({
+    instruments, pairs, items, range: { from: 20260901, to: 20260901 },
+    complete: true, frame: 'm15',
+  });
+  const coverage = sheets.find((part) => part.name === 'پوشش دریافت');
+  const colAt = (name) => coverage.headers.indexOf(name);
+  const line = coverage.rows.find((row) => row[1] === 'ضهرم۱');
+  check('برگ پوشش ستون «بیرون از جلسه» دارد', colAt('بیرون از جلسه') > 0);
+  check('و عددش همان چیزی است که جداساز جلسه شمرده',
+    line[colAt('بیرون از جلسه')] === dataExportSessionRows(trades).outside
+      && line[colAt('بیرون از جلسه')] === 1);
+  check('و «کل ردیف» منهای «بیرون از جلسه» با ردیف‌های برگ ابزار می‌خواند',
+    line[colAt('کل ردیف')] - line[colAt('بیرون از جلسه')] === dataExportSessionRows(trades).rows.length);
+  check('ستونِ پرچمِ endpoint دیگر «مسیر» خوانده نمی‌شود',
+    colAt('پرچم درخواست') > 0 && colAt('مسیر') === -1);
+  check('و همان خانه هنوز پرچم را می‌گوید',
+    line[colAt('پرچم درخواست')] === 'پرچم true');
+  check('مسیرِ واقعی همان ستون «منبع» است',
+    line[colAt('منبع')] === 'history');
+  const guide = sheets.find((part) => part.name === 'راهنما');
+  const valueOf = (key) => (guide.rows.find((row) => row[0] === key) || [])[1] || '';
+  check('راهنما ستونِ بیرون از جلسه را به نام صدا می‌زند',
+    valueOf('پنجرهٔ ساعت').includes('بیرون از جلسه'));
+  check('و می‌گوید حراج پایانی سطلِ تازه نمی‌سازد',
+    valueOf('تایم‌فریم').includes('حراج پایانی'));
 }

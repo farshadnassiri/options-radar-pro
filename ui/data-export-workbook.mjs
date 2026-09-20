@@ -2,8 +2,8 @@
 
 import {
   BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, EMPTY_STATUS, blankAuditSummary, dataExportCandles,
-  dataExportCoverageRows, dataExportFrame, dataExportOutcome, dataExportRouteSplit,
-  dataExportSessionRows, dataExportTradeRows,
+  dataExportCoverageRows, dataExportFrame, dataExportListingBasis, dataExportOutcome,
+  dataExportRouteSplit, dataExportSessionRows, dataExportTradeRows,
 } from '../core/data-export.mjs';
 import { tradeTimeLabel } from '../core/backtest.mjs';
 import { historyDateLabel } from '../core/history.mjs';
@@ -82,6 +82,7 @@ export function buildDataExportSheets({
     ? `${blanks.missing} ابزار/روز تابلو معامله ثبت کرده ولی ریزمعامله نیامد · `
       + `${blanks.quiet} واقعاً بی‌معامله · ${blanks.unknown} بی تابلوی روزانه`
     : '—';
+  const basis = dataExportListingBasis(instruments, pairs);
   const route = dataExportRouteSplit(pairs, items);
   const routeLine = route.total
     ? `تاریخی: ${route.history.total} ابزار/روز، ${route.history.ok} داده آورد · `
@@ -107,13 +108,25 @@ export function buildDataExportSheets({
     ['تفکیک مسیر', routeLine],
     ['بازبینی خالی‌ها با تابلوی روزانه', blankLine],
     ...(blanks.worst ? [['بدترین مورد نیامدن', `کد ${blanks.worst.ins} در ${blanks.worst.date} — تابلو ${blanks.worst.dailyTrades} معامله`]] : []),
-    ['پنجرهٔ ساعت', 'ردیف‌های برگ هر ابزار فقط جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰ است؛ شمار ردیف‌های بیرون از این بازه در برگ پوشش می‌آید.'],
+    ['پنجرهٔ ساعت', 'ردیف‌های برگ هر ابزار فقط جلسهٔ پیوستهٔ ۹:۰۰ تا ۱۲:۳۰ است؛ شمار ردیف‌های بیرون از این بازه در ستون «بیرون از جلسه» برگ پوشش می‌آید.'],
     ['تایم‌فریم', tf.seconds
-      ? `${tf.label} — هر ردیف یک سطل زمانی است که مبدأش ۹:۰۰ است. سطلِ بی‌معامله ردیف ندارد و هیچ قیمتی درون‌یابی نشده.`
+      ? `${tf.label} — هر ردیف یک سطل زمانی است که مبدأش ۹:۰۰ است. سطلِ بی‌معامله ردیف ندارد و هیچ قیمتی درون‌یابی نشده. معاملهٔ حراج پایانی (۱۲:۳۰:۰۰) در سطلِ آخرِ همان روز می‌نشیند، نه در سطلی تازه.`
       : `${tf.label} — هر ردیف یک اجرای گزارش‌شدهٔ بورس است.`],
     ['ستون‌های مشتق', derived
       ? 'روشن — ارزش خام، اندازه قرارداد و ارزش با اندازه قرارداد در برگ هر ابزار آمده‌اند.'
       : 'خاموش برای کوچک‌ماندن فایل. هر سه حاصل‌ضرب ستون‌های موجودند و اندازهٔ قرارداد در برگ «پوشش دریافت» ستون دارد.'],
+    // ═══ چرا «مبنای تاریخ عرضه» یک سطر شد ═══
+    //
+    // ممیزی فایلِ m5: ۵۸ ابزار/روز اصلاً درخواست نرفته بودند و هر ۵۸تا
+    // پوت بودند، چون کرانِ پایینیِ عمرشان از اولین روزِ دیده‌شدن آمده بود
+    // نه از تاریخ عرضه. حالا کفِ سری آن‌ها را برمی‌گرداند — ولی تا وقتی
+    // اسکن دفتر تاریخ عرضهٔ رسمی را نیاورده، این هنوز یک **مشاهده** است و
+    // فایل باید همین را بگوید، نه اینکه مثل تاریخِ رسمی نشانش دهد.
+    ['مبنای تاریخ عرضه', basis.total
+      ? `${basis.official} قرارداد از ${basis.total} تاریخ عرضهٔ رسمی دارند`
+        + `${basis.observed ? ` · برای ${basis.observed} قرارداد آغازِ عمر از اولین روزِ دیده‌شدنِ دفتر آمده و با سریِ خودش (کال و پوتِ هم‌اعمال) هم‌تراز شده` : ''}`
+        + `${basis.recovered ? ` — ${basis.recovered} ابزار/روز که پیش از این هم‌ترازی اصلاً درخواست نمی‌رفت` : ''}`
+      : '—'],
     ['پوشش دفتر قراردادها', complete ? 'کامل' : 'ناقص — همه قراردادها تضمین نمی‌شود'],
     ['یادداشت منبع', note || '—'],
     ['تعریف ردیف', tf.seconds
@@ -123,11 +136,22 @@ export function buildDataExportSheets({
   ], [150, 430]);
 
   const auditByKey = new Map((audit || []).map((row) => [row.key, row]));
+  // ═══ دو ستونی که اینجا عوض شدند ═══
+  //
+  // «بیرون از جلسه» **اضافه** شد: برگ راهنما وعده‌اش را می‌داد ولی ستونش
+  // در فایل نبود، و بی آن تفاوتِ «کل ردیف» با ردیف‌های برگ ابزار بی‌شرح
+  // می‌ماند.
+  //
+  // «مسیر» به «پرچم درخواست» **تغییر نام** داد چون محتوایش هیچ‌وقت مسیر
+  // نبود: `hit.variant` می‌گوید پاسخ از کدام پرچمِ endpoint تاریخی آمد
+  // (`true`، `false`، یا «هر دو را زدیم و خالی بود»). مسیرِ واقعی —
+  // تاریخی یا نوار زنده — همان ستون «منبع» است، و برگ‌های ابزار هم همین
+  // نام را برای همان چیز دارند.
   const coverageSheet = sheet('پوشش دریافت', [
     'نماد پایه', 'نماد ابزار', 'نوع', 'کد ابزار', 'اندازه قرارداد',
     'تاریخ میلادی', 'تاریخ شمسی', 'کل ردیف',
-    'فعال', 'باطل', 'وضعیت', 'حکم خالی‌بودن', 'معاملهٔ تابلوی روزانه', 'مسیر',
-    'پاسخ بالادست', 'منبع', 'خطا',
+    'فعال', 'باطل', 'بیرون از جلسه', 'وضعیت', 'حکم خالی‌بودن',
+    'معاملهٔ تابلوی روزانه', 'پرچم درخواست', 'پاسخ بالادست', 'منبع', 'خطا',
   ], coverage.map((row) => {
     const seen = auditByKey.get(`${row.date}:${row.ins}`) || null;
     const hit = items?.[`${row.date}:${row.ins}`] || {};
@@ -135,7 +159,7 @@ export function buildDataExportSheets({
       row.baseName, row.name, DATA_EXPORT_KIND_LABEL[row.kind] || row.kind, row.ins,
       Number.isFinite(row.size) && row.size > 0 ? row.size : '',
       row.date, jalaliText(row.date),
-      row.rows, row.active, row.canceled, row.status,
+      row.rows, row.active, row.canceled, row.outside, row.status,
       seen ? BLANK_VERDICT_LABEL[seen.verdict] : '—',
       seen && Number.isFinite(seen.dailyTrades) ? seen.dailyTrades : '',
       hit.variant ? `پرچم ${hit.variant}` : '',
@@ -144,7 +168,7 @@ export function buildDataExportSheets({
         ? `${hit.upstream} / ${hit.upstreamAlt}` : hit.upstream) : '',
       row.source, row.error,
     ];
-  }), [100, 120, 95, 140, 100, 95, 95, 75, 65, 65, 100, 250, 110, 85, 200, 80, 260]);
+  }), [100, 120, 95, 140, 100, 95, 95, 75, 65, 65, 95, 100, 250, 110, 100, 200, 80, 260]);
 
   const instrumentSheets = instruments.map((instrument) => {
     // خواستهٔ صریح: «هر روز معاملاتی از ساعت ۹ الی ۱۲:۳۰». ردیفِ بیرون از
