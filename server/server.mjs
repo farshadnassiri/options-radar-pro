@@ -19,7 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaults, sanitize } from '../core/settings.mjs';
 import { num } from '../core/num.mjs';
-import { normalizeTrades } from '../core/backtest.mjs';
+import { normalizeTrades, normalizeTradesDetailed } from '../core/backtest.mjs';
 import { upstreamShape, upstreamShapeLabel } from '../core/upstream-shape.mjs';
 import { normalizeBookEvents } from '../core/book-history.mjs';
 import {
@@ -348,6 +348,63 @@ function firstDict(obj) {
   return obj;
 }
 
+// ═════════════ یک دریافت‌کننده برای همهٔ مسیرهای ریزمعاملهٔ تاریخی ═════════════
+//
+// ممیزی ۱۴۰۵/۰۶/۲۹، نمونهٔ واقعی — اهرم، `17914401175772326`، `20260919`:
+//
+//   فهرست روزانه              ۷٬۷۳۶ معامله / ۷۳٬۳۰۵٬۲۲۴ حجم
+//   GetTradeHistory/…/true    صفر  / صفر
+//   GetTradeHistory/…/false   ۷٬۷۳۶ / ۷۳٬۳۰۵٬۲۲۴   ← همان روز، کامل
+//
+// یعنی داده **بود** و مسیر اول آن را خالی می‌داد. `/api/trades/batch`
+// تلاشِ دومِ پرچمِ دیگر را داشت، ولی `/api/trades` و
+// `/api/hist?kind=trades` نداشتند. نتیجه: یک ابزار/روز در خروجی دیتا پر
+// و در بک‌تستِ سبد خالی دیده می‌شد — دو مسیر، دو حقیقت.
+//
+// این تابع تنها راهِ رسیدن به ریزمعاملهٔ تاریخی است. هر سه مسیر از همین
+// می‌گذرند، پس تفاوتِ رفتار دیگر جایی برای زیستن ندارد (معیار پذیرشِ ۱ و ۳).
+//
+// خروجی همیشه وضعیت را می‌گوید، نه فقط ردیف‌ها:
+//   variant     کدام پرچم جواب داد («true» / «false» / «both» یعنی هیچ‌کدام)
+//   emptyBoth   پس از هر دو مسیر خالی ماند
+//   upstream*   شکلِ خامِ پاسخِ هر دو مسیر، برای تشخیصِ اجرای بعدی
+//   duplicates  شمارِ ردیف‌های کاملاً تکراری که انداخته شدند
+//   conflicts   شماره‌هایی که دو محتوای متفاوت داشتند (هیچ‌کدام حذف نشده)
+async function fetchHistoricalTape(code, date, { fresh = false } = {}) {
+  const pull = async (pathname) => {
+    const data = fresh ? await getFresh(pathname, 2, 6) : await get(pathname, S.ttlDailySec, 6);
+    const detail = normalizeTradesDetailed(firstList(data));
+    return { ...detail, shape: upstreamShape(data) };
+  };
+  try {
+    const first = await pull(historicalTradesPath(code, date));
+    if (first.rows.length) {
+      return {
+        rows: first.rows, variant: 'true',
+        duplicates: first.duplicates, conflicts: first.conflicts,
+      };
+    }
+    // «تلاش تا موفقیت» نیست: دقیقاً یک تلاش دوم، و فقط برای خالی — نه
+    // برای خطا. خطا بالا می‌رود تا با «بی‌معامله» اشتباه نشود.
+    const alt = await pull(historicalTradesAltPath(code, date));
+    if (alt.rows.length) {
+      return {
+        rows: alt.rows, variant: 'false',
+        duplicates: alt.duplicates, conflicts: alt.conflicts,
+      };
+    }
+    return {
+      rows: [], variant: 'both', emptyBoth: true,
+      duplicates: 0, conflicts: [],
+      // شکلِ **هر دو** مسیر، چون ممکن است فقط یکی‌شان بدقلق باشد.
+      upstream: upstreamShapeLabel(first.shape),
+      upstreamAlt: upstreamShapeLabel(alt.shape),
+    };
+  } catch (e) {
+    return { rows: [], error: `${e.name}: ${e.message}` };
+  }
+}
+
 /**
  * پاسخ تاریخ‌دار بالادست را به شکل ثابت درمی‌آورد.
  *
@@ -364,10 +421,9 @@ function shapeHistorical(kind, raw) {
     const rows = firstList(raw);
     return { events: normalizeBookEvents(rows), count: rows.length };
   }
-  if (kind === 'trades') {
-    const rows = firstList(raw);
-    return { rows: normalizeTrades(rows), count: rows.length };
-  }
+  // `trades` عمداً اینجا نیست: مسیر ریزمعامله پیش از رسیدن به این تابع به
+  // `fetchHistoricalTape` می‌رود تا تلاشِ پرچمِ دوم و حذفِ تکرار را هم
+  // بگیرد. شاخهٔ مردهٔ اینجا یعنی دو نرمال‌سازی که روزی از هم دور می‌افتند.
   if (kind === 'daily' || kind === 'instrument' || kind === 'clientType') {
     return { row: firstDict(raw) };
   }
@@ -1057,8 +1113,12 @@ async function handle(req, res) {
       if (!codes.length) return sendJson(res, 400, { error: 'دست‌کم یک کد ابزار معتبر لازم است' });
       const one = async (code) => {
         try {
-          const rows = normalizeTrades(firstList(await getFresh(`/Trade/GetTrade/${code}`, 2, 2)));
-          return [code, { ins: code, rows, summary: summarizeLiveTrades(rows) }];
+          // تکرارِ دقیق همین‌جا می‌افتد، وگرنه خلاصه و شمع‌ساز آن را
+          // دوباره می‌شمارند: نمونهٔ اهرم/۲۰۲۶۰۹۲۰ پنج ردیفِ تکراری داشت و
+          // ۴٬۰۵۷ واحد حجمِ اضافه می‌ساخت.
+          const tape = normalizeTradesDetailed(firstList(await getFresh(`/Trade/GetTrade/${code}`, 2, 2)));
+          const { rows, duplicates, conflicts } = tape;
+          return [code, { ins: code, rows, duplicates, conflicts, summary: summarizeLiveTrades(rows) }];
         } catch (e) {
           return [code, { ins: code, rows: [], error: `${e.name}: ${e.message}` }];
         }
@@ -1178,26 +1238,7 @@ async function handle(req, res) {
       // چیزی داد که اصلاً فهرست معامله نیست. `firstList` هر دو را یک `[]`
       // می‌کند. حالا شکلِ خامِ پاسخ همراه خالی می‌آید و در برگ پوشش
       // می‌نشیند، تا اجرای بعدی تشخیص باشد نه حدسِ تازه.
-      const one = async ({ key, code, date }) => {
-        const pull = async (path) => {
-          const data = fresh ? await getFresh(path, 2, 6) : await get(path, S.ttlDailySec, 6);
-          return { rows: normalizeTrades(firstList(data)), shape: upstreamShape(data) };
-        };
-        try {
-          const first = await pull(historicalTradesPath(code, date));
-          if (first.rows.length) return [key, { rows: first.rows, variant: 'true' }];
-          const alt = await pull(historicalTradesAltPath(code, date));
-          if (alt.rows.length) return [key, { rows: alt.rows, variant: 'false' }];
-          return [key, {
-            rows: [], variant: 'both', emptyBoth: true,
-            // شکلِ **هر دو** مسیر، چون ممکن است فقط یکی‌شان بدقلق باشد.
-            upstream: upstreamShapeLabel(first.shape),
-            upstreamAlt: upstreamShapeLabel(alt.shape),
-          }];
-        } catch (e) {
-          return [key, { rows: [], error: `${e.name}: ${e.message}` }];
-        }
-      };
+      const one = async ({ key, code, date }) => [key, await fetchHistoricalTape(code, date, { fresh })];
       return sendJson(res, 200, { count: requests.length, items: Object.fromEntries(await Promise.all(requests.map(one))) });
     }
 
@@ -1467,6 +1508,14 @@ async function handle(req, res) {
       if (!validCompactDate(date)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
 
       const one = async (code) => {
+        // ریزمعامله از همان دریافت‌کنندهٔ مشترک می‌گذرد — با تلاشِ پرچمِ
+        // دوم و حذفِ تکرار — تا این مسیر همان جوابی را بدهد که
+        // `/api/trades` و `/api/trades/batch` می‌دهند. بقیهٔ نوع‌ها یک
+        // endpoint دارند و جایگزینی ندارند.
+        if (kind === 'trades') {
+          const tape = await fetchHistoricalTape(code, date);
+          return [code, { ins: code, ...tape, count: tape.rows?.length ?? 0 }];
+        }
         const upstream = historicalPath(kind, code, date);
         if (!upstream) return [code, { ins: code, error: 'کد ابزار نامعتبر' }];
         try {
@@ -1557,11 +1606,14 @@ async function handle(req, res) {
       });
     }
 
+    // همان دریافت‌کنندهٔ دسته‌ای، برای یک ابزار/روز. پیش از این فقط مسیر
+    // اول را می‌خواند و نمونهٔ واقعیِ اهرم/۲۰۲۶۰۹۱۹ را خالی می‌داد در حالی
+    // که مسیر دوم ۷٬۷۳۶ معامله داشت.
     if (p === '/api/trades') {
       const date = u.searchParams.get('date');
       if (!validCompactDate(date)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
-      const rows = firstList(await get(historicalTradesPath(ins, date), S.ttlDailySec, 6));
-      return sendJson(res, 200, { ins, date: Number(date), rows: normalizeTrades(rows) });
+      const tape = await fetchHistoricalTape(ins, date, { fresh: u.searchParams.get('fresh') === '1' });
+      return sendJson(res, 200, { ins, date: Number(date), ...tape });
     }
 
     // تاریخچه دسته‌ای همه پاهای یک زنجیره. n=0 یعنی از اولین روز موجود.

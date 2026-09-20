@@ -119,7 +119,7 @@ group('۲۶۷. مصرف در سرور و تب');
     server.includes('upstream: upstreamShapeLabel(first.shape)')
       && server.includes('upstreamAlt: upstreamShapeLabel(alt.shape)'));
   check('و خطا همچنان خطا می‌ماند، نه خالیِ بی‌شرح',
-    server.includes('return [key, { rows: [], error: `${e.name}: ${e.message}` }];'));
+    server.includes('return { rows: [], error: `${e.name}: ${e.message}` };'));
 
   const tab = readSrc('../ui/tabs/data-export.mjs');
   // ═══ چرا `n=0` ═══
