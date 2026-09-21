@@ -150,7 +150,8 @@ group('۲۶۵. جمع‌بندی صادقانهٔ دریافت');
   check('تب از قراردادهای انتخاب‌شده جفت می‌سازد، نه از همهٔ پایه',
     src.includes('const instruments = selectedInstruments()'));
   check('بستهٔ شکست‌خورده نصف و دوباره فرستاده می‌شود',
-    src.includes('splitPairBatch(batch)') && src.includes('fetchBatch(half, items, signal, depth + 1, fresh)'));
+    src.includes('splitPairBatch(batch)')
+      && src.includes('fetchBatch(half, items, signal, depth + 1, fresh, bust)'));
   // خطا هنوز روی همان جفت می‌نشیند، ولی از `keepBetterTape` می‌گذرد: پس
   // از F-04، خطای تلاشِ دوباره دیگر ردیف‌های سالمِ دورِ قبل را نمی‌برد.
   check('و بستهٔ تک‌جفتی خطایش را روی همان جفت می‌نشاند',
@@ -292,7 +293,7 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
   // مسیر انبوه پیش‌فرض از کش می‌خورد تا اجرای دوبارهٔ یک بازه به بالادست
   // فشار نیاورد؛ کش فقط برای خالیِ **تکذیب‌شده** دور زده می‌شود، نه همه.
   check('مسیر انبوه پیش‌فرض از کش می‌خورد',
-    tab.includes('async function fetchHistorical(pairs, items, signal, fresh = false)'));
+    tab.includes('async function fetchHistorical(pairs, items, signal, fresh = false, bust = true)'));
   check('و فقط خالیِ تکذیب‌شدهٔ تاریخی یک بار بی‌کش تکرار می‌شود',
     tab.includes('await fetchHistorical(staleHistorical, items, controller.signal, true)')
       && tab.includes("row.verdict === 'missing'"));

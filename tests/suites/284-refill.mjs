@@ -168,9 +168,31 @@ group('۲۸۴. پیگیری در فایل و رابط');
   check('فاصله می‌افتد و قابلِ توقف است',
     tab.includes('await sleepUnlessAborted(wait, controller.signal)')
       && tab.includes("signal?.addEventListener('abort', onAbort, { once: true })"));
-  check('شمارندهٔ تلاش پیش از درخواست می‌نشیند، نه پس از آن',
-    /markRefillAttempt\(prepared\.items\[job\.key\][\s\S]{0,200}await fetchHistorical\(jobs/.test(tab));
-  check('دورِ بی‌اثر حلقه را می‌بندد', tab.includes('if (!gained.gainedTrades)'));
+  // ═══ R5-01: شمارش جابه‌جا شد، پس این ادعا هم ═══
+  //
+  // ادعای قبلی «افزایش پیش از درخواست، داخلِ حلقهٔ تکمیلی» بود — و همان
+  // جایگاه بود که دریافتِ اولیه را از شمارش جا می‌انداخت. حالا شمارش در
+  // `fetchBatch` است، یعنی همان دری که **هر** دورِ پرسیدن از آن رد
+  // می‌شود؛ پس ادعا این است که حلقهٔ تکمیلی شمارندهٔ جداگانه **ندارد**.
+  check('شمارنده یک نقطه دارد و در مسیرِ مشترکِ دریافت است',
+    tab.includes('const mark = (record) => markAttempt(record, Date.now())')
+      && /items\[pair\.key\] = mark\(keepBetterTape\(/.test(tab));
+  check('و حلقهٔ تکمیلی شمارندهٔ جداگانه ندارد',
+    !/markAttempt\(prepared\.items\[job\.key\]/.test(tab));
+  check('دو دورِ بی‌اثرِ پیاپی حلقه را می‌بندد', tab.includes('if (barren >= 2)'));
+  // و پرچمِ درخواست بین دورها عوض می‌شود، وگرنه فقط یک مسیر امتحان می‌شود.
+  // ═══ R5-04: ادعا دقیق‌تر شد ═══
+  //
+  // نسخهٔ اولِ همین قاعده `fresh` را بین دورها عوض می‌کرد، و دورِ «ساده»
+  // به کشِ ۹۰۰ثانیه‌ایِ سرور می‌افتاد و اصلاً به بالادست نمی‌رسید — در
+  // اجرای آزمایشیِ مرورگر، چهار دور رفته بود و بالادست هر مسیر را فقط سه
+  // بار دیده بود. حالا `fresh` **همیشه** روشن است و فقط `bust` عوض
+  // می‌شود، پس ادعا هر دو را با هم می‌گزد.
+  check('پرچمِ درخواست بین دورها عوض می‌شود',
+    tab.includes('const bust = round % 2 === 1')
+      && tab.includes('await fetchHistorical(jobs, prepared.items, controller.signal, true, bust)'));
+  check('ولی کشِ سرور در هر دو دور دور زده می‌شود',
+    !/fetchHistorical\(jobs,[^)]*controller\.signal, false/.test(tab));
   check('و ممیزی بین دورها دوباره حساب می‌شود',
     tab.includes('prepared.audit = dataExportBlankAudit(prepared.pairs, prepared.items, lastDailyByIns, lastOpenDates)'));
   check('توقف، دادهٔ به‌دست‌آمده را نگه می‌دارد',

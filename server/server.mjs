@@ -294,8 +294,25 @@ function cachedAt(pathname) {
  * می‌ماند تا چند تب/کلیک هم‌زمان یک درخواست را ادغام کنند و سهمیه دور زده
  * نشود. پاسخ ناموفق مثل get() کش نمی‌شود.
  */
-async function getFresh(pathname, ttlSec = 2, priority = 2) {
-  const key = `fresh:${pathname}`;
+/**
+ * ═══ R5-04: «تازه» دو چیز بود و باید دو چیز بماند ═══
+ *
+ * `bust` تعیین می‌کند مهرِ زمان به URLِ بالادست بچسبد یا نه؛ کشِ **خودمان**
+ * در هر حال دور زده می‌شود، چون تلاشِ دوباره‌ای که از کشِ خودمان جواب
+ * بگیرد اصلاً تلاشِ دوباره نیست.
+ *
+ * چرا این تفکیک لازم شد: آزمونِ عملیِ F-04 ثبت کرد که همان ابزار/روز با
+ * URLِ ساده دو هزار ردیف داد و با URLِ مهرخورده صفر. تا امروز هر تلاشِ
+ * پس از دورِ اول فقط URLِ مهرخورده را می‌زد. اولین تلاش برای عوض‌کردنِ
+ * پرچم بین دورها هم بی‌اثر بود — چون دورِ «ساده» به مسیرِ کشِ ۹۰۰ثانیه‌ای
+ * می‌افتاد و اصلاً به بالادست نمی‌رسید؛ در اجرای آزمایشی، بالادست برای هر
+ * مسیر فقط ۳ بار پرسیده شد در حالی که ۴ دور رفته بود.
+ *
+ * کلیدِ کش هم پیشوندِ حالت می‌گیرد، وگرنه دو شکلِ URL پاسخِ هم را
+ * می‌خورند و تفکیک دوباره از بین می‌رود.
+ */
+async function getFresh(pathname, ttlSec = 2, priority = 2, { bust = true } = {}) {
+  const key = `fresh:${bust ? 'b' : 'p'}:${pathname}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; tally.cacheHit(pathname); return hit.data; }
   const joined = inflight.get(key);
@@ -309,7 +326,7 @@ async function getFresh(pathname, ttlSec = 2, priority = 2) {
         stat.requests += 1;
         tally.request(pathname);
         const join = pathname.includes('?') ? '&' : '?';
-        const url = `${S.baseUrl}${pathname}${join}_=${Date.now()}`;
+        const url = bust ? `${S.baseUrl}${pathname}${join}_=${Date.now()}` : `${S.baseUrl}${pathname}`;
         const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket);
         cache.set(key, { at: Date.now(), data });
         evictOldest(cache, S.maxCacheEntries);
@@ -417,9 +434,12 @@ function insListOrReject(res, raw, max, label) {
 //
 // مرجع **هم‌زمان** با مسیر اول گرفته می‌شود، نه پس از آن، تا وقتی مسیر
 // اول کامل باشد هیچ رفت‌وبرگشتِ اضافه‌ای به تأخیر اضافه نکند.
-async function fetchHistoricalTape(code, date, { fresh = false, expect = null } = {}) {
+async function fetchHistoricalTape(code, date, { fresh = false, expect = null, bust = true } = {}) {
   const pull = async (pathname) => {
-    const data = fresh ? await getFresh(pathname, 2, 6) : await get(pathname, S.ttlDailySec, 6);
+    // `fresh` یعنی «کشِ ما را رد کن»؛ `bust` یعنی «مهرِ زمان به URLِ
+    // بالادست بچسبان». دومی بی اولی معنا ندارد، ولی اولی بی دومی دارد —
+    // و همان حالتی است که تا امروز راهی نداشت.
+    const data = fresh ? await getFresh(pathname, 2, 6, { bust }) : await get(pathname, S.ttlDailySec, 6);
     const detail = normalizeTradesDetailed(firstList(data));
     return { ...detail, shape: upstreamShape(data) };
   };
@@ -1357,6 +1377,9 @@ async function handle(req, res) {
       // رد شود. این راهِ فرار از سهمیه نیست: صفِ مشترک سرِ جایش است و
       // فراخوان فقط همان چند روزِ مشکوک را دوباره می‌پرسد.
       const fresh = body.fresh === true;
+      // دورِ زوجِ تلاشِ تکمیلی URLِ ساده را می‌زند، ولی باز هم از کشِ ما
+      // رد می‌شود. نبودنِ کلید یعنی رفتارِ قبلی: مهرخورده.
+      const bust = body.bust !== false;
       // ═══ چرا پاسخِ خالی یک بار دیگر پرسیده می‌شود ═══
       //
       // گزارش صاحب پروژه: فایل خروجی برای ۵۹ ابزار/روز نوشته بود «بدون
@@ -1379,7 +1402,7 @@ async function handle(req, res) {
       // چیزی داد که اصلاً فهرست معامله نیست. `firstList` هر دو را یک `[]`
       // می‌کند. حالا شکلِ خامِ پاسخ همراه خالی می‌آید و در برگ پوشش
       // می‌نشیند، تا اجرای بعدی تشخیص باشد نه حدسِ تازه.
-      const one = async ({ key, code, date, expect }) => [key, await fetchHistoricalTape(code, date, { fresh, expect })];
+      const one = async ({ key, code, date, expect }) => [key, await fetchHistoricalTape(code, date, { fresh, expect, bust })];
       return sendJson(res, 200, { count: requests.length, items: Object.fromEntries(await Promise.all(requests.map(one))) });
     }
 
@@ -1776,7 +1799,10 @@ async function handle(req, res) {
     if (p === '/api/trades') {
       const date = u.searchParams.get('date');
       if (!validCompactDate(date)) return sendJson(res, 400, { error: 'تاریخ باید هشت رقم میلادی باشد' });
-      const tape = await fetchHistoricalTape(ins, date, { fresh: u.searchParams.get('fresh') === '1' });
+      const tape = await fetchHistoricalTape(ins, date, {
+        fresh: u.searchParams.get('fresh') === '1',
+        bust: u.searchParams.get('bust') !== '0',
+      });
       return sendJson(res, 200, { ins, date: Number(date), ...tape });
     }
 

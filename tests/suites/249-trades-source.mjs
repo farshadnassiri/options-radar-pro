@@ -252,7 +252,9 @@ group('۲۵۲. پاسخِ خالیِ پایه که واقعیتِ بازار ن�
   const srv252 = readSrc('../server/server.mjs');
   check('سرور هم راهِ «بی کش» دارد',
     srv252.includes('const fresh = body.fresh === true;')
-    && srv252.includes('fresh ? await getFresh(pathname, 2, 6) : await get(pathname, S.ttlDailySec, 6)'));
+    // R5-04: «بی کش» حالا یک گزینهٔ `bust` هم می‌گیرد — کشِ ما در هر دو
+    // حالت دور زده می‌شود و فقط شکلِ URLِ بالادست فرق می‌کند.
+    && srv252.includes('fresh ? await getFresh(pathname, 2, 6, { bust }) : await get(pathname, S.ttlDailySec, 6)'));
   // ═══ و عمرِ کوتاهِ پاسخِ خالی ═══
   check('پاسخِ خالی برچسب می‌خورد و عمرِ کوتاه‌تر می‌گیرد',
     srv252.includes('empty: firstList(data).length === 0')
