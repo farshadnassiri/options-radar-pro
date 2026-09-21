@@ -481,7 +481,7 @@ function withUpstream(decided, first, alt) {
  *
  * `count` همیشه هست تا «آمد ولی خالی بود» از «نیامد» جدا بماند.
  */
-function shapeHistorical(kind, raw) {
+function shapeHistorical(kind, raw, date = 0, ins = '') {
   if (kind === 'book') {
     const rows = firstList(raw);
     return { events: normalizeBookEvents(rows), count: rows.length };
@@ -490,10 +490,76 @@ function shapeHistorical(kind, raw) {
   // `fetchHistoricalTape` می‌رود تا تلاشِ پرچمِ دوم و حذفِ تکرار را هم
   // بگیرد. شاخهٔ مردهٔ اینجا یعنی دو نرمال‌سازی که روزی از هم دور می‌افتند.
   if (kind === 'daily' || kind === 'instrument' || kind === 'clientType') {
-    return { row: firstDict(raw) };
+    return datedRow(kind, firstDict(raw), date, ins);
   }
   const rows = firstList(raw);
   return { rows, count: rows.length };
+}
+
+/**
+ * ردیفِ تک‌رکوردیِ تاریخ‌دار — فقط وقتی «ردیفِ آن روز» است که خودش بگوید.
+ *
+ * ═══ R3-01 ═══
+ *
+ * `GET /api/hist?kind=daily&…&date=20260624` با HTTP ۲۰۰ برگشت، ولی
+ * `row.dEven` داخلش **۲۰۲۶۰۹۲۱** بود — رکوردِ سه ماه بعد، در جایگاهِ
+ * روزانهٔ آن روز. مصرف‌کننده‌ای که به تاریخِ درخواست اعتماد کند، قیمتِ
+ * آینده را وارد تحلیل تاریخی می‌کند.
+ *
+ * ═══ R4-01: و چرا یک نامِ میدان برای همه غلط بود ═══
+ *
+ * نسخهٔ اولِ همین دروازه فقط `dEven` را می‌خواند و به هر سه نوعِ
+ * تک‌رکوردی اعمال می‌شد. نتیجه‌اش یک **پسرفت** بود: پاسخِ درستِ
+ * `clientType` برای اهرم/۲۰۲۶۰۹۱۹ — با `recDate:20260919` و حجمِ خریدی
+ * که دقیقاً ۷۳٬۳۰۵٬۲۲۴ یعنی همان حجمِ روزانه — به‌عنوان «بی‌تاریخ» رد
+ * شد و `row:null` گرفت. داده رسیده بود و ما دورش ریختیم.
+ *
+ * درسش: **نامِ میدانِ تاریخ قراردادِ هر endpoint است، نه یک ثابتِ
+ * سراسری.** پس جدول، نه حدس.
+ *
+ * و نوعِ سومی هم هست که اصلاً رکوردِ یک روز **نیست**:
+ * `GetInstrumentHistory` مشخصاتِ ابزار را می‌دهد با `lastDate:0` و
+ * `insCode:"0"`. دروازهٔ تاریخ رویش معنا ندارد و اعمالش همان اشتباهِ
+ * `clientType` را تکرار می‌کند. پس رد نمی‌شود، ولی `dated:false` علامت
+ * می‌خورد تا هیچ‌کس آن را «رکوردِ آن روز» نخواند.
+ */
+const DATED_ROW_FIELDS = {
+  daily: { date: 'dEven', id: 'insCode' },
+  clientType: { date: 'recDate', id: 'insCode' },
+  // `instrument` عمداً اینجا نیست — رکوردِ تاریخ‌دار نیست.
+};
+
+function datedRow(kind, row, date = 0, ins = '') {
+  if (!row || !Object.keys(row).length) return { row: null, found: false, why: 'پاسخ رکوردی نداشت' };
+  const shape = DATED_ROW_FIELDS[kind];
+  // نوعی که قرارداد تاریخ‌دار ندارد، سنجیده نمی‌شود — ولی ادعای
+  // «رکوردِ آن روز» هم برایش نمی‌شود.
+  if (!shape) return { row, found: true, dated: false, why: 'این نوع رکوردِ تاریخ‌دار نیست' };
+
+  const stampedIns = String(row[shape.id] ?? '').trim();
+  // شناسه فقط وقتی سنجیده می‌شود که واقعاً شناسه باشد: بعضی پاسخ‌ها
+  // «۰» می‌گذارند، و آن جای‌نگه‌دار است نه ابزارِ دیگر.
+  if (ins && stampedIns && stampedIns !== '0' && stampedIns !== String(ins)) {
+    return { row: null, found: false, why: `رکوردِ ابزارِ ${stampedIns} آمد، نه ${ins}`, mismatch: row };
+  }
+
+  const wanted = Math.trunc(Number(date) || 0);
+  const has = row[shape.date] !== undefined && row[shape.date] !== null;
+  // ═══ نبودِ میدان، مدرکِ نامرتبط‌بودن نیست ═══
+  //
+  // رد کردنِ رکوردی که میدانِ تاریخش را نمی‌شناسیم، همان R4-01 است.
+  // تحویلش می‌دهیم و صریح می‌گوییم تاریخش راست‌آزمایی نشد.
+  if (!has) return { row, found: true, dated: false, why: `تاریخِ رکورد خوانده نشد (${shape.date} نیامد)` };
+
+  const stampedDate = Math.trunc(Number(row[shape.date]) || 0);
+  if (wanted && stampedDate !== wanted) {
+    return {
+      row: null, found: false, dated: true,
+      why: `رکوردِ ${stampedDate} آمد، نه ${wanted} — رکوردِ همان روز در دست نیست`,
+      mismatch: row,
+    };
+  }
+  return { row, found: true, dated: true };
 }
 
 // ————————————————————————————————— ساعات بازار —————————————————————————————————
@@ -1618,7 +1684,7 @@ async function handle(req, res) {
         if (!upstream) return [code, { ins: code, error: 'کد ابزار نامعتبر' }];
         try {
           const raw = await get(upstream, S.ttlDailySec, 6);
-          return [code, { ins: code, ...shapeHistorical(kind, raw) }];
+          return [code, { ins: code, ...shapeHistorical(kind, raw, date, code) }];
         } catch (e) {
           return [code, { ins: code, error: `${e.name}: ${e.message}` }];
         }

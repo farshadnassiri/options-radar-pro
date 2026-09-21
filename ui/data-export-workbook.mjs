@@ -4,7 +4,7 @@ import {
   BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, EMPTY_STATUS, blankAuditSummary, dataExportCandles,
   dataExportCoverageRows, dataExportFrame, dataExportListingBasis, dataExportOutcome,
   dataExportRouteSplit, dataExportSessionRows, dataExportTradeRows,
-  DEFAULT_SESSION_WINDOW, clockLabel,
+  DEFAULT_SESSION_WINDOW, clockLabel, BUCKET_STATE,
 } from '../core/data-export.mjs';
 import { tradeTimeLabel } from '../core/backtest.mjs';
 import { historyDateLabel } from '../core/history.mjs';
@@ -90,7 +90,7 @@ export const DATA_EXPORT_CANDLE_DERIVED_HEADERS = [
 export function buildDataExportSheets({
   instruments = [], pairs = [], items = {}, range = {}, complete = false, note = '',
   outcome = null, audit = [], frame = 'tick', derived = false, dailyMissing = [],
-  window = DEFAULT_SESSION_WINDOW, continuous = false,
+  window = DEFAULT_SESSION_WINDOW, continuous = false, coverageWarnings = [],
 } = {}) {
   const tf = dataExportFrame(frame);
   const coverage = dataExportCoverageRows(instruments, pairs, items, audit, window);
@@ -162,6 +162,19 @@ export function buildDataExportSheets({
     // خالی‌هایش «تابلوی روزانه در دست نیست» می‌گرفتند — که همان حکمِ
     // «نمی‌دانیم» است ولی علتش دریافتِ ما بود، نه بالادست. این دو باید
     // در فایل از هم جدا بمانند.
+    // ═══ چرا «تلاش دریافت» یک سطرِ خلاصه هم دارد ═══
+    //
+    // اعلامِ درستِ کسری جای دریافتِ داده را نمی‌گیرد. کسی که فایل را
+    // بعداً باز می‌کند باید بداند برای پرکردنِ این شکاف چقدر تلاش شده —
+    // وگرنه «نیامد» و «نپرسیدیم» یک شکل دارند.
+    ['تلاش دریافت', (() => {
+      const tried = coverage.filter((row) => row.attempts > 1);
+      const most = Math.max(0, ...coverage.map((row) => row.attempts));
+      return tried.length
+        ? `${tried.length} ابزار/روز بیش از یک بار پرسیده شدند (بیشینه ${most} بار).`
+          + ' ستون «تلاش دریافت» برگ پوشش شمارِ هر کدام را دارد.'
+        : 'هر ابزار/روز یک بار پرسیده شد. برای کم‌داشته‌ها دکمهٔ «تلاش تکمیلی» در همان تب هست.';
+    })()],
     ['راست‌آزمایی انجام‌نشده', (dailyMissing || []).length
       ? `${(dailyMissing || []).length} ابزار تابلوی روزانه‌شان پاسخ نگرفت، پس خالی‌هایشان راست‌آزمایی نشد`
       : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت'],
@@ -186,9 +199,11 @@ export function buildDataExportSheets({
       + ' نسبت به جلسهٔ رسمیِ ۰۹:۰۰ تا ۱۲:۳۰ می‌دهد.'
       + `${window.custom ? ' این پنجره را خودِ شما انتخاب کرده‌اید، پیش‌فرض ۰۹:۰۰:۰۰ تا ۱۲:۳۰:۰۰ است.' : ''}`],
     ['جدول زمانی', continuous
-      ? 'پیوسته — هر سطلِ پنجره ردیف دارد، حتی سطلی که معامله‌ای نداشته.'
-        + ' سطلِ بی‌معامله خانه‌های قیمتش **خالی** است و ستون «معامله شد» آن را «خیر» می‌خواند؛'
-        + ' هیچ قیمتی درون‌یابی یا از سطل قبل تکرار نشده.'
+      ? 'پیوسته — هر روزِ درخواست‌شده تمام سطل‌های پنجره را دارد، حتی روزی که داده‌اش اصلاً نرسیده.'
+        + ' خانه‌های قیمتِ سطلِ بی‌معامله **خالی** است و هیچ قیمتی درون‌یابی یا از سطل قبل تکرار نشده.'
+        + ' ستون «معامله شد» چهار حالت دارد: «بله» معامله شد · «خیر» تابلو هم صفر است، پس واقعاً نشد ·'
+        + ' «دریافت نشد» تابلو معامله ثبت کرده ولی ریزمعامله نیامد · «نامعلوم» دریافتِ آن روز ناقص یا بی‌مرجع بود،'
+        + ' پس دربارهٔ این دقیقه نمی‌توان حکم داد.'
       : 'فشرده — فقط سطلی که معامله داشته ردیف دارد. برای جدولِ تمام‌دقیقه‌ها گزینهٔ «جدول زمانی پیوسته» را روشن کنید.'],
     ['تایم‌فریم', tf.seconds
       ? `${tf.label} — هر ردیف یک سطل زمانی است که مبدأش ۹:۰۰ است. سطلِ بی‌معامله ردیف ندارد و هیچ قیمتی درون‌یابی نشده. معاملهٔ حراج پایانی (۱۲:۳۰:۰۰) در سطلِ آخرِ همان روز می‌نشیند، نه در سطلی تازه.`
@@ -209,6 +224,15 @@ export function buildDataExportSheets({
         + `${basis.recovered ? ` — ${basis.recovered} ابزار/روز که پیش از این هم‌ترازی اصلاً درخواست نمی‌رفت` : ''}`
       : '—'],
     ['پوشش دفتر قراردادها', complete ? 'کامل' : 'ناقص — همه قراردادها تضمین نمی‌شود'],
+    // ═══ R4-05: قفلی که برداشته شد، باید اینجا نوشته شود ═══
+    //
+    // ساختِ ناتمامِ دفتر دیگر دکمه را نمی‌بندد — چون قفلی که کاربر
+    // نمی‌تواند بازش کند محافظت نیست. ولی اگر همین‌جا نوشته نشود،
+    // «قفل برداشته شد» به «انگار مشکلی نبود» ترجمه می‌شود، و فایلی
+    // که ناقص است کامل به نظر می‌رسد.
+    ['کم‌داشتهٔ دفتر هنگام خروجی', (coverageWarnings || []).length
+      ? (coverageWarnings || []).join(' · ')
+      : 'دفتر هنگام ساختِ این فایل کم‌داشته‌ای نداشت'],
     ['یادداشت منبع', note || '—'],
     ['تعریف ردیف', tf.seconds
       ? 'هر ردیف یک شمع است: باز/بسته اولین و آخرین قیمتِ مشاهده‌شدهٔ همان سطل، و حجم و ارزش جمعِ معامله‌های باطل‌نشدهٔ آن.'
@@ -235,7 +259,8 @@ export function buildDataExportSheets({
     // برای همین فایل انتخاب کرده. یکی‌کردنشان همان F-02 بود.
     'فعال', 'باطل', 'خارج از جلسهٔ بازار', 'خارج از پنجرهٔ انتخابی',
     'وضعیت', 'حکم خالی‌بودن',
-    'معاملهٔ تابلوی روزانه', 'کسریِ نسبت به تابلو', 'پرچم درخواست', 'پاسخ بالادست', 'منبع', 'خطا',
+    'معاملهٔ تابلوی روزانه', 'کسریِ نسبت به تابلو', 'تلاش دریافت',
+    'پرچم درخواست', 'پاسخ بالادست', 'منبع', 'خطا',
   ], coverage.map((row) => {
     const seen = auditByKey.get(`${row.date}:${row.ins}`) || null;
     const hit = items?.[`${row.date}:${row.ins}`] || {};
@@ -254,13 +279,17 @@ export function buildDataExportSheets({
       hit.complete === false && hit.shortfall
         ? `${n(hit.shortfall.trades)} معامله / ${n(hit.shortfall.volume)} حجم`
         : (hit.complete === true ? 'تطبیق کامل' : ''),
+      // «۱ بار» یعنی همان دورِ اول و بس؛ عددِ بزرگ‌تر یعنی تلاشِ تکمیلی
+      // رویش رفته و باز نیامده. این تفاوت، تفاوتِ «نپرسیدیم» و «پرسیدیم
+      // و نداد» است.
+      row.attempts > 0 ? `${row.attempts} بار` : '',
       hit.variant ? `پرچم ${hit.variant}` : '',
       // خالیِ بی‌شرح همان چیزی است که چهار نوبت تشخیص را کور کرد.
       hit.upstream ? (hit.upstreamAlt && hit.upstreamAlt !== hit.upstream
         ? `${hit.upstream} / ${hit.upstreamAlt}` : hit.upstream) : '',
       row.source, row.error,
     ];
-  }), [100, 120, 95, 140, 100, 95, 95, 75, 65, 65, 110, 120, 100, 250, 110, 140, 100, 200, 80, 260]);
+  }), [100, 120, 95, 140, 100, 95, 95, 75, 65, 65, 110, 120, 100, 250, 110, 140, 85, 100, 200, 80, 260]);
 
   const instrumentSheets = instruments.flatMap((instrument) => {
     // ردیفِ بیرون از پنجره حذف می‌شود ولی شمارش‌شده — نه بی‌صدا.
@@ -268,14 +297,24 @@ export function buildDataExportSheets({
     const title = instrument.kind === 'underlying' ? `پایه ${instrument.name}` : instrument.name;
     const size = instrument.kind === 'underlying' ? 1 : Number(instrument.size) || 0;
     if (tf.seconds) {
-      const bars = dataExportCandles(rows, tf.seconds, { window, continuous });
+      // روزهای **درخواست‌شدهٔ همین ابزار** و حکمِ پوششِ هرکدام، تا جدولِ
+      // پیوسته روزِ دریافت‌نشده را هم بیاورد و «نیامد» را از «نشد» جدا کند.
+      const mine = (pairs || []).filter((pair) => String(pair.ins) === String(instrument.ins));
+      const dates = mine.map((pair) => pair.date);
+      const verdictByDate = {};
+      for (const pair of mine) {
+        const seen = auditByKey.get(pair.key);
+        if (seen) verdictByDate[pair.date] = seen.verdict;
+      }
+      const bars = dataExportCandles(rows, tf.seconds, { window, continuous, dates, verdictByDate });
       return splitSheets(title,
         derived ? [...DATA_EXPORT_CANDLE_HEADERS, ...DATA_EXPORT_CANDLE_DERIVED_HEADERS] : DATA_EXPORT_CANDLE_HEADERS,
         bars.map((bar) => [
           bar.date, jalaliText(bar.date), tradeTimeLabel(bar.time),
           bar.open, bar.high, bar.low, bar.close,
           bar.volume, bar.value, bar.trades, bar.canceled, bar.source,
-          bar.traded === false ? 'خیر' : 'بله',
+          // چهار حالت، نه دو تا: «نیامد» هرگز «نشد» خوانده نمی‌شود.
+          BUCKET_STATE[bar.state] || (bar.traded === false ? BUCKET_STATE.unknown : BUCKET_STATE.traded),
           ...(derived ? [size > 0 ? size : NaN, size > 0 ? bar.value * size : NaN] : []),
         ]),
         [95, 95, 85, 95, 95, 95, 95, 90, 130, 95, 85, 85, 80, ...(derived ? [95, 150] : [])]);

@@ -87,9 +87,22 @@ group('۲۸۱. معیارِ تطبیق، و معاملهٔ باطل');
     dailyExpectation({ closingPriceDaily: { zTotTran: 7736, qTotTran5J: 73305224, qTotCap: 5 } }).trades === 7736);
   check('و از ردیفِ نرمال‌شدهٔ روزانه هم',
     expectationFromDailyRow({ trades: 7736, vol: 73305224 }).volume === 73305224);
-  check('روزِ بی‌عدد مرجع نیست',
-    dailyExpectation({ x: { zTotTran: 0, qTotTran5J: 0 } }).known === false
-      && expectationFromDailyRow({ trades: 0, vol: 0 }).known === false);
+  // ═══ این ادعا پس از R3-03 وارونه شد ═══
+  //
+  // صفرِ **تأییدشده** هم یک مرجع است: تابلو گفت آن روز معامله‌ای نشد.
+  // خواندنش به‌عنوان «مرجع نداریم» همان چیزی بود که API را با خروجی
+  // ناسازگار می‌کرد — یکی `verified:false` می‌گفت و دیگری «بی‌معاملهٔ
+  // تأییدشده».
+  check('صفرِ تأییدشده هم مرجع است، با پرچمِ خودش',
+    dailyExpectation({ x: { zTotTran: 0, qTotTran5J: 0 } }).quiet === true
+      && expectationFromDailyRow({ trades: 0, vol: 0 }).quiet === true);
+  check('و «مرجع داریم» علامت می‌خورد',
+    dailyExpectation({ x: { zTotTran: 0, qTotTran5J: 0 } }).known === true);
+  // ولی **نبودنِ میدان** با **صفر بودنش** یکی نیست.
+  check('نبودِ میدانِ شمار/حجم مرجع نمی‌سازد',
+    dailyExpectation({ x: { pClosing: 230 } }).known === false);
+  check('و دلیلش گفته می‌شود',
+    String(dailyExpectation({ x: { pClosing: 230 } }).why || '').includes('شمار یا حجم'));
 }
 
 group('۲۸۱. F-04 — تلاشِ دوباره دادهٔ موجود را پاک نمی‌کند');

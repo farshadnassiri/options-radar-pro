@@ -536,6 +536,9 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {},
         ? rows.filter((row) => !inSessionWindow(row?.time, window)).length : null,
       status: !hit ? 'درخواست نرفت' : hit.error ? 'خطا'
         : coverageStatusOf(verdicts.get(pair.key), rows.length > 0),
+      // شمارِ تلاش روی خودِ رکورد می‌نشیند، پس فایل می‌گوید هر ابزار/روز
+      // چند بار پرسیده شده. بی این، «تلاش کردیم» یک ادعای شفاهی است.
+      attempts: Math.max(0, Math.trunc(n(hit?.attempts))),
       error: String(hit?.error || ''), source: String(hit?.source || ''),
     };
   });
@@ -764,8 +767,19 @@ const hhmmss = (second) => {
   return (Math.floor(value / 3600) * 10000) + (Math.floor((value % 3600) / 60) * 100) + (value % 60);
 };
 
+/** وضعیتِ یک سطل در جدولِ پیوسته. «نشد» با «نیامد» یکی نیست. */
+export const BUCKET_STATE = {
+  traded: 'بله',
+  quiet: 'خیر',
+  missing: 'دریافت نشد',
+  unknown: 'نامعلوم',
+};
+
 export function dataExportCandles(rows = [], seconds = 60, {
   window = DEFAULT_SESSION_WINDOW, continuous = false,
+  // روزهای **درخواست‌شده**، و حکمِ پوششِ هرکدام. بی این دو، جدولِ پیوسته
+  // فقط روزهایی را می‌شناسد که داده‌شان رسیده — که همان R3-02 است.
+  dates: requested = [], verdictByDate = {},
 } = {}) {
   const width = Math.max(1, Math.trunc(n(seconds)));
   const byBucket = new Map();
@@ -808,7 +822,10 @@ export function dataExportCandles(rows = [], seconds = 60, {
     bar.value += price * quantity;
     bar.trades += 1;
   }
-  if (!continuous) return order.sort((a, b) => a.date - b.date || a.second - b.second);
+  if (!continuous) {
+    return order.map((bar) => ({ ...bar, state: 'traded' }))
+      .sort((a, b) => a.date - b.date || a.second - b.second);
+  }
 
   // ═══ جدول زمانیِ پیوسته ═══
   //
@@ -827,18 +844,50 @@ export function dataExportCandles(rows = [], seconds = 60, {
   // و «در این دقیقه معامله نشده» فقط وقتی قابلِ تأیید است که دریافتِ آن
   // روز معتبر و کامل باشد؛ پرچمِ `traded` همین تفکیک را حمل می‌کند و
   // حکمِ کامل‌بودنِ روز در برگ پوشش می‌نشیند.
-  const dates = [...new Set(order.map((bar) => bar.date))].sort((a, b) => a - b);
+  // ═══ R3-02: روزِ دریافت‌نشده از جدول نمی‌افتد ═══
+  //
+  // بازآزماییِ دور سوم: اهرم در `20260919` صفر ردیف گرفت در حالی که
+  // تابلو ۷٬۷۳۶ معامله ثبت کرده بود؛ خروجیِ «پیوسته» با پنجرهٔ سه‌ساعته
+  // برای آن روز **هیچ ردیفی** نساخت. یعنی روزی که داده‌اش نرسیده، از
+  // جدول ناپدید می‌شد — و ناپدیدشدن بدترین شکلِ گزارش است.
+  //
+  // علتش این بود که فهرستِ روزها از خودِ شمع‌ها درمی‌آمد. حالا روزهای
+  // **درخواست‌شده** هم وارد می‌شوند، حتی اگر هیچ ردیفی نیاورده باشند.
+  const dates = [...new Set([
+    ...order.map((bar) => bar.date),
+    ...(requested || []).map((date) => Math.trunc(n(date))).filter(Boolean),
+  ])].sort((a, b) => a - b);
+  // «در این دقیقه معامله نشده» فقط وقتی قابلِ تأیید است که دریافتِ آن روز
+  // معتبر و **کامل** باشد. روزِ ناقص یا بی‌مرجع، سطلِ خالی‌اش «نامعلوم»
+  // است نه «نشد» — وگرنه همان ادعای غلط، این بار یک لایه پایین‌تر.
+  const stateOf = (date) => {
+    const verdict = String(verdictByDate?.[date] || '');
+    if (verdict === 'missing') return 'missing';
+    if (verdict === 'matched' || verdict === 'quiet') return 'quiet';
+    return 'unknown';
+  };
   const filled = [];
   for (const date of dates) {
     const have = new Map(order.filter((bar) => bar.date === date).map((bar) => [bar.second, bar]));
     const source = [...have.values()][0]?.source || '';
+    const blankState = stateOf(date);
     for (let start = window.start; start < window.end; start += width) {
       const bar = have.get(start);
-      if (bar) { filled.push(bar); continue; }
+      if (bar) { filled.push({ ...bar, state: 'traded' }); continue; }
+      // ═══ چرا حجمِ صفر هم همه‌جا درست نیست ═══
+      //
+      // برای سطلی که دریافتش **تأییدشده** است، صفر یک واقعیت است: آن
+      // دقیقه معامله‌ای نشد. ولی برای روزی که داده‌اش اصلاً نیامده،
+      // نوشتنِ «حجم صفر» همان ادعای غلطی است که این ممیزی‌ها پی‌درپی
+      // گرفته‌اند — تابلو برای اهرم/۲۰۲۶۰۹۱۹ ۷٬۷۳۶ معامله ثبت کرده بود.
+      // پس شمار و حجم هم مثل قیمت خالی می‌مانند، نه صفر.
+      const blank = blankState !== 'quiet';
       filled.push({
         date, second: start, time: hhmmss(start),
         open: NaN, high: NaN, low: NaN, close: NaN,
-        volume: 0, value: 0, trades: 0, canceled: 0, source, traded: false,
+        volume: blank ? NaN : 0, value: blank ? NaN : 0,
+        trades: blank ? NaN : 0, canceled: blank ? NaN : 0, source,
+        traded: false, state: blankState,
       });
     }
   }
@@ -942,32 +991,72 @@ export function suspectEmptyDays(pairs = [], items = {}, { minPairs = SUSPECT_DA
  * بی‌تاریخ، و دفترِ نسخه‌قدیمی که اصلاً از کاتالوگ عبور نکرده. هر کدام
  * تمام می‌شوند و قفل باز می‌شود؛ شکستِ مشخصاتِ ابزار نامرتبط مانع نیست.
  */
-export function exportBlockers(universe = null, instruments = null) {
-  if (!universe) return [];
-  const out = [];
+export function exportGate(universe = null, instruments = null) {
+  const blocking = [], warnings = [];
+  if (!universe) return { blocking, warnings };
+
+  // ═══ R4-05: چرا فهرست دو تکه شد ═══
+  //
+  // بازآزماییِ پذیرش: کاربر بازهٔ یک‌هفته‌ای و ۱۰۸ قرارداد را انتخاب کرد و
+  // دکمهٔ آماده‌سازی **هرگز فعال نشد** — «پیمایش کاتالوگ ابزار تمام نشده»،
+  // در حالی که ساختِ دفتر روی ۱٬۳۷۴ از ۳٬۵۱۳ جست‌وجو بود و شمارِ کل هم با
+  // کشفِ شاخه‌های تازه بالا می‌رفت. یعنی شرطِ باز شدنِ قفل خودش در حال
+  // دور شدن بود.
+  //
+  // نتیجه‌اش این شد که مسیرِ واقعیِ کلیک تا دانلود **یک بار هم اجرا نشد**.
+  // قفلی که کاربر نمی‌تواند بازش کند، محافظت نیست؛ همان «جمعِ نصفه» است
+  // با ظاهرِ احتیاط.
+  //
+  // مرزِ درست: **بی‌معنا** در برابر **ناقص**.
+  //   بی‌معنا → قفل. خروجی‌اش قابلِ اتکا نیست و کاربر کاری از دستش برنمی‌آید.
+  //   ناقص   → هشدار. داده‌ای که در دست است بیرون می‌رود و کم‌داشته‌اش
+  //            هم در صفحه و هم داخلِ فایل نوشته می‌شود.
+  //
+  // این همان تصمیمی است که یک بار برای `complete` گرفته شد (قفلِ دائمیِ
+  // «۶۶ جفت ناقص کال/پوت» که هرگز درست نمی‌شد) و حالا به دو پرچمِ دیگر
+  // هم تعمیم پیدا می‌کند.
   const missing = Math.max(0, Math.trunc(n(universe.missingDays)));
-  if (missing > 0) out.push(`${missing} روزِ کاریِ این بازه هنوز اسکن نشده`);
+  if (missing > 0) warnings.push(`${missing} روزِ کاریِ این بازه هنوز اسکن نشده`);
+
   const scan = universe.health?.scan || null;
   // دفترِ بی‌گزارشِ سلامت چیزی برای ادعا ندارد؛ نبودِ خبر، خبرِ بد نیست.
-  if (!scan) return out;
-  if (scan.versionCurrent === false) out.push('دفتر با نسخهٔ قدیمی ساخته شده و از کاتالوگ ابزار عبور نکرده');
-  else {
-    if (scan.catalogComplete === false) out.push('پیمایش کاتالوگ ابزار تمام نشده');
-    if (scan.detailsComplete === false) {
-      // مشخصاتِ کلِ بازار نباید خروجیِ چند قراردادِ معلوم را نگه دارد.
-      // برای قراردادِ معامله‌شده `activeFrom` از اولین روزِ واقعی می‌آید
-      // و عمرش در این بازه معلوم است. فقط قراردادِ انتخابیِ بی‌تاریخ است
-      // که بدون پاس مشخصات نمی‌تواند با صداقت وارد بازه شود.
-      const scoped = Array.isArray(instruments);
-      const unknown = scoped ? unknownListingContracts(instruments) : [];
-      if (!scoped || unknown.length > 0) {
-        out.push(scoped
-          ? `${unknown.length} قراردادِ انتخابی هنوز تاریخ عرضهٔ معلوم ندارد`
-          : 'مشخصات قراردادهای بی‌معامله کامل نشده');
-      }
+  if (!scan) return { blocking, warnings };
+
+  // تنها موردِ واقعاً **بی‌معنا**: دفتر با نسخهٔ قدیمی ساخته شده، پس
+  // تاریخ‌های عرضه‌اش شکلِ دیگری دارند و هیچ انتخابی قابلِ اتکا نیست.
+  // این یکی به پیمایش وابسته نیست (`version >= ROSTER_VERSION`) و با
+  // بازسازیِ دفتر خودش باز می‌شود — یعنی قفلی است که راهِ خروج دارد.
+  if (scan.versionCurrent === false) {
+    blocking.push('دفتر با نسخهٔ قدیمی ساخته شده و از کاتالوگ ابزار عبور نکرده');
+    return { blocking, warnings };
+  }
+
+  if (scan.catalogComplete === false) {
+    warnings.push('پیمایش کاتالوگ ابزار تمام نشده — ممکن است قراردادی کشف‌نشده مانده باشد');
+  }
+  if (scan.detailsComplete === false) {
+    // مشخصاتِ کلِ بازار نباید خروجیِ چند قراردادِ معلوم را نگه دارد.
+    // قراردادِ انتخابیِ بی‌تاریخ هم وارد بازه نمی‌شود و نامش در فایل
+    // می‌آید — پس نبودش «کم‌داشته» است، نه «خروجیِ غلط».
+    const scoped = Array.isArray(instruments);
+    const unknown = scoped ? unknownListingContracts(instruments) : [];
+    if (!scoped || unknown.length > 0) {
+      warnings.push(scoped
+        ? `${unknown.length} قراردادِ انتخابی تاریخ عرضهٔ معلوم ندارد و وارد بازه نمی‌شود`
+        : 'مشخصات قراردادهای بی‌معامله کامل نشده');
     }
   }
-  return out;
+  return { blocking, warnings };
+}
+
+/** فقط آنچه واقعاً خروجی را قفل می‌کند. */
+export function exportBlockers(universe = null, instruments = null) {
+  return exportGate(universe, instruments).blocking;
+}
+
+/** آنچه خروجی را قفل نمی‌کند ولی باید گفته شود — در صفحه و داخلِ فایل. */
+export function exportWarnings(universe = null, instruments = null) {
+  return exportGate(universe, instruments).warnings;
 }
 
 /**

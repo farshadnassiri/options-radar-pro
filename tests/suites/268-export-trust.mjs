@@ -12,7 +12,7 @@
 import { check, group, readSrc } from '../harness.mjs';
 import {
   EMPTY_STATUS, dataExportCoverageRows, dataExportPairs, emptyStatusOf,
-  exportBlockers, instrumentsWithPairs, unknownListingContracts,
+  exportBlockers, exportWarnings, instrumentsWithPairs, unknownListingContracts,
 } from '../../core/data-export.mjs';
 import { buildDataExportSheets } from '../../ui/data-export-workbook.mjs';
 
@@ -133,35 +133,49 @@ group('۲۶۸. قفل تا تکمیلِ واقعیِ دفتر');
   const universe = (missingDays, patch) => ({ missingDays, health: { scan: scan(patch) } });
 
   check('دفترِ تمام‌شده هیچ مانعی ندارد', exportBlockers(universe(0, {})).length === 0);
-  check('روزِ اسکن‌نشده مانع است',
-    exportBlockers(universe(131, {}))[0].includes('۱۳۱'.replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
-      || exportBlockers(universe(131, {}))[0].includes('131'));
 
-  // ═══ ایرادی که ممیزی گرفت ═══
+  // ═══ R4-05: سیاستِ قفل عوض شد — «بی‌معنا» در برابر «ناقص» ═══
   //
-  // روزها تمام شده‌اند ولی پاس کاتالوگ یا مشخصات هنوز می‌دود؛ تا امروز
-  // دکمه در همین حالت فعال می‌شد و فهرستِ قرارداد ناقص می‌ماند.
-  check('پاسِ ناتمامِ کاتالوگ با missingDays=0 هم مانع است',
-    exportBlockers(universe(0, { catalogComplete: false })).some((why) => why.includes('کاتالوگ')));
-  check('مشخصاتِ ناتمام هم مانع است',
-    exportBlockers(universe(0, { detailsComplete: false })).some((why) => why.includes('مشخصات')));
+  // بازآزماییِ پذیرش نشان داد دکمهٔ آماده‌سازی هرگز فعال نمی‌شود: ساختِ
+  // دفتر روی ۱٬۳۷۴ از ۳٬۵۱۳ جست‌وجو بود و شمارِ کل هم بالا می‌رفت، پس
+  // شرطِ بازشدنِ قفل خودش در حال دور شدن بود و مسیرِ کلیک تا دانلود یک
+  // بار هم اجرا نشد. قفلی که کاربر نمی‌تواند بازش کند محافظت نیست.
+  //
+  // پس سه ادعای زیر **عمداً وارونه شدند**: این‌ها خروجی را ناقص می‌کنند،
+  // نه بی‌معنا — و ناقص گفته می‌شود، نه قفل.
+  check('پاسِ ناتمامِ کاتالوگ دیگر قفل نمی‌کند',
+    exportBlockers(universe(0, { catalogComplete: false })).length === 0);
+  check('ولی بی‌صدا هم نیست — هشدار می‌شود',
+    exportWarnings(universe(0, { catalogComplete: false })).some((why) => why.includes('کاتالوگ')));
+  check('روزِ اسکن‌نشده هم هشدار است نه مانع',
+    exportBlockers(universe(131, {})).length === 0
+      && exportWarnings(universe(131, {})).join().includes('131'));
+
   const knownSelection = [
     { ins: 'B', kind: 'underlying' },
     { ins: 'c1', kind: 'call', activeFrom: 20260701 },
     { ins: 'p1', kind: 'put', activeFrom: 20260701 },
   ];
-  check('مشخصاتِ نامرتبطِ کلِ بازار، انتخابِ تاریخ‌دار را قفل نمی‌کند',
-    exportBlockers(universe(0, { detailsComplete: false }), knownSelection).length === 0);
-  check('و فقط قراردادِ انتخابیِ بی‌تاریخ مانع می‌شود',
-    exportBlockers(universe(0, { detailsComplete: false }), [...knownSelection, { ins: 'c2', kind: 'call', activeFrom: 0 }])
+  check('مشخصاتِ نامرتبطِ کلِ بازار برای انتخابِ تاریخ‌دار هشداری هم ندارد',
+    exportWarnings(universe(0, { detailsComplete: false }), knownSelection).length === 0);
+  check('و قراردادِ انتخابیِ بی‌تاریخ هشدار می‌گیرد، نه قفل',
+    exportBlockers(universe(0, { detailsComplete: false }),
+      [...knownSelection, { ins: 'c2', kind: 'call', activeFrom: 0 }]).length === 0
+    && exportWarnings(universe(0, { detailsComplete: false }),
+      [...knownSelection, { ins: 'c2', kind: 'call', activeFrom: 0 }])
       .some((why) => why.includes('1 قراردادِ انتخابی')));
-  check('ناتمام‌بودن کاتالوگ حتی برای انتخابِ معلوم همچنان مانع است',
-    exportBlockers(universe(0, { catalogComplete: false, detailsComplete: false }), knownSelection)
-      .some((why) => why.includes('کاتالوگ')));
+
+  // ═══ و آنچه هنوز **قفل** است ═══
+  //
+  // دفترِ نسخه‌قدیمی شکلِ دیگری دارد، پس هیچ انتخابی قابلِ اتکا نیست —
+  // این «بی‌معنا» است، نه «ناقص». و به پیمایش وابسته نیست، پس با
+  // بازسازیِ دفتر خودش باز می‌شود: قفلی که راهِ خروج دارد.
   check('دفترِ نسخه‌قدیمی مانع است و علتش را خودش می‌گوید',
     exportBlockers(universe(0, { versionCurrent: false })).join().includes('نسخهٔ قدیمی'));
   check('و نسخهٔ قدیمی دو مانعِ تکراری نمی‌سازد',
     exportBlockers(universe(0, { versionCurrent: false, catalogComplete: false, detailsComplete: false })).length === 1);
+  check('نسخهٔ قدیمی هشدارهای بعدی را هم نمی‌سازد — یک حرف، یک بار',
+    exportWarnings(universe(0, { versionCurrent: false, catalogComplete: false })).length === 0);
 
   // ═══ و چرا قفل روی خودِ `complete` گذاشته نشد ═══
   //

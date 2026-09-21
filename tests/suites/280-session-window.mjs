@@ -101,7 +101,20 @@ group('۲۸۰. جدول زمانیِ پیوسته');
   check('سطلِ بی‌معامله هیچ قیمتی نمی‌گیرد',
     Number.isNaN(blank.open) && Number.isNaN(blank.high)
       && Number.isNaN(blank.low) && Number.isNaN(blank.close));
-  check('و حجم و ارزشش صفر است', blank.volume === 0 && blank.value === 0 && blank.trades === 0);
+  // ═══ این ادعا پس از R3-02 دو شاخه شد ═══
+  //
+  // صفر فقط وقتی راست است که دریافتِ آن روز تأیید شده باشد. بی حکمِ
+  // پوشش، نوشتنِ «حجم صفر» همان ادعای غلطی است که ممیزی گرفت — برای
+  // روزی که تابلو ۷٬۷۳۶ معامله ثبت کرده بود.
+  check('بی حکمِ پوشش، حجم و شمار هم خالی می‌مانند، نه صفر',
+    Number.isNaN(blank.volume) && Number.isNaN(blank.value) && Number.isNaN(blank.trades));
+  check('و وضعیتش «نامعلوم» است', blank.state === 'unknown');
+  const quietDay = dataExportCandles(rows, 60, {
+    continuous: true, verdictByDate: { 20260920: 'quiet' },
+  }).find((bar) => bar.time === 100000);
+  check('ولی با تأییدِ تابلو، صفر یک واقعیت است و نوشته می‌شود',
+    quietDay.volume === 0 && quietDay.value === 0 && quietDay.trades === 0);
+  check('و وضعیتش «نشد» است، نه «نیامد»', quietDay.state === 'quiet');
   check('و خودش را «معامله نشد» معرفی می‌کند', blank.traded === false);
   check('سطلِ واقعی «معامله شد» است', full.find((bar) => bar.time === 103000).traded === true);
   // هیچ قیمتی از سطل قبل تکرار نشده باشد.
