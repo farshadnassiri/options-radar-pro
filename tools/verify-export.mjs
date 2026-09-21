@@ -163,15 +163,25 @@ const status = (r) => String(r[at('وضعیت')] ?? '');
 const count = (needle) => D.filter((r) => status(r).includes(needle)).length;
 const matched = count('کامل — با تابلو تطبیق شد');
 const missing = count('ریزمعامله نیامد');
+// ═══ R5-08: «نگذاشتند بیاید» با «نیامد» یکی شمرده نمی‌شود ═══
+//
+// بالادست سهمیه را با `HTTP 200` و آرایهٔ خالی می‌بندد — همان شکلی که
+// روزِ بی‌معامله دارد. این ردیف‌ها اصلاً پرسیده نشده‌اند، پس نه نقصِ
+// دریافت‌اند و نه واقعیتِ بازار؛ راهِ حلشان هم فرق دارد: صبر، نه تلاشِ
+// دوباره.
+const throttled = count('سهمیهٔ بالادست');
 const partial = count('ناقص');
 const quiet = count('بدون معامله');
 const unverified = count('تأییدنشده');
 const errored = count('خطا') + count('درخواست نرفت');
 const total = D.length;
 console.log(`  تطبیق‌شده ${matched} · نیامد ${missing} · ناقص ${partial} · بی‌معامله ${quiet}`
-  + ` · تأییدنشده ${unverified} · خطا ${errored}  (از ${total})`);
+  + ` · تأییدنشده ${unverified} · سهمیه ${throttled} · خطا ${errored}  (از ${total})`);
 say(missing === 0, 'هیچ ابزار/روزی «نیامد» نیست',
   missing ? `${missing} ابزار/روز تابلو معامله ثبت کرده ولی ریزمعامله نیامد` : '');
+say(throttled === 0, 'سهمیهٔ بالادست در این اجرا بسته نشد',
+  throttled ? `${throttled} ابزار/روز پشتِ سهمیه ماندند و پرسیده نشدند —`
+    + ' این فایل ناقص است ولی نقصش مالِ بالادست نیست؛ چند ساعت بعد همین بازه را دوباره بگیرید' : '');
 say(partial === 0, 'هیچ پاسخِ ناقصی نمانده', partial ? `${partial} ابزار/روز کمتر از تابلو` : '');
 say(errored === 0, 'هیچ خطای دریافتی نمانده', errored ? `${errored} ابزار/روز` : '');
 const coverage = total ? (matched + quiet) / total : 0;
@@ -281,6 +291,10 @@ if (tryAt < 0) {
   say(missing === 0 || gapRetried === missing,
     'هر ابزار/روزِ «نیامد» تلاشِ تکمیلی دیده است',
     missing ? `${gapRetried} از ${missing} تا` : 'شکافی نمانده');
+  if (throttled) {
+    say('warn', 'ردیفِ پشتِ سهمیه تلاشِ تکمیلی لازم ندارد',
+      `${throttled} ابزار/روز پرسیده نشده‌اند؛ تلاشِ دوباره فقط سهمیه را بیشتر می‌بندد`);
+  }
 }
 
 // ═════ ۶. برگ‌های ابزار ═════

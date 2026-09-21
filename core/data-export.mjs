@@ -312,11 +312,18 @@ export function selectedDataExportInstruments(instruments = [], selection = []) 
  * انتهای جمله.
  */
 export function dataExportOutcome(pairs = [], items = {}) {
-  let ok = 0, empty = 0, failed = 0, missing = 0, trades = 0;
+  let ok = 0, empty = 0, failed = 0, missing = 0, trades = 0, throttled = 0;
   const reasons = new Map();
   for (const pair of pairs || []) {
     const hit = items?.[pair.key];
     if (!hit) { missing += 1; continue; }
+    // ═══ R5-08: سهمیه خطا نیست ═══
+    //
+    // ابزار/روزی که پشتِ سهمیه ماند اصلاً **پرسیده نشده**؛ شمردنش در
+    // «خطادار» یعنی جملهٔ وضعیت بگوید برنامه شکست خورد، در حالی که
+    // برنامه درست کار کرد و بالادست در را بست. در هارنس همین باعث شد
+    // خطِ وضعیت «۵۰ ابزار/روز خطادار» بنویسد.
+    if (hit.throttled) { throttled += 1; continue; }
     if (hit.error) {
       failed += 1;
       const why = String(hit.error);
@@ -328,11 +335,14 @@ export function dataExportOutcome(pairs = [], items = {}) {
   }
   const total = (pairs || []).length;
   return {
-    total, ok, empty, failed, missing, trades,
+    total, ok, empty, failed, missing, trades, throttled,
     // «هیچ داده‌ای نیامد» با «هیچ معامله‌ای نشده» یکی نیست: اولی خرابی
     // است و دومی واقعیتِ بازار.
     blank: total > 0 && ok === 0,
     allFailed: total > 0 && failed + missing === total,
+    // «هیچ‌چیز نیامد چون سهمیه بسته شد» حکمِ خودش را دارد: نه خرابیِ ما،
+    // نه واقعیتِ بازار — و راهِ حلش صبر است، نه تلاشِ دوباره.
+    throttleStopped: throttled > 0,
     topReason: [...reasons.entries()].sort((a, b) => b[1] - a[1])[0] || null,
   };
 }
@@ -480,6 +490,19 @@ export function emptyStatusOf(verdict) {
 }
 
 /**
+ * وضعیتی که از حکمِ بازبینی نمی‌آید، از **نرسیدنِ درخواست** می‌آید.
+ *
+ * این سه با هفت‌تای بالا یک جنس نیستند: آن‌ها می‌گویند «پاسخ آمد و این
+ * بود»، این‌ها می‌گویند «پاسخی در کار نبود، به این دلیل». قاطی‌کردنشان
+ * همان چیزی بود که ۳۵۹ ابزار/روزِ پشتِ سهمیه را «ریزمعامله نیامد» نوشت.
+ */
+export const BLOCKED_STATUS = {
+  throttled: 'سهمیهٔ بالادست',
+  absent: 'درخواست نرفت',
+  error: 'خطا',
+};
+
+/**
  * وضعیتِ یک ابزار/روز در برگ پوشش.
  *
  * `hasRows` فقط شکلِ پاسخ را می‌گوید؛ حکم را بازبینی می‌دهد. وقتی بازبینی
@@ -534,8 +557,20 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {},
         ? rows.filter((row) => !inIntradaySession(row?.time)).length : null,
       outsideWindow: hit && Array.isArray(hit.rows)
         ? rows.filter((row) => !inSessionWindow(row?.time, window)).length : null,
-      status: !hit ? 'درخواست نرفت' : hit.error ? 'خطا'
-        : coverageStatusOf(verdicts.get(pair.key), rows.length > 0),
+      // ═══ R5-08: سهمیه، پیش از هر حکمِ دیگری ═══
+      //
+      // آزمونِ واقعی نشان داد بالادست سهمیه را با `HTTP 200` و آرایهٔ
+      // **خالی** می‌بندد — همان شکلی که یک روزِ بی‌معامله دارد. پس بی این
+      // شاخه، هر ابزار/روزی که پشتِ سهمیه ماند «ریزمعامله نیامد» نوشته
+      // می‌شد؛ یعنی فایل علتِ غلط اعلام می‌کرد و کاربر دنبالِ داده‌ای
+      // می‌گشت که اصلاً پرسیده نشده بود.
+      //
+      // این شاخه **مقدم** است، حتی بر خطا: وقتی سرور حکم داده سهمیه بسته
+      // شده، آن حکم دربارهٔ این ردیف صادق‌تر از هر برچسبِ دیگری است.
+      status: hit?.throttled ? 'سهمیهٔ بالادست'
+        : !hit ? 'درخواست نرفت' : hit.error ? 'خطا'
+          : coverageStatusOf(verdicts.get(pair.key), rows.length > 0),
+      throttled: hit?.throttled === true,
       // شمارِ تلاش روی خودِ رکورد می‌نشیند، پس فایل می‌گوید هر ابزار/روز
       // چند بار پرسیده شده. بی این، «تلاش کردیم» یک ادعای شفاهی است.
       attempts: Math.max(0, Math.trunc(n(hit?.attempts))),

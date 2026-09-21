@@ -172,6 +172,7 @@ export async function mount(root, { state, api }) {
         + `${sum.missing ? ` — ${fmt.int(sum.missing)} تا اصلاً نیامد` : ''}`
         + `${sum.partial ? `، ${fmt.int(sum.partial)} تا ناقص` : ''}`
         + `${sum.error ? `، ${fmt.int(sum.error)} تا خطادار` : ''}`
+        + `${sum.throttled ? `، ${fmt.int(sum.throttled)} تا پشتِ سهمیهٔ بالادست ماندند و اصلاً پرسیده نشدند` : ''}`
         + `. تلاش تکمیلی فقط همین‌ها را دوباره می‌پرسد و دادهٔ موجود را دست نمی‌زند؛`
         + ` هر ابزار/روز حداکثر ${fmt.int(REFILL_MAX_ATTEMPTS)} بار.`;
       return;
@@ -376,6 +377,9 @@ export async function mount(root, { state, api }) {
       });
       const payload = await response.json();
       if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
+      // حکمِ سهمیه از سرور می‌آید و همین‌جا حمل می‌شود؛ بسته‌های بعدی
+      // اصلاً فرستاده نمی‌شوند.
+      if (payload.throttled) throttled = { note: String(payload.throttleNote || ''), at: Date.now() };
       for (const pair of batch) {
         const hit = payload.items?.[pair.key];
         const fresh0 = hit && Array.isArray(hit.rows)
@@ -444,6 +448,11 @@ export async function mount(root, { state, api }) {
   // درست است: بی مرجع، `keepBetterTape` به «پرحجم‌تر می‌ماند» برمی‌گردد
   // و خالی هرگز جای پر را نمی‌گیرد.
   let dailyIndex = new Map();
+  // ═══ R5-08: سهمیهٔ بالادست، وقتی سرور تشخیصش داد ═══
+  //
+  // بی این، تب بستهٔ بعدی را می‌فرستاد و سهمیه را بیشتر می‌سوزاند — و
+  // چون هر بسته خالی برمی‌گشت، فایل همه را «نیامد» می‌نوشت.
+  let throttled = null;
   // مرجعی که **سرور** برای یک ابزار/روز پیدا کرده و همراهِ پاسخ فرستاده
   // (R5-05/R5-06). کلیدش `pair.key` است، نه `ins:date`، چون از همان
   // حلقه‌ای پر می‌شود که پاسخ‌ها را می‌نشاند.
@@ -528,6 +537,7 @@ export async function mount(root, { state, api }) {
       dailyMissing = merged.missing;
       dailyIndex = new Map();
       referenceIndex = new Map();
+      throttled = null;
       for (const [ins, value] of Object.entries(merged.payload)) {
         for (const row of Array.isArray(value?.rows) ? value.rows : []) {
           const date = Math.trunc(Number(row?.date) || 0);
@@ -545,6 +555,26 @@ export async function mount(root, { state, api }) {
   async function fetchHistorical(pairs, items, signal, fresh = false, bust = true) {
     const batches = dataExportPairBatches(pairs, DATA_EXPORT_BATCH_CAP);
     for (let index = 0; index < batches.length; index += 1) {
+      // R5-08: سهمیه که بسته شد، بستهٔ بعدی نمی‌رود. ادامه‌دادن نه داده
+      // می‌آورد و نه بی‌هزینه است — پنجرهٔ سهمیه را تمدید می‌کند.
+      //
+      // ولی «نفرستادن» باید **علت** داشته باشد. بی این حلقه، جفت‌های
+      // نرفته در فایل «درخواست نرفت» می‌گرفتند — که درست است ولی ناقص:
+      // نمی‌گفت چرا نرفت. در هارنس ۴۰۲ ردیف دقیقاً همین شکل را داشتند،
+      // کنار ۵۱ ردیفی که علتشان نوشته شده بود.
+      if (throttled) {
+        for (let rest = index; rest < batches.length; rest += 1) {
+          for (const pair of batches[rest]) {
+            if (items[pair.key]) continue;
+            items[pair.key] = {
+              rows: [], source: 'history', throttled: true,
+              error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد',
+            };
+          }
+        }
+        setStatus(`دریافت متوقف شد — ${throttled.note}`, true);
+        return;
+      }
       setStatus(`در حال دریافت روزهای بسته‌شده: بسته ${fmt.int(index + 1)} از ${fmt.int(batches.length)}…`);
       await fetchBatch(batches[index], items, signal, 0, fresh, bust);
     }
@@ -940,6 +970,18 @@ export async function mount(root, { state, api }) {
         // بالادست است که بین دورها عوض می‌شود — فرد مهرخورده، زوج ساده.
         const bust = round % 2 === 1;
         await fetchHistorical(jobs, prepared.items, controller.signal, true, bust);
+        // ═══ R5-08: سهمیه که بسته شد، دورِ بعد بی‌فایده و پرهزینه است ═══
+        //
+        // آزمونِ واقعی: سهمیه دست‌کم نیم‌ساعت دوام آورد. فاصلهٔ این حلقه
+        // چند دقیقه است، پس ادامه‌اش فقط پنجره را تمدید می‌کند.
+        if (throttled) {
+          prepared.audit = dataExportBlankAudit(prepared.pairs, prepared.items, lastDailyByIns, lastOpenDates);
+          prepared.outcome = dataExportOutcome(prepared.pairs, prepared.items);
+          paintResult(prepared.instruments, prepared.pairs, prepared.items);
+          paintRefillState();
+          setStatus(`تلاش تکمیلی متوقف شد — ${throttled.note}`, true);
+          return;
+        }
 
         // ممیزی دوباره حساب می‌شود، وگرنه صفِ دورِ بعد همان صفِ قبل است.
         prepared.audit = dataExportBlankAudit(prepared.pairs, prepared.items, lastDailyByIns, lastOpenDates);

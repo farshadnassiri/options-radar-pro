@@ -219,8 +219,13 @@ group('۲۸۱. مصرف در سرور');
   const server = readSrc('../server/server.mjs');
   check('دریافت‌کنندهٔ مشترک مرجعِ روزانه را می‌گیرد',
     server.includes("dailyExpectation(await get(historicalPath('daily', code, date)"));
+  // R5-07: مسیرِ اول حالا `false` است — ادعا همان است، با مسیرِ تازه.
   check('و آن را هم‌زمان با مسیر اول می‌گیرد، نه پس از آن',
-    server.includes('Promise.all([pull(historicalTradesPath(code, date)), reference()])'));
+    server.includes('Promise.all([pull(historicalTradesAltPath(code, date)), reference()])'));
+  // و ترتیب عوض شد: کم‌مصرف‌ترین مسیر اول، دومی فقط وقتی لازم شد.
+  check('مسیرِ `false` اول پرسیده می‌شود، نه `true`',
+    server.includes("const tried = [{ variant: 'false', ...first }]")
+      && server.includes("tried.push({ variant: 'true', ...alt })"));
   check('فقط تطبیقِ کامل جلوی مسیر دوم را می‌گیرد',
     server.includes('if (decided.complete) return withUpstream(decided, first, null);'));
   check('نبودِ مرجع اجرا را نمی‌اندازد',
