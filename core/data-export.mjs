@@ -764,8 +764,19 @@ const hhmmss = (second) => {
   return (Math.floor(value / 3600) * 10000) + (Math.floor((value % 3600) / 60) * 100) + (value % 60);
 };
 
+/** وضعیتِ یک سطل در جدولِ پیوسته. «نشد» با «نیامد» یکی نیست. */
+export const BUCKET_STATE = {
+  traded: 'بله',
+  quiet: 'خیر',
+  missing: 'دریافت نشد',
+  unknown: 'نامعلوم',
+};
+
 export function dataExportCandles(rows = [], seconds = 60, {
   window = DEFAULT_SESSION_WINDOW, continuous = false,
+  // روزهای **درخواست‌شده**، و حکمِ پوششِ هرکدام. بی این دو، جدولِ پیوسته
+  // فقط روزهایی را می‌شناسد که داده‌شان رسیده — که همان R3-02 است.
+  dates: requested = [], verdictByDate = {},
 } = {}) {
   const width = Math.max(1, Math.trunc(n(seconds)));
   const byBucket = new Map();
@@ -808,7 +819,10 @@ export function dataExportCandles(rows = [], seconds = 60, {
     bar.value += price * quantity;
     bar.trades += 1;
   }
-  if (!continuous) return order.sort((a, b) => a.date - b.date || a.second - b.second);
+  if (!continuous) {
+    return order.map((bar) => ({ ...bar, state: 'traded' }))
+      .sort((a, b) => a.date - b.date || a.second - b.second);
+  }
 
   // ═══ جدول زمانیِ پیوسته ═══
   //
@@ -827,18 +841,50 @@ export function dataExportCandles(rows = [], seconds = 60, {
   // و «در این دقیقه معامله نشده» فقط وقتی قابلِ تأیید است که دریافتِ آن
   // روز معتبر و کامل باشد؛ پرچمِ `traded` همین تفکیک را حمل می‌کند و
   // حکمِ کامل‌بودنِ روز در برگ پوشش می‌نشیند.
-  const dates = [...new Set(order.map((bar) => bar.date))].sort((a, b) => a - b);
+  // ═══ R3-02: روزِ دریافت‌نشده از جدول نمی‌افتد ═══
+  //
+  // بازآزماییِ دور سوم: اهرم در `20260919` صفر ردیف گرفت در حالی که
+  // تابلو ۷٬۷۳۶ معامله ثبت کرده بود؛ خروجیِ «پیوسته» با پنجرهٔ سه‌ساعته
+  // برای آن روز **هیچ ردیفی** نساخت. یعنی روزی که داده‌اش نرسیده، از
+  // جدول ناپدید می‌شد — و ناپدیدشدن بدترین شکلِ گزارش است.
+  //
+  // علتش این بود که فهرستِ روزها از خودِ شمع‌ها درمی‌آمد. حالا روزهای
+  // **درخواست‌شده** هم وارد می‌شوند، حتی اگر هیچ ردیفی نیاورده باشند.
+  const dates = [...new Set([
+    ...order.map((bar) => bar.date),
+    ...(requested || []).map((date) => Math.trunc(n(date))).filter(Boolean),
+  ])].sort((a, b) => a - b);
+  // «در این دقیقه معامله نشده» فقط وقتی قابلِ تأیید است که دریافتِ آن روز
+  // معتبر و **کامل** باشد. روزِ ناقص یا بی‌مرجع، سطلِ خالی‌اش «نامعلوم»
+  // است نه «نشد» — وگرنه همان ادعای غلط، این بار یک لایه پایین‌تر.
+  const stateOf = (date) => {
+    const verdict = String(verdictByDate?.[date] || '');
+    if (verdict === 'missing') return 'missing';
+    if (verdict === 'matched' || verdict === 'quiet') return 'quiet';
+    return 'unknown';
+  };
   const filled = [];
   for (const date of dates) {
     const have = new Map(order.filter((bar) => bar.date === date).map((bar) => [bar.second, bar]));
     const source = [...have.values()][0]?.source || '';
+    const blankState = stateOf(date);
     for (let start = window.start; start < window.end; start += width) {
       const bar = have.get(start);
-      if (bar) { filled.push(bar); continue; }
+      if (bar) { filled.push({ ...bar, state: 'traded' }); continue; }
+      // ═══ چرا حجمِ صفر هم همه‌جا درست نیست ═══
+      //
+      // برای سطلی که دریافتش **تأییدشده** است، صفر یک واقعیت است: آن
+      // دقیقه معامله‌ای نشد. ولی برای روزی که داده‌اش اصلاً نیامده،
+      // نوشتنِ «حجم صفر» همان ادعای غلطی است که این ممیزی‌ها پی‌درپی
+      // گرفته‌اند — تابلو برای اهرم/۲۰۲۶۰۹۱۹ ۷٬۷۳۶ معامله ثبت کرده بود.
+      // پس شمار و حجم هم مثل قیمت خالی می‌مانند، نه صفر.
+      const blank = blankState !== 'quiet';
       filled.push({
         date, second: start, time: hhmmss(start),
         open: NaN, high: NaN, low: NaN, close: NaN,
-        volume: 0, value: 0, trades: 0, canceled: 0, source, traded: false,
+        volume: blank ? NaN : 0, value: blank ? NaN : 0,
+        trades: blank ? NaN : 0, canceled: blank ? NaN : 0, source,
+        traded: false, state: blankState,
       });
     }
   }

@@ -78,10 +78,28 @@ export function dailyExpectation(raw, date = 0) {
       : `تابلوی روزانه تاریخ نداشت، پس مرجعِ ${wanted} نیست`);
   }
 
+  // ═══ صفرِ تأییدشده، در برابر صفرِ ساختهٔ ما ═══
+  //
+  // R3-03 بازآزماییِ دور سوم: طهرم۷۰۵۰ در `20260728` روزانهٔ **معتبر**
+  // دارد — شناسه و تاریخِ درست — و در آن `zTotTran:0` و `qTotTran5J:0`
+  // است، یعنی تابلو می‌گوید آن روز معامله‌ای نشده. ولی چون کد هر صفری را
+  // «مرجع نداریم» می‌خواند، `/api/trades` جواب `verified:false` می‌داد و
+  // هم‌زمان ممیزیِ خروجی همان را `quiet` یعنی «بدون معاملهٔ تأییدشده»
+  // می‌خواند. یک واقعیت، دو حکم در دو لایه.
+  //
+  // تفکیکِ لازم این است: **نبودنِ میدان** با **صفر بودنِ میدان** یکی
+  // نیست. اولی یعنی نمی‌دانیم، دومی یعنی تابلو گفت صفر. پس حضورِ میدان
+  // سنجیده می‌شود، نه فقط مقدارش — وگرنه `Number(undefined) || 0` این دو
+  // را برای همیشه یکی می‌کند.
+  const hasCount = dict.zTotTran !== undefined && dict.zTotTran !== null;
+  const hasVolume = dict.qTotTran5J !== undefined && dict.qTotTran5J !== null;
+  if (!hasCount || !hasVolume) return blank('تابلوی روزانه شمار یا حجم نداشت');
+
   const trades = n(dict.zTotTran), volume = n(dict.qTotTran5J), value = n(dict.qTotCap);
-  // روزی که تابلو برایش هیچ عددی ندارد، مرجع نیست.
-  if (!Number.isFinite(trades) || (!trades && !volume)) return blank();
-  return { known: true, trades, volume, value };
+  if (!Number.isFinite(trades) || !Number.isFinite(volume)) return blank();
+  // صفرِ تأییدشده هم یک مرجع است — مرجعی که می‌گوید «هیچ».
+  if (!trades && !volume) return { known: true, quiet: true, trades: 0, volume: 0, value: 0 };
+  return { known: true, quiet: false, trades, volume, value };
 }
 
 /**
@@ -92,10 +110,12 @@ export function dailyExpectation(raw, date = 0) {
  * معنی — و هر دو از یک تابعِ سنجش می‌گذرند تا حکم‌ها از هم دور نیفتند.
  */
 export function expectationFromDailyRow(row) {
-  if (!row || typeof row !== 'object') return { known: false, trades: 0, volume: 0, value: 0 };
+  if (!row || typeof row !== 'object') return { known: false, quiet: false, trades: 0, volume: 0, value: 0 };
   const trades = n(row.trades), volume = n(row.vol);
-  if (!trades && !volume) return { known: false, trades: 0, volume: 0, value: 0 };
-  return { known: true, trades, volume, value: n(row.value) };
+  // ردیفِ نرمال‌شده از `trustedDailyRows` گذشته، پس تاریخش معتبر است و
+  // عکسِ پیش‌جلسه نیست. صفرش هم صفرِ تأییدشده است، نه «نمی‌دانیم».
+  if (!trades && !volume) return { known: true, quiet: true, trades: 0, volume: 0, value: 0 };
+  return { known: true, quiet: false, trades, volume, value: n(row.value) };
 }
 
 /**
@@ -109,6 +129,9 @@ export function expectationFromDailyRow(row) {
  */
 export function tapeMatchesDaily(metrics, expect) {
   if (!expect?.known) return false;
+  // مرجعی که می‌گوید «هیچ»، فقط با نوارِ خالی می‌خواند. نوارِ پرِ روبه‌روی
+  // تابلوی صفر تطبیق نیست — تضاد است، و جای خودش را دارد.
+  if (expect.quiet) return metrics.trades === 0 && metrics.volume === 0;
   if (metrics.volume !== expect.volume) return false;
   return Math.abs(expect.trades - metrics.trades) <= metrics.canceled;
 }
@@ -134,12 +157,34 @@ export function chooseTape(candidates = [], expect = { known: false }) {
   const nonEmpty = list.filter((item) => item.metrics.total > 0);
 
   if (!nonEmpty.length) {
+    // ═══ خالیِ تأییدشده، در برابر خالیِ مشکوک ═══
+    //
+    // R3-03: وقتی تابلو خودش می‌گوید آن روز معامله‌ای نشده، نوارِ خالی
+    // **درست** است و باید «کامل» شمرده شود — نه «نیامد». تا پیش از این
+    // هر دو یک جواب می‌گرفتند و همین API را با خروجی ناسازگار می‌کرد.
+    if (expect.quiet) {
+      return {
+        rows: [], variant: 'both', emptyBoth: true, duplicates: 0, conflicts: [],
+        complete: true, verified: true, quiet: true, shortfall: null,
+      };
+    }
     return {
       rows: [], variant: 'both', emptyBoth: true, duplicates: 0, conflicts: [],
-      complete: false, verified: expect.known,
+      complete: false, verified: expect.known, quiet: false,
       // تابلو می‌گوید آن روز معامله شده ولی هیچ مسیری چیزی نداد: این
       // «بی‌معامله» نیست، «نیامد» است.
       shortfall: expect.known ? { trades: expect.trades, volume: expect.volume } : null,
+    };
+  }
+
+  // نوارِ پر روبه‌روی تابلوی صفر تطبیق نیست؛ تضاد است و اسمِ خودش را دارد.
+  if (expect.quiet) {
+    const best = [...nonEmpty].sort((a, b) => b.metrics.volume - a.metrics.volume)[0];
+    return {
+      rows: best.rows, variant: best.variant,
+      duplicates: best.duplicates, conflicts: best.conflicts,
+      complete: false, verified: true, quiet: false, surplus: true, metrics: best.metrics,
+      shortfall: null,
     };
   }
 
@@ -148,7 +193,7 @@ export function chooseTape(candidates = [], expect = { known: false }) {
     return {
       rows: matched.rows, variant: matched.variant,
       duplicates: matched.duplicates, conflicts: matched.conflicts,
-      complete: true, verified: true, metrics: matched.metrics,
+      complete: true, verified: true, quiet: false, metrics: matched.metrics,
     };
   }
 

@@ -481,7 +481,7 @@ function withUpstream(decided, first, alt) {
  *
  * `count` همیشه هست تا «آمد ولی خالی بود» از «نیامد» جدا بماند.
  */
-function shapeHistorical(kind, raw) {
+function shapeHistorical(kind, raw, date = 0, ins = '') {
   if (kind === 'book') {
     const rows = firstList(raw);
     return { events: normalizeBookEvents(rows), count: rows.length };
@@ -490,10 +490,51 @@ function shapeHistorical(kind, raw) {
   // `fetchHistoricalTape` می‌رود تا تلاشِ پرچمِ دوم و حذفِ تکرار را هم
   // بگیرد. شاخهٔ مردهٔ اینجا یعنی دو نرمال‌سازی که روزی از هم دور می‌افتند.
   if (kind === 'daily' || kind === 'instrument' || kind === 'clientType') {
-    return { row: firstDict(raw) };
+    return datedRow(firstDict(raw), date, ins);
   }
   const rows = firstList(raw);
   return { rows, count: rows.length };
+}
+
+/**
+ * ردیفِ تک‌رکوردیِ تاریخ‌دار — فقط وقتی «ردیفِ آن روز» است که خودش بگوید.
+ *
+ * ═══ R3-01 بازآزماییِ دور سوم ═══
+ *
+ * `GET /api/hist?kind=daily&ins=17914401175772326&date=20260624` با
+ * HTTP ۲۰۰ و `date:20260624` بیرونی برگشت، ولی `row.dEven` داخلش
+ * **۲۰۲۶۰۹۲۱** بود — رکوردِ سه ماه بعد، در جایگاهِ روزانهٔ آن روز، بی
+ * هیچ هشداری.
+ *
+ * این همان الگوی آشناست: بالادست برای روزِ بی‌جلسه آخرین عکس را
+ * می‌فرستد. مرجعِ **داخلیِ** ریزمعامله این را از همان نوبتِ قبل می‌گزد
+ * (`dailyExpectation`) و درست هم کار کرد — ولی قراردادِ **عمومیِ** همین
+ * endpoint هنوز آن را مثل رکوردِ معتبر تحویل می‌داد. مصرف‌کننده‌ای که به
+ * تاریخِ درخواست اعتماد کند، قیمتِ آینده را وارد تحلیل تاریخی می‌کند.
+ *
+ * پس: ردیفِ نامرتبط در جایگاهِ `row` نمی‌نشیند. خام حذف نمی‌شود — در
+ * `mismatch` می‌ماند تا تشخیص ممکن بماند، ولی کسی آن را «روزانهٔ آن روز»
+ * نمی‌خواند.
+ */
+function datedRow(row, date = 0, ins = '') {
+  const wanted = Math.trunc(Number(date) || 0);
+  const stampedDate = Math.trunc(Number(row?.dEven) || 0);
+  const stampedIns = String(row?.insCode ?? '').trim();
+  if (!row || !Object.keys(row).length) return { row: null, found: false, why: 'پاسخ رکوردی نداشت' };
+  // شناسه هم سنجیده می‌شود: رکوردِ ابزارِ دیگر هم رکوردِ ما نیست.
+  if (ins && stampedIns && stampedIns !== String(ins)) {
+    return { row: null, found: false, why: `رکوردِ ابزارِ ${stampedIns} آمد، نه ${ins}`, mismatch: row };
+  }
+  if (wanted && stampedDate !== wanted) {
+    return {
+      row: null, found: false,
+      why: stampedDate
+        ? `رکوردِ ${stampedDate} آمد، نه ${wanted} — رکوردِ همان روز در دست نیست`
+        : `رکورد تاریخ نداشت، پس رکوردِ ${wanted} شمرده نمی‌شود`,
+      mismatch: row,
+    };
+  }
+  return { row, found: true };
 }
 
 // ————————————————————————————————— ساعات بازار —————————————————————————————————
@@ -1618,7 +1659,7 @@ async function handle(req, res) {
         if (!upstream) return [code, { ins: code, error: 'کد ابزار نامعتبر' }];
         try {
           const raw = await get(upstream, S.ttlDailySec, 6);
-          return [code, { ins: code, ...shapeHistorical(kind, raw) }];
+          return [code, { ins: code, ...shapeHistorical(kind, raw, date, code) }];
         } catch (e) {
           return [code, { ins: code, error: `${e.name}: ${e.message}` }];
         }

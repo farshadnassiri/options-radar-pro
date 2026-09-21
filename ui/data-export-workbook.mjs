@@ -4,7 +4,7 @@ import {
   BLANK_VERDICT_LABEL, DATA_EXPORT_KIND_LABEL, EMPTY_STATUS, blankAuditSummary, dataExportCandles,
   dataExportCoverageRows, dataExportFrame, dataExportListingBasis, dataExportOutcome,
   dataExportRouteSplit, dataExportSessionRows, dataExportTradeRows,
-  DEFAULT_SESSION_WINDOW, clockLabel,
+  DEFAULT_SESSION_WINDOW, clockLabel, BUCKET_STATE,
 } from '../core/data-export.mjs';
 import { tradeTimeLabel } from '../core/backtest.mjs';
 import { historyDateLabel } from '../core/history.mjs';
@@ -186,9 +186,11 @@ export function buildDataExportSheets({
       + ' نسبت به جلسهٔ رسمیِ ۰۹:۰۰ تا ۱۲:۳۰ می‌دهد.'
       + `${window.custom ? ' این پنجره را خودِ شما انتخاب کرده‌اید، پیش‌فرض ۰۹:۰۰:۰۰ تا ۱۲:۳۰:۰۰ است.' : ''}`],
     ['جدول زمانی', continuous
-      ? 'پیوسته — هر سطلِ پنجره ردیف دارد، حتی سطلی که معامله‌ای نداشته.'
-        + ' سطلِ بی‌معامله خانه‌های قیمتش **خالی** است و ستون «معامله شد» آن را «خیر» می‌خواند؛'
-        + ' هیچ قیمتی درون‌یابی یا از سطل قبل تکرار نشده.'
+      ? 'پیوسته — هر روزِ درخواست‌شده تمام سطل‌های پنجره را دارد، حتی روزی که داده‌اش اصلاً نرسیده.'
+        + ' خانه‌های قیمتِ سطلِ بی‌معامله **خالی** است و هیچ قیمتی درون‌یابی یا از سطل قبل تکرار نشده.'
+        + ' ستون «معامله شد» چهار حالت دارد: «بله» معامله شد · «خیر» تابلو هم صفر است، پس واقعاً نشد ·'
+        + ' «دریافت نشد» تابلو معامله ثبت کرده ولی ریزمعامله نیامد · «نامعلوم» دریافتِ آن روز ناقص یا بی‌مرجع بود،'
+        + ' پس دربارهٔ این دقیقه نمی‌توان حکم داد.'
       : 'فشرده — فقط سطلی که معامله داشته ردیف دارد. برای جدولِ تمام‌دقیقه‌ها گزینهٔ «جدول زمانی پیوسته» را روشن کنید.'],
     ['تایم‌فریم', tf.seconds
       ? `${tf.label} — هر ردیف یک سطل زمانی است که مبدأش ۹:۰۰ است. سطلِ بی‌معامله ردیف ندارد و هیچ قیمتی درون‌یابی نشده. معاملهٔ حراج پایانی (۱۲:۳۰:۰۰) در سطلِ آخرِ همان روز می‌نشیند، نه در سطلی تازه.`
@@ -268,14 +270,24 @@ export function buildDataExportSheets({
     const title = instrument.kind === 'underlying' ? `پایه ${instrument.name}` : instrument.name;
     const size = instrument.kind === 'underlying' ? 1 : Number(instrument.size) || 0;
     if (tf.seconds) {
-      const bars = dataExportCandles(rows, tf.seconds, { window, continuous });
+      // روزهای **درخواست‌شدهٔ همین ابزار** و حکمِ پوششِ هرکدام، تا جدولِ
+      // پیوسته روزِ دریافت‌نشده را هم بیاورد و «نیامد» را از «نشد» جدا کند.
+      const mine = (pairs || []).filter((pair) => String(pair.ins) === String(instrument.ins));
+      const dates = mine.map((pair) => pair.date);
+      const verdictByDate = {};
+      for (const pair of mine) {
+        const seen = auditByKey.get(pair.key);
+        if (seen) verdictByDate[pair.date] = seen.verdict;
+      }
+      const bars = dataExportCandles(rows, tf.seconds, { window, continuous, dates, verdictByDate });
       return splitSheets(title,
         derived ? [...DATA_EXPORT_CANDLE_HEADERS, ...DATA_EXPORT_CANDLE_DERIVED_HEADERS] : DATA_EXPORT_CANDLE_HEADERS,
         bars.map((bar) => [
           bar.date, jalaliText(bar.date), tradeTimeLabel(bar.time),
           bar.open, bar.high, bar.low, bar.close,
           bar.volume, bar.value, bar.trades, bar.canceled, bar.source,
-          bar.traded === false ? 'خیر' : 'بله',
+          // چهار حالت، نه دو تا: «نیامد» هرگز «نشد» خوانده نمی‌شود.
+          BUCKET_STATE[bar.state] || (bar.traded === false ? BUCKET_STATE.unknown : BUCKET_STATE.traded),
           ...(derived ? [size > 0 ? size : NaN, size > 0 ? bar.value * size : NaN] : []),
         ]),
         [95, 95, 85, 95, 95, 95, 95, 90, 130, 95, 85, 85, 80, ...(derived ? [95, 150] : [])]);
