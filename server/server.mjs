@@ -42,6 +42,7 @@ import {
 } from '../core/live-market.mjs';
 import { decisionDashboardSnapshot, mergeUnderlyingTrades } from '../core/decision-dashboard.mjs';
 import { makeUpstreamTally } from '../core/upstream-tally.mjs';
+import { makeThrottleWatch, throttleNote } from '../core/throttle-watch.mjs';
 import { JOURNAL_CAP, appendEntry, makeEntry, normalizeJournal } from '../core/journal.mjs';
 import { writeJsonAtomic } from './atomic-json.mjs';
 import { watchHealth } from '../core/watch-health.mjs';
@@ -460,19 +461,36 @@ async function fetchHistoricalTape(code, date, { fresh = false, expect = null, b
     }
   };
   try {
-    const [first, expect] = await Promise.all([pull(historicalTradesPath(code, date)), reference()]);
-    const tried = [{ variant: 'true', ...first }];
-    // ═══ چرا «غیرخالی» دیگر بس نیست ═══
+    // ═══ R5-07: چرا `false` اول می‌رود، نه `true` ═══
     //
-    // F-01: مسیر `true` برای اهرم/۲۰۲۶۰۹۱۹ ۲٬۵۲۱ معامله داد و مسیر
-    // `false` همان روز ۷٬۷۳۶ — برابرِ تابلو. منطقِ قبلی («اگر اولی ردیف
-    // داشت، همان») ۵٬۲۱۵ معامله را دور می‌ریخت. حالا فقط **تطبیق با
-    // تابلو** جلوی درخواستِ دوم را می‌گیرد.
+    // ترتیب قبلی `true` بود و فقط وقتی `false` پرسیده می‌شد که اولی با
+    // تابلو نخوانَد. شمارندهٔ یک اجرای واقعی نشان داد این ترتیب وارونه
+    // است: ۳۸۶ درخواست به `true` رفت و ۳۱۸ تایش (**۸۲٪**) مجبور شد
+    // `false` را هم بپرسد.
+    //
+    // و آزمونِ مستقیمِ صاحب پروژه روی اهرم، هر پنج روزِ یک هفته:
+    //
+    //     روز        تابلو    false     true
+    //     20260914   30513    30513 ✓   5845
+    //     20260915   10761    21522 ✓*  2652     (* پس از حذف تکرارِ دقیق)
+    //     20260916   43152    43152 ✓   8723
+    //     20260919    7736     7736 ✓   2521
+    //     20260920    1795     1795 ✓   1335
+    //
+    // پنج از پنج: `false` با تابلو خواند و `true` بریده بود. پس ترتیبِ
+    // درست همین است، و با آن حدود **۴۰٪ درخواستِ کمتر** به بالادست
+    // می‌رود — که وقتی سهمیه خودش علتِ کم‌آمدنِ داده است، مهم‌تر از
+    // سرعت است.
+    //
+    // معیار عوض نشد: هیچ پاسخی بی تطبیق با تابلو «کامل» خوانده نمی‌شود،
+    // و اگر `false` نخوانَد `true` هم پرسیده می‌شود. فقط ترتیب عوض شد.
+    const [first, expect] = await Promise.all([pull(historicalTradesAltPath(code, date)), reference()]);
+    const tried = [{ variant: 'false', ...first }];
     const decided = chooseTape(tried, expect);
     if (decided.complete) return withUpstream(decided, first, null);
 
-    const alt = await pull(historicalTradesAltPath(code, date));
-    tried.push({ variant: 'false', ...alt });
+    const alt = await pull(historicalTradesPath(code, date));
+    tried.push({ variant: 'true', ...alt });
     return withUpstream(chooseTape(tried, expect), first, alt);
   } catch (e) {
     return { rows: [], error: `${e.name}: ${e.message}` };
@@ -1402,8 +1420,39 @@ async function handle(req, res) {
       // چیزی داد که اصلاً فهرست معامله نیست. `firstList` هر دو را یک `[]`
       // می‌کند. حالا شکلِ خامِ پاسخ همراه خالی می‌آید و در برگ پوشش
       // می‌نشیند، تا اجرای بعدی تشخیص باشد نه حدسِ تازه.
-      const one = async ({ key, code, date, expect }) => [key, await fetchHistoricalTape(code, date, { fresh, expect, bust })];
-      return sendJson(res, 200, { count: requests.length, items: Object.fromEntries(await Promise.all(requests.map(one))) });
+      // ═══ R5-08: سهمیه را تشخیص بده و بایست ═══
+      //
+      // تا امروز، وقتی بالادست سهمیه را می‌بست، این حلقه بقیهٔ بسته را
+      // هم می‌پرسید و هر کدام خالی برمی‌گشت — و خروجی همه‌شان را
+      // «ریزمعامله نیامد» می‌نوشت. دو خطا در یک حرکت: سهمیه بیشتر مصرف
+      // می‌شد، و فایل علتِ غلط اعلام می‌کرد.
+      //
+      // حالا ناظر بعد از هر پاسخ رأی می‌دهد، و به‌محضِ حکم، بقیهٔ بسته
+      // **پرسیده نمی‌شود**. آن‌ها نه خالی می‌گیرند نه خطا: علتشان صریح
+      // نوشته می‌شود تا با «نیامد» قاطی نشوند.
+      //
+      // ترتیبی اجرا می‌شود، نه با `Promise.all`: تشخیصِ وسطِ کار فقط وقتی
+      // می‌تواند جلوی بقیه را بگیرد که بقیه هنوز نرفته باشند.
+      const watch = makeThrottleWatch();
+      const items = {};
+      let stopped = 0;
+      for (const { key, code, date, expect } of requests) {
+        if (watch.throttled()) {
+          items[key] = { rows: [], source: 'history', throttled: true, error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد' };
+          stopped += 1;
+          continue;
+        }
+        const tape = await fetchHistoricalTape(code, date, { fresh, expect, bust });
+        watch.saw(tape);
+        items[key] = watch.throttled() ? { ...tape, throttled: true } : tape;
+      }
+      const state = watch.state();
+      return sendJson(res, 200, {
+        count: requests.length, items,
+        // مصرف‌کننده باید بتواند حلقهٔ خودش را هم متوقف کند، نه اینکه
+        // بستهٔ بعدی را بفرستد و سهمیه را باز هم بسوزاند.
+        ...(state.throttled ? { throttled: true, throttleNote: throttleNote(state), stopped } : {}),
+      });
     }
 
     // فهرست قراردادهای فعال برای تحلیل تاریخی، حتی بیرون از ساعت بازار.

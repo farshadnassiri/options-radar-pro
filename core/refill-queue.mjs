@@ -29,6 +29,9 @@ const n = (x) => num(x);
 
 /** چرا این ابزار/روز هنوز در صف است. */
 export const REFILL_REASON = {
+  // R5-08: پشتِ سهمیه ماندن خطا نیست — پرسیده نشدن است، و پیش از هر
+  // برچسبِ دیگری خوانده می‌شود چون علتِ واقعیِ همان ردیف است.
+  throttled: 'سهمیهٔ بالادست بسته شد و پرسیده نشد',
   missing: 'تابلو معامله ثبت کرده ولی ریزمعامله نیامد',
   partial: 'داده آمد ولی از تابلوی روزانه کمتر است',
   error: 'دریافتش خطا داد',
@@ -69,13 +72,21 @@ export const REFILL_MAX_ATTEMPTS = 6;
  * می‌دهد. فاصله به بالادست مهلت می‌دهد و به ما می‌گوید اگر پس از چند دقیقه
  * هم نیامد، دیگر «حالا نیامد» نیست.
  *
- * عمداً کوتاه شروع می‌شود (۵ ثانیه) چون بیشترِ ناپایداری‌های دیده‌شده
- * گذرا بودند، و تا دو دقیقه بالا می‌رود تا یک اجرای طولانی سهمیه را
- * نخورد.
+ * ═══ R5-08: عددها با اندازه‌گیری عوض شدند ═══
+ *
+ * فاصلهٔ قبلی از ۵ ثانیه شروع می‌شد و تا ۲ دقیقه می‌رفت — بر این فرض که
+ * ناپایداریِ بالادست «گذرا» است. آزمونِ واقعی فرض را رد کرد: وقتی سهمیه
+ * بسته می‌شود **دست‌کم نیم‌ساعت** دوام دارد. با فاصلهٔ چنددقیقه‌ای، هر
+ * چهار دور داخلِ همان پنجرهٔ بسته می‌افتند و هر چهارتا خالی برمی‌گردند —
+ * دقیقاً همان چیزی که در آزمونِ هفتگیِ صاحب پروژه شد.
+ *
+ * حالا از نیم‌دقیقه شروع می‌شود و تا یک ربع بالا می‌رود. و مهم‌تر از خودِ
+ * عدد: وقتی سرور حکمِ سهمیه بدهد، حلقه اصلاً دورِ بعد را نمی‌زند —
+ * فاصله برای ناپایداریِ گذراست، نه برای سهمیه.
  */
 export function refillDelayMs(round = 1) {
   const step = Math.max(1, Math.trunc(n(round)));
-  return Math.min(120000, 5000 * (2 ** (step - 1)));
+  return Math.min(900000, 30000 * (2 ** (step - 1)));
 }
 
 /**
@@ -101,6 +112,7 @@ export function refillQueue(pairs = [], items = {}, audit = [], {
 
     let reason = '';
     if (!hit) reason = 'absent';
+    else if (hit.throttled) reason = 'throttled';
     else if (hit.error) reason = 'error';
     else if (seen?.verdict === 'missing') reason = 'missing';
     else if (seen?.verdict === 'partial') reason = 'partial';
@@ -181,7 +193,7 @@ export function refillSummary(queue = []) {
   return {
     total: list.length,
     missing: of('missing'), partial: of('partial'),
-    error: of('error'), absent: of('absent'),
+    error: of('error'), absent: of('absent'), throttled: of('throttled'),
     gapTrades: list.reduce((sum, job) => sum + job.gapTrades, 0),
     worst: list[0] || null,
   };
