@@ -262,39 +262,141 @@ if (tryAt < 0) {
 }
 
 // ═════ ۶. برگ‌های ابزار ═════
+//
+// ═══ R4-02 و R4-03: چرا این بخش بازنویسی شد ═══
+//
+// نسخهٔ اول فقط دو چیز را می‌سنجید: «ردیف بیشتر از خام» و «برگ کاملاً
+// خالی». هر دو غلط بودند:
+//
+//   R4-02  برگی که از ۳۳ ردیف به **یک** ردیف بریده شده بود از هر دو شرط
+//          رد می‌شد و کلِ فایل حکمِ «کامل» می‌گرفت. ابزاری که برای گرفتنِ
+//          برش ساخته شده بود، برش را نمی‌دید.
+//   R4-03  جدولِ پیوستهٔ سالم با ۱۸۰ سطلِ یک‌دقیقه‌ای در برابر ۳۷ تیک،
+//          «بیشتر از خام» خوانده و رد می‌شد. مقایسهٔ سطل با تیک اصلاً
+//          معیار نیست.
+//
+// ریشهٔ هر دو یکی بود: **یک معیار برای سه شکلِ خروجی.** حالا هر شکل
+// معیارِ خودش را دارد، و معیارِ تیک **برابریِ دقیق** است نه نامساوی.
 console.log('\n── ۶. برگ‌های ابزار ──');
 const nameAt = at('نماد ابزار');
-const rawByName = new Map();
+const rowsAt2 = at('کل ردیف');
+const outWinAt = at('خارج از پنجرهٔ انتخابی');
+
+// انتظارِ هر ابزار: ردیف‌هایی که داخلِ پنجرهٔ انتخاب‌شده‌اند.
+const expectByName = new Map();
+const activeByName = new Map();
+const outByName = new Map();
+const daysByName = new Map();
 for (const r of D) {
   const key = String(r[nameAt] ?? '');
-  rawByName.set(key, (rawByName.get(key) || 0) + num(r[rowsAt]));
+  const inWindow = num(r[rowsAt2]) - num(r[outWinAt]);
+  expectByName.set(key, (expectByName.get(key) || 0) + Math.max(0, inWindow));
+  activeByName.set(key, (activeByName.get(key) || 0) + num(r[at('فعال')]));
+  outByName.set(key, (outByName.get(key) || 0) + num(r[outWinAt]));
+  if (num(r[rowsAt2]) > 0) daysByName.set(key, (daysByName.get(key) || 0) + 1);
 }
-let over = 0, emptyWithData = 0, checkedBars = 0, badState = 0;
+
+// شکلِ خروجی از برگ راهنما، نه از حدس.
+const frameLabel = String(guide.get('تایم‌فریم') ?? '');
+const gridLabel = String(guide.get('جدول زمانی') ?? '');
+const isTick = /ریزمعامله/.test(frameLabel);
+const isContinuous = /^پیوسته/.test(gridLabel);
+const faToEn = (t) => t.replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+const frameSeconds = isTick ? 0 : Number(faToEn(frameLabel).match(/شمع\s*(\d+)\s*دقیقه/)?.[1] || 0) * 60;
+const windowText = String(guide.get('پنجرهٔ ساعت') ?? '');
+const clock = [...windowText.matchAll(/(\d{2}):(\d{2}):(\d{2})/g)]
+  .map((m) => Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]));
+const winStart = clock[0] ?? 9 * 3600;
+const winEnd = clock[1] ?? (12 * 3600 + 30 * 60);
+const perDay = frameSeconds > 0 ? Math.ceil((winEnd - winStart) / frameSeconds) : 0;
+console.log(`  شکلِ خروجی: ${isTick ? 'تیک' : `شمع ${frameSeconds / 60} دقیقه`}`
+  + ` · ${isContinuous ? 'پیوسته' : 'فشرده'}`
+  + (perDay ? ` · ${perDay} سطل در هر روز` : ''));
+
+// برگ‌های چندبخشیِ یک ابزار («اهرم» و «اهرم (۲)») روی هم جمع می‌شوند،
+// وگرنه تقسیمِ فایلِ بزرگ خودش شبیهِ افتادگی دیده می‌شود.
+const baseName = (name) => name.replace(/^پایه /, '').replace(/\s*\([۰-۹0-9]+\)\s*$/, '');
+const bodyByName = new Map();
+const headByName = new Map();
 for (const [name, index] of byName) {
   if (name === 'راهنما' || name === 'پوشش دریافت') continue;
   const rows = readSheet(files, index, strings);
-  const body = rows.slice(1);
-  const key = rawByName.has(name) ? name : name.replace(/^پایه /, '');
-  const raw = rawByName.get(key) ?? 0;
-  if (body.length > raw && raw > 0) over += 1;
-  if (body.length === 0 && raw > 0) emptyWithData += 1;
-  const head = (rows[0] || []).map((x) => String(x ?? ''));
-  const stateAt = head.indexOf('معامله شد');
-  if (stateAt >= 0) {
-    checkedBars += 1;
-    // سطلِ «دریافت نشد» یا «نامعلوم» نباید هیچ عددِ مالی داشته باشد.
-    const volAt = head.indexOf('حجم'), tradeAt = head.indexOf('تعداد معامله');
-    for (const r of body) {
-      const st = String(r[stateAt] ?? '');
-      if ((st === 'دریافت نشد' || st === 'نامعلوم')
-        && (Number.isFinite(r[volAt]) || Number.isFinite(r[tradeAt]))) { badState += 1; break; }
+  const key = baseName(name);
+  bodyByName.set(key, (bodyByName.get(key) || []).concat(rows.slice(1)));
+  if (!headByName.has(key)) headByName.set(key, (rows[0] || []).map((x) => String(x ?? '')));
+}
+
+let tickExact = 0, tickWrong = 0;
+const wrongDetail = [];
+let barsOut = 0, barsShort = 0, contWrong = 0, tradeMismatch = 0, badState = 0, stateMissing = 0;
+for (const [key, body] of bodyByName) {
+  const expect = expectByName.get(key) ?? 0;
+  const active = activeByName.get(key) ?? 0;
+  const outside = outByName.get(key) ?? 0;
+  const days = daysByName.get(key) ?? 0;
+  const head = headByName.get(key) || [];
+
+  if (isTick) {
+    // ═══ معیارِ تیک: برابریِ دقیق ═══
+    if (body.length === expect) tickExact += 1;
+    else { tickWrong += 1; wrongDetail.push(`${key}: ${body.length} در برابر ${expect}`); }
+    continue;
+  }
+
+  const tradeCol = head.indexOf('تعداد معامله');
+  const sumTrades = tradeCol >= 0
+    ? body.reduce((sum, r) => sum + num(r[tradeCol]), 0) : NaN;
+  // شمارِ معاملهٔ داخلِ پنجره بینِ این دو کران است: «فعال» شاملِ بیرونِ
+  // پنجره هم هست، و «خارج از پنجره» باطل‌ها را هم می‌شمارد.
+  if (Number.isFinite(sumTrades) && !(sumTrades <= active && sumTrades >= active - outside)) {
+    tradeMismatch += 1;
+    wrongDetail.push(`${key}: جمعِ معاملهٔ شمع‌ها ${sumTrades} بیرونِ بازهٔ [${active - outside}, ${active}]`);
+  }
+  if (expect > 0 && body.length === 0) barsShort += 1;
+
+  if (isContinuous) {
+    // پیوسته یعنی هر روزِ درخواست‌شده تمام سطل‌هایش را دارد.
+    const dateCol = head.indexOf('تاریخ میلادی');
+    const dates = new Set(body.map((r) => num(r[dateCol])).filter(Boolean));
+    const want = dates.size * perDay;
+    if (perDay > 0 && body.length !== want) {
+      contWrong += 1;
+      wrongDetail.push(`${key}: ${body.length} ردیف در برابر ${dates.size}×${perDay}=${want}`);
     }
+  } else if (perDay > 0 && body.length > days * perDay) {
+    // فشرده: هیچ روزی نمی‌تواند بیشتر از سطل‌های پنجره‌اش ردیف بدهد.
+    barsOut += 1;
+    wrongDetail.push(`${key}: ${body.length} سطل در برابر سقفِ ${days}×${perDay}`);
+  }
+
+  const stateAt = head.indexOf('معامله شد');
+  if (stateAt < 0) { stateMissing += 1; continue; }
+  const volAt = head.indexOf('حجم'), tradeAt = head.indexOf('تعداد معامله');
+  for (const r of body) {
+    const st = String(r[stateAt] ?? '');
+    if ((st === 'دریافت نشد' || st === 'نامعلوم')
+      && (Number.isFinite(r[volAt]) || Number.isFinite(r[tradeAt]))) { badState += 1; break; }
   }
 }
-say(over === 0, 'هیچ برگی بیشتر از ریزمعاملهٔ خودش ردیف ندارد', over ? `${over} برگ` : '');
-say(emptyWithData === 0, 'هیچ برگی با وجودِ داده خالی نیست', emptyWithData ? `${emptyWithData} برگ` : '');
-say(badState === 0, 'سطلِ دریافت‌نشده هیچ عددِ مالی ندارد',
-  badState ? `${badState} برگ عددِ ساختگی دارد` : (checkedBars ? '' : 'ستونِ وضعیت در برگ‌ها نبود'));
+
+if (isTick) {
+  say(tickWrong === 0, 'شمارِ ردیفِ هر برگ دقیقاً برابرِ ریزمعاملهٔ داخلِ پنجره است',
+    tickWrong ? `${tickWrong} برگ نمی‌خواند — ${wrongDetail.slice(0, 3).join(' · ')}` : `${tickExact} برگ`);
+} else {
+  say(barsShort === 0, 'هیچ برگی با وجودِ داده خالی نیست', barsShort ? `${barsShort} برگ` : '');
+  say(tradeMismatch === 0, 'جمعِ معاملهٔ شمع‌ها با شمارِ دریافت می‌خواند',
+    tradeMismatch ? wrongDetail.slice(0, 3).join(' · ') : '');
+  if (isContinuous) {
+    say(contWrong === 0, 'هر روز تمام سطل‌های پنجره را دارد',
+      contWrong ? wrongDetail.filter((x) => x.includes('×')).slice(0, 3).join(' · ') : '');
+  } else {
+    say(barsOut === 0, 'هیچ برگی بیشتر از سطل‌های پنجره ردیف ندارد', barsOut ? `${barsOut} برگ` : '');
+  }
+}
+say(badState === 0, 'سطلِ دریافت‌نشده هیچ عددِ مالی ندارد', badState ? `${badState} برگ` : '');
+if (stateMissing && !isTick) {
+  say('warn', 'ستونِ «معامله شد» در برگ‌ها نیست', `${stateMissing} برگ — فایل با نسخهٔ قدیمی ساخته شده`);
+}
 
 // ═════ حکم ═════
 console.log(`\n${'─'.repeat(52)}`);

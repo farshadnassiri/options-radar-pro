@@ -265,7 +265,17 @@ export async function mount(root, { state, api }) {
       if (stopped || mine !== loadSeq) return;
       paintBases(payload);
       if (payload.build?.running) {
-        $('de-universe-note').textContent = `${payload.note || ''} ساخت دفتر ادامه دارد؛ با پوشش فعلی هم می‌توانید خروجی بگیرید و محدودیت داخل فایل ثبت می‌شود.`;
+        // ═══ چرا این جمله شرطی شد ═══
+        //
+        // R4-04: متن می‌گفت «با پوشش فعلی هم می‌توانید خروجی بگیرید» در
+        // حالی که دکمه به‌خاطر قراردادهای بی‌تاریخِ عرضه **قفل** بود. دو
+        // پیامِ متناقض در یک صفحه، کاربر را دنبالِ دکمه‌ای می‌فرستد که
+        // وجود ندارد. جمله باید همان چیزی را بگوید که واقعاً هست.
+        const stuck = blockers();
+        $('de-universe-note').textContent = `${payload.note || ''} ساخت دفتر ادامه دارد؛ `
+          + (stuck.length
+            ? `ولی تا رفعِ این‌ها خروجی قفل است — ${stuck.join('؛ ')}.`
+            : 'با پوشش فعلی هم می‌توانید خروجی بگیرید و محدودیت داخل فایل ثبت می‌شود.');
         refreshTimer = setTimeout(() => loadUniverse(range), 4000);
       } else if (!payload.complete) $('de-universe-note').textContent = `${payload.note || ''} پوشش دفتر کامل نیست؛ خروجی در دسترس است و این محدودیت داخل برگ راهنما ثبت می‌شود.`;
       // قفل باید همان‌جا که دکمه است دیده شود، نه فقط در یادداشت بالا.

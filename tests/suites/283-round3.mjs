@@ -13,10 +13,17 @@ group('۲۸۳. R3-01 — رکوردِ تاریخِ دیگر در جایگاهِ 
 {
   const server = readSrc('../server/server.mjs');
   check('یک دروازهٔ مشترک برای ردیفِ تک‌رکوردیِ تاریخ‌دار هست',
-    server.includes('function datedRow(row, date = 0, ins = \'\')'));
+    server.includes('function datedRow(kind, row, date = 0, ins = \'\')'));
   check('و `kind=daily` از آن می‌گذرد',
     server.includes("if (kind === 'daily' || kind === 'instrument' || kind === 'clientType') {")
-      && server.includes('return datedRow(firstDict(raw), date, ins);'));
+      && server.includes('return datedRow(kind, firstDict(raw), date, ins);'));
+  // ═══ R4-01: نامِ میدانِ تاریخ قراردادِ هر endpoint است ═══
+  //
+  // نسخهٔ اولِ همین دروازه فقط `dEven` را می‌خواند و پاسخِ درستِ
+  // `clientType` را — که تاریخش `recDate` است — دور می‌ریخت.
+  check('هر نوع میدانِ تاریخِ خودش را دارد، نه یک ثابتِ سراسری',
+    server.includes("daily: { date: 'dEven', id: 'insCode' }")
+      && server.includes("clientType: { date: 'recDate', id: 'insCode' }"));
   check('تاریخ و شناسه هر دو به آن می‌رسند',
     server.includes('shapeHistorical(kind, raw, date, code)'));
   // ردیفِ نامرتبط نباید در جایگاهِ `row` بنشیند — ولی خام هم حذف نشود.
