@@ -232,35 +232,47 @@ export function chooseTape(candidates = [], expect = { known: false }) {
  * حمل می‌شود تا هم داده بماند هم ادعا درست بماند.
  */
 export function keepBetterTape(previous, next, expect = { known: false }) {
+  // ═══ چرا شمارندهٔ تلاش جدا حمل می‌شود ═══
+  //
+  // `{ ...next }` پاسخِ تازه را می‌نشاند و هر چیزی را که روی رکوردِ قبلی
+  // نشسته بود دور می‌ریزد — از جمله `attempts` و `lastAttemptAt` را، که
+  // پاسخِ بالادست هرگز ندارد. نتیجه‌اش این بود که شمارندهٔ تلاش با هر
+  // جایگزینیِ موفق **صفر** می‌شد: سقفِ تلاش بی‌اثر و ستونِ «تلاش دریافت»
+  // فایل خالی. این را شبیه‌سازیِ حلقه با بالادستِ ناپایدار گرفت، نه آزمونِ
+  // واحد — چون فقط در تلاشِ چندم دیده می‌شود.
+  const tracking = {
+    ...(previous?.attempts !== undefined ? { attempts: previous.attempts } : {}),
+    ...(previous?.lastAttemptAt !== undefined ? { lastAttemptAt: previous.lastAttemptAt } : {}),
+  };
+  const take = (record, replaced) => ({ ...tracking, ...record, replaced });
+
   const prevRows = Array.isArray(previous?.rows) ? previous.rows : null;
-  if (!prevRows || !prevRows.length) return { ...next, replaced: true };
+  if (!prevRows || !prevRows.length) return take(next, true);
 
   const nextRows = Array.isArray(next?.rows) ? next.rows : null;
   const prevMetrics = tapeMetrics(prevRows);
 
   // خطای تلاشِ تازه، دادهٔ قبلی را نمی‌برد.
   if (next?.error || !nextRows) {
-    return {
-      ...previous, replaced: false,
+    return take({
+      ...previous,
       retryFailed: true, retryError: String(next?.error || 'پاسخ ردیفی نداشت'),
-    };
+    }, false);
   }
 
   const nextMetrics = tapeMetrics(nextRows);
-  if (tapeMatchesDaily(nextMetrics, expect)) return { ...next, replaced: true };
-  if (tapeMatchesDaily(prevMetrics, expect)) {
-    return { ...previous, replaced: false, retryWorse: true };
-  }
+  if (tapeMatchesDaily(nextMetrics, expect)) return take(next, true);
+  if (tapeMatchesDaily(prevMetrics, expect)) return take({ ...previous, retryWorse: true }, false);
 
   // هیچ‌کدام با تابلو نخواند: پرحجم‌تر می‌ماند. برابر هم که بودند، قبلی
   // می‌ماند — تلاشِ دوباره دلیلِ عوض‌کردنِ دادهٔ سالم نیست.
   if (nextMetrics.volume > prevMetrics.volume
     || (nextMetrics.volume === prevMetrics.volume && nextMetrics.trades > prevMetrics.trades)) {
-    return { ...next, replaced: true };
+    return take(next, true);
   }
-  return {
-    ...previous, replaced: false,
+  return take({
+    ...previous,
     retryWorse: true,
     ...(nextMetrics.total === 0 ? { retryEmptied: true } : {}),
-  };
+  }, false);
 }

@@ -536,6 +536,9 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {},
         ? rows.filter((row) => !inSessionWindow(row?.time, window)).length : null,
       status: !hit ? 'درخواست نرفت' : hit.error ? 'خطا'
         : coverageStatusOf(verdicts.get(pair.key), rows.length > 0),
+      // شمارِ تلاش روی خودِ رکورد می‌نشیند، پس فایل می‌گوید هر ابزار/روز
+      // چند بار پرسیده شده. بی این، «تلاش کردیم» یک ادعای شفاهی است.
+      attempts: Math.max(0, Math.trunc(n(hit?.attempts))),
       error: String(hit?.error || ''), source: String(hit?.source || ''),
     };
   });

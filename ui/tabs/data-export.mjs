@@ -14,6 +14,10 @@ import { tradingDays } from '/core/roster-scan.mjs';
 import { LIVE_CODE_CAP, splitTradeDays } from '/core/trades-source.mjs';
 import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
 import { expectationFromDailyRow, keepBetterTape } from '/core/tape-choice.mjs';
+import {
+  REFILL_MAX_ATTEMPTS, markRefillAttempt, refillDelayMs, refillProgress,
+  refillQueue, refillSummary,
+} from '/core/refill-queue.mjs';
 import { inferLiveSessionDate, liveTapeCodes, liveTapeDay } from '/core/live-day.mjs';
 import { fetchRangeUniverse, mountHistoryRange } from '/ui/history-range.mjs';
 import { buildDataExportSheets, dataExportFilename } from '/ui/data-export-workbook.mjs';
@@ -66,7 +70,8 @@ export async function mount(root, { state, api }) {
       </div>
       <p class="note" id="de-frame-note">تایم‌فریم فقط شکل <b>خروجی</b> را عوض می‌کند، نه دریافت را: ریزمعامله همیشه کامل گرفته می‌شود و شمع از روی همان ساخته می‌شود، پس عوض‌کردنش دریافت دوباره نمی‌خواهد. پنجرهٔ ساعت هم همین‌طور است و در پالایه، شمع‌سازی و برگ راهنما یکسان اعمال می‌شود. جدول پیوسته سطلِ بی‌معامله را با خانه‌های قیمتِ <b>خالی</b> می‌آورد و ستون «معامله شد» آن را «خیر» می‌خواند — هیچ قیمتی درون‌یابی یا از سطل قبل تکرار نمی‌شود.</p>
       <p class="note" id="de-window-note" hidden></p>
-      <div class="de-actions"><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
+      <div class="de-actions"><button type="button" class="ghost" id="de-run" disabled>آماده‌سازی ریزمعاملات</button><button type="button" class="ghost" id="de-refill" hidden>تلاش تکمیلی</button><button type="button" class="btn" id="de-export" disabled>خروجی Excel</button><button type="button" class="ghost" id="de-stop" hidden>توقف</button></div>
+      <p class="note" id="de-refill-note" hidden></p>
       <p id="de-status" class="note" role="status" aria-live="polite"></p><div id="de-result" class="history-table-wrap"></div>
     </section>`;
 
@@ -81,6 +86,7 @@ export async function mount(root, { state, api }) {
   const currentWindow = () => sessionWindow($('de-from-time').value, $('de-to-time').value);
   const basesHost = $('de-bases'), contractsHost = $('de-contracts');
   const runBtn = $('de-run'), exportBtn = $('de-export'), stopBtn = $('de-stop');
+  const refillBtn = $('de-refill');
   let rangeUi = null, universe = null, controller = null, refreshTimer = null, loadSeq = 0, stopped = false;
   let prepared = null, exporting = false;
   // ابزارهای کشف‌شدهٔ پایه‌های تیک‌خورده، و کدِ قراردادهایی که کاربر خواسته.
@@ -130,6 +136,53 @@ export async function mount(root, { state, api }) {
       || blockers().length > 0;
     exportBtn.disabled = !prepared || Boolean(controller) || exporting;
     $('de-universe-note').toggleAttribute('data-error', universe?.complete === false);
+    paintRefillState();
+  }
+
+  /**
+   * دکمهٔ «تلاش تکمیلی» و جملهٔ کنارش.
+   *
+   * دکمه فقط وقتی دیده می‌شود که واقعاً کاری برای کردن باشد. صفِ خالی
+   * یعنی یا همه‌چیز آمده یا هرچه مانده سقفِ تلاشش را خورده — و در حالت
+   * دوم هم همین‌جا گفته می‌شود، نه اینکه دکمه بی‌صدا ناپدید شود.
+   */
+  function paintRefillState() {
+    const note = $('de-refill-note');
+    if (!prepared) { refillBtn.hidden = true; note.hidden = true; return; }
+    const queue = currentRefillQueue();
+    const sum = refillSummary(queue);
+    refillBtn.hidden = sum.total === 0;
+    refillBtn.disabled = Boolean(controller) || exporting;
+    if (sum.total) {
+      refillBtn.textContent = `تلاش تکمیلی (${fmt.int(sum.total)} ابزار/روز)`;
+      note.hidden = false;
+      note.removeAttribute('data-error');
+      note.textContent = `${fmt.int(sum.total)} ابزار/روز هنوز کم دارد`
+        + `${sum.missing ? ` — ${fmt.int(sum.missing)} تا اصلاً نیامد` : ''}`
+        + `${sum.partial ? `، ${fmt.int(sum.partial)} تا ناقص` : ''}`
+        + `${sum.error ? `، ${fmt.int(sum.error)} تا خطادار` : ''}`
+        + `. تلاش تکمیلی فقط همین‌ها را دوباره می‌پرسد و دادهٔ موجود را دست نمی‌زند؛`
+        + ` هر ابزار/روز حداکثر ${fmt.int(REFILL_MAX_ATTEMPTS)} بار.`;
+      return;
+    }
+    // صفِ خالی دو معنی دارد و این دو نباید یکی دیده شوند.
+    const exhausted = (prepared.pairs || []).filter((pair) => {
+      const hit = prepared.items?.[pair.key];
+      return Number(hit?.attempts || 0) >= REFILL_MAX_ATTEMPTS
+        && !(Array.isArray(hit?.rows) && hit.rows.length);
+    }).length;
+    note.hidden = exhausted === 0;
+    if (exhausted) {
+      note.setAttribute('data-error', '');
+      note.textContent = `${fmt.int(exhausted)} ابزار/روز پس از ${fmt.int(REFILL_MAX_ATTEMPTS)} تلاش هم نیامد.`
+        + ' این دیگر «حالا نیامد» نیست؛ بازه را کوچک‌تر بگیرید یا بعداً دوباره امتحان کنید.';
+    }
+  }
+
+  /** صفِ همین حالا، از دادهٔ آماده. */
+  function currentRefillQueue() {
+    if (!prepared) return [];
+    return refillQueue(prepared.pairs, prepared.items, prepared.audit);
   }
 
   /**
@@ -338,6 +391,9 @@ export async function mount(root, { state, api }) {
   // درست است: بی مرجع، `keepBetterTape` به «پرحجم‌تر می‌ماند» برمی‌گردد
   // و خالی هرگز جای پر را نمی‌گیرد.
   let dailyIndex = new Map();
+  // تابلوی روزانه و روزهای جلسه‌باز، نگه‌داشته می‌شوند تا تلاشِ تکمیلی
+  // بتواند ممیزی را دوباره حساب کند بی آنکه همه‌چیز را دوباره بگیرد.
+  let lastDailyByIns = {}, lastOpenDates = [];
   const expectationFor = (pair) => expectationFromDailyRow(
     dailyIndex.get(`${String(pair?.ins)}:${Math.trunc(Number(pair?.date) || 0)}`),
   );
@@ -596,6 +652,7 @@ export async function mount(root, { state, api }) {
       // معنادار می‌شود.
       const openDates = String(resolved.payload?.market?.phase || '') === 'open' && resolved.date
         ? [resolved.date] : [];
+      lastDailyByIns = dailyByIns; lastOpenDates = openDates;
       let outcome = dataExportOutcome(pairs, items);
       let audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
       // خالیِ تاریخی که تابلوی روزانه تکذیبش می‌کند غالباً پاسخِ خالیِ کش
@@ -729,6 +786,108 @@ export async function mount(root, { state, api }) {
   }
 
   /**
+   * تلاشِ تکمیلی — فقط کم‌داشته‌ها، با فاصله، و با گزارشِ آنچه واقعاً
+   * به دست آمد.
+   *
+   * ═══ چهار قاعده‌ای که این حلقه را بی‌خطر می‌کند ═══
+   *
+   * ۱. **دادهٔ موجود دست نمی‌خورد.** هر نشستن از `keepBetterTape` رد
+   *    می‌شود، پس پاسخِ خالی یا بدترِ تازه هرگز جای ردیف‌های سالم را
+   *    نمی‌گیرد. این همان F-04 است و اینجا دوباره لازمش داریم، چون
+   *    ذاتِ این حلقه «دوباره پرسیدن» است.
+   * ۲. **فاصله می‌افتد.** اگر علتِ خالی‌بودن فشارِ سهمیه باشد، تلاشِ
+   *    فوری همان فشار را ادامه می‌دهد.
+   * ۳. **سقف دارد.** هر ابزار/روز حداکثر چند بار؛ وگرنه حلقه تا ابد
+   *    می‌چرخد و سهمیه را می‌خورد بی آنکه چیزی عوض شود.
+   * ۴. **دورِ بی‌اثر حلقه را می‌بندد.** اگر یک دورِ کامل هیچ ردیفی
+   *    اضافه نکرد، ادامه‌اش فقط امیدواری است — و آن را به کاربر
+   *    می‌گوییم، نه اینکه بی‌صدا بچرخیم.
+   */
+  async function refill() {
+    if (!prepared || controller) return;
+    controller = new AbortController();
+    stopBtn.hidden = false;
+    updateRunState();
+    const startedItems = { ...prepared.items };
+    let round = 0, totalFilled = 0, totalGained = 0;
+    try {
+      for (;;) {
+        const queue = currentRefillQueue();
+        if (!queue.length) break;
+        round += 1;
+        const sum = refillSummary(queue);
+        setStatus(`تلاش تکمیلی، دور ${fmt.int(round)}: ${fmt.int(queue.length)} ابزار/روز`
+          + `${sum.worst ? ` — پرارزش‌ترینش کد ${faDigits(sum.worst.ins)} در ${faDigits(String(sum.worst.date))}` : ''}…`);
+
+        const before = { ...prepared.items };
+        // شمارندهٔ تلاش **پیش از** درخواست می‌نشیند، نه پس از آن: اگر
+        // اجرا وسط راه قطع شود، تلاشِ رفته باید شمرده شده باشد، وگرنه
+        // سقف بی‌معنی می‌شود.
+        const at = Date.now();
+        for (const job of queue) {
+          prepared.items[job.key] = markRefillAttempt(prepared.items[job.key] || { rows: [], source: 'history' }, at);
+        }
+        const jobs = queue.map((job) => ({ ins: job.ins, date: job.date, key: job.key }));
+        await fetchHistorical(jobs, prepared.items, controller.signal, true);
+
+        // ممیزی دوباره حساب می‌شود، وگرنه صفِ دورِ بعد همان صفِ قبل است.
+        prepared.audit = dataExportBlankAudit(prepared.pairs, prepared.items, lastDailyByIns, lastOpenDates);
+        prepared.outcome = dataExportOutcome(prepared.pairs, prepared.items);
+        const gained = refillProgress(queue, before, prepared.items);
+        totalFilled += gained.filled + gained.improved;
+        totalGained += gained.gainedTrades;
+        paintResult(prepared.instruments, prepared.pairs, prepared.items);
+        paintRefillState();
+
+        if (!gained.gainedTrades) {
+          setStatus(`دور ${fmt.int(round)} هیچ ردیفی اضافه نکرد.`
+            + `${totalGained ? ` در مجموع ${fmt.int(totalFilled)} ابزار/روز پر شد و ${fmt.int(totalGained)} ریزمعامله اضافه شد.` : ''}`
+            + ' بالادست هنوز همان پاسخ را می‌دهد؛ چند دقیقه بعد دوباره بزنید یا بازه را کوچک‌تر بگیرید.', true);
+          return;
+        }
+        setStatus(`دور ${fmt.int(round)}: ${fmt.int(gained.filled)} ابزار/روز پر شد،`
+          + ` ${fmt.int(gained.improved)} تا کامل‌تر، ${fmt.int(gained.gainedTrades)} ریزمعاملهٔ تازه.`
+          + ` ${fmt.int(gained.stillEmpty)} تا هنوز خالی.`);
+
+        const next = currentRefillQueue();
+        if (!next.length) break;
+        const wait = refillDelayMs(round);
+        setStatus(`دور ${fmt.int(round)} تمام شد — ${fmt.int(gained.gainedTrades)} ریزمعاملهٔ تازه.`
+          + ` ${fmt.int(next.length)} ابزار/روز مانده؛ ${fmt.int(Math.round(wait / 1000))} ثانیه مکث تا دور بعد…`);
+        await sleepUnlessAborted(wait, controller.signal);
+      }
+      const left = currentRefillQueue().length;
+      setStatus(`تلاش تکمیلی تمام شد: ${fmt.int(totalFilled)} ابزار/روز پر یا کامل‌تر شد و`
+        + ` ${fmt.int(totalGained)} ریزمعاملهٔ تازه به دست آمد.`
+        + `${left ? ` ${fmt.int(left)} ابزار/روز هنوز مانده.` : ' چیزی در صف نماند.'}`,
+      left > 0);
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        setStatus(`تلاش تکمیلی متوقف شد. تا اینجا ${fmt.int(totalFilled)} ابزار/روز پر شد`
+          + ` و ${fmt.int(totalGained)} ریزمعاملهٔ تازه به دست آمد — دادهٔ به‌دست‌آمده سرِ جایش می‌ماند.`, true);
+      } else {
+        setStatus(`تلاش تکمیلی کامل نشد: ${error.message}`, true);
+        logError('data-export:refill', error);
+      }
+    } finally {
+      controller = null; stopBtn.hidden = true;
+      // هرچه به دست آمده در `prepared` است، پس خروجی همچنان ساختنی است.
+      void startedItems;
+      updateRunState();
+    }
+  }
+
+  /** مکثِ قابل‌توقف. `setTimeout` تنها، دکمهٔ توقف را ناشنوا می‌کند. */
+  function sleepUnlessAborted(ms, signal) {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) { reject(new DOMException('متوقف شد', 'AbortError')); return; }
+      const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+      function onAbort() { clearTimeout(timer); reject(new DOMException('متوقف شد', 'AbortError')); }
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  /**
    * ساختِ فایل از دادهٔ آماده، در تایم‌فریمِ همین حالا.
    *
    * ═══ چرا شیت‌ها اینجا ساخته می‌شوند و نه در `run` ═══
@@ -801,6 +960,7 @@ export async function mount(root, { state, api }) {
   for (const id of ['de-frame', 'de-from-time', 'de-to-time', 'de-continuous']) {
     $(id).addEventListener('change', repaintEstimate);
   }
+  refillBtn.addEventListener('click', refill);
   $('de-side').addEventListener('change', paintContracts);
   $('de-contract-search').addEventListener('input', paintContracts);
   /** قراردادهایی که همین حالا روی صفحه دیده می‌شوند — با پالایهٔ نوع و جست‌وجو. */
