@@ -34,8 +34,26 @@
 // دومی می‌گوید خالی **درست** است. فقط موردی شمرده می‌شود که تابلو خودش
 // تکذیبش کند.
 
-/** چند ابزار/روزِ پیاپی تا حکمِ «سهمیه». */
+/** چند ابزار/روزِ پیاپیِ **تکذیب‌شده با تابلو** تا حکمِ «سهمیه». */
 export const THROTTLE_STREAK = 10;
+
+/**
+ * همان، وقتی تابلویی در کار نیست.
+ *
+ * ═══ R5-09: چرا این دومی لازم شد ═══
+ *
+ * معیارِ اول به تابلوی روزانه تکیه دارد — ولی سهمیه **تابلو را هم**
+ * می‌بندد. در فایلِ واقعیِ ۲۰۲۶۰۷۱۴ تا ۲۰۲۶۰۹۲۱، از ۱۵۹ ابزار فقط ۱۰ تا
+ * تابلو داشتند؛ یعنی ناظر دقیقاً ۱۰ رأی در دست داشت و با همان ۱۰ تا حکم
+ * داد. یکی کمتر، و هیچ حکمی صادر نمی‌شد و هر ۳٬۶۸۵ درخواست می‌رفت.
+ *
+ * تکیه بر شانس، تشخیص نیست. پس معیارِ دومی هست که به تابلو نیاز ندارد:
+ * رشتهٔ بلندی از پاسخِ خالی که **هیچ راهی برای سنجشش نداریم**. سقفش
+ * بالاتر است چون شاهدش ضعیف‌تر است — ولی چهل ابزار/روزِ پیاپیِ خالیِ
+ * سنجش‌ناپذیر هم دیگر «بازارِ ساکت» نیست، و خرج‌کردنِ سهمیه رویش
+ * قابل‌دفاع نیست.
+ */
+export const BLIND_STREAK = 40;
 
 /**
  * ناظرِ سهمیه برای یک اجرا.
@@ -43,8 +61,9 @@ export const THROTTLE_STREAK = 10;
  * حالت روی همین شیء می‌ماند، نه در ماژول: دو اجرای هم‌زمان نباید رأیِ
  * هم را خراب کنند، و آزمون باید بتواند نمونهٔ تمیز بسازد.
  */
-export function makeThrottleWatch({ streak = THROTTLE_STREAK } = {}) {
-  let run = 0, worst = 0, since = 0, denied = 0;
+export function makeThrottleWatch({ streak = THROTTLE_STREAK, blindStreak = BLIND_STREAK } = {}) {
+  let run = 0, blind = 0, worst = 0, since = 0, denied = 0;
+  const hit = () => run >= streak || blind >= blindStreak;
 
   return {
     /**
@@ -55,29 +74,47 @@ export function makeThrottleWatch({ streak = THROTTLE_STREAK } = {}) {
      */
     saw(tape) {
       const ref = tape?.reference;
-      // بی مرجع رأی نمی‌دهد، و صفرِ تأییدشده هم نه.
-      if (!ref || ref.quiet === true) return this.throttled();
-      if (!(Number(ref.trades) > 0 || Number(ref.volume) > 0)) return this.throttled();
+      const known = Boolean(ref) && (Number(ref.trades) > 0 || Number(ref.volume) > 0);
+      const empty = tape?.emptyBoth === true;
 
-      if (tape?.emptyBoth !== true) { run = 0; return false; }
-      run += 1;
+      // ردیفی که داده آورد هر دو شمارنده را صفر می‌کند: لوله باز است.
+      if (!empty) { run = 0; blind = 0; return false; }
+      // صفرِ تأییدشده هم همین‌طور — تابلو جواب داده و جوابش با نوار
+      // می‌خواند؛ سالم‌ترین حالتِ ممکن است، نه نشانهٔ خرابی.
+      if (ref && ref.quiet === true) { run = 0; blind = 0; return false; }
+
       denied += 1;
-      if (run > worst) worst = run;
-      if (run === streak) since = Date.now();
-      return run >= streak;
+      if (known) run += 1; else blind += 1;
+      const streakNow = known ? run : blind;
+      if (streakNow > worst) worst = streakNow;
+      if (hit() && !since) since = Date.now();
+      return hit();
     },
     /** آیا همین حالا حکمِ سهمیه برقرار است. */
-    throttled() { return run >= streak; },
+    throttled() { return hit(); },
     /** شرحِ وضعیت، برای پیام رابط و برگ راهنما. */
-    state() { return { run, worst, streak, since, denied, throttled: run >= streak }; },
-    reset() { run = 0; since = 0; },
+    state() {
+      return {
+        run, blind, worst, streak, blindStreak, since, denied,
+        throttled: hit(),
+        // کدام معیار حکم داد — جمله‌اش فرق می‌کند و کاربر باید بداند.
+        by: run >= streak ? 'board' : (blind >= blindStreak ? 'blind' : ''),
+      };
+    },
+    reset() { run = 0; blind = 0; since = 0; },
   };
 }
 
 /** جملهٔ فارسیِ حکم — یک جا نوشته می‌شود تا رابط و فایل یکی بگویند. */
 export function throttleNote(state) {
   if (!state?.throttled) return '';
-  return `بالادست ${state.run} ابزار/روزِ پیاپی را خالی برگرداند در حالی که تابلوی روزانه‌شان معامله ثبت کرده —`
-    + ' این الگوی سهمیه است، نه بازارِ بی‌معامله. دریافت همین‌جا متوقف شد تا سهمیه بیشتر مصرف نشود.'
+  const tail = ' دریافت همین‌جا متوقف شد تا سهمیه بیشتر مصرف نشود.'
     + ' چند ساعت بعد دوباره امتحان کنید؛ آنچه تا اینجا آمده سرِ جایش می‌ماند.';
+  if (state.by === 'blind') {
+    return `بالادست ${state.blind} ابزار/روزِ پیاپی را خالی برگرداند و تابلوی روزانهٔ هیچ‌کدام هم نیامد،`
+      + ' پس حتی نمی‌شود سنجید که واقعاً بی‌معامله بوده‌اند یا نه.'
+      + ' وقتی تابلو هم خالی برمی‌گردد، خودِ آن نشانهٔ سهمیه است.' + tail;
+  }
+  return `بالادست ${state.run} ابزار/روزِ پیاپی را خالی برگرداند در حالی که تابلوی روزانه‌شان معامله ثبت کرده —`
+    + ' این الگوی سهمیه است، نه بازارِ بی‌معامله.' + tail;
 }

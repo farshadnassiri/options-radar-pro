@@ -18,8 +18,9 @@
 // بار با تابلو خواند.
 
 import { check, group, readSrc } from '../harness.mjs';
-import { THROTTLE_STREAK, makeThrottleWatch, throttleNote } from '../../core/throttle-watch.mjs';
+import { BLIND_STREAK, THROTTLE_STREAK, makeThrottleWatch, throttleNote } from '../../core/throttle-watch.mjs';
 import { REFILL_REASON, refillQueue, refillSummary } from '../../core/refill-queue.mjs';
+import { mergeInsPayloads } from '../../core/ins-batches.mjs';
 import { BLOCKED_STATUS, dataExportCoverageRows, dataExportOutcome } from '../../core/data-export.mjs';
 
 /** پاسخی که تابلو تکذیبش می‌کند: مرجع معامله دارد، نوار خالی است. */
@@ -38,15 +39,36 @@ group('۲۸۹. ناظر فقط وقتی رأی می‌دهد که تابلو ت�
   // روزی که تابلو خودش می‌گوید معامله‌ای نشده، نوارِ خالی‌اش **درست**
   // است. شمردنش یعنی یک بازارِ ساکت را سهمیه خواندن.
   const quiet = makeThrottleWatch();
-  for (let i = 0; i < THROTTLE_STREAK * 2; i += 1) {
+  for (let i = 0; i < BLIND_STREAK * 2; i += 1) {
     quiet.saw({ emptyBoth: true, reference: { trades: 0, volume: 0, quiet: true } });
   }
   check('صفرِ تأییدشده هرگز حکمِ سهمیه نمی‌دهد', quiet.throttled() === false);
 
-  // و بی مرجع هم همین‌طور: نمی‌دانیم، پس حکم نمی‌دهیم.
+  // ═══ R5-09: ادعای «بی مرجع حکمی داده نمی‌شود» عوض شد ═══
+  //
+  // آن ادعا فرض می‌کرد تابلو همیشه در دسترس است. فایلِ واقعیِ ۲۰۲۶۰۷۱۴
+  // تا ۲۰۲۶۰۹۲۱ ردش کرد: سهمیه **تابلو را هم** بست و از ۱۵۹ ابزار فقط
+  // ۱۰ تا مرجع داشتند. ناظر دقیقاً با همان ۱۰ رأی حکم داد — یکی کمتر و
+  // هر ۳٬۶۸۵ درخواست می‌رفت.
+  //
+  // پس بی مرجع هم حکم داده می‌شود، ولی با سقفِ **بالاتر**، چون شاهدش
+  // ضعیف‌تر است.
   const blind = makeThrottleWatch();
-  for (let i = 0; i < THROTTLE_STREAK * 2; i += 1) blind.saw({ emptyBoth: true, reference: null });
-  check('بی مرجع هم حکمی داده نمی‌شود', blind.throttled() === false);
+  for (let i = 0; i < BLIND_STREAK - 1; i += 1) blind.saw({ emptyBoth: true, reference: null });
+  check('بی مرجع، زیر سقفِ بلند حکمی نیست', blind.throttled() === false);
+  check('و سرِ سقفِ بلند حکم صادر می‌شود',
+    blind.saw({ emptyBoth: true, reference: null }) === true);
+  check('و حکم می‌گوید از کدام راه آمد', blind.state().by === 'blind');
+  check('سقفِ بی‌مرجع از سقفِ بامرجع بالاتر است', BLIND_STREAK > THROTTLE_STREAK);
+  check('و جمله‌اش فرق می‌کند',
+    throttleNote(blind.state()).includes('تابلوی روزانهٔ هیچ‌کدام هم نیامد'));
+
+  // یک پاسخِ دارای داده هر دو شمارنده را صفر می‌کند: لوله باز است.
+  const opened = makeThrottleWatch();
+  for (let i = 0; i < BLIND_STREAK - 1; i += 1) opened.saw({ emptyBoth: true, reference: null });
+  opened.saw({ emptyBoth: false, reference: null });
+  for (let i = 0; i < BLIND_STREAK - 1; i += 1) opened.saw({ emptyBoth: true, reference: null });
+  check('پاسخِ دارای داده شمارندهٔ بی‌مرجع را هم صفر می‌کند', opened.throttled() === false);
 }
 
 group('۲۸۹. رشتهٔ پیاپی، و چیزی که می‌شکندش');
@@ -72,6 +94,7 @@ group('۲۸۹. رشتهٔ پیاپی، و چیزی که می‌شکندش');
   check('سقف عددِ معقولی است', THROTTLE_STREAK >= 5 && THROTTLE_STREAK <= 30);
   check('و حکم جملهٔ فارسی دارد',
     throttleNote(w.state()).includes('سهمیه') && throttleNote({ throttled: false }) === '');
+  check('و می‌گوید از راهِ تابلو آمد', w.state().by === 'board');
 }
 
 group('۲۸۹. فایل علتِ درست را می‌نویسد');
@@ -191,4 +214,32 @@ group('۲۸۹. صف هم علتِ درست را می‌داند');
 
   const sum = refillSummary(queue);
   check('جمع‌بندی سهمیه را جدا می‌شمارد', sum.throttled === 1 && sum.error === 1);
+}
+
+group('۲۸۹. تابلویی که خودش خالی آمده، «راست‌آزمایی شد» نیست');
+{
+  // ═══ R5-09: جمله‌ای که در فایلِ واقعی دروغ درآمد ═══
+  //
+  // `missing` فقط کدی را می‌شمرد که در پاسخ **نبود**. سهمیه اما پاسخِ
+  // موفق با آرایهٔ خالی می‌دهد، پس هر کد در پاسخ هست. نتیجه‌اش در فایلِ
+  // ۲۰۲۶۰۷۱۴ تا ۲۰۲۶۰۹۲۱: از ۱۵۹ ابزار فقط ۱۰ تا تابلو داشتند و برگ
+  // راهنما نوشت «هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت».
+  const merged = mergeInsPayloads(['A', 'B', 'C', 'D'], [{
+    A: { ins: 'A', rows: [{ date: 20260919, trades: 5 }], source: 'list' },
+    B: { ins: 'B', rows: [], source: 'list' },
+    C: { ins: 'C', rows: [], source: 'list' },
+    // D عمداً نیست.
+  }]);
+  check('کدِ نبوده هنوز «گمشده» است', merged.missing.join() === 'D');
+  check('و کدی که پاسخِ خالی گرفت جدا شمرده می‌شود', merged.blank.sort().join() === 'B,C');
+  check('کدی که ردیف داد در هیچ‌کدام نیست',
+    !merged.missing.includes('A') && !merged.blank.includes('A'));
+
+  const book = readSrc('../ui/data-export-workbook.mjs');
+  check('راهنما هر دو را با هم می‌شمارد',
+    book.includes('const hollow = (dailyBlank || []).length')
+      && book.includes('تابلوی روزانه‌شان نیامد'));
+  check('و ادعای «پاسخ گرفت» جایش را به «ردیف داد» داد',
+    book.includes('تابلوی روزانه‌اش ردیف داد')
+      && !book.includes('تابلوی روزانه‌اش پاسخ گرفت.'));
 }
