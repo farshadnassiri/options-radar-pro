@@ -185,9 +185,23 @@ export function buildDataExportSheets({
         + ` · ${never} ابزار/روز اصلاً درخواستشان نرفت.`
         + `${tried ? '' : ' برای کم‌داشته‌ها دکمهٔ «تلاش تکمیلی» در همان تب هست.'}`;
     })()],
-    ['راست‌آزمایی انجام‌نشده', (dailyMissing || []).length
-      ? `${(dailyMissing || []).length} ابزار تابلوی روزانه‌شان پاسخ نگرفت، پس خالی‌هایشان راست‌آزمایی نشد`
-      : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت'],
+    // ═══ R5-06: «از کدام در آمد» خودش بخشی از جواب است ═══
+    //
+    // تابلوی روزانه دو مسیر دارد: فهرستِ یکجا (`GetClosingPriceDailyList`)
+    // که برای قراردادِ منقضی خالی برمی‌گردد، و تک‌روزِ سرور
+    // (`GetClosingPriceDaily`) که هنوز جواب می‌دهد. حکمِ هر دو یکی است،
+    // ولی کسی که فایل را باز می‌کند حق دارد بداند کدام ردیف با کدام
+    // مرجع سنجیده شده.
+    ['راست‌آزمایی انجام‌نشده', (() => {
+      const list = (audit || []).filter((row) => row.referenceSource === 'list').length;
+      const day = (audit || []).filter((row) => row.referenceSource === 'day').length;
+      const head = (dailyMissing || []).length
+        ? `${(dailyMissing || []).length} ابزار تابلوی روزانه‌شان پاسخ نگرفت، پس خالی‌هایشان راست‌آزمایی نشد.`
+        : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت.';
+      return `${head} مبنای سنجش: ${list} ابزار/روز از فهرستِ روزانهٔ همین تب`
+        + `${day ? ` · ${day} ابزار/روز از تابلوی تک‌روزِ سرور — این‌ها اغلب قراردادِ منقضی‌اند که از فهرستِ یکجا حذف شده‌اند` : ''}`
+        + `${blanks.unknown ? ` · ${blanks.unknown} ابزار/روز هیچ مرجعی نداشتند` : ''}.`;
+    })()],
     ...(blanks.worst ? [['بدترین مورد نیامدن', `کد ${blanks.worst.ins} در ${blanks.worst.date} — تابلو ${blanks.worst.dailyTrades} معامله`]] : []),
     ...(blanks.worstPartial ? [['بدترین پاسخِ ناقص',
       `کد ${blanks.worstPartial.ins} در ${blanks.worstPartial.date} — تابلو ${blanks.worstPartial.dailyTrades} معامله`

@@ -393,6 +393,11 @@ export async function mount(root, { state, api }) {
         // باشد. نگه‌داشتنِ دادهٔ قبلی یعنی «از دستش ندادیم»، نه «کامل
         // است»: پرچمِ تلاشِ ناموفق جدا حمل می‌شود و حکمِ پوشش سرِ جایش
         // می‌ماند.
+        // مرجعی که سرور پیدا کرده پیش از نشستنِ رکورد ثبت می‌شود، تا
+        // همین دور هم از آن سود ببرد و دورهای بعد بی‌مرجع نمانند.
+        if (hit?.reference && Number.isFinite(Number(hit.reference.trades))) {
+          referenceIndex.set(String(pair.key), hit.reference);
+        }
         items[pair.key] = mark(keepBetterTape(items[pair.key], fresh0, expectationFor(pair)));
       }
       soloFailures = 0;
@@ -439,12 +444,44 @@ export async function mount(root, { state, api }) {
   // درست است: بی مرجع، `keepBetterTape` به «پرحجم‌تر می‌ماند» برمی‌گردد
   // و خالی هرگز جای پر را نمی‌گیرد.
   let dailyIndex = new Map();
+  // مرجعی که **سرور** برای یک ابزار/روز پیدا کرده و همراهِ پاسخ فرستاده
+  // (R5-05/R5-06). کلیدش `pair.key` است، نه `ins:date`، چون از همان
+  // حلقه‌ای پر می‌شود که پاسخ‌ها را می‌نشاند.
+  let referenceIndex = new Map();
   // تابلوی روزانه و روزهای جلسه‌باز، نگه‌داشته می‌شوند تا تلاشِ تکمیلی
   // بتواند ممیزی را دوباره حساب کند بی آنکه همه‌چیز را دوباره بگیرد.
   let lastDailyByIns = {}, lastOpenDates = [];
-  const expectationFor = (pair) => expectationFromDailyRow(
-    dailyIndex.get(`${String(pair?.ins)}:${Math.trunc(Number(pair?.date) || 0)}`),
-  );
+  /**
+   * انتظارِ تابلوی روزانه برای یک ابزار/روز — از هر دری که هست.
+   *
+   * ═══ R5-06: چرا دو منبع، و چرا به این ترتیب ═══
+   *
+   * اولویت با تابلویی است که خودِ این تب یکجا گرفته
+   * (`GetClosingPriceDailyList`)، چون یک درخواست برای کلِ عمرِ ابزار است
+   * و فرستادنش همراهِ درخواست، سرور را از پرسیدنِ دوباره بی‌نیاز می‌کند.
+   *
+   * ولی آن endpoint برای قراردادِ **منقضی** خالی برمی‌گردد — قرارداد از
+   * تابلو حذف شده. سرور همان روز را از `GetClosingPriceDaily` می‌گیرد و
+   * مرجعش را همراهِ پاسخ برمی‌گرداند؛ از R5-05 این مرجع روی رکورد
+   * می‌نشیند. پس دومین بار که همان ابزار/روز پرسیده می‌شود — دورِ خودکارِ
+   * «با تابلو نخواند» یا هر دورِ تکمیلی — دیگر بی‌مرجع نیست.
+   *
+   * بی این، `keepBetterTape` در دورهای بعد به «پرحجم‌تر می‌ماند» برمی‌گشت
+   * و هیچ‌وقت نمی‌فهمید کدام پاسخ واقعاً کامل است.
+   */
+  const expectationFor = (pair) => {
+    const own = expectationFromDailyRow(
+      dailyIndex.get(`${String(pair?.ins)}:${Math.trunc(Number(pair?.date) || 0)}`),
+    );
+    if (own.known) return own;
+    const carried = referenceIndex.get(String(pair?.key ?? ''));
+    if (!carried) return own;
+    const trades = Number(carried.trades), volume = Number(carried.volume);
+    if (!Number.isFinite(trades) || !Number.isFinite(volume)) return own;
+    // صفرِ تأییدشده هم یک مرجع است، مثل مسیرِ دیگر.
+    if (!trades && !volume) return { known: true, quiet: true, trades: 0, volume: 0, value: 0 };
+    return { known: true, quiet: false, trades, volume, value: 0 };
+  };
 
   async function fetchDaily(instruments, range, signal) {
     const codes = [...new Set(instruments.map((item) => String(item.ins)).filter(Boolean))];
@@ -490,6 +527,7 @@ export async function mount(root, { state, api }) {
       }
       dailyMissing = merged.missing;
       dailyIndex = new Map();
+      referenceIndex = new Map();
       for (const [ins, value] of Object.entries(merged.payload)) {
         for (const row of Array.isArray(value?.rows) ? value.rows : []) {
           const date = Math.trunc(Number(row?.date) || 0);

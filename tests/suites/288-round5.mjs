@@ -23,7 +23,7 @@ import {
   REFILL_MAX_ATTEMPTS, attemptsOf, markAttempt, markRefillAttempt, refillQueue,
 } from '../../core/refill-queue.mjs';
 import { chooseTape, keepBetterTape } from '../../core/tape-choice.mjs';
-import { dataExportCoverageRows } from '../../core/data-export.mjs';
+import { dataExportBlankAudit, dataExportCoverageRows } from '../../core/data-export.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const tool = path.join(root, 'tools', 'verify-export.mjs');
@@ -306,4 +306,78 @@ group('۲۸۸. R5-05 — عددِ کسری بی پشتوانهٔ تابلو نو
   const book = readSrc('../ui/data-export-workbook.mjs');
   check('برگ پوشش مرجعِ سرور را جایگزین می‌کند',
     book.includes('Number.isFinite(hit.reference?.trades) ? hit.reference.trades'));
+}
+
+group('۲۸۸. R5-06 — دو مرجعِ تابلو، یک حکم');
+{
+  // ═══ بازتولیدِ ثبت‌شده ═══
+  //
+  // `GetClosingPriceDailyList` برای قراردادِ منقضی خالی برمی‌گردد (از
+  // تابلو حذف شده)، ولی `GetClosingPriceDaily` همان روز را می‌دهد. پس
+  // سرور می‌دانست ابزار/روز ناقص است و عددِ کسری را هم برمی‌گرداند، در
+  // حالی که بازبینیِ تب حکمِ «نامعلوم» می‌داد — و «نامعلوم» وارد صفِ
+  // تلاشِ تکمیلی نمی‌شود. یعنی همان ردیف‌هایی که می‌دانستیم کم دارند
+  // هرگز دوباره پرسیده نمی‌شدند. در هارنسِ مرورگر ۳۶۲ از ۵۲۴ چنین بودند.
+  const pairs = [{ key: '20260919:A', ins: 'A', date: 20260919 }];
+  const tape = (k) => Array.from({ length: k }, () => ({ quantity: 10, canceled: false }));
+
+  // تابلوی یکجای تب خالی است — قراردادِ منقضی.
+  const withRef = dataExportBlankAudit(pairs, {
+    '20260919:A': {
+      rows: tape(4), source: 'history',
+      reference: { trades: 10, volume: 100, quiet: false },
+    },
+  }, {}, []);
+  check('مرجعِ سرور حکم را از «نامعلوم» بیرون می‌آورد', withRef[0].verdict === 'partial');
+  check('و عددهای تابلو در بازبینی می‌نشینند',
+    withRef[0].dailyTrades === 10 && withRef[0].dailyVolume === 100);
+  check('و منبعِ مرجع نام‌برده می‌شود', withRef[0].referenceSource === 'day');
+  check('کسری هم از همان حساب می‌شود',
+    withRef[0].tradeGap === 6 && withRef[0].volumeGap === 60);
+
+  // نوارِ خالی + مرجعِ سرور = «نیامد»، نه «نامعلوم».
+  const empty = dataExportBlankAudit(pairs, {
+    '20260919:A': { rows: [], source: 'history', reference: { trades: 10, volume: 100, quiet: false } },
+  }, {}, []);
+  check('نوارِ خالی با مرجعِ سرور «نیامد» می‌شود', empty[0].verdict === 'missing');
+
+  // ═══ و همین است که در صف می‌نشیند ═══
+  const queue = refillQueue(pairs, {
+    '20260919:A': { rows: [], source: 'history', attempts: 1, reference: { trades: 10, volume: 100 } },
+  }, empty);
+  check('و حالا وارد صفِ تلاشِ تکمیلی می‌شود', queue.length === 1 && queue[0].reason === 'missing');
+
+  // صفرِ تأییدشدهٔ سرور هم مرجع است، نه نبودِ مرجع.
+  const quiet = dataExportBlankAudit(pairs, {
+    '20260919:A': { rows: [], source: 'history', reference: { trades: 0, volume: 0, quiet: true } },
+  }, {}, []);
+  check('صفرِ تأییدشده «بدون معامله» می‌شود، نه «نامعلوم»', quiet[0].verdict === 'quiet');
+
+  // ═══ اولویت با مرجعِ خودِ تب می‌ماند ═══
+  //
+  // مرجعِ یکجا یک درخواست برای کلِ عمرِ ابزار است؛ اگر هست، همان مبناست.
+  const both = dataExportBlankAudit(pairs, {
+    '20260919:A': { rows: tape(4), source: 'history', reference: { trades: 999, volume: 9990 } },
+  }, { A: { rows: [{ date: 20260919, trades: 10, vol: 100 }] } }, []);
+  check('مرجعِ خودِ تب بر مرجعِ سرور مقدم است',
+    both[0].dailyTrades === 10 && both[0].referenceSource === 'list');
+
+  // بی هیچ مرجعی، هنوز «نامعلوم» است — این تغییر حدس نمی‌زند.
+  const blind = dataExportBlankAudit(pairs, {
+    '20260919:A': { rows: tape(4), source: 'history' },
+  }, {}, []);
+  check('بی هیچ مرجعی هنوز «نامعلوم» است', blind[0].verdict === 'unknown');
+  check('و منبعی هم اعلام نمی‌شود', blind[0].referenceSource === '');
+
+  // و مرجعِ بدشکل باور نمی‌شود.
+  const junk = dataExportBlankAudit(pairs, {
+    '20260919:A': { rows: tape(4), source: 'history', reference: { trades: 'x', volume: null } },
+  }, {}, []);
+  check('مرجعِ بدشکل نادیده گرفته می‌شود', junk[0].verdict === 'unknown');
+
+  // برگ راهنما می‌گوید هر حکم با کدام مرجع سنجیده شده.
+  const book = readSrc('../ui/data-export-workbook.mjs');
+  check('راهنما منبعِ راست‌آزمایی را می‌شمارد',
+    book.includes("row.referenceSource === 'list'") && book.includes("row.referenceSource === 'day'")
+      && book.includes('از تابلوی تک‌روزِ سرور'));
 }

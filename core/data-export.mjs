@@ -604,7 +604,32 @@ export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}, op
     if (!hit || hit.error) continue;
     const rows = Array.isArray(hit.rows) ? hit.rows : null;
     if (!rows) continue;
-    const daily = index.get(String(pair.ins))?.get(Math.trunc(n(pair.date))) || null;
+    // ═══ R5-06: دو مرجع برای یک تابلو، و حکمی که بینشان گم می‌شد ═══
+    //
+    // تابلوی روزانه از دو در می‌آید: `GetClosingPriceDailyList` که این تب
+    // یکجا برای کلِ عمرِ ابزار می‌گیرد، و `GetClosingPriceDaily` که سرور
+    // برای همان یک روز می‌پرسد. برای قراردادِ **منقضی** اولی خالی
+    // برمی‌گردد — قرارداد از تابلو حذف شده — ولی دومی هنوز جواب می‌دهد.
+    //
+    // پیامدش این بود: سرور می‌دانست آن ابزار/روز ناقص است و عددِ کسری
+    // را هم برمی‌گرداند، ولی این بازبینی چون مرجعِ خودش را نداشت حکمِ
+    // «نامعلوم» می‌داد. و «نامعلوم» وارد صفِ تلاشِ تکمیلی **نمی‌شود** —
+    // یعنی همان ردیف‌هایی که می‌دانستیم کم دارند، هرگز دوباره پرسیده
+    // نمی‌شدند. در اجرای آزمایشی ۳۶۲ از ۵۲۴ ابزار/روز همین حالت بودند.
+    //
+    // هر دو مرجع یک چیزند: تابلوی روزانهٔ همان ابزار در همان روز، و هر
+    // دو پیش از رسیدن به اینجا تاریخشان با روزِ خواسته‌شده سنجیده شده
+    // (`dailyExpectation` و `trustedDailyRows`). پس وقتی مرجعِ اول نیست،
+    // مرجعِ دوم حکم می‌دهد — و `referenceSource` می‌گوید از کدام در آمده،
+    // چون «از کجا می‌دانیم» خودش بخشی از جواب است.
+    const listed = index.get(String(pair.ins))?.get(Math.trunc(n(pair.date))) || null;
+    const carried = !listed && hit.reference
+      && Number.isFinite(Number(hit.reference.trades))
+      && Number.isFinite(Number(hit.reference.volume))
+      ? { trades: n(hit.reference.trades), vol: n(hit.reference.volume) }
+      : null;
+    const daily = listed || carried;
+    const referenceSource = listed ? 'list' : (carried ? 'day' : '');
     const dailyTrades = n(daily?.trades), dailyVolume = n(daily?.vol);
     // ═══ چرا معاملهٔ باطل جدا شمرده می‌شود ═══
     //
@@ -618,7 +643,7 @@ export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}, op
     const tapeVolume = active.reduce((sum, row) => sum + n(row?.quantity), 0);
     out.push({
       key: pair.key, ins: String(pair.ins), date: pair.date,
-      known: Boolean(daily),
+      known: Boolean(daily), referenceSource,
       dailyTrades: daily ? dailyTrades : NaN,
       dailyVolume: daily ? dailyVolume : NaN,
       tapeTrades, tapeCanceled, tapeVolume,
