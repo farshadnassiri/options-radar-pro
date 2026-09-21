@@ -73,7 +73,7 @@ group('۲۸۲. مرجع از مصرف‌کننده — یک درخواستِ ک�
   check('هر دو نقطهٔ مصرفِ سرور تاریخ را به سنجش می‌دهند',
     (server.match(/dailyExpectation\(await get\(historicalPath\('daily', code, date\), S\.ttlDailySec, 7\), date\)/g) || []).length === 2);
   check('دریافت‌کننده مرجعِ فرستاده‌شده را می‌پذیرد',
-    server.includes('async function fetchHistoricalTape(code, date, { fresh = false, expect = null } = {})'));
+    server.includes('async function fetchHistoricalTape(code, date, { fresh = false, expect = null, bust = true } = {})'));
   // مرجعِ بیرونی باور نمی‌شود: فقط دو عددِ متناهی از آن خوانده می‌شود.
   check('ولی آن را صحت‌سنجی می‌کند، نه اینکه باور کند',
     server.includes('Number.isFinite(Number(raw.trades)) && Number.isFinite(Number(raw.volume))')

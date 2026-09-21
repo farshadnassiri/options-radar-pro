@@ -167,17 +167,41 @@ export function buildDataExportSheets({
     // اعلامِ درستِ کسری جای دریافتِ داده را نمی‌گیرد. کسی که فایل را
     // بعداً باز می‌کند باید بداند برای پرکردنِ این شکاف چقدر تلاش شده —
     // وگرنه «نیامد» و «نپرسیدیم» یک شکل دارند.
+    // ═══ R5-01: چرا این جمله بازنویسی شد ═══
+    //
+    // شمارنده دریافتِ اولیه را نمی‌شمرد، پس پس از یک تلاشِ تکمیلیِ
+    // تمام‌شده عددِ ستون «۱ بار» می‌شد و همین سطر می‌گفت «هر ابزار/روز یک
+    // بار پرسیده شد» — یعنی فایل، تلاشی را که واقعاً رفته بود انکار
+    // می‌کرد. حالا `۱` یعنی فقط دورِ اول، `۲` به بالا یعنی تلاشِ دوباره،
+    // و `۰` یعنی اصلاً درخواستش نرفت. هر سه عدد اینجا نوشته می‌شوند چون
+    // هر سه معنای متفاوتی دارند.
     ['تلاش دریافت', (() => {
-      const tried = coverage.filter((row) => row.attempts > 1);
+      const tried = coverage.filter((row) => row.attempts > 1).length;
+      const once = coverage.filter((row) => row.attempts === 1).length;
+      const never = coverage.filter((row) => row.attempts === 0).length;
       const most = Math.max(0, ...coverage.map((row) => row.attempts));
-      return tried.length
-        ? `${tried.length} ابزار/روز بیش از یک بار پرسیده شدند (بیشینه ${most} بار).`
-          + ' ستون «تلاش دریافت» برگ پوشش شمارِ هر کدام را دارد.'
-        : 'هر ابزار/روز یک بار پرسیده شد. برای کم‌داشته‌ها دکمهٔ «تلاش تکمیلی» در همان تب هست.';
+      return `شمارِ ستون «تلاش دریافت» دورهای پرسیدن است، از خودِ دورِ اول:`
+        + ` ${once} ابزار/روز یک بار · ${tried} ابزار/روز بیش از یک بار (بیشینه ${most} بار)`
+        + ` · ${never} ابزار/روز اصلاً درخواستشان نرفت.`
+        + `${tried ? '' : ' برای کم‌داشته‌ها دکمهٔ «تلاش تکمیلی» در همان تب هست.'}`;
     })()],
-    ['راست‌آزمایی انجام‌نشده', (dailyMissing || []).length
-      ? `${(dailyMissing || []).length} ابزار تابلوی روزانه‌شان پاسخ نگرفت، پس خالی‌هایشان راست‌آزمایی نشد`
-      : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت'],
+    // ═══ R5-06: «از کدام در آمد» خودش بخشی از جواب است ═══
+    //
+    // تابلوی روزانه دو مسیر دارد: فهرستِ یکجا (`GetClosingPriceDailyList`)
+    // که برای قراردادِ منقضی خالی برمی‌گردد، و تک‌روزِ سرور
+    // (`GetClosingPriceDaily`) که هنوز جواب می‌دهد. حکمِ هر دو یکی است،
+    // ولی کسی که فایل را باز می‌کند حق دارد بداند کدام ردیف با کدام
+    // مرجع سنجیده شده.
+    ['راست‌آزمایی انجام‌نشده', (() => {
+      const list = (audit || []).filter((row) => row.referenceSource === 'list').length;
+      const day = (audit || []).filter((row) => row.referenceSource === 'day').length;
+      const head = (dailyMissing || []).length
+        ? `${(dailyMissing || []).length} ابزار تابلوی روزانه‌شان پاسخ نگرفت، پس خالی‌هایشان راست‌آزمایی نشد.`
+        : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت.';
+      return `${head} مبنای سنجش: ${list} ابزار/روز از فهرستِ روزانهٔ همین تب`
+        + `${day ? ` · ${day} ابزار/روز از تابلوی تک‌روزِ سرور — این‌ها اغلب قراردادِ منقضی‌اند که از فهرستِ یکجا حذف شده‌اند` : ''}`
+        + `${blanks.unknown ? ` · ${blanks.unknown} ابزار/روز هیچ مرجعی نداشتند` : ''}.`;
+    })()],
     ...(blanks.worst ? [['بدترین مورد نیامدن', `کد ${blanks.worst.ins} در ${blanks.worst.date} — تابلو ${blanks.worst.dailyTrades} معامله`]] : []),
     ...(blanks.worstPartial ? [['بدترین پاسخِ ناقص',
       `کد ${blanks.worstPartial.ins} در ${blanks.worstPartial.date} — تابلو ${blanks.worstPartial.dailyTrades} معامله`
@@ -270,7 +294,14 @@ export function buildDataExportSheets({
       row.date, jalaliText(row.date),
       row.rows, row.active, row.canceled, row.outside, row.outsideWindow, row.status,
       seen ? BLANK_VERDICT_LABEL[seen.verdict] : '—',
-      seen && Number.isFinite(seen.dailyTrades) ? seen.dailyTrades : '',
+      // ═══ R5-05: ستونِ تابلو از هر مرجعی که هست پر می‌شود ═══
+      //
+      // اولویت با مرجعِ خودِ این تب است (کلِ تاریخِ روزانه، یکجا)، ولی اگر
+      // نداشت و سرور برای همین ابزار/روز مرجع داشته، همان می‌نشیند. بی
+      // این، ستونِ «کسری» عدد داشت و ستونِ پشتوانه‌اش خالی بود — یعنی
+      // فایل عددی می‌نوشت که خودش نمی‌توانست توجیهش کند.
+      seen && Number.isFinite(seen.dailyTrades) ? seen.dailyTrades
+        : (Number.isFinite(hit.reference?.trades) ? hit.reference.trades : ''),
       // ═══ F-01: کسری، وقتی هیچ مسیری با تابلو نخواند ═══
       //
       // سرور حالا پاسخ‌ها را با تابلوی روزانه می‌سنجد و اگر هیچ‌کدام

@@ -151,6 +151,17 @@ export function tapeMatchesDaily(metrics, expect) {
  * آنچه هست» یکی نیست، و فایل باید همین تفاوت را بنویسد.
  */
 export function chooseTape(candidates = [], expect = { known: false }) {
+  // ═══ R5-05: مرجعی که حکم بر آن بنا شد، همراهِ حکم می‌رود ═══
+  //
+  // تا امروز فقط **کسری** برمی‌گشت، نه عددی که کسری از آن حساب شده بود.
+  // مصرف‌کننده (برگ پوشش) ستونِ تابلو را از مرجعِ **خودش** پر می‌کرد، و
+  // هر جا آن دو مرجع یکی نبودند، فایل عددِ کسری‌ای می‌نوشت که ستونِ
+  // پشتوانه‌اش خالی بود. در اجرای آزمایشیِ مرورگر ۳۶۲ ردیف دقیقاً همین
+  // شکل را داشتند — و «عددِ بی‌پشتوانه» همان چیزی است که این مخزن
+  // ممنوعش کرده.
+  const reference = expect.known
+    ? { trades: expect.trades, volume: expect.volume, quiet: expect.quiet === true }
+    : null;
   const list = (candidates || []).map((item) => ({
     ...item, metrics: tapeMetrics(item.rows),
   }));
@@ -165,7 +176,7 @@ export function chooseTape(candidates = [], expect = { known: false }) {
     if (expect.quiet) {
       return {
         rows: [], variant: 'both', emptyBoth: true, duplicates: 0, conflicts: [],
-        complete: true, verified: true, quiet: true, shortfall: null,
+        complete: true, verified: true, quiet: true, shortfall: null, reference,
       };
     }
     return {
@@ -174,6 +185,7 @@ export function chooseTape(candidates = [], expect = { known: false }) {
       // تابلو می‌گوید آن روز معامله شده ولی هیچ مسیری چیزی نداد: این
       // «بی‌معامله» نیست، «نیامد» است.
       shortfall: expect.known ? { trades: expect.trades, volume: expect.volume } : null,
+      reference,
     };
   }
 
@@ -184,7 +196,7 @@ export function chooseTape(candidates = [], expect = { known: false }) {
       rows: best.rows, variant: best.variant,
       duplicates: best.duplicates, conflicts: best.conflicts,
       complete: false, verified: true, quiet: false, surplus: true, metrics: best.metrics,
-      shortfall: null,
+      shortfall: null, reference,
     };
   }
 
@@ -193,7 +205,7 @@ export function chooseTape(candidates = [], expect = { known: false }) {
     return {
       rows: matched.rows, variant: matched.variant,
       duplicates: matched.duplicates, conflicts: matched.conflicts,
-      complete: true, verified: true, quiet: false, metrics: matched.metrics,
+      complete: true, verified: true, quiet: false, metrics: matched.metrics, reference,
     };
   }
 
@@ -206,6 +218,7 @@ export function chooseTape(candidates = [], expect = { known: false }) {
     shortfall: expect.known
       ? { trades: expect.trades - best.metrics.trades, volume: expect.volume - best.metrics.volume }
       : null,
+    reference,
     // کدام مسیرها امتحان شدند و هرکدام چه دادند — برای تشخیصِ اجرای بعدی.
     tried: list.map((item) => ({ variant: item.variant, trades: item.metrics.trades, volume: item.metrics.volume })),
   };

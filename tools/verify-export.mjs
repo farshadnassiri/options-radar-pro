@@ -251,11 +251,33 @@ const tryAt = at('تلاش دریافت');
 if (tryAt < 0) {
   say('warn', 'ستون «تلاش دریافت» در فایل نیست', 'فایل با نسخهٔ پیش از این قابلیت ساخته شده');
 } else {
+  // ═══ R5-01: قرارداد عوض شد و این بخش با آن هم‌تراز شد ═══
+  //
+  // حالا `۱` یعنی فقط دریافتِ اولیه، `۲` به بالا یعنی تلاشِ دوباره هم رفته،
+  // و `۰` یعنی اصلاً درخواستش نرفت. پیش از این دریافتِ اولیه شمرده نمی‌شد،
+  // پس یک تلاشِ تکمیلیِ واقعاً انجام‌شده اینجا «صفر مورد» گزارش می‌شد.
   const tries = D.map((r) => Number(String(r[tryAt] ?? '').match(/\d+/)?.[0] || 0));
   const most = Math.max(0, ...tries);
   const retried = tries.filter((t) => t > 1).length;
+  const never = D.filter((r, i) => tries[i] === 0).length;
   const gapRetried = D.filter((r, i) => status(r).includes('نیامد') && tries[i] > 1).length;
-  console.log(`  بیشینهٔ تلاش ${most} · ${retried} ابزار/روز بیش از یک بار پرسیده شدند`);
+  console.log(`  بیشینهٔ تلاش ${most} · ${retried} ابزار/روز بیش از یک بار پرسیده شدند`
+    + ` · ${never} ابزار/روز اصلاً درخواستشان نرفت`);
+  // «درخواستش نرفت» فقط وقتی توضیح دارد که خودِ ردیف علتش را نوشته باشد
+  // (روزِ آینده، ابزارِ بیرونِ عمر). بی علت، یعنی فایل روزی را پوشش
+  // اعلام کرده که هرگز پرسیده نشده.
+  const errAt = at('خطا');
+  const silentNever = D.filter((r, i) => tries[i] === 0 && !String(r[errAt] ?? '').trim()).length;
+  // فایلی که پیش از R5-01 ساخته شده، برای هیچ دریافتِ اولیه‌ای عدد ندارد؛
+  // آنجا «صفر» یعنی «نسخهٔ قدیمی»، نه «نپرسیدیم». برگ راهنما قرارداد را
+  // اعلام می‌کند و همین جمله تفکیک را می‌سازد.
+  const newContract = /دورهای پرسیدن/.test(String(guide.get('تلاش دریافت') ?? ''));
+  say(silentNever === 0 ? true : (newContract ? false : 'warn'),
+    'هر ابزار/روزِ نپرسیده علتش را نوشته است',
+    silentNever
+      ? `${silentNever} ابزار/روز نه پرسیده شدند نه علتی دارند`
+        + `${newContract ? '' : ' — فایل پیش از هم‌ترازیِ شمارنده ساخته شده'}`
+      : '');
   say(missing === 0 || gapRetried === missing,
     'هر ابزار/روزِ «نیامد» تلاشِ تکمیلی دیده است',
     missing ? `${gapRetried} از ${missing} تا` : 'شکافی نمانده');
@@ -277,23 +299,48 @@ if (tryAt < 0) {
 //
 // ریشهٔ هر دو یکی بود: **یک معیار برای سه شکلِ خروجی.** حالا هر شکل
 // معیارِ خودش را دارد، و معیارِ تیک **برابریِ دقیق** است نه نامساوی.
+//
+// ═══ R5-02 و R5-03: چرا دوباره بازنویسی شد ═══
+//
+// نسخهٔ دوم درست می‌سنجید، ولی **روی برگ‌هایی که وجود داشتند**. دو کنترلِ
+// منفیِ دور پنجم همین را لو داد:
+//
+//   R5-02  کلِ برگِ یک ابزار حذف شد؛ حلقه روی برگ‌های موجود می‌چرخید، پس
+//          ابزارِ حذف‌شده اصلاً وارد حلقه نشد و فایل حکمِ «دادهٔ کامل»
+//          گرفت — «۰ برگ اشکال دارد» چون هیچ برگی سنجیده نشد.
+//   R5-03  یک روزِ کاملِ ۱۸۰ردیفی از جدولِ پیوسته حذف شد؛ انتظار
+//          (`تعداد روزهای دیده‌شده × سطلِ هر روز`) از خودِ بدنه می‌آمد، پس
+//          با حذفِ روز، هم عددِ واقعی کم شد هم عددِ انتظار. دو طرفِ
+//          تساوی با هم آب می‌رفتند.
+//
+// ریشهٔ هر دو یکی است: **انتظار از چیزی آمده بود که قرار بود سنجیده
+// شود.** حالا انتظار فقط از برگ «پوشش دریافت» می‌آید — نام ابزار، روزها،
+// و شمارِ ردیفِ هر ابزار/روز — و حلقه روی همان مجموعه می‌چرخد، نه روی
+// برگ‌های موجود. برگِ نبوده، خطاست؛ روزِ نبوده هم.
 console.log('\n── ۶. برگ‌های ابزار ──');
 const nameAt = at('نماد ابزار');
 const rowsAt2 = at('کل ردیف');
 const outWinAt = at('خارج از پنجرهٔ انتخابی');
 
-// انتظارِ هر ابزار: ردیف‌هایی که داخلِ پنجرهٔ انتخاب‌شده‌اند.
+// انتظارِ هر ابزار، **به تفکیکِ روز**: ردیف‌هایی که داخلِ پنجرهٔ
+// انتخاب‌شده‌اند. تفکیکِ روز لازم است، وگرنه جابه‌جاییِ ردیف بین دو روز
+// (یا افتادنِ یک روز و اضافه‌شدنِ ردیف به روزِ دیگر) در جمعِ کل گم می‌شود.
 const expectByName = new Map();
 const activeByName = new Map();
 const outByName = new Map();
 const daysByName = new Map();
+const dayExpect = new Map();
 for (const r of D) {
   const key = String(r[nameAt] ?? '');
-  const inWindow = num(r[rowsAt2]) - num(r[outWinAt]);
-  expectByName.set(key, (expectByName.get(key) || 0) + Math.max(0, inWindow));
+  const day = num(r[dateAt]);
+  const inWindow = Math.max(0, num(r[rowsAt2]) - num(r[outWinAt]));
+  expectByName.set(key, (expectByName.get(key) || 0) + inWindow);
   activeByName.set(key, (activeByName.get(key) || 0) + num(r[at('فعال')]));
   outByName.set(key, (outByName.get(key) || 0) + num(r[outWinAt]));
   if (num(r[rowsAt2]) > 0) daysByName.set(key, (daysByName.get(key) || 0) + 1);
+  if (!dayExpect.has(key)) dayExpect.set(key, new Map());
+  const mine = dayExpect.get(key);
+  mine.set(day, (mine.get(day) || 0) + inWindow);
 }
 
 // شکلِ خروجی از برگ راهنما، نه از حدس.
@@ -326,20 +373,57 @@ for (const [name, index] of byName) {
   if (!headByName.has(key)) headByName.set(key, (rows[0] || []).map((x) => String(x ?? '')));
 }
 
+// ═══ R5-02: نبودِ برگ، پیش از هر سنجشِ دیگری ═══
+//
+// این کنترل باید **جدا** بماند و اول بیاید: اگر برگی نباشد، هر شمارشِ
+// بعدی روی مجموعه‌ای کوچک‌تر انجام می‌شود و «۰ اشکال» می‌دهد.
+const absentSheets = [...expectByName.keys()].filter((key) => !bodyByName.has(key));
+say(absentSheets.length === 0, 'هر ابزارِ برگ پوشش، برگِ خودش را دارد',
+  absentSheets.length
+    ? `${absentSheets.length} ابزار برگ ندارند — ${absentSheets.slice(0, 5).join(' · ')}`
+    : `${expectByName.size} ابزار`);
+const straySheets = [...bodyByName.keys()].filter((key) => !expectByName.has(key));
+if (straySheets.length) {
+  say('warn', 'هر برگ در پوشش هم ردیف دارد',
+    `${straySheets.length} برگ در پوشش نیامده‌اند — ${straySheets.slice(0, 5).join(' · ')}`);
+}
+
 let tickExact = 0, tickWrong = 0;
 const wrongDetail = [];
 let barsOut = 0, barsShort = 0, contWrong = 0, tradeMismatch = 0, badState = 0, stateMissing = 0;
-for (const [key, body] of bodyByName) {
-  const expect = expectByName.get(key) ?? 0;
+let dayGone = 0;
+// حلقه روی **انتظار** می‌چرخد، نه روی برگ‌های موجود. ابزارِ بی‌برگ اینجا
+// بدنهٔ خالی می‌گیرد و مثل هر بدنهٔ کم‌ردیفِ دیگر سنجیده می‌شود.
+for (const [key, expect] of expectByName) {
+  const body = bodyByName.get(key) || [];
   const active = activeByName.get(key) ?? 0;
   const outside = outByName.get(key) ?? 0;
   const days = daysByName.get(key) ?? 0;
   const head = headByName.get(key) || [];
+  const wantDays = dayExpect.get(key) || new Map();
+  const dateCol = head.indexOf('تاریخ میلادی');
+  // شمارِ ردیفِ هر روزِ همین برگ. `dateCol < 0` یعنی برگ اصلاً سر ندارد
+  // (چون وجود ندارد)، و آن وقت همهٔ روزها صفر ردیف دارند — که درست است.
+  const gotDays = new Map();
+  if (dateCol >= 0) {
+    for (const r of body) {
+      const d = num(r[dateCol]);
+      gotDays.set(d, (gotDays.get(d) || 0) + 1);
+    }
+  }
 
   if (isTick) {
-    // ═══ معیارِ تیک: برابریِ دقیق ═══
-    if (body.length === expect) tickExact += 1;
-    else { tickWrong += 1; wrongDetail.push(`${key}: ${body.length} در برابر ${expect}`); }
+    // ═══ معیارِ تیک: برابریِ دقیق، روزبه‌روز ═══
+    const offDays = [...wantDays.entries()].filter(([d, want]) => (gotDays.get(d) || 0) !== want);
+    const extraDays = [...gotDays.keys()].filter((d) => !wantDays.has(d));
+    if (body.length === expect && !offDays.length && !extraDays.length) tickExact += 1;
+    else {
+      tickWrong += 1;
+      const first = offDays[0];
+      wrongDetail.push(`${key}: ${body.length} در برابر ${expect}`
+        + (first ? ` — روز ${faDate(first[0])} ${gotDays.get(first[0]) || 0} در برابر ${first[1]}` : '')
+        + (extraDays.length ? ` — ${extraDays.length} روزِ بیرون از پوشش` : ''));
+    }
     continue;
   }
 
@@ -355,18 +439,34 @@ for (const [key, body] of bodyByName) {
   if (expect > 0 && body.length === 0) barsShort += 1;
 
   if (isContinuous) {
-    // پیوسته یعنی هر روزِ درخواست‌شده تمام سطل‌هایش را دارد.
-    const dateCol = head.indexOf('تاریخ میلادی');
-    const dates = new Set(body.map((r) => num(r[dateCol])).filter(Boolean));
-    const want = dates.size * perDay;
-    if (perDay > 0 && body.length !== want) {
+    // ═══ R5-03: پیوسته یعنی هر روزِ **پوشش** تمام سطل‌هایش را دارد ═══
+    //
+    // انتظار از برگ پوشش می‌آید، پس روزی که کلِ ردیف‌هایش حذف شده باشد
+    // اینجا با «۰ در برابر ۱۸۰» دیده می‌شود. پیش از این، همان روز از
+    // مجموعهٔ انتظار هم حذف می‌شد و هیچ‌وقت دیده نمی‌شد.
+    const short = [...wantDays.keys()].filter((d) => (gotDays.get(d) || 0) !== perDay);
+    const extra = [...gotDays.keys()].filter((d) => !wantDays.has(d));
+    if (perDay > 0 && (short.length || extra.length)) {
       contWrong += 1;
-      wrongDetail.push(`${key}: ${body.length} ردیف در برابر ${dates.size}×${perDay}=${want}`);
+      const gone = short.filter((d) => !gotDays.has(d));
+      dayGone += gone.length;
+      wrongDetail.push(`${key}: ${short.length} روز از ${wantDays.size} سطلِ کامل ندارد`
+        + (gone.length ? ` — ${gone.length} روز اصلاً ردیفی ندارد (${faDate(gone[0])})` : '')
+        + (short.length && !gone.length ? ` — ${faDate(short[0])} ${gotDays.get(short[0]) || 0} در برابر ${perDay}` : '')
+        + (extra.length ? ` — ${extra.length} روزِ بیرون از پوشش` : ''));
     }
-  } else if (perDay > 0 && body.length > days * perDay) {
-    // فشرده: هیچ روزی نمی‌تواند بیشتر از سطل‌های پنجره‌اش ردیف بدهد.
-    barsOut += 1;
-    wrongDetail.push(`${key}: ${body.length} سطل در برابر سقفِ ${days}×${perDay}`);
+  } else if (perDay > 0) {
+    // فشرده: هیچ روزی نمی‌تواند بیشتر از سطل‌های پنجره‌اش ردیف بدهد، و
+    // روزی که ریزمعاملهٔ داخلِ پنجره داشته باید دست‌کم یک سطل بدهد.
+    const over = [...gotDays.entries()].filter(([, got]) => got > perDay);
+    const emptyDays = [...wantDays.entries()].filter(([d, want]) => want > 0 && !(gotDays.get(d) > 0));
+    if (over.length || emptyDays.length) {
+      barsOut += 1;
+      dayGone += emptyDays.length;
+      wrongDetail.push(`${key}: ${body.length} سطل در برابر سقفِ ${days}×${perDay}`
+        + (emptyDays.length ? ` — ${emptyDays.length} روزِ دارای ریزمعامله هیچ سطلی ندارد (${faDate(emptyDays[0][0])})` : '')
+        + (over.length ? ` — ${faDate(over[0][0])} ${over[0][1]} سطل` : ''));
+    }
   }
 
   const stateAt = head.indexOf('معامله شد');
@@ -387,11 +487,16 @@ if (isTick) {
   say(tradeMismatch === 0, 'جمعِ معاملهٔ شمع‌ها با شمارِ دریافت می‌خواند',
     tradeMismatch ? wrongDetail.slice(0, 3).join(' · ') : '');
   if (isContinuous) {
-    say(contWrong === 0, 'هر روز تمام سطل‌های پنجره را دارد',
-      contWrong ? wrongDetail.filter((x) => x.includes('×')).slice(0, 3).join(' · ') : '');
+    say(contWrong === 0, 'هر روزِ پوشش تمام سطل‌های پنجره را دارد',
+      contWrong ? `${contWrong} برگ — ${wrongDetail.filter((x) => x.includes('روز')).slice(0, 3).join(' · ')}` : '');
   } else {
-    say(barsOut === 0, 'هیچ برگی بیشتر از سطل‌های پنجره ردیف ندارد', barsOut ? `${barsOut} برگ` : '');
+    say(barsOut === 0, 'هر روزِ پوشش سطل‌های خودش را دارد و از سقف نمی‌گذرد',
+      barsOut ? `${barsOut} برگ — ${wrongDetail.filter((x) => x.includes('سطل')).slice(0, 3).join(' · ')}` : '');
   }
+  // روزِ کاملاً غایب اسمِ خودش را دارد، وگرنه در «چند برگ نمی‌خواند» گم
+  // می‌شود — و همین گم‌شدن، R5-03 بود.
+  say(dayGone === 0, 'هیچ روزی از برگ‌ها غایب نیست',
+    dayGone ? `${dayGone} ابزار/روز در پوشش هست ولی در برگ هیچ ردیفی ندارد` : '');
 }
 say(badState === 0, 'سطلِ دریافت‌نشده هیچ عددِ مالی ندارد', badState ? `${badState} برگ` : '');
 if (stateMissing && !isTick) {

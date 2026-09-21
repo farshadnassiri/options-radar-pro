@@ -136,9 +136,19 @@ group('۲۸۱. F-04 — تلاشِ دوباره دادهٔ موجود را پا�
   const tab = readSrc('../ui/tabs/data-export.mjs');
   check('تب همهٔ نشستن‌ها را از همین دروازه رد می‌کند',
     (tab.match(/keepBetterTape\(/g) || []).length === 3);
+  // ═══ R5-06: ادعا گسترده‌تر شد، نه ضعیف‌تر ═══
+  //
+  // پیش از این مرجع فقط از تابلوی یکجا گرفته‌شدهٔ خودِ تب می‌آمد. برای
+  // قراردادِ منقضی آن endpoint خالی برمی‌گردد، پس `keepBetterTape` در
+  // دورهای بعد بی‌مرجع می‌ماند و به «پرحجم‌تر می‌ماند» برمی‌گشت. حالا
+  // مرجعی که سرور پیدا کرده هم شمرده می‌شود — ولی **پس از** مرجعِ خودِ
+  // تب، نه به‌جایش.
   check('و مرجعِ سنجش را از تابلوی روزانهٔ گرفته‌شده می‌سازد',
-    tab.includes('const expectationFor = (pair) => expectationFromDailyRow(')
+    tab.includes('const own = expectationFromDailyRow(')
       && tab.includes('dailyIndex.set('));
+  check('و اگر آن نبود، از مرجعی که سرور برگردانده',
+    tab.includes('if (own.known) return own;')
+      && tab.includes('referenceIndex.set(String(pair.key), hit.reference)'));
 }
 
 group('۲۸۱. F-02 — پنجرهٔ انتخابی ستونِ خودش را دارد');

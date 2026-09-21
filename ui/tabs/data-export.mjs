@@ -15,7 +15,7 @@ import { LIVE_CODE_CAP, splitTradeDays } from '/core/trades-source.mjs';
 import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
 import { expectationFromDailyRow, keepBetterTape } from '/core/tape-choice.mjs';
 import {
-  REFILL_MAX_ATTEMPTS, markRefillAttempt, refillDelayMs, refillProgress,
+  REFILL_MAX_ATTEMPTS, markAttempt, refillDelayMs, refillProgress,
   refillQueue, refillSummary,
 } from '/core/refill-queue.mjs';
 import { inferLiveSessionDate, liveTapeCodes, liveTapeDay } from '/core/live-day.mjs';
@@ -327,12 +327,33 @@ export async function mount(root, { state, api }) {
   let soloFailures = 0;
   let lastFailure = '';
 
-  async function fetchBatch(batch, items, signal, depth = 0, fresh = false) {
+  /**
+   * ═══ R5-01: یک نقطهٔ شمارش برای **هر** دورِ پرسیدن ═══
+   *
+   * پیش از این، شمارنده فقط در حلقهٔ تلاشِ تکمیلی بالا می‌رفت و دریافتِ
+   * اولیه اصلاً شمرده نمی‌شد. در آزمونِ واقعیِ دور پنجم، پس از یک کلیکِ
+   * تمام‌شدهٔ «تلاش تکمیلی»، ستون «تلاش دریافت» برای ۳۵۹ ابزار/روز «۱ بار»
+   * نوشت و برگ راهنما همچنان گفت «هر ابزار/روز یک بار پرسیده شد» — چون
+   * راهنما و ابزارِ کنترل `بیش از یک بار` را نشانهٔ تلاشِ دوباره می‌گیرند.
+   *
+   * حالا شمارش همین‌جا و فقط همین‌جا می‌افتد: هر جفتی که در این دور
+   * **پاسخی برایش نشست** — موفق، خطادار، یا رهاشده — یک واحد می‌گیرد. پس
+   * دورِ اول ۱ می‌شود و دورِ تکمیلی ۲، و «نپرسیدیم» با `۰` از «پرسیدیم و
+   * نداد» جدا می‌ماند.
+   *
+   * شمارش **پس از** `keepBetterTape` می‌نشیند نه پیش از آن: اگر پاسخِ تازه
+   * بدتر باشد، رکوردِ قبلی می‌ماند و شمارنده باید روی همان رکوردِ
+   * باقی‌مانده بالا برود، وگرنه تلاشِ رفته با دور ریختنِ پاسخِ بد پاک
+   * می‌شود.
+   */
+  const mark = (record) => markAttempt(record, Date.now());
+
+  async function fetchBatch(batch, items, signal, depth = 0, fresh = false, bust = true) {
     if (soloFailures >= GIVE_UP_AFTER) {
       for (const pair of batch) {
-        items[pair.key] = keepBetterTape(items[pair.key],
+        items[pair.key] = mark(keepBetterTape(items[pair.key],
           { rows: [], error: lastFailure || 'دریافت پیاپی شکست خورد', source: 'history' },
-          expectationFor(pair));
+          expectationFor(pair)));
       }
       return false;
     }
@@ -348,6 +369,9 @@ export async function mount(root, { state, api }) {
               : { ins, date };
           }),
           fresh,
+          // دورِ زوجِ تکمیلی URLِ سادهٔ بالادست را می‌زند؛ کشِ سرور در هر
+          // حال دور زده می‌شود، وگرنه «تلاشِ دوباره» به بالادست نمی‌رسد.
+          bust,
         }),
       });
       const payload = await response.json();
@@ -369,7 +393,12 @@ export async function mount(root, { state, api }) {
         // باشد. نگه‌داشتنِ دادهٔ قبلی یعنی «از دستش ندادیم»، نه «کامل
         // است»: پرچمِ تلاشِ ناموفق جدا حمل می‌شود و حکمِ پوشش سرِ جایش
         // می‌ماند.
-        items[pair.key] = keepBetterTape(items[pair.key], fresh0, expectationFor(pair));
+        // مرجعی که سرور پیدا کرده پیش از نشستنِ رکورد ثبت می‌شود، تا
+        // همین دور هم از آن سود ببرد و دورهای بعد بی‌مرجع نمانند.
+        if (hit?.reference && Number.isFinite(Number(hit.reference.trades))) {
+          referenceIndex.set(String(pair.key), hit.reference);
+        }
+        items[pair.key] = mark(keepBetterTape(items[pair.key], fresh0, expectationFor(pair)));
       }
       soloFailures = 0;
       return true;
@@ -377,15 +406,15 @@ export async function mount(root, { state, api }) {
       if (error.name === 'AbortError') throw error;
       const halves = splitPairBatch(batch);
       if (!halves.length) {
-        items[batch[0].key] = keepBetterTape(items[batch[0].key],
-          { rows: [], error: error.message, source: 'history' }, expectationFor(batch[0]));
+        items[batch[0].key] = mark(keepBetterTape(items[batch[0].key],
+          { rows: [], error: error.message, source: 'history' }, expectationFor(batch[0])));
         soloFailures += 1;
         lastFailure = error.message;
         return false;
       }
       setStatus(`بستهٔ ${fmt.int(batch.length)} تایی نرسید؛ نصف شد و دوباره می‌رود…`);
       let all = true;
-      for (const half of halves) all = (await fetchBatch(half, items, signal, depth + 1, fresh)) && all;
+      for (const half of halves) all = (await fetchBatch(half, items, signal, depth + 1, fresh, bust)) && all;
       return all;
     }
   }
@@ -415,12 +444,44 @@ export async function mount(root, { state, api }) {
   // درست است: بی مرجع، `keepBetterTape` به «پرحجم‌تر می‌ماند» برمی‌گردد
   // و خالی هرگز جای پر را نمی‌گیرد.
   let dailyIndex = new Map();
+  // مرجعی که **سرور** برای یک ابزار/روز پیدا کرده و همراهِ پاسخ فرستاده
+  // (R5-05/R5-06). کلیدش `pair.key` است، نه `ins:date`، چون از همان
+  // حلقه‌ای پر می‌شود که پاسخ‌ها را می‌نشاند.
+  let referenceIndex = new Map();
   // تابلوی روزانه و روزهای جلسه‌باز، نگه‌داشته می‌شوند تا تلاشِ تکمیلی
   // بتواند ممیزی را دوباره حساب کند بی آنکه همه‌چیز را دوباره بگیرد.
   let lastDailyByIns = {}, lastOpenDates = [];
-  const expectationFor = (pair) => expectationFromDailyRow(
-    dailyIndex.get(`${String(pair?.ins)}:${Math.trunc(Number(pair?.date) || 0)}`),
-  );
+  /**
+   * انتظارِ تابلوی روزانه برای یک ابزار/روز — از هر دری که هست.
+   *
+   * ═══ R5-06: چرا دو منبع، و چرا به این ترتیب ═══
+   *
+   * اولویت با تابلویی است که خودِ این تب یکجا گرفته
+   * (`GetClosingPriceDailyList`)، چون یک درخواست برای کلِ عمرِ ابزار است
+   * و فرستادنش همراهِ درخواست، سرور را از پرسیدنِ دوباره بی‌نیاز می‌کند.
+   *
+   * ولی آن endpoint برای قراردادِ **منقضی** خالی برمی‌گردد — قرارداد از
+   * تابلو حذف شده. سرور همان روز را از `GetClosingPriceDaily` می‌گیرد و
+   * مرجعش را همراهِ پاسخ برمی‌گرداند؛ از R5-05 این مرجع روی رکورد
+   * می‌نشیند. پس دومین بار که همان ابزار/روز پرسیده می‌شود — دورِ خودکارِ
+   * «با تابلو نخواند» یا هر دورِ تکمیلی — دیگر بی‌مرجع نیست.
+   *
+   * بی این، `keepBetterTape` در دورهای بعد به «پرحجم‌تر می‌ماند» برمی‌گشت
+   * و هیچ‌وقت نمی‌فهمید کدام پاسخ واقعاً کامل است.
+   */
+  const expectationFor = (pair) => {
+    const own = expectationFromDailyRow(
+      dailyIndex.get(`${String(pair?.ins)}:${Math.trunc(Number(pair?.date) || 0)}`),
+    );
+    if (own.known) return own;
+    const carried = referenceIndex.get(String(pair?.key ?? ''));
+    if (!carried) return own;
+    const trades = Number(carried.trades), volume = Number(carried.volume);
+    if (!Number.isFinite(trades) || !Number.isFinite(volume)) return own;
+    // صفرِ تأییدشده هم یک مرجع است، مثل مسیرِ دیگر.
+    if (!trades && !volume) return { known: true, quiet: true, trades: 0, volume: 0, value: 0 };
+    return { known: true, quiet: false, trades, volume, value: 0 };
+  };
 
   async function fetchDaily(instruments, range, signal) {
     const codes = [...new Set(instruments.map((item) => String(item.ins)).filter(Boolean))];
@@ -466,6 +527,7 @@ export async function mount(root, { state, api }) {
       }
       dailyMissing = merged.missing;
       dailyIndex = new Map();
+      referenceIndex = new Map();
       for (const [ins, value] of Object.entries(merged.payload)) {
         for (const row of Array.isArray(value?.rows) ? value.rows : []) {
           const date = Math.trunc(Number(row?.date) || 0);
@@ -480,11 +542,11 @@ export async function mount(root, { state, api }) {
     }
   }
 
-  async function fetchHistorical(pairs, items, signal, fresh = false) {
+  async function fetchHistorical(pairs, items, signal, fresh = false, bust = true) {
     const batches = dataExportPairBatches(pairs, DATA_EXPORT_BATCH_CAP);
     for (let index = 0; index < batches.length; index += 1) {
       setStatus(`در حال دریافت روزهای بسته‌شده: بسته ${fmt.int(index + 1)} از ${fmt.int(batches.length)}…`);
-      await fetchBatch(batches[index], items, signal, 0, fresh);
+      await fetchBatch(batches[index], items, signal, 0, fresh, bust);
     }
   }
 
@@ -667,6 +729,9 @@ export async function mount(root, { state, api }) {
       const dailyByIns = await fetchDaily(instruments, range, controller.signal);
       await fetchHistorical(historical, items, controller.signal);
       await fetchLive(live, items, controller.signal, resolved);
+      // نوارِ زنده هم یک بار پرسیده شد. بی این خط، جفت‌های روزِ جاری در
+      // ستون «تلاش دریافت» خالی می‌مانند و شبیهِ «اصلاً نپرسیدیم» می‌شوند.
+      for (const pair of live) if (items[pair.key]) items[pair.key] = mark(items[pair.key]);
       setStatus('داده‌ها آماده شد.');
       // ═══ کدام روز «هنوز تمام نشده» است ═══
       //
@@ -826,9 +891,26 @@ export async function mount(root, { state, api }) {
    *    فوری همان فشار را ادامه می‌دهد.
    * ۳. **سقف دارد.** هر ابزار/روز حداکثر چند بار؛ وگرنه حلقه تا ابد
    *    می‌چرخد و سهمیه را می‌خورد بی آنکه چیزی عوض شود.
-   * ۴. **دورِ بی‌اثر حلقه را می‌بندد.** اگر یک دورِ کامل هیچ ردیفی
-   *    اضافه نکرد، ادامه‌اش فقط امیدواری است — و آن را به کاربر
-   *    می‌گوییم، نه اینکه بی‌صدا بچرخیم.
+   * ۴. **دو دورِ بی‌اثرِ پیاپی حلقه را می‌بندد.** اگر دو دور هیچ ردیفی
+   *    اضافه نکردند، ادامه‌اش فقط امیدواری است — و آن را به کاربر
+   *    می‌گوییم، نه اینکه بی‌صدا بچرخیم. **دو** دور، نه یکی، چون هر دور
+   *    یکی از دو پرچم را می‌زند (قاعدهٔ ۵) و بستنِ حلقه پس از دورِ اول
+   *    یعنی پرچمِ دوم هرگز امتحان نشود.
+   * ۵. **پرچمِ درخواست بین دورها عوض می‌شود.** آزمونِ عملیِ F-04 ثبت کرد
+   *    که همان ابزار/روز با `fresh:false` دو هزار ردیف داد و با
+   *    `fresh:true` صفر؛ و دورِ پنجم ثبت کرد که بالادست بین دو نمونه از
+   *    خالی به کامل می‌رود. ولی تا امروز هر تلاشِ پس از دورِ اول — هم
+   *    پاسِ خودکارِ «با تابلو نخواند» و هم هر دورِ تکمیلی — **فقط**
+   *    URLِ مهرخوردهٔ بالادست را می‌زد. یعنی اگر مشکل از همان شکلِ URL
+   *    بود، هیچ‌وقت شکلِ دیگر امتحان نمی‌شد. حالا دورهای فرد مهرخورده
+   *    می‌روند و دورهای زوج ساده، و `keepBetterTape` تضمین می‌کند
+   *    هیچ‌کدام دادهٔ به‌دست‌آمده را پس نگیرد.
+   *
+   *    و این با «کشِ خودمان» یکی نیست: هر دو حالت `fresh` را روشن
+   *    می‌فرستند، وگرنه دورِ ساده از کشِ ۹۰۰ثانیه‌ایِ سرور جواب می‌گیرد و
+   *    اصلاً به بالادست نمی‌رسد. اولین پیاده‌سازیِ همین قاعده دقیقاً
+   *    همین اشتباه را داشت و در اجرای آزمایشی لو رفت: چهار دور رفته بود
+   *    و بالادست فقط سه بار پرسیده شده بود.
    */
   async function refill() {
     if (!prepared || controller) return;
@@ -836,7 +918,7 @@ export async function mount(root, { state, api }) {
     stopBtn.hidden = false;
     updateRunState();
     const startedItems = { ...prepared.items };
-    let round = 0, totalFilled = 0, totalGained = 0;
+    let round = 0, totalFilled = 0, totalGained = 0, barren = 0;
     try {
       for (;;) {
         const queue = currentRefillQueue();
@@ -847,15 +929,17 @@ export async function mount(root, { state, api }) {
           + `${sum.worst ? ` — پرارزش‌ترینش کد ${faDigits(sum.worst.ins)} در ${faDigits(String(sum.worst.date))}` : ''}…`);
 
         const before = { ...prepared.items };
-        // شمارندهٔ تلاش **پیش از** درخواست می‌نشیند، نه پس از آن: اگر
-        // اجرا وسط راه قطع شود، تلاشِ رفته باید شمرده شده باشد، وگرنه
-        // سقف بی‌معنی می‌شود.
-        const at = Date.now();
-        for (const job of queue) {
-          prepared.items[job.key] = markRefillAttempt(prepared.items[job.key] || { rows: [], source: 'history' }, at);
-        }
+        // ═══ R5-01: اینجا دیگر شمارش نمی‌شود ═══
+        //
+        // شمارنده داخلِ `fetchBatch` می‌نشیند، یعنی همان جایی که دریافتِ
+        // اولیه هم از آن رد می‌شود. افزایشِ جداگانهٔ اینجا یعنی دورِ
+        // تکمیلی دو واحد بگیرد و دورِ اول هیچ — همان دو قراردادی که عدد
+        // را بی‌معنی کرد.
         const jobs = queue.map((job) => ({ ins: job.ins, date: job.date, key: job.key }));
-        await fetchHistorical(jobs, prepared.items, controller.signal, true);
+        // قاعدهٔ ۵: هر دور از کشِ سرور رد می‌شود؛ فقط مهرِ زمانِ URLِ
+        // بالادست است که بین دورها عوض می‌شود — فرد مهرخورده، زوج ساده.
+        const bust = round % 2 === 1;
+        await fetchHistorical(jobs, prepared.items, controller.signal, true, bust);
 
         // ممیزی دوباره حساب می‌شود، وگرنه صفِ دورِ بعد همان صفِ قبل است.
         prepared.audit = dataExportBlankAudit(prepared.pairs, prepared.items, lastDailyByIns, lastOpenDates);
@@ -866,13 +950,17 @@ export async function mount(root, { state, api }) {
         paintResult(prepared.instruments, prepared.pairs, prepared.items);
         paintRefillState();
 
-        if (!gained.gainedTrades) {
-          setStatus(`دور ${fmt.int(round)} هیچ ردیفی اضافه نکرد.`
+        barren = gained.gainedTrades ? 0 : barren + 1;
+        if (barren >= 2) {
+          setStatus(`دو دورِ پیاپی هیچ ردیفی اضافه نکردند — هر دو پرچمِ درخواست امتحان شد.`
             + `${totalGained ? ` در مجموع ${fmt.int(totalFilled)} ابزار/روز پر شد و ${fmt.int(totalGained)} ریزمعامله اضافه شد.` : ''}`
             + ' بالادست هنوز همان پاسخ را می‌دهد؛ چند دقیقه بعد دوباره بزنید یا بازه را کوچک‌تر بگیرید.', true);
           return;
         }
-        setStatus(`دور ${fmt.int(round)}: ${fmt.int(gained.filled)} ابزار/روز پر شد،`
+        if (!gained.gainedTrades) {
+          setStatus(`دور ${fmt.int(round)} هیچ ردیفی اضافه نکرد؛`
+            + ` دور بعد با پرچمِ دیگر می‌رود.`);
+        } else setStatus(`دور ${fmt.int(round)}: ${fmt.int(gained.filled)} ابزار/روز پر شد،`
           + ` ${fmt.int(gained.improved)} تا کامل‌تر، ${fmt.int(gained.gainedTrades)} ریزمعاملهٔ تازه.`
           + ` ${fmt.int(gained.stillEmpty)} تا هنوز خالی.`);
 
