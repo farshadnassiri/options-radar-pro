@@ -457,6 +457,8 @@ export async function mount(root, { state, api }) {
   // (R5-05/R5-06). کلیدش `pair.key` است، نه `ins:date`، چون از همان
   // حلقه‌ای پر می‌شود که پاسخ‌ها را می‌نشاند.
   let referenceIndex = new Map();
+  // ابزارهایی که تابلوی روزانه‌شان پاسخِ **خالی** داد — نه نبود، خالی.
+  let dailyBlank = [];
   // تابلوی روزانه و روزهای جلسه‌باز، نگه‌داشته می‌شوند تا تلاشِ تکمیلی
   // بتواند ممیزی را دوباره حساب کند بی آنکه همه‌چیز را دوباره بگیرد.
   let lastDailyByIns = {}, lastOpenDates = [];
@@ -535,6 +537,9 @@ export async function mount(root, { state, api }) {
           new Error(`${merged.missing.length} ابزار از تابلوی روزانه پاسخ نگرفتند`));
       }
       dailyMissing = merged.missing;
+      // R5-09: ابزاری که پاسخِ خالی گرفت هم راست‌آزمایی نشده، حتی اگر
+      // درخواستش موفق بوده باشد.
+      dailyBlank = merged.blank || [];
       dailyIndex = new Map();
       referenceIndex = new Map();
       throttled = null;
@@ -829,7 +834,7 @@ export async function mount(root, { state, api }) {
         complete: universe.complete, note: universe.note || '', outcome, audit,
         // فهرستِ کدهایی که تابلوی روزانه‌شان نیامد، تا برگ راهنما بتواند
         // بگوید راست‌آزمایی برای چند ابزار انجام نشده.
-        dailyMissing: [...dailyMissing],
+        dailyMissing: [...dailyMissing], dailyBlank: [...dailyBlank],
         // و کم‌داشته‌هایی که دیگر قفل نمی‌کنند: اگر در فایل نوشته نشوند،
         // «قفل برداشته شد» به «انگار مشکلی نبود» ترجمه می‌شود.
         coverageWarnings: warnings(),
@@ -894,13 +899,13 @@ export async function mount(root, { state, api }) {
       // کدی که تابلوی روزانه‌اش اصلاً پاسخ نگرفت، «بی‌معامله» نیست و
       // «تأییدنشده» هم نیست — راست‌آزمایی‌اش انجام **نشده**. سکوت در این
       // مورد همان بند ۴ ممیزی است.
-      const dailyGap = dailyMissing.length
-        ? ` ${fmt.int(dailyMissing.length)} ابزار تابلوی روزانه‌اش پاسخ نگرفت، پس راست‌آزماییِ خالی‌هایشان انجام نشد.`
+      const dailyGap = dailyMissing.length || dailyBlank.length
+        ? ` ${fmt.int(dailyMissing.length + dailyBlank.length)} ابزار تابلوی روزانه‌اش نیامد، پس راست‌آزماییِ خالی‌هایشان انجام نشد.`
         : '';
       setStatus(`${head}${unlistedNote}${secondPass}${deadRoute}${outcome.failed && !outcome.blank ? ` ${fmt.int(outcome.failed)} ابزار/روز خطادار.` : ''}${why}${blankWhy}${partialWhy}${matchedWhy}${dailyGap}`
         + `${universe.complete ? '' : ' پوشش دفتر ناقص است و داخل فایل نوشته می‌شود.'}`,
       outcome.blank || blanks.missing > 0 || blanks.partial > 0
-        || dailyMissing.length > 0 || Boolean(deadRoute));
+        || dailyMissing.length > 0 || dailyBlank.length > 0 || Boolean(deadRoute));
     } catch (error) {
       if (error.name === 'AbortError') setStatus('دریافت با درخواست شما متوقف شد.', true);
       else { setStatus(`ساخت خروجی کامل نشد: ${error.message}`, true); logError('data-export', error); }

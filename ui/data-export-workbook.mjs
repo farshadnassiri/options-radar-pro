@@ -89,7 +89,7 @@ export const DATA_EXPORT_CANDLE_DERIVED_HEADERS = [
 
 export function buildDataExportSheets({
   instruments = [], pairs = [], items = {}, range = {}, complete = false, note = '',
-  outcome = null, audit = [], frame = 'tick', derived = false, dailyMissing = [],
+  outcome = null, audit = [], frame = 'tick', derived = false, dailyMissing = [], dailyBlank = [],
   window = DEFAULT_SESSION_WINDOW, continuous = false, coverageWarnings = [],
 } = {}) {
   const tf = dataExportFrame(frame);
@@ -195,9 +195,19 @@ export function buildDataExportSheets({
     ['راست‌آزمایی انجام‌نشده', (() => {
       const list = (audit || []).filter((row) => row.referenceSource === 'list').length;
       const day = (audit || []).filter((row) => row.referenceSource === 'day').length;
-      const head = (dailyMissing || []).length
-        ? `${(dailyMissing || []).length} ابزار تابلوی روزانه‌شان پاسخ نگرفت، پس خالی‌هایشان راست‌آزمایی نشد.`
-        : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ گرفت.';
+      // ═══ R5-09: «پاسخ گرفت» ادعای غلطی بود ═══
+      //
+      // `dailyMissing` فقط ابزاری را می‌شمرد که اصلاً در پاسخ نبود. ولی
+      // سهمیهٔ بالادست پاسخِ **موفق با آرایهٔ خالی** می‌دهد، پس در فایلِ
+      // واقعیِ ۲۰۲۶۰۷۱۴ تا ۲۰۲۶۰۹۲۱ از ۱۵۹ ابزار فقط ۱۰ تا تابلو داشتند
+      // و همین سطر نوشت «هر ابزارِ درخواست‌شده تابلوی روزانه‌اش پاسخ
+      // گرفت». جمله درست بود و معنایش غلط.
+      const gone = (dailyMissing || []).length;
+      const hollow = (dailyBlank || []).length;
+      const head = gone || hollow
+        ? `${gone + hollow} ابزار تابلوی روزانه‌شان نیامد، پس خالی‌هایشان راست‌آزمایی نشد`
+          + `${hollow ? ` (${hollow} تا پاسخِ خالی گرفتند، ${gone} تا اصلاً پاسخ نگرفتند)` : ''}.`
+        : 'هر ابزارِ درخواست‌شده تابلوی روزانه‌اش ردیف داد.';
       return `${head} مبنای سنجش: ${list} ابزار/روز از فهرستِ روزانهٔ همین تب`
         + `${day ? ` · ${day} ابزار/روز از تابلوی تک‌روزِ سرور — این‌ها اغلب قراردادِ منقضی‌اند که از فهرستِ یکجا حذف شده‌اند` : ''}`
         + `${blanks.unknown ? ` · ${blanks.unknown} ابزار/روز هیچ مرجعی نداشتند` : ''}.`;

@@ -80,5 +80,24 @@ export function mergeInsPayloads(requested = [], parts = []) {
     if (!part || typeof part !== 'object') continue;
     for (const [code, value] of Object.entries(part)) payload[code] = value;
   }
-  return { payload, missing: missingInsCodes(requested, payload), batches: (parts || []).length };
+  // ═══ R5-09: «پاسخ گرفت» با «ردیف داد» یکی نیست ═══
+  //
+  // `missing` فقط کدهایی را می‌شمرد که اصلاً در پاسخ نبودند. ولی بالادست
+  // وقتی سهمیه را می‌بندد، پاسخِ **موفق با آرایهٔ خالی** می‌دهد — پس هر
+  // کد در پاسخ هست و `missing` صفر می‌شود.
+  //
+  // در فایلِ واقعیِ ۲۰۲۶۰۷۱۴ تا ۲۰۲۶۰۹۲۱ همین شد: از ۱۵۹ ابزار فقط ۱۰
+  // تا تابلوی روزانه داشتند، و برگ راهنما نوشت «هر ابزارِ درخواست‌شده
+  // تابلوی روزانه‌اش پاسخ گرفت». جمله درست بود و معنایش غلط.
+  const blank = (requested || []).map(String)
+    .filter((code) => {
+      const value = payload[code];
+      if (!value) return false;                       // این «نبود» است، نه «خالی»
+      const rows = Array.isArray(value?.rows) ? value.rows : (Array.isArray(value) ? value : null);
+      return Array.isArray(rows) && rows.length === 0;
+    });
+  return {
+    payload, missing: missingInsCodes(requested, payload),
+    blank, batches: (parts || []).length,
+  };
 }
