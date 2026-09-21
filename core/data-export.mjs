@@ -991,32 +991,72 @@ export function suspectEmptyDays(pairs = [], items = {}, { minPairs = SUSPECT_DA
  * بی‌تاریخ، و دفترِ نسخه‌قدیمی که اصلاً از کاتالوگ عبور نکرده. هر کدام
  * تمام می‌شوند و قفل باز می‌شود؛ شکستِ مشخصاتِ ابزار نامرتبط مانع نیست.
  */
-export function exportBlockers(universe = null, instruments = null) {
-  if (!universe) return [];
-  const out = [];
+export function exportGate(universe = null, instruments = null) {
+  const blocking = [], warnings = [];
+  if (!universe) return { blocking, warnings };
+
+  // ═══ R4-05: چرا فهرست دو تکه شد ═══
+  //
+  // بازآزماییِ پذیرش: کاربر بازهٔ یک‌هفته‌ای و ۱۰۸ قرارداد را انتخاب کرد و
+  // دکمهٔ آماده‌سازی **هرگز فعال نشد** — «پیمایش کاتالوگ ابزار تمام نشده»،
+  // در حالی که ساختِ دفتر روی ۱٬۳۷۴ از ۳٬۵۱۳ جست‌وجو بود و شمارِ کل هم با
+  // کشفِ شاخه‌های تازه بالا می‌رفت. یعنی شرطِ باز شدنِ قفل خودش در حال
+  // دور شدن بود.
+  //
+  // نتیجه‌اش این شد که مسیرِ واقعیِ کلیک تا دانلود **یک بار هم اجرا نشد**.
+  // قفلی که کاربر نمی‌تواند بازش کند، محافظت نیست؛ همان «جمعِ نصفه» است
+  // با ظاهرِ احتیاط.
+  //
+  // مرزِ درست: **بی‌معنا** در برابر **ناقص**.
+  //   بی‌معنا → قفل. خروجی‌اش قابلِ اتکا نیست و کاربر کاری از دستش برنمی‌آید.
+  //   ناقص   → هشدار. داده‌ای که در دست است بیرون می‌رود و کم‌داشته‌اش
+  //            هم در صفحه و هم داخلِ فایل نوشته می‌شود.
+  //
+  // این همان تصمیمی است که یک بار برای `complete` گرفته شد (قفلِ دائمیِ
+  // «۶۶ جفت ناقص کال/پوت» که هرگز درست نمی‌شد) و حالا به دو پرچمِ دیگر
+  // هم تعمیم پیدا می‌کند.
   const missing = Math.max(0, Math.trunc(n(universe.missingDays)));
-  if (missing > 0) out.push(`${missing} روزِ کاریِ این بازه هنوز اسکن نشده`);
+  if (missing > 0) warnings.push(`${missing} روزِ کاریِ این بازه هنوز اسکن نشده`);
+
   const scan = universe.health?.scan || null;
   // دفترِ بی‌گزارشِ سلامت چیزی برای ادعا ندارد؛ نبودِ خبر، خبرِ بد نیست.
-  if (!scan) return out;
-  if (scan.versionCurrent === false) out.push('دفتر با نسخهٔ قدیمی ساخته شده و از کاتالوگ ابزار عبور نکرده');
-  else {
-    if (scan.catalogComplete === false) out.push('پیمایش کاتالوگ ابزار تمام نشده');
-    if (scan.detailsComplete === false) {
-      // مشخصاتِ کلِ بازار نباید خروجیِ چند قراردادِ معلوم را نگه دارد.
-      // برای قراردادِ معامله‌شده `activeFrom` از اولین روزِ واقعی می‌آید
-      // و عمرش در این بازه معلوم است. فقط قراردادِ انتخابیِ بی‌تاریخ است
-      // که بدون پاس مشخصات نمی‌تواند با صداقت وارد بازه شود.
-      const scoped = Array.isArray(instruments);
-      const unknown = scoped ? unknownListingContracts(instruments) : [];
-      if (!scoped || unknown.length > 0) {
-        out.push(scoped
-          ? `${unknown.length} قراردادِ انتخابی هنوز تاریخ عرضهٔ معلوم ندارد`
-          : 'مشخصات قراردادهای بی‌معامله کامل نشده');
-      }
+  if (!scan) return { blocking, warnings };
+
+  // تنها موردِ واقعاً **بی‌معنا**: دفتر با نسخهٔ قدیمی ساخته شده، پس
+  // تاریخ‌های عرضه‌اش شکلِ دیگری دارند و هیچ انتخابی قابلِ اتکا نیست.
+  // این یکی به پیمایش وابسته نیست (`version >= ROSTER_VERSION`) و با
+  // بازسازیِ دفتر خودش باز می‌شود — یعنی قفلی است که راهِ خروج دارد.
+  if (scan.versionCurrent === false) {
+    blocking.push('دفتر با نسخهٔ قدیمی ساخته شده و از کاتالوگ ابزار عبور نکرده');
+    return { blocking, warnings };
+  }
+
+  if (scan.catalogComplete === false) {
+    warnings.push('پیمایش کاتالوگ ابزار تمام نشده — ممکن است قراردادی کشف‌نشده مانده باشد');
+  }
+  if (scan.detailsComplete === false) {
+    // مشخصاتِ کلِ بازار نباید خروجیِ چند قراردادِ معلوم را نگه دارد.
+    // قراردادِ انتخابیِ بی‌تاریخ هم وارد بازه نمی‌شود و نامش در فایل
+    // می‌آید — پس نبودش «کم‌داشته» است، نه «خروجیِ غلط».
+    const scoped = Array.isArray(instruments);
+    const unknown = scoped ? unknownListingContracts(instruments) : [];
+    if (!scoped || unknown.length > 0) {
+      warnings.push(scoped
+        ? `${unknown.length} قراردادِ انتخابی تاریخ عرضهٔ معلوم ندارد و وارد بازه نمی‌شود`
+        : 'مشخصات قراردادهای بی‌معامله کامل نشده');
     }
   }
-  return out;
+  return { blocking, warnings };
+}
+
+/** فقط آنچه واقعاً خروجی را قفل می‌کند. */
+export function exportBlockers(universe = null, instruments = null) {
+  return exportGate(universe, instruments).blocking;
+}
+
+/** آنچه خروجی را قفل نمی‌کند ولی باید گفته شود — در صفحه و داخلِ فایل. */
+export function exportWarnings(universe = null, instruments = null) {
+  return exportGate(universe, instruments).warnings;
 }
 
 /**

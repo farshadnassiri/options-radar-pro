@@ -6,7 +6,7 @@ import {
   dataExportCandles, dataExportContractGroups, dataExportFrame, dataExportOutcome,
   dataExportPairBatches, dataExportPairs, dataExportRouteSplit, dataExportSessionRows,
   dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments,
-  exportBlockers, instrumentsWithPairs, splitPairBatch, suspectEmptyDays,
+  exportBlockers, exportWarnings, instrumentsWithPairs, splitPairBatch, suspectEmptyDays,
   unknownListingContracts, clockLabel, sessionWindow,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
@@ -122,12 +122,23 @@ export async function mount(root, { state, api }) {
   // پاسِ مشخصات هزاران قراردادِ بی‌معاملهٔ نامرتبط، انتخابِ کاربر را قفل نمی‌کند.
   // اگر خودِ قرارداد انتخابی تاریخ عرضه نداشته باشد، همان انتخاب دقیقاً مانع می‌شود.
   const blockers = () => exportBlockers(universe, selectedInstruments());
+  const warnings = () => exportWarnings(universe, selectedInstruments());
 
   function paintBlockerStatus() {
     if (controller || exporting) return;
     const why = blockers();
-    setStatus(why.length
-      ? `تا تکمیل دفتر، خروجی قفل است — ${faDigits(why.join('؛ '))}.`
+    if (why.length) {
+      setStatus(`تا تکمیل دفتر، خروجی قفل است — ${faDigits(why.join('؛ '))}.`, true);
+      return;
+    }
+    // ═══ R4-05: ناقص گفته می‌شود، ولی قفل نمی‌کند ═══
+    //
+    // پیش از این همین حرف‌ها دکمه را می‌بستند و کاربر راهی نداشت. حالا
+    // خروجی باز است و کم‌داشته‌اش همین‌جا و داخلِ فایل نوشته می‌شود.
+    const soft = warnings();
+    setStatus(soft.length
+      ? `خروجی باز است، ولی پوشش ناقص است — ${faDigits(soft.join('؛ '))}.`
+        + ' همین محدودیت در برگ راهنمای فایل هم ثبت می‌شود.'
       : '');
   }
 
@@ -276,6 +287,9 @@ export async function mount(root, { state, api }) {
           + (stuck.length
             ? `ولی تا رفعِ این‌ها خروجی قفل است — ${stuck.join('؛ ')}.`
             : 'با پوشش فعلی هم می‌توانید خروجی بگیرید و محدودیت داخل فایل ثبت می‌شود.');
+        // ساختِ دفتر ادامه دارد، ولی دیگر دکمه را نمی‌بندد؛ پس وضعیتِ
+        // کنارِ دکمه هم باید همین را بگوید، نه قفلِ نبوده را.
+        paintBlockerStatus();
         refreshTimer = setTimeout(() => loadUniverse(range), 4000);
       } else if (!payload.complete) $('de-universe-note').textContent = `${payload.note || ''} پوشش دفتر کامل نیست؛ خروجی در دسترس است و این محدودیت داخل برگ راهنما ثبت می‌شود.`;
       // قفل باید همان‌جا که دکمه است دیده شود، نه فقط در یادداشت بالا.
@@ -721,6 +735,9 @@ export async function mount(root, { state, api }) {
         // فهرستِ کدهایی که تابلوی روزانه‌شان نیامد، تا برگ راهنما بتواند
         // بگوید راست‌آزمایی برای چند ابزار انجام نشده.
         dailyMissing: [...dailyMissing],
+        // و کم‌داشته‌هایی که دیگر قفل نمی‌کنند: اگر در فایل نوشته نشوند،
+        // «قفل برداشته شد» به «انگار مشکلی نبود» ترجمه می‌شود.
+        coverageWarnings: warnings(),
       };
       paintResult(sheetInstruments, pairs, items);
       // ═══ چرا صفر بودنِ داده، خبرِ اول است ═══

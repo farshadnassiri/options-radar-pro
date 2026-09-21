@@ -90,7 +90,7 @@ export const DATA_EXPORT_CANDLE_DERIVED_HEADERS = [
 export function buildDataExportSheets({
   instruments = [], pairs = [], items = {}, range = {}, complete = false, note = '',
   outcome = null, audit = [], frame = 'tick', derived = false, dailyMissing = [],
-  window = DEFAULT_SESSION_WINDOW, continuous = false,
+  window = DEFAULT_SESSION_WINDOW, continuous = false, coverageWarnings = [],
 } = {}) {
   const tf = dataExportFrame(frame);
   const coverage = dataExportCoverageRows(instruments, pairs, items, audit, window);
@@ -224,6 +224,15 @@ export function buildDataExportSheets({
         + `${basis.recovered ? ` — ${basis.recovered} ابزار/روز که پیش از این هم‌ترازی اصلاً درخواست نمی‌رفت` : ''}`
       : '—'],
     ['پوشش دفتر قراردادها', complete ? 'کامل' : 'ناقص — همه قراردادها تضمین نمی‌شود'],
+    // ═══ R4-05: قفلی که برداشته شد، باید اینجا نوشته شود ═══
+    //
+    // ساختِ ناتمامِ دفتر دیگر دکمه را نمی‌بندد — چون قفلی که کاربر
+    // نمی‌تواند بازش کند محافظت نیست. ولی اگر همین‌جا نوشته نشود،
+    // «قفل برداشته شد» به «انگار مشکلی نبود» ترجمه می‌شود، و فایلی
+    // که ناقص است کامل به نظر می‌رسد.
+    ['کم‌داشتهٔ دفتر هنگام خروجی', (coverageWarnings || []).length
+      ? (coverageWarnings || []).join(' · ')
+      : 'دفتر هنگام ساختِ این فایل کم‌داشته‌ای نداشت'],
     ['یادداشت منبع', note || '—'],
     ['تعریف ردیف', tf.seconds
       ? 'هر ردیف یک شمع است: باز/بسته اولین و آخرین قیمتِ مشاهده‌شدهٔ همان سطل، و حجم و ارزش جمعِ معامله‌های باطل‌نشدهٔ آن.'
