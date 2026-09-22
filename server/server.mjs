@@ -518,11 +518,37 @@ function withUpstream(decided, first, alt) {
  * تصمیم می‌گیرد.
  *
  * `count` همیشه هست تا «آمد ولی خالی بود» از «نیامد» جدا بماند.
+ *
+ * ═══ R5-15: و `count: 0` خودش دو چیز است ═══
+ *
+ * `firstList()` دو حالتِ کاملاً متفاوت را به یک `[]` تبدیل می‌کند —
+ * «بالادست آمد و گفت این روز رکوردی نداشت» و «بالادست چیزی داد که اصلاً
+ * فهرست نیست». `core/upstream-shape.mjs` دقیقاً برای همین ساخته شد، ولی
+ * تا امروز فقط مسیرِ ریزمعامله از آن استفاده می‌کرد؛ `book` و `state` و
+ * `threshold` با `count: 0` و بی هیچ نشانه‌ای برمی‌گشتند و مصرف‌کننده
+ * هر دو را «آن روز چیزی نبود» می‌خواند.
+ *
+ * مثل `withUpstream`، شکل **فقط وقتی** همراه می‌شود که خالی مانده باشیم:
+ * پاسخِ پرردیف نشانه لازم ندارد و پاسخ را هم سنگین نمی‌کنیم.
  */
 function shapeHistorical(kind, raw, date = 0, ins = '') {
+  // شکلِ خام، پیش از هر نرمال‌سازی — چون همین‌جاست که «نیامد» و «خالی
+  // آمد» هنوز از هم جدا هستند.
+  const blankShape = () => {
+    const shape = upstreamShape(raw);
+    // هم نامِ ماشین‌خوان و هم جملهٔ آدم‌خوان: مصرف‌کننده نباید برای
+    // تشخیصِ «فهرستِ خالیِ واقعی» رشتهٔ فارسی مقایسه کند.
+    return { blank: true, upstreamKind: shape.kind, upstream: upstreamShapeLabel(shape) };
+  };
   if (kind === 'book') {
     const rows = firstList(raw);
-    return { events: normalizeBookEvents(rows), count: rows.length };
+    const events = normalizeBookEvents(rows);
+    // دفترِ رویداد دو جور می‌تواند تهی شود: رکوردی نیامد، یا رکورد آمد و
+    // هیچ‌کدام رویدادِ معتبری نبود. دومی خبرِ بدتری است و باید دیده شود.
+    if (!events.length) {
+      return { events, count: rows.length, ...blankShape(), droppedRows: rows.length };
+    }
+    return { events, count: rows.length };
   }
   // `trades` عمداً اینجا نیست: مسیر ریزمعامله پیش از رسیدن به این تابع به
   // `fetchHistoricalTape` می‌رود تا تلاشِ پرچمِ دوم و حذفِ تکرار را هم
@@ -531,6 +557,7 @@ function shapeHistorical(kind, raw, date = 0, ins = '') {
     return datedRow(kind, firstDict(raw), date, ins);
   }
   const rows = firstList(raw);
+  if (!rows.length) return { rows, count: 0, ...blankShape() };
   return { rows, count: rows.length };
 }
 

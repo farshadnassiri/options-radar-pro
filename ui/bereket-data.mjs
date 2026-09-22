@@ -14,15 +14,36 @@
 // زمان، «الان» معنی ندارد.
 
 import { fetchDailies } from './daily-intake.mjs';
+import { fetchHist, fetchHistKinds, histWarning } from './hist-intake.mjs';
 
 const memo = new Map();
 
-/** کش درون‌مرورگری. روز تمام‌شده دیگر عوض نمی‌شود، پس عمرش تا بستن تب است. */
+/**
+ * کش درون‌مرورگری. روز تمام‌شده دیگر عوض نمی‌شود، پس عمرش تا بستن تب است.
+ *
+ * ═══ چرا شکست کش نمی‌شود ═══
+ *
+ * تا پیش از دروازه، خطای HTTP یک `throw` بود و `catch` کلید را پاک
+ * می‌کرد، پس تلاشِ بعدی دوباره می‌پرسید. دروازه عمداً پرتاب نمی‌کند —
+ * حکمِ `error` برمی‌گرداند تا مصرف‌کننده بتواند نامِ آنچه نرسید را
+ * بگوید. بی این بند، همان تغییر یک پسرفت می‌شد: **یک** پاسخِ خراب تا
+ * پایانِ نشست می‌ماند و هیچ تلاشِ دوباره‌ای ممکن نبود.
+ */
 async function once(key, make) {
   if (memo.has(key)) return memo.get(key);
-  const promise = make().catch((error) => { memo.delete(key); throw error; });
+  const promise = make().then((value) => {
+    if (unusable(value)) memo.delete(key);
+    return value;
+  }).catch((error) => { memo.delete(key); throw error; });
   memo.set(key, promise);
   return promise;
+}
+
+/** حکمی که ارزشِ نگه‌داشتن ندارد: نرسید، پس بعداً دوباره بپرس. */
+function unusable(value) {
+  const states = value?.verdict ? [value.verdict.state]
+    : Object.values(value?.verdicts || {}).map((v) => v.state);
+  return states.some((state) => state === 'error' || state === 'missing' || state === 'throttled');
 }
 
 export function clearBereketCache() { memo.clear(); }
@@ -60,18 +81,36 @@ export async function loadDailies(ins, { n = 0 } = {}) {
   return (await loadDailiesVerdict(ins, { n })).rows;
 }
 
+/**
+ * ریزمعاملهٔ یک ابزار در یک روز، همراهِ حکمش.
+ *
+ * ═══ چرا حکم، و چرا اینجا از همه مهم‌تر است ═══
+ *
+ * سرور از چهار دور ممیزی به این‌سو `complete` · `verified` · `quiet` ·
+ * `throttled` را با هر پاسخ می‌فرستد و این بارگذار **همه‌شان را دور
+ * می‌ریخت** (`body?.rows || []`). یعنی نوارِ سهمیه‌خورده — که `HTTP 200`
+ * با آرایهٔ خالی است — «آن روز معامله‌ای نشد» خوانده می‌شد، و تبِ سفر در
+ * زمان رویش یک جلسهٔ معاملاتیِ ساکت می‌ساخت که هرگز وجود نداشت.
+ */
+export async function loadTradesVerdict(ins, date) {
+  const key = `trades|${ins}|${compact(date)}`;
+  return once(key, () => fetchHist('trades', ins, compact(date)));
+}
+
 /** ریزمعاملهٔ یک ابزار در یک روز تکمیل‌شده. */
 export async function loadTrades(ins, date) {
-  const key = `trades|${ins}|${compact(date)}`;
-  const body = await once(key, () => getJson(`/api/hist?kind=trades&ins=${encodeURIComponent(ins)}&date=${compact(date)}`));
-  return body?.rows || [];
+  return (await loadTradesVerdict(ins, date)).rows;
+}
+
+/** رویدادهای دفتر سفارش، همراهِ حکمشان. */
+export async function loadBookEventsVerdict(ins, date) {
+  const key = `book|${ins}|${compact(date)}`;
+  return once(key, () => fetchHist('book', ins, compact(date)));
 }
 
 /** رویدادهای دفتر سفارش یک ابزار در یک روز تکمیل‌شده. */
 export async function loadBookEvents(ins, date) {
-  const key = `book|${ins}|${compact(date)}`;
-  const body = await once(key, () => getJson(`/api/hist?kind=book&ins=${encodeURIComponent(ins)}&date=${compact(date)}`));
-  return body?.events || [];
+  return (await loadBookEventsVerdict(ins, date)).rows;
 }
 
 /**
@@ -83,15 +122,27 @@ export async function loadBookEvents(ins, date) {
  */
 export async function loadDayMeta(ins, date, second) {
   const day = compact(date);
-  const [threshold, state] = await Promise.all([
-    once(`th|${ins}|${day}`, () => getJson(`/api/hist?kind=threshold&ins=${encodeURIComponent(ins)}&date=${day}`)).catch(() => null),
-    once(`st|${ins}|${day}`, () => getJson(`/api/hist?kind=state&ins=${encodeURIComponent(ins)}&date=${day}`)).catch(() => null),
-  ]);
+  // ═══ چرا `catch(() => null)` برداشته شد ═══
+  //
+  // نسخهٔ قبلی هر دو درخواست را در `catch` می‌انداخت و `null` می‌داد؛
+  // `lastBefore` هم رویش `NaN` و `''` برمی‌گرداند. نتیجه: «دامنه را
+  // نگرفتیم» و «دامنه‌ای اعلام نشده» یک شکل می‌شدند — و تشخیصِ صف
+  // دقیقاً روی همین دو تکیه دارد. حالا هر نوع حکمِ خودش را دارد و
+  // هیچ‌کدام دیگری را نمی‌اندازد.
+  const got = await once(`meta|${ins}|${day}`,
+    () => fetchHistKinds(['threshold', 'state'], ins, day));
+  const threshold = got.byKind.threshold;
+  const state = got.byKind.state;
   return {
     limitLow: lastBefore(threshold?.rows, second, 'psGelStaMin'),
     limitHigh: lastBefore(threshold?.rows, second, 'psGelStaMax'),
     state: lastBefore(state?.rows, second, 'cEtaval', ''),
     stateTitle: lastBefore(state?.rows, second, 'cEtavalTitle', ''),
+    // و آنچه نرسید، با نام. بی این، «—» در رابط یعنی «نبود»، در حالی که
+    // می‌تواند «نگرفتیم» باشد.
+    verdicts: got.verdicts,
+    trusted: got.summary.trusted === got.summary.total,
+    note: histWarning(got.summary),
   };
 }
 
