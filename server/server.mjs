@@ -1443,8 +1443,19 @@ async function handle(req, res) {
           continue;
         }
         const tape = await fetchHistoricalTape(code, date, { fresh, expect, bust });
-        watch.saw(tape);
-        items[key] = watch.throttled() ? { ...tape, throttled: true } : tape;
+        const verdict = watch.saw(tape, key);
+        items[key] = verdict ? { ...tape, throttled: true } : tape;
+        // ═══ R5-10: مدرکِ حکم، خودش قربانیِ حکم است ═══
+        //
+        // حکم روی پنجره‌ای صادر می‌شود که چند ابزار/روزِ **قبلی** هم
+        // در آن تکذیب شده‌اند. آن‌ها همین حالا «نیامد» نشسته‌اند، در
+        // حالی که دقیقاً همان چیزی‌اند که نشان داد سهمیه بسته شده.
+        // بی این حلقه، در خروجیِ واقعی ۵۴ ردیف علتِ غلط می‌گرفتند.
+        if (verdict) {
+          for (const suspect of watch.state().suspects) {
+            if (items[suspect]) items[suspect] = { ...items[suspect], throttled: true };
+          }
+        }
       }
       const state = watch.state();
       return sendJson(res, 200, {

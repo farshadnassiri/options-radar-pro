@@ -570,9 +570,17 @@ export async function mount(root, { state, api }) {
       if (throttled) {
         for (let rest = index; rest < batches.length; rest += 1) {
           for (const pair of batches[rest]) {
-            if (items[pair.key]) continue;
+            // ═══ شرط اینجا «ردیف دارد» است، نه «رکورد دارد» ═══
+            //
+            // نسخهٔ اول `if (items[pair.key]) continue` بود، و همان
+            // ابزار/روزهایی را رد می‌کرد که در پاسِ قبلی **خالی** نشسته
+            // بودند — یعنی دقیقاً آن‌هایی که باید برچسبشان عوض می‌شد.
+            // در هارنس ۵۴ ردیف به همین دلیل «نیامد» ماندند، با آنکه
+            // سرور سهمیه را تشخیص داده بود.
+            const seen = items[pair.key];
+            if (Array.isArray(seen?.rows) && seen.rows.length) continue;
             items[pair.key] = {
-              rows: [], source: 'history', throttled: true,
+              ...(seen || {}), rows: [], source: 'history', throttled: true,
               error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد',
             };
           }
