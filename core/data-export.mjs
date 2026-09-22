@@ -696,17 +696,24 @@ export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}, op
     const tapeTrades = active.length;
     const tapeCanceled = rows.length - active.length;
     const tapeVolume = active.reduce((sum, row) => sum + n(row?.quantity), 0);
+    // حجمِ ردیف‌های باطل — در جمعِ ما نمی‌نشیند ولی تابلو می‌شماردش.
+    const tapeCanceledVolume = rows
+      .filter((row) => row?.canceled === true)
+      .reduce((sum, row) => sum + n(row?.quantity), 0);
     out.push({
       key: pair.key, ins: String(pair.ins), date: pair.date,
       known: Boolean(daily), referenceSource,
       dailyTrades: daily ? dailyTrades : NaN,
       dailyVolume: daily ? dailyVolume : NaN,
       tapeTrades, tapeCanceled, tapeVolume,
-      tradeGap: daily ? dailyTrades - tapeTrades : NaN,
-      volumeGap: daily ? dailyVolume - tapeVolume : NaN,
+      tapeCanceledVolume,
+      // کسری، پس از کنارگذاشتنِ آنچه توضیح دارد: تابلو معاملهٔ باطل را
+      // می‌شمارد، پس تا اندازهٔ آن‌ها اختلاف کسری نیست.
+      tradeGap: daily ? Math.max(0, dailyTrades - tapeTrades - tapeCanceled) : NaN,
+      volumeGap: daily ? Math.max(0, dailyVolume - tapeVolume - tapeCanceledVolume) : NaN,
       verdict: coverageVerdict({
         daily: Boolean(daily), dailyTrades, dailyVolume,
-        tapeTrades, tapeCanceled, tapeVolume,
+        tapeTrades, tapeCanceled, tapeVolume, tapeCanceledVolume,
         // روزِ نوارِ زنده، یا روزی که فازش `open` است: هیچ‌کدام تابلوی
         // نهاییِ سنجش‌پذیر ندارند.
         sessionOpen: openDates.has(Math.trunc(n(pair.date))) || (liveDay && !daily),
@@ -745,14 +752,27 @@ export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}, op
  */
 export function coverageVerdict({
   daily = false, dailyTrades = 0, dailyVolume = 0,
-  tapeTrades = 0, tapeCanceled = 0, tapeVolume = 0, sessionOpen = false,
+  tapeTrades = 0, tapeCanceled = 0, tapeVolume = 0, tapeCanceledVolume = 0,
+  sessionOpen = false,
 } = {}) {
   if (sessionOpen) return 'open';
   if (!daily) return tapeTrades ? 'unknown' : 'unknown';
   const boardTraded = dailyTrades > 0 || dailyVolume > 0;
   if (!tapeTrades) return boardTraded ? 'missing' : 'quiet';
   if (!boardTraded) return 'surplus';
-  const volumeMatches = tapeVolume === dailyVolume;
+  // ═══ R5-12: همان قاعده، و این‌بار **یک** جا ═══
+  //
+  // این شرط تا امروز برابریِ **دقیقِ** حجم می‌خواست، در حالی که
+  // `tapeMatchesDaily` در `core/tape-choice.mjs` همین را با رواداریِ
+  // حجمِ باطل‌ها می‌سنجید. یعنی یک مفهوم، دو پیاده‌سازی — و نتیجه‌اش در
+  // خروجیِ واقعی این شد که سرور شش ابزار/روز را «کامل» می‌دانست و
+  // بازبینی همان‌ها را «ناقص» می‌خواند.
+  //
+  // درسش در `NEXT.md` نوشته شده بود: «عددی که در دو جا به دو راه حساب
+  // می‌شود، آزمونی می‌خواهد که همان دو راه را کنار هم بگذارد.» دستهٔ ۲۹۰
+  // حالا همین را می‌کند.
+  const volumeGap = dailyVolume - tapeVolume;
+  const volumeMatches = volumeGap >= 0 && volumeGap <= Math.max(0, tapeCanceledVolume);
   const countExplained = Math.abs(dailyTrades - tapeTrades) <= tapeCanceled;
   if (volumeMatches && countExplained) return 'matched';
   return 'partial';
