@@ -22,6 +22,7 @@ import {
   GREEKS, annotateReplay, monitorSeries, monitorGreekSummary, monitorVolSummary, monitorCoverage,
 } from '/core/monitor.mjs';
 import { chart as trackChart, LEG_COLORS } from '/ui/track-chart.mjs';
+import { dailySummary, dailyWarning, fetchDailies } from '/ui/daily-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -727,12 +728,16 @@ export async function mount(root, { state }) {
     loadBtn.disabled = true; runBtn.disabled = true;
     setStatus(`در حال دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
     try {
-      const payloads = await Promise.all(chunks(codes, 70).map(async (part) => {
-        const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0`);
-        const payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
-        return payload;
-      }));
+      // R5-14: از دروازهٔ مشترک. `__meta` جدا می‌شود، پس پیمایشِ پایین
+      // دیگر یک کلیدِ غیرابزار را ابزار نمی‌بیند.
+      const parts = await Promise.all(chunks(codes, 70).map((part) => fetchDailies(part)));
+      const payloads = parts.map((got) => got.byIns);
+      {
+        const verdicts = {};
+        for (const got of parts) Object.assign(verdicts, got.verdicts);
+        const note = dailyWarning(dailySummary(verdicts, parts.find((g) => g.meta?.suspectThrottled)?.meta));
+        if (note) setStatus(note, true);
+      }
       // ═══ چرا خطای هر ابزار جدا نگه داشته می‌شود ═══
       //
       // بند ۷ ممیزیِ ۱۴۰۵/۰۶/۲۹: سرور خطای هر ابزار را **داخل** پاسخِ

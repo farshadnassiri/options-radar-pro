@@ -36,7 +36,9 @@ import { handoffRange, handoffEntryDate } from '/ui/handoff.mjs';
 import { clipDates, comboEntryDates, fastPathCodes } from '/ui/backtest-fastpath.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchLiveTape, quoteWarning } from '/ui/quote-intake.mjs';
 import { chart, LEG_COLORS } from '/ui/track-chart.mjs';
+import { fetchTapeBatch, tapeSummary, tapeWarning } from '/ui/tape-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -494,13 +496,19 @@ export async function mount(root, { state }) {
    */
   async function postTradeBatch(requests, { fresh = false } = {}) {
     try {
-      const response = await fetch('/api/trades/batch', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ requests, fresh }),
-      });
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
-      return payload.items || {};
+      // ═══ R5-13: حکمِ هر ابزار/روز همراهِ ردیف‌هایش می‌آید ═══
+      //
+      // نسخهٔ قبلی `payload.items` را خام برمی‌داشت و هیچ‌کجا `complete`،
+      // `shortfall` یا `throttled` را نمی‌خواند. نتیجهٔ بک‌تست روی نوارِ
+      // بریده ساخته می‌شد و از نتیجهٔ روی نوارِ کامل قابلِ تشخیص نبود —
+      // بدترین حالت برای چیزی که مستقیم به تصمیمِ معاملاتی می‌رسد.
+      const got = await fetchTapeBatch(requests, { fresh });
+      if (got.throttled) batchErrors.push(got.note);
+      else {
+        const warn = tapeWarning(tapeSummary(got.verdicts));
+        if (warn) batchErrors.push(warn);
+      }
+      return got.items;
     } catch (error) {
       batchErrors.push(String(error?.message || error));
       return {};
@@ -509,17 +517,13 @@ export async function mount(root, { state }) {
 
   /** نوار زندهٔ امروز، برای همان ابزارها. */
   async function getLiveTape(codes) {
-    const items = {};
-    for (let at = 0; at < codes.length; at += LIVE_CODE_CAP) {
-      const part = codes.slice(at, at + LIVE_CODE_CAP);
-      try {
-        const response = await fetch(`/api/live-trades?ins=${part.join(',')}`, { cache: 'no-store' });
-        const payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || 'نوار زنده دریافت نشد');
-        Object.assign(items, payload.items || {});
-      } catch (error) { batchErrors.push(String(error?.message || error)); }
-    }
-    return items;
+    // دسته‌بندی و بررسیِ پاسخ هر دو در دروازه‌اند؛ اینجا فقط خطاها به
+    // همان جایی می‌روند که پیش از این می‌رفتند.
+    const got = await fetchLiveTape(codes);
+    for (const fail of got.errors) batchErrors.push(String(fail.why));
+    const note = quoteWarning(got.summary);
+    if (note) batchErrors.push(note);
+    return got.byIns;
   }
 
   let batchErrors = [];
@@ -1351,12 +1355,13 @@ export async function mount(root, { state }) {
     liveLoading = true; $('bt-live').disabled = true;
     try {
       const codes = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua.ins)])];
-      const response = await fetch(`/api/live-trades?ins=${encodeURIComponent(codes.join(','))}`, { cache: 'no-store' });
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || 'معاملات زنده دریافت نشد');
-      const byIns = Object.fromEntries(codes.map((ins) => [ins, payload.items?.[ins]?.rows || []]));
-      const failed = codes.filter((ins) => payload.items?.[ins]?.error);
-      intradayDate = tehranDateNumber(payload.at);
+      const got = await fetchLiveTape(codes);
+      if (got.errors.length) throw new Error(got.errors[0].why);
+      const byIns = Object.fromEntries(codes.map((ins) => [ins, got.byIns[ins]?.rows || []]));
+      // «خالیِ بی‌تأیید» هم شکست است، نه سکوتِ بازار — پس کنار خطاهای
+      // صریح می‌نشیند و در جملهٔ پایین شمرده می‌شود.
+      const failed = codes.filter((ins) => !got.verdicts[ins]?.usable);
+      intradayDate = tehranDateNumber(got.at);
       lastDayFetch = { byIns, failed, date: intradayDate };
       intraday = replayDay({ byIns }, intradayDate);
       $('bt-result').hidden = false;

@@ -88,6 +88,8 @@ import { downloadPortfolioBacktest } from '/ui/portfolio-backtest-export.mjs';
 import { dataSourceRows } from '/core/data-source.mjs';
 import { FILTER_FIELDS, applyComboFilter, filterNote } from '/core/combo-filter.mjs';
 import { selectMatrixRows } from '/core/portfolio-matrix.mjs';
+import { fetchTapeOne } from '/ui/tape-intake.mjs';
+import { fetchDailies } from '/ui/daily-intake.mjs';
 import {
   correlationHeatOption, correlationOf, familyBarOption, funnelOption, paretoOption,
   roseOption, shareDonutOption, similarityGraphOption, sunburstOption,
@@ -632,9 +634,7 @@ export async function mount(root, { state, api }) {
         setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
         try {
           const payloads = await Promise.all(chunks(codes, 70).map(async (part) => {
-            const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0`), payload = await response.json();
-            if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
-            return payload;
+            return (await fetchDailies(part)).byIns;   // R5-14
           }));
           seriesByIns = {};
           runSeriesByIns = {};
@@ -668,10 +668,7 @@ export async function mount(root, { state, api }) {
           if (asOf && emptyCodes.length) {
             setStatus(`${fmt.int(emptyCodes.length)} ابزار از فهرست روزانه خالی برگشت — منبع دوم…`);
             const retries = await Promise.all(chunks(emptyCodes, 70).map(async (part) => {
-              const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0&asOf=${asOf}`);
-              const payload = await response.json();
-              if (!response.ok || payload.error) throw new Error(payload.error || 'منبع دوم پاسخ نداد');
-              return payload;
+              return (await fetchDailies(part, { asOf })).byIns;   // R5-14
             }));
             for (const payload of retries) {
               for (const [ins, value] of Object.entries(payload)) {
@@ -1872,12 +1869,16 @@ export async function mount(root, { state, api }) {
     button.disabled = true;
     host.innerHTML = '<p class="empty-note">در حال دریافت ریزمعاملهٔ پاهای همین ترکیب…</p>';
     try {
+      // R5-13: هر ابزاری که نوارش کامل نبود، تا شمارشِ بالا برود.
+      const markGaps = [];
       const codes = [...new Set([String(ua.ins), ...item.legs.map((leg) => String(leg.ins))])];
       const settled = await Promise.allSettled(codes.map(async (ins) => {
-        const response = await fetch(`/api/trades?ins=${encodeURIComponent(ins)}&date=${endDate}`);
-        const payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
-        return [ins, payload.rows || []];
+        // R5-13: از دروازهٔ مشترک. پیش از این حکم اینجا دور ریخته می‌شد،
+        // در حالی که چند خط پایین‌تر همین فایل `emptyBoth` را می‌خواند —
+        // یک مفهوم، دو رفتار، در یک فایل.
+        const { item: got, verdict } = await fetchTapeOne(ins, endDate);
+        if (verdict.state !== 'complete' && verdict.state !== 'quiet') markGaps.push(verdict.state);
+        return [ins, got.rows || []];
       }));
       const tape = Object.fromEntries(settled.filter((row) => row.status === 'fulfilled').map((row) => row.value));
       const failed = settled.filter((row) => row.status === 'rejected').length;
@@ -1991,9 +1992,7 @@ export async function mount(root, { state, api }) {
     let failed = 0, emptyBoth = 0;
     for (const part of chunks(codes, 12)) {
       const settled = await Promise.allSettled(part.map(async (ins) => {
-        const response = await fetch(`/api/trades?ins=${encodeURIComponent(ins)}&date=${date}`);
-        const payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
+        const { item: payload } = await fetchTapeOne(ins, date);
         // ═══ چرا `emptyBoth` تا اینجا می‌آید ═══
         //
         // `/api/trades` حالا هر دو پرچمِ بالادست را امتحان می‌کند و

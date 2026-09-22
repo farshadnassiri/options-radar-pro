@@ -129,8 +129,13 @@ group('۲۶۷. مصرف در سرور و تب');
   // قراردادِ منقضی تابلوی روزانه‌اش نمی‌آمد و راست‌آزماییِ خالی‌ها برای
   // ۸۴۷ ابزار/روز کور می‌شد — دقیقاً همان‌جا که لازمش داشتیم.
   check('تابلوی روزانه با کلِ تاریخِ موجود خواسته می‌شود',
-    tab.includes("/api/dailies?ins=${batches[index].join(',')}&n=0")
-      && !tab.includes('n=${span + 10}'));
+    tab.includes('await fetchDailies(batches[index], {')
+      && !tab.includes('n=${span + 10}')
+      && !/fetchDailies\(batches\[index\], \{[^}]*\bn:/.test(tab));
+  // و سرِ دیگرِ همان قاعده: پیش‌فرضِ خودِ دروازه هم صفر است، وگرنه
+  // «شمار ندادن» یعنی «شمارِ ناشناخته»، نه «کلِ تاریخ».
+  check('و پیش‌فرضِ دروازه هم همان صفر است',
+    readSrc('../ui/daily-intake.mjs').includes('n: count = 0'));
   check('و صفرِ یک مسیرِ کامل در جملهٔ وضعیت خبرِ اول است',
     tab.includes('const deadRoute =') && tab.includes('هیچ خطایی هم نداد'));
 }

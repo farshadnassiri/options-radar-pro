@@ -126,7 +126,12 @@ group('۸۷. دامنهٔ داده تا لحظهٔ جاری');
     srv87.includes('LIVE_SOURCE_TAPE } from \'../core/live-day.mjs\'')
     && srv87.includes('source: LIVE_SOURCE_TAPE'));
   check('و نگاه باز کلِ بدنه را می‌دهد، نه دو فیلدش',
-    readSrc('../ui/tabs/open-view.mjs').includes('liveTapeDay(parts[0])'));
+    readSrc('../ui/tabs/open-view.mjs').includes('liveTapeDay(tape.envelope)'));
+  // و سرِ دومِ همان قاعده: دروازه باید بدنهٔ خام را **دست‌نخورده** حمل
+  // کند. اگر بازسازی‌اش می‌کرد، `source` جا می‌افتاد و همان «منبع
+  // نامعلوم»ِ بی‌صدا برمی‌گشت — این بار از یک لایه عقب‌تر.
+  check('و دروازه بدنه را بازسازی نمی‌کند، همان که آمد را نگه می‌دارد',
+    readSrc('../ui/quote-intake.mjs').includes('if (envelope === null) envelope = got.payload;'));
   check('عکس مستقیم تابلو پذیرفته می‌شود',
     liveDayOf({ phase: 'open' }, Date.UTC(2026, 1, 10, 8, 0), { source: 'snapshot' }).ok === true);
   for (const source of ['watch-archive', 'archive', 'roster', 'roster-range', '']) {

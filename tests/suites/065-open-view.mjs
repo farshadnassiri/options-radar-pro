@@ -141,9 +141,14 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
   // وجودِ نام را می‌دید. حالا خودِ تابعِ تک‌ورودی خواسته می‌شود، که جای
   // فراموشی ندارد.
   check('ریز روز بین تاریخی و امروز زنده عوض می‌شود و سقف درخواست رعایت می‌شود',
-    ui64.includes('id="ov-day-source"') && ui64.includes("chunks(ids, 24)")
-    && ui64.includes("priceBasis: live ? 'latest' : 'vwap'") && ui64.includes('liveTapeDay(parts[0])')
+    ui64.includes('id="ov-day-source"')
+    && ui64.includes("priceBasis: live ? 'latest' : 'vwap'")
+    && ui64.includes('liveTapeDay(tape.envelope)')
     && !ui64.includes('liveDayOf('));
+  // سقفِ درخواست حالا در دروازه است — یک جا، برای هر ده مصرف‌کننده.
+  check('و سقفِ درخواست، از دروازه',
+    readSrc('../ui/quote-intake.mjs').includes('insBatches(wanted, LIVE_INS_CAP)')
+    && readSrc('../core/live-quote.mjs').includes('export const LIVE_INS_CAP = 24'));
   check('نمای زنده پیش‌فرض است، خودکار تازه می‌شود و از نخستین سطل هم نمودار می‌سازد',
     ui64.includes('<option value="live" selected>') && ui64.includes('await loadDayIntraday()')
     && ui64.includes('open-view-single-point') && !ui64.includes('rows.length < 2'));

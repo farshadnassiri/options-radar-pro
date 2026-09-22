@@ -9,6 +9,7 @@ import {
 } from '/core/live-market.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchLiveTape } from '/ui/quote-intake.mjs';
 
 // رنگ وضعیت (سود، زیان، هشدار) سری نیست و نباید سری بشود: وقتی «قرارداد
 // ششم» سبزِ سود می‌گیرد، سبز دیگر معنی «در سود» نمی‌دهد. فهرست از همان شش
@@ -342,14 +343,15 @@ async function legacyMount(root, { state, api }) {
     loading = true; $('lm-refresh').disabled = true;
     const codes = [selectedUa, ...selected].filter(Boolean);
     try {
-      const response = await fetch(`/api/live-trades?ins=${encodeURIComponent(codes.join(','))}`, { cache: 'no-store' });
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || `خطای شبکه ${faDigits(response.status)}`);
-      paint(payload);
-      const failures = Object.values(payload.items || {}).filter((item) => item.error).length;
+      const got = await fetchLiveTape(codes);
+      if (got.errors.length) throw new Error(got.errors[0].why);
+      paint(got.envelope);
+      // «پاسخ نداد» حالا خطای صریح **و** خالیِ بی‌تأیید را می‌شمارد؛ پیش
+      // از این فقط اولی دیده می‌شد و دومی «بی‌معامله» جلوه می‌کرد.
+      const failures = got.summary.error + got.summary.blank + got.summary.missing;
       $('lm-status').textContent = failures
-        ? `${fmt.int(failures)} ابزار پاسخ نداد؛ بقیه در ${faClock(new Date(payload.at))} به‌روز شدند.`
-        : `به‌روز شد: ${faClock(new Date(payload.at))} · دریافت بعدی ${fmt.int(intervalMs / 1000)} ثانیه دیگر.`;
+        ? `${fmt.int(failures)} ابزار پاسخ نداد؛ بقیه در ${faClock(new Date(got.at))} به‌روز شدند.`
+        : `به‌روز شد: ${faClock(new Date(got.at))} · دریافت بعدی ${fmt.int(intervalMs / 1000)} ثانیه دیگر.`;
     } catch (error) {
       $('lm-status').textContent = `دریافت زنده ناموفق بود: ${error.message}`;
       logError('رصد لحظه‌ای بازار', error);

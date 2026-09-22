@@ -101,8 +101,11 @@ group('۲۷۶. یک مسیرِ مشترک برای ریزمعاملهٔ تاری
 
   // نوار زنده هم باید از همان حذفِ تکرار بگذرد، وگرنه بند ۲ فقط نصفه
   // بسته می‌شود: خلاصهٔ نوار و شمع‌ساز هر دو روی همین ردیف‌ها می‌نشینند.
+  // ادعا به **رفتار** پین است، نه به یک‌خطی‌بودنِ آن: پاسخِ خام حالا جدا
+  // نگه داشته می‌شود تا شکلش هم گزارش شود، ولی همان یک مسیرِ حذفِ تکرار
+  // سرِ جایش است.
   check('نوار زنده هم تکرارِ دقیق را می‌اندازد',
-    server.includes("normalizeTradesDetailed(firstList(await getFresh(`/Trade/GetTrade/${code}`"));
+    /const raw = await getFresh\(`\/Trade\/GetTrade\/\$\{code\}`[\s\S]{0,120}normalizeTradesDetailed\(firstList\(raw\)\)/.test(server));
   check('و شمارِ تکرار را به مصرف‌کننده می‌گوید',
     server.includes('rows, duplicates, conflicts, summary: summarizeLiveTrades(rows)'));
 

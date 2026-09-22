@@ -8,6 +8,9 @@ import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
 import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { applyLiveScope, scopeOptionsMarkup, SCOPE_LIVE } from '/ui/live-scope.mjs';
+import { fetchTapeBatch, tapeSummary, tapeWarning } from '/ui/tape-intake.mjs';
+import { fetchDailies } from '/ui/daily-intake.mjs';
+import { fetchLiveTape } from '/ui/quote-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -88,6 +91,8 @@ function chart(host, sourceRows, series, {
   const bars = visible.filter((item) => item.kind === 'bar'), lines = visible.filter((item) => item.kind !== 'bar');
   const values = rows.flatMap((row) => visible.map((item) => row[item.key]).filter(Number.isFinite));
   let low = Math.min(...values), high = Math.max(...values);
+  // R5-13: جملهٔ کم‌داشتهٔ نوار، تا جدول و نمودار بی‌اعلام روی دادهٔ ناقص ساخته نشوند.
+  let tapeNote = '';
   if (bars.length) { low = Math.min(low, 0); high = Math.max(high, 0); }
   if (!(high > low)) { low -= 1; high += 1; }
   const padding = (high - low) * 0.08; low -= padding; high += padding;
@@ -426,8 +431,8 @@ export async function mount(root, { state }) {
       // بی‌پاسخ از سری می‌افتند، بازه **کامل** هم به نظر می‌رسید.
       const seriesErrors = {};
       for (const group of chunks(codes, 100)) {
-        const response = await fetch(`/api/dailies?ins=${encodeURIComponent(group.join(','))}&n=0`), payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
+        // R5-14: از دروازه، تا `__meta` وارد پیمایشِ ابزارها نشود.
+        const payload = (await fetchDailies(group)).byIns;
         for (const [ins, result] of Object.entries(payload)) {
           closedSeriesByIns[ins] = result?.rows || [];
           const why = result?.error || result?.fallbackError || result?.fallbackNote
@@ -483,19 +488,16 @@ export async function mount(root, { state }) {
       let analysisDate = selectedDate, tradesByKey = live ? null : tradeCache.get(cacheKey);
       if (live) {
         const ids = [String(ua.ins), ...viewContracts.map((contract) => String(contract.ins))];
-        const parts = await Promise.all(chunks(ids, 24).map(async (group) => {
-          const response = await fetch(`/api/live-trades?ins=${encodeURIComponent(group.join(','))}`, { cache: 'no-store' });
-          const payload = await response.json();
-          if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
-          return payload;
-        }));
+        const tape = await fetchLiveTape(ids);
+        if (tape.errors.length) throw new Error(tape.errors[0].why);
         // کلِ بدنهٔ پاسخ می‌رود، نه دو فیلدش: انتساب روز به منبع هم نگاه
         // می‌کند، و فرستادنِ ناقصش «منبع نامعلوم» می‌داد — بی‌صدا، و کلِ
-        // این نما را از کار می‌انداخت.
-        const day = liveTapeDay(parts[0]);
+        // این نما را از کار می‌انداخت. دروازه هم به همین دلیل بدنهٔ خام
+        // را دست‌نخورده حمل می‌کند، نه بازسازی‌شده.
+        const day = liveTapeDay(tape.envelope);
         if (!day.ok) throw new Error(`عکس بازار به امروز قابل انتساب نیست${day.why ? `؛ ${day.why}` : ''}`);
         analysisDate = day.date;
-        const items = Object.assign({}, ...parts.map((part) => part.items || {}));
+        const items = tape.byIns;
         const batch = liveTradeBatch(items, analysisDate, ua.ins);
         if (batch.baseFailed) throw new Error('ریزمعامله نماد پایه دریافت نشد؛ نمودارهای وابسته به پایه قابل ساخت نیستند.');
         tradesByKey = batch.tradesByKey;
@@ -510,11 +512,20 @@ export async function mount(root, { state }) {
           // داده روزانه ناقص، دلیل حذف درخواست ریزمعامله نیست.
           if (contract.size > 0 && normalizeHistoryDate(contract.expiry) >= selectedDate) requests.push({ ins: String(contract.ins), date: String(selectedDate) });
         }
-        const response = await fetch('/api/trades/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests }) }), payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
-        if (Object.values(payload.items || {}).some((item) => item.error)) throw new Error('دریافت ریزمعامله برخی نمادها ناموفق بود؛ این وضعیت به معنی نبود معامله نیست.');
-        tradesByKey = Object.fromEntries(Object.entries(payload.items || {}).map(([key, item]) => [key, item.rows || []]));
-        if (Object.values(tradesByKey).some((rows) => rows.length)) tradeCache.set(cacheKey, tradesByKey);
+        // ═══ R5-13: ردیف بی حکم برداشته نمی‌شود ═══
+        //
+        // نسخهٔ قبلی `item.rows || []` می‌گرفت و `complete`، `shortfall`
+        // و `throttled` را دور می‌ریخت. فقط `item.error` را می‌دید — ولی
+        // پاسخِ **سهمیه‌خورده خطا ندارد**: `HTTP 200` با آرایهٔ خالی.
+        // یعنی نوارِ بریده یا نیامده بی‌صدا «معامله‌ای نبود» خوانده
+        // می‌شد، و جدول و نمودارِ این تب رویش ساخته می‌شد.
+        const got = await fetchTapeBatch(requests);
+        tapeNote = tapeWarning(tapeSummary(got.verdicts));
+        if (got.throttled) tapeNote = got.note;
+        tradesByKey = Object.fromEntries(Object.entries(got.items).map(([key, item]) => [key, item.rows || []]));
+        // کشِ تبِ خودمان فقط دادهٔ **سنجیده‌شده** را نگه می‌دارد؛ وگرنه
+        // یک اجرای سهمیه‌خورده تا پایان نشست تکرار می‌شود.
+        if (!tapeNote && Object.values(tradesByKey).some((rows) => rows.length)) tradeCache.set(cacheKey, tradesByKey);
       }
       if (request !== intradayRequest || requestedExpiry !== selectedExpiry()) return;
       intraday = analyzeIntradayOpenView({
@@ -522,6 +533,11 @@ export async function mount(root, { state }) {
         settings: model, priceBasis: live ? 'latest' : 'vwap',
       });
       intradayRelations = relationMatrix(intraday.rows); paintIntraday();
+      // ═══ R5-13: کم‌داشتهٔ نوار پیش از جدول گفته می‌شود ═══
+      //
+      // جدول و نمودارِ درون‌روزی روی همین نوار ساخته می‌شوند؛ اگر بخشی
+      // نیامده باشد، شکلِ نمودار مالِ دریافتِ ماست نه بازار.
+      if (tapeNote) setStatus(tapeNote, true);
       if (live) paintLiveDetail(analysisDate);
       const coverage = live && marketCoverage
         ? ` · ${fmt.int(marketCoverage.trades)} ریزمعامله در ${fmt.int(marketCoverage.tradedInstruments)} از ${fmt.int(marketCoverage.requested)} ابزار${Number.isFinite(marketCoverage.first) ? ` · ${clock(marketCoverage.first)} تا ${clock(marketCoverage.last)}` : ''}${marketCoverage.failed ? ` · خطای ${fmt.int(marketCoverage.failed)} ابزار` : ''}`

@@ -270,8 +270,11 @@ group('۲۳۰-ل. دو منبعِ مظنه و چرخشِ سهمیه، در را�
   for (const [name, src, prefix] of [['رادار', radar, 'gr'], ['دیده‌بان', watch, 'wt']]) {
     check(`${name}: منبعِ مظنه انتخابی است — معامله یا دفترِ قابل اجرا`,
       src.includes(`id="${prefix}-live-source"`) && src.includes('LIVE_SOURCES.map'));
+    // R5-16: انتخابِ مسیر حالا انتخابِ تابعِ دروازه است. قاعده عوض نشده —
+    // دفتر همچنان مسیرِ خودش و سقفِ بزرگ‌ترش را دارد.
     check(`${name}: منبعِ دفتر از مسیرِ خودش گرفته می‌شود، با سقفِ بزرگ‌ترش`,
-      src.includes("source === 'book' ? '/api/books' : '/api/live-trades'")
+      src.includes("? await fetchBooks(plan.ins, { signal: job.signal })")
+      && src.includes("await fetchLiveTape(plan.ins, { signal: job.signal })")
       && src.includes("liveSource($('" + prefix + "-live-source').value).id === 'book' ? BOOK_INS_CAP : LIVE_INS_CAP"));
     check(`${name}: چرخشِ سهمیه هست و مکان‌نمایش از خودِ برنامه‌ریز می‌آید`,
       src.includes(`id="${prefix}-live-rotate"`) && src.includes('plan.nextStart'));

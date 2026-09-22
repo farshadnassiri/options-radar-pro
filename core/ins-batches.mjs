@@ -93,7 +93,14 @@ export function mergeInsPayloads(requested = [], parts = []) {
     .filter((code) => {
       const value = payload[code];
       if (!value) return false;                       // این «نبود» است، نه «خالی»
-      const rows = Array.isArray(value?.rows) ? value.rows : (Array.isArray(value) ? value : null);
+      // ═══ R5-16: نامِ میدانِ فهرست یکی نیست ═══
+      //
+      // `/api/books` زیرِ `book` می‌دهد، نه `rows`. پس دفترِ خالی از این
+      // شمارش جا می‌افتاد و «هر ابزار پاسخ گرفت» دوباره جمله‌ای درست با
+      // معنای غلط می‌شد — همان چیزی که این تابع برای گرفتنش ساخته شد.
+      const rows = Array.isArray(value?.rows) ? value.rows
+        : (Array.isArray(value?.book) ? value.book
+          : (Array.isArray(value) ? value : null));
       return Array.isArray(rows) && rows.length === 0;
     });
   return {

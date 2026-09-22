@@ -1,5 +1,6 @@
 import { applyLiveScope } from './live-scope.mjs';
 import { normalizeHistoryDate } from '../core/history.mjs';
+import { fetchDailies } from './daily-intake.mjs';
 
 /** تاریخچهٔ کامل، با همان منبع دومِ آزمون همه برای قراردادهای سررسیدشده. */
 /**
@@ -28,9 +29,9 @@ export async function loadHistoricalDailies(codes, baseIns, fetcher = fetch, { o
     await Promise.all(batches.map(async (part) => {
       try {
         signal?.throwIfAborted();
-        const response = await fetcher(`/api/dailies?ins=${part.join(',')}&n=0${asOf ? `&asOf=${asOf}` : ''}`, { signal });
-        const payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
+        // R5-14: از دروازهٔ مشترک، تا `__meta` وارد پیمایشِ ابزارها نشود
+        // و خالی‌بودنِ تابلو از «تاریخچه ندارد» جدا بماند.
+        const payload = (await fetchDailies(part, { asOf, fetcher, signal })).byIns;
         for (const ins of part) {
           const value = payload[ins];
           seriesByIns[ins] = Array.isArray(value?.rows) ? value.rows : [];

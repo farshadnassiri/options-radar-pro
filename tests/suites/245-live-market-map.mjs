@@ -48,7 +48,7 @@ check('نقشه بین پایه‌ها و قراردادهای نماد انتخ
   && mapUi245.includes('data-lmm-map-mode="contracts"')
   && mapUi245.includes('selectContractFromMap'));
 check('انتخاب سررسید، بازه واقعی روزانه را دسته‌ای می‌گیرد و عدد گمشده نمی‌سازد',
-  mapUi245.includes('/api/infos?ins=')
+  mapUi245.includes('await fetchInfos(ids)')
   && mapUi245.includes('Number(row.first) > 0')
   && mapUi245.includes('Number(row.low) > 0')
   && mapUi245.includes('Number(row.high) > 0'));

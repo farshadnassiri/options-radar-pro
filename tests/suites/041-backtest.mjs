@@ -109,9 +109,17 @@ group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فری�
   check('۳. سقف روز دیگر ۴۵ نیست و وقتی بگزد صریح گفته می‌شود',
     /const TIMEFRAME_DAY_CAP = (\d+);/.exec(source40)?.[1] >= 250
     && source40.includes('روز قدیمی‌تر بررسی نشد (سقف'));
+  // ═══ R5-13: ادعا همان است، از پشتِ دروازهٔ مشترک ═══
+  //
+  // `fetch` مستقیم دیگر در این فایل نیست؛ دروازهٔ `ui/tape-intake.mjs`
+  // آن را می‌زند و حکمِ هر ابزار/روز را هم همراه می‌آورد. نگهبانِ دستهٔ
+  // ۲۹۱ هر بازگشتی به `fetch` مستقیم را رد می‌کند.
   check('۴. مسیر دسته‌ای استفاده می‌شود، نه یک درخواست به‌ازای هر روز و هر ابزار',
-    source40.includes("fetch('/api/trades/batch'") && source40.includes('tradeBatches(history, codes')
+    source40.includes('fetchTapeBatch(requests, { fresh })') && source40.includes('tradeBatches(history, codes')
     && !source40.includes('/api/trades?ins='));
+  check('۴-ب. و حکمِ کم‌داشته دور ریخته نمی‌شود',
+    source40.includes('tapeWarning(tapeSummary(got.verdicts))')
+      && source40.includes('if (got.throttled) batchErrors.push(got.note)'));
   check('۱. روز جاری از نوار زنده می‌آید',
     source40.includes("getLiveTape(codes)") && source40.includes('liveDate = Number(loaded.liveDate) || 0;'));
   check('اگر ماتریس روی سطل درشت‌تر ساخته شود، همان‌جا گفته می‌شود',

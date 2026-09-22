@@ -518,11 +518,37 @@ function withUpstream(decided, first, alt) {
  * تصمیم می‌گیرد.
  *
  * `count` همیشه هست تا «آمد ولی خالی بود» از «نیامد» جدا بماند.
+ *
+ * ═══ R5-15: و `count: 0` خودش دو چیز است ═══
+ *
+ * `firstList()` دو حالتِ کاملاً متفاوت را به یک `[]` تبدیل می‌کند —
+ * «بالادست آمد و گفت این روز رکوردی نداشت» و «بالادست چیزی داد که اصلاً
+ * فهرست نیست». `core/upstream-shape.mjs` دقیقاً برای همین ساخته شد، ولی
+ * تا امروز فقط مسیرِ ریزمعامله از آن استفاده می‌کرد؛ `book` و `state` و
+ * `threshold` با `count: 0` و بی هیچ نشانه‌ای برمی‌گشتند و مصرف‌کننده
+ * هر دو را «آن روز چیزی نبود» می‌خواند.
+ *
+ * مثل `withUpstream`، شکل **فقط وقتی** همراه می‌شود که خالی مانده باشیم:
+ * پاسخِ پرردیف نشانه لازم ندارد و پاسخ را هم سنگین نمی‌کنیم.
  */
 function shapeHistorical(kind, raw, date = 0, ins = '') {
+  // شکلِ خام، پیش از هر نرمال‌سازی — چون همین‌جاست که «نیامد» و «خالی
+  // آمد» هنوز از هم جدا هستند.
+  const blankShape = () => {
+    const shape = upstreamShape(raw);
+    // هم نامِ ماشین‌خوان و هم جملهٔ آدم‌خوان: مصرف‌کننده نباید برای
+    // تشخیصِ «فهرستِ خالیِ واقعی» رشتهٔ فارسی مقایسه کند.
+    return { blank: true, upstreamKind: shape.kind, upstream: upstreamShapeLabel(shape) };
+  };
   if (kind === 'book') {
     const rows = firstList(raw);
-    return { events: normalizeBookEvents(rows), count: rows.length };
+    const events = normalizeBookEvents(rows);
+    // دفترِ رویداد دو جور می‌تواند تهی شود: رکوردی نیامد، یا رکورد آمد و
+    // هیچ‌کدام رویدادِ معتبری نبود. دومی خبرِ بدتری است و باید دیده شود.
+    if (!events.length) {
+      return { events, count: rows.length, ...blankShape(), droppedRows: rows.length };
+    }
+    return { events, count: rows.length };
   }
   // `trades` عمداً اینجا نیست: مسیر ریزمعامله پیش از رسیدن به این تابع به
   // `fetchHistoricalTape` می‌رود تا تلاشِ پرچمِ دوم و حذفِ تکرار را هم
@@ -531,6 +557,7 @@ function shapeHistorical(kind, raw, date = 0, ins = '') {
     return datedRow(kind, firstDict(raw), date, ins);
   }
   const rows = firstList(raw);
+  if (!rows.length) return { rows, count: 0, ...blankShape() };
   return { rows, count: rows.length };
 }
 
@@ -1289,9 +1316,19 @@ async function handle(req, res) {
           // تکرارِ دقیق همین‌جا می‌افتد، وگرنه خلاصه و شمع‌ساز آن را
           // دوباره می‌شمارند: نمونهٔ اهرم/۲۰۲۶۰۹۲۰ پنج ردیفِ تکراری داشت و
           // ۴٬۰۵۷ واحد حجمِ اضافه می‌ساخت.
-          const tape = normalizeTradesDetailed(firstList(await getFresh(`/Trade/GetTrade/${code}`, 2, 2)));
+          const raw = await getFresh(`/Trade/GetTrade/${code}`, 2, 2);
+          const tape = normalizeTradesDetailed(firstList(raw));
           const { rows, duplicates, conflicts } = tape;
-          return [code, { ins: code, rows, duplicates, conflicts, summary: summarizeLiveTrades(rows) }];
+          const item = { ins: code, rows, duplicates, conflicts, summary: summarizeLiveTrades(rows) };
+          // فازِ بازار می‌گوید «هنوز جلسه‌ای نبوده» یا «این ابزار معامله
+          // نشده» — ولی حالتِ سومی هم هست که تا امروز نامی نداشت:
+          // بالادست چیزی داد که اصلاً نوار نیست. شکلِ خام همان را
+          // می‌گوید، و فقط وقتی همراه می‌شود که خالی مانده باشیم.
+          if (!rows.length) {
+            const shape = upstreamShape(raw);
+            return [code, { ...item, blank: true, upstreamKind: shape.kind, upstream: upstreamShapeLabel(shape) }];
+          }
+          return [code, item];
         } catch (e) {
           return [code, { ins: code, rows: [], error: `${e.name}: ${e.message}` }];
         }
@@ -1937,7 +1974,45 @@ async function handle(req, res) {
           return [code, { ins: code, rows: [], source: 'list', error: `${e.name}: ${e.message}` }];
         }
       };
-      return sendJson(res, 200, Object.fromEntries(await Promise.all(codes.map(one))));
+      const settled = await Promise.all(codes.map(one));
+      const out = Object.fromEntries(settled);
+
+      // ═══ R5-14: «ردیف نداشت» خودش یک خبر است ═══
+      //
+      // مصرف‌کننده تا امروز `value.rows` را می‌گرفت و آرایهٔ خالی را
+      // «این ابزار تاریخچه ندارد» ترجمه می‌کرد. ولی خالی سه علت دارد و
+      // فقط یکی‌شان واقعیتِ بازار است:
+      //
+      //   ۱. قراردادِ سررسیدشده که از تابلو حذف شده  → واقعی، و `asOf`
+      //      برایش هست
+      //   ۲. سهمیهٔ بالادست                          → `HTTP 200` با
+      //      آرایهٔ خالی، بی هیچ خطایی
+      //   ۳. خودِ ابزار واقعاً بی‌تاریخچه            → نادر
+      //
+      // تابلوی روزانه **مرجعِ سنجشِ همهٔ بقیهٔ برنامه** است؛ وقتی خودش
+      // خالی برگردد و کسی نفهمد، هر حکمِ «کامل/ناقص» در هر تبی بی‌پشتوانه
+      // می‌شود. پس شمارش و پرچم همراه پاسخ می‌روند.
+      const blanks = settled.filter(([, v]) => !(v.rows || []).length).map(([code]) => code);
+      for (const [, value] of settled) value.blank = !(value.rows || []).length;
+
+      // ═══ سوءظن، نه حکم ═══
+      //
+      // بسته‌ای که در آن **هیچ** ابزاری تاریخچه ندارد، واقعیتِ بازار
+      // نیست: حتی فهرستی از قراردادهای منقضی هم معمولاً چند ردیف دارد.
+      // ولی این استدلال قطعی نیست، پس اسمش «سوءظن» است نه «سهمیه» —
+      // همان تفکیکی که این مخزن جای دیگر هم نگه می‌دارد.
+      const allBlank = codes.length >= 10 && blanks.length === codes.length;
+      return sendJson(res, 200, {
+        ...out,
+        __meta: {
+          requested: codes.length, blank: blanks.length,
+          blankCodes: blanks.slice(0, 20),
+          suspectThrottled: allBlank,
+          note: allBlank
+            ? `هیچ‌کدام از ${codes.length} ابزار تابلوی روزانه نداد. این الگوی سهمیهٔ بالادست است، نه بازارِ بی‌تاریخچه.`
+            : '',
+        },
+      });
     }
 
     if (p === '/api/clienttype') {
@@ -1954,7 +2029,8 @@ async function handle(req, res) {
       const one = async (code) => {
         try {
           if (wantBook) {
-            const rows = firstList(await get(`/BestLimits/${code}`, S.ttlBookSec, 3));
+            const raw = await get(`/BestLimits/${code}`, S.ttlBookSec, 3);
+            const rows = firstList(raw);
             const book = rows
               .map((r) => ({
                 level: Number(r.number), bid: Number(r.pMeDem) || 0, bidQty: Number(r.qTitMeDem) || 0,
@@ -1964,6 +2040,14 @@ async function handle(req, res) {
               .filter((r) => Number.isFinite(r.level))
               .sort((a, b) => a.level - b.level)
               .slice(0, 5);
+            // دفترِ خالی دو چیز است، مثل هر جای دیگر: بالادست گفت
+            // سطحی ثبت نشده، یا چیزی داد که اصلاً فهرست نیست. بی این
+            // نشانه، «بی‌مظنه» و «نگرفتیم» یک شکل‌اند — و رادار فاصله
+            // دومی را «بازارِ بی‌عمق» می‌خواند.
+            if (!book.length) {
+              const shape = upstreamShape(raw);
+              return [code, { book, blank: true, upstreamKind: shape.kind, upstream: upstreamShapeLabel(shape) }];
+            }
             return [code, { book }];
           }
           const d = firstDict(await get(`/ClosingPrice/GetClosingPriceInfo/${code}`, S.ttlInfoSec, 3));
@@ -1980,7 +2064,10 @@ async function handle(req, res) {
             staleSec: hE ? Math.max(0, nowT - secs) : null,
           }];
         } catch (e) {
-          return [code, { error: `${e.name}` }];
+          // پیش از این فقط `e.name` می‌رفت: «TypeError» بی هیچ توضیحی.
+          // دفتر خطاها پر می‌شد از نامِ کلاس، و هیچ‌کدام قابلِ پیگیری
+          // نبودند. پیام هم می‌رود، مثل هر مسیرِ دیگر.
+          return [code, { error: `${e.name}: ${e.message}` }];
         }
       };
       const pairs = await Promise.all(codes.map(one));

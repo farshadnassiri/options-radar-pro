@@ -13,6 +13,7 @@ import {
 } from '../core/decision-dashboard.mjs';
 import { shouldFetchRange } from './live-dashboard-scope.mjs';
 import { busyBlock } from './busy.mjs';
+import { fetchInfos } from './quote-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'\"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;',
@@ -620,16 +621,10 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     rangeStatus.textContent = `در حال دریافت بازه واقعی امروز برای ${fmt.int(ids.length)} قرارداد…`;
     rangeChart.innerHTML = busyBlock(`در حال دریافت کمینه/بیشینهٔ امروز برای ${fmt.int(ids.length)} قرارداد…`, { lines: 4 });
     try {
-      const chunks = [];
-      for (let index = 0; index < ids.length; index += 180) chunks.push(ids.slice(index, index + 180));
-      const parts = await Promise.all(chunks.map(async (chunk) => {
-        const response = await fetch(`/api/infos?ins=${encodeURIComponent(chunk.join(','))}`, { cache: 'no-store' });
-        const data = await response.json();
-        if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-        return data;
-      }));
+      const got = await fetchInfos(ids);
+      if (got.errors.length) throw new Error(got.errors[0].why);
       if (request !== rangeRequest || key !== `${uaIns}:${endDate}`) return;
-      rangeCache.set(key, { at: Date.now(), items: Object.assign({}, ...parts) });
+      rangeCache.set(key, { at: Date.now(), items: got.byIns });
       paintDailyRanges();
     } catch (error) {
       if (request !== rangeRequest) return;

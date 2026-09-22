@@ -19,6 +19,8 @@ import { scan } from '../core/scan.mjs';
 import { buildHistoryChain, historyBasis, historyChainNote } from '../core/history-chain.mjs';
 import { todayCompact } from '../core/history-range.mjs';
 import { liveDaySnapshot } from './live-scope.mjs';
+import { fetchDailies } from './daily-intake.mjs';
+import { fetchLiveTape } from './quote-intake.mjs';
 
 /** درخواستِ کدها، تکه‌تکه — `/api/dailies` سقف ۲۰۰ کد دارد. */
 const CHUNK = 100;
@@ -68,15 +70,27 @@ export async function historyDates(uaIns, count = 180, { fetcher, includeToday =
  *
  * `includeToday` وقتی خاموش می‌شود که فراخوان تاریخِ گذشته می‌خواهد: آن
  * روز در دفتر روزانه هست و دو درخواستِ لحظه‌ای چیزی به آن اضافه نمی‌کنند.
+ *
+ * ═══ `onVerdicts` چرا هست ═══
+ *
+ * شکلِ بازگشتی همان نقشهٔ ابزار→سری می‌ماند، چون `buildHistoryChain` همان
+ * را می‌خواهد. ولی «کدام ابزار اصلاً تابلو نگرفت» در آن نقشه دیده نمی‌شود
+ * — سری خالی و سریِ نیامده یک شکل‌اند. این فراخوان همان را جدا می‌دهد،
+ * بی آنکه کسی مجبور باشد کلیدِ اضافه در نقشه تحمل کند.
  */
-export async function dailiesFor(codes = [], { fetcher, includeToday = true } = {}) {
+export async function dailiesFor(codes = [], { fetcher, includeToday = true, onVerdicts } = {}) {
   const list = [...new Set(codes.map((code) => String(code || '')).filter(Boolean))];
   const out = {};
+  const verdicts = {};
   for (let at = 0; at < list.length; at += CHUNK) {
     const part = list.slice(at, at + CHUNK);
-    const payload = await asJson(`/api/dailies?ins=${part.join(',')}&n=0`, fetcher);
-    Object.assign(out, payload);
+    // از دروازه، نه خام: `Object.assign(out, payload)` کلیدِ خلاصهٔ پاسخ را
+    // هم یک «ابزار» می‌کرد و زنجیره‌ساز رویش می‌افتاد.
+    const got = await fetchDailies(part, { fetcher: fetcher || fetch });
+    Object.assign(out, got.byIns);
+    Object.assign(verdicts, got.verdicts);
   }
+  if (typeof onVerdicts === 'function') onVerdicts(verdicts);
   if (!includeToday) return out;
   const snap = await liveDaySnapshot({ wanted: list, fetcher: fetcher || fetch });
   if (!snap.ok) return out;
@@ -126,7 +140,12 @@ export async function runHistoryScan({ def, uaIns, date, basis = 'CLOSE', settin
     if (row.insCode_P) codes.push(row.insCode_P);
   }
   // روزِ گذشته دو درخواستِ لحظه‌ای لازم ندارد؛ دفتر روزانه خودش داردش.
-  const dailies = await dailiesFor(codes, { fetcher, includeToday: Number(date) >= todayCompact() });
+  let dailyVerdicts = {};
+  const dailies = await dailiesFor(codes, {
+    fetcher,
+    includeToday: Number(date) >= todayCompact(),
+    onVerdicts: (v) => { dailyVerdicts = v; },
+  });
   const built = buildHistoryChain(rows, dailies, date);
   const used = historyBasis(basis);
   const result = scan({
@@ -148,6 +167,9 @@ export async function runHistoryScan({ def, uaIns, date, basis = 'CLOSE', settin
     // دوباره درست می‌شود، و رابط باید بتواند این دو را جدا نشان بدهد.
     incomplete: (built.legsFailed || 0) + (built.basesFailed || 0) > 0,
     failedCount: (built.legsFailed || 0) + (built.basesFailed || 0),
+    // و جدا از آن: چند ابزار اصلاً تابلویی نگرفتند. این با «آن روز معامله
+    // نشد» یکی نیست و درمانش هم یکی نیست — اولی اسکنِ دوباره می‌خواهد.
+    unreferenced: Object.values(dailyVerdicts).filter((v) => v.state !== 'rows').length,
     universeNote: universe.note || '',
     asOf: universe.asOf ?? null,
     archived: universe.archived === true,
@@ -164,13 +186,14 @@ export async function runHistoryScan({ def, uaIns, date, basis = 'CLOSE', settin
 export async function liveTapeFor(codes = [], { fetcher } = {}) {
   const list = [...new Set(codes.map((code) => String(code || '')).filter(Boolean))].slice(0, 24);
   if (!list.length) return { at: 0, tape: {}, errors: {}, market: null };
-  const payload = await asJson(`/api/live-trades?ins=${list.join(',')}`, fetcher);
+  const payload = await fetchLiveTape(list, { fetcher: fetcher || fetch });
   const tape = {};
   const errors = {};
-  for (const [ins, box] of Object.entries(payload.items || {})) {
+  for (const [ins, box] of Object.entries(payload.byIns)) {
     tape[ins] = Array.isArray(box?.rows) ? box.rows : [];
     if (box?.error) errors[ins] = box.error;
   }
+  for (const fail of payload.errors) for (const ins of fail.codes) errors[ins] = fail.why;
   // وضعیت بازار همراه می‌آید تا «هنوز جلسه‌ای نبوده» با «این پا معامله
   // نشده» اشتباه نشود — دو جملهٔ کاملاً متفاوت با یک ظاهر.
   return { at: payload.at ?? 0, tape, errors, market: payload.market || null };

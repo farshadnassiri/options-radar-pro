@@ -9,8 +9,8 @@
 // دریافت عمق دوباره مرتب می‌شوند.
 
 import { CATALOG } from '/strategies/catalog.mjs';
-import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchQuotes, quoteWarning } from '/ui/quote-intake.mjs';
 
 let worker = null;
 let seq = 0;
@@ -156,22 +156,20 @@ export async function runScan({ defId, uaKeys, settings, qty, onStage }) {
   if (!list.length) return endEarly('ردیف‌های مرحله یک نماد قابل استعلامی ندارند');
 
   try {
-    const bookParts = [], infoParts = [];
-    for (const batch of insBatches(list, INS_CAP.books)) {
-      const q = batch.join(',');
-      const [b, i] = await Promise.all([
-        fetch(`/api/books?ins=${q}`).then((r) => r.json()),
-        fetch(`/api/infos?ins=${q}`).then((r) => r.json()),
-      ]);
-      bookParts.push(b); infoParts.push(i);
-    }
-    const books = mergeInsPayloads(list, bookParts).payload;
-    const infos = mergeInsPayloads(list, infoParts).payload;
+    // از دروازه، نه خام. بندِ قبلی `response.ok` را نمی‌دید: یک ۵۰۰ یا
+    // یک ۴۰۰ِ «از سقف گذشتی» هم `json()` می‌شد و به‌جای دفتر می‌نشست،
+    // پس **هر** نماد «بی‌عمق» می‌شد و از مرحلهٔ دو می‌افتاد — یعنی خطای
+    // سرور به حکمِ نقدشوندگی ترجمه می‌شد. (همان اشتباهِ ممیزی ۱۴۰۵/۰۶/۲۹
+    // بند ۴، این بار از راهی دیگر.)
+    const quotes = await fetchQuotes(list);
+    const books = quotes.books.byIns;
+    const infos = quotes.infos.byIns;
     const data = {};
     for (const ins of list) {
       data[ins] = { ...(infos[ins] || {}), ...(books[ins] || {}) };
     }
     await ask({ type: 'overlay', data });
+    const quoteNote = quoteWarning(quotes.summary);
 
     const two = await ask({
       type: 'scan', defId, uaKeys: [...new Set(top.map((r) => r.uaIns))],
@@ -181,7 +179,7 @@ export async function runScan({ defId, uaKeys, settings, qty, onStage }) {
     // برمی‌گردد؛ بدون این بررسی، two.rows نبود و onStage مصرف‌کننده‌اش
     // (strategy.mjs) روی res.rows.map می‌ترکید
     if (two.error) { onStage?.('two', { rows: [], error: two.error }); return one; }
-    onStage?.('two', { ...two, asked: list.length });
+    onStage?.('two', { ...two, asked: list.length, quoteNote });
     return two;
   } catch (e) {
     onStage?.('two', { rows: [], error: e.message });

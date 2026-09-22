@@ -51,6 +51,7 @@ import { historyDateLabel } from '/core/history.mjs';
 import { todayJalali, gregorianToJalali, parseJalali, daysSinceJalali } from '/core/jalali.mjs';
 import { marginParamsOf } from '/core/settings.mjs';
 import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
+import { fetchInfos, fetchLiveTape, fetchQuotes, quoteWarning } from '/ui/quote-intake.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { fmt } from '/ui/table.mjs';
@@ -63,6 +64,7 @@ import { normalizeHistoryDate } from '/core/history.mjs';
 import { GREEKS, monitorSnapshot, monitorStance } from '/core/monitor.mjs';
 import { emptyReason } from '/ui/feed-state.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchDailies } from '/ui/daily-intake.mjs';
 
 const KINDS = [
   ['covered-call', 'کاوردکال — سهم + فروش کال'],
@@ -107,6 +109,7 @@ export async function mount(root, { state, api }) {
   let tapeByIns = {};
   let tapeAt = 0;
   let tapeNote = '';
+  let quoteNote = '';
   const sessionTicks = new Map();
   let trackModeId = TRACK_MODES[0].id;
   // دو دستهٔ جدا: نمودارِ روندِ یک موقعیت با عوض شدنِ حالت آزاد و دوباره
@@ -704,6 +707,9 @@ export async function mount(root, { state, api }) {
         curveHost.innerHTML = `<p class="empty-note">${curve.reason || 'نقطه‌ای برای منحنی سبد نیست'}</p>`;
       }
       root.querySelector('#sum-chart-note').textContent = [
+        // مظنه‌ای که نرسید، اول می‌آید: این جمله دربارهٔ **اعتبارِ همین
+        // ارقامِ سود و زیان** است، نه یک خبرِ جانبی دربارهٔ نمودار.
+        faDigits(quoteNote),
         trackNote(curve, 'daily'),
         curve.skippedBefore
           ? `منحنی از ${faDigits(historyDateLabel(curve.from))} شروع می‌شود — دیرترین روزِ ورودِ موقعیت‌های باز؛ ${faDigits(curve.skippedBefore)} روزِ قدیمی‌تر کنار گذاشته شد چون همهٔ موقعیت‌ها هنوز باز نشده بودند.`
@@ -1286,7 +1292,10 @@ export async function mount(root, { state, api }) {
     const needs = draft.legs.filter((leg) => needsEntryClose(leg) && leg.ins);
     if (!needs.length) return;
     try {
-      const infos = await (await fetch(`/api/infos?ins=${needs.map((leg) => leg.ins).join(',')}`)).json();
+      // این هم `response.ok` را نمی‌دید: پاسخِ ۵۰۰ یک شیء بی‌کلیدِ ابزار
+      // می‌شد و جمله می‌گفت «قیمت پایانی نداشت» — یعنی خطای سرور به
+      // حکمی دربارهٔ خودِ قرارداد ترجمه می‌شد.
+      const infos = (await fetchInfos(needs.map((leg) => leg.ins))).byIns;
       let filled = 0;
       for (const leg of needs) {
         const close = Number(infos[leg.ins]?.close);
@@ -1358,7 +1367,9 @@ export async function mount(root, { state, api }) {
       const all = [...codes];
       const parts = [];
       for (const batch of insBatches(all, INS_CAP.dailies)) {
-        parts.push(await (await fetch(`/api/dailies?ins=${batch.join(',')}&n=${need}`)).json());
+        // R5-14: `byIns` بی `__meta` است، پس `mergeInsPayloads` پایین
+        // یک کلیدِ غیرابزار را ابزار نمی‌شمارد.
+        parts.push((await fetchDailies(batch, { n: need })).byIns);
       }
       const merged = mergeInsPayloads(all, parts);
       dailyByIns = merged.payload;
@@ -1382,13 +1393,18 @@ export async function mount(root, { state, api }) {
     const codes = trackInstruments(p).slice(0, 24);
     if (!codes.length) { tapeNote = 'شناسه‌ای برای گرفتن نوار نیست.'; return; }
     try {
-      const res = await (await fetch(`/api/live-trades?ins=${codes.join(',')}`)).json();
-      if (res?.error) { tapeByIns = {}; tapeNote = faDigits(res.error); return; }
-      tapeByIns = res?.items || {};
-      tapeAt = Number(res?.at) || Date.now();
+      // از دروازه: پیش از این `response.ok` دیده نمی‌شد و فقط `res.error`
+      // بررسی می‌شد — یعنی پاسخی که بدنه‌اش `error` نداشت ولی ۵۰۰ بود،
+      // یک نوارِ خالیِ موفق به حساب می‌آمد.
+      const got = await fetchLiveTape(codes);
+      tapeByIns = got.byIns;
+      tapeAt = got.at || Date.now();
       // بازارِ بسته و نمادِ بی‌معامله دو چیزند و نوارِ خالی هر دو را
-      // یک‌شکل نشان می‌دهد؛ پس فاز بازار همراه جمله می‌آید.
-      tapeNote = res?.market?.open === false ? `بازار باز نیست — ${faDigits(res.market.why || '')}` : '';
+      // یک‌شکل نشان می‌دهد؛ پس فاز بازار همراه جمله می‌آید. و آنچه
+      // **نرسید** هم جملهٔ خودش را دارد، جدا از هر دو.
+      tapeNote = got.market?.open === false
+        ? `بازار باز نیست — ${faDigits(got.market.why || '')}`
+        : faDigits(quoteWarning(got.summary));
     } catch (e) {
       tapeByIns = {};
       tapeNote = `نوار امروز گرفته نشد: ${faDigits(e.message)}`;
@@ -1412,17 +1428,14 @@ export async function mount(root, { state, api }) {
       // همان دلیلِ `loadDailies`: مظنهٔ سبدِ بزرگ‌تر از ۲۰۰ ابزار بی‌صدا
       // بریده می‌شد و قراردادِ انتهای فهرست بی‌قیمت می‌ماند.
       const all = [...codes];
-      const bookParts = [], infoParts = [];
-      for (const batch of insBatches(all, INS_CAP.books)) {
-        const q = batch.join(',');
-        const [b, i] = await Promise.all([
-          fetch(`/api/books?ins=${q}`).then((r) => r.json()),
-          fetch(`/api/infos?ins=${q}`).then((r) => r.json()),
-        ]);
-        bookParts.push(b); infoParts.push(i);
-      }
-      const books = mergeInsPayloads(all, bookParts).payload;
-      const infos = mergeInsPayloads(all, infoParts).payload;
+      // از دروازه: بندِ قبلی `response.ok` را نمی‌دید، پس یک ۵۰۰ یا یک
+      // ۴۰۰ِ «از سقف گذشتی» هم `json()` می‌شد و به‌جای دفتر می‌نشست —
+      // یعنی **کلِ** سبد بی‌قیمت می‌شد، درست همان حالتی که کامنتِ بالا
+      // برای جلوگیری از نسخهٔ بریده‌اش نوشته شده بود.
+      const quotes = await fetchQuotes(all);
+      const books = quotes.books.byIns;
+      const infos = quotes.infos.byIns;
+      quoteNote = quoteWarning(quotes.summary);
       quotesByIns = new Map();
       for (const ins of codes) {
         const b = books[ins]?.book || [];
