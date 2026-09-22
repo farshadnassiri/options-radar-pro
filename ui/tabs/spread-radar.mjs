@@ -61,6 +61,7 @@ import {
   testDelivery,
 } from '/ui/gap-alarm.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchTapeBatch, tapeSummary, tapeWarning } from '/ui/tape-intake.mjs';
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -752,19 +753,25 @@ export async function mount(root, { state }) {
   async function fetchTape(row, date) {
     const legs = row.legs.filter((leg) => leg.kind !== 'underlying');
     const wanted = [...new Set([...legs.map((leg) => String(leg.ins)), String(ua?.ins ?? '')])].filter(Boolean);
-    const response = await fetch('/api/trades/batch', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requests: wanted.map((ins) => ({ ins, date: String(date) })) }),
-    });
-    const payload = await response.json();
-    if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
+    // R5-13: از دروازهٔ مشترک، تا حکمِ هر پا همراهِ ردیف‌هایش بیاید.
+    const got = await fetchTapeBatch(wanted.map((ins) => ({ ins, date: String(date) })));
     const byIns = {};
-    for (const ins of wanted) byIns[ins] = payload.items?.[`${date}:${ins}`]?.rows || [];
+    for (const ins of wanted) byIns[ins] = got.items?.[`${date}:${ins}`]?.rows || [];
+    // نمودارِ شکافِ درون‌روزی روی نوارِ **همهٔ** پاها ساخته می‌شود؛ اگر
+    // یک پا ناقص باشد، شکافِ رسم‌شده مالِ بازار نیست مالِ دریافتِ ماست.
+    byIns.__note = got.throttled ? got.note : tapeWarning(tapeSummary(got.verdicts));
     return byIns;
   }
 
-  /** سریِ درون‌روزیِ یک ترکیب از نوارِ گرفته‌شده. */
+  /**
+   * سریِ درون‌روزیِ یک ترکیب از نوارِ گرفته‌شده.
+   *
+   * R5-13: کم‌داشتهٔ نوار، پیش از رسم، گفته می‌شود. نمودارِ شکاف روی
+   * نوارِ **همهٔ** پاها ساخته می‌شود؛ یک پای ناقص شکافی می‌سازد که شبیه
+   * حرکتِ واقعیِ بازار است.
+   */
   function buildIntraday(row, byIns, date, grain) {
+    if (byIns.__note) setStatus(byIns.__note, true);
     const series = intradayGapSeries({
       legs: row.legs, tapeByIns: byIns, date, grain,
       strategyId: row.def.id, entry: row.entry, expiry: row.expiry,

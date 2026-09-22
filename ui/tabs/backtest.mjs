@@ -37,6 +37,7 @@ import { clipDates, comboEntryDates, fastPathCodes } from '/ui/backtest-fastpath
 import { attachExportsIn } from '/ui/export.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { chart, LEG_COLORS } from '/ui/track-chart.mjs';
+import { fetchTapeBatch, tapeSummary, tapeWarning } from '/ui/tape-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -494,13 +495,19 @@ export async function mount(root, { state }) {
    */
   async function postTradeBatch(requests, { fresh = false } = {}) {
     try {
-      const response = await fetch('/api/trades/batch', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ requests, fresh }),
-      });
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
-      return payload.items || {};
+      // ═══ R5-13: حکمِ هر ابزار/روز همراهِ ردیف‌هایش می‌آید ═══
+      //
+      // نسخهٔ قبلی `payload.items` را خام برمی‌داشت و هیچ‌کجا `complete`،
+      // `shortfall` یا `throttled` را نمی‌خواند. نتیجهٔ بک‌تست روی نوارِ
+      // بریده ساخته می‌شد و از نتیجهٔ روی نوارِ کامل قابلِ تشخیص نبود —
+      // بدترین حالت برای چیزی که مستقیم به تصمیمِ معاملاتی می‌رسد.
+      const got = await fetchTapeBatch(requests, { fresh });
+      if (got.throttled) batchErrors.push(got.note);
+      else {
+        const warn = tapeWarning(tapeSummary(got.verdicts));
+        if (warn) batchErrors.push(warn);
+      }
+      return got.items;
     } catch (error) {
       batchErrors.push(String(error?.message || error));
       return {};

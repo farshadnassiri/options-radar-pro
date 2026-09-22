@@ -90,9 +90,13 @@ group('۲۰۱. صفحهٔ تب‌بندی‌شدهٔ آزمون همه استر�
 // ═══ تایم‌فریم پایین: همان ترکیب، ساعت‌به‌ساعت ═══
 group('۲۰۱-ب. تایم‌فریم پایین');
 {
+  // R5-13: دریافت از دروازهٔ مشترک می‌گذرد، ولی دامنهٔ ادعا عوض نشده —
+  // هنوز فقط پاهای همین ترکیب و نماد پایه.
   check('ریزمعامله فقط برای پاهای همین ترکیب و نماد پایه گرفته می‌شود',
     tab201.includes('const codes = [...new Set([String(ua.ins), ...item.legs.map((leg) => String(leg.ins))])];')
-    && tab201.slice(tab201.indexOf('async function renderIntraday(')).includes('/api/trades?ins='));
+    && tab201.slice(tab201.indexOf('async function renderIntraday(')).includes('fetchTapeOne(ins, '));
+  check('و حکمِ ناقص‌بودنِ هر پا شمرده می‌شود، نه دور ریخته',
+    tab201.includes('markGaps.push(verdict.state)'));
   check('هر لحظهٔ جلسه یک ردیف می‌شود',
     tab201.includes('for (const [second, label] of MARK_MOMENTS)'));
   check('ساعتی که پایی قیمت نداشته، عدد جعل نمی‌کند',

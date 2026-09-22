@@ -37,6 +37,7 @@ import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.
 import { attachExportsIn } from '/ui/export.mjs';
 import { takeHandoff, handoffEntryDate } from '/ui/handoff.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchTapeOne } from '/ui/tape-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -116,6 +117,8 @@ const PANELS = [
 
 export async function mount(root, { state }) {
   let chain = new Map();
+  // R5-13: هر ابزار/روزی که نوارش کامل نبود، تا بالای نمودار برود.
+  const tapeGaps = [];
   let ua = null;
   let contracts = [];
   let seriesByIns = {};
@@ -426,11 +429,19 @@ export async function mount(root, { state }) {
 
   // ——————————————————————— ریزمعامله ———————————————————————
 
+  /**
+   * ریزمعاملهٔ یک ابزار/روز، با حکمش.
+   *
+   * R5-13: نسخهٔ قبلی `payload.rows || []` برمی‌داشت و حکم را دور
+   * می‌ریخت. نوارِ بریده در این تب مستقیم به یونانی‌ها و نمودارِ مسیر
+   * می‌رود، و آنجا از نوارِ کامل قابلِ تشخیص نیست.
+   */
   async function fetchTrades(ins, date) {
-    const response = await fetch(`/api/trades?ins=${encodeURIComponent(ins)}&date=${date}`);
-    const payload = await response.json();
-    if (!response.ok || payload.error) throw new Error(payload.error || 'ریزمعامله دریافت نشد');
-    return payload.rows || [];
+    const { item, verdict } = await fetchTapeOne(ins, date);
+    if (verdict.state !== 'complete' && verdict.state !== 'quiet') {
+      tapeGaps.push({ ins: String(ins), date: String(date), state: verdict.state });
+    }
+    return item.rows || [];
   }
 
   /**
@@ -483,6 +494,27 @@ export async function mount(root, { state }) {
     } finally {
       button.disabled = false;
     }
+  }
+
+  /**
+   * R5-13: هر ابزار/روزی که نوارش کامل نبود، پیش از رسم گفته می‌شود.
+   *
+   * یونانی‌ها و نمودارِ مسیر مستقیم روی این نوار ساخته می‌شوند، و نوارِ
+   * بریده آنجا از نوارِ کامل قابلِ تشخیص نیست.
+   */
+  function reportTapeGaps() {
+    if (!tapeGaps.length) return;
+    const of = (state) => tapeGaps.filter((g) => g.state === state).length;
+    const parts = [];
+    if (of('throttled')) parts.push(`${of('throttled')} ابزار/روز پشتِ سهمیهٔ بالادست ماند`);
+    if (of('missing')) parts.push(`${of('missing')} ابزار/روز تابلو معامله ثبت کرده ولی ریزمعامله‌اش نیامد`);
+    if (of('partial')) parts.push(`${of('partial')} ابزار/روز کمتر از تابلو آمد`);
+    if (of('unverified')) parts.push(`${of('unverified')} ابزار/روز تابلوی روزانه‌اش در دست نبود`);
+    if (of('error')) parts.push(`${of('error')} ابزار/روز خطا داد`);
+    if (parts.length) {
+      setStatus(`${parts.join(' · ')} — یونانی‌ها و نمودارِ مسیر روی دادهٔ ناقص ساخته شده‌اند.`, true);
+    }
+    tapeGaps.length = 0;
   }
 
   // ——————————————————————— ساخت مسیر مهرخورده ———————————————————————
@@ -716,7 +748,14 @@ export async function mount(root, { state }) {
 
   $('gw-load').addEventListener('click', loadHistory);
   $('gw-run').addEventListener('click', runReplay);
-  $('gw-fetch-intraday').addEventListener('click', fetchIntraday);
+  // R5-13: پس از هر دریافتِ درون‌روزی، کم‌داشتهٔ نوار اعلام می‌شود.
+  // بستنِ گزارش به خودِ دکمه — نه داخلِ `fetchIntraday` — باعث می‌شود
+  // مسیرهای دیگرِ همان تابع هم بعداً فراموش نشوند: هر صدازننده باید
+  // صریح گزارش بدهد.
+  $('gw-fetch-intraday').addEventListener('click', async () => {
+    await fetchIntraday();
+    reportTapeGaps();
+  });
   $('gw-strategy').addEventListener('change', refreshCombos);
   $('gw-combo').addEventListener('change', () => { $('gw-run').disabled = !combos.length; });
   $('gw-bucket').addEventListener('change', (event) => {
