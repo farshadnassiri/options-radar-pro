@@ -481,7 +481,7 @@ export const EMPTY_STATUS = {
   quiet: 'بدون معامله',
   missing: 'ریزمعامله نیامد',
   surplus: 'تضاد با تابلو',
-  open: 'جلسه تمام نشده',
+  open: 'روزِ جاری — تابلو هنوز نهایی نشده',
   unknown: 'خالی، تأییدنشده',
 };
 
@@ -510,6 +510,16 @@ export const BLOCKED_STATUS = {
  * است — نه «کامل». این تفاوت کلِ بند ۳ ممیزی است.
  */
 export function coverageStatusOf(verdict, hasRows) {
+  // ═══ R5-11: «خالی، تأییدنشده» برای ردیفی که داده دارد، دروغ است ═══
+  //
+  // `unknown` خودش یک کلیدِ معتبرِ `EMPTY_STATUS` است، پس شرطِ اول
+  // می‌گرفتش و برچسبِ «**خالی**، تأییدنشده» می‌نشست — حتی وقتی نوار
+  // هزاران ردیف داشت. برچسبِ `'داده آمد، تأییدنشده'` که دقیقاً برای
+  // همین حالت نوشته شده بود، هیچ‌وقت دیده نمی‌شد.
+  //
+  // در خروجیِ واقعیِ ۲۰۲۶۰۹۱۵ تا ۲۰۲۶۰۹۲۲، ۶۸ ابزار/روز که داده داشتند
+  // «خالی» خوانده شدند.
+  if (verdict === 'unknown') return hasRows ? 'داده آمد، تأییدنشده' : EMPTY_STATUS.unknown;
   if (verdict && EMPTY_STATUS[verdict]) return EMPTY_STATUS[verdict];
   return hasRows ? 'داده آمد، تأییدنشده' : EMPTY_STATUS.unknown;
 }
@@ -657,6 +667,16 @@ export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}, op
     // (`dailyExpectation` و `trustedDailyRows`). پس وقتی مرجعِ اول نیست،
     // مرجعِ دوم حکم می‌دهد — و `referenceSource` می‌گوید از کدام در آمده،
     // چون «از کجا می‌دانیم» خودش بخشی از جواب است.
+    // ═══ R5-11: روزِ نوارِ زنده تابلوی نهایی ندارد ═══
+    //
+    // تابلوی روزانهٔ روزِ جاری تا تسویه نهایی نمی‌شود، پس سنجیدنِ نوارِ
+    // زنده با آن معنا ندارد. تا امروز این فقط وقتی فهمیده می‌شد که فازِ
+    // بازار `open` باشد؛ کسی که پس از بسته‌شدنِ بازار خروجی می‌گرفت،
+    // همان روز را «نامعلوم» می‌دید. در خروجیِ واقعیِ ۲۰۲۶۰۹۱۵ تا
+    // ۲۰۲۶۰۹۲۲، هر ۸۵ ابزار/روزِ امروز همین شدند.
+    //
+    // منبعِ `live` خودش این را می‌گوید و به فازِ بازار وابسته نیست.
+    const liveDay = String(hit.source || '') === 'live';
     const listed = index.get(String(pair.ins))?.get(Math.trunc(n(pair.date))) || null;
     const carried = !listed && hit.reference
       && Number.isFinite(Number(hit.reference.trades))
@@ -687,7 +707,9 @@ export function dataExportBlankAudit(pairs = [], items = {}, dailyByIns = {}, op
       verdict: coverageVerdict({
         daily: Boolean(daily), dailyTrades, dailyVolume,
         tapeTrades, tapeCanceled, tapeVolume,
-        sessionOpen: openDates.has(Math.trunc(n(pair.date))),
+        // روزِ نوارِ زنده، یا روزی که فازش `open` است: هیچ‌کدام تابلوی
+        // نهاییِ سنجش‌پذیر ندارند.
+        sessionOpen: openDates.has(Math.trunc(n(pair.date))) || (liveDay && !daily),
       }),
     });
   }
@@ -742,7 +764,7 @@ export const BLANK_VERDICT_LABEL = {
   missing: 'ریزمعامله نیامد — تابلو برای آن روز معامله ثبت کرده',
   quiet: 'بدون معامله — تابلوی روزانه هم صفر است',
   surplus: 'تضاد — نوار داده دارد ولی تابلوی روزانه صفر است',
-  open: 'جلسه هنوز تمام نشده — تطبیق معنا ندارد',
+  open: 'روزِ جاری — تابلوی روزانه هنوز نهایی نشده، پس تطبیق معنا ندارد',
   unknown: 'نامعلوم — تابلوی روزانه در دست نیست',
 };
 
