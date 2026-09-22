@@ -8,9 +8,11 @@
 //
 // ولی سه برچسب غلط بود، و هر سه از جنسِ «فایل چیزی می‌گوید که نیست».
 
-import { check, group } from '../harness.mjs';
+import { check, group, readSrc } from '../harness.mjs';
 import { tapeMatchesDaily, tapeMetrics } from '../../core/tape-choice.mjs';
-import { coverageStatusOf, dataExportBlankAudit, EMPTY_STATUS } from '../../core/data-export.mjs';
+import {
+  coverageStatusOf, coverageVerdict, dataExportBlankAudit, EMPTY_STATUS,
+} from '../../core/data-export.mjs';
 
 group('۲۹۰. R5-11 — تابلو معاملهٔ باطل را هم می‌شمارد');
 {
@@ -100,4 +102,53 @@ group('۲۹۰. R5-11 — روزِ نوارِ زنده تابلوی نهایی ن
   const hist = dataExportBlankAudit([{ key: '20260919:A', ins: 'A', date: 20260919 }],
     { '20260919:A': { rows: tape(10), source: 'history' } }, {}, []);
   check('روزِ تاریخیِ بی‌تابلو همچنان «نامعلوم» است', hist[0].verdict === 'unknown');
+}
+
+group('۲۹۰. R5-12 — یک قاعده، و این‌بار در هر دو جا');
+{
+  // ═══ چرا این دسته لازم شد ═══
+  //
+  // `tapeMatchesDaily` رواداریِ حجمِ باطل‌ها را گرفت، ولی `coverageVerdict`
+  // نگرفت — دو پیاده‌سازی از یک مفهوم. نتیجه در خروجیِ واقعی: سرور شش
+  // ابزار/روز را «کامل» می‌دانست و بازبینی همان‌ها را «ناقص» می‌خواند، و
+  // پس از اصلاحِ اولی عدد ۶ تکان نخورد.
+  //
+  // درسش از قبل در `NEXT.md` بود: «عددی که در دو جا به دو راه حساب
+  // می‌شود، آزمونی می‌خواهد که همان دو راه را کنار هم بگذارد.»
+  const board = { daily: true, dailyTrades: 1102, dailyVolume: 1103 };
+  const tape = { tapeTrades: 1101, tapeVolume: 1101, tapeCanceled: 1, tapeCanceledVolume: 2 };
+
+  check('حکمِ بازبینی هم رواداریِ حجمِ باطل‌ها را دارد',
+    coverageVerdict({ ...board, ...tape }) === 'matched');
+  check('و بیشتر از آن همچنان «ناقص» است',
+    coverageVerdict({ ...board, dailyVolume: 1104, ...tape }) === 'partial');
+  check('و تابلوی کمتر از ما هنوز تطبیق نیست',
+    coverageVerdict({ ...board, dailyVolume: 1100, ...tape }) !== 'matched');
+  check('نوارِ بی‌باطل هیچ رواداری نمی‌گیرد',
+    coverageVerdict({ daily: true, dailyTrades: 500, dailyVolume: 501,
+      tapeTrades: 500, tapeVolume: 500, tapeCanceled: 0, tapeCanceledVolume: 0 }) === 'partial');
+
+  // ═══ و کسریِ گزارش‌شده هم نباید باطل‌ها را «کم‌داشته» بنویسد ═══
+  const pairs = [{ key: '20260915:A', ins: 'A', date: 20260915 }];
+  const rows = [
+    ...Array.from({ length: 1101 }, () => ({ quantity: 1, canceled: false })),
+    { quantity: 2, canceled: true },
+  ];
+  const audit = dataExportBlankAudit(pairs, { '20260915:A': { rows, source: 'history' } },
+    { A: { rows: [{ date: 20260915, trades: 1102, vol: 1103 }] } }, []);
+  check('ابزار/روزِ دارای باطل «تطبیق‌شده» می‌شود', audit[0].verdict === 'matched');
+  check('و کسریِ ساختگی گزارش نمی‌شود',
+    audit[0].tradeGap === 0 && audit[0].volumeGap === 0);
+  check('حجمِ باطل‌ها جدا حمل می‌شود', audit[0].tapeCanceledVolume === 2);
+
+  // کسریِ واقعی همچنان گزارش می‌شود.
+  const short = dataExportBlankAudit(pairs, { '20260915:A': { rows, source: 'history' } },
+    { A: { rows: [{ date: 20260915, trades: 1200, vol: 1300 }] } }, []);
+  check('کسریِ واقعی همچنان دیده می‌شود',
+    short[0].verdict === 'partial' && short[0].volumeGap === 197);
+
+  const tool = readSrc('../tools/verify-export.mjs');
+  check('ابزارِ کنترل روزِ جاری را از مخرجِ پوشش بیرون می‌گذارد',
+    tool.includes("const openDay = count('روزِ جاری')")
+      && tool.includes('const judged = Math.max(0, total - openDay)'));
 }
