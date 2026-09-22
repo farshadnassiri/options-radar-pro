@@ -89,6 +89,7 @@ import { dataSourceRows } from '/core/data-source.mjs';
 import { FILTER_FIELDS, applyComboFilter, filterNote } from '/core/combo-filter.mjs';
 import { selectMatrixRows } from '/core/portfolio-matrix.mjs';
 import { fetchTapeOne } from '/ui/tape-intake.mjs';
+import { fetchDailies } from '/ui/daily-intake.mjs';
 import {
   correlationHeatOption, correlationOf, familyBarOption, funnelOption, paretoOption,
   roseOption, shareDonutOption, similarityGraphOption, sunburstOption,
@@ -633,9 +634,7 @@ export async function mount(root, { state, api }) {
         setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
         try {
           const payloads = await Promise.all(chunks(codes, 70).map(async (part) => {
-            const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0`), payload = await response.json();
-            if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
-            return payload;
+            return (await fetchDailies(part)).byIns;   // R5-14
           }));
           seriesByIns = {};
           runSeriesByIns = {};
@@ -669,10 +668,7 @@ export async function mount(root, { state, api }) {
           if (asOf && emptyCodes.length) {
             setStatus(`${fmt.int(emptyCodes.length)} ابزار از فهرست روزانه خالی برگشت — منبع دوم…`);
             const retries = await Promise.all(chunks(emptyCodes, 70).map(async (part) => {
-              const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0&asOf=${asOf}`);
-              const payload = await response.json();
-              if (!response.ok || payload.error) throw new Error(payload.error || 'منبع دوم پاسخ نداد');
-              return payload;
+              return (await fetchDailies(part, { asOf })).byIns;   // R5-14
             }));
             for (const payload of retries) {
               for (const [ins, value] of Object.entries(payload)) {

@@ -1937,7 +1937,45 @@ async function handle(req, res) {
           return [code, { ins: code, rows: [], source: 'list', error: `${e.name}: ${e.message}` }];
         }
       };
-      return sendJson(res, 200, Object.fromEntries(await Promise.all(codes.map(one))));
+      const settled = await Promise.all(codes.map(one));
+      const out = Object.fromEntries(settled);
+
+      // ═══ R5-14: «ردیف نداشت» خودش یک خبر است ═══
+      //
+      // مصرف‌کننده تا امروز `value.rows` را می‌گرفت و آرایهٔ خالی را
+      // «این ابزار تاریخچه ندارد» ترجمه می‌کرد. ولی خالی سه علت دارد و
+      // فقط یکی‌شان واقعیتِ بازار است:
+      //
+      //   ۱. قراردادِ سررسیدشده که از تابلو حذف شده  → واقعی، و `asOf`
+      //      برایش هست
+      //   ۲. سهمیهٔ بالادست                          → `HTTP 200` با
+      //      آرایهٔ خالی، بی هیچ خطایی
+      //   ۳. خودِ ابزار واقعاً بی‌تاریخچه            → نادر
+      //
+      // تابلوی روزانه **مرجعِ سنجشِ همهٔ بقیهٔ برنامه** است؛ وقتی خودش
+      // خالی برگردد و کسی نفهمد، هر حکمِ «کامل/ناقص» در هر تبی بی‌پشتوانه
+      // می‌شود. پس شمارش و پرچم همراه پاسخ می‌روند.
+      const blanks = settled.filter(([, v]) => !(v.rows || []).length).map(([code]) => code);
+      for (const [, value] of settled) value.blank = !(value.rows || []).length;
+
+      // ═══ سوءظن، نه حکم ═══
+      //
+      // بسته‌ای که در آن **هیچ** ابزاری تاریخچه ندارد، واقعیتِ بازار
+      // نیست: حتی فهرستی از قراردادهای منقضی هم معمولاً چند ردیف دارد.
+      // ولی این استدلال قطعی نیست، پس اسمش «سوءظن» است نه «سهمیه» —
+      // همان تفکیکی که این مخزن جای دیگر هم نگه می‌دارد.
+      const allBlank = codes.length >= 10 && blanks.length === codes.length;
+      return sendJson(res, 200, {
+        ...out,
+        __meta: {
+          requested: codes.length, blank: blanks.length,
+          blankCodes: blanks.slice(0, 20),
+          suspectThrottled: allBlank,
+          note: allBlank
+            ? `هیچ‌کدام از ${codes.length} ابزار تابلوی روزانه نداد. این الگوی سهمیهٔ بالادست است، نه بازارِ بی‌تاریخچه.`
+            : '',
+        },
+      });
     }
 
     if (p === '/api/clienttype') {

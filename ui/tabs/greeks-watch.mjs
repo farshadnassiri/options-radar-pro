@@ -38,6 +38,7 @@ import { attachExportsIn } from '/ui/export.mjs';
 import { takeHandoff, handoffEntryDate } from '/ui/handoff.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { fetchTapeOne } from '/ui/tape-intake.mjs';
+import { dailySummary, dailyWarning, fetchDailies } from '/ui/daily-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -332,14 +333,17 @@ export async function mount(root, { state }) {
     $('gw-load').disabled = true;
     setStatus(`دریافت تاریخچه ${fmt.int(codes.length)} نماد…`);
     try {
-      const payloads = await Promise.all(chunks(codes, 70).map(async (part) => {
-        const response = await fetch(`/api/dailies?ins=${part.join(',')}&n=0`);
-        const payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
-        return payload;
-      }));
+      // R5-14: از دروازهٔ مشترک، تا خالی‌بودنِ تابلو دیده شود نه اینکه
+      // «این ابزار تاریخچه ندارد» ترجمه شود.
+      const parts = await Promise.all(chunks(codes, 70).map((part) => fetchDailies(part)));
       seriesByIns = {};
-      for (const payload of payloads) for (const [ins, value] of Object.entries(payload)) seriesByIns[ins] = value.rows || [];
+      const verdicts = {};
+      for (const got of parts) {
+        for (const [ins, value] of Object.entries(got.byIns)) seriesByIns[ins] = value.rows || [];
+        Object.assign(verdicts, got.verdicts);
+      }
+      const dailyNote = dailyWarning(dailySummary(verdicts, parts.find((g) => g.meta?.suspectThrottled)?.meta));
+      if (dailyNote) setStatus(dailyNote, true);
       await applyScope();
       computeHistVol();
       entryDates = (seriesByIns[String(ua.ins)] || [])

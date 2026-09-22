@@ -63,6 +63,7 @@ import { normalizeHistoryDate } from '/core/history.mjs';
 import { GREEKS, monitorSnapshot, monitorStance } from '/core/monitor.mjs';
 import { emptyReason } from '/ui/feed-state.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchDailies } from '/ui/daily-intake.mjs';
 
 const KINDS = [
   ['covered-call', 'کاوردکال — سهم + فروش کال'],
@@ -1358,7 +1359,9 @@ export async function mount(root, { state, api }) {
       const all = [...codes];
       const parts = [];
       for (const batch of insBatches(all, INS_CAP.dailies)) {
-        parts.push(await (await fetch(`/api/dailies?ins=${batch.join(',')}&n=${need}`)).json());
+        // R5-14: `byIns` بی `__meta` است، پس `mergeInsPayloads` پایین
+        // یک کلیدِ غیرابزار را ابزار نمی‌شمارد.
+        parts.push((await fetchDailies(batch, { n: need })).byIns);
       }
       const merged = mergeInsPayloads(all, parts);
       dailyByIns = merged.payload;

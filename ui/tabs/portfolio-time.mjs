@@ -69,6 +69,7 @@ import {
 import { missionSaveLabel, resumeMissionRecord } from '../portfolio-mission-resume.mjs';
 import { mountDateWheel } from '../datewheel.mjs';
 import { fmt, faDigits } from '../fmt.mjs';
+import { fetchDailies } from '/ui/daily-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -1872,9 +1873,7 @@ export async function mount(root, { state, api }) {
     resetHistoryDates();
     $('pt-feed-status').textContent = 'در حال دریافت روزهای معاملاتی…';
     try {
-      const response = await fetch(`/api/dailies?ins=${encodeURIComponent(ins)}&n=0`);
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || payload.error) throw new Error(payload.error || 'تاریخچه دریافت نشد');
+      const payload = (await fetchDailies([ins])).byIns;      // R5-14
       const days = new Set((payload?.[ins]?.rows || [])
         .map((row) => normalizeHistoryDate(row.date)).filter(Boolean));
       // ── روزِ جاری ─────────────────────────────────────────────────

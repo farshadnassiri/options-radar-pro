@@ -9,6 +9,7 @@ import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { applyLiveScope, scopeOptionsMarkup, SCOPE_LIVE } from '/ui/live-scope.mjs';
 import { fetchTapeBatch, tapeSummary, tapeWarning } from '/ui/tape-intake.mjs';
+import { fetchDailies } from '/ui/daily-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -429,8 +430,8 @@ export async function mount(root, { state }) {
       // بی‌پاسخ از سری می‌افتند، بازه **کامل** هم به نظر می‌رسید.
       const seriesErrors = {};
       for (const group of chunks(codes, 100)) {
-        const response = await fetch(`/api/dailies?ins=${encodeURIComponent(group.join(','))}&n=0`), payload = await response.json();
-        if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
+        // R5-14: از دروازه، تا `__meta` وارد پیمایشِ ابزارها نشود.
+        const payload = (await fetchDailies(group)).byIns;
         for (const [ins, result] of Object.entries(payload)) {
           closedSeriesByIns[ins] = result?.rows || [];
           const why = result?.error || result?.fallbackError || result?.fallbackNote

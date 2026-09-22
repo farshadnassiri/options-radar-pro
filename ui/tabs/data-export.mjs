@@ -24,6 +24,7 @@ import { buildDataExportSheets, dataExportFilename } from '/ui/data-export-workb
 import { downloadXlsx } from '/ui/xlsx.mjs';
 import { faDigits, fmt } from '/ui/fmt.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchDailies } from '/ui/daily-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -524,10 +525,9 @@ export async function mount(root, { state, api }) {
         if (batches.length > 1) {
           setStatus(`در حال گرفتن تابلوی روزانه: بسته ${fmt.int(index + 1)} از ${fmt.int(batches.length)}…`);
         }
-        const response = await fetch(`/api/dailies?ins=${batches[index].join(',')}&n=0`, { cache: 'no-store', signal });
-        const payload = await response.json();
-        if (!response.ok || payload?.error) throw new Error(payload?.error || `پاسخ ${response.status}`);
-        parts.push(payload && typeof payload === 'object' ? payload : {});
+        // R5-14: از دروازه. `byIns` بی `__meta` است، پس `mergeInsPayloads`
+        // و شمارشِ `blank` پایین دست‌نخورده کار می‌کنند.
+        parts.push((await fetchDailies(batches[index], { fetcher: (u, o) => fetch(u, { ...o, cache: 'no-store' }), signal })).byIns);
       }
       const merged = mergeInsPayloads(codes, parts);
       if (merged.missing.length) {
@@ -634,11 +634,11 @@ export async function mount(root, { state, api }) {
       if (!codes.length) return { payload, date: 0, why: day.why || '' };
       const [tapeResponse, dailyResponse] = await Promise.all([
         fetch(`/api/live-trades?ins=${codes.join(',')}`, { cache: 'no-store', signal }),
-        fetch(`/api/dailies?ins=${codes.join(',')}&n=12`, { cache: 'no-store', signal }),
+        fetchDailies(codes, { n: 12, fetcher: (u, o) => fetch(u, { ...o, cache: 'no-store' }), signal }),
       ]);
-      const [tape, daily] = await Promise.all([tapeResponse.json(), dailyResponse.json()]);
-      if (!tapeResponse.ok || tape?.error || !dailyResponse.ok || daily?.error) {
-        const why = tape?.error || daily?.error || `پاسخ ${!tapeResponse.ok ? tapeResponse.status : dailyResponse.status}`;
+      const [tape, daily] = await Promise.all([tapeResponse.json(), Promise.resolve(dailyResponse.byIns)]);
+      if (!tapeResponse.ok || tape?.error) {
+        const why = tape?.error || `پاسخ ${tapeResponse.status}`;
         return { payload, date: 0, why: `${day.why || 'روز نوار روشن نیست'}؛ تطبیق آخرین جلسه نرسید: ${why}` };
       }
       const inferred = inferLiveSessionDate(tape.items, daily);

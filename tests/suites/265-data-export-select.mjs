@@ -257,7 +257,7 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
 
   const tab = readSrc('../ui/tabs/data-export.mjs');
   check('تب تابلوی روزانه را برای راست‌آزمایی می‌گیرد',
-    tab.includes('fetchDaily(instruments, range') && tab.includes('/api/dailies?ins='));
+    tab.includes('fetchDaily(instruments, range') && tab.includes('await fetchDailies(batches[index]'));
   check('شکست تابلوی روزانه کار اصلی را نمی‌خورد',
     tab.includes("logError('data-export:daily', error)"));
   check('جملهٔ وضعیت می‌گوید داده نرسیده، نه اینکه بازار ساکت بوده',

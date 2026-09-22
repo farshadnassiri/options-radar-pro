@@ -13,6 +13,8 @@
 // می‌دهد. هیچ نقطهٔ لایوی اینجا صدا زده نمی‌شود، چون در یک جلسهٔ سفر در
 // زمان، «الان» معنی ندارد.
 
+import { fetchDailies } from './daily-intake.mjs';
+
 const memo = new Map();
 
 /** کش درون‌مرورگری. روز تمام‌شده دیگر عوض نمی‌شود، پس عمرش تا بستن تب است. */
@@ -34,11 +36,28 @@ async function getJson(url) {
 
 const compact = (date) => String(Math.trunc(Number(date) || 0));
 
+/**
+ * سری روزانهٔ یک ابزار، همراهِ حکمش.
+ *
+ * ═══ چرا حکم هم برمی‌گردد ═══
+ *
+ * «آرایهٔ خالی» در این تب دو معنیِ کاملاً متفاوت دارد که یک شکل‌اند:
+ * ابزاری که آن روز معامله نشده، و ابزاری که تابلویش **اصلاً نیامده**.
+ * `contractsAliveAt` با اولی قرارداد را کنار می‌گذارد — و با دومی هم
+ * همان کار را می‌کرد، بی آنکه کسی بفهمد یک قرارداد از جلسه افتاد.
+ * حکم همین را جدا می‌کند.
+ */
+export async function loadDailiesVerdict(ins, { n = 0 } = {}) {
+  const key = `daily|${ins}|${n}`;
+  return once(key, async () => {
+    const got = await fetchDailies([ins], { n });
+    return { rows: got.byIns?.[String(ins)]?.rows || [], verdict: got.verdicts[String(ins)] };
+  });
+}
+
 /** سری روزانهٔ یک ابزار. `n=0` یعنی از اولین روز موجود. */
 export async function loadDailies(ins, { n = 0 } = {}) {
-  const key = `daily|${ins}|${n}`;
-  const body = await once(key, () => getJson(`/api/dailies?ins=${encodeURIComponent(ins)}&n=${n}`));
-  return body?.[String(ins)]?.rows || [];
+  return (await loadDailiesVerdict(ins, { n })).rows;
 }
 
 /** ریزمعاملهٔ یک ابزار در یک روز تکمیل‌شده. */

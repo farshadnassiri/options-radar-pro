@@ -74,7 +74,7 @@ group('۱۱۵. پوسته UI مأموریت — مرحله نخست');
       .every((id) => tab.includes(`id=\"${id}\"`)));
   check('نماد و تاریخ از موتورهای مشترک برنامه می‌آیند',
     tab.includes('buildChain(') && tab.includes('underlyingList(')
-    && tab.includes('mountDateWheel(') && tab.includes('/api/dailies?'));
+    && tab.includes('mountDateWheel(') && tab.includes('fetchDailies('));
   check('رقم‌های خلاصه از formatter مشترک رابط عبور می‌کنند',
     tab.includes('fmt.int(') && tab.includes('fmt.pct(') && tab.includes('faDigits('));
   check('گذرنامه تاریخ‌های مرور را با برچسب جلالی نشان می‌دهد',
