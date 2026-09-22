@@ -20,6 +20,7 @@ import { buildHistoryChain, historyBasis, historyChainNote } from '../core/histo
 import { todayCompact } from '../core/history-range.mjs';
 import { liveDaySnapshot } from './live-scope.mjs';
 import { fetchDailies } from './daily-intake.mjs';
+import { fetchLiveTape } from './quote-intake.mjs';
 
 /** درخواستِ کدها، تکه‌تکه — `/api/dailies` سقف ۲۰۰ کد دارد. */
 const CHUNK = 100;
@@ -185,13 +186,14 @@ export async function runHistoryScan({ def, uaIns, date, basis = 'CLOSE', settin
 export async function liveTapeFor(codes = [], { fetcher } = {}) {
   const list = [...new Set(codes.map((code) => String(code || '')).filter(Boolean))].slice(0, 24);
   if (!list.length) return { at: 0, tape: {}, errors: {}, market: null };
-  const payload = await asJson(`/api/live-trades?ins=${list.join(',')}`, fetcher);
+  const payload = await fetchLiveTape(list, { fetcher: fetcher || fetch });
   const tape = {};
   const errors = {};
-  for (const [ins, box] of Object.entries(payload.items || {})) {
+  for (const [ins, box] of Object.entries(payload.byIns)) {
     tape[ins] = Array.isArray(box?.rows) ? box.rows : [];
     if (box?.error) errors[ins] = box.error;
   }
+  for (const fail of payload.errors) for (const ins of fail.codes) errors[ins] = fail.why;
   // وضعیت بازار همراه می‌آید تا «هنوز جلسه‌ای نبوده» با «این پا معامله
   // نشده» اشتباه نشود — دو جملهٔ کاملاً متفاوت با یک ظاهر.
   return { at: payload.at ?? 0, tape, errors, market: payload.market || null };

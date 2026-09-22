@@ -10,6 +10,7 @@ import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.
 import { applyLiveScope, scopeOptionsMarkup, SCOPE_LIVE } from '/ui/live-scope.mjs';
 import { fetchTapeBatch, tapeSummary, tapeWarning } from '/ui/tape-intake.mjs';
 import { fetchDailies } from '/ui/daily-intake.mjs';
+import { fetchLiveTape } from '/ui/quote-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -487,19 +488,16 @@ export async function mount(root, { state }) {
       let analysisDate = selectedDate, tradesByKey = live ? null : tradeCache.get(cacheKey);
       if (live) {
         const ids = [String(ua.ins), ...viewContracts.map((contract) => String(contract.ins))];
-        const parts = await Promise.all(chunks(ids, 24).map(async (group) => {
-          const response = await fetch(`/api/live-trades?ins=${encodeURIComponent(group.join(','))}`, { cache: 'no-store' });
-          const payload = await response.json();
-          if (!response.ok || payload.error) throw new Error(payload.error || `HTTP ${response.status}`);
-          return payload;
-        }));
+        const tape = await fetchLiveTape(ids);
+        if (tape.errors.length) throw new Error(tape.errors[0].why);
         // کلِ بدنهٔ پاسخ می‌رود، نه دو فیلدش: انتساب روز به منبع هم نگاه
         // می‌کند، و فرستادنِ ناقصش «منبع نامعلوم» می‌داد — بی‌صدا، و کلِ
-        // این نما را از کار می‌انداخت.
-        const day = liveTapeDay(parts[0]);
+        // این نما را از کار می‌انداخت. دروازه هم به همین دلیل بدنهٔ خام
+        // را دست‌نخورده حمل می‌کند، نه بازسازی‌شده.
+        const day = liveTapeDay(tape.envelope);
         if (!day.ok) throw new Error(`عکس بازار به امروز قابل انتساب نیست${day.why ? `؛ ${day.why}` : ''}`);
         analysisDate = day.date;
-        const items = Object.assign({}, ...parts.map((part) => part.items || {}));
+        const items = tape.byIns;
         const batch = liveTradeBatch(items, analysisDate, ua.ins);
         if (batch.baseFailed) throw new Error('ریزمعامله نماد پایه دریافت نشد؛ نمودارهای وابسته به پایه قابل ساخت نیستند.');
         tradesByKey = batch.tradesByKey;

@@ -314,7 +314,7 @@ group('۲۶۵. پنجرهٔ ۹ تا ۱۲:۳۰ و راست‌آزماییِ خا�
   check('روزِ نوار زنده از خودِ پاسخ تابلو گرفته می‌شود',
     tab.includes('liveTapeDay(payload)') && tab.includes('async function resolveLiveDay'));
   check('روز تعطیل، تاریخ آخرین نوار را از اثرانگشت روزانه تأیید می‌کند',
-    tab.includes('inferLiveSessionDate(tape.items, daily)') && tab.includes("['holiday', 'before']"));
+    tab.includes('inferLiveSessionDate(tape.byIns, daily)') && tab.includes("['holiday', 'before']"));
   check('نوار زنده دوباره درخواست نمی‌شود — همان پاسخِ حل‌شده مصرف می‌شود',
     tab.includes('fetchLive(live, items, controller.signal, resolved)'));
   // ═══ چرا دکمهٔ «آزمون یک ابزار/روز» رفت ═══

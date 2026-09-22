@@ -1316,9 +1316,19 @@ async function handle(req, res) {
           // تکرارِ دقیق همین‌جا می‌افتد، وگرنه خلاصه و شمع‌ساز آن را
           // دوباره می‌شمارند: نمونهٔ اهرم/۲۰۲۶۰۹۲۰ پنج ردیفِ تکراری داشت و
           // ۴٬۰۵۷ واحد حجمِ اضافه می‌ساخت.
-          const tape = normalizeTradesDetailed(firstList(await getFresh(`/Trade/GetTrade/${code}`, 2, 2)));
+          const raw = await getFresh(`/Trade/GetTrade/${code}`, 2, 2);
+          const tape = normalizeTradesDetailed(firstList(raw));
           const { rows, duplicates, conflicts } = tape;
-          return [code, { ins: code, rows, duplicates, conflicts, summary: summarizeLiveTrades(rows) }];
+          const item = { ins: code, rows, duplicates, conflicts, summary: summarizeLiveTrades(rows) };
+          // فازِ بازار می‌گوید «هنوز جلسه‌ای نبوده» یا «این ابزار معامله
+          // نشده» — ولی حالتِ سومی هم هست که تا امروز نامی نداشت:
+          // بالادست چیزی داد که اصلاً نوار نیست. شکلِ خام همان را
+          // می‌گوید، و فقط وقتی همراه می‌شود که خالی مانده باشیم.
+          if (!rows.length) {
+            const shape = upstreamShape(raw);
+            return [code, { ...item, blank: true, upstreamKind: shape.kind, upstream: upstreamShapeLabel(shape) }];
+          }
+          return [code, item];
         } catch (e) {
           return [code, { ins: code, rows: [], error: `${e.name}: ${e.message}` }];
         }
@@ -2019,7 +2029,8 @@ async function handle(req, res) {
       const one = async (code) => {
         try {
           if (wantBook) {
-            const rows = firstList(await get(`/BestLimits/${code}`, S.ttlBookSec, 3));
+            const raw = await get(`/BestLimits/${code}`, S.ttlBookSec, 3);
+            const rows = firstList(raw);
             const book = rows
               .map((r) => ({
                 level: Number(r.number), bid: Number(r.pMeDem) || 0, bidQty: Number(r.qTitMeDem) || 0,
@@ -2029,6 +2040,14 @@ async function handle(req, res) {
               .filter((r) => Number.isFinite(r.level))
               .sort((a, b) => a.level - b.level)
               .slice(0, 5);
+            // دفترِ خالی دو چیز است، مثل هر جای دیگر: بالادست گفت
+            // سطحی ثبت نشده، یا چیزی داد که اصلاً فهرست نیست. بی این
+            // نشانه، «بی‌مظنه» و «نگرفتیم» یک شکل‌اند — و رادار فاصله
+            // دومی را «بازارِ بی‌عمق» می‌خواند.
+            if (!book.length) {
+              const shape = upstreamShape(raw);
+              return [code, { book, blank: true, upstreamKind: shape.kind, upstream: upstreamShapeLabel(shape) }];
+            }
             return [code, { book }];
           }
           const d = firstDict(await get(`/ClosingPrice/GetClosingPriceInfo/${code}`, S.ttlInfoSec, 3));
@@ -2045,7 +2064,10 @@ async function handle(req, res) {
             staleSec: hE ? Math.max(0, nowT - secs) : null,
           }];
         } catch (e) {
-          return [code, { error: `${e.name}` }];
+          // پیش از این فقط `e.name` می‌رفت: «TypeError» بی هیچ توضیحی.
+          // دفتر خطاها پر می‌شد از نامِ کلاس، و هیچ‌کدام قابلِ پیگیری
+          // نبودند. پیام هم می‌رود، مثل هر مسیرِ دیگر.
+          return [code, { error: `${e.name}: ${e.message}` }];
         }
       };
       const pairs = await Promise.all(codes.map(one));

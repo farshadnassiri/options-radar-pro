@@ -14,6 +14,7 @@
 import { liveDayOf, liveDayRows, liveTapeCodes, mergeLiveDay } from '../core/live-day.mjs';
 import { historyDateLabel } from '../core/history.mjs';
 import { fmt, faClock, faDigits } from './fmt.mjs';
+import { fetchLiveTape } from './quote-intake.mjs';
 
 export const SCOPE_CLOSED = 'closed';
 export const SCOPE_LIVE = 'live';
@@ -47,7 +48,6 @@ export const scopeOptionsMarkup = (selected = SCOPE_LIVE) => SCOPE_OPTIONS
 
 // سقفِ خودِ `/api/live-trades` برای هر درخواست. تکه‌تکه می‌رود تا بازهٔ
 // چندنمادی هم بتواند ردیف امروزش را بگیرد.
-const TAPE_CHUNK = 24;
 
 /**
  * خلاصهٔ نوار معاملهٔ چند ابزار.
@@ -60,20 +60,14 @@ export async function loadTapeSummaries(codes = [], fetcher = fetch) {
   const list = [...new Set((codes || []).map((code) => String(code || '')).filter(Boolean))];
   const summaries = {};
   const errors = [];
-  for (let at = 0; at < list.length; at += TAPE_CHUNK) {
-    const part = list.slice(at, at + TAPE_CHUNK);
-    try {
-      const response = await fetcher(`/api/live-trades?ins=${part.join(',')}`, { cache: 'no-store' });
-      const payload = await response.json();
-      if (!response.ok || payload.error) throw new Error(payload.error || `پاسخ ${response.status}`);
-      for (const [ins, item] of Object.entries(payload.items || {})) {
-        if (item?.summary) summaries[ins] = item.summary;
-        else if (item?.error) errors.push(String(item.error));
-      }
-    } catch (error) {
-      errors.push(String(error?.message || error));
-    }
+  // دسته‌بندی و بررسیِ پاسخ در دروازه است؛ این تابع همان قرارداد را نگه
+  // می‌دارد: هیچ‌وقت پرتاب نمی‌کند، و آنچه نرسید را نام می‌برد.
+  const got = await fetchLiveTape(list, { fetcher });
+  for (const [ins, item] of Object.entries(got.byIns)) {
+    if (item?.summary) summaries[ins] = item.summary;
+    else if (item?.error) errors.push(String(item.error));
   }
+  for (const fail of got.errors) errors.push(String(fail.why));
   return { summaries, errors };
 }
 

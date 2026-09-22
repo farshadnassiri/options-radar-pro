@@ -61,6 +61,7 @@ import {
   testDelivery,
 } from '/ui/gap-alarm.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchBooks, fetchLiveTape } from '/ui/quote-intake.mjs';
 import { fetchTapeBatch, tapeSummary, tapeWarning } from '/ui/tape-intake.mjs';
 
 const $ = (id) => document.getElementById(id);
@@ -977,13 +978,17 @@ export async function mount(root, { state }) {
         startAt: liveRotates() ? liveCursor : 0,
       });
       if (!plan.ins.length) { $('gr-live-state').textContent = 'ابزاری برای مظنهٔ زنده نبود'; return; }
-      const path = source === 'book' ? '/api/books' : '/api/live-trades';
-      const response = await fetch(`${path}?ins=${plan.ins.join(',')}`, { signal: job.signal });
-      const payload = await response.json();
+      // دو مسیر، یک دروازه. `envelope`/`payload` همان شکلِ خامی است که
+      // `liveQuoteBook` و `bookQuoteBook` می‌شناسند، پس این دو دست‌نخورده
+      // می‌مانند و فقط بررسیِ پاسخ یک‌جا می‌شود.
+      const got = source === 'book'
+        ? await fetchBooks(plan.ins, { signal: job.signal })
+        : await fetchLiveTape(plan.ins, { signal: job.signal });
+      const payload = source === 'book' ? got.byIns : got.envelope;
       // پاسخ رسید، ولی رصد در این فاصله خاموش شده یا اولویت عوض شده:
       // نه نوار عوض می‌شود، نه جدول. این همان «توقفِ قابل اعتماد» است.
       if (gen !== liveGen || !mounted) return;
-      if (!response.ok || payload.error) throw new Error(payload.error || 'مظنهٔ زنده دریافت نشد');
+      if (got.errors.length) throw new Error(got.errors[0].why);
       liveCursor = liveRotates() ? plan.nextStart : 0;
       if (source === 'book') {
         liveBook = bookQuoteBook(payload);
@@ -998,7 +1003,7 @@ export async function mount(root, { state }) {
         liveBase = Number(liveBook.prices[String(ua?.ins ?? '')] ?? NaN);
         livePrices = liveBook.prices;
       }
-      liveAt = Number(payload.at) || Date.now();
+      liveAt = got.at || Date.now();
       const applied = applyLive(source);
       const clock = faDigits(new Date(liveAt).toLocaleTimeString('fa-IR'));
       const what = source === 'book' ? 'مظنهٔ قابل اجرا' : 'مظنهٔ هم‌زمان';

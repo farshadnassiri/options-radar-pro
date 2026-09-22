@@ -12,6 +12,7 @@ import {
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchLiveTape } from '/ui/quote-intake.mjs';
 import { dashboardClock } from '/core/watch-health.mjs';
 import { busyBlock, attachBusyBar } from '/ui/busy.mjs';
 import { createOpenViewBaseSyncGate } from '/ui/open-view-selection.mjs';
@@ -1220,9 +1221,9 @@ export async function mount(root, { state, api }) {
     tape = [];
     const contract = activeContract(); if (!contract) return;
     try {
-      const response = await fetch(`/api/live-trades?ins=${encodeURIComponent(`${pick.uaIns},${contract.ins}`)}`, { cache: 'no-store' });
-      const data = await response.json(); if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-      const optionRows = data.items?.[contract.ins]?.rows || [], baseRows = data.items?.[pick.uaIns]?.rows || [];
+      const got = await fetchLiveTape([pick.uaIns, contract.ins]);
+      if (got.errors.length) throw new Error(got.errors[0].why);
+      const optionRows = got.byIns[contract.ins]?.rows || [], baseRows = got.byIns[pick.uaIns]?.rows || [];
       tape = liveOptionTape({ trades: optionRows, contract, underlyingTape: liveReferenceTape(baseRows), settings: state.settings });
     } catch (error) { logError('ریزمعامله داشبورد تصمیم‌گیری', error); }
   }

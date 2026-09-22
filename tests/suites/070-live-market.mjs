@@ -72,7 +72,7 @@ group('۶۹. داشبورد تجمعی بازار و رصد زنده موقعی�
     && !ui69.includes('id="dd-contract"') && !ui69.includes('fillSelectors')
     && ui69.includes('resolveScope(scopeLevel, marketExplorer.selection())'));
   check('دامنه قرارداد فقط پایه و همان قرارداد را برای ریزمعامله می‌گیرد',
-    ui69.includes('`${pick.uaIns},${contract.ins}`')
+    ui69.includes('fetchLiveTape([pick.uaIns, contract.ins])')
     && ui69.includes('liveOptionTape({ trades: optionRows') && ui69.includes('tape ='));
   check('هر سه تب، گزینه رصد زنده موقعیت تاریخی دارند',
     backtest69.includes('id="bt-live"') && backtest69.includes('async function refreshLivePosition()')
@@ -80,7 +80,7 @@ group('۶۹. داشبورد تجمعی بازار و رصد زنده موقعی�
   const livePlan69 = historyHandoffPlan({ ua: { ins: '77' }, replay: { priced: [], startDate: 20260101, endDate: 20260102 }, live: true });
   check('نقشه انتقال، درخواست زنده را صریح و بدون کپی نتیجه حمل می‌کند', livePlan69.live === true && livePlan69.autoRun === true && !('netPnl' in livePlan69));
   check('رصد زنده، همان موتور ریزمعامله مشترک و endpoint امروز را به کار می‌گیرد',
-    backtest69.includes("fetch(`/api/live-trades?ins=${encodeURIComponent(codes.join(','))}`")
+    backtest69.includes('const got = await fetchLiveTape(codes);')
     // `replayDay` همان `replayIntraday` است به‌علاوهٔ مهر تلاطم؛ هر چهار
     // مسیر درون‌روز از همین یکی رد می‌شوند تا هیچ‌کدام بی‌تلاطم نماند.
     && backtest69.includes('intraday = replayDay({ byIns }, intradayDate);')

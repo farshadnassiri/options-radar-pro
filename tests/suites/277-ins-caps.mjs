@@ -96,9 +96,16 @@ group('۲۷۷. سقف ابزار — برشِ بی‌صدای تب‌ها برد
     readSrc('../ui/data-export-workbook.mjs').includes("['راست‌آزمایی انجام‌نشده'"));
 
   const positions = readSrc('../ui/tabs/positions.mjs');
-  check('موقعیت‌ها روزانه و مظنه را دسته‌بندی می‌کند',
-    positions.includes('insBatches(all, INS_CAP.dailies)')
-      && positions.includes('insBatches(all, INS_CAP.books)'));
+  // R5-16: دسته‌بندیِ مظنه به `ui/quote-intake.mjs` رفت، پس ادعا هم
+  // همان‌جا را می‌بیند — قاعده عوض نشده، فقط یک‌جا شده. اگر اینجا پین
+  // می‌ماند، هر سه تب می‌توانستند بی‌دسته‌بندی بشوند و ادعا سبز بماند.
+  check('موقعیت‌ها روزانه را دسته‌بندی می‌کند',
+    positions.includes('insBatches(all, INS_CAP.dailies)'));
+  check('و مظنه را دروازه دسته‌بندی می‌کند — برای هر سه تب، یک بار',
+    readSrc('../ui/quote-intake.mjs').includes('insBatches(wanted, cap)')
+      && readSrc('../ui/quote-intake.mjs').includes('INS_CAP.books'));
+  check('و نوارِ زنده هم با سقفِ خودش، نه سقفِ دفتر',
+    readSrc('../ui/quote-intake.mjs').includes('insBatches(wanted, LIVE_INS_CAP)'));
   check('و «نیامد» را از «خالی آمد» جدا می‌گوید',
     positions.includes('قرارداد اصلاً پاسخ نگرفت'));
 

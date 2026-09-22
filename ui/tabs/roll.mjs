@@ -8,7 +8,7 @@
 // می‌گیرد و از همان موتور بازده مشترک می‌آید.
 
 import { rollAnalysis, markToMarket } from '/core/positions.mjs';
-import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
+import { fetchQuotes, quoteWarning } from '/ui/quote-intake.mjs';
 import { rollFriction, rollPayback } from '/core/roll-cost.mjs';
 import { positionStatus } from '/core/position-close.mjs';
 import { tehranDateNumber } from '/core/live-day.mjs';
@@ -31,6 +31,7 @@ export async function mount(root, { state, api }) {
   let positions = [];
   let sel = 0;
   let quotesByIns = new Map();
+  let quoteNote = '';
   let detail = null;
   let candidates = [];
   let dChart = null, c1Chart = null, c2Chart = null;
@@ -214,17 +215,14 @@ export async function mount(root, { state, api }) {
       // نامزدِ صدوهشتادویکم بی‌قیمت می‌ماند و در جدول «بی‌مظنه» دیده
       // می‌شد، انگار بازار برایش قیمتی نداشته. حالا همه می‌روند، دسته‌دسته.
       const all = [...codes];
-      const bookParts = [], infoParts = [];
-      for (const batch of insBatches(all, INS_CAP.books)) {
-        const q = batch.join(',');
-        const [b, i] = await Promise.all([
-          fetch(`/api/books?ins=${q}`).then((r) => r.json()),
-          fetch(`/api/infos?ins=${q}`).then((r) => r.json()),
-        ]);
-        bookParts.push(b); infoParts.push(i);
-      }
-      const books = mergeInsPayloads(all, bookParts).payload;
-      const infos = mergeInsPayloads(all, infoParts).payload;
+      // از دروازه: بندِ قبلی `response.ok` را نمی‌دید، پس یک ۵۰۰ هم
+      // `json()` می‌شد و به‌جای دفتر می‌نشست — و **هر** نامزد «بی‌مظنه»
+      // دیده می‌شد. یعنی دقیقاً همان حذفِ بی‌صدایی که `slice(0, 180)` به
+      // خاطرش برداشته شد، از راهی دیگر برمی‌گشت.
+      const quotes = await fetchQuotes(all);
+      const books = quotes.books.byIns;
+      const infos = quotes.infos.byIns;
+      quoteNote = quoteWarning(quotes.summary);
       for (const ins of codes) {
         const b = books[ins]?.book || [];
         const i2 = infos[ins] || {};
@@ -303,8 +301,10 @@ export async function mount(root, { state, api }) {
       <dt>سود و زیان جاری</dt><dd>${fmt.money(m.pnlTotal)}</dd>
       <dt>سربه‌سری فعلی</dt><dd>${r.curBreakevens.map((b) => fmt.money(b)).join(' , ') || '—'}</dd>`;
 
-    el('#newnote').textContent =
-      `هزینه بستن پای فعلی از عرضه: ${fmt.money(-r.closeCash)} — بستانکار پای تازه از تقاضا: ${fmt.money(r.newCash)}`;
+    // مظنه‌ای که نرسید، پیش از هر عددی گفته می‌شود: این جمله دربارهٔ
+    // **اعتبارِ همین ارقام** است، نه یک خبرِ جانبی.
+    el('#newnote').textContent = (quoteNote ? `${quoteNote}\n` : '')
+      + `هزینه بستن پای فعلی از عرضه: ${fmt.money(-r.closeCash)} — بستانکار پای تازه از تقاضا: ${fmt.money(r.newCash)}`;
 
     // ——— اصطکاک اجرای رول ———
     //

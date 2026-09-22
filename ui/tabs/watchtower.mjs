@@ -58,6 +58,7 @@ import {
   NOTIFY_LABEL, askNotifyPermission, clearLog, deliverBurst, notifyState, readLog, testDelivery,
 } from '/ui/gap-alarm.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { fetchBooks, fetchLiveTape } from '/ui/quote-intake.mjs';
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -747,16 +748,20 @@ export async function mount(root, { state }) {
         startAt: liveRotates() ? watchCursor : 0,
       });
       if (!plan.ins.length) { $('wt-watch-state').textContent = 'ابزاری برای مظنهٔ زنده نبود'; return; }
-      const path = source === 'book' ? '/api/books' : '/api/live-trades';
-      const response = await fetch(`${path}?ins=${plan.ins.join(',')}`, { signal: job.signal });
-      const payload = await response.json();
+      // دو مسیر، یک دروازه. `envelope`/`payload` همان شکلِ خامی است که
+      // `liveQuoteBook` و `bookQuoteBook` می‌شناسند، پس این دو دست‌نخورده
+      // می‌مانند و فقط بررسیِ پاسخ یک‌جا می‌شود.
+      const got = source === 'book'
+        ? await fetchBooks(plan.ins, { signal: job.signal })
+        : await fetchLiveTape(plan.ins, { signal: job.signal });
+      const payload = source === 'book' ? got.byIns : got.envelope;
       // رصد در این فاصله خاموش شده: پاسخ دور ریخته می‌شود. این همان
       // «توقفِ قابل اعتماد» است — پیش از این پاسخِ کندِ پانزده‌ثانیه‌ای
       // نوار را دوباره «روشن» می‌کرد.
       if (gen !== watchGen || !mounted) return;
-      if (!response.ok || payload.error) throw new Error(payload.error || 'مظنهٔ زنده دریافت نشد');
+      if (got.errors.length) throw new Error(got.errors[0].why);
       watchCursor = liveRotates() ? plan.nextStart : 0;
-      watchAt = Number(payload.at) || Date.now();
+      watchAt = got.at || Date.now();
       const book = source === 'book' ? bookQuoteBook(payload) : liveQuoteBook(payload);
       const basePriceOf = (ins) => {
         if (source !== 'book') return num(book.prices[String(ins)], NaN);

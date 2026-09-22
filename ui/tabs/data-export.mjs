@@ -25,6 +25,7 @@ import { downloadXlsx } from '/ui/xlsx.mjs';
 import { faDigits, fmt } from '/ui/fmt.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { fetchDailies } from '/ui/daily-intake.mjs';
+import { fetchLiveTape } from '/ui/quote-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -632,16 +633,15 @@ export async function mount(root, { state, api }) {
       if (!mayHoldPrevious) return { payload, date: 0, why: day.why || '' };
       const codes = [...new Set((payload.rows || []).map((row) => String(row?.uaInsCode || '')).filter(Boolean))].slice(0, 3);
       if (!codes.length) return { payload, date: 0, why: day.why || '' };
-      const [tapeResponse, dailyResponse] = await Promise.all([
-        fetch(`/api/live-trades?ins=${codes.join(',')}`, { cache: 'no-store', signal }),
+      const [tape, dailyResponse] = await Promise.all([
+        fetchLiveTape(codes, { signal }),
         fetchDailies(codes, { n: 12, fetcher: (u, o) => fetch(u, { ...o, cache: 'no-store' }), signal }),
       ]);
-      const [tape, daily] = await Promise.all([tapeResponse.json(), Promise.resolve(dailyResponse.byIns)]);
-      if (!tapeResponse.ok || tape?.error) {
-        const why = tape?.error || `پاسخ ${tapeResponse.status}`;
-        return { payload, date: 0, why: `${day.why || 'روز نوار روشن نیست'}؛ تطبیق آخرین جلسه نرسید: ${why}` };
+      const daily = dailyResponse.byIns;
+      if (tape.errors.length) {
+        return { payload, date: 0, why: `${day.why || 'روز نوار روشن نیست'}؛ تطبیق آخرین جلسه نرسید: ${tape.errors[0].why}` };
       }
-      const inferred = inferLiveSessionDate(tape.items, daily);
+      const inferred = inferLiveSessionDate(tape.byIns, daily);
       return {
         payload, date: inferred, inferred: inferred > 0,
         why: inferred ? 'تاریخ آخرین جلسه از تطبیق نوار و تابلوی روزانه تأیید شد' : `${day.why || 'روز نوار روشن نیست'}؛ اثرانگشت نوار با روزانه تطبیق نکرد`,
@@ -681,11 +681,13 @@ export async function mount(root, { state, api }) {
     for (let index = 0; index < parts.length; index += 1) {
       const part = parts[index]; setStatus(`در حال دریافت نوار امروز: بسته ${fmt.int(index + 1)} از ${fmt.int(parts.length)}…`);
       try {
-        const response = await fetch(`/api/live-trades?ins=${part.join(',')}`, { cache: 'no-store', signal });
-        const live = await response.json();
-        if (!response.ok || live.error) throw new Error(live.error || `پاسخ ${response.status}`);
+        // تکه‌ها همین‌جا می‌مانند، نه در دروازه: جملهٔ وضعیت باید بسته‌به‌بسته
+        // جلو برود و بستهٔ ۸۴۷تایی بی‌خبر، همان «هنگ‌کردن»ی است که کاربر
+        // می‌بیند. هر تکه ≤ سقفِ دروازه است، پس یک درخواست بیشتر نمی‌شود.
+        const live = await fetchLiveTape(part, { signal });
+        if (live.errors.length) throw new Error(live.errors[0].why);
         for (const ins of part) {
-          const hit = live.items?.[ins], pair = pairs.find((item) => item.ins === ins);
+          const hit = live.byIns[ins], pair = pairs.find((item) => item.ins === ins);
           if (pair) items[pair.key] = hit && Array.isArray(hit.rows) ? { ...hit, source: 'live' } : { rows: [], error: hit?.error || 'پاسخ نوار ابزار نیامد', source: 'live' };
         }
       } catch (error) {
