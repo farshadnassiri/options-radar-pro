@@ -257,7 +257,24 @@ export function keepBetterTape(previous, next, expect = { known: false }) {
     ...(previous?.attempts !== undefined ? { attempts: previous.attempts } : {}),
     ...(previous?.lastAttemptAt !== undefined ? { lastAttemptAt: previous.lastAttemptAt } : {}),
   };
-  const take = (record, replaced) => ({ ...tracking, ...record, replaced });
+  // ═══ R5-10: پرچمِ سهمیه هم باید از این دروازه رد شود ═══
+  //
+  // `throttled` روی پاسخِ **تازه** می‌نشیند، نه روی قبلی. پس وقتی
+  // `keepBetterTape` رکوردِ قبلی را نگه می‌داشت، پرچم بی‌صدا گم می‌شد —
+  // دقیقاً همان تله‌ای که یک بار سرِ `attempts` خوردیم، با همان ریشه.
+  // در هارنس، ۵۴ ردیف «نیامد» ماندند با آنکه سرور سهمیه را تشخیص داده و
+  // برچسب زده بود.
+  //
+  // و پرچم فقط وقتی می‌چسبد که رکوردِ برنده **بی‌ردیف** باشد: ابزار/روزی
+  // که داده دارد، هر چه بر سرِ تلاشِ بعدی‌اش آمده باشد، «پشتِ سهمیه
+  // مانده» نیست.
+  const blocked = previous?.throttled === true || next?.throttled === true;
+  const take = (record, replaced) => {
+    const out = { ...tracking, ...record, replaced };
+    const rows = Array.isArray(out.rows) ? out.rows : [];
+    if (blocked && !rows.length) out.throttled = true;
+    return out;
+  };
 
   const prevRows = Array.isArray(previous?.rows) ? previous.rows : null;
   if (!prevRows || !prevRows.length) return take(next, true);

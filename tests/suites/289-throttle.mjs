@@ -18,9 +18,13 @@
 // بار با تابلو خواند.
 
 import { check, group, readSrc } from '../harness.mjs';
-import { BLIND_STREAK, THROTTLE_STREAK, makeThrottleWatch, throttleNote } from '../../core/throttle-watch.mjs';
+import {
+  BLIND_STREAK, THROTTLE_STREAK, WINDOW, WINDOW_DENIED,
+  makeThrottleWatch, throttleNote,
+} from '../../core/throttle-watch.mjs';
 import { REFILL_REASON, refillQueue, refillSummary } from '../../core/refill-queue.mjs';
 import { mergeInsPayloads } from '../../core/ins-batches.mjs';
+import { keepBetterTape } from '../../core/tape-choice.mjs';
 import { BLOCKED_STATUS, dataExportCoverageRows, dataExportOutcome } from '../../core/data-export.mjs';
 
 /** پاسخی که تابلو تکذیبش می‌کند: مرجع معامله دارد، نوار خالی است. */
@@ -188,8 +192,16 @@ group('۲۸۹. سهمیه در جمع‌بندی، خطا شمرده نمی‌ش
   check('جفت‌های نفرستاده علتِ سهمیه می‌گیرند',
     tab.includes('for (let rest = index; rest < batches.length; rest += 1)')
       && tab.includes("error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد',"));
-  check('ولی جفتی که پاسخ گرفته دست نمی‌خورد',
-    tab.includes('if (items[pair.key]) continue;'));
+  // ═══ R5-10: شرط از «رکورد دارد» به «ردیف دارد» عوض شد ═══
+  //
+  // نسخهٔ اول هر جفتی را که رکورد داشت رد می‌کرد — از جمله آن‌هایی که در
+  // پاسِ قبلی **خالی** نشسته بودند، یعنی دقیقاً همان‌هایی که باید
+  // برچسبشان از «نیامد» به «سهمیه» عوض می‌شد. در هارنس ۵۴ ردیف به همین
+  // دلیل علتِ غلط نگه داشتند.
+  check('ولی جفتی که ردیف گرفته دست نمی‌خورد',
+    tab.includes('if (Array.isArray(seen?.rows) && seen.rows.length) continue;'));
+  check('و جفتِ خالی برچسبش عوض می‌شود، بی آنکه بقیهٔ رکوردش پاک شود',
+    tab.includes('...(seen || {}), rows: [], source: \'history\', throttled: true,'));
 }
 
 group('۲۸۹. صف هم علتِ درست را می‌داند');
@@ -242,4 +254,120 @@ group('۲۸۹. تابلویی که خودش خالی آمده، «راست‌آ�
   check('و ادعای «پاسخ گرفت» جایش را به «ردیف داد» داد',
     book.includes('تابلوی روزانه‌اش ردیف داد')
       && !book.includes('تابلوی روزانه‌اش پاسخ گرفت.'));
+}
+
+group('۲۸۹. فازِ تدریجی — نسبت در پنجرهٔ کشویی');
+{
+  // ═══ R5-10: بازتولیدِ ثبت‌شده ═══
+  //
+  // اجرای دومِ آزمونِ بار، ۱۷۸ موفق و ۱۱۰ خالیِ درهم. در این فاز هر
+  // پاسخِ موفق رشتهٔ پیاپی را صفر می‌کند، پس ناظر حکم نمی‌داد و
+  // ابزار/روزهای خالی «نیامد» برچسب می‌خوردند. در خروجیِ واقعیِ
+  // ۲۰۲۶۰۹۱۴ تا ۲۰۲۶۰۹۲۱ دقیقاً ۵۷ ردیف چنین شدند.
+  const denied0 = { emptyBoth: true, reference: { trades: 100, volume: 1000, quiet: false } };
+  const served0 = { emptyBoth: false, reference: { trades: 100, volume: 1000, quiet: false } };
+
+  // الگوی درهم: دو خالی، یک موفق — رشته هرگز به ۱۰ نمی‌رسد.
+  const mixed = makeThrottleWatch();
+  let fired = false;
+  for (let i = 0; i < WINDOW && !fired; i += 1) {
+    fired = mixed.saw(i % 3 === 2 ? served0 : denied0);
+  }
+  check('رشتهٔ پیاپی در فازِ درهم هرگز به سقف نمی‌رسد', mixed.state().run < THROTTLE_STREAK);
+  check('ولی نسبت حکم می‌دهد', mixed.throttled() === true);
+  check('و می‌گوید از راهِ نسبت آمد', mixed.state().by === 'ratio');
+  check('جمله‌اش الگوی درهم را شرح می‌دهد',
+    throttleNote(mixed.state()).includes('تدریجی'));
+
+  // ═══ و نسبتِ سالم حکم نمی‌دهد ═══
+  //
+  // بازارِ کم‌معامله هم خالیِ پراکنده دارد؛ پنجره نباید رویش حکم بدهد.
+  const healthy = makeThrottleWatch();
+  for (let i = 0; i < WINDOW * 3; i += 1) healthy.saw(i % 3 === 0 ? denied0 : served0);
+  check('یک‌سومِ خالی هنوز حکمِ سهمیه نیست', healthy.throttled() === false);
+
+  check('سقفِ پنجره از نصف بیشتر است', WINDOW_DENIED > WINDOW / 2);
+  check('و پنجره آن‌قدر بزرگ هست که بدشانسیِ محلی حکم ندهد', WINDOW >= 20);
+
+  // پنجره فقط ابزار/روزِ مرجع‌دار را می‌شمارد.
+  const blindOnly = makeThrottleWatch();
+  for (let i = 0; i < WINDOW; i += 1) blindOnly.saw({ emptyBoth: true, reference: null });
+  check('ردیفِ بی‌مرجع وارد پنجره نمی‌شود', blindOnly.state().windowSize === 0);
+
+  // و پنجره با بازنشانی پاک می‌شود.
+  mixed.reset();
+  check('بازنشانی پنجره را هم پاک می‌کند',
+    mixed.throttled() === false && mixed.state().windowSize === 0);
+}
+
+group('۲۸۹. مدرکِ حکم، خودش قربانیِ حکم است');
+{
+  // ═══ R5-10 ═══
+  //
+  // حکم روی پنجره‌ای صادر می‌شود که چند ابزار/روزِ قبلی هم در آن تکذیب
+  // شده‌اند. آن‌ها همان لحظه «نیامد» نشسته‌اند، در حالی که دقیقاً همان
+  // چیزی‌اند که نشان داد سهمیه بسته شده. در خروجیِ واقعی ۵۴ ردیف علتِ
+  // غلط گرفتند.
+  const deny = { emptyBoth: true, reference: { trades: 100, volume: 1000, quiet: false } };
+  const serve = { emptyBoth: false, reference: { trades: 100, volume: 1000, quiet: false } };
+
+  const w = makeThrottleWatch();
+  // پیش از حکم، هیچ مظنونی اعلام نمی‌شود — وگرنه خالیِ عادی برچسب
+  // می‌خورد و این خودش یک ادعای بی‌پشتوانه است.
+  w.saw(deny, 'k1');
+  check('پیش از حکم، مظنونی اعلام نمی‌شود', w.state().suspects.length === 0);
+
+  let fired = false;
+  for (let i = 2; i <= WINDOW && !fired; i += 1) {
+    fired = w.saw(i % 3 === 0 ? serve : deny, `k${i}`);
+  }
+  check('حکم صادر شد', w.throttled() === true);
+  const suspects = w.state().suspects;
+  check('و مظنون‌ها نام‌برده می‌شوند', suspects.length >= WINDOW_DENIED);
+  check('هر مظنون کلیدِ واقعی دارد', suspects.every((k) => /^k\d+$/.test(k)));
+  check('و ابزار/روزی که داده آورد مظنون نیست', !suspects.includes('k3'));
+
+  // سرور همان‌ها را دوباره برچسب می‌زند.
+  const server = readSrc('../server/server.mjs');
+  check('سرور مظنون‌ها را به سهمیه برمی‌گرداند',
+    server.includes('for (const suspect of watch.state().suspects)')
+      && server.includes('items[suspect] = { ...items[suspect], throttled: true }'));
+  check('و حکمِ همان ردیف را هم از خروجیِ `saw` می‌گیرد',
+    server.includes('const verdict = watch.saw(tape, key)'));
+}
+
+group('۲۸۹. پرچمِ سهمیه از دروازهٔ حفظِ داده رد می‌شود');
+{
+  // ═══ R5-10: همان تله، بارِ دوم ═══
+  //
+  // `throttled` روی پاسخِ تازه می‌نشیند. `keepBetterTape` وقتی رکوردِ
+  // قبلی را نگه می‌داشت پرچم را دور می‌ریخت — عیناً همان چیزی که یک بار
+  // سرِ `attempts` رخ داد. در هارنس ۵۴ ردیف «نیامد» ماندند با آنکه سرور
+  // سهمیه را تشخیص داده و برچسب زده بود.
+  const expect = { known: true, quiet: false, trades: 50, volume: 500 };
+  const rows = (k) => Array.from({ length: k }, (_, i) => ({ quantity: 1, sequence: i + 1 }));
+
+  const held = keepBetterTape(
+    { rows: [], source: 'history' },
+    { rows: [], source: 'history', throttled: true }, expect);
+  check('پرچمِ سهمیه در نگه‌داشتنِ رکوردِ خالی می‌ماند', held.throttled === true);
+
+  const fromPrev = keepBetterTape(
+    { rows: [], source: 'history', throttled: true },
+    { rows: [], source: 'history' }, expect);
+  check('و از رکوردِ قبلی هم به بعد منتقل می‌شود', fromPrev.throttled === true);
+
+  // ═══ ولی ردیفی که داده دارد «پشتِ سهمیه» نیست ═══
+  //
+  // بی این شرط، یک ابزار/روزِ دارای داده در فایل «سهمیهٔ بالادست»
+  // برچسب می‌خورد و دادهٔ سالمش پشتِ علتِ غلط پنهان می‌شود.
+  const filled = keepBetterTape(
+    { rows: rows(50), source: 'history' },
+    { rows: [], source: 'history', throttled: true }, expect);
+  check('ردیفِ دارای داده پرچمِ سهمیه نمی‌گیرد', filled.throttled !== true);
+  check('و دادهٔ سالمش سرِ جایش می‌ماند', filled.rows.length === 50);
+
+  // و بی هیچ سهمیه‌ای، پرچمِ ساختگی ساخته نمی‌شود.
+  const plain = keepBetterTape({ rows: [], source: 'history' }, { rows: [], source: 'history' }, expect);
+  check('بی سهمیه، پرچمِ ساختگی ساخته نمی‌شود', plain.throttled === undefined);
 }

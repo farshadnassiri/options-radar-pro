@@ -56,14 +56,50 @@ export const THROTTLE_STREAK = 10;
 export const BLIND_STREAK = 40;
 
 /**
+ * پنجرهٔ کشویی، برای فازِ **تدریجیِ** بستن.
+ *
+ * ═══ R5-10: چرا رشتهٔ پیاپی کافی نبود ═══
+ *
+ * دو معیارِ بالا رشتهٔ **پیاپی** می‌شمارند، و آن فقط فازِ کاملاً بستهٔ
+ * سهمیه را می‌گیرد. ولی اندازه‌گیری نشان داد بستن تدریجی است — اجرای
+ * دومِ آزمونِ بار، ۱۷۸ موفق و ۱۱۰ خالیِ درهم:
+ *
+ *     xx........x.......xx.....
+ *     .........xx0x0000000000x0
+ *
+ * در این فاز هر پاسخِ موفق رشته را صفر می‌کند، پس ناظر تا فازِ کامل صبر
+ * می‌کند و در این فاصله ده‌ها ابزار/روز «نیامد» برچسب می‌خورند — علتِ
+ * غلط، چون آن‌ها هم قربانیِ سهمیه‌اند. در خروجیِ واقعیِ ۲۰۲۶۰۹۱۴ تا
+ * ۲۰۲۶۰۹۲۱ دقیقاً ۵۷ ردیف چنین شدند، ۵۰تایش در همان روزِ اول.
+ *
+ * پس معیارِ سوم نسبت را در پنجره‌ای کشویی می‌سنجد: اگر بیشترِ آخرین
+ * `WINDOW` ابزار/روزِ **مرجع‌دار** تکذیب شده باشند، فاز شروع شده.
+ * پنجره عمداً کوچک نیست تا یک بدشانسیِ محلی حکم ندهد.
+ */
+export const WINDOW = 25;
+export const WINDOW_DENIED = 15;
+
+/**
  * ناظرِ سهمیه برای یک اجرا.
  *
  * حالت روی همین شیء می‌ماند، نه در ماژول: دو اجرای هم‌زمان نباید رأیِ
  * هم را خراب کنند، و آزمون باید بتواند نمونهٔ تمیز بسازد.
  */
-export function makeThrottleWatch({ streak = THROTTLE_STREAK, blindStreak = BLIND_STREAK } = {}) {
+export function makeThrottleWatch({
+  streak = THROTTLE_STREAK, blindStreak = BLIND_STREAK,
+  window = WINDOW, windowDenied = WINDOW_DENIED,
+} = {}) {
   let run = 0, blind = 0, worst = 0, since = 0, denied = 0;
-  const hit = () => run >= streak || blind >= blindStreak;
+  // پنجرهٔ کشویی فقط ابزار/روزِ **مرجع‌دار** را می‌گیرد، چون تنها آن
+  // تکذیب‌پذیر است. بی مرجع، معیارِ `blind` کارِ خودش را می‌کند.
+  const recent = [];
+  // کلیدِ ابزار/روزهایی که در پنجره **تکذیب** شده‌اند. وقتی حکم صادر
+  // می‌شود، همین‌ها مدرکش بوده‌اند — پس همین‌ها هم قربانیِ سهمیه‌اند و
+  // نباید «نیامد» برچسب بخورند. (R5-10)
+  const suspects = [];
+  let recentDenied = 0;
+  const ratioHit = () => recent.length >= window && recentDenied >= windowDenied;
+  const hit = () => run >= streak || blind >= blindStreak || ratioHit();
 
   return {
     /**
@@ -72,16 +108,27 @@ export function makeThrottleWatch({ streak = THROTTLE_STREAK, blindStreak = BLIN
      * `tape` همان چیزی است که `chooseTape` برگردانده: `emptyBoth` و
      * `reference` را از آن می‌خوانیم.
      */
-    saw(tape) {
+    saw(tape, key = '') {
       const ref = tape?.reference;
       const known = Boolean(ref) && (Number(ref.trades) > 0 || Number(ref.volume) > 0);
       const empty = tape?.emptyBoth === true;
 
-      // ردیفی که داده آورد هر دو شمارنده را صفر می‌کند: لوله باز است.
-      if (!empty) { run = 0; blind = 0; return false; }
+      // ═══ پنجرهٔ کشویی، پیش از هر صفرکردنی ═══
+      //
+      // برخلاف رشته، پنجره با یک پاسخِ موفق پاک نمی‌شود — و نکتهٔ فازِ
+      // تدریجی دقیقاً همین است.
+      if (known) {
+        recent.push(empty ? 1 : 0);
+        suspects.push(empty ? String(key || '') : '');
+        if (empty) recentDenied += 1;
+        if (recent.length > window) { recentDenied -= recent.shift(); suspects.shift(); }
+      }
+
+      // ردیفی که داده آورد هر دو رشته را صفر می‌کند: لوله باز است.
+      if (!empty) { run = 0; blind = 0; return hit(); }
       // صفرِ تأییدشده هم همین‌طور — تابلو جواب داده و جوابش با نوار
       // می‌خواند؛ سالم‌ترین حالتِ ممکن است، نه نشانهٔ خرابی.
-      if (ref && ref.quiet === true) { run = 0; blind = 0; return false; }
+      if (ref && ref.quiet === true) { run = 0; blind = 0; return hit(); }
 
       denied += 1;
       if (known) run += 1; else blind += 1;
@@ -96,12 +143,16 @@ export function makeThrottleWatch({ streak = THROTTLE_STREAK, blindStreak = BLIN
     state() {
       return {
         run, blind, worst, streak, blindStreak, since, denied,
+        windowSize: recent.length, windowDenied: recentDenied,
+        // فقط وقتی معنا دارد که حکم صادر شده باشد؛ وگرنه فهرستی از
+        // خالی‌های عادی است و برچسب‌زدنشان ادعای بی‌پشتوانه می‌شود.
+        suspects: hit() ? suspects.filter(Boolean) : [],
         throttled: hit(),
         // کدام معیار حکم داد — جمله‌اش فرق می‌کند و کاربر باید بداند.
-        by: run >= streak ? 'board' : (blind >= blindStreak ? 'blind' : ''),
+        by: run >= streak ? 'board' : (blind >= blindStreak ? 'blind' : (ratioHit() ? 'ratio' : '')),
       };
     },
-    reset() { run = 0; blind = 0; since = 0; },
+    reset() { run = 0; blind = 0; since = 0; recent.length = 0; suspects.length = 0; recentDenied = 0; },
   };
 }
 
@@ -110,6 +161,11 @@ export function throttleNote(state) {
   if (!state?.throttled) return '';
   const tail = ' دریافت همین‌جا متوقف شد تا سهمیه بیشتر مصرف نشود.'
     + ' چند ساعت بعد دوباره امتحان کنید؛ آنچه تا اینجا آمده سرِ جایش می‌ماند.';
+  if (state.by === 'ratio') {
+    return `از ${state.windowSize} ابزار/روزِ اخیر، ${state.windowDenied} تا خالی برگشتند`
+      + ' در حالی که تابلوی روزانه‌شان معامله ثبت کرده. بستنِ سهمیه تدریجی است و این آغازش است —'
+      + ' ادامه‌دادن هم داده نمی‌آورد و هم پنجره را تمدید می‌کند.' + tail;
+  }
   if (state.by === 'blind') {
     return `بالادست ${state.blind} ابزار/روزِ پیاپی را خالی برگرداند و تابلوی روزانهٔ هیچ‌کدام هم نیامد،`
       + ' پس حتی نمی‌شود سنجید که واقعاً بی‌معامله بوده‌اند یا نه.'
