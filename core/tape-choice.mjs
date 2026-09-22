@@ -33,13 +33,18 @@ const n = (x) => num(x);
 
 /** شمار معاملهٔ فعال، حجم و شمارِ باطل یک نوارِ نرمال‌شده. */
 export function tapeMetrics(rows = []) {
-  let trades = 0, volume = 0, canceled = 0;
+  let trades = 0, volume = 0, canceled = 0, canceledVolume = 0;
   for (const row of rows || []) {
-    if (row?.canceled === true) { canceled += 1; continue; }
+    // ═══ R5-11: حجمِ معاملهٔ باطل هم شمرده می‌شود — جدا ═══
+    //
+    // در جمعِ حجم نمی‌نشیند (معاملهٔ باطل انجام نشده)، ولی تابلوی روزانه
+    // آن را **می‌شمارد**. بی این عدد، راهی نیست بفهمیم اختلافِ ما با
+    // تابلو توضیح دارد یا واقعاً کسری است.
+    if (row?.canceled === true) { canceled += 1; canceledVolume += n(row?.quantity); continue; }
     trades += 1;
     volume += n(row?.quantity);
   }
-  return { trades, volume, canceled, total: (rows || []).length };
+  return { trades, volume, canceled, canceledVolume, total: (rows || []).length };
 }
 
 /**
@@ -132,7 +137,28 @@ export function tapeMatchesDaily(metrics, expect) {
   // مرجعی که می‌گوید «هیچ»، فقط با نوارِ خالی می‌خواند. نوارِ پرِ روبه‌روی
   // تابلوی صفر تطبیق نیست — تضاد است، و جای خودش را دارد.
   if (expect.quiet) return metrics.trades === 0 && metrics.volume === 0;
-  if (metrics.volume !== expect.volume) return false;
+
+  // ═══ R5-11: تابلو معاملهٔ باطل را هم می‌شمارد ═══
+  //
+  // شرطِ قبلی برابریِ **دقیقِ** حجم بود، و در خروجیِ واقعیِ
+  // ۲۰۲۶۰۹۱۵ تا ۲۰۲۶۰۹۲۲ شش ابزار/روز را «ناقص» خواند در حالی که کامل
+  // بودند. اندازه‌گیری روی همان شش تا، علت را قطعی کرد:
+  //
+  //     نماد        کسریِ ادعاشده   حجمِ ردیف‌های باطل
+  //     ضهرم6045          ۲                ۲
+  //     ضهرم6046          ۶                ۶
+  //     ضهرم6050        ۱۹۸              ۱۹۸
+  //     طهرم7063         ۵۱               ۵۱
+  //     ضهرم7064          ۵                ۵
+  //
+  // یعنی `qTotTran5J` حجمِ معامله‌های باطل‌شده را هم در خود دارد، و ما
+  // آن را (درست) از جمعِ خودمان بیرون می‌گذاریم. اختلاف واقعی نیست.
+  //
+  // پس کران این است: تابلو می‌تواند تا **اندازهٔ همان ردیف‌های باطل** از
+  // ما بیشتر باشد، نه بیشتر. کمتر بودنش همچنان تطبیق نیست — آن یعنی ما
+  // چیزی داریم که تابلو نمی‌شناسد، و اسمش «تضاد» است نه «تطبیق».
+  const volumeGap = n(expect.volume) - n(metrics.volume);
+  if (volumeGap < 0 || volumeGap > n(metrics.canceledVolume)) return false;
   return Math.abs(expect.trades - metrics.trades) <= metrics.canceled;
 }
 
