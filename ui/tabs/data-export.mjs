@@ -7,7 +7,8 @@ import {
   dataExportPairBatches, dataExportPairs, dataExportRouteSplit, dataExportSessionRows,
   dataExportTradeRows, discoverDataExportInstruments, selectedDataExportInstruments,
   exportBlockers, exportWarnings, instrumentsWithPairs, splitPairBatch, suspectEmptyDays,
-  unknownListingContracts, clockLabel, sessionWindow,
+  unknownListingContracts, clockLabel, sessionWindow, askedDeniedText, wasAsked,
+  recoverListingFromDaily,
 } from '/core/data-export.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { tradingDays } from '/core/roster-scan.mjs';
@@ -174,7 +175,9 @@ export async function mount(root, { state, api }) {
         + `${sum.missing ? ` — ${fmt.int(sum.missing)} تا اصلاً نیامد` : ''}`
         + `${sum.partial ? `، ${fmt.int(sum.partial)} تا ناقص` : ''}`
         + `${sum.error ? `، ${fmt.int(sum.error)} تا خطادار` : ''}`
-        + `${sum.throttled ? `، ${fmt.int(sum.throttled)} تا پشتِ سهمیهٔ بالادست ماندند و اصلاً پرسیده نشدند` : ''}`
+        + `${sum.throttled - sum.throttledAsked ? `، ${fmt.int(sum.throttled - sum.throttledAsked)} تا پشتِ سهمیهٔ بالادست ماندند و اصلاً پرسیده نشدند` : ''}`
+        // R5-17: پرسیده‌شده‌ها جملهٔ خودشان را دارند — مدرکِ حکمِ سهمیه‌اند.
+        + `${sum.throttledAsked ? `، ${fmt.int(sum.throttledAsked)} تا پرسیده شدند و بالادست فهرستِ خالی داد (الگوی سهمیه)` : ''}`
         + `. تلاش تکمیلی فقط همین‌ها را دوباره می‌پرسد و دادهٔ موجود را دست نمی‌زند؛`
         + ` هر ابزار/روز حداکثر ${fmt.int(REFILL_MAX_ATTEMPTS)} بار.`;
       return;
@@ -580,10 +583,24 @@ export async function mount(root, { state, api }) {
             // سرور سهمیه را تشخیص داده بود.
             const seen = items[pair.key];
             if (Array.isArray(seen?.rows) && seen.rows.length) continue;
-            items[pair.key] = {
-              ...(seen || {}), rows: [], source: 'history', throttled: true,
-              error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد',
-            };
+            // ═══ R5-17: «پرسیده شد و خالی آمد» با «پرسیده نشد» یکی نیست ═══
+            //
+            // این حلقه در دورِ تکمیلی هم اجرا می‌شود، و آنجا ردیف‌هایی را
+            // می‌بیند که دورِ اول **پرسیده** بود و بالادست فهرستِ خالی داده
+            // بود. آزمونِ عملی ۱۴۰۵/۰۷/۰۱ ۲۵ ردیف با همین تناقض داشت:
+            // «۱ بار · هر دو پرچم · فهرست خالی» و کنارش «پرسیده نشد» — یعنی
+            // دقیقاً همان ردیف‌هایی که مدرکِ بسته‌شدنِ سهمیه بودند، علتِ غلط
+            // گرفتند. پس فقط آنچه واقعاً نرفت «پرسیده نشد» می‌شود.
+            const asked = wasAsked(seen);
+            items[pair.key] = asked
+              ? {
+                ...seen, rows: [], source: 'history', throttled: true,
+                error: askedDeniedText(seen),
+              }
+              : {
+                ...(seen || {}), rows: [], source: 'history', throttled: true, skipped: true,
+                error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد',
+              };
           }
         }
         setStatus(`دریافت متوقف شد — ${throttled.note}`, true);
@@ -735,17 +752,44 @@ export async function mount(root, { state, api }) {
     const blocked = blockers();
     if (blocked.length) { setStatus(`خروجی هنوز آماده نیست — ${faDigits(blocked.join('؛ '))}.`, true); return; }
     const range = rangeUi.range;
-    const instruments = selectedInstruments();
+    let instruments = selectedInstruments();
     // قراردادِ بی‌تاریخِ عرضه جفت نمی‌سازد؛ ولی بی‌صدا هم نمی‌افتد.
-    const unlisted = unknownListingContracts(instruments);
-    const pairs = dataExportPairs(instruments, tradingDays(range.from, range.to));
-    if (!instruments.length || !pairs.length) { setStatus('برای این انتخاب ابزار/روزی برای دریافت ساخته نشد.', true); return; }
+    let unlisted = unknownListingContracts(instruments);
+    let pairs = dataExportPairs(instruments, tradingDays(range.from, range.to));
+    let recoveredListing = 0;
+    // قراردادِ بی‌تاریخِ عرضه ممکن است پس از خواندنِ تابلوی روزانه جفت
+    // بسازد، پس «هیچ جفتی نیست» تنها وقتی زود پایان می‌دهد که چنین
+    // قراردادی هم در کار نباشد.
+    if (!instruments.length || (!pairs.length && !unlisted.length)) { setStatus('برای این انتخاب ابزار/روزی برای دریافت ساخته نشد.', true); return; }
     invalidatePrepared(); clearTimeout(refreshTimer);
     controller = new AbortController(); runBtn.disabled = true; stopBtn.hidden = false; $('de-result').innerHTML = '';
     const items = {};
     try {
       soloFailures = 0;
       lastFailure = '';
+      // ═══ R5-17: تابلوی روزانه پیش از ساختنِ جفت‌ها ═══
+      //
+      // پیش از این جفت‌ها اول ساخته می‌شدند و تابلو بعد می‌آمد، پس
+      // قراردادِ بی‌تاریخِ عرضه هیچ راهی به بازه نداشت — حتی وقتی
+      // تاریخچهٔ روزانهٔ خودش، که همین تب کاملش را می‌گیرد، اولین روزِ
+      // معامله‌اش را می‌گفت. آزمونِ عملی شش قرارداد را همین‌طور از دست داد.
+      setStatus('در حال دریافت تابلوی روزانه…');
+      const dailyByIns = await fetchDaily(instruments, range, controller.signal);
+      if (unlisted.length) {
+        const { recovered, still } = recoverListingFromDaily(unlisted, dailyByIns);
+        if (recovered.length) {
+          const patched = new Map(recovered.map((item) => [String(item.ins), item]));
+          instruments = instruments.map((item) => patched.get(String(item.ins)) || item);
+          pairs = dataExportPairs(instruments, tradingDays(range.from, range.to));
+        }
+        recoveredListing = recovered.length;
+        unlisted = still;
+      }
+      if (!pairs.length) {
+        setStatus('برای این انتخاب ابزار/روزی برای دریافت ساخته نشد'
+          + `${unlisted.length ? ` — ${fmt.int(unlisted.length)} قرارداد تاریخِ عرضه‌اش در دفتر نیست و تابلوی روزانه‌اش هم خالی بود` : ''}.`, true);
+        return;
+      }
       // اول باید معلوم شود نوارِ زنده مالِ کدام روز است؛ تقسیمِ روزها به آن
       // بستگی دارد، نه به ساعت مرورگر.
       setStatus('در حال تشخیص روزِ نوار زنده…');
@@ -771,7 +815,6 @@ export async function mount(root, { state, api }) {
       // ۲. **حفاظت از دورِ اول.** `keepBetterTape` بی مرجع فقط
       //    «پرحجم‌تر می‌ماند» را دارد؛ با مرجع، از همان دورِ اول
       //    می‌فهمد کدام پاسخ واقعاً کامل است.
-      const dailyByIns = await fetchDaily(instruments, range, controller.signal);
       await fetchHistorical(historical, items, controller.signal);
       await fetchLive(live, items, controller.signal, resolved);
       // نوارِ زنده هم یک بار پرسیده شد. بی این خط، جفت‌های روزِ جاری در
@@ -880,10 +923,13 @@ export async function mount(root, { state, api }) {
           ? ` دورِ دومِ بی‌کش ${fmt.int(rescued)} ابزار/روز را نجات داد.`
           : ` دورِ دومِ بی‌کش روی ${fmt.int(suspectPairs.length)} ابزار/روز هم چیزی نیاورد.`)
         : '';
-      const unlistedNote = unlisted.length
-        ? ` ${fmt.int(unlisted.length)} قرارداد تاریخ عرضه‌اش در دفتر نیست و وارد بازه نشد —`
-          + ' «نمی‌دانیم کی عرضه شده» درخواستِ روزِ گذشته نمی‌سازد.'
-        : '';
+      const unlistedNote = (recoveredListing
+        ? ` ${fmt.int(recoveredListing)} قرارداد تاریخِ عرضه‌اش در دفتر نبود و از اولین روزِ معامله‌اش در تابلوی روزانه وارد بازه شد.`
+        : '')
+        + (unlisted.length
+          ? ` ${fmt.int(unlisted.length)} قرارداد تاریخ عرضه‌اش در دفتر نیست و تابلوی روزانه‌اش هم چیزی نگفت، پس وارد بازه نشد —`
+            + ' «نمی‌دانیم کی عرضه شده» درخواستِ روزِ گذشته نمی‌سازد.'
+          : '');
       const head = outcome.blank
         ? `هیچ ریزمعامله‌ای دریافت نشد — ${fmt.int(outcome.failed)} ابزار/روز خطا داد و ${fmt.int(outcome.empty)} تا خالی برگشت.`
         : `آمادهٔ خروجی: ${fmt.int(outcome.trades)} ریزمعامله از ${fmt.int(outcome.ok)} ابزار/روز، در ${fmt.int(sheetInstruments.length)} شیت.`;
@@ -959,9 +1005,27 @@ export async function mount(root, { state, api }) {
    */
   async function refill() {
     if (!prepared || controller) return;
+    // ═══ R5-17: حکمِ سهمیهٔ قبلی، جلوی تلاشِ بعدی را نمی‌گیرد ═══
+    //
+    // `throttled` فقط در `fetchDaily` پاک می‌شد، و این تابع آن را صدا
+    // نمی‌زند. پس پس از هر توقفِ سهمیه، این دکمه — حتی ساعت‌ها بعد —
+    // مستقیم به حلقهٔ «پرسیده نشد» می‌رفت و **هیچ درخواستی نمی‌فرستاد**.
+    // تنها راهِ ادامه، ساختنِ دوبارهٔ کلِ خروجی بود — که همان ردیف‌های
+    // کامل‌آمده را دور می‌ریخت و سهمیه را دوباره برایشان می‌سوزاند.
+    //
+    // زدنِ این دکمه خودش تصمیمِ کاربر برای امتحانِ دوباره است. اگر سهمیه
+    // هنوز بسته باشد، ناظرِ سرور در چند درخواستِ اول دوباره حکم می‌دهد؛
+    // هزینه‌اش همان چند درخواست است، نه کلِ بازه.
+    const lastStop = throttled;
+    throttled = null;
     controller = new AbortController();
     stopBtn.hidden = false;
     updateRunState();
+    if (lastStop?.at) {
+      const minutes = Math.round((Date.now() - lastStop.at) / 60000);
+      setStatus(`سهمیه ${fmt.int(minutes)} دقیقه پیش بسته شد؛ دوباره امتحان می‌شود`
+        + `${minutes < 30 ? ' — معمولاً دست‌کم نیم ساعت طول می‌کشد، پس ممکن است زود باشد' : ''}…`);
+    }
     const startedItems = { ...prepared.items };
     let round = 0, totalFilled = 0, totalGained = 0, barren = 0;
     try {

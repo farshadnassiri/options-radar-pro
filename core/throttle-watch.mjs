@@ -111,21 +111,32 @@ export function makeThrottleWatch({
     saw(tape, key = '') {
       const ref = tape?.reference;
       const known = Boolean(ref) && (Number(ref.trades) > 0 || Number(ref.volume) > 0);
+      // ═══ R5-17: دو جور تکذیب ═══
+      //
+      // `emptyBoth`: هیچ پرچمی چیزی نداد. `falseEmpty`: پرچمِ اصلی خالی
+      // آمد و نوار از `true`ِ همیشه‌بریده پر شد. دومی تا امروز «داده آمد»
+      // خوانده می‌شد و رشته را صفر می‌کرد — در آزمونِ عملی ۱۳ ردیف همین
+      // شکل را داشتند، درهم با ردیف‌های سهمیه.
+      //
+      // ولی فقط اولی **مظنون** می‌شود: ردیفِ `falseEmpty` دادهٔ واقعی
+      // دارد و برچسبِ «سهمیه» آن را پنهان می‌کرد.
       const empty = tape?.emptyBoth === true;
+      const refused = empty || (tape?.falseEmpty === true && known);
 
       // ═══ پنجرهٔ کشویی، پیش از هر صفرکردنی ═══
       //
       // برخلاف رشته، پنجره با یک پاسخِ موفق پاک نمی‌شود — و نکتهٔ فازِ
       // تدریجی دقیقاً همین است.
       if (known) {
-        recent.push(empty ? 1 : 0);
+        recent.push(refused ? 1 : 0);
         suspects.push(empty ? String(key || '') : '');
-        if (empty) recentDenied += 1;
+        if (refused) recentDenied += 1;
         if (recent.length > window) { recentDenied -= recent.shift(); suspects.shift(); }
       }
 
-      // ردیفی که داده آورد هر دو رشته را صفر می‌کند: لوله باز است.
-      if (!empty) { run = 0; blind = 0; return hit(); }
+      // ردیفی که داده آورد هر دو رشته را صفر می‌کند: لوله باز است —
+      // مگر داده فقط از پرچمِ بریده آمده باشد.
+      if (!refused) { run = 0; blind = 0; return hit(); }
       // صفرِ تأییدشده هم همین‌طور — تابلو جواب داده و جوابش با نوار
       // می‌خواند؛ سالم‌ترین حالتِ ممکن است، نه نشانهٔ خرابی.
       if (ref && ref.quiet === true) { run = 0; blind = 0; return hit(); }
@@ -160,7 +171,10 @@ export function makeThrottleWatch({
 export function throttleNote(state) {
   if (!state?.throttled) return '';
   const tail = ' دریافت همین‌جا متوقف شد تا سهمیه بیشتر مصرف نشود.'
-    + ' چند ساعت بعد دوباره امتحان کنید؛ آنچه تا اینجا آمده سرِ جایش می‌ماند.';
+    // R5-17: «چند ساعت بعد دوباره امتحان کنید» نمی‌گفت **چطور**، و راهِ
+    // بدیهی — ساختنِ خروجیِ تازه — دقیقاً همان است که داده را دور می‌ریزد.
+    + ' دست‌کم نیم ساعت بعد «تلاش تکمیلی» را در همین صفحه بزنید؛ آنچه تا اینجا آمده سرِ جایش می‌ماند.'
+    + ' ساختنِ خروجیِ تازه همه را از صفر می‌گیرد.';
   if (state.by === 'ratio') {
     return `از ${state.windowSize} ابزار/روزِ اخیر، ${state.windowDenied} تا خالی برگشتند`
       + ' در حالی که تابلوی روزانه‌شان معامله ثبت کرده. بستنِ سهمیه تدریجی است و این آغازش است —'

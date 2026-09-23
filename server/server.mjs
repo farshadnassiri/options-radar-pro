@@ -491,7 +491,21 @@ async function fetchHistoricalTape(code, date, { fresh = false, expect = null, b
 
     const alt = await pull(historicalTradesPath(code, date));
     tried.push({ variant: 'true', ...alt });
-    return withUpstream(chooseTape(tried, expect), first, alt);
+    const out = withUpstream(chooseTape(tried, expect), first, alt);
+    // ═══ R5-17: «false خالی، true بریده» خودش الگوی سهمیه است ═══
+    //
+    // آزمونِ عملیِ ۱۴۰۵/۰۷/۰۱: ۱۳ ابزار/روز «ناقص» ماندند و **همه** پرچمِ
+    // `true` داشتند، درهم با ردیف‌های سهمیه (ضهرم۸۰۳۱ کنارِ ضهرم۸۰۳۰ و
+    // ضهرم۸۰۳۲). یعنی `false` خالی برگشته بود و `true` نسخهٔ همیشه‌بریده‌اش
+    // را داده بود. ناظرِ سهمیه فقط «هر دو خالی» را تکذیب می‌شمرد، پس هر یک
+    // از این ردیف‌ها **رشته را صفر می‌کرد** و حکم دیرتر رسید — سهمیهٔ
+    // بیشتری سوخت و ردیف‌های بیشتری ناقص ماندند.
+    //
+    // فقط وقتی علامت می‌خورد که نوارِ نهایی **کامل نشد**: اگر `true` با
+    // تابلو خواند، داده رسیده و هیچ دلیلی برای حکم نیست.
+    const falseEmpty = !out.complete && !out.emptyBoth && !first.rows?.length
+      && expect.known === true && (Number(expect.trades) > 0 || Number(expect.volume) > 0);
+    return falseEmpty ? { ...out, falseEmpty: true } : out;
   } catch (e) {
     return { rows: [], error: `${e.name}: ${e.message}` };
   }
@@ -1475,13 +1489,21 @@ async function handle(req, res) {
       let stopped = 0;
       for (const { key, code, date, expect } of requests) {
         if (watch.throttled()) {
-          items[key] = { rows: [], source: 'history', throttled: true, error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد' };
+          // `skipped` صریح است، نه استنباطی: مصرف‌کننده نباید برای این ردیف
+          // «یک تلاش» بشمارد. آزمونِ عملی هفت ردیف با «۱ بار» نشان داد که
+          // هرگز به بالادست نرفته بودند.
+          items[key] = {
+            rows: [], source: 'history', throttled: true, skipped: true,
+            error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد',
+          };
           stopped += 1;
           continue;
         }
         const tape = await fetchHistoricalTape(code, date, { fresh, expect, bust });
         const verdict = watch.saw(tape, key);
-        items[key] = verdict ? { ...tape, throttled: true } : tape;
+        // ردیفی که داده دارد «سهمیه» نمی‌گیرد، حتی اگر حکم روی همان صادر
+        // شد: دادهٔ رسیده واقعی است و برچسبِ «سهمیه» آن را پنهان می‌کرد.
+        items[key] = verdict && !tape.rows?.length ? { ...tape, throttled: true } : tape;
         // ═══ R5-10: مدرکِ حکم، خودش قربانیِ حکم است ═══
         //
         // حکم روی پنجره‌ای صادر می‌شود که چند ابزار/روزِ **قبلی** هم

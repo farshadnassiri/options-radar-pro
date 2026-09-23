@@ -123,8 +123,13 @@ group('۲۶۸. دروازهٔ اجرا');
   check('قفل به بازه بسته است، نه به سلامتِ کلِ دفتر',
     !tab.includes('runBtn.disabled = !universe?.complete'));
   check('قراردادِ بی‌تاریخِ عرضه در جملهٔ وضعیت گفته می‌شود',
-    tab.includes('const unlisted = unknownListingContracts(instruments)')
-      && tab.includes('تاریخ عرضه‌اش در دفتر نیست و وارد بازه نشد'));
+    tab.includes('let unlisted = unknownListingContracts(instruments)')
+      && tab.includes('تاریخ عرضه‌اش در دفتر نیست و تابلوی روزانه‌اش هم چیزی نگفت، پس وارد بازه نشد'));
+  // R5-17: و پیش از بیرون‌گذاشتن، از تاریخچهٔ روزانهٔ خودش بازیابی می‌شود —
+  // تابلو پیش از ساختنِ جفت‌ها گرفته می‌شود تا این ممکن باشد.
+  check('و پیش از آن، تاریخِ عرضه از اولین روزِ معامله بازیابی می‌شود',
+    tab.includes('recoverListingFromDaily(unlisted, dailyByIns)')
+      && tab.indexOf('const dailyByIns = await fetchDaily(') < tab.indexOf("setStatus('در حال تشخیص روزِ نوار زنده…')"));
 }
 
 group('۲۶۸. قفل تا تکمیلِ واقعیِ دفتر');

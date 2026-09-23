@@ -302,6 +302,15 @@ export function keepBetterTape(previous, next, expect = { known: false }) {
     return out;
   };
 
+  // ═══ R5-17: پاسخِ «پرسیده نشد» خبری از بالادست ندارد ═══
+  //
+  // سرور بعد از حکمِ سهمیه بقیهٔ بسته را نمی‌پرسد و `skipped` می‌فرستد.
+  // اگر همان ابزار/روز در دورِ قبل **پرسیده شده بود**، جایگزین‌کردنش با
+  // این پاسخ مدرکِ آن دور را پاک می‌کرد — پرچمِ پرسیده‌شده، فهرستِ خالی،
+  // مرجعِ تابلو — و ردیف را «پرسیده نشد» می‌نوشت. آزمونِ عملی ۲۵ ردیف با
+  // همین تناقض داشت: «۱ بار · هر دو پرچم · فهرست خالی · پرسیده نشد».
+  if (next?.skipped === true && previous) return take({ ...previous }, false);
+
   const prevRows = Array.isArray(previous?.rows) ? previous.rows : null;
   if (!prevRows || !prevRows.length) return take(next, true);
 

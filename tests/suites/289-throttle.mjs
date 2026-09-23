@@ -141,7 +141,8 @@ group('۲۸۹. سرور و تب هر دو می‌ایستند');
       && !server.includes('requests.map(one)'));
   check('و به‌محضِ حکم، بقیه پرسیده نمی‌شوند',
     server.includes('if (watch.throttled()) {')
-      && server.includes("throttled: true, error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد'"));
+      && server.includes("rows: [], source: 'history', throttled: true, skipped: true,")
+      && server.includes("error: 'سهمیهٔ بالادست بسته شد؛ این ابزار/روز پرسیده نشد',"));
   check('حکم به مصرف‌کننده هم گفته می‌شود',
     server.includes('throttled: true, throttleNote: throttleNote(state), stopped'));
 
