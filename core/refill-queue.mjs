@@ -31,7 +31,9 @@ const n = (x) => num(x);
 export const REFILL_REASON = {
   // R5-08: پشتِ سهمیه ماندن خطا نیست — پرسیده نشدن است، و پیش از هر
   // برچسبِ دیگری خوانده می‌شود چون علتِ واقعیِ همان ردیف است.
-  throttled: 'سهمیهٔ بالادست بسته شد و پرسیده نشد',
+  // R5-17: «پرسیده نشد» فقط برای بخشی از این‌ها درست است؛ بقیه پرسیده
+  // شدند و خالی آمدند. جزئیات روی خودِ کار (`asked`) می‌نشیند.
+  throttled: 'سهمیهٔ بالادست بسته شد',
   missing: 'تابلو معامله ثبت کرده ولی ریزمعامله نیامد',
   partial: 'داده آمد ولی از تابلوی روزانه کمتر است',
   error: 'دریافتش خطا داد',
@@ -129,6 +131,8 @@ export function refillQueue(pairs = [], items = {}, audit = [], {
     out.push({
       key: pair.key, ins: String(pair.ins), date: pair.date,
       reason, attempts,
+      // پرسیده شد یا فقط به تب رسید؟ برای سهمیه، این دو دو جمله‌اند.
+      asked: hit?.skipped !== true && attempts > 0,
       gapTrades: Number.isFinite(gapTrades) ? gapTrades : 0,
       gapVolume: Number.isFinite(gapVolume) ? gapVolume : 0,
     });
@@ -171,6 +175,13 @@ export function refillProgress(queue = [], before = {}, after = {}) {
  * می‌ماند؛ دو نقطهٔ جدا همان چیزی بود که شمارش را دروغ کرد.
  */
 export function markAttempt(record = {}, at = Date.now()) {
+  // ═══ R5-17: پرسیده‌نشده، تلاش نیست ═══
+  //
+  // سرور ابزار/روزهای بعد از حکمِ سهمیه را **نمی‌پرسد** و `skipped`
+  // می‌گذارد. این تابع تا امروز برای هر پاسخی که به تب می‌رسید یکی
+  // می‌افزود، پس آزمونِ عملی هفت ردیف با «۱ بار» داشت که هرگز به بالادست
+  // نرفته بودند — و «۱ بار پرسیدیم» برای آن‌ها ادعای دروغ بود.
+  if (record?.skipped === true) return { ...record };
   return {
     ...record,
     attempts: Math.max(0, Math.trunc(n(record.attempts))) + 1,
@@ -194,6 +205,7 @@ export function refillSummary(queue = []) {
     total: list.length,
     missing: of('missing'), partial: of('partial'),
     error: of('error'), absent: of('absent'), throttled: of('throttled'),
+    throttledAsked: list.filter((job) => job.reason === 'throttled' && job.asked).length,
     gapTrades: list.reduce((sum, job) => sum + job.gapTrades, 0),
     worst: list[0] || null,
   };

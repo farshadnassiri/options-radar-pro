@@ -94,6 +94,42 @@ export function unknownListingContracts(instruments = []) {
 }
 
 /**
+ * تاریخِ عرضهٔ نامعلوم، از تاریخچهٔ روزانهٔ خودِ قرارداد.
+ *
+ * ═══ R5-17: آزمونِ عملیِ ۱۴۰۵/۰۷/۰۱ ═══
+ *
+ * شش قرارداد از خروجیِ یک‌هفته‌ای بیرون ماندند چون دفتر تاریخِ عرضه‌شان
+ * را نداشت. قاعدهٔ بالا درست است — «نمی‌دانیم کی عرضه شد» نباید درخواستِ
+ * روزهای پیش از تولد بسازد. ولی همین تب **کلِ** تاریخچهٔ روزانهٔ هر ابزار
+ * را پیش از هر چیز می‌گیرد، و اولین ردیفِ معامله‌دارِ آن، اولین روزی است
+ * که آن قرارداد معامله شده.
+ *
+ * برای ریزمعامله این جایگزین **بی‌زیان** است: پیش از اولین روزِ معامله،
+ * ریزمعامله‌ای وجود ندارد که از دست برود. پس کفِ پایینی از داده می‌آید،
+ * نه از حدس، و منبعش روی رکورد می‌نشیند.
+ *
+ * قراردادی که تابلوی روزانه‌اش هم خالی آمد، همچنان بیرون می‌ماند —
+ * خالی‌بودنِ تابلو خودش «نمی‌دانیم» است، نه «از اول بوده».
+ */
+export function recoverListingFromDaily(unlisted = [], dailyByIns = {}) {
+  const recovered = [], still = [];
+  for (const item of unlisted || []) {
+    const value = dailyByIns?.[String(item?.ins ?? '')];
+    const rows = Array.isArray(value?.rows) ? value.rows : (Array.isArray(value) ? value : []);
+    const traded = rows
+      .filter((row) => n(row?.trades) > 0 || n(row?.vol) > 0)
+      .map((row) => Math.trunc(n(row?.date)))
+      .filter((date) => date > 0);
+    if (!traded.length) { still.push(item); continue; }
+    recovered.push({
+      ...item, activeFrom: Math.min(...traded), listingKnown: true,
+      listingSource: 'daily-first-trade',
+    });
+  }
+  return { recovered, still };
+}
+
+/**
  * کفِ عمرِ هر قرارداد، از روی **سری** و نه از روی یک سمت.
  *
  * ═══ ممیزی فایلِ m5 اهرم ═══
@@ -312,7 +348,7 @@ export function selectedDataExportInstruments(instruments = [], selection = []) 
  * انتهای جمله.
  */
 export function dataExportOutcome(pairs = [], items = {}) {
-  let ok = 0, empty = 0, failed = 0, missing = 0, trades = 0, throttled = 0;
+  let ok = 0, empty = 0, failed = 0, missing = 0, trades = 0, throttled = 0, throttledAsked = 0;
   const reasons = new Map();
   for (const pair of pairs || []) {
     const hit = items?.[pair.key];
@@ -323,7 +359,7 @@ export function dataExportOutcome(pairs = [], items = {}) {
     // «خطادار» یعنی جملهٔ وضعیت بگوید برنامه شکست خورد، در حالی که
     // برنامه درست کار کرد و بالادست در را بست. در هارنس همین باعث شد
     // خطِ وضعیت «۵۰ ابزار/روز خطادار» بنویسد.
-    if (hit.throttled) { throttled += 1; continue; }
+    if (hit.throttled) { throttled += 1; if (wasAsked(hit)) throttledAsked += 1; continue; }
     if (hit.error) {
       failed += 1;
       const why = String(hit.error);
@@ -336,6 +372,8 @@ export function dataExportOutcome(pairs = [], items = {}) {
   const total = (pairs || []).length;
   return {
     total, ok, empty, failed, missing, trades, throttled,
+    // R5-17: از سهمیه‌ای‌ها، چندتا واقعاً پرسیده شدند و خالی آمدند.
+    throttledAsked, throttledSkipped: throttled - throttledAsked,
     // «هیچ داده‌ای نیامد» با «هیچ معامله‌ای نشده» یکی نیست: اولی خرابی
     // است و دومی واقعیتِ بازار.
     blank: total > 0 && ok === 0,
@@ -497,10 +535,36 @@ export function emptyStatusOf(verdict) {
  * همان چیزی بود که ۳۵۹ ابزار/روزِ پشتِ سهمیه را «ریزمعامله نیامد» نوشت.
  */
 export const BLOCKED_STATUS = {
-  throttled: 'سهمیهٔ بالادست',
+  // ═══ R5-17: سهمیه دو حالت است، نه یکی ═══
+  //
+  // آزمونِ عملیِ ۱۴۰۵/۰۷/۰۱ هر ۳۰۹ ردیفِ سهمیه را «پرسیده نشد» نوشت، در
+  // حالی که ۳۲ تایشان پرسیده شده بودند — ۲۵ تا با هر دو پرچم و فهرستِ
+  // خالی. آن ۲۵ **مدرکِ** بسته‌شدنِ سهمیه‌اند؛ ۲۷۷ تای دیگر **پیامدِ**
+  // آن. قاطی‌کردنشان یعنی کاربر نمی‌تواند بفهمد حکمِ برنامه روی چه بنا شد.
+  throttled: 'سهمیهٔ بالادست — پرسیده نشد',
+  throttledAsked: 'سهمیهٔ بالادست — پرسیده شد، خالی آمد',
   absent: 'درخواست نرفت',
   error: 'خطا',
 };
+
+/** آیا این رکورد واقعاً به بالادست رفته — نه صرفاً اینکه به تب رسیده. */
+export function wasAsked(record) {
+  return Boolean(record) && record.skipped !== true && Math.trunc(n(record.attempts)) > 0;
+}
+
+/**
+ * جملهٔ ردیفی که پرسیده شد و خالی آمد، در حالی که سهمیه بسته بود.
+ *
+ * عددِ تابلو در جمله می‌آید چون همان چیزی است که این ردیف را «مدرک»
+ * می‌کند: فهرستِ خالی روبه‌روی تابلوی صفر، روزِ بی‌معامله است؛ روبه‌روی
+ * هفت هزار معامله، سهمیه.
+ */
+export function askedDeniedText(record = {}) {
+  const board = n(record?.reference?.trades ?? record?.shortfall?.trades);
+  const against = board > 0 ? ` در حالی که تابلو ${board} معامله ثبت کرده` : '';
+  return `پرسیده شد؛ بالادست فهرستِ خالی داد${against} — الگوی سهمیه.`
+    + ' پس از بازشدنِ سهمیه دوباره بگیرید.';
+}
 
 /**
  * وضعیتِ یک ابزار/روز در برگ پوشش.
@@ -577,10 +641,12 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {},
       //
       // این شاخه **مقدم** است، حتی بر خطا: وقتی سرور حکم داده سهمیه بسته
       // شده، آن حکم دربارهٔ این ردیف صادق‌تر از هر برچسبِ دیگری است.
-      status: hit?.throttled ? 'سهمیهٔ بالادست'
-        : !hit ? 'درخواست نرفت' : hit.error ? 'خطا'
+      status: hit?.throttled
+        ? (wasAsked(hit) ? BLOCKED_STATUS.throttledAsked : BLOCKED_STATUS.throttled)
+        : !hit ? BLOCKED_STATUS.absent : hit.error ? BLOCKED_STATUS.error
           : coverageStatusOf(verdicts.get(pair.key), rows.length > 0),
       throttled: hit?.throttled === true,
+      asked: wasAsked(hit),
       // شمارِ تلاش روی خودِ رکورد می‌نشیند، پس فایل می‌گوید هر ابزار/روز
       // چند بار پرسیده شده. بی این، «تلاش کردیم» یک ادعای شفاهی است.
       attempts: Math.max(0, Math.trunc(n(hit?.attempts))),

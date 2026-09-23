@@ -1048,7 +1048,17 @@ export async function mount(root, { state, api }) {
     const stats = trackStats(series.points || []);
     root.querySelector('#track-stats').innerHTML = trackStatsHtml(stats, { changeLabel: CHANGE_LABEL[mode] });
     const extra = mode === 'intraday' && tapeAt ? ` آخرین دریافت نوار: ${faClock(new Date(tapeAt))}.` : '';
-    root.querySelector('#track-note').textContent = `${trackNote(series, mode)}${extra}${tapeNote && mode === 'intraday' ? ` ${tapeNote}` : ''}`;
+    // ═══ R5-17: بازارِ بسته، پیش از هر جملهٔ دیگری ═══
+    //
+    // آزمونِ عملیِ ۱۴۰۵/۰۷/۰۱: با بازارِ بسته، این نمودار فقط «نوار معاملهٔ
+    // امروز برای این موقعیت گرفته نشده» می‌گفت — درست، ولی کاربر را به
+    // گرفتنِ نواری دعوت می‌کرد که مالِ جلسهٔ قبل است. جملهٔ «بازار باز
+    // نیست» فقط **پس از** گرفتنِ نوار می‌آمد. همان نشانه‌ای که سربرگ با آن
+    // «بازار بسته است» می‌نویسد، اینجا هم پیش از هر چیز خوانده می‌شود.
+    const closedNow = mode === 'intraday' && !tapeAt && state.watch?.stale === true
+      ? 'بازار زنده نیست — آنچه می‌بینید از آخرین جلسه است؛ نوارِ درون‌روزی هم اگر گرفته شود، نوارِ همان جلسه است. '
+      : '';
+    root.querySelector('#track-note').textContent = `${closedNow}${trackNote(series, mode)}${extra}${tapeNote && mode === 'intraday' ? ` ${tapeNote}` : ''}`;
 
     // نوار امروز فقط با درخواست صریح گرفته می‌شود، و هزینه‌اش پیش از کلیک
     // نوشته می‌شود — نه بعدش. عددی که بعد از فشردن دکمه معلوم شود، هشدار

@@ -148,7 +148,7 @@ group('۲۶۵. جمع‌بندی صادقانهٔ دریافت');
   // ——— قرارداد تب ———
   const src = readSrc('../ui/tabs/data-export.mjs');
   check('تب از قراردادهای انتخاب‌شده جفت می‌سازد، نه از همهٔ پایه',
-    src.includes('const instruments = selectedInstruments()'));
+    src.includes('let instruments = selectedInstruments()'));
   check('بستهٔ شکست‌خورده نصف و دوباره فرستاده می‌شود',
     src.includes('splitPairBatch(batch)')
       && src.includes('fetchBatch(half, items, signal, depth + 1, fresh, bust)'));
