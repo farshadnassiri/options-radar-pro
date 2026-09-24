@@ -294,7 +294,16 @@ export function keepBetterTape(previous, next, expect = { known: false }) {
   // و پرچم فقط وقتی می‌چسبد که رکوردِ برنده **بی‌ردیف** باشد: ابزار/روزی
   // که داده دارد، هر چه بر سرِ تلاشِ بعدی‌اش آمده باشد، «پشتِ سهمیه
   // مانده» نیست.
-  const blocked = previous?.throttled === true || next?.throttled === true;
+  //
+  // ═══ R5-18: ولی پرچمِ قبلی روی پاسخِ **تازه** نمی‌چسبد ═══
+  //
+  // نسخهٔ قبلی `previous.throttled || next.throttled` بود، یعنی ردیفی که
+  // یک بار «سهمیه» گرفت دیگر هرگز از آن بیرون نمی‌آمد — حتی وقتی پاسخِ
+  // تازهٔ بالادست کامل و بی‌سهمیه بود. آزمونِ عملی ۲۲ ردیف را همین‌طور
+  // تا آخرِ شش تلاش «سهمیه» نگه داشت. پرچم دربارهٔ **آخرین پاسخ** است.
+  // (پاسخِ «پرسیده نشد» پاسخ نیست؛ آن شاخه پایین‌تر رکوردِ قبلی را کامل
+  // نگه می‌دارد، پرچمش هم با آن.)
+  const blocked = next?.throttled === true;
   const take = (record, replaced) => {
     const out = { ...tracking, ...record, replaced };
     const rows = Array.isArray(out.rows) ? out.rows : [];

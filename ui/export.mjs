@@ -17,6 +17,7 @@
 // «Import Text» همه‌جا کار می‌کند و با ابزارهای دیگر هم می‌خواند.
 
 import { toEnDigits } from './fmt.mjs';
+import { saveBlob } from './save-file.mjs';
 
 /** یک خانه، آمادهٔ CSV. نقل‌قول درون متن دوبار می‌شود، طبق RFC 4180. */
 /**
@@ -64,12 +65,7 @@ export function toCsv(rows) {
  * فایل هم‌نام دارد و مرورگر به دومی و سومی «(1)» و «(2)» می‌چسباند.
  */
 export function downloadCsv(name, rows) {
-  const url = URL.createObjectURL(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${name}.csv`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  saveBlob(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }), `${name}.csv`);
 }
 
 /**

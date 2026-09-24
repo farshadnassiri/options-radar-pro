@@ -1,3 +1,4 @@
+import { saveBlob } from '/ui/save-file.mjs';
 import { CATALOG, GROUPS, byId } from '/strategies/catalog.mjs';
 import { buildChain, comboContractSize } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
@@ -885,9 +886,7 @@ export async function mount(root, { state }) {
       row.perLeg.forEach((leg) => values.push(leg.exitPrice, leg.secondVolume, leg.cumulativeVolume, leg.netPnl, leg.ageSec));
       return values;
     })].map((row) => row.map((value) => `"${String(value ?? '').replaceAll('"', '""')}"`).join(','));
-    const href = URL.createObjectURL(new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a'); link.href = href; link.download = `intraday-${intradayDate || replay.endDate}.csv`; link.click();
-    setTimeout(() => URL.revokeObjectURL(href), 0);
+    saveBlob(new Blob([`\ufeff${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' }), `intraday-${intradayDate || replay.endDate}.csv`);
   }
 
   /**

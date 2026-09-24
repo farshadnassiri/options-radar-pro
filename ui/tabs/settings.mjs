@@ -9,6 +9,7 @@ import { FORMULAS, FORMULA_GROUPS, STRATEGY_FORMULAS, SYMBOLS } from '/core/form
 import { CATALOG, GROUPS as STRAT_GROUPS } from '/strategies/catalog.mjs';
 import { faDigits, fmt, ltr } from '/ui/fmt.mjs';
 import { BACKUP_PARTS, buildBackup, readBackup, restorePlan } from '/core/backup-bundle.mjs';
+import { saveBlob } from '/ui/save-file.mjs';
 
 const SCOPE_LABEL = { server: 'سرور', client: 'مرورگر', both: 'هر دو' };
 
@@ -414,12 +415,7 @@ export async function mount(root, { state, api }) {
     catch { positions = null; }
     const bundle = buildBackup({ ...currentParts(), positions, at: Date.now() });
     const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `options-radar-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    saveBlob(blob, `options-radar-backup-${new Date().toISOString().slice(0, 10)}.json`);
     const parts = BACKUP_PARTS.filter((part) => bundle[part.key] != null).map((part) => part.label);
     backupFlash(parts.length ? `پشتیبان گرفته شد: ${parts.join('، ')}.` : 'چیزی برای پشتیبان‌گیری نبود.');
   });

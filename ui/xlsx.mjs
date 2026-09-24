@@ -21,6 +21,7 @@
 // قابل باز شدن.
 
 import { clean } from './workbook.mjs';
+import { saveBlob } from './save-file.mjs';
 
 // ═══════════════════ ابزار ═══════════════════
 
@@ -344,13 +345,8 @@ export async function buildXlsx(sheets) {
 /** فایل را به کاربر می‌دهد. */
 export async function downloadXlsx(name, sheets) {
   const bytes = await buildXlsx(sheets);
-  const url = URL.createObjectURL(new Blob([bytes], {
+  saveBlob(new Blob([bytes], {
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${name}.xlsx`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  }), `${name}.xlsx`);
   return bytes.length;
 }

@@ -23,6 +23,7 @@ import { inferLiveSessionDate, liveTapeCodes, liveTapeDay } from '/core/live-day
 import { fetchRangeUniverse, mountHistoryRange } from '/ui/history-range.mjs';
 import { buildDataExportSheets, dataExportFilename } from '/ui/data-export-workbook.mjs';
 import { downloadXlsx } from '/ui/xlsx.mjs';
+import { lastSaved } from '/ui/save-file.mjs';
 import { faDigits, fmt } from '/ui/fmt.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { fetchDailies } from '/ui/daily-intake.mjs';
@@ -583,6 +584,14 @@ export async function mount(root, { state, api }) {
             // سرور سهمیه را تشخیص داده بود.
             const seen = items[pair.key];
             if (Array.isArray(seen?.rows) && seen.rows.length) continue;
+            // ═══ R5-18: پاسخِ کامل، هر چند خالی، «سهمیه» نمی‌شود ═══
+            //
+            // آزمونِ عملیِ پنج‌دوره: ۲۲ ابزار/روز که سرور با تابلوی همان
+            // روز «کامل — بی‌معامله» خوانده بود، همین‌جا «سهمیه» گرفتند —
+            // چون این حلقه فقط «ردیف دارد؟» را می‌پرسید. سپس شش بار دوباره
+            // پرسیده شدند و فایل ۹۳٫۶٪ نوشت در حالی که واقعاً ۱۰۰٪ بود.
+            // خالیِ تأییدشده جواب است، نه کمبود.
+            if (seen?.complete === true) continue;
             // ═══ R5-17: «پرسیده شد و خالی آمد» با «پرسیده نشد» یکی نیست ═══
             //
             // این حلقه در دورِ تکمیلی هم اجرا می‌شود، و آنجا ردیف‌هایی را
@@ -741,8 +750,17 @@ export async function mount(root, { state, api }) {
     const shrink = frame.seconds && ticks > out
       ? ` با «${frame.label}» خروجی ${fmt.int(out)} ردیف می‌شود به‌جای ${fmt.int(ticks)} — حدود ${fmt.int(Math.round(ticks / Math.max(1, out)))} برابر کوچک‌تر.`
       : '';
+    // ═══ R5-18: «دانلود شد» ادعایی بود که برنامه نمی‌تواند بداند ═══
+    //
+    // آزمونِ عملی: دو دور همین جمله آمد و فایلی روی دیسک نبود. مرورگر به
+    // صفحه نمی‌گوید ذخیره کرد یا نه؛ پس جمله فقط آنچه را می‌داند می‌گوید، و
+    // یک پیوندِ دستی می‌دهد — کلیکِ خودِ کاربر مطمئن‌ترین راهِ دانلود است.
+    const saved = lastSaved();
+    const manual = saved?.url
+      ? ` اگر دانلود شروع نشد، <a href="${saved.url}" download="${esc(saved.filename)}">این پیوند</a> را بزنید.`
+      : '';
     const headline = Number.isFinite(bytes)
-      ? `فایل با حجم ${fmt.int(Math.ceil(bytes / 1024))} کیلوبایت دانلود شد.${shrink}`
+      ? `فایل با حجم ${fmt.int(Math.ceil(bytes / 1024))} کیلوبایت ساخته شد و به مرورگر سپرده شد.${manual}${shrink}`
       : `داده آماده است؛ برای دریافت فایل روی «خروجی Excel» بزنید.${shrink}`;
     $('de-result').innerHTML = `<p class="note">${headline}</p><table class="history-table"><thead><tr><th>پایه</th><th>شیت ابزار</th><th>نوع</th><th>ریزمعاملهٔ ۹ تا ۱۲:۳۰</th><th>ردیف خروجی</th><th>بیرون از جلسه</th><th>روز خطادار</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
   }
@@ -830,8 +848,9 @@ export async function mount(root, { state, api }) {
       const openDates = String(resolved.payload?.market?.phase || '') === 'open' && resolved.date
         ? [resolved.date] : [];
       lastDailyByIns = dailyByIns; lastOpenDates = openDates;
-      let outcome = dataExportOutcome(pairs, items);
+      // حکمِ تابلو اول، چون جمع‌بندی حالا رویش می‌ایستد (R5-18).
       let audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
+      let outcome = dataExportOutcome(pairs, items, audit);
       // خالیِ تاریخی که تابلوی روزانه تکذیبش می‌کند غالباً پاسخِ خالیِ کش
       // CDN است. همان جفت‌ها دقیقاً یک بار با cache-buster دوباره می‌روند؛
       // نه همهٔ بازه، و نه خالی‌ای که تابلو واقعاً صفر اعلام کرده است.
@@ -848,8 +867,8 @@ export async function mount(root, { state, api }) {
       if (staleHistorical.length) {
         setStatus(`${fmt.int(staleHistorical.length)} ابزار/روز با تابلوی روزانه نخواند (خالی یا ناقص)؛ دریافت تازه در حال انجام است…`);
         await fetchHistorical(staleHistorical, items, controller.signal, true);
-        outcome = dataExportOutcome(pairs, items);
         audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
+        outcome = dataExportOutcome(pairs, items, audit);
       }
       // ═══ دور دوم برای روزهایی که **سراسر** خالی آمدند ═══
       //
@@ -872,8 +891,8 @@ export async function mount(root, { state, api }) {
         setStatus(`${fmt.int(suspectDays.size)} روزِ معاملاتی سراسر خالی آمد — این واقعیتِ بازار نیست؛`
           + ` ${fmt.int(suspectPairs.length)} ابزار/روز بی‌کش دوباره پرسیده می‌شود…`);
         await fetchHistorical(suspectPairs, items, controller.signal, true);
-        outcome = dataExportOutcome(pairs, items);
         audit = dataExportBlankAudit(pairs, items, dailyByIns, openDates);
+        outcome = dataExportOutcome(pairs, items, audit);
       }
       const rescued = suspectPairs.filter((pair) => (items[pair.key]?.rows || []).length).length;
       // شیت‌ها اینجا ساخته نمی‌شوند: تایم‌فریم شکلِ نوشتن است نه دریافت، و
@@ -890,7 +909,9 @@ export async function mount(root, { state, api }) {
         dailyMissing: [...dailyMissing], dailyBlank: [...dailyBlank],
         // و کم‌داشته‌هایی که دیگر قفل نمی‌کنند: اگر در فایل نوشته نشوند،
         // «قفل برداشته شد» به «انگار مشکلی نبود» ترجمه می‌شود.
-        coverageWarnings: warnings(),
+        // R5-18: فهرستِ **پس از** بازیابیِ تاریخِ عرضه — وگرنه فایل می‌نوشت
+        // «۸۴ قرارداد وارد بازه نمی‌شود» در حالی که ۷۵ تایش وارد شده بود.
+        coverageWarnings: exportWarnings(universe, instruments),
       };
       paintResult(sheetInstruments, pairs, items);
       // ═══ چرا صفر بودنِ داده، خبرِ اول است ═══
@@ -1055,7 +1076,7 @@ export async function mount(root, { state, api }) {
         // چند دقیقه است، پس ادامه‌اش فقط پنجره را تمدید می‌کند.
         if (throttled) {
           prepared.audit = dataExportBlankAudit(prepared.pairs, prepared.items, lastDailyByIns, lastOpenDates);
-          prepared.outcome = dataExportOutcome(prepared.pairs, prepared.items);
+          prepared.outcome = dataExportOutcome(prepared.pairs, prepared.items, prepared.audit);
           paintResult(prepared.instruments, prepared.pairs, prepared.items);
           paintRefillState();
           setStatus(`تلاش تکمیلی متوقف شد — ${throttled.note}`, true);
@@ -1064,7 +1085,7 @@ export async function mount(root, { state, api }) {
 
         // ممیزی دوباره حساب می‌شود، وگرنه صفِ دورِ بعد همان صفِ قبل است.
         prepared.audit = dataExportBlankAudit(prepared.pairs, prepared.items, lastDailyByIns, lastOpenDates);
-        prepared.outcome = dataExportOutcome(prepared.pairs, prepared.items);
+        prepared.outcome = dataExportOutcome(prepared.pairs, prepared.items, prepared.audit);
         const gained = refillProgress(queue, before, prepared.items);
         totalFilled += gained.filled + gained.improved;
         totalGained += gained.gainedTrades;
@@ -1143,7 +1164,7 @@ export async function mount(root, { state, api }) {
       const bytes = await downloadXlsx(dataExportFilename(prepared.range, frame), sheets);
       paintResult(prepared.instruments, prepared.pairs, prepared.items, bytes);
       setStatus(`فایل Excel در تایم‌فریم «${dataExportFrame(frame).label}»`
-        + ` و پنجرهٔ ${faDigits(clockLabel(window.start))} تا ${faDigits(clockLabel(window.end))} دانلود شد`
+        + ` و پنجرهٔ ${faDigits(clockLabel(window.start))} تا ${faDigits(clockLabel(window.end))} ساخته و به مرورگر سپرده شد`
         + `${sheets.length > prepared.instruments.length + 2 ? ` — ابزارِ پرردیف به چند برگ تقسیم شد (${fmt.int(sheets.length)} برگ).` : '.'}`
         + ' تایم‌فریم و ساعت را عوض کنید و دوباره همین دکمه را بزنید — دریافت دوباره لازم نیست.');
     } catch (error) {

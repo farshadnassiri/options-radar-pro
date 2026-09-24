@@ -11,6 +11,8 @@
 // می‌شود نه نمودار. و چرا نه xlsx واقعی: فرمتش zip است و بدون کتابخانه
 // ساختنش یعنی نوشتن یک zip writer — که قاعدهٔ ۲-۱ را دور می‌زند نه رعایت.
 
+import { saveBlob } from './save-file.mjs';
+
 const BIDI = /[‎‏‪-‮⁦-⁩]/g;
 
 /**
@@ -78,10 +80,5 @@ export function workbook(sheets) {
 
 /** فایل را به کاربر می‌دهد. */
 export function downloadWorkbook(name, content) {
-  const url = URL.createObjectURL(new Blob([content], { type: 'application/vnd.ms-excel;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `${name}.xls`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  saveBlob(new Blob([content], { type: 'application/vnd.ms-excel;charset=utf-8' }), `${name}.xls`);
 }

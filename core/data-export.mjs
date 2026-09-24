@@ -185,15 +185,19 @@ export function dataExportListingFloors(instruments = []) {
 export function dataExportListingBasis(instruments = [], pairs = []) {
   const byIns = new Map((instruments || []).filter((item) => item?.ins && item.kind !== 'underlying')
     .map((item) => [String(item.ins), item]));
-  let official = 0, observed = 0, recovered = 0;
+  let official = 0, observed = 0, recovered = 0, fromDaily = 0;
   for (const item of byIns.values()) {
-    if (item.listingOfficial === true) official += 1; else observed += 1;
+    if (item.listingOfficial === true) official += 1;
+    // R5-18: کفی که از اولین روزِ معاملهٔ تابلوی روزانه آمد، «اولین روزِ
+    // دیده‌شدنِ دفتر» نیست و فایل نباید آن را همان‌طور بنویسد.
+    else if (item.listingSource === 'daily-first-trade') fromDaily += 1;
+    else observed += 1;
   }
   for (const pair of pairs || []) {
     const item = byIns.get(String(pair.ins));
     if (item && item.listingOfficial !== true && pair.date < n(item.activeFrom)) recovered += 1;
   }
-  return { official, observed, recovered, total: byIns.size };
+  return { official, observed, fromDaily, recovered, total: byIns.size };
 }
 
 /** پایه در کل بازه و اختیار فقط در عمر ثبت‌شدهٔ خودش درخواست می‌شود. */
@@ -347,12 +351,17 @@ export function selectedDataExportInstruments(instruments = [], selection = []) 
  * بگوید چند جفت واقعاً داده آورد؛ صفر بودنش خبرِ اول است، نه یک عدد در
  * انتهای جمله.
  */
-export function dataExportOutcome(pairs = [], items = {}) {
+export function dataExportOutcome(pairs = [], items = {}, audit = []) {
   let ok = 0, empty = 0, failed = 0, missing = 0, trades = 0, throttled = 0, throttledAsked = 0;
   const reasons = new Map();
+  // R5-18: بی حکمِ تابلو، ردیفِ «بی‌معامله با تابلو» که برچسبِ سهمیه
+  // خورده بود در شمارِ سهمیه می‌رفت. حکم اختیاری است تا فراخوان‌های
+  // قدیمی نشکنند.
+  const verdicts = new Map((audit || []).map((row) => [row.key, row.verdict]));
   for (const pair of pairs || []) {
     const hit = items?.[pair.key];
     if (!hit) { missing += 1; continue; }
+    if (boardQuiet(verdicts.get(pair.key), hit.rows)) { empty += 1; continue; }
     // ═══ R5-08: سهمیه خطا نیست ═══
     //
     // ابزار/روزی که پشتِ سهمیه ماند اصلاً **پرسیده نشده**؛ شمردنش در
@@ -547,6 +556,16 @@ export const BLOCKED_STATUS = {
   error: 'خطا',
 };
 
+/**
+ * نوارِ خالی که تابلوی همان روز هم صفرش را تأیید کرده — یعنی کامل.
+ *
+ * این یک جواب است، نه یک کمبود: نه دوباره پرسیده می‌شود، نه «سهمیه»
+ * می‌گیرد، نه از پوشش کم می‌کند.
+ */
+export function boardQuiet(verdict, rows) {
+  return verdict === 'quiet' && !(Array.isArray(rows) && rows.length);
+}
+
 /** آیا این رکورد واقعاً به بالادست رفته — نه صرفاً اینکه به تب رسیده. */
 export function wasAsked(record) {
   return Boolean(record) && record.skipped !== true && Math.trunc(n(record.attempts)) > 0;
@@ -641,11 +660,19 @@ export function dataExportCoverageRows(instruments = [], pairs = [], items = {},
       //
       // این شاخه **مقدم** است، حتی بر خطا: وقتی سرور حکم داده سهمیه بسته
       // شده، آن حکم دربارهٔ این ردیف صادق‌تر از هر برچسبِ دیگری است.
-      status: hit?.throttled
-        ? (wasAsked(hit) ? BLOCKED_STATUS.throttledAsked : BLOCKED_STATUS.throttled)
-        : !hit ? BLOCKED_STATUS.absent : hit.error ? BLOCKED_STATUS.error
-          : coverageStatusOf(verdicts.get(pair.key), rows.length > 0),
-      throttled: hit?.throttled === true,
+      // ═══ R5-18: تابلوی «صفر» جوابِ کامل است، هر برچسبی که خورده باشد ═══
+      //
+      // آزمونِ عملیِ پنج‌دوره ۲۲ ردیف داشت که ستونِ «حکم خالی‌بودن»
+      // می‌گفت «بدون معامله — تابلوی روزانه هم صفر است» و ستونِ «وضعیت»
+      // در **همان ردیف** می‌گفت «سهمیه». شاخهٔ سهمیه مقدم بود، پس حکمِ
+      // تابلو دیده نمی‌شد و پوشش ۹۳٫۶٪ نوشته شد در حالی که ۱۰۰٪ بود.
+      status: boardQuiet(verdicts.get(pair.key), rows)
+        ? coverageStatusOf('quiet', false)
+        : hit?.throttled
+          ? (wasAsked(hit) ? BLOCKED_STATUS.throttledAsked : BLOCKED_STATUS.throttled)
+          : !hit ? BLOCKED_STATUS.absent : hit.error ? BLOCKED_STATUS.error
+            : coverageStatusOf(verdicts.get(pair.key), rows.length > 0),
+      throttled: hit?.throttled === true && !boardQuiet(verdicts.get(pair.key), rows),
       asked: wasAsked(hit),
       // شمارِ تلاش روی خودِ رکورد می‌نشیند، پس فایل می‌گوید هر ابزار/روز
       // چند بار پرسیده شده. بی این، «تلاش کردیم» یک ادعای شفاهی است.
