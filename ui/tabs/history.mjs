@@ -1,3 +1,4 @@
+import { saveBlob } from '/ui/save-file.mjs';
 import { CATALOG, GROUPS, byId } from '/strategies/catalog.mjs';
 import {
   buildChain, comboContractSize, legContractSize, blockedExpirySet, expiryBlocked,
@@ -1449,16 +1450,11 @@ export async function mount(root, { state }) {
     const heads = ['تاریخ', 'روز', 'روز نگهداری', 'دارایی پایه', 'پایانی پایه', 'حجم پایه', 'ارزش پایه', 'تعداد معامله پایه', 'تغییر روزانه پایه ٪', 'تغییر از ورود پایه ٪', ...legHeads, 'سود ناخالص', 'کارمزد کل', 'سود خالص', 'تغییر سود روز', 'بازده ٪', 'افت از قله', 'وجه تضمین خالص', 'وضعیت'];
     const lines = [heads, ...currentReplay.rows.map((r) => [r.dateLabel, r.dayName, r.holdingDays, displayName(ua, 'دارایی پایه'), r.baseClose, r.baseVolume, r.baseValue, r.baseTrades, r.baseDailyPct, r.baseCumulativePct, ...r.perLeg.flatMap((l) => [l.exitPrice, l.netPnl, l.pnlDelta, l.volume, l.value]), r.grossPnl, r.totalFees, r.netPnl, r.pnlDelta, r.returnPct, r.drawdown, r.marginNet, r.status === 'ok' ? 'معتبر' : r.status === 'liquidity' ? 'حذف نقدشوندگی' : 'فاقد داده'])];
     const blob = new Blob(['\ufeff' + lines.map((row) => row.map(csvCell).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob); link.download = `options-history-${currentReplay.startDate}-${currentReplay.endDate}.csv`;
-    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0);
+    saveBlob(blob, `options-history-${currentReplay.startDate}-${currentReplay.endDate}.csv`);
   }
 
   function downloadMatrixFile(content, type, extension) {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([content], { type }));
-    link.download = `strategy-matrix-${rollingArgs.startDate}-${rollingArgs.endDate}.${extension}`;
-    link.click(); setTimeout(() => URL.revokeObjectURL(link.href), 0);
+    saveBlob(new Blob([content], { type }), `strategy-matrix-${rollingArgs.startDate}-${rollingArgs.endDate}.${extension}`);
   }
 
   function buildMatrixExport() {

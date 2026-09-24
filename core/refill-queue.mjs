@@ -112,6 +112,12 @@ export function refillQueue(pairs = [], items = {}, audit = [], {
     // نوارِ زنده دوباره گرفتنی نیست: روزِ جاری از مسیر تاریخی نمی‌آید.
     if (String(hit?.source || '') === 'live') continue;
 
+    // ═══ R5-18: «بی‌معامله با تابلو» کامل است، نه در صف ═══
+    //
+    // آزمونِ عملی: ۲۲ ابزار/روز با تابلوی صفر شش بار پرسیده شدند — هر بار
+    // دو پرچم، و بیشترِ HTTP 500های دورهای آخر هم روی همین‌ها بود. یعنی
+    // دست‌کم ۱۳۲ درخواست از سهمیه، برای جوابی که از دورِ اول در دست بود.
+    if (seen?.verdict === 'quiet' && !(Array.isArray(hit?.rows) && hit.rows.length)) continue;
     let reason = '';
     if (!hit) reason = 'absent';
     else if (hit.throttled) reason = 'throttled';

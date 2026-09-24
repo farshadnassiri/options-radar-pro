@@ -170,13 +170,13 @@ group('۲۹۵. نگهبانِ منبع');
   check('سرور پرسیده‌نشده را صریح علامت می‌زند',
     server.includes("rows: [], source: 'history', throttled: true, skipped: true,"));
   check('و ردیفِ داده‌دار را «سهمیه» نمی‌کند',
-    server.includes('items[key] = verdict && !tape.rows?.length ? { ...tape, throttled: true } : tape;'));
+    server.includes('items[key] = verdict && !tape.rows?.length && tape.complete !== true ? { ...tape, throttled: true } : tape;'));
   check('و «false خالی» را فقط وقتی علامت می‌زند که نوار کامل نشد',
     server.includes('const falseEmpty = !out.complete && !out.emptyBoth && !first.rows?.length'));
 
   const verify = readSrc('../tools/verify-export.mjs');
   check('راست‌آزما سهمیه را هم «دریافت‌نشده» می‌شمارد',
-    verify.includes("|| st.includes('سهمیهٔ بالادست')"));
+    verify.includes("|| (st.includes('سهمیهٔ بالادست') && !boardQuietRow(r))"));
   check('و پرسیده‌ها را از ستونِ پرچم جدا می‌کند، تا روی فایلِ قدیمی هم درست بگوید',
     verify.includes("const flagAt = at('پرچم درخواست');"));
   check('و دیگر نمی‌گوید «تلاشِ تکمیلی لازم ندارد»',

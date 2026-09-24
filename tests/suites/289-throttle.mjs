@@ -353,10 +353,26 @@ group('۲۸۹. پرچمِ سهمیه از دروازهٔ حفظِ داده رد 
     { rows: [], source: 'history', throttled: true }, expect);
   check('پرچمِ سهمیه در نگه‌داشتنِ رکوردِ خالی می‌ماند', held.throttled === true);
 
+  // ═══ R5-18: این ادعا **وارونه** شد، و آگاهانه ═══
+  //
+  // نسخهٔ قبلی می‌خواست پرچمِ رکوردِ قبلی روی پاسخِ تازه هم بچسبد. آزمونِ
+  // عملیِ پنج‌دوره نشان داد هزینه‌اش چیست: ۲۲ ابزار/روز که پاسخِ تازه‌شان
+  // «کامل — بی‌معامله با تابلو» بود، تا آخرِ شش تلاش «سهمیه» ماندند و هر
+  // بار دوباره پرسیده شدند. پرچم دربارهٔ **آخرین پاسخِ بالادست** است؛
+  // جهتِ اصلیِ R5-10 — گم‌نشدنِ پرچمِ پاسخِ تازه — در ادعای بالا سرِ جایش
+  // است، و «پرسیده نشد» (که پاسخ نیست) رکوردِ قبلی را با پرچمش نگه می‌دارد.
   const fromPrev = keepBetterTape(
     { rows: [], source: 'history', throttled: true },
     { rows: [], source: 'history' }, expect);
-  check('و از رکوردِ قبلی هم به بعد منتقل می‌شود', fromPrev.throttled === true);
+  check('ولی پاسخِ تازهٔ بی‌سهمیه، پرچمِ قبلی را پاک می‌کند', fromPrev.throttled !== true);
+  const quietNow = keepBetterTape(
+    { rows: [], source: 'history', throttled: true },
+    { rows: [], source: 'history', complete: true, quiet: true }, { known: true, quiet: true, trades: 0, volume: 0 });
+  check('و مخصوصاً پاسخِ «کامل — بی‌معامله»', quietNow.throttled !== true && quietNow.complete === true);
+  const skippedNow = keepBetterTape(
+    { rows: [], source: 'history', throttled: true, attempts: 1 },
+    { rows: [], source: 'history', throttled: true, skipped: true }, expect);
+  check('ولی «پرسیده نشد» پاسخ نیست و پرچمِ قبلی را نگه می‌دارد', skippedNow.throttled === true);
 
   // ═══ ولی ردیفی که داده دارد «پشتِ سهمیه» نیست ═══
   //

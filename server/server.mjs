@@ -1503,7 +1503,7 @@ async function handle(req, res) {
         const verdict = watch.saw(tape, key);
         // ردیفی که داده دارد «سهمیه» نمی‌گیرد، حتی اگر حکم روی همان صادر
         // شد: دادهٔ رسیده واقعی است و برچسبِ «سهمیه» آن را پنهان می‌کرد.
-        items[key] = verdict && !tape.rows?.length ? { ...tape, throttled: true } : tape;
+        items[key] = verdict && !tape.rows?.length && tape.complete !== true ? { ...tape, throttled: true } : tape;
         // ═══ R5-10: مدرکِ حکم، خودش قربانیِ حکم است ═══
         //
         // حکم روی پنجره‌ای صادر می‌شود که چند ابزار/روزِ **قبلی** هم
