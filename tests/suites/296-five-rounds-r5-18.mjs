@@ -108,7 +108,10 @@ group('۲۹۶. دانلود: نشانی تا خروجیِ بعدی زنده می
     }
     return out;
   };
-  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+  // `fileURLToPath`، نه `new URL(…).pathname`: روی ویندوز دومی `/D:/a/…`
+  // می‌دهد و `path.resolve` آن را `D:\\D:\\a\\…` می‌کند — همان که CI ویندوز شکست.
+  const { fileURLToPath } = await import('node:url');
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const offenders = walk(path.join(root, 'ui'))
     .map((file) => path.relative(root, file).split(path.sep).join('/'))
     .filter((rel) => rel !== 'ui/save-file.mjs' && readSrc(`../${rel}`).includes('revokeObjectURL'));
