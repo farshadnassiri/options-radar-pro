@@ -62,7 +62,7 @@ import {
 } from '/ui/gap-alarm.mjs';
 import { logError } from '/ui/errlog.mjs';
 import { fetchBooks, fetchLiveTape } from '/ui/quote-intake.mjs';
-import { fetchTapeBatch, tapeSummary, tapeWarning } from '/ui/tape-intake.mjs';
+import { fetchTapeBatch, tapeSummary, tapeWarning, usableRows } from '/ui/tape-intake.mjs';
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -757,9 +757,18 @@ export async function mount(root, { state }) {
     // R5-13: از دروازهٔ مشترک، تا حکمِ هر پا همراهِ ردیف‌هایش بیاید.
     const got = await fetchTapeBatch(wanted.map((ins) => ({ ins, date: String(date) })));
     const byIns = {};
-    for (const ins of wanted) byIns[ins] = got.items?.[`${date}:${ins}`]?.rows || [];
+    const failed = [];
+    for (const ins of wanted) {
+      const key = `${date}:${ins}`;
+      const rows = usableRows(got.items?.[key], got.verdicts?.[key]);
+      if (rows) byIns[ins] = rows; else failed.push(ins);
+    }
     // نمودارِ شکافِ درون‌روزی روی نوارِ **همهٔ** پاها ساخته می‌شود؛ اگر
     // یک پا ناقص باشد، شکافِ رسم‌شده مالِ بازار نیست مالِ دریافتِ ماست.
+    // R5-20: پس رسم نمی‌شود — تا اینجا فقط هشدار می‌داد و رسم می‌کرد.
+    if (failed.length) {
+      throw new Error(`نوار کامل ${fmt.int(failed.length)} ابزار نرسید؛ نمودار روی نوار بریده ساخته نمی‌شود — چند دقیقه بعد دوباره بزنید.`);
+    }
     byIns.__note = got.throttled ? got.note : tapeWarning(tapeSummary(got.verdicts));
     return byIns;
   }

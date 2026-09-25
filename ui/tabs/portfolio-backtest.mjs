@@ -88,7 +88,7 @@ import { downloadPortfolioBacktest } from '/ui/portfolio-backtest-export.mjs';
 import { dataSourceRows } from '/core/data-source.mjs';
 import { FILTER_FIELDS, applyComboFilter, filterNote } from '/core/combo-filter.mjs';
 import { selectMatrixRows } from '/core/portfolio-matrix.mjs';
-import { fetchTapeOne } from '/ui/tape-intake.mjs';
+import { fetchTapeOne, usableRows } from '/ui/tape-intake.mjs';
 import { fetchDailies } from '/ui/daily-intake.mjs';
 import {
   correlationHeatOption, correlationOf, familyBarOption, funnelOption, paretoOption,
@@ -1878,7 +1878,11 @@ export async function mount(root, { state, api }) {
         // یک مفهوم، دو رفتار، در یک فایل.
         const { item: got, verdict } = await fetchTapeOne(ins, endDate);
         if (verdict.state !== 'complete' && verdict.state !== 'quiet') markGaps.push(verdict.state);
-        return [ins, got.rows || []];
+        // R5-20: نوارِ بریده قیمتِ ساعت را از معامله‌ای می‌گیرد که شاید
+        // آخرین معاملهٔ آن ساعت نبوده. کنار می‌رود و «نرسید» شمرده می‌شود.
+        const rows = usableRows(got, verdict);
+        if (!rows) throw new Error(verdict.state);
+        return [ins, rows];
       }));
       const tape = Object.fromEntries(settled.filter((row) => row.status === 'fulfilled').map((row) => row.value));
       const failed = settled.filter((row) => row.status === 'rejected').length;
@@ -1911,7 +1915,7 @@ export async function mount(root, { state, api }) {
           return `<tr data-tone="${band.tone}" data-level="${band.level ?? ''}"><td>${esc(row.label)}</td><td class="${signTone(row.netPnl)}">${fmt.money(row.netPnl)}</td><td class="${signTone(row.pct)}">${pctCell(row.pct)}</td><td>${fmt.int(row.legs)} پا با قیمت ${row.exitAt.map((price) => fmt.money(price)).join(' / ')}</td></tr>`;
         }).join('')}</tbody></table>`;
       note.textContent = known.length
-        ? `${fmt.int(known.length)} ساعت از ${fmt.int(MARK_MOMENTS.length)} ساعت، برای همهٔ پاهای این ترکیب قیمت داشت. عددها میان‌روزی‌اند و پایانِ روز نیستند.${failed ? ` ریزمعاملهٔ ${fmt.int(failed)} ابزار دریافت نشد.` : ''}`
+        ? `${fmt.int(known.length)} ساعت از ${fmt.int(MARK_MOMENTS.length)} ساعت، برای همهٔ پاهای این ترکیب قیمت داشت. عددها میان‌روزی‌اند و پایانِ روز نیستند.${failed ? ` ریزمعاملهٔ ${fmt.int(failed)} ابزار کامل نرسید و کنار رفت؛ چند دقیقه بعد دوباره بزنید.` : ''}`
         : 'در هیچ‌کدام از ساعت‌های جلسه، همهٔ پاهای این ترکیب قیمت نداشتند.';
     } catch (error) {
       host.innerHTML = `<p class="empty-note">${esc(errorText(error, 'ریزمعاملهٔ روز سنجش دریافت نشد.'))}</p>`;
@@ -1992,20 +1996,23 @@ export async function mount(root, { state, api }) {
     let failed = 0, emptyBoth = 0;
     for (const part of chunks(codes, 12)) {
       const settled = await Promise.allSettled(part.map(async (ins) => {
-        const { item: payload } = await fetchTapeOne(ins, date);
+        const { item: payload, verdict } = await fetchTapeOne(ins, date);
         // ═══ چرا `emptyBoth` تا اینجا می‌آید ═══
         //
         // `/api/trades` حالا هر دو پرچمِ بالادست را امتحان می‌کند و
         // می‌گوید پس از **هر دو** خالی ماند یا نه. بی این، نقطهٔ سنجشِ
         // بک‌تست «این ابزار معامله نشد» می‌نویسد برای ابزاری که فقط
         // داده‌اش نرسیده — همان اشتباهی که بند ۱ ممیزی نشان داد.
-        return [ins, payload.rows || [], payload.emptyBoth === true];
+        // R5-20: `null` یعنی نوارِ کامل نرسید؛ آن ابزار در این لحظه قیمت
+        // نمی‌گیرد، نه قیمتی از نوارِ بریده.
+        return [ins, usableRows(payload, verdict), payload.emptyBoth === true];
       }));
       for (const item of settled) {
         if (item.status !== 'fulfilled') { failed += 1; continue; }
         const [ins, rows, blank] = item.value;
-        tape[ins] = rows;
         if (blank) emptyBoth += 1;
+        if (!rows) { if (!blank) failed += 1; continue; }
+        tape[ins] = rows;
       }
       setStatus(`دریافت ریزمعاملهٔ روز سنجش: ${fmt.int(Object.keys(tape).length)} از ${fmt.int(codes.length)} ابزار`);
     }
