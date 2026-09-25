@@ -27,7 +27,7 @@ const TONE_CLASS = { good: 'open', warn: 'shut', bad: 'down', info: '', muted: '
 const chip = (cat, count = null) => {
   if (!cat) return '<span class="pill">—</span>';
   const tone = TONE_CLASS[DL_TONE[cat]] ?? '';
-  return `<span class="pill ${tone}" title="${esc(cat)}">${esc(DL_CAT[cat] || cat)}${count != null ? ` · ${fmt.int(count)}` : ''}</span>`;
+  return `<span class="pill ${tone}" title="${esc(cat)}">${esc(DL_CAT[cat] || cat)}${count != null ? `: ${fmt.int(count)}` : ''}</span>`;
 };
 const slowChip = (on) => (on ? `<span class="pill shut">${DL_SLOW_LABEL}</span>` : '');
 const catsChips = (cats = {}) => Object.entries(cats)
@@ -38,7 +38,7 @@ function sumText(sum = {}) {
   const parts = [];
   if (sum.error) parts.push(`خطا: ${sum.error}`);
   if (sum.note) parts.push(sum.note);
-  if (sum.states) parts.push(Object.entries(sum.states).map(([k, n]) => `${k} ${fmt.int(n)}`).join(' · '));
+  if (sum.states) parts.push(Object.entries(sum.states).map(([k, n]) => `${k} ${fmt.int(n)}`).join('؛ '));
   if (sum.items != null) parts.push(`${fmt.int(sum.items)} قلم`);
   if (sum.rows != null) parts.push(`${fmt.int(sum.rows)} ردیف${sum.key || sum.list ? ` (${sum.key || sum.list})` : ''}`);
   if (sum.first) parts.push(`${faDigits(sum.first)} تا ${faDigits(sum.last)}`);
@@ -47,10 +47,22 @@ function sumText(sum = {}) {
   if (sum.failed) parts.push(`${fmt.int(sum.failed)} قلمِ خطادار`);
   if (sum.source) parts.push(`منبع ${sum.source}`);
   if (sum.keys) parts.push(`کلیدها: ${sum.keys.join('، ')}`);
-  return parts.join(' · ');
+  // «·» کنارِ رقمِ فارسی شبیهِ «۰» خوانده می‌شد («آمد · ۶» ≈ «آمد ۶۰»).
+  return parts.join('؛ ');
 }
 
-export async function mount(root) {
+// ═══ R5-23: پنجرهٔ جدا، و فیلترهایی که با جابه‌جاییِ تب نمی‌روند ═══
+//
+// پنجرهٔ اصلی هنگامِ رفتن به تبِ دیگر این تب را کامل می‌بندد؛ برگشتن یعنی
+// از نو ساختن. نگه‌داشتنِ همهٔ تب‌ها زنده راهِ درست نبود: هر تب حلقه و
+// زمان‌سنجِ خودش را دارد و همه با هم درخواست می‌فرستادند — همان باری که
+// R5-19 برداشت. پس این تب در پنجرهٔ جدا هم باز می‌شود (`/ui/datalog.html`)،
+// و فیلترهایش در حافظهٔ مرورگر می‌ماند.
+const PREFS_KEY = 'datalog.filters';
+const readPrefs = () => { try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') || {}; } catch { return {}; } };
+const writePrefs = (prefs) => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* حافظهٔ بسته */ } };
+
+export async function mount(root, { standalone = false } = {}) {
   root.innerHTML = `
     <div class="page-head">
       <h2>جریان داده</h2>
@@ -65,6 +77,7 @@ export async function mount(root) {
         <div class="log-actions">
           <label class="log-filter"><input type="checkbox" id="dl-live" checked> تازه‌سازیِ زنده</label>
           <button type="button" class="ghost" id="dl-refresh">تازه‌سازی</button>
+          ${standalone ? '' : '<a class="ghost button-link" id="dl-popout" href="/ui/datalog.html" target="datalog" rel="opener" title="کنارِ کار در تب‌های دیگر، زنده به‌روز می‌شود">باز کردن در پنجرهٔ جدا ↗</a>'}
           <a class="ghost button-link" id="dl-download" href="/api/datalog/file" download>دریافت فایل لاگِ امروز</a>
           <button type="button" class="ghost" id="dl-clear" title="فایل‌های روزانه دست نمی‌خورند">پاک کردنِ لاگِ حافظه</button>
         </div>
@@ -166,11 +179,11 @@ export async function mount(root) {
     const flat = tree.flatMap((n) => [n.client, n.api, ...n.up].filter(Boolean));
     const sum = summarizeLog(flat);
     const files = (info?.files || []).slice(0, 7)
-      .map((f) => `<a href="/api/datalog/file?day=${f.day}" download>${faDigits(f.day)}</a> (${bytes(f.bytes)})`).join(' · ');
+      .map((f) => `<a href="/api/datalog/file?day=${f.day}" download>${faDigits(f.day)}</a> (${bytes(f.bytes)})`).join('؛ ');
     $('dl-state').innerHTML = `${info?.enabled === false
       ? '<b class="loss">ثبت خاموش است</b> — از تنظیمات («ثبت جریان داده») روشنش کنید.'
-      : 'ثبت روشن است.'} مرزِ «دیر آمد»: ${ms(info?.slowMs)} · ${fmt.int(rows.length)} ردیف در حافظهٔ این صفحه`
-      + `${files ? ` · فایل‌های روزانه: ${files}` : ''}`;
+      : 'ثبت روشن است.'} مرزِ «دیر آمد»: ${ms(info?.slowMs)}؛ ${fmt.int(rows.length)} ردیف در حافظهٔ این صفحه`
+      + `${files ? `؛ فایل‌های روزانه: ${files}` : ''}`;
 
     const tabRows = Object.entries(sum.byTab).sort((a, b) => b[1].requests - a[1].requests);
     const pathRows = Object.entries(sum.byPath).sort((a, b) => b[1].count - a[1].count).slice(0, 25);
@@ -215,7 +228,7 @@ export async function mount(root) {
       <td class="dl-url"><span dir="ltr">${esc(method)} ${esc(url)}${status ? ` → ${status}` : ''}</span>${names ? `<br><b>${esc(names)}</b>` : ''}</td>
       <td>${chip(node.cat)} ${slowChip(node.slow)}</td><td class="dl-ms">${dur || '—'}</td>
       <td>${esc(sumText(a?.sum || node.up[0]?.sum)) || (c?.error ? esc(c.error) : '—')}</td>
-      <td>${node.up.length ? `${fmt.int(node.up.length)} · ${catsChips(node.upCats)}` : '—'}</td></tr>`;
+      <td>${node.up.length ? `${fmt.int(node.up.length)}؛ ${catsChips(node.upCats)}` : '—'}</td></tr>`;
     return isOpen ? main + detailHtml(node) : main;
   }
 
@@ -225,8 +238,8 @@ export async function mount(root) {
       ['شناسه', node.id],
       ['مبدأ در کد', (c?.src || []).join(' ← ') || a?.src || '—'],
       ['بدنهٔ درخواست', c?.body || '—'],
-      ['دیدِ مرورگر', c ? `${clock(c.sentAt || c.at)} فرستاده · ${ms(c.ms)} · HTTP ${c.status || '—'} · ${c.cat === 'ok' ? 'پاسخ به مرورگر رسید' : (DL_CAT[c.cat] || c.cat || '—')}${c.error ? ` · ${c.error}` : ''}` : 'ثبت نشده (درخواست از مرورگر نبود یا هنوز نرسیده)'],
-      ['دیدِ سرور', a ? `${ms(a.ms)} · HTTP ${a.status} · ${DL_CAT[a.cat] || a.cat} · ${fmt.int(a.up || 0)} درخواست به TSETMC` : '—'],
+      ['دیدِ مرورگر', c ? `${clock(c.sentAt || c.at)} فرستاده؛ ${ms(c.ms)}؛ HTTP ${c.status || '—'}؛ ${c.cat === 'ok' ? 'پاسخ به مرورگر رسید' : (DL_CAT[c.cat] || c.cat || '—')}${c.error ? `؛ ${c.error}` : ''}` : 'ثبت نشده (درخواست از مرورگر نبود یا هنوز نرسیده)'],
+      ['دیدِ سرور', a ? `${ms(a.ms)}؛ HTTP ${a.status}؛ ${DL_CAT[a.cat] || a.cat}؛ ${fmt.int(a.up || 0)} درخواست به TSETMC` : '—'],
       ['خلاصهٔ پاسخ', a ? JSON.stringify(a.sum) : '—'],
     ];
     const ups = node.up.slice().sort((x, y) => x.at - y.at);
@@ -236,8 +249,8 @@ export async function mount(root) {
         <thead><tr><th>زمان</th><th>آدرسِ کاملِ TSETMC</th><th>تلاش</th><th>صف</th><th>مدت</th><th>HTTP</th><th>حجم</th><th>نتیجه</th><th>خلاصه / خطا</th></tr></thead>
         <tbody>${ups.map((u) => `<tr class="${DL_PROBLEM.has(u.cat) ? 'history-missing' : ''}">
           <td>${clock(u.at)}</td><td class="dl-url">${u.name ? `<b>${esc(u.name)}</b><br>` : ''}<span dir="ltr">${esc(u.url || u.path)}</span></td>
-          <td>${u.attempt ? `${fmt.int(u.attempt)} از ${fmt.int(u.of)}${u.retry ? ' · تلاشِ بعدی دارد' : ''}` : '—'}</td>
-          <td>${u.lane === 'tape' ? 'خطِ ریزمعامله' : 'خطِ عمومی'}${u.waitMs ? ` · ${ms(u.waitMs)}` : ''}</td>
+          <td>${u.attempt ? `${fmt.int(u.attempt)} از ${fmt.int(u.of)}${u.retry ? '؛ تلاشِ بعدی دارد' : ''}` : '—'}</td>
+          <td>${u.lane === 'tape' ? 'خطِ ریزمعامله' : 'خطِ عمومی'}${u.waitMs ? `؛ ${ms(u.waitMs)}` : ''}</td>
           <td>${ms(u.ms ?? u.ageMs)}${u.cat === 'cached' && u.ageMs != null ? ' (سنِ کش)' : ''}</td>
           <td>${u.status || '—'}</td><td>${bytes(u.bytes)}</td>
           <td>${chip(u.cat)} ${slowChip(u.slow)}</td>
@@ -253,8 +266,25 @@ export async function mount(root) {
     if (open.has(id)) open.delete(id); else open.add(id);
     paint();
   });
-  for (const id of ['dl-range', 'dl-tab', 'dl-cat']) $(id).addEventListener('change', paint);
-  $('dl-q').addEventListener('input', paint);
+  // فیلترهای قبلی برمی‌گردند؛ تبی که هنوز در فهرست نیست گزینه‌اش ساخته می‌شود.
+  const prefs = readPrefs();
+  if (prefs.range != null && [...$('dl-range').options].some((o) => o.value === String(prefs.range))) $('dl-range').value = String(prefs.range);
+  if (prefs.tab) {
+    const option = document.createElement('option');
+    option.value = prefs.tab; option.textContent = tabLabel(prefs.tab);
+    $('dl-tab').appendChild(option);
+    $('dl-tab').value = prefs.tab;
+  }
+  if (prefs.cat && [...$('dl-cat').options].some((o) => o.value === prefs.cat)) $('dl-cat').value = prefs.cat;
+  if (typeof prefs.q === 'string') $('dl-q').value = prefs.q;
+  if (typeof prefs.live === 'boolean') $('dl-live').checked = prefs.live;
+  const savePrefs = () => writePrefs({
+    range: $('dl-range').value, tab: $('dl-tab').value, cat: $('dl-cat').value,
+    q: $('dl-q').value, live: $('dl-live').checked,
+  });
+  for (const id of ['dl-range', 'dl-tab', 'dl-cat']) $(id).addEventListener('change', () => { savePrefs(); paint(); });
+  $('dl-q').addEventListener('input', () => { savePrefs(); paint(); });
+  $('dl-live').addEventListener('change', savePrefs);
   $('dl-refresh').addEventListener('click', () => load());
   $('dl-clear').addEventListener('click', async () => {
     await fetch('/api/datalog', { method: 'DELETE' }).catch(() => null);
