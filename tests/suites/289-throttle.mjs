@@ -155,8 +155,12 @@ group('۲۸۹. سرور و تب هر دو می‌ایستند');
 
   // ═══ نرخ، که علتِ اصلی بود ═══
   const settings = readSrc('../core/settings.mjs');
-  check('سقفِ نرخ پایین آمد', /key: 'ratePerSec'[\s\S]{0,80}def: 3,/.test(settings));
-  check('و هم‌زمانی هم', /key: 'concurrency'[\s\S]{0,80}def: 2,/.test(settings));
+  // R5-19: سقفِ محتاط سرِ جایش است — ولی فقط برای ریزمعاملهٔ تاریخی، که
+  // سهمیه‌اش دیده شده. بقیهٔ برنامه به سرعتِ پیش از R5-08 برگشت.
+  check('سقفِ نرخ پایین آمد — برای ریزمعاملهٔ تاریخی', /key: 'tapeRatePerSec'[\s\S]{0,80}def: 3,/.test(settings));
+  check('و هم‌زمانی هم', /key: 'tapeConcurrency'[\s\S]{0,80}def: 2,/.test(settings));
+  check('و ریزمعاملهٔ تاریخی واقعاً به همان خط می‌رود',
+    readSrc('../server/rate-lanes.mjs').includes("includes('/Trade/GetTradeHistory/') ? TAPE_LANE : GENERAL_LANE"));
 
   const tool = readSrc('../tools/verify-export.mjs');
   check('ابزارِ کنترل سهمیه را جدا می‌شمارد',

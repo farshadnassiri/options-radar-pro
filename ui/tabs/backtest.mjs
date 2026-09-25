@@ -33,6 +33,7 @@ import { mountDateWheel } from '/ui/datewheel.mjs';
 import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
+import { expectationFromDailyRow } from '/core/tape-choice.mjs';
 import { handoffRange, handoffEntryDate } from '/ui/handoff.mjs';
 import { clipDates, comboEntryDates, fastPathCodes } from '/ui/backtest-fastpath.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
@@ -545,7 +546,22 @@ export async function mount(root, { state }) {
     if (!fresh) batchErrors = [];
     const days = new Map();
     const { live, history, ahead } = splitTradeDays(dates, { liveDate });
-    const batches = tradeBatches(history, codes, { cap: BATCH_PAIR_CAP });
+    // ═══ R5-19: مرجعِ تابلو همراهِ درخواست می‌رود ═══
+    //
+    // سرور برای سنجیدنِ هر ابزار/روز یک رکوردِ روزانه لازم دارد. این تب
+    // تاریخچهٔ روزانهٔ همین ابزارها را از قبل دارد (`seriesByIns`)؛ نفرستادنش
+    // یعنی سرور برای **هر** ابزار/روز یک درخواستِ اضافه به بالادست بزند.
+    // اندازه‌گیری روی ۴ ابزار × ۳۰ روز: ۲۷۰ درخواست، که ۱۲۰تایش همین بود.
+    // تب خروجیِ دیتا از R5-07 همین کار را می‌کند. سرور مرجع را باور نمی‌کند:
+    // فقط دو عددِ متناهی از آن می‌خواند، و صفر را خودش دوباره می‌پرسد.
+    const batches = tradeBatches(history, codes, { cap: BATCH_PAIR_CAP }).map((requests) => requests.map((request) => {
+      const row = rowAt(request.ins, request.date);
+      if (!row || row.live === true) return request;
+      const expect = expectationFromDailyRow(row);
+      return expect.known && (expect.trades > 0 || expect.volume > 0)
+        ? { ...request, expect: { trades: expect.trades, volume: expect.volume } }
+        : request;
+    }));
     const total = batches.length + (live.length ? 1 : 0);
     let done = 0;
     for (const requests of batches) {
@@ -589,7 +605,7 @@ export async function mount(root, { state }) {
     // را برمی‌گرداند و کاربر می‌دید روزی وسط مسیر خالی است در حالی که روز
     // قبل و بعدش سالم‌اند. دقیقاً همان چیزی که گزارش شد.
     lastDayFetch = result;
-    if (!requiredMissing(failed).length) tradesCache.set(date, result);
+    if (!failed.length) tradesCache.set(date, result);
     return result;
   }
 
@@ -623,10 +639,16 @@ export async function mount(root, { state }) {
     return failed.filter((ins) => required.has(ins));
   };
 
-  function tradeWarningText({ byIns, failed }) {
+  function tradeWarningText({ byIns, failed, unverified = [] }) {
     const missing = requiredMissing(failed);
     if (missing.length) return `ریزمعامله ${fmt.int(missing.length)} پای استراتژی دریافت نشد`;
     if (failed.length) return 'ریزمعامله نماد پایه دریافت نشد';
+    // R5-19: رسم می‌شود ولی بی‌پشتوانه نمی‌ماند — اغلب پای منقضی است که
+    // تابلوی تک‌روزش دیگر در دسترس نیست.
+    if (unverified.length) {
+      return `ریزمعاملهٔ ${fmt.int(unverified.length)} ابزار رسید ولی با تابلوی روزانه تأیید نشد`
+        + ' (معمولاً قراردادِ منقضی) — نمودار با همان داده رسم شده است';
+    }
     return Object.values(byIns).some((rows) => rows.length) ? '' : 'برای این روز هیچ ریزمعامله‌ای برنگشت';
   }
 
@@ -638,7 +660,7 @@ export async function mount(root, { state }) {
     try {
       const day = await fetchDayTrades(date);
       intradayDate = date;
-      intraday = replayDay(day, date);
+      intraday = day.failed.length ? [] : replayDay(day, date);
       const warning = tradeWarningText(day);
       paintIntradayAnalysis();
       paintDayTable();
@@ -1051,7 +1073,7 @@ export async function mount(root, { state }) {
     // چنین روزی یک بار — و فقط یک بار — بی کش دوباره پرسیده می‌شود.
     const suspect = wanted.filter((date) => {
       const day = tradesCache.get(date) || loaded.days.get(date);
-      if (!day || requiredMissing(day.failed).length) return false;
+      if (!day || day.failed.length) return false;
       return baseGapSuspect({
         baseTrades: day.byIns[String(ua.ins)] || [],
         legTrades: legs.map((leg) => day.byIns[String(leg.ins)] || []),
@@ -1088,8 +1110,8 @@ export async function mount(root, { state }) {
       // «خطای دریافت» یعنی دوباره تلاش کن؛ «نماد پایه معامله نشد» یعنی
       // واقعیتِ بازار است و تلاش دوباره فایده ندارد. یکی‌کردنشان تصمیمِ
       // کاربر را خراب می‌کند.
-      if (requiredMissing(day.failed).length) {
-        coverage.push({ ...row, status: TF_DAY_STATUS.FAILED, legs: legNames(requiredMissing(day.failed)) });
+      if (day.failed.length) {
+        coverage.push({ ...row, status: TF_DAY_STATUS.FAILED, legs: legNames(day.failed) });
         continue;
       }
       const gap = baseGapSuspect({

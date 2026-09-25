@@ -83,9 +83,9 @@ group('۲۴۹. منبع ریزمعاملهٔ هر روز و شمار درخوا�
   // واقعیت "قرارداد معامله نشده" اشتباه می‌شود.»
   const rows = [{ time: 90000, price: 100, quantity: 5 }];
   const items = {
-    [batchKey('ua', YDAY)]: { rows },
+    [batchKey('ua', YDAY)]: { rows, complete: true },
     // معامله‌ای نشده — پاسخ سالم، فهرست خالی
-    [batchKey('call', YDAY)]: { rows: [] },
+    [batchKey('call', YDAY)]: { rows: [], complete: true, verified: true, quiet: true },
     // درخواستش شکست خورده — این «بی‌معامله» نیست
     [batchKey('put', YDAY)]: { rows: [], error: 'HttpError: 502' },
   };
@@ -97,6 +97,26 @@ group('۲۴۹. منبع ریزمعاملهٔ هر روز و شمار درخوا�
   check('۵. پایی که اصلاً در پاسخ نیست هم «دریافت‌نشده» است',
     dayFromBatch({}, YDAY, codes3).failed.join(',') === 'ua,call,put');
   check('۵. منبع هر روز روی خودش نوشته می‌شود', day.source === TRADES_HISTORY);
+  const broken = dayFromBatch({
+    [batchKey('ua', YDAY)]: { rows, complete: false, verified: true, shortfall: { trades: 10 } },
+    [batchKey('call', YDAY)]: { rows, complete: false, verified: false },
+    [batchKey('put', YDAY)]: { rows: [], complete: false, throttled: true },
+  }, YDAY, codes3);
+  // ═══ R5-19: «تأییدنشده» از این ادعا جدا شد ═══
+  //
+  // نسخهٔ قبلی نوارِ **پرِ** بی‌مرجع (`call` بالا) را هم دریافت‌نشده
+  // می‌خواست. اندازه‌گیری نشان داد هزینه‌اش چیست: پای منقضی تابلوی تک‌روز
+  // ندارد، پس هر ۳۰ روزِ یک تحلیل از نمودار افتاد در حالی که نوارش کامل
+  // رسیده بود. ناقصِ **اثبات‌شده** و سهمیه‌خورده بیرون می‌مانند؛ پرِ
+  // بی‌مرجع رسم می‌شود و نامش در `unverified` می‌آید.
+  check('نوار ناقصِ اثبات‌شده و سهمیه‌خورده وارد محاسبهٔ روز نمی‌شوند',
+    broken.failed.join(',') === 'ua,put' && !('ua' in broken.byIns) && !('put' in broken.byIns));
+  check('ولی نوارِ پرِ تأییدنشده رسم می‌شود — با نامش',
+    broken.byIns.call?.length === rows.length && broken.unverified.join(',') === 'call');
+  check('و نوارِ خالیِ بی‌مرجع دریافت‌نشده است، نه بی‌معامله',
+    dayFromBatch({ [batchKey('ua', YDAY)]: { rows: [], complete: false, verified: false } }, YDAY, ['ua']).failed.join(',') === 'ua');
+  check('پاسخ بی‌حکم به جای بی‌معامله، دریافت‌نشده است',
+    dayFromBatch({ [batchKey('ua', YDAY)]: { rows: [] } }, YDAY, ['ua']).failed.join(',') === 'ua');
 
   // ————— همان قاعده برای نوار زنده —————
   const tape = dayFromLiveTape({
@@ -112,9 +132,9 @@ group('۲۴۹. منبع ریزمعاملهٔ هر روز و شمار درخوا�
   // اینکه روزهای قبل و بعد داده داشتند.» این شکافِ خودِ بالادست است، نه
   // خرابی ما — و باید از خطای دریافت جدا دیده شود.
   const gap = dayFromBatch({
-    [batchKey('ua', 20260909)]: { rows: [] },
-    [batchKey('call', 20260909)]: { rows: [] },
-    [batchKey('put', 20260909)]: { rows: [] },
+    [batchKey('ua', 20260909)]: { rows: [], complete: true, verified: true, quiet: true },
+    [batchKey('call', 20260909)]: { rows: [], complete: true, verified: true, quiet: true },
+    [batchKey('put', 20260909)]: { rows: [], complete: true, verified: true, quiet: true },
   }, 20260909, codes3);
   check('۶. روزِ خالیِ بالادست «دریافت‌نشده» علامت نمی‌خورد',
     gap.failed.length === 0 && Object.values(gap.byIns).every((list) => list.length === 0));

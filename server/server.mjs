@@ -47,6 +47,7 @@ import { JOURNAL_CAP, appendEntry, makeEntry, normalizeJournal } from '../core/j
 import { writeJsonAtomic } from './atomic-json.mjs';
 import { watchHealth } from '../core/watch-health.mjs';
 import { makeJobQueue } from './job-queue.mjs';
+import { GENERAL_LANE, TAPE_LANE, laneLimits, laneOf, makeBucket } from './rate-lanes.mjs';
 import {
   validIns, validCompactDate, historicalTradesPath, historicalTradesAltPath, historicalPath, HISTORICAL_KINDS,
   validSessionId, parseInsRequest, safeStaticPath, readBody, BodyTooLarge,
@@ -147,17 +148,15 @@ function logErr(where, e, level = 'error') {
 // ————————————————————————————————— سهمیه نرخ درخواست —————————————————————————————————
 // سطل توکن: ظرفیت انفجاری برای رگبار اول، نرخ ثابت برای ادامه.
 
-let tokens = S.burst;
-let lastRefill = Date.now();
-
-function takeToken() {
-  const now = Date.now();
-  tokens = Math.min(S.burst, tokens + ((now - lastRefill) / 1000) * S.ratePerSec);
-  lastRefill = now;
-  if (tokens >= 1) { tokens -= 1; return 0; }
-  const waitMs = Math.ceil(((1 - tokens) / S.ratePerSec) * 1000);
-  return waitMs;
-}
+//
+// ═══ R5-19: دو خط، نه یکی ═══
+//
+// ریزمعاملهٔ تاریخی (`GetTradeHistory`) خطِ محتاطِ خودش را دارد؛ بقیهٔ
+// درخواست‌ها به سرعتِ پیش از R5-08 برگشتند. شرح در `server/rate-lanes.mjs`.
+const buckets = {
+  [TAPE_LANE]: makeBucket(() => laneLimits(S, TAPE_LANE)),
+  [GENERAL_LANE]: makeBucket(() => laneLimits(S, GENERAL_LANE)),
+};
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -166,16 +165,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // صف در `server/job-queue.mjs` است، نه اینجا: ایرادِ گرسنگیِ حلقهٔ زنده یک
 // ایرادِ ترتیب بود، و ترتیب را فقط وقتی می‌شود سنجید که از شبکه جدا باشد.
 // سطل ژتون بیرون می‌ماند و از `beforeRun` تزریق می‌شود.
-const jobs = makeJobQueue({
-  concurrency: () => S.concurrency,
+const depthByLane = { [TAPE_LANE]: [0, 0], [GENERAL_LANE]: [0, 0] };
+const queueFor = (lane) => makeJobQueue({
+  concurrency: () => laneLimits(S, lane).concurrency,
   beforeRun: async () => {
-    const wait = takeToken();
-    if (wait > 0) { stat.rateWaits += 1; await sleep(wait); takeToken(); }
+    const wait = buckets[lane].take();
+    if (wait > 0) { stat.rateWaits += 1; await sleep(wait); buckets[lane].take(); }
   },
-  onChange: (depth, running) => { stat.queueDepth = depth; stat.inflight = running; },
+  onChange: (depth, running) => {
+    depthByLane[lane] = [depth, running];
+    stat.queueDepth = depthByLane[TAPE_LANE][0] + depthByLane[GENERAL_LANE][0];
+    stat.inflight = depthByLane[TAPE_LANE][1] + depthByLane[GENERAL_LANE][1];
+  },
 });
+const queues = { [TAPE_LANE]: queueFor(TAPE_LANE), [GENERAL_LANE]: queueFor(GENERAL_LANE) };
 
-const schedule = (fn, priority = 5, ticket = null) => jobs.push(fn, priority, ticket);
+// خط از خودِ مسیر خوانده می‌شود و روی بلیت می‌نشیند، تا ارثِ اولویت هم
+// به صفِ درست برود.
+const schedule = (fn, priority = 5, ticket = null, pathname = '') => {
+  const lane = laneOf(pathname);
+  if (ticket) ticket.lane = lane;
+  return queues[lane].push(fn, priority, ticket);
+};
 
 /**
  * ═══ وارونگیِ اولویت، از راهِ ادغامِ درخواستِ در پرواز ═══
@@ -197,7 +208,7 @@ const schedule = (fn, priority = 5, ticket = null) => jobs.push(fn, priority, ti
  * عجول‌تری به یک کارِ هنوز-شروع‌نشده می‌پیوندد، آن کار باید عجلهٔ او را
  * بگیرد. کارِ در حالِ اجرا جابه‌جا نمی‌شود — آنجا صف معنی ندارد.
  */
-const boostTicket = (ticket, priority) => jobs.boost(ticket, priority);
+const boostTicket = (ticket, priority) => queues[ticket?.lane || GENERAL_LANE].boost(ticket, priority);
 
 // ————————————————————————————————— کش و ادغام درخواست در پرواز —————————————————————————————————
 
@@ -249,7 +260,7 @@ async function get(pathname, ttlSec, priority = 5) {
         // اولویت از بلیت خوانده می‌شود نه از پارامتر: ممکن است بین دو تلاش
         // صدازنندهٔ عجول‌تری پیوسته باشد، و تلاشِ بعدی باید عجلهٔ او را داشته
         // باشد نه عجلهٔ صدازنندهٔ اول را.
-        const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket);
+        const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket, pathname);
         // «خالی» یعنی پاسخ آمد ولی هیچ ردیفی نداشت. این با «نیامد» فرق
         // دارد و کش می‌شود — ولی نه به همان درازا.
         cache.set(url, { at: Date.now(), data, empty: firstList(data).length === 0 });
@@ -328,7 +339,7 @@ async function getFresh(pathname, ttlSec = 2, priority = 2, { bust = true } = {}
         tally.request(pathname);
         const join = pathname.includes('?') ? '&' : '?';
         const url = bust ? `${S.baseUrl}${pathname}${join}_=${Date.now()}` : `${S.baseUrl}${pathname}`;
-        const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket);
+        const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket, pathname);
         cache.set(key, { at: Date.now(), data });
         evictOldest(cache, S.maxCacheEntries);
         return data;
@@ -1307,7 +1318,7 @@ async function handle(req, res) {
       if (req.method === 'GET') return sendJson(res, 200, S);
       if (req.method === 'PUT') {
         const next = await saveSettings(JSON.parse(await readBody(req, MAX_BODY) || '{}'));
-        tokens = Math.min(tokens, next.burst);
+        buckets[TAPE_LANE].clamp(); buckets[GENERAL_LANE].clamp();
         log('تنظیمات ذخیره شد');
         return sendJson(res, 200, next);
       }

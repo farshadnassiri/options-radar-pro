@@ -122,14 +122,31 @@ export const batchKey = (ins, date) => `${day(date)}:${String(ins)}`;
  */
 export function dayFromBatch(items = {}, date, codes = []) {
   const wanted = day(date);
-  const byIns = {}, failed = [];
+  const byIns = {}, failed = [], unverified = [];
   for (const code of codes || []) {
     const ins = String(code);
     const hit = items?.[batchKey(ins, wanted)];
-    if (!hit || hit.error || !Array.isArray(hit.rows)) { failed.push(ins); continue; }
-    byIns[ins] = hit.rows;
+    if (!hit || hit.error || hit.throttled || !Array.isArray(hit.rows)) { failed.push(ins); continue; }
+    // ═══ R5-19: «ناقصِ اثبات‌شده» با «تأییدنشده» یکی نیست ═══
+    //
+    // نسخهٔ قبلیِ همین بند هر پاسخی را که `complete !== true` داشت کنار
+    // می‌گذاشت. ولی `complete` فقط وقتی `true` است که تابلوی روزانهٔ همان
+    // روز پیدا شود و بخواند — و قراردادِ منقضی اغلب تابلوی تک‌روز ندارد.
+    // اندازه‌گیری روی چهار ابزار × ۳۰ روز: نوارِ پای منقضی **کامل** رسیده
+    // بود و همین قاعده هر ۳۰ روز را از نمودار انداخت — نمودارِ خالی.
+    //
+    // پس سه حالت:
+    //   ناقصِ اثبات‌شده (تابلو هست و نمی‌خواند)  → دریافت‌نشده
+    //   خالیِ بی‌مرجع (بی‌معامله یا سهمیه؟)        → دریافت‌نشده
+    //   پر ولی بی‌مرجع                            → رسم می‌شود، با برچسبِ «تأییدنشده»
+    const rows = hit.rows;
+    if (hit.complete !== true) {
+      if (!rows.length || hit.verified === true) { failed.push(ins); continue; }
+      unverified.push(ins);
+    }
+    byIns[ins] = rows;
   }
-  return { byIns, failed, date: wanted, source: TRADES_HISTORY };
+  return { byIns, failed, unverified, date: wanted, source: TRADES_HISTORY };
 }
 
 /** همان، برای پاسخ نوار زنده. */
