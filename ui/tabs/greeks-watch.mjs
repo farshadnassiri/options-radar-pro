@@ -37,7 +37,7 @@ import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.
 import { attachExportsIn } from '/ui/export.mjs';
 import { takeHandoff, handoffEntryDate } from '/ui/handoff.mjs';
 import { logError } from '/ui/errlog.mjs';
-import { fetchTapeOne } from '/ui/tape-intake.mjs';
+import { fetchTapeOne, usableRows } from '/ui/tape-intake.mjs';
 import { dailySummary, dailyWarning, fetchDailies } from '/ui/daily-intake.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
@@ -445,7 +445,9 @@ export async function mount(root, { state }) {
     if (verdict.state !== 'complete' && verdict.state !== 'quiet') {
       tapeGaps.push({ ins: String(ins), date: String(date), state: verdict.state });
     }
-    return item.rows || [];
+    // R5-20: `null` یعنی «نمی‌دانیم» و روزش کنار می‌رود؛ پیش از این نوارِ
+    // بریده مستقیم به یونانی‌ها و نمودارِ مسیر می‌رسید.
+    return usableRows(item, verdict);
   }
 
   /**
@@ -468,7 +470,7 @@ export async function mount(root, { state }) {
       for (const date of days) {
         $('gw-intraday-note').textContent = `دریافت ریزمعاملهٔ ${dateLabel(date)}…`;
         const fetched = await Promise.allSettled(codes.map(async (ins) => [ins, await fetchTrades(ins, date)]));
-        if (fetched.some((item) => item.status === 'rejected')) { skipped.push(date); continue; }
+        if (fetched.some((item) => item.status === 'rejected' || item.value[1] === null)) { skipped.push(date); continue; }
         const byIns = Object.fromEntries(fetched.map((item) => item.value));
         const points = replayIntraday({
           replay, tradesByIns: byIns, baseTrades: byIns[String(ua.ins)] || [],
@@ -513,11 +515,12 @@ export async function mount(root, { state }) {
     if (of('throttled')) parts.push(`${of('throttled')} ابزار/روز پشتِ سهمیهٔ بالادست ماند`);
     if (of('missing')) parts.push(`${of('missing')} ابزار/روز تابلو معامله ثبت کرده ولی ریزمعامله‌اش نیامد`);
     if (of('partial')) parts.push(`${of('partial')} ابزار/روز کمتر از تابلو آمد`);
-    if (of('unverified')) parts.push(`${of('unverified')} ابزار/روز تابلوی روزانه‌اش در دست نبود`);
     if (of('error')) parts.push(`${of('error')} ابزار/روز خطا داد`);
-    if (parts.length) {
-      setStatus(`${parts.join(' · ')} — یونانی‌ها و نمودارِ مسیر روی دادهٔ ناقص ساخته شده‌اند.`, true);
-    }
+    // R5-20: این‌ها دیگر رسم نمی‌شوند؛ روزشان کنار می‌رود.
+    const text = [];
+    if (parts.length) text.push(`${parts.join(' · ')} — روزهایشان کنار گذاشته شد تا نمودار روی نوار بریده ساخته نشود؛ چند دقیقه بعد دوباره بزنید.`);
+    if (of('unverified')) text.push(`${of('unverified')} ابزار/روز تابلوی روزانه‌اش در دست نبود و با همان نوار رسم شد (معمولاً قرارداد منقضی).`);
+    if (text.length) setStatus(text.join(' '), true);
     tapeGaps.length = 0;
   }
 

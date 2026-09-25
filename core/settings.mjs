@@ -16,6 +16,12 @@ export const SCHEMA = [
   // ——— منبع داده ———
   { key: 'baseUrl', group: 'data', kind: 'text', scope: 'server',
     def: 'https://cdn.tsetmc.com/api', label: 'آدرس پایه داده' },
+  // R5-21: جریانِ داده — هر درخواست با آدرس، زمان، تب و نتیجه در
+  // `data/logs/`. خروجیِ دیتا عمداً بیرون است (`DL_MUTED_TABS`).
+  { key: 'dataLog', group: 'data', kind: 'bool', scope: 'server',
+    def: true, label: 'ثبت جریان داده (تب «جریان داده»)' },
+  { key: 'dataLogSlowMs', group: 'data', kind: 'num', scope: 'server',
+    def: 3000, min: 250, max: 60000, step: 250, unit: 'میلی‌ثانیه', label: 'مرز «دیر آمد» در جریان داده' },
   { key: 'watchIntervalSec', group: 'data', kind: 'num', scope: 'server',
     def: 5, min: 2, max: 120, step: 1, unit: 'ثانیه',
     label: 'فاصله دریافت دیده‌بان',

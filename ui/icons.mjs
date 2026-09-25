@@ -29,6 +29,7 @@ const PATHS = {
   briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 12h18"/>',
   rotate: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>',
   alert: '<path d="M12 4l9 16H3l9-16z"/><path d="M12 10v4M12 17.5v.01"/>',
+  flow: '<path d="M4 6h10M4 12h16M4 18h7"/><path d="M17 3l3 3-3 3M17 15l3 3-3 3"/>',
   dot: '<circle cx="12" cy="12" r="3.5"/>',
   // تک‌پایه: یک فلش جهت‌دار. ساده‌ترین شکل ممکن، چون خودِ ساختار هم
   // ساده‌ترین ساختار ممکن است — یک پا، یک جهت.
@@ -74,7 +75,7 @@ export const GROUP_ICON = {
 export const TAB_ICON = {
   settings: 'sliders', chain: 'grid', 'live-market': 'wave', 'open-view': 'wave', history: 'clock', backtest: 'play',
   'data-export': 'download',
-  'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert',
+  'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert', datalog: 'flow',
   'strategy-explorer': 'search', watchtower: 'bell',
   positions: 'briefcase', roll: 'rotate',
 };

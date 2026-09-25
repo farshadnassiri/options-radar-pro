@@ -8,7 +8,7 @@ import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
 import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { applyLiveScope, scopeOptionsMarkup, SCOPE_LIVE } from '/ui/live-scope.mjs';
-import { fetchTapeBatch, tapeSummary, tapeWarning } from '/ui/tape-intake.mjs';
+import { fetchTapeBatch, tapeSummary, tapeWarning, usableRows } from '/ui/tape-intake.mjs';
 import { fetchDailies } from '/ui/daily-intake.mjs';
 import { fetchLiveTape } from '/ui/quote-intake.mjs';
 
@@ -522,7 +522,24 @@ export async function mount(root, { state }) {
         const got = await fetchTapeBatch(requests);
         tapeNote = tapeWarning(tapeSummary(got.verdicts));
         if (got.throttled) tapeNote = got.note;
-        tradesByKey = Object.fromEntries(Object.entries(got.items).map(([key, item]) => [key, item.rows || []]));
+        // ═══ R5-20: نوارِ بریده رسم نمی‌شود، فقط گفته نمی‌شود ═══
+        //
+        // هشدارِ R5-13 درست بود ولی همان ردیف‌ها باز هم به جدول و نمودار
+        // می‌رفتند. حالا قراردادی که نوارش کامل نرسید کنار می‌رود و
+        // شمارش گفته می‌شود؛ پایه که نرسد، نمودارِ وابسته به پایه ساخته
+        // نمی‌شود — مثل مسیرِ زنده.
+        tradesByKey = {};
+        const dropped = [];
+        for (const [key, item] of Object.entries(got.items)) {
+          const rows = usableRows(item, got.verdicts[key]);
+          if (rows) tradesByKey[key] = rows; else dropped.push(key);
+        }
+        if (dropped.includes(`${selectedDate}:${ua.ins}`)) {
+          throw new Error('ریزمعاملهٔ کامل نماد پایه نرسید؛ نمودارهای وابسته به پایه روی نوار بریده ساخته نمی‌شوند. چند دقیقه بعد دوباره بزنید.');
+        }
+        if (dropped.length) {
+          tapeNote = `${tapeNote ? `${tapeNote} · ` : ''}${fmt.int(dropped.length)} قرارداد چون نوارش کامل نرسید از جدول و نمودار کنار رفت — چند دقیقه بعد دوباره بزنید.`;
+        }
         // کشِ تبِ خودمان فقط دادهٔ **سنجیده‌شده** را نگه می‌دارد؛ وگرنه
         // یک اجرای سهمیه‌خورده تا پایان نشست تکرار می‌شود.
         if (!tapeNote && Object.values(tradesByKey).some((rows) => rows.length)) tradeCache.set(cacheKey, tradesByKey);

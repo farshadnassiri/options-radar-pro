@@ -210,7 +210,7 @@ group('۲۹۱. هر تبِ اولویت‌دار حکم را **نشان** می�
 
   const back = readSrc('../ui/tabs/backtest.mjs');
   check('بک‌تست حکم را در دفترِ خطاهای خودش می‌نشاند',
-    back.includes('if (got.throttled) batchErrors.push(got.note)')
+    back.includes('if (got.throttled) { batchThrottled = true; batchErrors.push(got.note); }')
       && back.includes('if (warn) batchErrors.push(warn)'));
 
   const pf = readSrc('../ui/tabs/portfolio-backtest.mjs');

@@ -115,11 +115,11 @@ group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فری�
   // آن را می‌زند و حکمِ هر ابزار/روز را هم همراه می‌آورد. نگهبانِ دستهٔ
   // ۲۹۱ هر بازگشتی به `fetch` مستقیم را رد می‌کند.
   check('۴. مسیر دسته‌ای استفاده می‌شود، نه یک درخواست به‌ازای هر روز و هر ابزار',
-    source40.includes('fetchTapeBatch(requests, { fresh })') && source40.includes('tradeBatches(history, codes')
+    source40.includes('fetchTapeBatch(requests, { fresh, bust })') && source40.includes('tradeBatches(history, codes')
     && !source40.includes('/api/trades?ins='));
   check('۴-ب. و حکمِ کم‌داشته دور ریخته نمی‌شود',
     source40.includes('tapeWarning(tapeSummary(got.verdicts))')
-      && source40.includes('if (got.throttled) batchErrors.push(got.note)'));
+      && source40.includes('if (got.throttled) { batchThrottled = true; batchErrors.push(got.note); }'));
   check('روزِ دارای ابزارِ دریافت‌نشده وارد نمودار یا کش نمی‌شود، حتی اگر آن ابزار پایه باشد',
     source40.includes('if (day.failed.length) {')
     && source40.includes('if (!failed.length) tradesCache.set(date, result);')

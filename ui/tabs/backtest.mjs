@@ -34,6 +34,7 @@ import { fmt, faDigits, faClock, signTone, ltr } from '/ui/fmt.mjs';
 import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { loadHistoricalDailies } from '/ui/history-dailies.mjs';
 import { expectationFromDailyRow } from '/core/tape-choice.mjs';
+import { AUTO_FILL_MAX_ROUNDS, fillDelayMs, fillNext, fillPending, fillStopText } from '/core/auto-fill.mjs';
 import { handoffRange, handoffEntryDate } from '/ui/handoff.mjs';
 import { clipDates, comboEntryDates, fastPathCodes } from '/ui/backtest-fastpath.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
@@ -179,8 +180,9 @@ export async function mount(root, { state }) {
       </div>
 
       <div class="bt-panel" data-panel="bt-timeframe" hidden>
-      <section class="card backtest-timeframe"><div class="section-head"><div><p class="eyebrow">گام سوم · کل بازه روی تایم‌فریم دلخواه</p><h2>عملکرد کلی و به تفکیک پاها</h2></div><div class="backtest-head-actions"><label class="backtest-tf-field">تایم‌فریم<select id="bt-tf-size"><option value="60">۱ دقیقه</option><option value="300">۵ دقیقه</option><option value="900" selected>۱۵ دقیقه</option><option value="1800">۳۰ دقیقه</option><option value="3600">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="bt-tf-run">تحلیل کل بازه</button><button type="button" class="ghost" id="bt-tf-export" hidden>دریافت فایل اکسل</button><span id="bt-tf-export-size" class="backtest-export-size" role="status"></span></div></div>
+      <section class="card backtest-timeframe"><div class="section-head"><div><p class="eyebrow">گام سوم · کل بازه روی تایم‌فریم دلخواه</p><h2>عملکرد کلی و به تفکیک پاها</h2></div><div class="backtest-head-actions"><label class="backtest-tf-field">تایم‌فریم<select id="bt-tf-size"><option value="60">۱ دقیقه</option><option value="300">۵ دقیقه</option><option value="900" selected>۱۵ دقیقه</option><option value="1800">۳۰ دقیقه</option><option value="3600">۶۰ دقیقه</option></select></label><button type="button" class="primary" id="bt-tf-run">تحلیل کل بازه</button><button type="button" class="ghost" id="bt-tf-fill-stop" hidden>توقف تکمیل خودکار</button><button type="button" class="ghost" id="bt-tf-export" hidden>دریافت فایل اکسل</button><span id="bt-tf-export-size" class="backtest-export-size" role="status"></span></div></div>
         <p id="bt-tf-note" class="backtest-table-note">برای هر روز بازه، ریزمعامله همه پاها و نماد پایه جداگانه گرفته می‌شود؛ این یعنی چند ده درخواست. نتیجه فقط از ثانیه‌هایی ساخته می‌شود که هر پا دست‌کم یک معامله داشته باشد.</p>
+        <p id="bt-tf-fill" class="backtest-table-note" role="status" hidden></p>
         <p class="backtest-table-note">این مسیر از <b>آخرین معاملهٔ مشاهده‌شدهٔ هر پا</b> ساخته می‌شود، نه از مظنه تقاضا و عرضهٔ هم‌زمان. یعنی «ارزش موقعیت در آن لحظه»، نه «سودی که در آن لحظه می‌شد گرفت»: آفست واقعی، خرید روی عرضه و فروش روی تقاضاست و اسپرد هر دو پا را می‌پردازد. تابلو دفتر سفارش تاریخی نمی‌دهد، پس عدد اجرایی از این داده ساختنی نیست.</p>
         <div id="bt-tf-body" hidden>
           <div class="backtest-kpis" id="bt-tf-kpis"></div>
@@ -496,7 +498,7 @@ export async function mount(root, { state }) {
    * می‌خورد و بقیهٔ تکه‌ها ادامه می‌دهند. یک ۵۰۲ نباید کل تحلیل را ببلعد،
    * و مهم‌تر، نباید به‌شکل «آن روزها معامله نشده» دیده شود.
    */
-  async function postTradeBatch(requests, { fresh = false } = {}) {
+  async function postTradeBatch(requests, { fresh = false, bust = true } = {}) {
     try {
       // ═══ R5-13: حکمِ هر ابزار/روز همراهِ ردیف‌هایش می‌آید ═══
       //
@@ -504,8 +506,8 @@ export async function mount(root, { state }) {
       // `shortfall` یا `throttled` را نمی‌خواند. نتیجهٔ بک‌تست روی نوارِ
       // بریده ساخته می‌شد و از نتیجهٔ روی نوارِ کامل قابلِ تشخیص نبود —
       // بدترین حالت برای چیزی که مستقیم به تصمیمِ معاملاتی می‌رسد.
-      const got = await fetchTapeBatch(requests, { fresh });
-      if (got.throttled) batchErrors.push(got.note);
+      const got = await fetchTapeBatch(requests, { fresh, bust });
+      if (got.throttled) { batchThrottled = true; batchErrors.push(got.note); }
       else {
         const warn = tapeWarning(tapeSummary(got.verdicts));
         if (warn) batchErrors.push(warn);
@@ -529,6 +531,9 @@ export async function mount(root, { state }) {
   }
 
   let batchErrors = [];
+  // سرور در همان بسته‌ای که سهمیه را تشخیص داد می‌ایستد؛ این پرچم بسته‌های
+  // **بعدی** را هم نگه می‌دارد (R5-20).
+  let batchThrottled = false;
 
   /**
    * ریزمعاملهٔ چند روز، از منبع درستِ هر روز و با کمترین درخواست ممکن.
@@ -542,8 +547,9 @@ export async function mount(root, { state }) {
    * ردیف ۴: برای هر روز و هر ابزار یک درخواست جدا می‌رفت؛ ۴۵ روز و دو پا
    * یعنی ۱۳۵ درخواست. `/api/trades/batch` از قبل بود و استفاده نمی‌شد.
    */
-  async function loadTradeDays(dates, codes, { onProgress = () => {}, fresh = false } = {}) {
+  async function loadTradeDays(dates, codes, { onProgress = () => {}, fresh = false, bust = true } = {}) {
     if (!fresh) batchErrors = [];
+    batchThrottled = false;
     const days = new Map();
     const { live, history, ahead } = splitTradeDays(dates, { liveDate });
     // ═══ R5-19: مرجعِ تابلو همراهِ درخواست می‌رود ═══
@@ -563,11 +569,24 @@ export async function mount(root, { state }) {
         : request;
     }));
     const total = batches.length + (live.length ? 1 : 0);
-    let done = 0;
+    let done = 0, sent = 0;
     for (const requests of batches) {
+      // ═══ R5-20: سهمیه که بسته شد، بستهٔ بعدی نمی‌رود ═══
+      //
+      // تا امروز حلقه بقیهٔ بسته‌ها را هم می‌فرستاد؛ هر کدام چند درخواستِ
+      // تازه به پنجرهٔ بسته می‌زد تا ناظرِ سرور دوباره حکم بدهد. روزهایشان
+      // «دریافت‌نشده» می‌مانند — دقیقاً همان چیزی که تکمیلِ خودکار برمی‌دارد.
+      if (batchThrottled) {
+        for (const date of [...new Set(requests.map((row) => row.date))]) {
+          days.set(date, dayFromBatch({}, date, codes));
+        }
+        done += 1;
+        continue;
+      }
       onProgress({ done, total, phase: 'history', days: requests.length / Math.max(1, codes.length) });
       await nextFrame();
-      const items = await postTradeBatch(requests, { fresh });
+      const items = await postTradeBatch(requests, { fresh, bust });
+      sent += 1;
       for (const date of [...new Set(requests.map((row) => row.date))]) {
         days.set(date, dayFromBatch(items, date, codes));
       }
@@ -581,7 +600,7 @@ export async function mount(root, { state }) {
       done += 1;
     }
     onProgress({ done, total, phase: 'done', days: 0 });
-    return { days, ahead, live: live.length, batches: batches.length };
+    return { days, ahead, live: live.length, batches: sent, throttled: batchThrottled };
   }
 
   /**
@@ -1037,7 +1056,7 @@ export async function mount(root, { state }) {
    * «دریافت نشد» از «معامله نشده» جدا شمرده می‌شود. یکی خرابی ماست و باید
    * دوباره تلاش شود؛ دیگری واقعیت بازار است.
    */
-  async function loadTimeframeDays() {
+  async function loadTimeframeDays({ fresh = false, bust = true, alive = () => true } = {}) {
     // ═══ فهرستِ مرجع: هر روزِ معاملاتیِ بازه، نه فقط روزهای «معتبر» ═══
     //
     // گزارش صاحب پروژه: «همه روزهای درون بازه را انگار پوشش نمیده.» علتش
@@ -1052,7 +1071,9 @@ export async function mount(root, { state }) {
     const codes = dayCodes();
     // روزهایی که از قبل کامل گرفته شده‌اند دوباره درخواست نمی‌شوند.
     const missing = wanted.filter((date) => !tradesCache.has(date));
+    batchErrors = [];
     const loaded = await loadTradeDays(missing, codes, {
+      fresh, bust,
       onProgress: ({ done, total, phase, days }) => {
         const text = phase === 'done'
           ? `دریافت تمام شد؛ در حال ساخت سطل‌ها…`
@@ -1071,7 +1092,12 @@ export async function mount(root, { state }) {
     // تشخیصش به پرسیدنِ بیرون نیاز ندارد: اختیار وقتی معامله می‌شود که
     // خودِ نماد باز است، پس «پاها معامله دارند ولی پایه صفر» متناقض است.
     // چنین روزی یک بار — و فقط یک بار — بی کش دوباره پرسیده می‌شود.
-    const suspect = wanted.filter((date) => {
+    // ترکیب وسطِ دریافت عوض شد: این روزها مالِ ترکیبِ قبلی‌اند و نباید
+    // در کشِ ترکیبِ تازه بنشینند.
+    if (!alive()) return null;
+    // پشتِ سهمیه، پرسیدنِ دوباره فقط پنجره را تمدید می‌کند؛ تکمیلِ خودکار
+    // همین روزها را پس از مکث برمی‌دارد.
+    const suspect = loaded.throttled ? [] : wanted.filter((date) => {
       const day = tradesCache.get(date) || loaded.days.get(date);
       if (!day || day.failed.length) return false;
       return baseGapSuspect({
@@ -1088,6 +1114,7 @@ export async function mount(root, { state }) {
       // پاسخِ ناقص هرگز کش نمی‌شود، وگرنه همان روز تا پایان نشست می‌ماند.
       for (const date of suspect) tradesCache.delete(date);
       const again = await loadTradeDays(suspect, codes, { fresh: true });
+      if (!alive()) return null;
       retried = again.days;
       // شمار درخواست‌ها باید همه‌چیز را بگوید، وگرنه عددِ گزارش‌شده از
       // چیزی که واقعاً به بالادست رفت کمتر است.
@@ -1136,7 +1163,7 @@ export async function mount(root, { state }) {
     return {
       days: out, coverage, summary: coverageSummary(coverage), ahead: loaded.ahead,
       requests: loaded.batches + (loaded.live ? 1 : 0) + retryRequests,
-      retried: suspect.length, live: loaded.live,
+      retried: suspect.length, live: loaded.live, throttled: loaded.throttled,
       errors: [...new Set(batchErrors)],
       cap: TIMEFRAME_DAY_CAP, range: dates.length,
     };
@@ -1307,35 +1334,152 @@ export async function mount(root, { state }) {
     }).join('')}</tbody></table>`;
   }
 
+  /** نتیجهٔ یک دریافت را روی جدولِ پوشش، نمودار و پنل‌ها می‌نشاند. */
+  let timeframeCoverage = [];
+  function applyTimeframe(loaded) {
+    timeframeDays = loaded.days;
+    timeframeCoverage = loaded.coverage || [];
+    // جدول پوشش حتی وقتی هیچ روزی نقطه نساخته هم رسم می‌شود: کاربر باید
+    // بتواند ببیند **کدام** روز و **چرا**، نه فقط اینکه «چیزی پیدا نشد».
+    paintCoverage(loaded);
+    if (!timeframeDays.length) {
+      const why = `در هیچ روز این بازه، ریزمعامله کامل همه پاها پیدا نشد.${loadedSummary(loaded)}`;
+      tfNote(why, true); $('bt-tf-body').hidden = true; $('bt-tf-export').hidden = true;
+      return why;
+    }
+    paintTimeframe(loaded);
+    // حالا سطل‌های تایم‌فریم ساخته شده‌اند؛ پنل‌های تحلیلی هم باید همان
+    // تایم‌فریم را ببینند وگرنه ریلِ «سطل تایم‌فریم» به مسیر روزانه
+    // برمی‌گشت و کاربر تفاوتش را نمی‌فهمید.
+    paintPanels();
+    // دکمهٔ خروجی تا وقتی تحلیلی ساخته نشده پنهان است: دکمه‌ای که فایل
+    // خالی می‌دهد، بدتر از دکمهٔ نبوده است.
+    $('bt-tf-export').hidden = false;
+    return '';
+  }
+
+  // ═══ R5-20: تکمیلِ خودکارِ روزهای جامانده ═══
+  //
+  // خواستهٔ صاحب پروژه: «هرجا نمودار کشیده می‌شود، دیتا کامل باشد و
+  // بریدگی نداشته باشد.» روزِ «خطای دریافت» تا امروز فقط با زدنِ دوبارهٔ
+  // دکمه پر می‌شد. حالا همان روزها — و فقط همان‌ها — پس از مکث دوباره
+  // پرسیده می‌شوند و نمودار با رسیدنِ هر روز دوباره رسم می‌شود. قاعدهٔ
+  // مکث و توقف در `core/auto-fill.mjs` است.
+  //
+  // هر تغییرِ ترکیب یا اجرای تازه، `fillGen` را جلو می‌برد و تکمیلِ قبلی
+  // بی‌صدا کنار می‌رود — وگرنه روزهای ترکیبِ قبلی در کشِ ترکیبِ تازه
+  // می‌نشستند.
+  let fillGen = 0;
+  let fillWake = null;
+
+  function fillLine(text, error = false) {
+    const el = $('bt-tf-fill');
+    el.hidden = !text;
+    el.textContent = text || '';
+    el.toggleAttribute('data-error', Boolean(error));
+  }
+
+  function stopAutoFill({ quiet = true } = {}) {
+    fillGen += 1;
+    fillWake?.();
+    fillWake = null;
+    $('bt-tf-fill-stop').hidden = true;
+    if (quiet) fillLine('');
+  }
+
+  /** مکث با شمارشِ معکوس؛ `false` یعنی وسطش لغو شد. */
+  function fillSleep(ms, gen, render) {
+    return new Promise((resolve) => {
+      const end = Date.now() + ms;
+      let timer = null;
+      const finish = (value) => { clearInterval(timer); fillWake = null; resolve(value); };
+      const tick = () => {
+        if (gen !== fillGen) return finish(false);
+        const left = end - Date.now();
+        if (left <= 0) return finish(true);
+        render(left);
+        return null;
+      };
+      fillWake = () => finish(false);
+      timer = setInterval(tick, 1000);
+      tick();
+    });
+  }
+
+  const countdown = (ms) => {
+    const sec = Math.max(0, Math.ceil(ms / 1000));
+    return faDigits(`${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`);
+  };
+
+  async function autoFill(first) {
+    let pending = fillPending(first.coverage);
+    if (!pending.length) { fillLine(''); return; }
+    const gen = fillGen;
+    const owner = replay;
+    const codesKey = dayCodes().join(',');
+    const alive = () => gen === fillGen && replay === owner && dayCodes().join(',') === codesKey;
+    $('bt-tf-fill-stop').hidden = false;
+    let round = 0, barren = 0;
+    let throttled = Boolean(first.throttled);
+    let wait = fillDelayMs({ round: 1, throttled });
+    try {
+      for (;;) {
+        const cause = throttled ? 'سهمیهٔ بالادست بسته است' : 'پاسخ کامل نرسید';
+        const woke = await fillSleep(wait, gen, (left) => fillLine(
+          `${fmt.int(pending.length)} روز هنوز کامل نرسیده (${cause}) — تلاش خودکار`
+          + ` ${fmt.int(round + 1)} از ${fmt.int(AUTO_FILL_MAX_ROUNDS)} تا ${countdown(left)} دیگر.`
+          + ' نمودار با رسیدنِ هر روز دوباره رسم می‌شود.'));
+        if (!woke || !alive()) return;
+        round += 1;
+        fillLine(`تلاش خودکار ${fmt.int(round)}: پرسیدنِ دوبارهٔ ${fmt.int(pending.length)} روز…`);
+        // هر دور از کشِ سرور رد می‌شود و مهرِ URLِ بالادست یک‌درمیان عوض
+        // می‌شود — همان قاعدهٔ «تلاش تکمیلی» در تب خروجی.
+        const loaded = await loadTimeframeDays({ fresh: true, bust: round % 2 === 1, alive });
+        if (!loaded || !alive()) return;
+        const after = fillPending(loaded.coverage);
+        const filled = Math.max(0, pending.length - after.length);
+        applyTimeframe(loaded);
+        pending = after;
+        throttled = Boolean(loaded.throttled);
+        const step = fillNext({ round, pending: after.length, filled, throttled, barren });
+        if (step.stop) {
+          $('bt-tf-fill-stop').hidden = true;
+          fillLine(fillStopText(step.reason, after.length), step.reason !== 'done');
+          setStatus(fillStopText(step.reason, after.length), step.reason !== 'done');
+          return;
+        }
+        barren = step.barren;
+        wait = step.wait;
+      }
+    } catch (error) {
+      if (!alive()) return;
+      $('bt-tf-fill-stop').hidden = true;
+      fillLine(errorText(error, 'تکمیل خودکار کامل نشد.'), true);
+      logError('backtest:auto-fill', error);
+    }
+  }
+
   async function runTimeframe() {
     if (!replay?.ok) return;
+    stopAutoFill();
     timeframeSeconds = Math.max(60, Number($('bt-tf-size').value) || 900);
     $('bt-tf-run').disabled = true;
+    let loaded = null;
     try {
-      const loaded = await loadTimeframeDays();
-      timeframeDays = loaded.days;
-      // جدول پوشش حتی وقتی هیچ روزی نقطه نساخته هم رسم می‌شود: کاربر باید
-      // بتواند ببیند **کدام** روز و **چرا**، نه فقط اینکه «چیزی پیدا نشد».
-      paintCoverage(loaded);
-      if (!timeframeDays.length) {
-        const why = `در هیچ روز این بازه، ریزمعامله کامل همه پاها پیدا نشد.${loadedSummary(loaded)}`;
-        setStatus(why, true); tfNote(why, true); $('bt-tf-body').hidden = true; return;
+      loaded = await loadTimeframeDays();
+      const why = applyTimeframe(loaded);
+      if (why) setStatus(why, true);
+      else {
+        setStatus(`تحلیل ${fmt.int(timeframeDays.length)} روز روی سطل ${fmt.int(timeframeSeconds / 60)} دقیقه‌ای آماده شد.`);
+        $('bt-tf-body').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-      paintTimeframe(loaded);
-      // حالا سطل‌های تایم‌فریم ساخته شده‌اند؛ پنل‌های تحلیلی هم باید همان
-      // تایم‌فریم را ببینند وگرنه ریلِ «سطل تایم‌فریم» به مسیر روزانه
-      // برمی‌گشت و کاربر تفاوتش را نمی‌فهمید.
-      paintPanels();
-      // دکمهٔ خروجی تا وقتی تحلیلی ساخته نشده پنهان است: دکمه‌ای که فایل
-      // خالی می‌دهد، بدتر از دکمهٔ نبوده است.
-      $('bt-tf-export').hidden = false;
-      setStatus(`تحلیل ${fmt.int(timeframeDays.length)} روز روی سطل ${fmt.int(timeframeSeconds / 60)} دقیقه‌ای آماده شد.`);
-      $('bt-tf-body').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (error) {
       const text = errorText(error, 'تحلیل تایم‌فریم کامل نشد.');
       setStatus(text, true); tfNote(text, true);
     }
     finally { $('bt-tf-run').disabled = false; }
+    // بیرون از `try`: تکمیل در پس‌زمینه ادامه می‌دهد و دکمه آزاد می‌ماند.
+    if (loaded) autoFill(loaded);
   }
 
   /** متن نوار اجرا: از چه چیزی ساخته شد و چه چیزی نامعلوم ماند. */
@@ -1414,7 +1558,7 @@ export async function mount(root, { state }) {
     });
     if (!replay.ok) { setStatus(replay.error || 'موقعیت تاریخی برای رصد ساخته نشد.', true); return; }
     annotateDailyIv(replay, ivP());
-    tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true; $('bt-tf-export').hidden = true;
+    stopAutoFill(); tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true; $('bt-tf-export').hidden = true;
     liveWatching = true; $('bt-live').textContent = 'توقف رصد زنده'; $('bt-live').setAttribute('data-active', 'true');
     setStatus('در حال دریافت معاملات امروز برای موقعیت تاریخی…');
     await refreshLivePosition();
@@ -1436,7 +1580,7 @@ export async function mount(root, { state }) {
       if (!replay.ok) throw new Error(replay.error);
       annotateDailyIv(replay, ivP());
       // ترکیب یا بازه عوض شده؛ ریزمعامله‌های کش‌شده مال بازپخش قبلی‌اند.
-      tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true; $('bt-tf-export').hidden = true; $('bt-tf-export').hidden = true;
+      stopAutoFill(); tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true; $('bt-tf-export').hidden = true;
       const day = await fetchDayTrades(endDate);
       paintRunNote(day);
       intradayDate = endDate;
@@ -1620,6 +1764,11 @@ export async function mount(root, { state }) {
     if (row && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); openDayIntraday(Number(row.dataset.day)); }
   });
   $('bt-tf-run').addEventListener('click', runTimeframe);
+  $('bt-tf-fill-stop').addEventListener('click', () => {
+    const left = fillPending(timeframeCoverage).length;
+    stopAutoFill({ quiet: false });
+    fillLine(fillStopText('stopped', left), true);
+  });
 
   // ——————————————— بایگانی اجراها ———————————————
   //
