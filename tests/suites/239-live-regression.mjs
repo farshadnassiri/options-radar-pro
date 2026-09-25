@@ -152,12 +152,13 @@ check('کارِ شکست‌خورده صف را نمی‌خواباند', after 
 check('و شمارنده‌ها به صفر برمی‌گردند', resilient.running === 0 && resilient.depth === 0);
 
 check('سرور از همین صف استفاده می‌کند، نه نسخهٔ دوم',
-  serverSrc.includes('const jobs = makeJobQueue({') && !serverSrc.includes('async function pump()'));
+  // R5-19: دو صف، هر دو از همین سازنده — نه پیاده‌سازیِ دوم.
+  serverSrc.includes('const queueFor = (lane) => makeJobQueue({') && !serverSrc.includes('async function pump()'));
 check('و پیوستن به درخواستِ در پرواز، عجله را با خودش می‌برد',
   serverSrc.includes('if (held) { boostTicket(held.ticket, priority); return held.promise; }')
   && serverSrc.includes('if (joined) { boostTicket(joined.ticket, priority); return joined.promise; }'));
 check('تلاشِ دوم هم اولویتِ تازه را می‌گیرد، نه اولویتِ صدازنندهٔ اول',
-  serverSrc.includes('schedule(() => fetchUpstream(url), ticket.priority, ticket)'));
+  serverSrc.includes('schedule(() => fetchUpstream(url), ticket.priority, ticket, pathname)'));
 
 group('۲۳۹ P1‑۲ج — نوشتنِ اتمیک: خواننده نیمهٔ فایل را نمی‌بیند');
 

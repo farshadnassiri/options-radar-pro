@@ -102,8 +102,19 @@ group('۲۴۹. منبع ریزمعاملهٔ هر روز و شمار درخوا�
     [batchKey('call', YDAY)]: { rows, complete: false, verified: false },
     [batchKey('put', YDAY)]: { rows: [], complete: false, throttled: true },
   }, YDAY, codes3);
-  check('نوار ناقص، تأییدنشده و سهمیه‌خورده وارد محاسبهٔ روز نمی‌شوند',
-    broken.failed.join(',') === 'ua,call,put' && Object.keys(broken.byIns).length === 0);
+  // ═══ R5-19: «تأییدنشده» از این ادعا جدا شد ═══
+  //
+  // نسخهٔ قبلی نوارِ **پرِ** بی‌مرجع (`call` بالا) را هم دریافت‌نشده
+  // می‌خواست. اندازه‌گیری نشان داد هزینه‌اش چیست: پای منقضی تابلوی تک‌روز
+  // ندارد، پس هر ۳۰ روزِ یک تحلیل از نمودار افتاد در حالی که نوارش کامل
+  // رسیده بود. ناقصِ **اثبات‌شده** و سهمیه‌خورده بیرون می‌مانند؛ پرِ
+  // بی‌مرجع رسم می‌شود و نامش در `unverified` می‌آید.
+  check('نوار ناقصِ اثبات‌شده و سهمیه‌خورده وارد محاسبهٔ روز نمی‌شوند',
+    broken.failed.join(',') === 'ua,put' && !('ua' in broken.byIns) && !('put' in broken.byIns));
+  check('ولی نوارِ پرِ تأییدنشده رسم می‌شود — با نامش',
+    broken.byIns.call?.length === rows.length && broken.unverified.join(',') === 'call');
+  check('و نوارِ خالیِ بی‌مرجع دریافت‌نشده است، نه بی‌معامله',
+    dayFromBatch({ [batchKey('ua', YDAY)]: { rows: [], complete: false, verified: false } }, YDAY, ['ua']).failed.join(',') === 'ua');
   check('پاسخ بی‌حکم به جای بی‌معامله، دریافت‌نشده است',
     dayFromBatch({ [batchKey('ua', YDAY)]: { rows: [] } }, YDAY, ['ua']).failed.join(',') === 'ua');
 

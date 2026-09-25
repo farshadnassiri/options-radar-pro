@@ -57,14 +57,29 @@ export const SCHEMA = [
   //
   // سرعت اینجا ارزشی ندارد: خروجیِ سریعی که نصفش خالی است، از خروجیِ
   // کندِ کامل بدتر است — چون شبیهِ کامل به نظر می‌رسد.
+  //
+  // ═══ R5-19: سقفِ محتاط فقط برای ریزمعاملهٔ تاریخی ═══
+  //
+  // R5-08 این سه عدد را برای **همهٔ** درخواست‌ها پایین آورد، در حالی که
+  // سهمیهٔ «پاسخِ خالی» فقط روی `GetTradeHistory` دیده شده بود. کلِ برنامه
+  // چهار برابر کند شد. حالا ریزمعاملهٔ تاریخی خطِ جدای خودش را دارد
+  // (سه کلیدِ `tape*` پایین) و بقیه به عددهای پیش از R5-08 برگشتند.
   { key: 'ratePerSec', group: 'quota', kind: 'num', scope: 'server',
-    def: 3, min: 1, max: 60, step: 1, unit: 'درخواست در ثانیه',
-    label: 'سقف نرخ درخواست',
-    hint: 'بالادست سهمیه را با پاسخِ «خالی» می‌بندد، نه با خطا. بالابردن این عدد یعنی خروجیِ نیمه‌خالیِ بی‌اعلام.' },
+    def: 12, min: 1, max: 60, step: 1, unit: 'درخواست در ثانیه',
+    label: 'سقف نرخ درخواست — عمومی',
+    hint: 'همهٔ درخواست‌ها جز ریزمعاملهٔ تاریخی: دیده‌بان، تابلوی روزانه، مشخصاتِ ابزار، دفترِ سفارش.' },
   { key: 'burst', group: 'quota', kind: 'num', scope: 'server',
-    def: 6, min: 1, max: 120, step: 1, unit: 'درخواست', label: 'ظرفیت انفجاری' },
+    def: 20, min: 1, max: 120, step: 1, unit: 'درخواست', label: 'ظرفیت انفجاری — عمومی' },
   { key: 'concurrency', group: 'quota', kind: 'num', scope: 'server',
-    def: 2, min: 1, max: 24, step: 1, unit: 'هم‌زمان', label: 'سقف درخواست هم‌زمان' },
+    def: 6, min: 1, max: 24, step: 1, unit: 'هم‌زمان', label: 'سقف درخواست هم‌زمان — عمومی' },
+  { key: 'tapeRatePerSec', group: 'quota', kind: 'num', scope: 'server',
+    def: 3, min: 1, max: 60, step: 1, unit: 'درخواست در ثانیه',
+    label: 'سقف نرخ درخواست — ریزمعاملهٔ تاریخی',
+    hint: 'بالادست سهمیهٔ ریزمعامله را با پاسخِ «خالی» می‌بندد، نه با خطا. بالابردن این عدد یعنی خروجیِ نیمه‌خالیِ بی‌اعلام.' },
+  { key: 'tapeBurst', group: 'quota', kind: 'num', scope: 'server',
+    def: 6, min: 1, max: 120, step: 1, unit: 'درخواست', label: 'ظرفیت انفجاری — ریزمعاملهٔ تاریخی' },
+  { key: 'tapeConcurrency', group: 'quota', kind: 'num', scope: 'server',
+    def: 2, min: 1, max: 24, step: 1, unit: 'هم‌زمان', label: 'سقف درخواست هم‌زمان — ریزمعاملهٔ تاریخی' },
   { key: 'retries', group: 'quota', kind: 'num', scope: 'server',
     def: 2, min: 0, max: 5, step: 1, unit: 'بار', label: 'تلاش مجدد' },
   { key: 'timeoutMs', group: 'quota', kind: 'num', scope: 'server',
