@@ -589,7 +589,7 @@ export async function mount(root, { state }) {
     // را برمی‌گرداند و کاربر می‌دید روزی وسط مسیر خالی است در حالی که روز
     // قبل و بعدش سالم‌اند. دقیقاً همان چیزی که گزارش شد.
     lastDayFetch = result;
-    if (!requiredMissing(failed).length) tradesCache.set(date, result);
+    if (!failed.length) tradesCache.set(date, result);
     return result;
   }
 
@@ -638,7 +638,7 @@ export async function mount(root, { state }) {
     try {
       const day = await fetchDayTrades(date);
       intradayDate = date;
-      intraday = replayDay(day, date);
+      intraday = day.failed.length ? [] : replayDay(day, date);
       const warning = tradeWarningText(day);
       paintIntradayAnalysis();
       paintDayTable();
@@ -1051,7 +1051,7 @@ export async function mount(root, { state }) {
     // چنین روزی یک بار — و فقط یک بار — بی کش دوباره پرسیده می‌شود.
     const suspect = wanted.filter((date) => {
       const day = tradesCache.get(date) || loaded.days.get(date);
-      if (!day || requiredMissing(day.failed).length) return false;
+      if (!day || day.failed.length) return false;
       return baseGapSuspect({
         baseTrades: day.byIns[String(ua.ins)] || [],
         legTrades: legs.map((leg) => day.byIns[String(leg.ins)] || []),
@@ -1088,8 +1088,8 @@ export async function mount(root, { state }) {
       // «خطای دریافت» یعنی دوباره تلاش کن؛ «نماد پایه معامله نشد» یعنی
       // واقعیتِ بازار است و تلاش دوباره فایده ندارد. یکی‌کردنشان تصمیمِ
       // کاربر را خراب می‌کند.
-      if (requiredMissing(day.failed).length) {
-        coverage.push({ ...row, status: TF_DAY_STATUS.FAILED, legs: legNames(requiredMissing(day.failed)) });
+      if (day.failed.length) {
+        coverage.push({ ...row, status: TF_DAY_STATUS.FAILED, legs: legNames(day.failed) });
         continue;
       }
       const gap = baseGapSuspect({

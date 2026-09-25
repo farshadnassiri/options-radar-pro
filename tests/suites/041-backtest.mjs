@@ -120,6 +120,10 @@ group('۴۰. سه گام بک‌تست سریع و تحلیل تایم‌فری�
   check('۴-ب. و حکمِ کم‌داشته دور ریخته نمی‌شود',
     source40.includes('tapeWarning(tapeSummary(got.verdicts))')
       && source40.includes('if (got.throttled) batchErrors.push(got.note)'));
+  check('روزِ دارای ابزارِ دریافت‌نشده وارد نمودار یا کش نمی‌شود، حتی اگر آن ابزار پایه باشد',
+    source40.includes('if (day.failed.length) {')
+    && source40.includes('if (!failed.length) tradesCache.set(date, result);')
+    && source40.includes('intraday = day.failed.length ? [] : replayDay(day, date);'));
   check('۱. روز جاری از نوار زنده می‌آید',
     source40.includes("getLiveTape(codes)") && source40.includes('liveDate = Number(loaded.liveDate) || 0;'));
   check('اگر ماتریس روی سطل درشت‌تر ساخته شود، همان‌جا گفته می‌شود',
