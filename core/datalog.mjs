@@ -150,6 +150,41 @@ export function summarizeUpstream(data) {
   return out;
 }
 
+/**
+ * نامِ نماد کنارِ کدِ ابزار (R5-22).
+ *
+ * لاگ فقط کدِ هفده‌رقمی داشت (`52631478606575330`) و کاربر نمی‌توانست
+ * بی جست‌وجو بگوید کدام پا بوده. نام‌ها از همان پاسخ‌هایی یاد گرفته
+ * می‌شوند که از لاگ رد می‌شوند — دیده‌بانِ اختیار و مشخصاتِ ابزار — و از
+ * دفترِ قراردادها برای منقضی‌ها.
+ */
+export function learnNames(names, data) {
+  if (!names || !data || typeof data !== 'object') return 0;
+  let learned = 0;
+  const put = (ins, name) => {
+    const code = String(ins ?? '').trim();
+    const label = String(name ?? '').trim();
+    if (!/^\d{6,20}$/.test(code) || !label || names.get(code) === label) return;
+    names.set(code, label); learned += 1;
+  };
+  const watch = data.instrumentOptMarketWatch;
+  if (Array.isArray(watch)) {
+    for (const row of watch) {
+      put(row?.insCode_C, row?.lVal18AFC_C);
+      put(row?.insCode_P, row?.lVal18AFC_P);
+      put(row?.uaInsCode, row?.lVal18AFC_UA || row?.lval30_UA);
+    }
+  }
+  const info = data.instrumentInfo;
+  if (info && typeof info === 'object') put(info.insCode, info.lVal18AFC);
+  return learned;
+}
+
+/** اولین کدِ ابزار در یک مسیرِ TSETMC یا پرس‌وجو. */
+export function insFromPath(path = '') {
+  return /\/(\d{6,20})(?=\/|$|\?)/.exec(String(path))?.[1] || '';
+}
+
 /** دستهٔ پاسخِ موفقِ بالادست. «خالی» یعنی آمد ولی هیچ ردیفی نداشت. */
 export function classifyUpstreamOk(summary) {
   return Number(summary?.rows) > 0 ? 'ok' : 'empty';

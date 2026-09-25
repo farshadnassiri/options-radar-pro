@@ -205,11 +205,14 @@ export async function mount(root) {
     const dur = [c ? `مرورگر ${ms(c.ms)}` : '', a ? `سرور ${ms(a.ms)}` : '', !c && !a && node.up[0] ? ms(node.up[0].ms) : '']
       .filter(Boolean).join('<br>');
     const status = c?.status || a?.status;
+    // نامِ نمادها: از پرس‌وجو (سرور)، وگرنه از درخواست‌های TSETMCِ زیرش.
+    const names = (a?.names?.length ? a.names : [...new Set(node.up.map((u) => u.name).filter(Boolean))])
+      .slice(0, 6).join('، ');
     const isOpen = open.has(node.id);
     const main = `<tr class="dl-row${DL_PROBLEM.has(node.cat) ? ' history-missing' : ''}" data-node="${esc(node.id)}" tabindex="0">
       <td>${clock(node.at)}</td><td>${esc(tabLabel(node.tab))}</td>
       <td>${action ? `${esc(action)}${ago}` : '—'}</td>
-      <td dir="ltr" class="dl-url">${esc(method)} ${esc(url)}${status ? ` → ${status}` : ''}</td>
+      <td class="dl-url"><span dir="ltr">${esc(method)} ${esc(url)}${status ? ` → ${status}` : ''}</span>${names ? `<br><b>${esc(names)}</b>` : ''}</td>
       <td>${chip(node.cat)} ${slowChip(node.slow)}</td><td class="dl-ms">${dur || '—'}</td>
       <td>${esc(sumText(a?.sum || node.up[0]?.sum)) || (c?.error ? esc(c.error) : '—')}</td>
       <td>${node.up.length ? `${fmt.int(node.up.length)} · ${catsChips(node.upCats)}` : '—'}</td></tr>`;
@@ -232,7 +235,7 @@ export async function mount(root) {
       ${ups.length ? `<table class="history-table dl-up">
         <thead><tr><th>زمان</th><th>آدرسِ کاملِ TSETMC</th><th>تلاش</th><th>صف</th><th>مدت</th><th>HTTP</th><th>حجم</th><th>نتیجه</th><th>خلاصه / خطا</th></tr></thead>
         <tbody>${ups.map((u) => `<tr class="${DL_PROBLEM.has(u.cat) ? 'history-missing' : ''}">
-          <td>${clock(u.at)}</td><td dir="ltr" class="dl-url">${esc(u.url || u.path)}</td>
+          <td>${clock(u.at)}</td><td class="dl-url">${u.name ? `<b>${esc(u.name)}</b><br>` : ''}<span dir="ltr">${esc(u.url || u.path)}</span></td>
           <td>${u.attempt ? `${fmt.int(u.attempt)} از ${fmt.int(u.of)}${u.retry ? ' · تلاشِ بعدی دارد' : ''}` : '—'}</td>
           <td>${u.lane === 'tape' ? 'خطِ ریزمعامله' : 'خطِ عمومی'}${u.waitMs ? ` · ${ms(u.waitMs)}` : ''}</td>
           <td>${ms(u.ms ?? u.ageMs)}${u.cat === 'cached' && u.ageMs != null ? ' (سنِ کش)' : ''}</td>

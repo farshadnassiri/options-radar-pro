@@ -12,6 +12,7 @@ import {
   bucketIntradayPath, observedBuckets, intradayHoldingSummary, timeOfDayProfile, intradayEntryExitProfile,
   TF_BUCKET_STATUS, TF_BUCKET_LABEL, timeframeChartPath,
   intradayPathWithGaps, coverageSummary, baseGapSuspect, TF_DAY_STATUS, TF_DAY_LABEL,
+  dayPriceWindow, priceWindowGaps,
 } from '/core/backtest.mjs';
 import {
   ivParams, IV_PARAMS, annotateDailyIv, annotateIntradayIv, annotateBucketIv, ivSummary, legDaysToExpiry,
@@ -187,6 +188,7 @@ export async function mount(root, { state }) {
         <div id="bt-tf-body" hidden>
           <div class="backtest-kpis" id="bt-tf-kpis"></div>
           <div class="backtest-chart-grid"><section><div class="section-head"><h3>آفست موقعیت در کل بازه</h3><span>ریال · هر نقطه یک سطل</span></div><div id="bt-tf-pnl-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>اثر خالص هر پا</h3><span>تفکیک ریالی</span></div><div id="bt-tf-leg-chart" class="backtest-chart"></div></section></div>
+          <div id="bt-tf-gaps" class="backtest-table-note" role="note" hidden></div>
           <div class="backtest-chart-grid"><section><div class="section-head"><h3>بازده استراتژی و نماد پایه</h3><span>درصد</span></div><div id="bt-tf-return-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>قیمت نماد پایه</h3><span>ریال</span></div><div id="bt-tf-base-chart" class="backtest-chart"></div></section></div>
           <section class="backtest-tape"><div class="section-head"><div><h3>کِی وارد شوی و کِی خارج</h3><p id="bt-tf-matrix-note"></p></div><span id="bt-tf-matrix-best">—</span></div><div id="bt-tf-matrix" class="history-table-wrap"></div></section>
           <section class="backtest-tape"><div class="section-head"><div><h3>پوشش روزهای بازه</h3><p>هر روز معاملاتی بازه یک ردیف دارد — چه داده ساخته باشد چه نه. روزِ بی‌داده روی نمودار شکاف است، نه حذف.</p></div><span id="bt-tf-coverage-count">—</span></div><div id="bt-tf-coverage" class="history-table-wrap"></div></section>
@@ -1230,6 +1232,42 @@ export async function mount(root, { state }) {
     }).join('')}</tbody></table>`;
   }
 
+  /**
+   * R5-22: علتِ بریدگیِ هر روز، همان‌جا زیرِ نمودار.
+   *
+   * نمودار پیش از آنکه همهٔ پاها قیمت داشته باشند نقطه نمی‌سازد، و پس از
+   * آخرین معاملهٔ کم‌معامله‌ترین پا قیمتش کهنه است. بی این یادداشت، شکافِ
+   * بازار شبیهِ خرابیِ دریافت دیده می‌شد — همان گزارشی که رسید.
+   */
+  function paintPriceWindows() {
+    const el = $('bt-tf-gaps');
+    const hhmm = (second) => faDigits(clockLabel(second).slice(0, 5));
+    const lines = [];
+    for (const { date } of timeframeDays) {
+      const day = tradesCache.get(date);
+      if (!day) continue;
+      const window = dayPriceWindow(legs.map((leg, index) => ({
+        name: nameOf(leg, `پای ${faDigits(index + 1)}`),
+        times: sessionTrades(day.byIns[String(leg.ins)]).map((trade) => trade.time),
+      })));
+      const gap = priceWindowGaps(window);
+      const parts = [];
+      if (gap.late) {
+        parts.push(`تا ${hhmm(window.first.second)} نقطه‌ای نیست، چون «${esc(window.first.name)}» تا این ساعت معامله نشده بود`
+          + ` (${fmt.int(window.first.trades)} معامله در کلِ روز)`);
+      }
+      if (gap.early) {
+        parts.push(`پس از ${hhmm(window.last.second)} قیمتِ «${esc(window.last.name)}» کهنه است — آخرین معامله‌اش همان ساعت بود`
+          + ` (${fmt.int(window.last.trades)} معامله در کلِ روز)`);
+      }
+      if (parts.length) lines.push(`<li><b>${dateLabel(date)}</b>: ${parts.join('؛ ')}.</li>`);
+    }
+    el.hidden = !lines.length;
+    el.innerHTML = lines.length
+      ? `<p><b>بریدگی‌های نمودار از خودِ بازار است، نه از دریافتِ داده.</b> نقطه فقط جایی ساخته می‌شود که همهٔ پاها قیمتِ واقعی دارند:</p><ul>${lines.join('')}</ul>`
+      : '';
+  }
+
   function paintTimeframe(loaded) {
     const seconds = timeframeSeconds;
     const buckets = bucketIntradayPath(timeframeDays, { bucketSeconds: seconds });
@@ -1293,6 +1331,7 @@ export async function mount(root, { state }) {
     chart($('bt-tf-leg-chart'), points, legSeries, { money: true, step: true, ...fullSession });
     chart($('bt-tf-return-chart'), points, [{ key: 'returnPct', label: 'بازده استراتژی', color: 'var(--accent)' }, { key: 'basePct', label: 'تغییر نماد پایه', color: 'var(--cmp1)' }], { step: true, ...fullSession });
     chart($('bt-tf-base-chart'), points, [{ key: 'basePrice', label: 'قیمت نماد پایه', color: 'var(--cmp2)' }], { money: true, step: true, ...fullSession });
+    paintPriceWindows();
 
     $('bt-tf-holding').innerHTML = `<table class="history-table backtest-compact-table"><thead><tr><th>روز</th><th>نقطه</th><th>مشاهده‌شده</th><th>در سود</th><th>درصد در سود</th><th>باز</th><th>بسته</th><th>بیشینه</th><th>کمینه</th><th>بازده پایان</th><th>تغییر پایه</th></tr></thead><tbody>${holding.days.map((row) => `<tr><td>${dateLabel(row.date)}</td><td>${fmt.int(row.points)}</td><td>${hours(row.observedSeconds)}</td><td>${hours(row.positiveSeconds)}</td><td class="${signTone(row.positivePct - 50)}">${fmt.pct(row.positivePct)}٪</td><td class="${signTone(row.openPnl)}">${fmt.money(row.openPnl)}</td><td class="${signTone(row.closePnl)}">${fmt.money(row.closePnl)}</td><td class="gain">${fmt.money(row.bestPnl)}</td><td class="loss">${fmt.money(row.worstPnl)}</td><td class="${signTone(row.closeReturnPct)}">${fmt.pct(row.closeReturnPct)}٪</td><td class="${signTone(row.basePct)}">${fmt.pct(row.basePct)}٪</td></tr>`).join('')}</tbody></table>`;
 
