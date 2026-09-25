@@ -17,7 +17,7 @@ group('۵۳. روزِ قفل‌شدهٔ ریزمعامله');
   // یک خطای گذرای بالادست — سهمیه، مهلت، ۵۰۲ — آن روز را تا پایان نشست قفل
   // می‌کرد و هر بار باز کردنش همان نتیجهٔ خرابِ کش‌شده را برمی‌گرداند.
   check('نتیجهٔ ناقص کش نمی‌شود',
-    /if \(!requiredMissing\(failed\)\.length\) tradesCache\.set\(date, result\);/.test(src53));
+    /if \(!failed\.length\) tradesCache\.set\(date, result\);/.test(src53));
   check('گرفتن دوباره با اجبار ممکن است', src53.includes('async function fetchDayTrades(date, { force = false } = {})'));
   check('دکمهٔ تلاش دوباره همان روز را از کش پاک می‌کند',
     src53.includes("tradesCache.delete(intradayDate);") && src53.includes('bt-intraday-retry'));

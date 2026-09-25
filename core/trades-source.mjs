@@ -126,7 +126,11 @@ export function dayFromBatch(items = {}, date, codes = []) {
   for (const code of codes || []) {
     const ins = String(code);
     const hit = items?.[batchKey(ins, wanted)];
-    if (!hit || hit.error || !Array.isArray(hit.rows)) { failed.push(ins); continue; }
+    // ردیفِ رسیده کافی نیست: نوارِ ناقص یا تأییدنشده می‌تواند نمودار بسازد
+    // ولی نمایندهٔ همهٔ معامله‌های آن روز نیست. خالیِ سالم هم complete=true دارد.
+    if (!hit || hit.error || hit.throttled || hit.complete !== true || !Array.isArray(hit.rows)) {
+      failed.push(ins); continue;
+    }
     byIns[ins] = hit.rows;
   }
   return { byIns, failed, date: wanted, source: TRADES_HISTORY };
