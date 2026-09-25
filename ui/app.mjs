@@ -9,6 +9,7 @@ import { CATALOG, GROUPS as SGROUPS } from '/strategies/catalog.mjs';
 import { mountCapacityPicker } from '/ui/expiries.mjs';
 import { icon, TAB_ICON } from '/ui/icons.mjs';
 import { installGlobalCapture, logError } from '/ui/errlog.mjs';
+import { installDataLog } from '/ui/datalog-client.mjs';
 import { linkLabelKey } from '/ui/feed-state.mjs';
 import { takeHandoff } from '/ui/handoff.mjs';
 import { installTableEnhance } from '/ui/table-enhance.mjs';
@@ -360,6 +361,8 @@ const TABS = [
   { id: 'watchtower', title: '🔔 دیده‌بان شرطی', alias: 'هشدار و اعلان روی شرط',
     mod: '/ui/tabs/watchtower.mjs', phase: 3 },
   { id: 'logs', title: 'دفتر خطاها', mod: '/ui/tabs/logs.mjs', phase: 1 },
+  // R5-21: هر درخواستِ داده از خواستن تا رسیدن — کدام تب، کدام آدرس، چه نتیجه.
+  { id: 'datalog', title: 'جریان داده', alias: 'لاگ کامل درخواست‌ها و پاسخ‌ها', mod: '/ui/tabs/datalog.mjs', phase: 1 },
 ];
 TABS.push({ id: 'positions', title: 'موقعیت‌های من', phase: 7, mod: '/ui/tabs/positions.mjs' });
 TABS.push({ id: 'roll', title: 'تحلیل رول', phase: 7, mod: '/ui/tabs/roll.mjs' });
@@ -713,6 +716,8 @@ document.addEventListener('keydown', (e) => {
 const getTheme = () => { try { return localStorage.getItem('theme'); } catch { return null; } };
 
 installGlobalCapture();
+// پیش از هر درخواستِ دیگری: هر `fetch` به `/api/` از این پوشش می‌گذرد.
+installDataLog({ currentTab: () => current || '' });
 
 document.addEventListener('wheel', (event) => {
   const select = event.target?.closest?.('select');

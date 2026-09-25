@@ -8,3 +8,5 @@ data/portfolio-missions/
 data/option-roster.json
 data/option-roster.checkpoint.json
 data/journal.json
+# R5-21: لاگِ جریانِ داده — محلی است و برای بررسی جدا فرستاده می‌شود
+data/logs/

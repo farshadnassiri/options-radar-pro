@@ -59,5 +59,7 @@
   "shockPct": 10,
   "theme": "board",
   "persianDigits": false,
-  "topN": 200
+  "topN": 200,
+  "dataLog": true,
+  "dataLogSlowMs": 3000
 }

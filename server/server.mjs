@@ -48,6 +48,10 @@ import { writeJsonAtomic } from './atomic-json.mjs';
 import { watchHealth } from '../core/watch-health.mjs';
 import { makeJobQueue } from './job-queue.mjs';
 import { GENERAL_LANE, TAPE_LANE, laneLimits, laneOf, makeBucket } from './rate-lanes.mjs';
+import { createDataLog, tehranDay } from './datalog.mjs';
+import {
+  DL_MUTED_TABS, classifyError, classifyReply, classifyUpstreamOk, summarizeReply, summarizeUpstream,
+} from '../core/datalog.mjs';
 import {
   validIns, validCompactDate, historicalTradesPath, historicalTradesAltPath, historicalPath, HISTORICAL_KINDS,
   validSessionId, parseInsRequest, safeStaticPath, readBody, BodyTooLarge,
@@ -127,6 +131,39 @@ const stat = {
 const tally = makeUpstreamTally();
 
 const errlog = createLog();
+
+// ═══ R5-21: جریانِ داده — هر درخواست، از خواستن تا رسیدن ═══
+//
+// شرح در `core/datalog.mjs`. `upLog` زمینه را صریح می‌گیرد، نه از
+// `AsyncLocalStorage`: صفِ نرخ کار را از زمینهٔ دیگری اجرا می‌کند.
+const dlog = createDataLog({ dir: path.join(ROOT, 'data', 'logs'), enabled: () => S.dataLog !== false });
+const slowMs = () => Math.max(250, num(S.dataLogSlowMs, 3000));
+function upLog(ctx, fields) {
+  if (ctx?.mute || !dlog.on()) return;
+  if (ctx) ctx.up = (ctx.up || 0) + 1;
+  dlog.push({
+    kind: 'up', parent: ctx?.id || null, tab: ctx?.tab || 'server', action: ctx?.action || '',
+    lane: laneOf(fields.path || ''), ...fields,
+  });
+}
+/** ثبتِ یک تلاشِ بالادست، موفق یا ناموفق. */
+function upAttempt(ctx, { pathname, url, attempt, queuedAt, meta, data, error }) {
+  const base = {
+    path: pathname, url, attempt: attempt + 1, of: S.retries + 1,
+    waitMs: meta.start ? meta.start - queuedAt : null, ms: meta.ms ?? null,
+    status: meta.status ?? null, bytes: meta.bytes ?? null,
+  };
+  if (error) {
+    upLog(ctx, {
+      ...base, cat: classifyError(error, { abortIsTimeout: true }),
+      error: `${error.name || 'Error'}: ${error.message}`.slice(0, 300),
+      code: error.cause?.code || error.code || undefined, retry: attempt < S.retries,
+    });
+    return;
+  }
+  const sum = summarizeUpstream(data);
+  upLog(ctx, { ...base, cat: classifyUpstreamOk(sum), slow: (meta.ms || 0) > slowMs(), sum });
+}
 
 function log(...a) {
   const t = new Date().toTimeString().slice(0, 8);
@@ -215,12 +252,15 @@ const boostTicket = (ticket, priority) => queues[ticket?.lane || GENERAL_LANE].b
 const cache = new Map();     // url -> { at, data }
 const inflight = new Map();  // url -> { promise, ticket }
 
-async function fetchUpstream(url) {
+async function fetchUpstream(url, meta = {}) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), S.timeoutMs);
   const t0 = Date.now();
+  meta.start = t0;
   try {
     const res = await fetch(url, { headers: HEADERS, signal: ac.signal });
+    meta.status = res.status;
+    meta.bytes = Number(res.headers.get('content-length')) || null;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     // `res.json()` نه: شناسهٔ هفده‌رقمی از مرز امنِ عددی جاوااسکریپت رد
     // می‌شود و `JSON.parse` بی‌هیچ خطایی ارقام آخرش را گرد می‌کند. عددِ
@@ -232,6 +272,7 @@ async function fetchUpstream(url) {
     return js;
   } finally {
     clearTimeout(timer);
+    meta.ms = Date.now() - t0;
   }
 }
 
@@ -242,13 +283,18 @@ async function fetchUpstream(url) {
  */
 async function get(pathname, ttlSec, priority = 5) {
   const url = `${S.baseUrl}${pathname}`;
+  const dl = dlog.ctx();
   const hit = cache.get(url);
   // پاسخِ خالی عمرِ کوتاه‌ترِ خودش را دارد؛ چرایش کنار `ttlEmptySec` نوشته است.
   const liveFor = hit?.empty ? Math.min(ttlSec, Math.max(0, num(S.ttlEmptySec, 60))) : ttlSec;
-  if (hit && Date.now() - hit.at < liveFor * 1000) { stat.cacheHits += 1; tally.cacheHit(pathname); return hit.data; }
+  if (hit && Date.now() - hit.at < liveFor * 1000) {
+    stat.cacheHits += 1; tally.cacheHit(pathname);
+    upLog(dl, { cat: 'cached', path: pathname, url, ageMs: Date.now() - hit.at, sum: summarizeUpstream(hit.data) });
+    return hit.data;
+  }
   // پیوستن به درخواستِ در پرواز، عجلهٔ صدازنندهٔ تازه را هم با خودش می‌برد.
   const held = inflight.get(url);
-  if (held) { boostTicket(held.ticket, priority); return held.promise; }
+  if (held) { boostTicket(held.ticket, priority); upLog(dl, { cat: 'joined', path: pathname, url }); return held.promise; }
 
   const ticket = { priority, job: null };
   const p = (async () => {
@@ -260,7 +306,13 @@ async function get(pathname, ttlSec, priority = 5) {
         // اولویت از بلیت خوانده می‌شود نه از پارامتر: ممکن است بین دو تلاش
         // صدازنندهٔ عجول‌تری پیوسته باشد، و تلاشِ بعدی باید عجلهٔ او را داشته
         // باشد نه عجلهٔ صدازنندهٔ اول را.
-        const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket, pathname);
+        const queuedAt = Date.now();
+        const meta = {};
+        let data;
+        try {
+          data = await schedule(() => fetchUpstream(url, meta), ticket.priority, ticket, pathname);
+        } catch (e) { upAttempt(dl, { pathname, url, attempt, queuedAt, meta, error: e }); throw e; }
+        upAttempt(dl, { pathname, url, attempt, queuedAt, meta, data });
         // «خالی» یعنی پاسخ آمد ولی هیچ ردیفی نداشت. این با «نیامد» فرق
         // دارد و کش می‌شود — ولی نه به همان درازا.
         cache.set(url, { at: Date.now(), data, empty: firstList(data).length === 0 });
@@ -325,10 +377,15 @@ function cachedAt(pathname) {
  */
 async function getFresh(pathname, ttlSec = 2, priority = 2, { bust = true } = {}) {
   const key = `fresh:${bust ? 'b' : 'p'}:${pathname}`;
+  const dl = dlog.ctx();
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < ttlSec * 1000) { stat.cacheHits += 1; tally.cacheHit(pathname); return hit.data; }
+  if (hit && Date.now() - hit.at < ttlSec * 1000) {
+    stat.cacheHits += 1; tally.cacheHit(pathname);
+    upLog(dl, { cat: 'cached', path: pathname, url: `${S.baseUrl}${pathname}`, fresh: true, ageMs: Date.now() - hit.at, sum: summarizeUpstream(hit.data) });
+    return hit.data;
+  }
   const joined = inflight.get(key);
-  if (joined) { boostTicket(joined.ticket, priority); return joined.promise; }
+  if (joined) { boostTicket(joined.ticket, priority); upLog(dl, { cat: 'joined', path: pathname, url: `${S.baseUrl}${pathname}`, fresh: true }); return joined.promise; }
 
   const ticket = { priority, job: null };
   const pending = (async () => {
@@ -339,7 +396,13 @@ async function getFresh(pathname, ttlSec = 2, priority = 2, { bust = true } = {}
         tally.request(pathname);
         const join = pathname.includes('?') ? '&' : '?';
         const url = bust ? `${S.baseUrl}${pathname}${join}_=${Date.now()}` : `${S.baseUrl}${pathname}`;
-        const data = await schedule(() => fetchUpstream(url), ticket.priority, ticket, pathname);
+        const queuedAt = Date.now();
+        const meta = {};
+        let data;
+        try {
+          data = await schedule(() => fetchUpstream(url, meta), ticket.priority, ticket, pathname);
+        } catch (e) { upAttempt(dl, { pathname, url, attempt, queuedAt, meta, error: e }); throw e; }
+        upAttempt(dl, { pathname, url, attempt, queuedAt, meta, data });
         cache.set(key, { at: Date.now(), data });
         evictOldest(cache, S.maxCacheEntries);
         return data;
@@ -1264,7 +1327,13 @@ function send(res, code, body, type = 'application/json; charset=utf-8') {
   res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(body);
 }
-const sendJson = (res, code, obj) => send(res, code, JSON.stringify(obj));
+const sendJson = (res, code, obj) => {
+  // R5-21: پاسخ به‌عنوانِ مرجع نگه داشته می‌شود، نه کپی؛ خلاصه‌اش پس از
+  // فرستادن ساخته می‌شود.
+  const ctx = dlog.ctx();
+  if (ctx) ctx.reply = obj;
+  return send(res, code, JSON.stringify(obj));
+};
 
 const normalizeDailyRows = (rows) => rows.map((r) => ({
   // `hEven` همراه می‌آید چون دروازهٔ «عکس پیش‌جلسه» بی آن کور است: رکوردِ
@@ -1290,8 +1359,44 @@ async function serveStatic(res, pathname) {
   }
 }
 
+/** مسیرهایی که خودشان لاگ نمی‌شوند: خودِ لاگ، دفترِ خطا و جریانِ زنده. */
+const DL_SKIP = /^\/api\/(datalog|logs|stream)\b/;
+const headerText = (req, name) => {
+  const raw = req.headers[name];
+  if (!raw) return '';
+  try { return decodeURIComponent(String(raw)).slice(0, 300); } catch { return String(raw).slice(0, 300); }
+};
+let dlSeq = 0;
+
+/**
+ * ورودیِ هر درخواست. برای `/api/`، زمینهٔ جریانِ داده ساخته می‌شود و پس از
+ * پاسخ یک ردیفِ `api` می‌نشیند — با کد، مدت، و خلاصهٔ آنچه فرستاده شد.
+ */
 async function handle(req, res) {
   const u = new URL(req.url, `http://${req.headers.host}`);
+  if (!u.pathname.startsWith('/api/') || DL_SKIP.test(u.pathname) || !dlog.on()) return handleRequest(req, res, u);
+  const tab = headerText(req, 'x-dl-tab');
+  const ctx = {
+    id: headerText(req, 'x-dl-id') || `s${++dlSeq}`, tab: tab || '', action: headerText(req, 'x-dl-action'),
+    mute: DL_MUTED_TABS.has(tab), up: 0, reply: null,
+  };
+  const t0 = Date.now();
+  try {
+    await dlog.run(ctx, () => handleRequest(req, res, u));
+  } finally {
+    if (!ctx.mute) {
+      const sum = summarizeReply(u.pathname, ctx.reply);
+      const ms = Date.now() - t0;
+      dlog.push({
+        kind: 'api', id: ctx.id, tab: ctx.tab, action: ctx.action, src: headerText(req, 'x-dl-src'),
+        method: req.method, path: `${u.pathname}${u.search}`, status: res.statusCode, ms,
+        cat: classifyReply(res.statusCode, sum), slow: ms > slowMs(), up: ctx.up, sum,
+      });
+    }
+  }
+}
+
+async function handleRequest(req, res, u) {
   const p = u.pathname;
   const ins = u.searchParams.get('ins');
 
@@ -2285,6 +2390,50 @@ async function handle(req, res) {
       return sendJson(res, 405, { error: 'روش پشتیبانی نمی‌شود' });
     }
 
+    // ═══ R5-21: جریانِ داده ═══
+    if (p === '/api/datalog') {
+      if (req.method === 'DELETE') { dlog.clear(); return sendJson(res, 200, { ok: true }); }
+      if (req.method === 'POST') {
+        // دیدِ مرورگر: آیا درخواست اصلاً به سرور رسید، و مرورگر چه دید.
+        const body = JSON.parse(await readBody(req, MAX_BODY) || '{}');
+        let taken = 0;
+        for (const row of (Array.isArray(body.rows) ? body.rows : []).slice(0, 300)) {
+          if (!row || DL_MUTED_TABS.has(String(row.tab || ''))) continue;
+          const clip = (v, n = 300) => (v == null ? undefined : String(v).slice(0, n));
+          dlog.push({
+            kind: 'client', id: clip(row.id, 60), tab: clip(row.tab, 60), action: clip(row.action, 120),
+            actionAgoMs: Number.isFinite(row.actionAgoMs) ? row.actionAgoMs : undefined,
+            method: clip(row.method, 10), url: clip(row.url, 600), status: Number(row.status) || 0,
+            ms: Number(row.ms) || 0, cat: clip(row.cat, 20), slow: row.slow === true, error: clip(row.error),
+            src: Array.isArray(row.src) ? row.src.slice(0, 6).map((f) => clip(f, 120)) : undefined,
+            body: clip(row.body, 400), bytes: Number(row.bytes) || undefined, sentAt: Number(row.sentAt) || undefined,
+          });
+          taken += 1;
+        }
+        return sendJson(res, 200, { ok: true, taken });
+      }
+      const since = Number(u.searchParams.get('since')) || 0;
+      const limit = Math.min(8000, Math.max(1, Number(u.searchParams.get('limit')) || 3000));
+      return sendJson(res, 200, {
+        rows: dlog.list({ since, limit }), ...dlog.stats(), enabled: dlog.on(),
+        slowMs: slowMs(), today: tehranDay(), files: await dlog.files(),
+      });
+    }
+    if (p === '/api/datalog/file') {
+      await dlog.flush();
+      const day = /^\d{8}$/.test(u.searchParams.get('day') || '') ? u.searchParams.get('day') : tehranDay();
+      try {
+        const buf = await fs.readFile(dlog.fileOf(day));
+        res.writeHead(200, {
+          'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store',
+          'Content-Disposition': `attachment; filename="datalog-${day}.jsonl"`,
+        });
+        return res.end(buf);
+      } catch {
+        return sendJson(res, 404, { error: `برای روز ${day} فایلِ لاگی نیست` });
+      }
+    }
+
     // دفتر خطاها. برنامه در مرورگر باز است و کاربر ترمینال سرور را نمی‌بیند؛
     // بدون این نقطه پایانی، «چه شد؟» هیچ پاسخی ندارد.
     if (p === '/api/logs') {
@@ -2329,6 +2478,13 @@ async function handle(req, res) {
 }
 
 await loadSettings();
+// R5-21: لاگِ امروز پس از اجرای دوباره هم در تبِ «جریان داده» می‌ماند، و
+// ردیف‌های آخر هنگامِ بستن روی دیسک می‌نشینند.
+await dlog.restore();
+process.on('exit', () => dlog.flushSync());
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.once(signal, () => { dlog.flushSync(); process.exit(code); });
+}
 http.createServer(handle).listen(PORT, '127.0.0.1', () => {
   log(`سرور بالا آمد → http://127.0.0.1:${PORT}`);
   const g = marketOpen();

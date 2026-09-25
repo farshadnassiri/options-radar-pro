@@ -4539,6 +4539,22 @@ td.rich { padding-block: var(--space-1); }
   .de-base-grid { grid-template-columns: 1fr; max-height: 240px; }
   .de-search { width: 100%; }
 }
+/* ═══ R5-21: جریان داده ═══
+   جدولِ درخواست‌ها بلند است و آدرس‌ها لاتین؛ آدرس چپ‌به‌راست و شکستنی
+   می‌ماند تا ستون‌های دیگر از صفحه بیرون نروند. */
+.dl-filters { display: flex; flex-wrap: wrap; gap: var(--space-3, 12px); align-items: end; }
+.dl-filters label { display: grid; gap: 4px; font-size: var(--fs-xs); color: var(--muted); }
+.dl-table td, .dl-up td { white-space: normal; vertical-align: top; }
+.dl-table .dl-url, .dl-up .dl-url { word-break: break-all; min-width: 220px; max-width: 420px; font-size: var(--fs-xs); text-align: left; }
+.dl-row { cursor: pointer; }
+.dl-table .dl-ms, .dl-up td:nth-child(5) { white-space: nowrap; }
+.dl-table .pill, .dl-up .pill { display: inline-block; margin: 1px 0; white-space: nowrap; }
+.dl-detail > td { background: var(--panel-2); }
+.dl-facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0 0 10px; font-size: var(--fs-xs); }
+.dl-facts dt { color: var(--muted); }
+.dl-facts dd { margin: 0; word-break: break-all; }
+.dl-paths summary { cursor: pointer; margin-top: 8px; }
+
 
 .pb-skin {
   --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */
@@ -4824,3 +4840,4 @@ td.rich { padding-block: var(--space-1); }
   font-size: var(--fs-xs); line-height: 1.95;
 }
 .pb-skin .pb-filter-note:empty { display: none; }
+
