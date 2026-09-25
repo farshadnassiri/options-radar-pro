@@ -815,6 +815,49 @@ export const TF_DAY_LABEL = Object.freeze({
   skipped: 'بیرون از سقف بررسی',
 });
 
+/**
+ * پنجرهٔ «قیمتِ کامل» یک روز، و مقصرِ هر دو سرش (R5-22).
+ *
+ * گزارشِ صاحب پروژه: «نمودارِ کل بازه ناقص است.» لاگِ جریانِ داده نشان
+ * داد هر دوازده ابزار/روز کامل رسیده بود؛ علت بازار بود: یک پا روزِ
+ * ۲۵ شهریور فقط ۱۵ معامله داشت، از ۱۱:۴۹. نمودار عمداً پیش از آنکه همهٔ
+ * پاها قیمت داشته باشند نقطه نمی‌سازد (`BEFORE_FIRST`)، و پس از آخرین
+ * معاملهٔ کم‌معامله‌ترین پا قیمتش کهنه است (`CARRIED`). این دو در جدولِ
+ * سطل‌ها بود ولی زیرِ نمودار نه — کاربر بریدگی را می‌دید و علتش را نه.
+ *
+ * `legs`: `[{ name, times }]` — ساعتِ HHMMSS معامله‌های معتبرِ داخلِ جلسه.
+ * `first` دیرترین «اولین معامله» میانِ پاهاست، `last` زودترین «آخرین».
+ */
+export function dayPriceWindow(legs = []) {
+  const spans = [];
+  const silent = [];
+  for (const leg of legs || []) {
+    const seconds = (leg?.times || []).map(tradeSecond).filter((s) => s >= INTRADAY_START_SECOND && s <= INTRADAY_END_SECOND);
+    if (!seconds.length) { silent.push(leg?.name || ''); continue; }
+    spans.push({ name: leg?.name || '', first: Math.min(...seconds), last: Math.max(...seconds), trades: seconds.length });
+  }
+  if (!spans.length || silent.length) return { silent, first: null, last: null, spans };
+  const first = spans.reduce((a, b) => (b.first > a.first ? b : a));
+  const last = spans.reduce((a, b) => (b.last < a.last ? b : a));
+  return {
+    silent, spans,
+    first: { second: first.first, name: first.name, trades: first.trades },
+    last: { second: last.last, name: last.name, trades: last.trades },
+  };
+}
+
+/** مرزی که کم‌تر از آن بریدگی گزارش نمی‌شود: یک ربعِ اول و آخرِ جلسه. */
+export const PRICE_WINDOW_SLACK_SECONDS = 15 * 60;
+
+/** آیا این پنجره آن‌قدر کوتاه است که روی نمودار دیده شود؟ */
+export function priceWindowGaps(window, slack = PRICE_WINDOW_SLACK_SECONDS) {
+  if (!window?.first) return { late: false, early: false };
+  return {
+    late: window.first.second > INTRADAY_START_SECOND + slack,
+    early: window.last.second < INTRADAY_END_SECOND - slack,
+  };
+}
+
 /** شمارشِ هر وضعیت، به‌ترتیبِ ثابت — تا جملهٔ خلاصه هر بار یک شکل باشد. */
 export function coverageSummary(coverage = []) {
   const counts = Object.fromEntries(Object.values(TF_DAY_STATUS).map((key) => [key, 0]));

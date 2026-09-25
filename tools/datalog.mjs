@@ -62,7 +62,27 @@ if (flag('problems') || problems.length) {
     console.log(`      نتیجه: ${DL_CAT[n.cat] || n.cat}${n.slow ? ` · ${DL_SLOW_LABEL}` : ''}${c ? ` · مرورگر ${c.ms}ms HTTP ${c.status || '—'}` : ''}${a ? ` · سرور ${a.ms}ms` : ''}${c?.error ? ` · ${c.error}` : ''}${a?.sum ? ` · ${JSON.stringify(a.sum)}` : ''}`);
     if (c?.src?.length) console.log(`      مبدأ: ${c.src.join(' ← ')}`);
     for (const u of n.up.filter((u) => DL_PROBLEM.has(u.cat) || u.slow).slice(0, 8)) {
-      console.log(`      ↳ ${clock(u.at)} ${u.url || u.path} · تلاش ${u.attempt || '—'}/${u.of || '—'} · ${u.ms ?? '—'}ms · HTTP ${u.status || '—'} · ${DL_CAT[u.cat] || u.cat}${u.slow ? ' · دیر' : ''}${u.error ? ` · ${u.error}` : ''}`);
+      console.log(`      ↳ ${clock(u.at)}${u.name ? ` [${u.name}]` : ''} ${u.url || u.path} · تلاش ${u.attempt || '—'}/${u.of || '—'} · ${u.ms ?? '—'}ms · HTTP ${u.status || '—'} · ${DL_CAT[u.cat] || u.cat}${u.slow ? ' · دیر' : ''}${u.error ? ` · ${u.error}` : ''}`);
     }
+  }
+}
+
+// ═══ R5-22: ریزمعامله به تفکیکِ ابزار و روز ═══
+//
+// همان جدولی که علتِ «نمودارِ ناقص» را نشان داد: کدام پا چند معامله داشت
+// و از چه ساعتی تا چه ساعتی. پای کم‌معامله همین‌جا پیدا می‌شود.
+const tapes = picked.filter((r) => r.kind === 'up' && /\/Trade\/GetTradeHistory\//.test(r.path || '') && r.sum);
+if (tapes.length) {
+  const seen = new Map();
+  for (const r of tapes) {
+    const [, , , ins, date, flag] = String(r.path).split('/');
+    const key = `${date}|${ins}`;
+    const prev = seen.get(key);
+    // از هر ابزار/روز، پرردیف‌ترین پاسخ — پرچمِ `true` ممکن است بریده باشد.
+    if (!prev || (r.sum.rows || 0) > (prev.sum.rows || 0)) seen.set(key, { ...r, ins, date, flag });
+  }
+  console.log(`\n■ ریزمعامله به تفکیکِ ابزار و روز (${seen.size})`);
+  for (const r of [...seen.values()].sort((a, b) => a.date.localeCompare(b.date) || a.ins.localeCompare(b.ins)).slice(0, 80)) {
+    console.log(`  ${r.date} · ${r.name || r.ins} · ${r.sum.rows ?? 0} معامله${r.sum.first ? ` · ${r.sum.first} تا ${r.sum.last}` : ''} · ${DL_CAT[r.cat] || r.cat}${r.flag === 'true' ? ' · پرچم true' : ''}`);
   }
 }

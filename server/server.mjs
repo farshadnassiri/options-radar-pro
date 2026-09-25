@@ -50,7 +50,8 @@ import { makeJobQueue } from './job-queue.mjs';
 import { GENERAL_LANE, TAPE_LANE, laneLimits, laneOf, makeBucket } from './rate-lanes.mjs';
 import { createDataLog, tehranDay } from './datalog.mjs';
 import {
-  DL_MUTED_TABS, classifyError, classifyReply, classifyUpstreamOk, summarizeReply, summarizeUpstream,
+  DL_MUTED_TABS, classifyError, classifyReply, classifyUpstreamOk, insFromPath, learnNames,
+  summarizeReply, summarizeUpstream,
 } from '../core/datalog.mjs';
 import {
   validIns, validCompactDate, historicalTradesPath, historicalTradesAltPath, historicalPath, HISTORICAL_KINDS,
@@ -138,12 +139,15 @@ const errlog = createLog();
 // `AsyncLocalStorage`: صفِ نرخ کار را از زمینهٔ دیگری اجرا می‌کند.
 const dlog = createDataLog({ dir: path.join(ROOT, 'data', 'logs'), enabled: () => S.dataLog !== false });
 const slowMs = () => Math.max(250, num(S.dataLogSlowMs, 3000));
+// R5-22: کد → نامِ نماد، تا لاگ بگوید کدام پا بود.
+const dlNames = new Map();
+const dlNameOf = (path) => dlNames.get(insFromPath(path)) || undefined;
 function upLog(ctx, fields) {
   if (ctx?.mute || !dlog.on()) return;
   if (ctx) ctx.up = (ctx.up || 0) + 1;
   dlog.push({
     kind: 'up', parent: ctx?.id || null, tab: ctx?.tab || 'server', action: ctx?.action || '',
-    lane: laneOf(fields.path || ''), ...fields,
+    lane: laneOf(fields.path || ''), name: dlNameOf(fields.path), ...fields,
   });
 }
 /** ثبتِ یک تلاشِ بالادست، موفق یا ناموفق. */
@@ -161,6 +165,7 @@ function upAttempt(ctx, { pathname, url, attempt, queuedAt, meta, data, error })
     });
     return;
   }
+  learnNames(dlNames, data);
   const sum = summarizeUpstream(data);
   upLog(ctx, { ...base, cat: classifyUpstreamOk(sum), slow: (meta.ms || 0) > slowMs(), sum });
 }
@@ -1387,10 +1392,13 @@ async function handle(req, res) {
     if (!ctx.mute) {
       const sum = summarizeReply(u.pathname, ctx.reply);
       const ms = Date.now() - t0;
+      const codes = [...new Set(String(u.searchParams.get('ins') || '').split(',').filter(Boolean))].slice(0, 12);
+      const names = codes.map((code) => dlNames.get(code) || '').filter(Boolean);
       dlog.push({
         kind: 'api', id: ctx.id, tab: ctx.tab, action: ctx.action, src: headerText(req, 'x-dl-src'),
         method: req.method, path: `${u.pathname}${u.search}`, status: res.statusCode, ms,
         cat: classifyReply(res.statusCode, sum), slow: ms > slowMs(), up: ctx.up, sum,
+        ...(names.length ? { names } : {}),
       });
     }
   }
@@ -2481,6 +2489,10 @@ await loadSettings();
 // R5-21: لاگِ امروز پس از اجرای دوباره هم در تبِ «جریان داده» می‌ماند، و
 // ردیف‌های آخر هنگامِ بستن روی دیسک می‌نشینند.
 await dlog.restore();
+// نامِ قراردادهای منقضی از دفترِ قراردادها؛ زنده‌ها از دیده‌بان یاد گرفته می‌شوند.
+readRoster().then((roster) => {
+  for (const row of roster.rows || []) if (row?.ins && row?.symbol && !dlNames.has(row.ins)) dlNames.set(String(row.ins), String(row.symbol));
+}).catch(() => {});
 process.on('exit', () => dlog.flushSync());
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.once(signal, () => { dlog.flushSync(); process.exit(code); });
