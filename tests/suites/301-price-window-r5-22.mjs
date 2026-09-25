@@ -68,3 +68,19 @@ group('۳۰۱. سیم‌کشی');
   const tool = readSrc('../tools/datalog.mjs');
   check('ابزارِ خطِ فرمان جدولِ ابزار/روز را چاپ می‌کند', tool.includes('ریزمعامله به تفکیکِ ابزار و روز'));
 }
+
+group('۳۰۱. جریانِ داده در پنجرهٔ جدا، و فیلترهای ماندگار (R5-23)');
+{
+  const tab = readSrc('../ui/tabs/datalog.mjs');
+  const page = readSrc('../ui/datalog.html');
+  check('دکمهٔ «باز کردن در پنجرهٔ جدا» — و در خودِ پنجرهٔ جدا نه',
+    tab.includes('id="dl-popout" href="/ui/datalog.html" target="datalog"') && tab.includes("${standalone ? '' :"));
+  check('صفحهٔ جدا همان تب را سوار می‌کند و پوششِ fetch را نصب نمی‌کند',
+    page.includes("await import('/ui/tabs/datalog.mjs')") && page.includes('{ standalone: true }')
+    && !page.includes('installDataLog'));
+  check('فیلترها با جابه‌جاییِ تب نمی‌روند',
+    tab.includes("const PREFS_KEY = 'datalog.filters';") && tab.includes('const prefs = readPrefs();')
+    && tab.includes("$('dl-live').addEventListener('change', savePrefs);"));
+  check('جداکنندهٔ «·» کنارِ شمارش نیست — شبیهِ «۰» خوانده می‌شد',
+    tab.includes("`: ${fmt.int(count)}`") && !tab.includes("` · ${fmt.int(count)}`"));
+}
