@@ -20,6 +20,7 @@ import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { ivParams } from '/core/leg-iv.mjs';
 import { GREEKS, monitorSnapshot } from '/core/monitor.mjs';
+import { CC_PANEL_HTML, mountCcRoll } from '/ui/cc-roll-panel.mjs';
 
 const baseName = (position) => {
   const name = String(position?.uaName || '').trim();
@@ -68,6 +69,8 @@ export async function mount(root, { state, api }) {
       </section>
     </div>
 
+    ${CC_PANEL_HTML}
+
     <div class="kpis" id="kpis"></div>
 
     <section class="card">
@@ -100,6 +103,9 @@ export async function mount(root, { state, api }) {
   // وقتی خالی‌اند، و خواندن لحظهٔ کلیک انجام می‌شود — پس یک بار کافی است.
   attachExportsIn(root, 'roll');
 
+  // دستیار کاوردکال: فقط برای موقعیت کاوردکال عدد می‌سازد و برای بقیه
+  // دلیلش را می‌گوید. قیمت‌هایش از همان قیمت‌گیری هر پانزده ثانیهٔ تب می‌آید.
+  const ccPanel = mountCcRoll(root, { getSettings: s });
 
   const el = (id) => root.querySelector(id);
 
@@ -169,6 +175,7 @@ export async function mount(root, { state, api }) {
       el('#exp2').value = '';
       fillNew();
     }
+    drawCc();
     await priceAll();
   }
 
@@ -206,7 +213,8 @@ export async function mount(root, { state, api }) {
     const p = positions[sel];
     if (!p) return;
     const codes = new Set([p.uaIns, ...p.legs.map((l) => l.ins).filter(Boolean),
-      ...candidates.map((c) => c.q.ins).filter(Boolean)].filter(Boolean));
+      ...candidates.map((c) => c.q.ins).filter(Boolean),
+      ...(detail ? ccPanel.codes(p, detail) : [])].filter(Boolean));
     if (!codes.size) return;
     try {
       // ═══ چرا `slice(0, 180)` رفت ═══
@@ -236,8 +244,19 @@ export async function mount(root, { state, api }) {
     } catch { /* نوار بالا خبر می‌دهد */ }
   }
 
+  /** دستیار کاوردکال — مستقل از نامزد انتخاب‌شدهٔ پایین صفحه. */
+  function drawCc() {
+    const p = positions[sel];
+    if (!p) return;
+    const uaQ = quotesByIns.get(p.uaIns) || {};
+    // قیمت ورود سهم جای قیمت امروز نمی‌نشیند: بی قیمت امروز، حکمی ساخته نمی‌شود.
+    const spot = uaQ.last || uaQ.close || detail?.last || detail?.close || 0;
+    ccPanel.update({ pos: p, detail, quotesByIns, spot, uaName: baseName(p), reprice: priceAll });
+  }
+
   function draw() {
     const p = positions[sel];
+    drawCc();
     if (!p || !candidates.length) return;
     const closeIdx = Number(el('#leg').value);
     const candIdx = Number(el('#new').value) || 0;
@@ -435,5 +454,5 @@ export async function mount(root, { state, api }) {
   const offWatch = api.subscribeWatch((w) => pushRows(w, !w.changed));
   await load();
   const timer = setInterval(priceAll, 15000);
-  return () => { offChain(); offWatch(); clearInterval(timer); dChart?.destroy(); c1Chart?.destroy(); c2Chart?.destroy(); };
+  return () => { offChain(); offWatch(); clearInterval(timer); dChart?.destroy(); c1Chart?.destroy(); c2Chart?.destroy(); ccPanel.dispose(); };
 }
