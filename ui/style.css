@@ -4539,6 +4539,30 @@ td.rich { padding-block: var(--space-1); }
   .de-base-grid { grid-template-columns: 1fr; max-height: 240px; }
   .de-search { width: 100%; }
 }
+/* ——— دستیار رول کاوردکال (تب تحلیل رول) ——— */
+.ccr .gain { color: var(--gain); }
+.ccr .loss { color: var(--loss); }
+.ccr li.warn, .ccr .warn-text { color: var(--warn); }
+.ccr td .unit { display: block; }
+.ccr-controls { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 12px; }
+.ccr-controls .field { min-width: 150px; margin: 0; }
+.ccr-verdict { border: 1px solid var(--line); border-inline-start: 5px solid var(--muted); border-radius: var(--radius-md); padding: 12px 16px; background: var(--panel-2); margin-bottom: 12px; }
+.ccr-verdict.tone-gain { border-inline-start-color: var(--gain); background: color-mix(in srgb, var(--gain) 7%, var(--panel)); }
+.ccr-verdict.tone-loss { border-inline-start-color: var(--loss); background: color-mix(in srgb, var(--loss) 6%, var(--panel)); }
+.ccr-verdict.tone-warn { border-inline-start-color: var(--warn); background: color-mix(in srgb, var(--warn) 7%, var(--panel)); }
+.ccr-v-title { font-size: var(--fs-2xl); font-weight: 900; }
+.ccr-verdict.tone-gain .ccr-v-title { color: var(--gain); }
+.ccr-verdict.tone-loss .ccr-v-title { color: var(--loss); }
+.ccr-verdict.tone-warn .ccr-v-title { color: var(--warn); }
+.ccr-v-sub { color: var(--muted); margin: 4px 0 8px; }
+.ccr-verdict ul, .ccr-lines, .ccr-issues ul, .ccr-quick ul { margin: 6px 0 0; padding-inline-start: 20px; line-height: 2; }
+.ccr-issues { border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); background: var(--warn-soft); border-radius: var(--radius-md); padding: 10px 14px; margin-top: 10px; }
+.ccr-quick { border-inline-start: 4px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius-md); padding: 10px 14px; margin-top: 12px; }
+.ccr-panel { padding-top: 10px; }
+.ccr-panel h4 { margin: 16px 0 6px; }
+.ccr-chart { height: 320px; }
+.ccr-grid td { min-width: 88px; }
+
 /* ═══ R5-21: جریان داده ═══
    جدولِ درخواست‌ها بلند است و آدرس‌ها لاتین؛ آدرس چپ‌به‌راست و شکستنی
    می‌ماند تا ستون‌های دیگر از صفحه بیرون نروند. */
@@ -4840,4 +4864,3 @@ td.rich { padding-block: var(--space-1); }
   font-size: var(--fs-xs); line-height: 1.95;
 }
 .pb-skin .pb-filter-note:empty { display: none; }
-
