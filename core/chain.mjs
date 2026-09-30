@@ -128,6 +128,16 @@ function pcOpenInterestRatio(ua) {
 // و به‌اندازه‌ای بزرگ که هیچ‌وقت قید مقیدکننده نشود.
 export const UNKNOWN_DEPTH = 1e12;
 
+// ═══ «نیامد» با «صفر» یکی نیست ═══
+//
+// ممیزی ۳۰ سپتامبر: با حذف `qTotCap_C` و `oP_C` از ردیف، زنجیره `value=0` و
+// `oi=0` می‌ساخت — «داده نرسید» به «معامله نشد» تبدیل می‌شد و در جمع‌ها کم
+// شمرده می‌شد. عدد همچنان صفر می‌ماند (۱۲۶ خوانندهٔ این رکورد در تب‌ها
+// صفر را انتظار دارند)، ولی `missing` نام میدان‌های نیامده را می‌گوید تا
+// هر جمعی که به کار می‌برد، جمعِ نصفه نسازد.
+const TOTAL_FIELDS = [['vol', 'qTotTran5J'], ['trades', 'zTotTran'], ['value', 'qTotCap'], ['oi', 'oP']];
+const absent = (v) => v === null || v === undefined || v === '' || !Number.isFinite(Number(v));
+
 /** مظنه یک سمت قرارداد، از رکورد دیده‌بان. */
 function sideQuote(r, sfx) {
   const ins = String(r[`insCode_${sfx}`] ?? '');
@@ -135,7 +145,14 @@ function sideQuote(r, sfx) {
   const bid = n(r[`pMeDem_${sfx}`]);
   const ask = n(r[`pMeOf_${sfx}`]);
   const last = n(r[`pDrCotVal_${sfx}`]);
-  const close = n(r[`pClosing_${sfx}`]) || last || bid;
+  // ═══ پایانی فقط پایانیِ رسمی ═══
+  //
+  // پیش از این `pClosing || last || bid` بود: قراردادِ بی‌پایانی و بی‌معامله،
+  // بهترین تقاضا را «قیمت پایانی» می‌گرفت و داشبورد همان را «آخرین» هم
+  // می‌نوشت (ممیزی ۳۰ سپتامبر، با تقاضای ۱۲۳). مصرف‌کننده‌ها صفر را «نیامد»
+  // می‌خوانند و جایگزینِ خودشان را با نام انتخاب می‌کنند (`closePrice`,
+  // `execPrice`)؛ ساختنِ پایانی از مظنه، برچسبِ دروغ است.
+  const close = n(r[`pClosing_${sfx}`]);
   return {
     ins,
     name: rawName && rawName !== ins ? rawName : `قرارداد ${sfx === 'C' ? 'اختیار خرید' : 'اختیار فروش'}`,
@@ -162,6 +179,7 @@ function sideQuote(r, sfx) {
     // وضعیتش رشتهٔ خالی. مرحلهٔ دو هر دو را با عددِ واقعی پر می‌کند.
     book: null, state: '', staleSec: NaN,
     depth: false,                  // آیا عمق کامل گرفته شده
+    missing: TOTAL_FIELDS.filter(([, raw]) => absent(r[`${raw}_${sfx}`])).map(([key]) => key),
   };
 }
 
@@ -282,6 +300,9 @@ function rollupQuotes(u) {
   // نامعلوم می‌شود نه ناقص: جمعِ ناقص، عددی می‌سازد که به‌اندازه همان
   // قرارداد غلط است و هیچ نشانی هم ندارد.
   let callOiYday = 0, putOiYday = 0, oiYdayKnown = true;
+  // هر سمت که میدانی از یک قراردادش نیامده، جمعِ آن میدانش نامعلوم است.
+  const gap = { call: new Set(), put: new Set() };
+  const missing = { vol: 0, trades: 0, value: 0, oi: 0 };
   const strikes = new Set();
   const spreads = [];
   for (const ex of u.expiryList) {
@@ -290,6 +311,7 @@ function rollupQuotes(u) {
       for (const [q, isCall] of [[st.call, true], [st.put, false]]) {
         if (!q.ins) continue;
         contracts += 1;
+        for (const key of q.missing || []) { gap[isCall ? 'call' : 'put'].add(key); missing[key] += 1; }
         if (q.bid > 0 || q.ask > 0) quoted += 1;
         if (isCall) {
           callVol += q.vol; callOi += q.oi; callValue += q.value; callTrades += q.trades || 0;
@@ -311,6 +333,11 @@ function rollupQuotes(u) {
     ? spreads[(spreads.length - 1) / 2]
     : (spreads[spreads.length / 2 - 1] + spreads[spreads.length / 2]) / 2) : NaN;
   const days = u.expiryList.map((ex) => ex.days).filter(Number.isFinite);
+  const side = (key, isCall, total) => (gap[isCall ? 'call' : 'put'].has(key) ? NaN : total);
+  callVol = side('vol', true, callVol); putVol = side('vol', false, putVol);
+  callOi = side('oi', true, callOi); putOi = side('oi', false, putOi);
+  callValue = side('value', true, callValue); putValue = side('value', false, putValue);
+  callTrades = side('trades', true, callTrades); putTrades = side('trades', false, putTrades);
   const oi = callOi + putOi;
   const volume = callVol + putVol;
   const value = callValue + putValue;
@@ -333,7 +360,7 @@ function rollupQuotes(u) {
     callOiChange: oiYdayKnown ? callOi - callOiYday : NaN,
     putOiChange: oiYdayKnown ? putOi - putOiYday : NaN,
     pcVolRatio: callVol > 0 ? putVol / callVol : NaN,
-    value, trades,
+    value, trades, missing,
     spreadMedPct: spreads.length ? mid : NaN,
     farDays: days.length ? Math.max(...days) : null,
   };
@@ -366,7 +393,9 @@ export function underlyingList(chain, opt = {}) {
         atmIvPct: Number.isFinite(iv) ? iv * 100 : NaN,
       };
     })
-    .sort((a, b) => b.volume - a.volume || b.contracts - a.contracts);
+    // حجمِ نامعلوم ته فهرست می‌رود، نه اینکه مقایسه را NaN کند.
+    .sort((a, b) => (Number.isFinite(b.volume) ? b.volume : -1) - (Number.isFinite(a.volume) ? a.volume : -1)
+      || b.contracts - a.contracts);
 }
 
 /** مظنه پایه، به شکل همان قرارداد مظنه اختیار، تا موتور یک مسیر داشته باشد. */

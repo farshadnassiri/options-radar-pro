@@ -1511,7 +1511,13 @@ async function handleRequest(req, res, u) {
       }));
       const tradesByIns = Object.fromEntries(fetched.map(([ins, rows]) => [ins, rows]));
       const failed = fetched.filter(([, , error]) => error).map(([ins, , error]) => ({ ins, error }));
+      const failedIns = new Set(failed.map((row) => String(row.ins)));
       const observed = instruments.map((item) => {
+        // نوارِ نرسیده صفر نمی‌سازد: حجم و ارزش و تعدادش نامعلوم است و
+        // `tapeFailed` آن را از «بی‌معامله» جدا می‌کند (ممیزی ۳۰ سپتامبر).
+        if (failedIns.has(String(item.ins))) {
+          return { ...item, volume: NaN, value: NaN, trades: NaN, tapeFailed: true };
+        }
         const summary = summarizeLiveTrades(tradesByIns[item.ins] || []);
         return {
           ...item,

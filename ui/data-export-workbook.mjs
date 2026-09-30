@@ -83,8 +83,12 @@ export function splitSheets(title, headers, rows, widths, cap = SHEET_ROW_CAP) {
   }
   return parts;
 }
+// ستونِ اصلیِ «ارزش (ریال)» شمع، ارزشِ **واقعی** است (× اندازهٔ قرارداد).
+// پیش از این همان «قیمت × حجم» بی اندازه بود و برای اختیار هزار برابر کم —
+// با سرستونی که ادعای ریال داشت. جمعِ خام حالا فقط در ستونِ مشتق و با نامِ
+// خودش، هم‌نام با ستونِ مشتقِ برگ خام.
 export const DATA_EXPORT_CANDLE_DERIVED_HEADERS = [
-  'اندازه قرارداد', 'ارزش با اندازه قرارداد (ریال)',
+  'اندازه قرارداد', 'ارزش خام (ریال)',
 ];
 
 export function buildDataExportSheets({
@@ -386,10 +390,11 @@ export function buildDataExportSheets({
         bars.map((bar) => [
           bar.date, jalaliText(bar.date), tradeTimeLabel(bar.time),
           bar.open, bar.high, bar.low, bar.close,
-          bar.volume, bar.value, bar.trades, bar.canceled, bar.source,
+          // اندازهٔ نامعلوم ارزشِ نامعلوم می‌دهد، نه عددِ بی‌اندازه.
+          bar.volume, size > 0 ? bar.value * size : NaN, bar.trades, bar.canceled, bar.source,
           // چهار حالت، نه دو تا: «نیامد» هرگز «نشد» خوانده نمی‌شود.
           BUCKET_STATE[bar.state] || (bar.traded === false ? BUCKET_STATE.unknown : BUCKET_STATE.traded),
-          ...(derived ? [size > 0 ? size : NaN, size > 0 ? bar.value * size : NaN] : []),
+          ...(derived ? [size > 0 ? size : NaN, bar.value] : []),
         ]),
         [95, 95, 85, 95, 95, 95, 95, 90, 130, 95, 85, 85, 80, ...(derived ? [95, 150] : [])]);
     }

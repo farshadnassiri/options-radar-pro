@@ -142,6 +142,14 @@ export function historyMarketMetrics(row, { size = 1 } = {}) {
   if (!(volume > 0)) return { volume, trades, value: 0, valueEstimated: false, valueKnown: true };
   const close = historyPrice(row, 'CLOSE');
   const lot = num(size, 1);
+  // جمعِ «تعداد × قیمت» نوار (سنجش درون‌روزی) با اندازهٔ همین ابزار دقیق
+  // است، نه برآورد. بی اندازه، همان خطای هزاربرابری است، پس نامعلوم.
+  const tape = num(row.tapeValue, NaN);
+  if (tape > 0) {
+    return lot > 0
+      ? { volume, trades, value: tape * lot, valueEstimated: false, valueKnown: true }
+      : { volume, trades, value: NaN, valueEstimated: false, valueKnown: false };
+  }
   // معامله هست ولی نه ارزشِ رسمی و نه اندازهٔ قرارداد: ارزش نامعلوم است.
   if (!(close > 0) || !(lot > 0)) {
     return { volume, trades, value: NaN, valueEstimated: false, valueKnown: false };

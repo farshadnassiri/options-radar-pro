@@ -25,13 +25,23 @@ import { liveDayOf, LIVE_SOURCE_BOARD } from './live-day.mjs';
  * `qTotCap_*` (ارزش) و `zTotTran_*` (تعداد معامله) عمداً اینجا هستند:
  * ارزش می‌تواند بی‌تغییرِ حجم اصلاح شود (ابطال یک معامله و ثبت دوباره با
  * قیمت دیگر)، و بدون آن‌ها مصرف‌کنندهٔ رویدادها عدد کهنه را نگه می‌داشت.
+ *
+ * ممیزی ۳۰ سپتامبر `yesterdayOP_*` را هم کم یافت: منبع موقعیت باز دیروز را
+ * پس از بستن به‌روز می‌کند و «تغییر موقعیت باز» کهنه می‌ماند. حالا فهرست
+ * **هر** میدانی است که `buildChain` می‌خواند؛ دستهٔ ۳۰۴ همین را از متنِ
+ * `core/chain.mjs` می‌سنجد تا فهرست و خواننده از هم جدا نیفتند.
  */
+const SIDE_FIELDS = [
+  'lVal18AFC', 'pMeDem', 'qTitMeDem', 'pMeOf', 'qTitMeOf',
+  'pDrCotVal', 'pClosing', 'priceYesterday',
+  'oP', 'yesterdayOP', 'qTotTran5J', 'qTotCap', 'zTotTran',
+];
 export const WATCH_TRACK = Object.freeze([
-  'pDrCotVal_UA', 'pClosing_UA',
-  'pMeDem_C', 'qTitMeDem_C', 'pMeOf_C', 'qTitMeOf_C',
-  'pDrCotVal_C', 'pClosing_C', 'oP_C', 'qTotTran5J_C', 'qTotCap_C', 'zTotTran_C',
-  'pMeDem_P', 'qTitMeDem_P', 'pMeOf_P', 'qTitMeOf_P',
-  'pDrCotVal_P', 'pClosing_P', 'oP_P', 'qTotTran5J_P', 'qTotCap_P', 'zTotTran_P',
+  'lval30_UA', 'pDrCotVal_UA', 'pClosing_UA', 'priceYesterday_UA',
+  'qTotTran5J_UA', 'qTotCap_UA', 'zTotTran_UA',
+  'strikePrice', 'remainedDay', 'contractSize', 'endDate',
+  ...SIDE_FIELDS.map((f) => `${f}_C`),
+  ...SIDE_FIELDS.map((f) => `${f}_P`),
 ]);
 
 export const watchRowKey = (r) => `${r?.insCode_C ?? ''}|${r?.insCode_P ?? ''}`;

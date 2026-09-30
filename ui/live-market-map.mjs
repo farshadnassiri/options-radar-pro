@@ -141,18 +141,23 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       const value = Number(breadth[key]);
       return total + (Number.isFinite(value) ? value : 0);
     }, 0);
-    const underlyingValue = hasBreadth ? breadthValue : data.underlyingValue;
+    // جمعِ نصفه ساخته نمی‌شود: اگر نوار یک پایه نرسید، جمع نامعلوم است و
+    // تعدادِ کم‌آمده زیرش نوشته می‌شود — نه عددِ کم ولی کامل‌نما.
+    const tapeFailed = hasBreadth ? Number(breadth.tapeFailed) || 0 : 0;
+    const underlyingValue = hasBreadth ? (tapeFailed ? NaN : breadthValue) : data.underlyingValue;
+    const gap = (count, unit = 'پایه') => (count > 0 ? `${fmt.int(count)} ${unit} نامعلوم` : '');
+    const missing = data.missing || {};
     const positiveBases = Number.isFinite(Number(breadth.positive)) ? Number(breadth.positive) : data.positiveBases;
     const negativeBases = Number.isFinite(Number(breadth.negative)) ? Number(breadth.negative) : data.negativeBases;
     summaryHost.innerHTML = `
       <div class="section-head"><div><p class="eyebrow">کل بازار در همین عکس</p><h2>ارزش معاملات و وضعیت عمومی</h2></div><span>${fmt.int(baseTraded)} پایه معامله‌شده از ${fmt.int(data.underlyings)}</span></div>
       <div class="lmm-stat-grid">
-        ${stat('جمع ارزش اختیار', fmt.tomanShort(data.optionValue), 'کال و پوت')}
-        ${stat('ارزش کال', fmt.tomanShort(data.callValue))}
-        ${stat('ارزش پوت', fmt.tomanShort(data.putValue))}
-        ${stat('ارزش نمادهای پایه', fmt.tomanShort(underlyingValue))}
-        ${stat('حجم اختیار', fmt.int(data.optionVolume))}
-        ${stat('موقعیت باز', fmt.int(data.openInterest))}
+        ${stat('جمع ارزش اختیار', fmt.tomanShort(data.optionValue), gap(missing.optionValue) || 'کال و پوت')}
+        ${stat('ارزش کال', fmt.tomanShort(data.callValue), gap(missing.callValue))}
+        ${stat('ارزش پوت', fmt.tomanShort(data.putValue), gap(missing.putValue))}
+        ${stat('ارزش نمادهای پایه', fmt.tomanShort(underlyingValue), hasBreadth ? gap(tapeFailed) : gap(missing.underlyingValue))}
+        ${stat('حجم اختیار (قرارداد)', fmt.int(data.optionVolume), gap(missing.optionVolume))}
+        ${stat('موقعیت باز (قرارداد)', fmt.int(data.openInterest), gap(missing.openInterest))}
         ${stat('قرارداد معامله‌شده', fmt.int(data.tradedContracts), `از ${fmt.int(data.contracts)} قرارداد`)}
         ${stat('مظنه دوطرفه', fmt.int(data.twoSided), `${fmt.int(positiveBases)} پایه مثبت · ${fmt.int(negativeBases)} پایه منفی`)}
       </div>`;
@@ -589,9 +594,11 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       .sort((a, b) => Number(b[rangeSort]) - Number(a[rangeSort]) || a.name.localeCompare(b.name, 'fa'));
     rangeStatus.textContent = `${fmt.int(rows.length)} قرارداد دارای بازه معتبر از ${fmt.int(contracts().length)} قرارداد · مرتب بر ${labels[rangeSort]}${heading.note ? ` · ${heading.note}` : ''}`;
     if (!rows.length) { rangeChart.innerHTML = '<p class="empty-note">بالادست برای قراردادهای این سررسید بازه معتبر امروز برنگرداند.</p>'; return; }
-    rangeChart.innerHTML = `<div class="lmm-range-legend"><span>سایه: کمینه تا بیشینه</span><span>بدنه: اولین تا آخرین</span><span>نقاط: پنج قیمت مستقل</span><small>موس را روی هر کندل حرکت بده تا همه قیمت‌ها دیده شوند؛ کلیک، جزئیات را باز نگه می‌دارد.</small></div><div class="lmm-range-list">${rows.map((row) => {
+    rangeChart.innerHTML = `<div class="lmm-range-legend"><span>سایه: کمینه تا بیشینه</span><span>بدنه: اولین تا آخرین</span><span>نقاط: پنج قیمت مستقل</span><span>قیمت‌ها: ریال، برای هر واحد دارایی پایه</span><small>موس را روی هر کندل حرکت بده تا همه قیمت‌ها دیده شوند؛ کلیک، جزئیات را باز نگه می‌دارد.</small></div><div class="lmm-range-list">${rows.map((row) => {
       const low = Number(row.low), high = Number(row.high), first = Number(row.first), last = Number(row.last), close = Number(row.close);
-      const rankValue = rangeSort === 'value' ? fmt.tomanShort(row.value) : fmt.int(row[rangeSort]);
+      // هر عدد با واحدِ خودش: ارزش تومان، حجم و موقعیت باز «قرارداد» (نه سهم).
+      const rankValue = rangeSort === 'value' ? fmt.tomanShort(row.value)
+        : Number.isFinite(Number(row[rangeSort])) ? `${fmt.int(Number(row[rangeSort]))} قرارداد` : '—';
       const lastPct = pctVsYday(last, row.yday), closePct = pctVsYday(close, row.yday);
       return `<article class="${tone(last - first)}" data-lmm-range-card="${esc(row.ins)}"><header><button type="button" data-lmm-range-contract="${esc(row.ins)}"><b>${esc(row.name)}</b><small>${kindLabel(row.kind)} · اعمال ${fmt.money(row.strike)}</small></button><div class="lmm-range-stats"><strong${rangeSort === 'value' && Number.isFinite(Number(row.value)) ? ` title="${fmt.toman(Number(row.value))} تومان"` : ''}>${rankValue}</strong><span class="${tone(lastPct)}">آخرین ${fmt.pct(lastPct)}٪</span><span class="${tone(closePct)}">پایانی ${fmt.pct(closePct)}٪</span></div></header><button type="button" class="lmm-range-track" data-lmm-range-focus="${esc(row.ins)}" aria-expanded="false" aria-label="کندل روزانه ${esc(row.name)}؛ تغییر آخرین ${fmt.pct(lastPct)} درصد و پایانی ${fmt.pct(closePct)} درصد"></button><footer><span>کمینه ${fmt.money(low)}</span><span>اولین ${fmt.money(first)}</span><span>آخرین ${fmt.money(last)}</span><span>پایانی ${fmt.money(close)}</span><span>بیشینه ${fmt.money(high)}</span></footer></article>`;
     }).join('')}</div>`;
