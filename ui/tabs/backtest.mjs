@@ -294,7 +294,7 @@ export async function mount(root, { state }) {
     }
     const entryDate = Number($('bt-entry-date').dataset.value), basis = entryRail.dataset.value || 'LAST';
     $('bt-legs').innerHTML = legs.map((leg, index) => {
-      const row = rowAt(leg.ins, entryDate), market = historyMarketMetrics(row);
+      const row = rowAt(leg.ins, entryDate), market = historyMarketMetrics(row, { size: leg.kind === 'underlying' ? 1 : Number(leg.size) || 0 });
       return `<article><span>${faDigits(index + 1)} · ${leg.side === 'buy' ? 'خرید' : 'فروش'} ${leg.kind === 'call' ? 'اختیار خرید' : leg.kind === 'put' ? 'اختیار فروش' : 'نماد پایه'}</span><b>${esc(nameOf(leg, 'پایه'))}</b><small>اعمال ${leg.kind === 'underlying' ? '—' : fmt.int(leg.strike)} · نسبت ${fmt.num(leg.ratio)} · اندازه ${fmt.int(leg.size)}</small><small>قیمت ورود ${fmt.money(historyPrice(row, basis))} · حجم ${fmt.int(market.volume)} · ارزش ${fmt.money(market.value)}</small></article>`;
     }).join('');
     refreshExitDates();

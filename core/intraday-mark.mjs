@@ -44,7 +44,7 @@ export const MARK_MOMENTS = [
 export function markAt(rows = [], second) {
   const cut = num(second, NaN);
   if (!Number.isFinite(cut)) return null;
-  let last = null, volume = 0, trades = 0, value = 0;
+  let last = null, volume = 0, trades = 0, rawValue = 0;
   for (const row of rows || []) {
     const price = num(row?.price, NaN);
     if (!(price > 0) || row?.canceled || !inIntradaySession(row.time)) continue;
@@ -53,11 +53,14 @@ export function markAt(rows = [], second) {
     const quantity = Math.max(0, num(row.quantity));
     volume += quantity;
     trades += 1;
-    value += quantity * price;
+    rawValue += quantity * price;
     if (!last || at >= last.second) last = { price, second: at, timeLabel: tradeTimeLabel(row.time) };
   }
   if (!last) return null;
-  return { ...last, volume, trades, value };
+  // `rawValue` جمعِ «تعداد × قیمت» است، **بی** اندازهٔ قرارداد. نامش عمداً
+  // `value` نیست: برای اختیار هزار برابر کمتر از ارزشِ ریالی است و مصرف‌کننده
+  // باید با اندازهٔ همان ابزار ضربش کند (`historyMarketMetrics`).
+  return { ...last, volume, trades, rawValue };
 }
 
 /** همان `markAt` برای همهٔ ابزارها. ابزارِ بی‌معامله اصلاً کلید نمی‌گیرد. */
@@ -105,7 +108,11 @@ export function applyIntradayMark(seriesByIns = {}, marks = {}, { date, second }
       close: mark.price, last: mark.price,
       yday: num(official?.yday, 0),
       first: 0, low: 0, high: 0,
-      vol: mark.volume, trades: mark.trades, value: mark.value,
+      // ارزشِ رسمیِ این لحظه را نداریم (`value: 0`)؛ جمعِ بی‌اندازهٔ نوار در
+      // `tapeValue` می‌رود و `historyMarketMetrics` با اندازهٔ همان پا ضربش
+      // می‌کند. پیش از این همان جمع در `value` می‌نشست و «رسمی» خوانده
+      // می‌شد: برای ضفزر729، ۱٬۰۵۱٬۲۶۶٬۶۶۹ به‌جای ۱٬۰۵۱٬۲۶۶٬۶۶۹٬۰۰۰ ریال.
+      vol: mark.volume, trades: mark.trades, value: 0, tapeValue: mark.rawValue,
       intradayMark: true, markSecond: mark.second, markTimeLabel: mark.timeLabel,
     }].sort((a, b) => normalizeHistoryDate(a.date) - normalizeHistoryDate(b.date));
   }

@@ -10,6 +10,36 @@ export function num(x, d = 0) {
   return Number.isFinite(v) ? v : d;
 }
 
+/**
+ * عدد، یا `NaN` برای «نامعلوم» — **بدون** تبدیلِ `null` به صفر.
+ *
+ * `NaN` در JSON به `null` می‌رود و `Number(null)` صفر است؛ پس
+ * `Number.isFinite(Number(x))` برای دادهٔ نامعلوم «درست» برمی‌گرداند و IV
+ * نامعلوم «صفر» خوانده می‌شد (ممیزی ۳۰ سپتامبر: ۵۷۹ قرارداد). `null`،
+ * `undefined`، رشتهٔ خالی و بولی نامعلوم‌اند؛ باقی همان `Number(x)`.
+ */
+export function numOrNaN(x) {
+  if (x === null || x === undefined || x === '' || typeof x === 'boolean') return NaN;
+  const v = Number(x);
+  return Number.isFinite(v) ? v : NaN;
+}
+
+/**
+ * ردیف‌های رسیده از JSON: هر `null` که جای عدد نشسته، دوباره `NaN` می‌شود.
+ *
+ * سرور `NaN` را برای «نامعلوم» می‌فرستد و JSON آن را `null` می‌کند؛ مصرف‌کننده
+ * با `Number()` صفرش می‌خواند. این مرز یک بار برمی‌گرداندش تا هیچ خواننده‌ای
+ * مجبور نباشد به یاد بیاورد. فقط `null`ِ خالص عوض می‌شود؛ رشته و شیء نه.
+ */
+export function reviveNullNumbers(rows = []) {
+  return (rows || []).map((row) => {
+    if (!row || typeof row !== 'object') return row;
+    const out = { ...row };
+    for (const key of Object.keys(out)) if (out[key] === null) out[key] = NaN;
+    return out;
+  });
+}
+
 /** آیا مقدار، عدد متناهی است. */
 export function ok(x) {
   return typeof x === 'number' && Number.isFinite(x);

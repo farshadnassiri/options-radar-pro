@@ -56,7 +56,18 @@ export function summarizeLiveTrades(rows = []) {
  * است. این مسیر «مشاهده بازار» است، نه قیمت قابل اجرا؛ قیمت اختیار، خودِ
  * آخرین معامله ثبت‌شده است و دفتر سفارش تاریخی از این API نمی‌آید.
  */
-export function liveOptionTape({ trades = [], baseTrades = [], contract = {}, settings = {} } = {}) {
+const OPTION_TAPE_KEYS = new Set(['trades', 'baseTrades', 'contract', 'settings']);
+
+export function liveOptionTape(args = {}) {
+  // ═══ کلیدِ ناشناخته، خطای بلند ═══
+  //
+  // ممیزی ۳۰ سپتامبر: داشبورد `underlyingTape` می‌فرستاد و این تابع
+  // `baseTrades` می‌خواند. نتیجه بی‌صدا بود — نوار پایه خالی، صفر IV — و
+  // آزمونِ خودِ تابع سبز می‌ماند چون نام درست را می‌داد. حالا اشتباهِ نام
+  // همان‌جا پرتاب می‌شود و در دفتر خطا دیده می‌شود.
+  const unknown = Object.keys(args || {}).filter((key) => !OPTION_TAPE_KEYS.has(key));
+  if (unknown.length) throw new TypeError(`liveOptionTape: کلید ناشناخته ${unknown.join(', ')}`);
+  const { trades = [], baseTrades = [], contract = {}, settings = {} } = args || {};
   const optionRows = activeLiveTrades(trades);
   const baseRows = activeLiveTrades(baseTrades);
   const days = finite(contract.days);
@@ -171,10 +182,16 @@ const breadthState = (price, yday, traded) => {
 export function marketBreadthSnapshot(instruments = []) {
   const rows = (instruments || []).map((item) => {
     const price = finite(item.last) > 0 ? finite(item.last) : finite(item.close);
-    const volume = Math.max(0, finite(item.uaVolume !== undefined ? item.uaVolume : item.volume) || 0);
-    const trades = Math.max(0, finite(item.uaTrades !== undefined ? item.uaTrades : item.trades) || 0);
-    const value = Math.max(0, finite(item.uaValue !== undefined ? item.uaValue : item.value) || 0);
-    const state = breadthState(price, item.yday, volume > 0 || trades > 0);
+    // ═══ نوارِ نرسیده «بی‌معامله» نیست ═══
+    //
+    // ممیزی ۳۰ سپتامبر: شکستِ دریافتِ نوار پایه به آرایهٔ خالی و حجم و ارزشِ
+    // صفر تبدیل می‌شد؛ نماد «بی‌معامله» شمرده می‌شد و جمعِ ارزش پایه‌ها کم ولی
+    // کامل‌نما. حالا `tapeFailed` وضعیتِ «نامعلوم» می‌گیرد و شمرده می‌شود.
+    const failed = item.tapeFailed === true;
+    const volume = failed ? NaN : Math.max(0, finite(item.uaVolume !== undefined ? item.uaVolume : item.volume) || 0);
+    const trades = failed ? NaN : Math.max(0, finite(item.uaTrades !== undefined ? item.uaTrades : item.trades) || 0);
+    const value = failed ? NaN : Math.max(0, finite(item.uaValue !== undefined ? item.uaValue : item.value) || 0);
+    const state = failed ? 'unknown' : breadthState(price, item.yday, volume > 0 || trades > 0);
     return {
       ...item, price, volume, value, trades, state,
       changePct: price > 0 && finite(item.yday) > 0 ? ((price / finite(item.yday)) - 1) * 100 : NaN,
@@ -189,6 +206,7 @@ export function marketBreadthSnapshot(instruments = []) {
   const valueOf = (state) => rows.filter((row) => row.state === state).reduce((sum, row) => sum + row.value, 0);
   return {
     total: rows.length, traded, positive, negative, flat, untraded, unknown,
+    tapeFailed: rows.filter((row) => row.tapeFailed === true).length,
     positivePct: pct(positive), negativePct: pct(negative), flatPct: pct(flat),
     breadth: positive - negative,
     positiveVolume: volumeOf('positive'), negativeVolume: volumeOf('negative'), flatVolume: volumeOf('flat'),

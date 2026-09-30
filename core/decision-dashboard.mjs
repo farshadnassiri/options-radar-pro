@@ -8,6 +8,7 @@ import { buildChain, underlyingList } from './chain.mjs';
 import { liveQuoteIvSet, IV_WHY_LABEL } from './live-market.mjs';
 import { greeksFromIvPct } from './leg-iv.mjs';
 import { bsPrice } from './bs.mjs';
+import { numOrNaN, reviveNullNumbers } from './num.mjs';
 
 export function pctVsYesterday(last, yesterday) {
   const now = Number(last), prior = Number(yesterday);
@@ -17,6 +18,7 @@ export function pctVsYesterday(last, yesterday) {
 const emptyAggregate = (seed = {}) => ({
   ...seed, contracts: 0, tradedContracts: 0, positive: 0, negative: 0, unchanged: 0,
   volume: 0, value: 0, trades: 0, oi: 0, oiYday: 0, _oiYdayGap: false,
+  missing: { volume: 0, value: 0, trades: 0, oi: 0 },
   callVolume: 0, putVolume: 0, callValue: 0, putValue: 0,
   callTrades: 0, putTrades: 0,
   callOi: 0, putOi: 0, twoSided: 0, changePct: NaN, ivPct: NaN,
@@ -27,6 +29,11 @@ function addContract(target, row) {
   target.contracts += 1;
   const traded = row.volume > 0 || row.trades > 0 || row.value > 0;
   if (traded) target.tradedContracts += 1;
+  // میدانِ نیامده (`NaN`) جمع را نامعلوم می‌کند و شمرده می‌شود؛ جمعِ نصفه
+  // ساخته نمی‌شود. `finishAggregate` تعداد را کنار عددِ نامعلوم می‌گذارد.
+  for (const key of ['volume', 'value', 'trades', 'oi']) {
+    if (!Number.isFinite(row[key])) target.missing = { ...target.missing, [key]: target.missing[key] + 1 };
+  }
   target.volume += row.volume; target.value += row.value; target.trades += row.trades;
   target.oi += row.oi;
   // همان قاعده رده پایین: اگر موقعیت باز دیروزِ یک قرارداد نامعلوم باشد،
@@ -129,7 +136,10 @@ export function decisionDashboardSnapshot(rows, settings = {}) {
       for (const strike of expiry.strikeList) {
         for (const quote of [strike.call, strike.put]) {
           if (!quote.ins) continue;
+          // «آخرین» اگر معامله‌ای نبود از پایانیِ **رسمی** می‌آید (دیگر هرگز از
+          // مظنه) و منشأش در `lastSource` صریح است؛ `tradeLast` فقط معامله.
           const last = Number(quote.last || quote.close);
+          const lastSource = Number(quote.last) > 0 ? 'trade' : Number(quote.close) > 0 ? 'close' : '';
           const mid = quote.bid > 0 && quote.ask > 0 ? (quote.bid + quote.ask) / 2 : NaN;
           const intrinsic = quote.kind === 'put'
             ? Math.max(0, Number(strike.strike) - spot)
@@ -137,11 +147,12 @@ export function decisionDashboardSnapshot(rows, settings = {}) {
           const timeValue = Number.isFinite(last) ? last - intrinsic : NaN;
           const pctSpot = (value) => spot > 0 && Number.isFinite(value) ? (value / spot) * 100 : NaN;
           const oiYday = Number(quote.oiYday);
+          const gone = (key) => (quote.missing || []).includes(key);
           const contract = {
             ins: String(quote.ins), name: quote.name, kind: quote.kind,
             uaIns: String(ua.ins), uaName: ua.name, endDate: expiry.endDate, days: expiry.days,
             strike: strike.strike, size: strike.size, spot,
-            last, tradeLast: Number(quote.last) > 0 ? Number(quote.last) : NaN,
+            last: last > 0 ? last : NaN, lastSource, tradeLast: Number(quote.last) > 0 ? Number(quote.last) : NaN,
             close: Number(quote.close), yday: quote.yday,
             changePct: pctVsYesterday(last, quote.yday), bid: quote.bid, ask: quote.ask,
             closeChangePct: pctVsYesterday(quote.close, quote.yday),
@@ -150,10 +161,12 @@ export function decisionDashboardSnapshot(rows, settings = {}) {
             premiumPctSpot: pctSpot(last), intrinsic, timeValue,
             intrinsicPctSpot: pctSpot(intrinsic), timeValuePctSpot: pctSpot(timeValue),
             moneynessPct: spot > 0 ? ((Number(strike.strike) / spot) - 1) * 100 : NaN,
-            volume: quote.vol, trades: quote.trades, value: quote.value,
-            oi: quote.oi, oiYday: quote.oiYday,
-            oiChange: Number.isFinite(oiYday) ? Number(quote.oi) - oiYday : NaN,
-            oiChangePct: Number.isFinite(oiYday) && oiYday > 0
+            // میدانِ نیامده در تابلو `NaN` است، نه صفرِ «معامله نشد».
+            volume: gone('vol') ? NaN : quote.vol, trades: gone('trades') ? NaN : quote.trades,
+            value: gone('value') ? NaN : quote.value,
+            oi: gone('oi') ? NaN : quote.oi, oiYday: quote.oiYday,
+            oiChange: Number.isFinite(oiYday) && !gone('oi') ? Number(quote.oi) - oiYday : NaN,
+            oiChangePct: Number.isFinite(oiYday) && oiYday > 0 && !gone('oi')
               ? ((Number(quote.oi) / oiYday) - 1) * 100 : NaN,
             // سه تلاطم و علتش، از یک مسیر: مشاهده‌ای (آخرین معامله) و
             // اجرایی (مظنه). مظنه با قیمت پایه هم‌زمان است، آخرین معامله
@@ -187,12 +200,13 @@ export function decisionDashboardSnapshot(rows, settings = {}) {
     contract.spreadRankPct = spreadPercentile(spreadSorted, contract.spreadPct);
   }
 
-  const expiries = [...expiryMap.values()].sort((a, b) => b.value - a.value || a.days - b.days);
+  const known = (v) => (Number.isFinite(v) ? v : -1);
+  const expiries = [...expiryMap.values()].sort((a, b) => known(b.value) - known(a.value) || a.days - b.days);
   const marketExpiries = [...marketExpiryMap.values()].map((item) => {
     const count = item.underlyings.size; item.underlyings = count;
     return finishAggregate(item);
-  }).sort((a, b) => b.value - a.value || a.days - b.days);
-  contracts.sort((a, b) => b.value - a.value || b.volume - a.volume || a.name.localeCompare(b.name, 'fa'));
+  }).sort((a, b) => known(b.value) - known(a.value) || a.days - b.days);
+  contracts.sort((a, b) => known(b.value) - known(a.value) || known(b.volume) - known(a.volume) || a.name.localeCompare(b.name, 'fa'));
   return { underlyings, expiries, marketExpiries, contracts };
 }
 
@@ -277,11 +291,20 @@ export function marketMapRows(snapshot = {}, metric = 'value') {
 export function marketMapSummary(snapshot = {}) {
   const underlyings = snapshot.underlyings || [];
   const contracts = snapshot.contracts || [];
-  const sum = (rows, key) => rows.reduce((total, row) => {
-    const value = Number(row[key]);
-    return total + (Number.isFinite(value) ? value : 0);
-  }, 0);
-  const knownDirection = underlyings.filter((row) => Number.isFinite(Number(row.changePct)));
+  // جمعِ نصفه ساخته نمی‌شود: پیش از این ردیفِ نامعلوم صفر شمرده می‌شد و
+  // «ارزش نمادهای پایه» با یک نوارِ نرسیده، کم ولی کامل‌نما چاپ می‌شد. حالا
+  // یک ردیفِ نامعلوم کل جمع را نامعلوم می‌کند و `missing` تعدادش را می‌گوید.
+  const missing = {};
+  const sum = (rows, key, label = key) => {
+    let total = 0, gaps = 0;
+    for (const row of rows) {
+      const value = numOrNaN(row[key]);
+      if (Number.isFinite(value)) total += value; else gaps += 1;
+    }
+    missing[label] = gaps;
+    return gaps ? NaN : total;
+  };
+  const knownDirection = underlyings.filter((row) => Number.isFinite(numOrNaN(row.changePct)));
   return {
     underlyings: underlyings.length,
     baseTraded: underlyings.filter((row) => Number(row.uaVolume) > 0 || Number(row.uaTrades) > 0 || Number(row.uaValue) > 0).length,
@@ -293,10 +316,11 @@ export function marketMapSummary(snapshot = {}) {
     flatBases: knownDirection.filter((row) => Number(row.changePct) === 0).length,
     callValue: sum(underlyings, 'callValue'),
     putValue: sum(underlyings, 'putValue'),
-    optionValue: sum(underlyings, 'value'),
-    underlyingValue: sum(underlyings, 'uaValue'),
-    optionVolume: sum(underlyings, 'volume'),
-    openInterest: sum(underlyings, 'oi'),
+    optionValue: sum(underlyings, 'value', 'optionValue'),
+    underlyingValue: sum(underlyings, 'uaValue', 'underlyingValue'),
+    optionVolume: sum(underlyings, 'volume', 'optionVolume'),
+    openInterest: sum(underlyings, 'oi', 'openInterest'),
+    missing,
   };
 }
 
@@ -676,9 +700,11 @@ export function chainSideMax(rows = [], key = 'oi') {
  */
 export function contractAnalytics(row = {}, params = {}) {
   const kind = row.kind === 'put' ? 'put' : row.kind === 'call' ? 'call' : null;
-  const spot = Number(row.spot), strike = Number(row.strike);
+  // `numOrNaN`: ردیف از JSON می‌آید و IV نامعلوم آنجا `null` است. با
+  // `Number()` صفر می‌شد و یونانی‌ها روی تلاطمِ صفر ساخته می‌شدند.
+  const spot = numOrNaN(row.spot), strike = numOrNaN(row.strike);
   const premium = Number(row.last) > 0 ? Number(row.last) : NaN;
-  const days = Number(row.days), ivPct = Number(row.ivPct);
+  const days = numOrNaN(row.days), ivPct = numOrNaN(row.ivPct);
   const yearDays = Number(params.yearDays) > 0 ? Number(params.yearDays) : 365;
   const greeks = kind ? greeksFromIvPct({ kind, strike }, { spot, days }, ivPct, { ...params, yearDays }) : null;
   // کف نظری = ارزش بلک–شولز در کمینهٔ دامنهٔ تلاطم. زیر این عدد، هیچ
@@ -714,8 +740,8 @@ export function contractAnalytics(row = {}, params = {}) {
   // درست بود، و نتیجه‌اش بدترین شکلِ ناقص‌بودن: ردیفی که «دلتای اجرایی»
   // داشت ولی گاما و تتا و وگایش خالی بود — یعنی داده **بود** و ما دورش
   // ریخته بودیم. محاسبه همان یک فراخوانی بود که از قبل انجام می‌شد.
-  const midGreeks = kind && Number.isFinite(Number(row.ivMidPct))
-    ? greeksFromIvPct({ kind, strike }, { spot, days }, Number(row.ivMidPct), { ...params, yearDays })
+  const midGreeks = kind && Number.isFinite(numOrNaN(row.ivMidPct))
+    ? greeksFromIvPct({ kind, strike }, { spot, days }, numOrNaN(row.ivMidPct), { ...params, yearDays })
     : null;
   const deltaMid = Number(midGreeks?.delta ?? NaN);
 
@@ -723,7 +749,7 @@ export function contractAnalytics(row = {}, params = {}) {
     // ستون خالی وقتی تلاطم هست یعنی «چیزی برای توضیح نیست»؛ ستون خالی
     // وقتی تلاطم نیست یعنی «خودمان هم نمی‌دانیم» — و این دو نباید یک شکل
     // دیده شوند.
-    ivWhyText: Number.isFinite(Number(row.ivPct)) ? ''
+    ivWhyText: Number.isFinite(numOrNaN(row.ivPct)) ? ''
       : (IV_WHY_LABEL[row.ivWhy] || 'نامشخص'),
     // ═══ «آخرین قیمت» همیشه «قیمت امروز» نیست ═══
     //
@@ -747,7 +773,7 @@ export function contractAnalytics(row = {}, params = {}) {
     // داشبورد فقط `ivWhyText` مربوط به آخرین معامله را ستون‌بندی کرده.»
     // اطلاعات تشخیصی بود و نمایش داده نمی‌شد — همان قاعدهٔ ستون «علت نبود
     // تلاطم»، این بار برای سمتِ اجرایی.
-    ivMidWhyText: Number.isFinite(Number(row.ivMidPct)) ? ''
+    ivMidWhyText: Number.isFinite(numOrNaN(row.ivMidPct)) ? ''
       : (IV_WHY_LABEL[row.ivMidWhy] || 'نامشخص'),
     delta: Number.isFinite(delta) ? delta : NaN,
     gamma: Number(greeks?.gamma ?? NaN),
@@ -965,4 +991,22 @@ export function pairedSides(side = 'all') {
   if (side === 'call') return ['call'];
   if (side === 'put') return ['put'];
   return ['call', 'put'];
+}
+
+/**
+ * عکس داشبورد پس از عبور از JSON: `null`ِ هر ردیف دوباره `NaN` می‌شود.
+ *
+ * ممیزی ۳۰ سپتامبر: IV نامعلومِ ۵۷۹ قرارداد پس از JSON روی لبخند تلاطم
+ * «صفر» رسم می‌شد و علتِ نبودِ تلاطم پاک می‌شد. تب داشبورد همین را روی
+ * پاسخ `/api/live-dashboard` صدا می‌زند، پیش از هر مصرفی.
+ */
+export function reviveDashboardUniverse(universe = {}) {
+  const u = universe || {};
+  return {
+    ...u,
+    underlyings: reviveNullNumbers(u.underlyings),
+    expiries: reviveNullNumbers(u.expiries),
+    marketExpiries: reviveNullNumbers(u.marketExpiries),
+    contracts: reviveNullNumbers(u.contracts),
+  };
 }

@@ -3,12 +3,13 @@
 
 import { fmt, faDigits, faClock } from '/ui/fmt.mjs';
 import { makeTable } from '/ui/table.mjs';
-import { liveOptionTape, liveReferenceTape, marketBreadthSnapshot } from '/core/live-market.mjs';
+import { liveOptionTape, marketBreadthSnapshot } from '/core/live-market.mjs';
 import {
   dashboardScope, activeOptionsBoard, moneynessDistribution, BOARD_METRICS,
   strikeLadder, maxPain, termStructure,
-  contractBreakeven, breakevenGap, breakevenGapPct, contractAnalytics,
+  contractBreakeven, breakevenGap, breakevenGapPct, contractAnalytics, reviveDashboardUniverse,
 } from '/core/decision-dashboard.mjs';
+import { numOrNaN } from '/core/num.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -474,13 +475,14 @@ function aggregateRows(rows, keyOf, labelOf) {
     }
     item.contractCount += 1;
     if (Number(row.volume) > 0 || Number(row.trades) > 0 || Number(row.value) > 0) item.tradedContracts += 1;
-    for (const metric of ['value', 'volume', 'trades', 'oi']) item[metric] += Number(row[metric]) || 0;
-    if (Number.isFinite(Number(row.oiYday))) item.oiYday += Number(row.oiYday); else item._oiYdayGap = true;
+    // میدانِ نامعلوم جمعِ گروه را نامعلوم می‌کند، نه صفر (جمعِ نصفه ساخته نمی‌شود).
+    for (const metric of ['value', 'volume', 'trades', 'oi']) item[metric] += numOrNaN(row[metric]);
+    if (Number.isFinite(numOrNaN(row.oiYday))) item.oiYday += numOrNaN(row.oiYday); else item._oiYdayGap = true;
     const side = row.kind === 'put' ? 'put' : 'call';
-    item[`${side}Volume`] += Number(row.volume) || 0;
-    item[`${side}Value`] += Number(row.value) || 0;
-    item[`${side}Trades`] += Number(row.trades) || 0;
-    item[`${side}Oi`] += Number(row.oi) || 0;
+    item[`${side}Volume`] += numOrNaN(row.volume);
+    item[`${side}Value`] += numOrNaN(row.value);
+    item[`${side}Trades`] += numOrNaN(row.trades);
+    item[`${side}Oi`] += numOrNaN(row.oi);
     const weight = Number(row.value) > 0 ? Number(row.value) : 1;
     if (Number.isFinite(row.changePct)) {
       item._change += row.changePct * weight; item._changeWeight += weight;
@@ -1163,7 +1165,7 @@ export async function mount(root, { state, api }) {
     if (kind === 'iv-smile') {
       host.innerHTML = `<p class="note">لبخند تلاطم: نوسان ضمنی هر قرارداد در برابر فاصله اعمالش از قیمت جاری. صفر یعنی نزدیک پول.</p>${scatterChart(contracts.map((row) => ({
         x: Number(row.spot) > 0 ? ((Number(row.strike) / Number(row.spot)) - 1) * 100 : NaN,
-        y: Number(row.ivPct), kind: row.kind, label: `${row.name} · IV ${fmt.pct(row.ivPct)}٪`,
+        y: numOrNaN(row.ivPct), kind: row.kind, label: `${row.name} · IV ${fmt.pct(row.ivPct)}٪`,
       })), { xLabel: 'فاصله اعمال از قیمت جاری ٪', yLabel: 'تلاطم ضمنی ٪', marker: NaN })}`;
       return true;
     }
@@ -1175,7 +1177,7 @@ export async function mount(root, { state, api }) {
     if (scatters[kind]) {
       const [xKey, yKey, xLabel, yLabel] = scatters[kind];
       host.innerHTML = scatterChart(contracts.map((row) => ({
-        x: Number(row[xKey]), y: Number(row[yKey]), kind: row.kind,
+        x: numOrNaN(row[xKey]), y: numOrNaN(row[yKey]), kind: row.kind,
         label: `${row.name} · ${xLabel} ${fmt.num(row[xKey])} · ${yLabel} ${fmt.num(row[yKey])}`,
       })), { xLabel, yLabel, marker: NaN });
       return true;
@@ -1224,7 +1226,10 @@ export async function mount(root, { state, api }) {
       const got = await fetchLiveTape([pick.uaIns, contract.ins]);
       if (got.errors.length) throw new Error(got.errors[0].why);
       const optionRows = got.byIns[contract.ins]?.rows || [], baseRows = got.byIns[pick.uaIns]?.rows || [];
-      tape = liveOptionTape({ trades: optionRows, contract, underlyingTape: liveReferenceTape(baseRows), settings: state.settings });
+      // نوارِ خامِ پایه با نامِ درستِ پارامتر. پیش از این `underlyingTape`
+      // می‌رفت که تابع اصلاً نمی‌خواند؛ هر ۳٬۰۱۶ معاملهٔ ضفزر729 بی قیمت پایه
+      // و بی IV می‌ماند. تابع حالا کلیدِ ناشناخته را رد می‌کند.
+      tape = liveOptionTape({ trades: optionRows, baseTrades: baseRows, contract, settings: state.settings });
     } catch (error) { logError('ریزمعامله داشبورد تصمیم‌گیری', error); }
   }
 
@@ -1241,6 +1246,8 @@ export async function mount(root, { state, api }) {
     try {
       const response = await fetch('/api/live-dashboard', { cache: 'no-store' }), next = await response.json();
       if (!response.ok || next.error) throw new Error(next.error || `HTTP ${response.status}`);
+      // `NaN`ِ سرور پس از JSON `null` است و `Number(null)` صفر؛ مرز همین‌جاست.
+      next.universe = reviveDashboardUniverse(next.universe);
       payload = next; openViewController?.updateLive?.(payload);
       await marketExplorer.setUniverse(payload.universe, true, payload);
       paintLevels(); await fetchTape(); await paintView();

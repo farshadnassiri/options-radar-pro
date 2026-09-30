@@ -138,7 +138,8 @@ export function comboMetrics({
   // «ارزش معامله» به فیلترها اضافه شد چون ترکیبی که روی کاغذ هست و در
   // بازار نیست، ردیفِ گمراه‌کننده‌ای است. کمترینِ پاها ملاک است نه جمعشان:
   // ترکیبی که یک پایش ده میلیارد و پای دیگرش صفر خورده، اجرا نمی‌شود.
-  const markets = options.map((leg) => historyMarketMetrics(rowByIns[String(leg.ins)]));
+  // اندازهٔ قرارداد صریح: پیش‌فرضِ ۱ برای اختیار، برآوردِ هزار برابر کم می‌ساخت.
+  const markets = options.map((leg) => historyMarketMetrics(rowByIns[String(leg.ins)], { size: num(leg.size, 0) || size }));
   const values = markets.map((row) => num(row.value, 0));
   const volumes = markets.map((row) => num(row.volume, 0));
   const trades = markets.map((row) => num(row.trades, 0));
