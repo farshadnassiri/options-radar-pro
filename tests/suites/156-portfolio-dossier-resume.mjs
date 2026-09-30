@@ -85,6 +85,6 @@ group('۱۵۶. بازکردن پروندهٔ ذخیره‌شده پس از refre
     !/fetch\(|portfolioSessionEligibility|walkBook|buildChain/.test(view156));
   const shown156 = [resumed156.headlineText, resumed156.accountingText,
     resumed156.positionsText, resumed156.realized.totalText];
-  check('متن پرونده رقم لاتین یا ریال ندارد',
-    shown156.every((value) => !/[0-9]/.test(value) && !String(value).includes('ریال')));
+  check('متن پرونده رقم لاتین یا تومان ندارد',
+    shown156.every((value) => !/[0-9]/.test(value) && !String(value).includes('تومان')));
 }

@@ -25,22 +25,22 @@ group('۱۷۴. تشکیل سبد با حجم صریح و ماندگاری پس �
   const id174 = `build-refresh-174-${process.pid}`;
   const setup174 = createPortfolioStepOneDraft({
     id: id174, baseIns: fx174.baseSession.baseIns,
-    capitalToman: '1000000000', reserveToman: '0',
+    capitalRialInput: '10000000000', reserveRialInput: '0',
     startDate: fx174.at.date, startSecond: fx174.at.second,
     endDate: 20260620, endSecond: 12 * 3600,
     grain: 'daily', createdAt: 174,
   });
   const outlook174 = createPortfolioOutlookDraft(setup174.draft, {
-    direction: 'bullish', targetPriceToman: '1140',
-    rangeLowToman: '', rangeHighToman: '', volatilityView: 'higher',
+    direction: 'bullish', targetPriceRialInput: '11400',
+    rangeLowRialInput: '', rangeHighRialInput: '', volatilityView: 'higher',
     expectedVolatilityPct: '35', confidencePct: '70',
     thesis: 'تشکیل واقعی سبد با حجم انتخابی کاربر',
   });
   const risk174 = createPortfolioRiskDraft(outlook174.draft, {
     maxLossPct: '50', maxDrawdownPct: '60', minFreeCapitalPct: '10',
     maxMarginUsePct: '40', allowUnlimitedRisk: 'yes',
-    minUnderlyingDailyValueToman: '10000000',
-    minOptionDailyValueToman: '1000000', minOpenInterest: '100',
+    minUnderlyingDailyValueRialInput: '100000000',
+    minOptionDailyValueRialInput: '10000000', minOpenInterest: '100',
     maxSpreadPct: '8', maxBookTakePct: '50', requireFullBook: 'no',
   });
   const allocation174 = createPortfolioAllocationDraft(risk174.draft, [

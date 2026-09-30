@@ -27,7 +27,7 @@ group('۱۶۰. کارت ضعف‌های مستند در پرونده');
     model160.ok && ['critical', 'warning', 'notice']
       .every((severity) => model160.rows.some((row) => row.severity === severity)));
   check('شاهدهای پولی و درصدی پیش از DOM قالب شده‌اند',
-    model160.rows.flatMap((row) => row.evidence).some((row) => row.valueText.includes('تومان'))
+    model160.rows.flatMap((row) => row.evidence).some((row) => row.valueText.includes('ریال'))
     && model160.rows.flatMap((row) => row.evidence).some((row) => row.valueText.endsWith('٪')));
 
   const calmSession160 = JSON.parse(JSON.stringify(mission160));

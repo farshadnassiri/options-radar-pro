@@ -32,7 +32,7 @@ export const WATCH_VIEW_REASONS = PORTFOLIO_WATCH_REASONS;
 const SEVERITY = Object.freeze({ breached: 0, near: 1, unknown: 2, clear: 3 });
 
 const text = (value) => String(value ?? '').trim();
-const toman = (rial) => (Number.isFinite(rial) ? fmt.int(rial / 10) : '—');
+const money = (rial) => fmt.rialText(rial);
 const pct = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');
 
 function fail(reason, why = '') {
@@ -71,14 +71,14 @@ function toRow(alert) {
     limitText: pct(alert.limitPct),
     currentText: Number.isFinite(alert.currentPct) ? pct(alert.currentPct) : '—',
     headroomText: Number.isFinite(alert.headroomPct)
-      ? `${toman(alert.headroomRial)} تومان · ${pct(alert.headroomPct)}` : '—',
+      ? `${money(alert.headroomRial)} · ${pct(alert.headroomPct)}` : '—',
     // نبودِ عدد با عدد جایگزین نمی‌شود؛ علتش می‌آید.
     why: faDigits(text(alert.why)),
     // «چه چیزی عوض شد» — نه فقط «الان بد است».
     changeText: moved
-      ? `${toman(alert.changeRial)} تومان نسبت به لحظهٔ ثبت` : '',
+      ? `${money(alert.changeRial)} نسبت به لحظهٔ ثبت` : '',
     atCommitText: Number.isFinite(alert.atCommitRial)
-      ? `${toman(alert.atCommitRial)} تومان` : '',
+      ? `${money(alert.atCommitRial)}` : '',
     unlimitedLoss: Boolean(alert.unlimitedLoss),
   };
 }

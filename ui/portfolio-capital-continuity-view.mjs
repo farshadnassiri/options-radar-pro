@@ -1,7 +1,7 @@
 // مدل نمایش و اتصال فرم برای تداوم سرمایه.
 //
 // محاسبه سرمایه در core انجام شده است. این فایل فقط ریال قطعی را برای نمایش
-// به تومان تبدیل می‌کند و همان قرارداد را، بدون تغییر، به draft تازه می‌چسباند.
+// به ورودی ریالی تبدیل می‌کند و همان قرارداد را، بدون تغییر، به draft تازه می‌چسباند.
 
 import {
   portfolioCapitalContinuity, validatePortfolioCapitalContinuity,
@@ -9,8 +9,8 @@ import {
 import { momentText } from './portfolio-clock-view.mjs';
 import { faDigits, fmt } from './fmt.mjs';
 
-const money = (rial) => (Number.isFinite(rial) ? `${fmt.int(rial / 10)} تومان` : '—');
-const inputMoney = (rial) => (Number.isFinite(rial) ? fmt.int(rial / 10) : '');
+const money = (rial) => fmt.rialText(rial);
+const inputMoney = (rial) => (Number.isFinite(rial) ? fmt.int(rial) : '');
 const text = (value) => faDigits(String(value ?? '').trim());
 
 function lineageRows(continuity) {

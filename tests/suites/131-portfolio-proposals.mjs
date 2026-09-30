@@ -25,16 +25,16 @@ group('۱۳۱. مدل نمایش پیشنهادهای سبد');
   check('سرمایهٔ نمایشی همان عدد موتور است، فقط به تومان',
     view131.shortlist.every((row) => {
       const rial = Number(row.score) === 0 ? null : null;
-      return typeof row.capitalTomanText === 'string' && row.capitalTomanText !== '—';
+      return typeof row.capitalRialText === 'string' && row.capitalRialText !== '—';
     })
-    && top131.capitalTomanText === fmt.int(source131.capital.components.totalRial / 10),
-    `${top131.capitalTomanText}`);
+    && top131.capitalRialText === fmt.rialText(source131.capital.components.totalRial),
+    `${top131.capitalRialText}`);
   check('بیشترین زیانِ نمایشی هم از موتور می‌آید و ساخته نمی‌شود',
-    top131.maxLossTomanText === fmt.int(source131.capital.components.totalRial / 10)
-    || top131.maxLossTomanText === 'نامحدود');
+    top131.maxLossRialText === fmt.rialText(source131.capital.components.totalRial)
+    || top131.maxLossRialText === 'نامحدود');
   check('سود نامحدود عدد نمی‌گیرد و «نامحدود» می‌ماند',
-    view131.shortlist.some((row) => row.maxProfitTomanText === 'نامحدود')
-    && view131.shortlist.every((row) => row.maxProfitTomanText !== '0'));
+    view131.shortlist.some((row) => row.maxProfitRialText === 'نامحدود')
+    && view131.shortlist.every((row) => row.maxProfitRialText !== '0'));
 
   // تنها حسابِ عددی مجاز در این لایه، تقسیم بر ده برای تبدیل واحد است.
   const viewCode131 = readSrc('../ui/portfolio-proposals.mjs')
@@ -44,8 +44,8 @@ group('۱۳۱. مدل نمایش پیشنهادهای سبد');
   // جلویش را نمی‌گیرد چون کاربر تفاوتش را نمی‌بیند.
   const rialMath131 = viewCode131.match(/Rial[A-Za-z]*\s*[*+\-]/g) || [];
   const rialDiv131 = (viewCode131.match(/Rial[A-Za-z]*\s*\/\s*[0-9]+/g) || [])
-    .filter((hit) => !/\/\s*10$/.test(hit));
-  check('لایهٔ نمایش روی عدد ریالی جز تقسیم بر ده حساب نمی‌کند',
+    .filter(Boolean);
+  check('لایهٔ نمایش روی عدد ریالی هیچ حسابی نمی‌کند (فقط قالب ریال)',
     rialMath131.length === 0 && rialDiv131.length === 0,
     [...rialMath131, ...rialDiv131].join(' ،') || 'هیچ');
   check('و موتور بازده و وجه تضمین را مستقیم صدا نمی‌زند',

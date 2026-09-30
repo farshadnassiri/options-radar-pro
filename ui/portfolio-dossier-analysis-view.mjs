@@ -1,10 +1,10 @@
 // نمایش تحلیل پرونده. همه محاسبات مالی در core انجام شده‌اند؛ اینجا تنها
-// ریال به تومان تبدیل و عددها فارسی می‌شوند.
+// ریال قالب‌بندی (بزرگ‌ها «میلیون ریال») و عددها فارسی می‌شوند.
 
 import { MISSION_RETURN_BASES } from '../core/portfolio-mission.mjs';
 import { faDigits, fmt, signTone } from './fmt.mjs';
 
-const money = (rial) => (Number.isFinite(rial) ? `${fmt.int(rial / 10)} تومان` : '—');
+const money = (rial) => fmt.rialText(rial);
 const pct = (value) => (Number.isFinite(value) ? `${fmt.num(value)}٪` : '—');
 
 export function portfolioDossierAnalysisView(analysis) {

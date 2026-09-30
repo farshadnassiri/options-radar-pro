@@ -54,7 +54,7 @@ import { feesOf, marginParamsOf } from '../../core/settings.mjs';
 import {
   activatePortfolioMissionDraft, createPortfolioAllocationDraft, createPortfolioMissionDraft,
   createPortfolioOutlookDraft, createPortfolioRiskDraft,
-  createPortfolioStepOneDraft, parseIntegerInput, parsePercentInput, parseTomanInput,
+  createPortfolioStepOneDraft, parseIntegerInput, parsePercentInput, parseRialInput,
   previewPortfolioAllocations,
   previewPortfolioCapital, previewPortfolioRisk,
 } from '../portfolio-mission-form.mjs';
@@ -137,17 +137,17 @@ export async function mount(root, { state, api }) {
       <div class="pt-main">
         <div class="pt-panel" data-panel="setup">
         <section class="card pt-card" data-pt-setup>
-          <div class="section-head"><div><p class="eyebrow">مرحله نخست · بخش یک</p><h2>سرمایه‌ای که با خودت به گذشته می‌بری</h2></div><span>واحد ورود: تومان</span></div>
+          <div class="section-head"><div><p class="eyebrow">مرحله نخست · بخش یک</p><h2>سرمایه‌ای که با خودت به گذشته می‌بری</h2></div><span>واحد ورود: ریال</span></div>
           <div class="pt-form-grid pt-money-grid">
             <label class="field" id="pt-capital-field"><span>ارزش پورتفو در شروع</span>
-              <input id="pt-capital" type="text" inputmode="numeric" value="۱,۰۰۰,۰۰۰,۰۰۰" aria-describedby="pt-capital-hint pt-capital-error">
-              <small class="hint" id="pt-capital-hint">نمونه: یک میلیارد تومان</small><small class="pt-field-error" id="pt-capital-error" hidden></small></label>
+              <input id="pt-capital" type="text" inputmode="numeric" value="۱۰,۰۰۰,۰۰۰,۰۰۰" aria-describedby="pt-capital-hint pt-capital-error">
+              <small class="hint" id="pt-capital-hint">نمونه: ده میلیارد ریال (۱۰,۰۰۰ میلیون ریال)</small><small class="pt-field-error" id="pt-capital-error" hidden></small></label>
             <label class="field" id="pt-reserve-field"><span>ذخیره نقدی کنارگذاشته‌شده</span>
               <input id="pt-reserve" type="text" inputmode="numeric" value="۰" aria-describedby="pt-reserve-hint pt-reserve-error">
               <small class="hint" id="pt-reserve-hint">این مبلغ وارد تخصیص استراتژی‌ها نمی‌شود.</small><small class="pt-field-error" id="pt-reserve-error" hidden></small></label>
           </div>
           <div class="pt-capital-board" aria-live="polite">
-            <article><span>سرمایه کل</span><b id="pt-total">—</b><small>تومان</small></article>
+            <article><span>سرمایه کل</span><b id="pt-total">—</b></article>
             <article><span>ذخیره</span><b id="pt-reserve-view">—</b><small id="pt-reserve-pct">—</small></article>
             <article class="accent"><span>قابل تخصیص</span><b id="pt-allocatable">—</b><small>مبنای بودجه خانواده‌ها</small></article>
           </div>
@@ -177,9 +177,9 @@ export async function mount(root, { state, api }) {
           <fieldset class="pt-fieldset" id="pt-direction-field"><legend>جهت مورد انتظار</legend><div class="pt-choice-grid" id="pt-direction">${directionCards()}</div><small class="pt-field-error" id="pt-direction-error" hidden></small></fieldset>
 
           <div class="pt-form-grid pt-outlook-price-grid">
-            <label class="field"><span>قیمت هدف</span><input id="pt-target-price" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-target-hint pt-target-error"><small class="hint" id="pt-target-hint">برای دید صعودی یا نزولی لازم است.</small><small class="pt-field-error" id="pt-target-error" hidden></small></label>
-            <label class="field"><span>کران پایین بازه</span><input id="pt-range-low" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-range-hint pt-range-error"><small class="hint" id="pt-range-hint">دو کران را با هم وارد کن.</small><small class="pt-field-error" id="pt-range-error" hidden></small></label>
-            <label class="field"><span>کران بالای بازه</span><input id="pt-range-high" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-range-hint pt-range-error"></label>
+            <label class="field"><span>قیمت هدف</span><input id="pt-target-price" type="text" inputmode="numeric" placeholder="ریال" aria-describedby="pt-target-hint pt-target-error"><small class="hint" id="pt-target-hint">برای دید صعودی یا نزولی لازم است.</small><small class="pt-field-error" id="pt-target-error" hidden></small></label>
+            <label class="field"><span>کران پایین بازه</span><input id="pt-range-low" type="text" inputmode="numeric" placeholder="ریال" aria-describedby="pt-range-hint pt-range-error"><small class="hint" id="pt-range-hint">دو کران را با هم وارد کن.</small><small class="pt-field-error" id="pt-range-error" hidden></small></label>
+            <label class="field"><span>کران بالای بازه</span><input id="pt-range-high" type="text" inputmode="numeric" placeholder="ریال" aria-describedby="pt-range-hint pt-range-error"></label>
           </div>
 
           <section class="pt-scenario" aria-labelledby="pt-scenario-title">
@@ -226,8 +226,8 @@ export async function mount(root, { state, api }) {
 
           <div class="section-head pt-subhead"><div><p class="eyebrow">دروازه اجرای واقعی</p><h3>حداقل کیفیت نقدشوندگی</h3></div></div>
           <div class="pt-liquidity-grid">
-            <label class="field"><span>حداقل ارزش معامله‌شدهٔ نماد پایه تا لحظهٔ شروع</span><input id="pt-underlying-value" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-underlying-value-hint pt-underlying-value-error"><small class="hint" id="pt-underlying-value-hint">ارزش از ابتدای جلسه تا همان لحظهٔ شروع جمع می‌شود، نه کل روز — عدد پایان روز نقدشوندگی ساعت ۱۰ را بیش‌برآورد می‌کند. برای شروعِ زودهنگام، کف را کوچک‌تر بگیر. صفر یعنی این فیلتر غیرفعال است.</small><small class="pt-field-error" id="pt-underlying-value-error" hidden></small></label>
-            <label class="field"><span>حداقل ارزش معامله‌شدهٔ اختیار تا لحظهٔ شروع</span><input id="pt-option-value" type="text" inputmode="numeric" placeholder="تومان" aria-describedby="pt-option-value-hint pt-option-value-error"><small class="hint" id="pt-option-value-hint">ارزش از ابتدای جلسه تا همان لحظهٔ شروع جمع می‌شود، نه کل روز — عدد پایان روز نقدشوندگی ساعت ۱۰ را بیش‌برآورد می‌کند. برای شروعِ زودهنگام، کف را کوچک‌تر بگیر. صفر یعنی این فیلتر غیرفعال است.</small><small class="pt-field-error" id="pt-option-value-error" hidden></small></label>
+            <label class="field"><span>حداقل ارزش معامله‌شدهٔ نماد پایه تا لحظهٔ شروع</span><input id="pt-underlying-value" type="text" inputmode="numeric" placeholder="ریال" aria-describedby="pt-underlying-value-hint pt-underlying-value-error"><small class="hint" id="pt-underlying-value-hint">ارزش از ابتدای جلسه تا همان لحظهٔ شروع جمع می‌شود، نه کل روز — عدد پایان روز نقدشوندگی ساعت ۱۰ را بیش‌برآورد می‌کند. برای شروعِ زودهنگام، کف را کوچک‌تر بگیر. صفر یعنی این فیلتر غیرفعال است.</small><small class="pt-field-error" id="pt-underlying-value-error" hidden></small></label>
+            <label class="field"><span>حداقل ارزش معامله‌شدهٔ اختیار تا لحظهٔ شروع</span><input id="pt-option-value" type="text" inputmode="numeric" placeholder="ریال" aria-describedby="pt-option-value-hint pt-option-value-error"><small class="hint" id="pt-option-value-hint">ارزش از ابتدای جلسه تا همان لحظهٔ شروع جمع می‌شود، نه کل روز — عدد پایان روز نقدشوندگی ساعت ۱۰ را بیش‌برآورد می‌کند. برای شروعِ زودهنگام، کف را کوچک‌تر بگیر. صفر یعنی این فیلتر غیرفعال است.</small><small class="pt-field-error" id="pt-option-value-error" hidden></small></label>
             <label class="field"><span>حداقل موقعیت باز</span><input id="pt-open-interest" type="text" inputmode="numeric" placeholder="تعداد" aria-describedby="pt-open-interest-hint pt-open-interest-error"><small class="hint" id="pt-open-interest-hint">برای تاریخی که آرشیو موقعیت باز ندارد، صفر وارد کن تا فقط دفتر واقعی سنجیده شود.</small><small class="pt-field-error" id="pt-open-interest-error" hidden></small></label>
             <label class="field"><span>حداکثر اسپرد خرید/فروش</span><input id="pt-max-spread" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-max-spread-error"><small class="pt-field-error" id="pt-max-spread-error" hidden></small></label>
             <label class="field"><span>حداکثر مصرف عمق دفتر</span><input id="pt-book-take" type="text" inputmode="decimal" placeholder="درصد" aria-describedby="pt-book-take-error"><small class="pt-field-error" id="pt-book-take-error" hidden></small></label>
@@ -251,8 +251,8 @@ export async function mount(root, { state, api }) {
             <div class="pt-allocation-totals">
               <article><span>جمع درصدها</span><b id="pt-allocation-total">۰٪</b></article>
               <article><span>فاصله تا صد</span><b id="pt-allocation-remaining">۱۰۰٪</b></article>
-              <article><span>بودجه تخصیص‌یافته</span><b id="pt-allocation-assigned">—</b><small>تومان</small></article>
-              <article><span>سرمایه تخصیص‌نیافته</span><b id="pt-allocation-unassigned">—</b><small>تومان</small></article>
+              <article><span>بودجه تخصیص‌یافته</span><b id="pt-allocation-assigned">—</b></article>
+              <article><span>سرمایه تخصیص‌نیافته</span><b id="pt-allocation-unassigned">—</b></article>
             </div>
           </section>
 
@@ -326,7 +326,7 @@ export async function mount(root, { state, api }) {
             <div class="pt-series-chart" id="pt-series-chart"></div>
             <small class="hint" id="pt-series-scale"></small>
             <table class="pt-series-table">
-            <thead><tr><th>لحظه</th><th>سود و زیان کل (تومان)</th><th>بازده روی سرمایه</th><th>محقق‌شده</th><th>تحقق‌نیافته</th><th>موقعیت باز</th></tr></thead>
+            <thead><tr><th>لحظه</th><th>سود و زیان کل</th><th>بازده روی سرمایه</th><th>محقق‌شده</th><th>تحقق‌نیافته</th><th>موقعیت باز</th></tr></thead>
             <tbody id="pt-series-body"></tbody>
             </table>
             <div class="pt-series-head">
@@ -334,7 +334,7 @@ export async function mount(root, { state, api }) {
             <label class="field pt-series-pick"><span>لحظه</span><select id="pt-series-pick"></select></label>
             </div>
             <table class="pt-series-table">
-            <thead><tr><th>استراتژی</th><th>خانواده</th><th>حجم باز</th><th>سود و زیان (تومان)</th><th>بازده روی سرمایهٔ خودش</th><th>محقق‌شده</th><th>تحقق‌نیافته</th><th>وضعیت داده</th></tr></thead>
+            <thead><tr><th>استراتژی</th><th>خانواده</th><th>حجم باز</th><th>سود و زیان</th><th>بازده روی سرمایهٔ خودش</th><th>محقق‌شده</th><th>تحقق‌نیافته</th><th>وضعیت داده</th></tr></thead>
             <tbody id="pt-series-strategies"></tbody>
             </table>
             </section>
@@ -349,7 +349,7 @@ export async function mount(root, { state, api }) {
             <p class="hint" id="pt-proposals-family-note" hidden></p>
             <p class="pt-save-state" id="pt-proposals-state" role="status" aria-live="polite">پس از فعال‌شدن جلسه، طرح‌های در دسترس اینجا می‌آیند.</p>
             <table class="pt-proposals-table">
-            <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم (تومان)</th><th>بیشترین سود (تومان)</th><th>بیشترین زیان (تومان)</th><th>چرا این جایگاه</th><th>کیفیت</th><th>انتخاب</th></tr></thead>
+            <thead><tr><th>رتبه</th><th>استراتژی</th><th>امتیاز</th><th>سرمایه لازم</th><th>بیشترین سود</th><th>بیشترین زیان</th><th>چرا این جایگاه</th><th>کیفیت</th><th>انتخاب</th></tr></thead>
             <tbody id="pt-proposals-body"></tbody>
             </table>
             <p class="eyebrow" id="pt-proposals-aside-title" hidden>کنار گذاشته‌شده‌ها و نامعلوم‌ها</p>
@@ -397,7 +397,7 @@ export async function mount(root, { state, api }) {
             <p class="pt-save-state" id="pt-positions-state" role="status" aria-live="polite">پس از نخستین ثبت، موقعیت‌ها اینجا می‌آیند.</p>
             <div class="pt-table-scroll">
             <table class="pt-positions-table">
-            <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه (تومان)</th><th>ارزش جاری (تومان)</th><th>سود تحقق‌نیافته (تومان)</th><th>سود تحقق‌یافته (تومان)</th><th>پاها</th><th>کیفیت</th><th>مدیریت حجم</th></tr></thead>
+            <thead><tr><th>موقعیت</th><th>وضعیت</th><th>حجم</th><th>سرمایه</th><th>ارزش جاری</th><th>سود تحقق‌نیافته</th><th>سود تحقق‌یافته</th><th>پاها</th><th>کیفیت</th><th>مدیریت حجم</th></tr></thead>
             <tbody id="pt-positions-body"></tbody>
             </table>
             </div>
@@ -747,28 +747,28 @@ export async function mount(root, { state, api }) {
   }
 
   function paintCapital() {
-    const result = previewPortfolioCapital({ capitalToman: capital.value, reserveToman: reserve.value });
-    $('pt-total').textContent = result.ok ? moneyText(result.plan.initialRial / 10) : '—';
-    $('pt-reserve-view').textContent = result.ok ? moneyText(result.plan.reserveRial / 10) : '—';
+    const result = previewPortfolioCapital({ capitalRialInput: capital.value, reserveRialInput: reserve.value });
+    $('pt-total').textContent = result.ok ? fmt.rialText(result.plan.initialRial) : '—';
+    $('pt-reserve-view').textContent = result.ok ? fmt.rialText(result.plan.reserveRial) : '—';
     $('pt-reserve-pct').textContent = result.ok ? `${fmt.pct(result.plan.reserveRial / result.plan.initialRial * 100)}٪ از کل` : '—';
-    $('pt-allocatable').textContent = result.ok ? moneyText(result.plan.allocatableRial / 10) : '—';
-    $('pt-review-capital').textContent = result.ok ? `${moneyText(result.plan.allocatableRial / 10)} تومان` : '—';
+    $('pt-allocatable').textContent = result.ok ? fmt.rialText(result.plan.allocatableRial) : '—';
+    $('pt-review-capital').textContent = result.ok ? `${fmt.rialText(result.plan.allocatableRial)}` : '—';
   }
 
   function formatMoneyInput(input) {
-    const value = parseTomanInput(input.value);
+    const value = parseRialInput(input.value);
     if (Number.isFinite(value)) input.value = fmt.int(value);
     paintCapital();
   }
 
   function optionalMoneyText(input) {
-    const value = parseTomanInput(input.value);
+    const value = parseRialInput(input.value);
     return Number.isFinite(value) ? fmt.int(value) : '—';
   }
 
   function formatOptionalMoney(input) {
     if (!input.value.trim()) return;
-    const value = parseTomanInput(input.value);
+    const value = parseRialInput(input.value);
     if (Number.isFinite(value)) input.value = fmt.int(value);
   }
 
@@ -781,9 +781,9 @@ export async function mount(root, { state, api }) {
     $('pt-scenario-low').textContent = optionalMoneyText(low);
     $('pt-scenario-target').textContent = optionalMoneyText(target);
     $('pt-scenario-high').textContent = optionalMoneyText(high);
-    $('pt-marker-low').hidden = !Number.isFinite(parseTomanInput(low.value));
-    $('pt-marker-target').hidden = !Number.isFinite(parseTomanInput(target.value));
-    $('pt-marker-high').hidden = !Number.isFinite(parseTomanInput(high.value));
+    $('pt-marker-low').hidden = !Number.isFinite(parseRialInput(low.value));
+    $('pt-marker-target').hidden = !Number.isFinite(parseRialInput(target.value));
+    $('pt-marker-high').hidden = !Number.isFinite(parseRialInput(high.value));
     $('pt-scenario-track').dataset.direction = direction;
     $('pt-review-outlook').textContent = setupDraft ? (MISSION_DIRECTIONS[direction] || 'ثبت نشده') : 'ثبت نشده';
     $('pt-review-confidence').textContent = setupDraft ? `${fmt.int(confidence)}٪` : '—';
@@ -796,8 +796,8 @@ export async function mount(root, { state, api }) {
       minFreeCapitalPct: $('pt-min-free').value,
       maxMarginUsePct: $('pt-max-margin').value,
       allowUnlimitedRisk: selectedValue('pt-unlimited'),
-      minUnderlyingDailyValueToman: $('pt-underlying-value').value,
-      minOptionDailyValueToman: $('pt-option-value').value,
+      minUnderlyingDailyValueRialInput: $('pt-underlying-value').value,
+      minOptionDailyValueRialInput: $('pt-option-value').value,
       minOpenInterest: $('pt-open-interest').value,
       maxSpreadPct: $('pt-max-spread').value,
       maxBookTakePct: $('pt-book-take').value,
@@ -817,8 +817,8 @@ export async function mount(root, { state, api }) {
     $('pt-budget-free-pct').textContent = budget ? `${fmt.pct(freePct)}٪` : '—';
     $('pt-budget-margin-pct').textContent = budget ? `${fmt.pct(marginPct)}٪` : '—';
     $('pt-budget-flex-pct').textContent = budget ? `${fmt.pct(flexPct)}٪` : '—';
-    $('pt-budget-free-rial').textContent = budget ? `${moneyText(budget.minFreeCapitalRial / 10)} تومان` : '—';
-    $('pt-budget-margin-rial').textContent = budget ? `${moneyText(budget.maxMarginUseRial / 10)} تومان` : '—';
+    $('pt-budget-free-rial').textContent = budget ? `${fmt.rialText(budget.minFreeCapitalRial)}` : '—';
+    $('pt-budget-margin-rial').textContent = budget ? `${fmt.rialText(budget.maxMarginUseRial)}` : '—';
     $('pt-review-risk').textContent = budget ? `${fmt.pct(freePct)}٪ آزاد · ${fmt.pct(marginPct)}٪ تضمین` : 'ثبت نشده';
   }
 
@@ -848,11 +848,11 @@ export async function mount(root, { state, api }) {
       ? `${fmt.pct(remaining)}٪`
       : `${fmt.pct(Math.abs(remaining))}٪ بیش از سقف`;
     $('pt-allocation-remaining').toggleAttribute('data-error', remaining < 0);
-    $('pt-allocation-assigned').textContent = preview.ok ? moneyText(preview.plan.assignedRial / 10) : '—';
-    $('pt-allocation-unassigned').textContent = preview.ok ? moneyText(preview.plan.unassignedRial / 10) : '—';
+    $('pt-allocation-assigned').textContent = preview.ok ? fmt.rialText(preview.plan.assignedRial) : '—';
+    $('pt-allocation-unassigned').textContent = preview.ok ? fmt.rialText(preview.plan.unassignedRial) : '—';
     const budgets = preview.ok ? preview.session.allocations : [];
     allocationRowsRoot.querySelectorAll('.pt-allocation-budget').forEach((output, index) => {
-      output.textContent = budgets[index] ? `${moneyText(budgets[index].targetRial / 10)} تومان` : '—';
+      output.textContent = budgets[index] ? `${fmt.rialText(budgets[index].targetRial)}` : '—';
     });
   }
 
@@ -874,9 +874,9 @@ export async function mount(root, { state, api }) {
     };
     $('pt-final-setup').textContent = [
       `نماد ${base.selectedOptions[0]?.textContent || session.baseIns}`,
-      `سرمایه شروع ${moneyText(session.capital.initialRial / 10)} تومان`,
-      `ذخیره ${moneyText(session.capital.reserveRial / 10)} تومان`,
-      `قابل تخصیص ${moneyText(session.capital.allocatableRial / 10)} تومان`,
+      `سرمایه شروع ${fmt.rialText(session.capital.initialRial)}`,
+      `ذخیره ${fmt.rialText(session.capital.reserveRial)}`,
+      `قابل تخصیص ${fmt.rialText(session.capital.allocatableRial)}`,
       `شروع ${momentText(session.start)}`, `پایان ${momentText(session.end)}`,
       `پخش ${MISSION_REPLAY_GRAINS[allocationDraft.replay.grain]?.label || '—'}`,
     ].join(' · ');
@@ -886,9 +886,9 @@ export async function mount(root, { state, api }) {
       `دید تلاطم ${MISSION_VOLATILITY_VIEWS[outlook.volatilityView]}`,
       `اطمینان ${fmt.pct(outlook.confidencePct)}٪`,
     ];
-    if (Number.isFinite(outlook.targetPriceRial)) outlookParts.push(`هدف ${moneyText(outlook.targetPriceRial / 10)} تومان`);
+    if (Number.isFinite(outlook.targetPriceRial)) outlookParts.push(`هدف ${fmt.rialText(outlook.targetPriceRial)}`);
     if (Number.isFinite(outlook.rangeLowRial) && Number.isFinite(outlook.rangeHighRial)) {
-      outlookParts.push(`بازه ${moneyText(outlook.rangeLowRial / 10)} تا ${moneyText(outlook.rangeHighRial / 10)} تومان`);
+      outlookParts.push(`بازه ${fmt.rialText(outlook.rangeLowRial)} تا ${fmt.rialText(outlook.rangeHighRial)}`);
     }
     if (Number.isFinite(outlook.expectedVolatilityPct)) outlookParts.push(`تلاطم مورد انتظار ${fmt.pct(outlook.expectedVolatilityPct)}٪`);
     outlookParts.push(`دلیل: ${outlook.thesis}`);
@@ -898,15 +898,15 @@ export async function mount(root, { state, api }) {
       `زیان معامله ${fmt.pct(risk.maxLossPct)}٪`, `افت کل ${fmt.pct(risk.maxDrawdownPct)}٪`,
       `سرمایه آزاد ${fmt.pct(risk.minFreeCapitalPct)}٪`, `وجه تضمین ${fmt.pct(risk.maxMarginUsePct)}٪`,
       `ریسک نامحدود ${risk.allowUnlimitedRisk ? 'مجاز' : 'غیرمجاز'}`,
-      `ارزش روزانه پایه ${moneyText(liquidity.minUnderlyingDailyValueRial / 10)} تومان`,
-      `ارزش روزانه اختیار ${moneyText(liquidity.minOptionDailyValueRial / 10)} تومان`,
+      `ارزش روزانه پایه ${fmt.rialText(liquidity.minUnderlyingDailyValueRial)}`,
+      `ارزش روزانه اختیار ${fmt.rialText(liquidity.minOptionDailyValueRial)}`,
       `موقعیت باز ${fmt.int(liquidity.minOpenInterest)}`, `اسپرد ${fmt.pct(liquidity.maxSpreadPct)}٪`,
       `مصرف عمق ${fmt.pct(liquidity.maxBookTakePct)}٪`, `پنج سطح ${liquidity.requireFullBook ? 'الزامی' : 'غیرالزامی'}`,
     ].join(' · ');
     $('pt-final-allocation').textContent = [
-      ...session.allocations.map((row) => `${row.label} ${fmt.pct(row.pct)}٪ / ${moneyText(row.targetRial / 10)} تومان`),
-      `جمع ${moneyText(session.capital.assignedRial / 10)} تومان`,
-      `تخصیص‌نیافته ${moneyText(session.capital.unassignedRial / 10)} تومان`,
+      ...session.allocations.map((row) => `${row.label} ${fmt.pct(row.pct)}٪ / ${fmt.rialText(row.targetRial)}`),
+      `جمع ${fmt.rialText(session.capital.assignedRial)}`,
+      `تخصیص‌نیافته ${fmt.rialText(session.capital.unassignedRial)}`,
     ].join(' · ');
     const objective = MISSION_OBJECTIVES[selectedValue('pt-objective')] || 'هدف ثبت نشده';
     const returnBase = MISSION_RETURN_BASES[selectedValue('pt-return-base')] || 'مبنای بازده ثبت نشده';
@@ -1545,10 +1545,10 @@ export async function mount(root, { state, api }) {
     section.hidden = false;
     $('pt-ledger-state').textContent = view.headlineText;
     const figures = [
-      ['سرمایهٔ جلسه', `${view.baseTomanText} تومان`],
-      ['درگیر', `${view.committedTomanText} تومان`],
-      ['آزاد', `${view.freeTomanText} تومان · ${view.freePctText}`],
-      ...view.components.map((row) => [row.label, `${row.tomanText} تومان`]),
+      ['سرمایهٔ جلسه', `${view.baseRialText}`],
+      ['درگیر', `${view.committedRialText}`],
+      ['آزاد', `${view.freeRialText} · ${view.freePctText}`],
+      ...view.components.map((row) => [row.label, `${row.rialText}`]),
     ];
     $('pt-ledger-figures').innerHTML = figures
       .map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('');
@@ -1560,7 +1560,7 @@ export async function mount(root, { state, api }) {
       <td data-label="حکم"><b>${esc(row.stateLabel)}</b></td>
     </tr>`).join('');
     $('pt-ledger-families').textContent = view.families.length
-      ? view.families.map((row) => `${row.label}: ${row.tomanText} تومان (${row.countText} ثبت)`).join(' · ')
+      ? view.families.map((row) => `${row.label}: ${row.rialText} (${row.countText} ثبت)`).join(' · ')
       : '';
     // شمردنِ نداشته‌ها، نه پنهان‌کردنشان.
     $('pt-ledger-unpriced').hidden = !view.unpriced;
@@ -1618,11 +1618,11 @@ export async function mount(root, { state, api }) {
       <td data-label="موقعیت">${esc(row.defLabel)}<br><small>${esc(row.familyLabelFromId)} · ${esc(row.idText)}</small></td>
       <td data-label="وضعیت"><b>${esc(row.statusLabel)}</b></td>
       <td data-label="حجم">${esc(row.openQtyText)}${row.openQtyText === row.initialQtyText ? '' : `<br><small>از ${esc(row.initialQtyText)}</small>`}</td>
-      <td data-label="سرمایه">${esc(row.capitalTomanText)}</td>
-      <td data-label="ارزش جاری">${esc(row.valueTomanText)}${row.valuedWhy
+      <td data-label="سرمایه">${esc(row.capitalRialText)}</td>
+      <td data-label="ارزش جاری">${esc(row.valueRialText)}${row.valuedWhy
         ? `<br><small>${esc(row.valuedWhy)}</small>` : ''}</td>
-      <td data-label="سود تحقق‌نیافته" class="${esc(row.unrealizedTone)}">${esc(row.unrealizedTomanText)}</td>
-      <td data-label="سود تحقق‌یافته" class="${esc(row.realizedTone)}">${esc(row.realizedTomanText)}${row.realizedWhy
+      <td data-label="سود تحقق‌نیافته" class="${esc(row.unrealizedTone)}">${esc(row.unrealizedRialText)}</td>
+      <td data-label="سود تحقق‌یافته" class="${esc(row.realizedTone)}">${esc(row.realizedRialText)}${row.realizedWhy
         ? `<br><small>${esc(row.realizedWhy)}</small>` : ''}</td>
       <td data-label="پاها">${row.legTexts.length
         ? row.legTexts.map((leg) => `<div>${esc(leg)}</div>`).join('')
@@ -1753,9 +1753,9 @@ export async function mount(root, { state, api }) {
       <td data-label="رتبه">${esc(row.rankText)}</td>
       <td data-label="استراتژی">${esc(row.defLabel)}<br><small>${esc(row.familyLabel)}</small></td>
       <td data-label="امتیاز"><b>${esc(row.scoreText)}</b></td>
-      <td data-label="سرمایه لازم">${esc(row.capitalTomanText)}</td>
-      <td data-label="بیشترین سود">${esc(row.maxProfitTomanText)}</td>
-      <td data-label="بیشترین زیان">${esc(row.maxLossTomanText)}</td>
+      <td data-label="سرمایه لازم">${esc(row.capitalRialText)}</td>
+      <td data-label="بیشترین سود">${esc(row.maxProfitRialText)}</td>
+      <td data-label="بیشترین زیان">${esc(row.maxLossRialText)}</td>
       <td data-label="چرا این جایگاه">${esc(row.liftedText)}${row.draggedText === '—' ? '' : `<br><small>کاهنده: ${esc(row.draggedText)}</small>`}</td>
       <td data-label="کیفیت">${esc(row.qualityLabel)}${row.qualityReason ? `<br><small>${esc(row.qualityReason)}</small>` : ''}</td>
       <td data-label="انتخاب">${committedIds.has(row.candidateId)
@@ -1928,7 +1928,7 @@ export async function mount(root, { state, api }) {
   function currentDraft() {
     const made = createPortfolioStepOneDraft({
       id: draftId, baseIns: base.value,
-      capitalToman: capital.value, reserveToman: reserve.value,
+      capitalRialInput: capital.value, reserveRialInput: reserve.value,
       startDate: Number($('pt-start-date').dataset.value), startSecond: Number($('pt-start-time').value),
       endDate: Number($('pt-end-date').dataset.value), endSecond: Number($('pt-end-time').value),
       grain: $('pt-grain').value, createdAt: Date.now(),
@@ -1940,9 +1940,9 @@ export async function mount(root, { state, api }) {
   function currentOutlookDraft() {
     return createPortfolioOutlookDraft(setupDraft, {
       direction: selectedValue('pt-direction'),
-      targetPriceToman: $('pt-target-price').value,
-      rangeLowToman: $('pt-range-low').value,
-      rangeHighToman: $('pt-range-high').value,
+      targetPriceRialInput: $('pt-target-price').value,
+      rangeLowRialInput: $('pt-range-low').value,
+      rangeHighRialInput: $('pt-range-high').value,
       volatilityView: selectedValue('pt-volatility'),
       expectedVolatilityPct: $('pt-expected-volatility').value,
       confidencePct: $('pt-confidence').value,
@@ -2072,8 +2072,8 @@ export async function mount(root, { state, api }) {
       $('pt-start-time').value = String(inputs.setup.startSecond);
       $('pt-end-time').value = String(inputs.setup.endSecond);
       $('pt-grain').value = inputs.setup.grain;
-      capital.value = inputs.setup.capitalToman;
-      reserve.value = inputs.setup.reserveToman;
+      capital.value = inputs.setup.capitalRialInput;
+      reserve.value = inputs.setup.reserveRialInput;
       formatMoneyInput(capital); formatMoneyInput(reserve);
       paintCapital();
       $('pt-save-step').onclick();
@@ -2082,9 +2082,9 @@ export async function mount(root, { state, api }) {
       if (inputs.outlook) {
         setRadio('pt-direction', inputs.outlook.direction);
         setRadio('pt-volatility', inputs.outlook.volatilityView);
-        $('pt-target-price').value = inputs.outlook.targetPriceToman;
-        $('pt-range-low').value = inputs.outlook.rangeLowToman;
-        $('pt-range-high').value = inputs.outlook.rangeHighToman;
+        $('pt-target-price').value = inputs.outlook.targetPriceRialInput;
+        $('pt-range-low').value = inputs.outlook.rangeLowRialInput;
+        $('pt-range-high').value = inputs.outlook.rangeHighRialInput;
         $('pt-expected-volatility').value = inputs.outlook.expectedVolatilityPct;
         $('pt-confidence').value = inputs.outlook.confidencePct;
         $('pt-thesis').value = inputs.outlook.thesis;
@@ -2097,8 +2097,8 @@ export async function mount(root, { state, api }) {
         $('pt-max-drawdown').value = inputs.risk.maxDrawdownPct;
         $('pt-min-free').value = inputs.risk.minFreeCapitalPct;
         $('pt-max-margin').value = inputs.risk.maxMarginUsePct;
-        $('pt-underlying-value').value = inputs.risk.minUnderlyingDailyValueToman;
-        $('pt-option-value').value = inputs.risk.minOptionDailyValueToman;
+        $('pt-underlying-value').value = inputs.risk.minUnderlyingDailyValueRialInput;
+        $('pt-option-value').value = inputs.risk.minOptionDailyValueRialInput;
         $('pt-open-interest').value = inputs.risk.minOpenInterest;
         $('pt-max-spread').value = inputs.risk.maxSpreadPct;
         $('pt-book-take').value = inputs.risk.maxBookTakePct;
@@ -2199,8 +2199,8 @@ export async function mount(root, { state, api }) {
       state.textContent = loaded.notFound ? 'این جلسه روی سرور نیست.' : `جلسه خوانده نشد — ${loaded.why}`;
       return;
     }
-    // رکورد را دوباره می‌سنجیم. سرور هم سنجیده، ولی اینجاست که ریال به
-    // تومان برمی‌گردد و رکوردی که از نظر قرارداد درست است می‌تواند به
+    // رکورد را دوباره می‌سنجیم. سرور هم سنجیده، ولی اینجاست که ریالِ ذخیره‌شده
+    // به ورودی فرم برمی‌گردد و رکوردی که از نظر قرارداد درست است می‌تواند به
     // ورودی فرم برنگردد.
     const restored = resumeMissionRecord(loaded.record);
     if (!restored.ok) {
@@ -2363,7 +2363,7 @@ export async function mount(root, { state, api }) {
     paintProposals(done.session);
     const remaining = done.budget.remainingRial;
     $('pt-proposals-state').textContent = `ثبت شد — حجم ${fmt.int(quantity)} · موقعیت ${faDigits(done.positionId)}`
-      + `${Number.isFinite(remaining) ? ` · باقی‌ماندهٔ خانواده ${fmt.int(remaining / 10)} تومان` : ''}`;
+      + `${Number.isFinite(remaining) ? ` · باقی‌ماندهٔ خانواده ${fmt.rialText(remaining)}` : ''}`;
   };
 
   /**
@@ -2429,9 +2429,9 @@ export async function mount(root, { state, api }) {
     // مقیاسِ رنگ گفته می‌شود، وگرنه «پررنگ» معنایی ندارد.
     $('pt-series-scale').textContent = view.scaleText === '—'
       ? 'هیچ پلهٔ معلومی در مسیر نیست، پس رنگ مقیاسی ندارد.'
-      : `شدت رنگ نسبت به بزرگ‌ترین سود یا زیانِ این مسیر است: ${view.scaleText} تومان.`;
+      : `شدت رنگ نسبت به بزرگ‌ترین سود یا زیانِ این مسیر است: ${view.scaleText}.`;
     trackChart($('pt-series-chart'), view.chartPoints, view.chartSeries,
-      { money: true, timeScale: true, xLabel: 'ساعت جلسه', yLabel: 'سود و زیان (تومان)' });
+      { money: true, timeScale: true, xLabel: 'ساعت جلسه', yLabel: 'سود و زیان (ریال)' });
     body.innerHTML = view.steps.map((step) => `<tr data-tone="${esc(step.totalTone)}" data-level="${esc(String(step.totalLevel))}">
       <td data-label="لحظه">${esc(step.atText)}${step.estimated ? '<br><small>تخمینی</small>' : ''}</td>
       <td data-label="سود و زیان کل" class="n"><b>${esc(step.totalText)}</b>${step.partial

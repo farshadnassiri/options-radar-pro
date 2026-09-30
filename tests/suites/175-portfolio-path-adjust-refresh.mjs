@@ -31,22 +31,22 @@ group('۱۷۵. حرکت مسیر، تغییر حجم، آفست و ماندگا�
   const id175 = `path-adjust-175-${process.pid}`;
   const setup175 = createPortfolioStepOneDraft({
     id: id175, baseIns: fx175.baseSession.baseIns,
-    capitalToman: '1000000000', reserveToman: '0',
+    capitalRialInput: '10000000000', reserveRialInput: '0',
     startDate: fx175.at.date, startSecond: fx175.at.second,
     endDate: 20260620, endSecond: 12 * 3600,
     grain: 'halfHour', createdAt: 175,
   });
   const outlook175 = createPortfolioOutlookDraft(setup175.draft, {
-    direction: 'bullish', targetPriceToman: '1140',
-    rangeLowToman: '', rangeHighToman: '', volatilityView: 'higher',
+    direction: 'bullish', targetPriceRialInput: '11400',
+    rangeLowRialInput: '', rangeHighRialInput: '', volatilityView: 'higher',
     expectedVolatilityPct: '35', confidencePct: '70',
     thesis: 'حرکت، تغییر حجم و آفست قابل بازپخش',
   });
   const risk175 = createPortfolioRiskDraft(outlook175.draft, {
     maxLossPct: '50', maxDrawdownPct: '60', minFreeCapitalPct: '10',
     maxMarginUsePct: '40', allowUnlimitedRisk: 'yes',
-    minUnderlyingDailyValueToman: '10000000',
-    minOptionDailyValueToman: '1000000', minOpenInterest: '100',
+    minUnderlyingDailyValueRialInput: '100000000',
+    minOptionDailyValueRialInput: '10000000', minOpenInterest: '100',
     maxSpreadPct: '8', maxBookTakePct: '50', requireFullBook: 'no',
   });
   const allocation175 = createPortfolioAllocationDraft(risk175.draft, [

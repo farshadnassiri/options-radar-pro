@@ -18,9 +18,9 @@ group('۱۵۸. کارت سرمایه و هدف در پرونده');
     portfolioDossierAnalysis(closed158.session, closed158.dossier),
   );
   check('مدل کامل همه عددهای کارت را آماده می‌کند',
-    full158.ok && full158.complete && full158.initialText.includes('تومان')
-    && full158.realizedText.includes('تومان') && full158.finalText.includes('تومان')
-    && full158.returnBaseText.includes('تومان') && full158.targetGapText.includes('تومان'));
+    full158.ok && full158.complete && full158.initialText.includes('ریال')
+    && full158.realizedText.includes('ریال') && full158.finalText.includes('ریال')
+    && full158.returnBaseText.includes('ریال') && full158.targetGapText.includes('ریال'));
   check('حکم و لحن فاصله از مدل می‌آیند',
     full158.targetState === 'missed' && full158.targetStateLabel === 'هدف محقق نشد'
     && full158.targetTone === 'loss');
@@ -65,8 +65,8 @@ group('۱۵۸. کارت سرمایه و هدف در پرونده');
   const shown158 = [full158.initialText, full158.realizedText, full158.finalText,
     full158.returnBaseText, full158.targetReturnText, full158.targetGapText,
     unknown158.finalText, unknown158.targetStateLabel];
-  check('متن کارت رقم لاتین و ریال ندارد',
-    shown158.every((value) => !/[0-9]/.test(value) && !String(value).includes('ریال')));
+  check('متن کارت رقم لاتین و تومان ندارد',
+    shown158.every((value) => !/[0-9]/.test(value) && !String(value).includes('تومان')));
 
   const css158 = readSrc('../ui/style.css');
   check('رنگ کارت فقط از توکن‌های موجود می‌آید',

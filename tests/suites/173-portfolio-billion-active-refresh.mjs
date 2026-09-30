@@ -55,21 +55,21 @@ group('۱۷۳. سفر یک‌میلیاردی — رفت‌وبرگشت کامل
 {
   const id = `billion-173-${process.pid}-${Date.now()}`;
   const setup = createPortfolioStepOneDraft({
-    id, baseIns: 'IRO1KHOD0001', capitalToman: '1000000000', reserveToman: '100000000',
+    id, baseIns: 'IRO1KHOD0001', capitalRialInput: '10000000000', reserveRialInput: '1000000000',
     startDate: 20260521, startSecond: 9 * 3600 + 30 * 60,
     endDate: 20260621, endSecond: 12 * 3600,
     grain: 'halfHour', createdAt: 173,
   });
   const outlook = createPortfolioOutlookDraft(setup.draft, {
-    direction: 'bullish', targetPriceToman: '4250', rangeLowToman: '3800',
-    rangeHighToman: '4500', volatilityView: 'higher', expectedVolatilityPct: '38.5',
+    direction: 'bullish', targetPriceRialInput: '42500', rangeLowRialInput: '38000',
+    rangeHighRialInput: '45000', volatilityView: 'higher', expectedVolatilityPct: '38.5',
     confidencePct: '72', thesis: 'فرض صریح کاربر برای سفر یک‌میلیاردی',
   });
   const risk = createPortfolioRiskDraft(outlook.draft, {
     maxLossPct: '9', maxDrawdownPct: '14', minFreeCapitalPct: '10',
     maxMarginUsePct: '65', allowUnlimitedRisk: 'yes',
-    minUnderlyingDailyValueToman: '25000000000',
-    minOptionDailyValueToman: '250000000', minOpenInterest: '50',
+    minUnderlyingDailyValueRialInput: '250000000000',
+    minOptionDailyValueRialInput: '2500000000', minOpenInterest: '50',
     maxSpreadPct: '7.5', maxBookTakePct: '25', requireFullBook: 'yes',
   });
   const allocation = createPortfolioAllocationDraft(risk.draft, [
@@ -107,7 +107,7 @@ group('۱۷۳. سفر یک‌میلیاردی — رفت‌وبرگشت کامل
   check('تمام مراحل سفر یک‌میلیاردی معتبر ساخته می‌شوند',
     setup.ok && outlook.ok && risk.ok && allocation.ok && mission.ok && active.ok,
     [setup, outlook, risk, allocation, mission, active].find((row) => !row.ok)?.why || '');
-  check('یک میلیارد تومان دقیقاً ده میلیارد ریال می‌ماند',
+  check('ورودی ده میلیارد ریال دقیقاً ده میلیارد ریال می‌ماند',
     active.draft?.session?.capital?.initialRial === 10_000_000_000);
   check('تخصیص ۳۰/۴۰/۳۰ بدون باقیمانده و بازتوزیع پنهان قفل می‌شود',
     active.draft?.session?.lockedAllocations?.map((row) => row.pct).join('/') === '30/40/30'
@@ -155,9 +155,9 @@ group('۱۷۳. سفر یک‌میلیاردی — رفت‌وبرگشت کامل
       inputs?.setup?.baseIns === 'IRO1KHOD0001'
       && inputs.setup.startDate === 20260521 && inputs.setup.startSecond === 34200
       && inputs.setup.endDate === 20260621 && inputs.setup.endSecond === 43200
-      && inputs.setup.grain === 'halfHour' && inputs.setup.capitalToman === '1000000000');
+      && inputs.setup.grain === 'halfHour' && inputs.setup.capitalRialInput === '10000000000');
     check('انتظار، ریسک، نقدشوندگی و هدف بدون پیش‌فرض تازه بازسازی می‌شوند',
-      inputs?.outlook?.targetPriceToman === '4250'
+      inputs?.outlook?.targetPriceRialInput === '42500'
       && inputs.outlook.expectedVolatilityPct === '38.5'
       && inputs.risk.maxLossPct === '9' && inputs.risk.requireFullBook === 'yes'
       && inputs.mission.targetReturnPct === '18' && inputs.mission.maxHoldingDays === '31');

@@ -37,7 +37,6 @@ import { regimeSeries, regimeAt, regimeLabel, regimeRuleText, stratifiedPick } f
 import {
   blankSession, recordView, lockExpectation, canAdvance, advanceTo, recordEvent,
   closeSession, sessionSummary, lastDecision, VIEW_DIRECTIONS, IV_VIEWS, SESSION_STATES,
-  RIAL_PER_TOMAN,
 } from '/core/bereket-session.mjs';
 import { executableAt } from '/core/bereket-exec.mjs';
 import { resolveHistVol } from '/core/hist-vol.mjs';
@@ -120,7 +119,7 @@ export async function mount(root, { state }) {
   const fees = () => feesOf(state.settings);
   const marginP = () => marginParamsOf(state.settings);
   const anonOn = () => !!session?.anonymous;
-  const capitalRial = () => Number(state.settings.bkCapitalToman || 0) * RIAL_PER_TOMAN;
+  const capitalRial = () => Number(state.settings.bkCapitalRial || 0);
 
   root.innerHTML = `
   <section class="backtest-hero"><div><p class="eyebrow">یادگیری، نه سیگنال</p><h1>سفره پر برکت بازار</h1><p>به یک لحظه در گذشته برو، فقط داده تا همان لحظه را ببین، نظرت را بنویس، موقعیت بساز، انتظارت را قفل کن، و جلو برو.</p></div><span id="bk-hero-state">جلسه‌ای باز نیست</span></section>
@@ -425,7 +424,7 @@ export async function mount(root, { state }) {
       ['ساعت', faDigits(clock(now.second))],
       ['رژیم بازار', esc(regimeLabel(regimeAt(regimeRows, now.date)))],
       ['قیمت پایه', anonOn() ? '—' : money(spot)],
-      ['سرمایهٔ جلسه', `${money(session.capitalRial / RIAL_PER_TOMAN)} تومان`],
+      ['سرمایهٔ جلسه', fmt.rialText(session.capitalRial)],
       ['روز جلسه', dayLabel(now.date, session.start.date, calendar)],
     ]);
     chart($('bk-now-chart'), shown.map((row) => ({ date: row.date, close: Number(row.close) })),

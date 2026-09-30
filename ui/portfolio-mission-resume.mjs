@@ -1,6 +1,6 @@
 // بازسازی فرم مأموریت از رکورد ذخیره‌شدهٔ سرور.
 //
-// این وارونهٔ `portfolio-mission-form.mjs` است: آن ورودی تومان و رشتهٔ
+// این وارونهٔ `portfolio-mission-form.mjs` است: آن ورودی ریال و رشتهٔ
 // فارسی را به draft ریالی تبدیل می‌کند، این draft ریالی را به همان
 // ورودی‌های صریح برمی‌گرداند تا فرم دقیقاً همان‌جایی باز شود که کاربر
 // رهایش کرده بود.
@@ -28,26 +28,26 @@ const isObject = (value) => !!value && typeof value === 'object' && !Array.isArr
 const fail = (why) => ({ ok: false, why, record: null });
 
 /**
- * ریال ذخیره‌شده → تومانِ همان ورودی.
+ * ریال ذخیره‌شده → همان ریالِ ورودی.
  *
- * تقسیم بر ده باید صحیح دربیاید. اگر نیامد یعنی رکورد دستکاری یا خراب
- * شده؛ گرد کردن، عددی به کاربر نشان می‌دهد که هرگز ننوشته است.
+ * ورودی حالا خودش ریال است (۱۴۰۵/۰۷/۰۸)؛ پیش از این تومان بود و این تابع
+ * بر ده تقسیم می‌کرد. عدد صحیحِ نامنفی نبود یعنی رکورد خراب است.
  */
-function rialToToman(rial) {
-  if (!Number.isSafeInteger(rial) || rial < 0 || rial % 10 !== 0) return null;
-  return rial / 10;
+function rialForInput(rial) {
+  if (!Number.isSafeInteger(rial) || rial < 0) return null;
+  return rial;
 }
 
 /** مقدار اختیاری: نبودش خالی است، بودنِ خرابش خطا. */
-function optionalToman(row, key) {
+function optionalRial(row, key) {
   if (!Object.prototype.hasOwnProperty.call(row, key) || row[key] === null) return { ok: true, value: '' };
-  const toman = rialToToman(row[key]);
-  return toman === null ? { ok: false, why: `مقدار ذخیره‌شدهٔ «${key}» معتبر نیست` } : { ok: true, value: String(toman) };
+  const amount = rialForInput(row[key]);
+  return amount === null ? { ok: false, why: `مقدار ذخیره‌شدهٔ «${key}» معتبر نیست` } : { ok: true, value: String(amount) };
 }
 
-function requiredToman(row, key) {
-  const toman = rialToToman(row?.[key]);
-  return toman === null ? { ok: false, why: `مقدار ذخیره‌شدهٔ «${key}» معتبر نیست` } : { ok: true, value: String(toman) };
+function requiredRial(row, key) {
+  const amount = rialForInput(row?.[key]);
+  return amount === null ? { ok: false, why: `مقدار ذخیره‌شدهٔ «${key}» معتبر نیست` } : { ok: true, value: String(amount) };
 }
 
 function requiredNumber(row, key) {
@@ -86,9 +86,9 @@ function setupInputs(session, replay) {
   if (typeof session.baseIns !== 'string' || !session.baseIns) return { ok: false, why: 'نماد پایهٔ ذخیره‌شده معتبر نیست' };
   const grain = requiredChoice(replay ?? {}, 'grain', MISSION_REPLAY_GRAINS);
   if (!grain.ok) return grain;
-  const capital = requiredToman(session.capital, 'initialRial');
+  const capital = requiredRial(session.capital, 'initialRial');
   if (!capital.ok) return capital;
-  const reserve = requiredToman(session.capital, 'reserveRial');
+  const reserve = requiredRial(session.capital, 'reserveRial');
   if (!reserve.ok) return reserve;
   const start = moment(session.start, 'شروع');
   if (!start.ok) return start;
@@ -98,8 +98,8 @@ function setupInputs(session, replay) {
     ok: true,
     value: {
       baseIns: session.baseIns,
-      capitalToman: capital.value,
-      reserveToman: reserve.value,
+      capitalRialInput: capital.value,
+      reserveRialInput: reserve.value,
       startDate: start.value.date,
       startSecond: start.value.second,
       endDate: end.value.date,
@@ -117,11 +117,11 @@ function outlookInputs(outlook) {
   if (!volatilityView.ok) return volatilityView;
   const confidence = requiredNumber(outlook, 'confidencePct');
   if (!confidence.ok) return confidence;
-  const target = optionalToman(outlook, 'targetPriceRial');
+  const target = optionalRial(outlook, 'targetPriceRial');
   if (!target.ok) return target;
-  const low = optionalToman(outlook, 'rangeLowRial');
+  const low = optionalRial(outlook, 'rangeLowRial');
   if (!low.ok) return low;
-  const high = optionalToman(outlook, 'rangeHighRial');
+  const high = optionalRial(outlook, 'rangeHighRial');
   if (!high.ok) return high;
   const expected = optionalNumber(outlook, 'expectedVolatilityPct');
   if (!expected.ok) return expected;
@@ -132,9 +132,9 @@ function outlookInputs(outlook) {
       volatilityView: volatilityView.value,
       confidencePct: confidence.value,
       thesis: typeof outlook.thesis === 'string' ? outlook.thesis : '',
-      targetPriceToman: target.value,
-      rangeLowToman: low.value,
-      rangeHighToman: high.value,
+      targetPriceRialInput: target.value,
+      rangeLowRialInput: low.value,
+      rangeHighRialInput: high.value,
       expectedVolatilityPct: expected.value,
     },
   };
@@ -153,9 +153,9 @@ function riskInputs(risk, liquidity) {
   if (!unlimited.ok) return unlimited;
   value.allowUnlimitedRisk = unlimited.value;
 
-  const underlying = requiredToman(liquidity, 'minUnderlyingDailyValueRial');
+  const underlying = requiredRial(liquidity, 'minUnderlyingDailyValueRial');
   if (!underlying.ok) return underlying;
-  const option = requiredToman(liquidity, 'minOptionDailyValueRial');
+  const option = requiredRial(liquidity, 'minOptionDailyValueRial');
   if (!option.ok) return option;
   const openInterest = requiredNumber(liquidity, 'minOpenInterest');
   if (!openInterest.ok) return openInterest;
@@ -166,8 +166,8 @@ function riskInputs(risk, liquidity) {
   const fullBook = requiredBool(liquidity, 'requireFullBook');
   if (!fullBook.ok) return fullBook;
 
-  value.minUnderlyingDailyValueToman = underlying.value;
-  value.minOptionDailyValueToman = option.value;
+  value.minUnderlyingDailyValueRialInput = underlying.value;
+  value.minOptionDailyValueRialInput = option.value;
   value.minOpenInterest = openInterest.value;
   value.maxSpreadPct = spread.value;
   value.maxBookTakePct = bookTake.value;
@@ -215,7 +215,7 @@ function missionInputs(mission) {
  *
  * سرور هنگام GET همین رکورد را با `restorePortfolioMissionSave` سنجیده،
  * ولی اینجا دوباره سنجیده می‌شود. دلیلش بدبینی به سرور نیست: این تابع
- * وارونهٔ ریال-به-تومان را هم انجام می‌دهد و همان‌جا می‌تواند به رکوردی
+ * وارونهٔ ریالِ ذخیره‌شده به ورودی را هم انجام می‌دهد و همان‌جا می‌تواند به رکوردی
  * بربخورد که از نظر قرارداد درست است ولی به ورودی فرم برنمی‌گردد.
  *
  * فقط بخش‌هایی از `inputs` پر می‌شوند که مرحلهٔ ذخیره‌شده واقعاً به آن‌ها

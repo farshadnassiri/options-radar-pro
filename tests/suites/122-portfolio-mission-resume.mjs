@@ -17,7 +17,7 @@ import { GROUPS as STRAT_GROUPS122 } from '../../strategies/catalog.mjs';
 //
 // بند ۲ پذیرش می‌گوید ادامه باید «دقیقاً» آخرین مرحلهٔ معتبر و همهٔ
 // ورودی‌های صریح را بازسازی کند و دادهٔ ناقص را صریح رد کند. پس آزمون
-// اصلی این دسته یک رفت‌وبرگشت است: تومان → ریال → تومان، و ادعا اینکه
+// اصلی این دسته یک رفت‌وبرگشت است: ریال → ریال → ریال، و ادعا اینکه
 // عددی که برمی‌گردد همان است که کاربر تایپ کرده بود، نه چیزی نزدیک به آن.
 group('۱۲۱. ادامهٔ مأموریت — بازسازی فرم و صداقت شبکه');
 {
@@ -72,10 +72,10 @@ group('۱۲۱. ادامهٔ مأموریت — بازسازی فرم و صداق
   check('مرحله نمایشی مأموریت، «مرور» است', resumed.record?.stage === 'review');
 
   const setupIn = resumed.record?.inputs?.setup;
-  check('سرمایه ریال به همان تومان ورودی برمی‌گردد', setupIn?.capitalToman === '1000000000',
-    String(setupIn?.capitalToman));
-  check('ذخیره احتیاطی هم به تومان برمی‌گردد', setupIn?.reserveToman === '200000000',
-    String(setupIn?.reserveToman));
+  check('سرمایه ریال به همان ریال ورودی برمی‌گردد', setupIn?.capitalRialInput === '10000000000',
+    String(setupIn?.capitalRialInput));
+  check('ذخیره احتیاطی هم به ریال برمی‌گردد', setupIn?.reserveRialInput === '2000000000',
+    String(setupIn?.reserveRialInput));
   check('نماد پایه، تایم‌فریم و دو لحظه بازسازی می‌شوند',
     setupIn?.baseIns === '900001' && setupIn?.grain === 'halfHour'
     && setupIn?.startDate === 20260521 && setupIn?.startSecond === 9 * 3600
@@ -85,9 +85,9 @@ group('۱۲۱. ادامهٔ مأموریت — بازسازی فرم و صداق
   check('انتظار بازار با همه ورودی‌های صریح برمی‌گردد',
     outlookIn?.direction === 'bullish' && outlookIn?.volatilityView === 'higher'
     && outlookIn?.confidencePct === '70' && outlookIn?.thesis === 'انتظار شکست مقاومت');
-  check('قیمت هدف و کران‌ها به تومان برمی‌گردند',
-    outlookIn?.targetPriceToman === '12000' && outlookIn?.rangeLowToman === '11000'
-    && outlookIn?.rangeHighToman === '13000');
+  check('قیمت هدف و کران‌ها به ریال برمی‌گردند',
+    outlookIn?.targetPriceRialInput === '120000' && outlookIn?.rangeLowRialInput === '110000'
+    && outlookIn?.rangeHighRialInput === '130000');
 
   const riskIn = resumed.record?.inputs?.risk;
   check('قیود ریسک و نقدشوندگی کامل برمی‌گردند',
@@ -96,9 +96,9 @@ group('۱۲۱. ادامهٔ مأموریت — بازسازی فرم و صداق
     && riskIn?.minOpenInterest === '100' && riskIn?.maxSpreadPct === '8');
   check('انتخاب دوگزینه‌ای به همان صورت صریح برمی‌گردد',
     riskIn?.allowUnlimitedRisk === 'no' && riskIn?.requireFullBook === 'yes');
-  check('ارزش روزانه ریالی به تومان برمی‌گردد',
-    riskIn?.minUnderlyingDailyValueToman === '10000000000'
-    && riskIn?.minOptionDailyValueToman === '100000000');
+  check('ارزش روزانه ریالی به همان ریال برمی‌گردد',
+    riskIn?.minUnderlyingDailyValueRialInput === '100000000000'
+    && riskIn?.minOptionDailyValueRialInput === '1000000000');
 
   check('تخصیص خانواده‌ها با درصدشان برمی‌گردد',
     resumed.record?.inputs?.allocation?.length === 2
@@ -135,8 +135,9 @@ group('۱۲۱. ادامهٔ مأموریت — بازسازی فرم و صداق
     !resumeMissionRecord(vagueChoice).ok);
 
   const oddRial = JSON.parse(JSON.stringify(missionRecord));
-  oddRial.draft.session.capital.initialRial = 10_000_000_001;
-  check('ریالی که به تومان صحیح برنمی‌گردد رد می‌شود، نه گرد',
+  // ریال فرد دیگر خراب نیست (ورودی ریال است)؛ ریالِ منفی یا کسری هنوز هست.
+  oddRial.draft.session.capital.initialRial = 10_000_000_000.5;
+  check('ریالِ کسری رد می‌شود، نه گرد',
     !resumeMissionRecord(oddRial).ok);
 
   const idMismatch = JSON.parse(JSON.stringify(missionRecord));

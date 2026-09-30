@@ -65,6 +65,14 @@ const stripNegZero = (s) => s.replace(/^-0(\.0+)?$/, (m) => m.slice(1));
 
 const grouped = (v) => faNum(stripNegZero(Math.round(v).toLocaleString('en-US')));
 
+/** عدد به میلیون: زیر هزار با یک رقم اعشار (بی «٫۰»)، بالاتر صحیح و گروه‌بندی‌شده. */
+function millions(v) {
+  const m = v / 1e6;
+  const r = Number(m.toFixed(1));
+  if (Math.abs(r) >= 1000) return grouped(m);
+  return faNum(stripNegZero(Number.isInteger(r) ? String(r) : r.toFixed(1)));
+}
+
 export const fmt = {
   money: (v) => (Number.isFinite(v) ? grouped(v)
     : v === Infinity ? '∞' : v === -Infinity ? '−∞' : '—'),
@@ -89,30 +97,27 @@ export const fmt = {
   },
   int: (v) => (Number.isFinite(v) ? grouped(v) : '—'),
   /**
-   * ارزش معامله: ریالِ داخلی، **تومان** در نمایش (قاعدهٔ ۷ پروتکل).
+   * پول: **ریال** همه‌جا، و از یک میلیون به بالا «میلیون ریال».
    *
-   * گزارش صاحب پروژه (ضفزر729): «ارزش معاملات کندل درست نیست.» عدد خامِ
-   * بالادست ریال است و بی‌واحد چاپ می‌شد؛ کنار هر عدد تومانی ده برابر
-   * بزرگ‌تر دیده می‌شد. `toman` عدد کامل برای ستونِ جدول است (واحد در
-   * سرستون)، `tomanShort` عدد کوتاه **با** واحد برای کارت و راهنما.
+   * خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۸): «واحد ارقام در برنامه حتماً باید ریال
+   * باشد نه تومان؛ اگر اعداد بزرگ شدند میلیون ریال.» پیش از این همین‌جا
+   * `toman`/`tomanShort` بود و بخش پورتفو هم ریال را بر ده تقسیم می‌کرد.
+   *
+   * `rialText` واحد را **همراه** عدد می‌دهد و برای کارت، جمله و خانهٔ جدولی
+   * است که عددهایش بزرگی‌های متفاوت دارند (سود ۲۵ هزار ریالی کنار سرمایهٔ
+   * ده میلیارد ریالی). زیر هزار میلیون یک رقم اعشار، بالاتر عدد صحیح؛ واحد
+   * از مقدارِ **گردشده** تصمیم می‌گیرد (مرز گرد شدن دور ۳۹).
+   *
+   * `mrial` فقط عددِ میلیون ریال است، برای ستونی که واحد در سرستونش آمده
+   * («ارزش معامله (میلیون ریال)»).
    */
-  toman: (rial) => (Number.isFinite(rial) ? grouped(rial / 10) : '—'),
-  tomanShort: (rial) => {
-    if (!Number.isFinite(rial)) return '—';
-    const t = rial / 10;
-    const tiers = [[1e12, 'هزار میلیارد'], [1e9, 'میلیارد'], [1e6, 'میلیون']];
-    const show = (x, unit) => `${faNum(stripNegZero(x.toFixed(1)))} ${unit} تومان`;
-    // واحد از روی مقدارِ **گردشده** تعیین می‌شود (همان مرز گرد شدن دور ۳۹):
-    // ۹۹۹٫۹۶ میلیون تومان باید «۱٫۰ میلیارد» شود، نه «۱۰۰۰٫۰ میلیون».
-    for (let i = 0; i < tiers.length; i++) {
-      const [base, unit] = tiers[i];
-      if (Math.abs(t) < base) continue;
-      const r = Number((t / base).toFixed(1));
-      if (i > 0 && Math.abs(r) >= 1000) return show(t / tiers[i - 1][0], tiers[i - 1][1]);
-      return show(t / base, unit);
-    }
-    return `${grouped(t)} تومان`;
+  rial: (v) => (Number.isFinite(v) ? grouped(v) : '—'),
+  rialText: (v) => {
+    if (!Number.isFinite(v)) return '—';
+    if (Math.abs(v) < 1e6) return `${grouped(v)} ریال`;
+    return `${millions(v)} میلیون ریال`;
   },
+  mrial: (v) => (Number.isFinite(v) ? millions(v) : '—'),
   /**
    * عدد بسیار کوچک، بی‌آنکه صفر شود.
    *

@@ -1,4 +1,4 @@
-// نمایش یافته‌های مستند پرونده؛ عددهای مالی فقط ریال به تومان می‌شوند.
+// نمایش یافته‌های مستند پرونده؛ عددهای مالی ریال، و بزرگ‌ها «میلیون ریال».
 
 import { DOSSIER_WEAKNESS_SEVERITIES } from '../core/portfolio-dossier-weakness.mjs';
 import { faDigits, fmt } from './fmt.mjs';
@@ -13,7 +13,7 @@ const labels = Object.freeze({
 });
 
 function evidenceValue(key, value) {
-  if (key.endsWith('Rial')) return Number.isFinite(value) ? `${fmt.int(value / 10)} تومان` : '—';
+  if (key.endsWith('Rial')) return fmt.rialText(value);
   if (key.endsWith('Pct')) return Number.isFinite(value) ? `${fmt.num(value)}٪` : '—';
   if (['openCount', 'openQty'].includes(key)) return Number.isFinite(value) ? fmt.int(value) : '—';
   if (Array.isArray(value)) return value.length ? value.map((row) => faDigits(String(row))).join('، ') : '—';
