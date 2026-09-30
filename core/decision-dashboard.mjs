@@ -222,10 +222,10 @@ export function dashboardScope(snapshot, scope = {}) {
 // ————————————————————————————————————————————————————————————————
 
 export const MARKET_MAP_METRICS = [
-  { key: 'callValue', label: 'ارزش معاملات کال', format: 'money' },
-  { key: 'putValue', label: 'ارزش معاملات پوت', format: 'money' },
-  { key: 'value', label: 'جمع ارزش کال و پوت', format: 'money' },
-  { key: 'uaValue', label: 'ارزش معاملات نماد پایه', format: 'money' },
+  { key: 'callValue', label: 'ارزش معاملات کال', format: 'tomanShort' },
+  { key: 'putValue', label: 'ارزش معاملات پوت', format: 'tomanShort' },
+  { key: 'value', label: 'جمع ارزش کال و پوت', format: 'tomanShort' },
+  { key: 'uaValue', label: 'ارزش معاملات نماد پایه', format: 'tomanShort' },
   { key: 'volume', label: 'حجم معاملات اختیار', format: 'int' },
   { key: 'changePct', label: 'درصد آخرین معامله پایه', format: 'pct' },
   // ── خانه‌های هم‌اندازه ────────────────────────────────────────────

@@ -177,7 +177,7 @@ export const DASHBOARD_MODES = [
 
 const METRICS = {
   changePct: ['تغییر آخرین نسبت به پایانی دیروز ٪', (value) => `${fmt.pct(value)}٪`],
-  value: ['ارزش معامله', fmt.money], volume: ['حجم', fmt.int], trades: ['تعداد معامله', fmt.int],
+  value: ['ارزش معامله', fmt.tomanShort], volume: ['حجم', fmt.int], trades: ['تعداد معامله', fmt.int],
   oi: ['موقعیت باز', fmt.int], oiChange: ['تغییر موقعیت باز', fmt.int],
   oiChangePct: ['تغییر موقعیت باز ٪', (value) => `${fmt.pct(value)}٪`],
   ivPct: ['تلاطم ضمنی ٪', (value) => `${fmt.pct(value)}٪`],
@@ -238,7 +238,7 @@ const COLS_CONTRACT = [
   // نه» همان‌قدر کار می‌کند.
   col('spreadRankPct', 'صدک فاصله مظنه ٪', 'pct', { group: 'مظنه', heat: 'loss' }),
   col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('value', 'ارزش معامله (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
   col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
   col('oiYday', 'موقعیت باز دیروز', 'int', { group: 'تعهد انباشته' }),
@@ -321,12 +321,12 @@ const COLS_UNDERLYING = [
   col('callVolumePct', 'سهم کال از حجم ٪', 'pct', { group: 'گردش امروز' }),
   col('putVol', 'حجم پوت', 'int', { group: 'گردش امروز' }),
   col('putVolumePct', 'سهم پوت از حجم ٪', 'pct', { group: 'گردش امروز' }),
-  col('value', 'ارزش معاملات اختیار', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('callValue', 'ارزش کال', 'money', { group: 'گردش امروز' }),
+  col('value', 'ارزش معاملات اختیار (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('callValue', 'ارزش کال (تومان)', 'toman', { group: 'گردش امروز' }),
   col('callValuePct', 'سهم کال از ارزش ٪', 'pct', { group: 'گردش امروز' }),
-  col('putValue', 'ارزش پوت', 'money', { group: 'گردش امروز' }),
+  col('putValue', 'ارزش پوت (تومان)', 'toman', { group: 'گردش امروز' }),
   col('putValuePct', 'سهم پوت از ارزش ٪', 'pct', { group: 'گردش امروز' }),
-  col('uaValue', 'ارزش معاملات نماد پایه', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('uaValue', 'ارزش معاملات نماد پایه (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('uaVolume', 'حجم نماد پایه', 'int', { group: 'گردش امروز' }),
   col('uaTrades', 'تعداد معامله نماد پایه', 'int', { group: 'گردش امروز' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
@@ -368,9 +368,9 @@ const COLS_EXPIRY = [
   col('callVolumePct', 'سهم کال از حجم ٪', 'pct', { group: 'گردش امروز' }),
   col('putVolume', 'حجم پوت', 'int', { group: 'گردش امروز' }),
   col('putVolumePct', 'سهم پوت از حجم ٪', 'pct', { group: 'گردش امروز' }),
-  col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('callValue', 'ارزش کال', 'money', { group: 'گردش امروز', base: true }),
-  col('putValue', 'ارزش پوت', 'money', { group: 'گردش امروز', base: true }),
+  col('value', 'ارزش معامله (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('callValue', 'ارزش کال (تومان)', 'toman', { group: 'گردش امروز', base: true }),
+  col('putValue', 'ارزش پوت (تومان)', 'toman', { group: 'گردش امروز', base: true }),
   col('callValuePct', 'سهم کال از ارزش ٪', 'pct', { group: 'گردش امروز' }),
   col('putValuePct', 'سهم پوت از ارزش ٪', 'pct', { group: 'گردش امروز' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
@@ -410,10 +410,10 @@ const COLS_GROUP = [
   col('callVolumePct', 'سهم کال از حجم ٪', 'pct', { group: 'گردش امروز' }),
   col('putVolume', 'حجم پوت', 'int', { group: 'گردش امروز' }),
   col('putVolumePct', 'سهم پوت از حجم ٪', 'pct', { group: 'گردش امروز' }),
-  col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('callValue', 'ارزش کال', 'money', { group: 'گردش امروز' }),
+  col('value', 'ارزش معامله (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('callValue', 'ارزش کال (تومان)', 'toman', { group: 'گردش امروز' }),
   col('callValuePct', 'سهم کال از ارزش ٪', 'pct', { group: 'گردش امروز' }),
-  col('putValue', 'ارزش پوت', 'money', { group: 'گردش امروز' }),
+  col('putValue', 'ارزش پوت (تومان)', 'toman', { group: 'گردش امروز' }),
   col('putValuePct', 'سهم پوت از ارزش ٪', 'pct', { group: 'گردش امروز' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز', base: true }),
   col('callTrades', 'تعداد معامله کال', 'int', { group: 'گردش امروز' }),
@@ -442,9 +442,9 @@ const COLS_TAPE = [
   col('price', 'قیمت', 'money', { group: 'معامله', base: true }),
   col('changeFromFirstPct', 'تغییر از اولین معامله ٪', 'pct', { group: 'معامله', heat: 'gain', sign: true }),
   col('quantity', 'حجم', 'int', { group: 'معامله', base: true }),
-  col('value', 'ارزش', 'money', { group: 'معامله', base: true, heat: 'gain' }),
+  col('value', 'ارزش (تومان)', 'toman', { group: 'معامله', base: true, heat: 'gain' }),
   col('cumulativeVolume', 'حجم تجمعی', 'int', { group: 'تجمعی', base: true }),
-  col('cumulativeValue', 'ارزش تجمعی', 'money', { group: 'تجمعی', base: true }),
+  col('cumulativeValue', 'ارزش تجمعی (تومان)', 'toman', { group: 'تجمعی', base: true }),
   col('basePrice', 'قیمت پایه هم‌زمان', 'money', { group: 'مرجع', base: true }),
   col('premiumPctBase', 'پریمیوم ٪ قیمت پایه', 'pct', { group: 'مرجع' }),
   col('moneynessPct', 'فاصله اعمال از پایه ٪', 'pct', { group: 'مرجع' }),
@@ -562,7 +562,7 @@ const COLS_BOARD = [
   col('askQty', 'حجم عرضه', 'int', { group: 'مظنه' }),
   col('mid', 'میانه مظنه', 'money', { group: 'مظنه' }),
   col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('value', 'ارزش معامله', 'money', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('value', 'ارزش معامله (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز', base: true }),
   col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
   col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain', sign: true }),
@@ -649,7 +649,7 @@ function barChart(rows, metric) {
   return `<div class="decision-bars" aria-label="${esc(label)}">${rows.slice(0, 16).map((row) => {
     const value = Number(row[metric]);
     const fill = signed ? (value > 0 ? 'var(--gain)' : value < 0 ? 'var(--loss)' : 'var(--muted)') : 'var(--bar-fill)';
-    return `<article><header><b>${esc(rowName(row))}</b><strong class="${tone(signed ? value : 0)}">${formatter(value)}</strong></header><i><b style="--bar:${Math.min(100, Math.abs(value) / max * 100)}%;--series:${fill}"></b></i><small>تغییر آخرین با پایانی دیروز: ${fmt.pct(row.changePct)}٪ · ارزش ${fmt.money(row.value)}</small></article>`;
+    return `<article><header><b>${esc(rowName(row))}</b><strong class="${tone(signed ? value : 0)}">${formatter(value)}</strong></header><i><b style="--bar:${Math.min(100, Math.abs(value) / max * 100)}%;--series:${fill}"></b></i><small>تغییر آخرین با پایانی دیروز: ${fmt.pct(row.changePct)}٪ · ارزش ${fmt.tomanShort(row.value)}</small></article>`;
   }).join('')}</div>`;
 }
 
@@ -1102,7 +1102,7 @@ export async function mount(root, { state, api }) {
       return;
     }
     if (view[2] === 'board-moneyness') {
-      host.innerHTML = `<p class="note">هر سطل، فاصله قیمت اعمال از قیمت جاری پایه است. سطل‌ها ثابت‌اند تا دو نماد و دو روز با هم مقایسه شوند.</p>${stackedBars(moneynessDistribution(scoped.contracts || [], board.metric), { label: `توزیع ${metricLabel}`, formatter: board.metric === 'value' ? fmt.money : fmt.int })}`;
+      host.innerHTML = `<p class="note">هر سطل، فاصله قیمت اعمال از قیمت جاری پایه است. سطل‌ها ثابت‌اند تا دو نماد و دو روز با هم مقایسه شوند.</p>${stackedBars(moneynessDistribution(scoped.contracts || [], board.metric), { label: `توزیع ${metricLabel}`, formatter: board.metric === 'value' ? fmt.tomanShort : fmt.int })}`;
       return;
     }
     // آخرین نمای تابلو: اعمال در برابر سربه‌سر.
@@ -1143,9 +1143,9 @@ export async function mount(root, { state, api }) {
       host.innerHTML = painCurve(maxPain(ladders())[0]);
       return true;
     }
-    if (kind === 'heatmap-value') { host.innerHTML = heatmap(contracts, { metric: 'value', formatter: fmt.money, label: 'جمع ارزش معامله هر خانه.' }); return true; }
+    if (kind === 'heatmap-value') { host.innerHTML = heatmap(contracts, { metric: 'value', formatter: fmt.tomanShort, label: 'جمع ارزش معامله هر خانه.' }); return true; }
     if (kind === 'heatmap-iv') { host.innerHTML = heatmap(contracts, { metric: 'ivPct', formatter: (v) => `${fmt.pct(v)}٪`, label: 'میانگین تلاطم ضمنی هر خانه.' }); return true; }
-    if (kind === 'histogram-money') { host.innerHTML = stackedBars(moneynessDistribution(contracts, 'value'), { label: 'توزیع ارزش روی فاصله اعمال', formatter: fmt.money }); return true; }
+    if (kind === 'histogram-money') { host.innerHTML = stackedBars(moneynessDistribution(contracts, 'value'), { label: 'توزیع ارزش روی فاصله اعمال', formatter: fmt.tomanShort }); return true; }
     if (kind === 'histogram-change') { host.innerHTML = histogram(contracts.map((row) => row.changePct), { label: 'توزیع تغییر نسبت به پایانی دیروز', unit: '٪' }); return true; }
     if (kind === 'histogram-iv') { host.innerHTML = histogram(contracts.map((row) => row.ivPct), { label: 'توزیع تلاطم ضمنی', unit: '٪' }); return true; }
     if (kind === 'term-structure' || kind === 'term-skew') {

@@ -28,7 +28,7 @@ const HEAT = {
   prob: ['--accent-soft', '--accent'],
 };
 
-const NUM_FMT = new Set(['money', 'pct', 'num', 'int']);
+const NUM_FMT = new Set(['money', 'toman', 'pct', 'num', 'int']);
 
 /**
  * جابه‌جایی یک ستون به جای ستون دیگر.
