@@ -81,5 +81,5 @@ group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دا�
   // برنامه صفر می‌ماند (ممیزی ۱۴۰۵/۰۶/۲۴، ردیف ۵).
   check('endpoint زنده عکس فشرده را با گردش واقعی پایه‌ها ادغام‌شده می‌دهد',
     server70.includes('universe: mergeUnderlyingTrades(decisionDashboardSnapshot(sourceRows, S), observed)')
-    && server70.includes('snapshotAt: watch.at'));
+    && server70.includes('snapshotAt: boardAt'));
 }

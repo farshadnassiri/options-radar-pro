@@ -26,6 +26,13 @@ export const SCHEMA = [
     def: 5, min: 2, max: 120, step: 1, unit: 'ثانیه',
     label: 'فاصله دریافت دیده‌بان',
     hint: 'یک درخواست، کل بازار اختیار. ستون فقرات همه تب‌ها.' },
+  // پس از بستن بازار، ارقام نهایی تابلو (ارزش، حجم، موقعیت باز) لزوماً
+  // در همان دقیقه ثابت نمی‌شوند. حلقه با این فاصله دوباره می‌پرسد تا دو عکس
+  // پشت‌سرهم یکی شوند، و بیش از سقف نمی‌پرسد (`core/watch-snapshot.mjs`).
+  { key: 'afterCloseRefreshSec', group: 'data', kind: 'num', scope: 'server',
+    def: 300, min: 60, max: 3600, step: 60, unit: 'ثانیه', label: 'فاصله عکس نهایی پس از بستن بازار' },
+  { key: 'afterCloseMaxPulls', group: 'data', kind: 'num', scope: 'server',
+    def: 12, min: 1, max: 48, step: 1, unit: 'بار', label: 'سقف عکس‌های پس از بستن بازار' },
   { key: 'ttlWatchSec', group: 'data', kind: 'num', scope: 'server',
     def: 4, min: 1, max: 60, step: 1, unit: 'ثانیه', label: 'عمر کش دیده‌بان' },
   { key: 'ttlBookSec', group: 'data', kind: 'num', scope: 'server',

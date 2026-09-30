@@ -42,7 +42,7 @@ group('۶۸. رصد لحظه‌ای بازار و IV هر معامله');
   ];
   const tape68 = liveOptionTape({
     trades: option68, baseTrades: base68,
-    contract: { ins: '22', name: 'ضنماد', kind: 'call', strike: 10000, days: 30, endDate: 20260922 },
+    contract: { ins: '22', name: 'ضنماد', kind: 'call', strike: 10000, days: 30, endDate: 20260922, size: 1000 },
     settings: settings68,
   });
   check('پیش از اولین معامله پایه، IV ساخته نمی‌شود', !Number.isFinite(tape68[0].iv));
@@ -50,9 +50,10 @@ group('۶۸. رصد لحظه‌ای بازار و IV هر معامله');
     tape68[1].basePrice === 10000 && tape68[2].basePrice === 11000);
   check('IV هر دو معامله معتبر، تلاطم بازار را بازمی‌سازد',
     near(tape68[1].iv, 0.5, 1e-5) && near(tape68[2].iv, 0.5, 1e-5), `${tape68[1].iv} | ${tape68[2].iv}`);
+  // ارزش اختیار «تعداد × قیمت × اندازهٔ قرارداد» است؛ بی اندازه هزار برابر کم بود.
   check('حجم و ارزش تجمعی در هر ردیف تازه جلو می‌روند',
     tape68[2].cumulativeVolume === 6
-    && near(tape68[2].cumulativeValue, option68.reduce((sum, row) => sum + row.price * row.quantity, 0), 1e-8));
+    && near(tape68[2].cumulativeValue, option68.reduce((sum, row) => sum + row.price * row.quantity * 1000, 0), 1e-8));
   const reference68 = liveReferenceTape(base68, { ins: '11', name: 'نماد' });
   check('مسیر پایه، تغییر قیمت و حجم تجمعی را برای نمودار می‌سازد',
     reference68.length === 2 && near(reference68[1].changePct, 10, 1e-10) && reference68[1].cumulativeVolume === 120);

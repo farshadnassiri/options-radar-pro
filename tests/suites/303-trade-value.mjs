@@ -1,0 +1,182 @@
+// ۳۰۳. ارزش معاملات کندل روزانه — گزارش ضفزر729
+//
+// صاحب پروژه: «اعداد ارزش معاملات در کندل قیمت امروز قراردادها صحیح نیست.»
+// ممیزی پنج علت پیدا کرد و این دسته هر پنج را قفل می‌کند:
+//   ۱. ارزش به ریال و بی‌واحد چاپ می‌شد (قاعده: تومان در نمایش).
+//   ۲. قیمت‌های کندل از `/api/infos` بودند و ارزش/حجم از عکس دیده‌بان؛ و
+//      `vol` پاسخ اطلاعات هرگز روی `volume` ردیف نمی‌نشست.
+//   ۳. پس از بستن بازار عکس دیده‌بان یخ می‌زد و تا فردا «امروز» خوانده می‌شد.
+//   ۴. امضای تغییر ردیف، ارزش و تعداد معامله را نداشت.
+//   ۵. ستون «ارزش» ریزمعاملهٔ اختیار اندازهٔ قرارداد را ضرب نمی‌کرد.
+
+import { check, group, readSrc } from '../harness.mjs';
+import { fmt } from '../../ui/fmt.mjs';
+import { infoTotals, mergeRangeInfo, rangeHeading } from '../../core/range-info.mjs';
+import {
+  WATCH_TRACK, watchRowSig, diffWatchRows, afterCloseDue, afterCloseState, watchSession,
+} from '../../core/watch-snapshot.mjs';
+import { liveOptionTape } from '../../core/live-market.mjs';
+import { tehranDateNumber } from '../../core/live-day.mjs';
+
+// اعداد رسمی ضفزر729 در ۳۰ سپتامبر (پاسخ GetClosingPriceInfo)
+const VALUE = 1051266669000;
+const VOLUME = 12591;
+const TRADES = 3016;
+
+group('۳۰۳. ارزش معاملات — تومان با واحد در نمایش');
+{
+  check('ارزش ضفزر729 به تومان و با واحد کوتاه می‌شود',
+    fmt.tomanShort(VALUE) === '۱۰۵٫۱ میلیارد تومان', fmt.tomanShort(VALUE));
+  check('عدد کامل تومانی برای ستون جدول، بی ریالِ اضافه',
+    fmt.toman(VALUE) === '۱۰۵,۱۲۶,۶۶۶,۹۰۰', fmt.toman(VALUE));
+  check('عدد روز قبل (۵۵۱٫۷ میلیارد ریال‌نما) هم به تومان می‌رود',
+    fmt.tomanShort(5516563710000) === '۵۵۱٫۷ میلیارد تومان', fmt.tomanShort(5516563710000));
+  check('مرز گرد شدن: ۹۹۹٫۹۶ میلیون تومان «۱٫۰ میلیارد» است، نه «۱۰۰۰٫۰ میلیون»',
+    fmt.tomanShort(9999600000) === '۱٫۰ میلیارد تومان', fmt.tomanShort(9999600000));
+  check('بالای هزار میلیارد تومان واحد خودش را دارد',
+    fmt.tomanShort(123456789012345) === '۱۲٫۳ هزار میلیارد تومان', fmt.tomanShort(123456789012345));
+  check('ارزش نامعلوم «—» است، نه صفر تومان',
+    fmt.tomanShort(NaN) === '—' && fmt.toman(NaN) === '—' && fmt.tomanShort(undefined) === '—');
+  check('صفر واقعی صفر تومان است', fmt.tomanShort(0) === '۰ تومان');
+
+  const map = readSrc('../ui/live-market-map.mjs');
+  check('عدد کنار کندل با تومان کوتاه چاپ می‌شود، نه ریالِ بی‌واحد',
+    map.includes("rangeSort === 'value' ? fmt.tomanShort(row.value)") && !/fmt\.money\([a-z.]*[vV]alue\)/.test(map));
+  const dash = readSrc('../ui/tabs/live-market-dashboard.mjs');
+  check('هیچ ارزش معامله‌ای در داشبورد با fmt.money چاپ نمی‌شود',
+    !/col\('(value|callValue|putValue|uaValue|cumulativeValue)', [^)]*'money'/.test(dash)
+    && !dash.includes('ارزش ${fmt.money(row.value)}') && !/formatter: fmt\.money/.test(dash.replace(/function \w+\([^)]*formatter = fmt\.money[^)]*\)/g, '')));
+  const table = readSrc('../ui/table.mjs');
+  check('ستون تومانی عددی است (راست‌چین، نقشهٔ گرما)', /NUM_FMT = new Set\(\[[^\]]*'toman'/.test(table));
+}
+
+group('۳۰۳. عددهای کنار کندل از همان پاسخی که خود کندل');
+{
+  // شکل پاسخ واقعی `GetClosingPriceInfo` (میدان‌های مربوط)
+  const raw = { qTotCap: VALUE, qTotTran5J: VOLUME, zTotTran: TRADES, pClosing: 83494, pDrCotVal: 83000 };
+  const totals = infoTotals(raw);
+  check('ارزش و حجم از پاسخ اطلاعات خوانده می‌شوند', totals.value === VALUE && totals.volume === VOLUME);
+  check('ارزشِ نیامده نامعلوم است، نه صفر', infoTotals({}).value === null && infoTotals({ qTotCap: '' }).value === null);
+  check('صفرِ آمده صفر است («معامله نشد»)', infoTotals({ qTotCap: 0 }).value === 0);
+
+  // ردیف زنجیره از عکس کهنه‌تر دیده‌بان
+  const watchRow = { ins: '2650251901841248', name: 'ضفزر729', value: 5516563710000, volume: 8306, trades: 2000, oi: 12011, first: 0 };
+  const info = { first: 80000, low: 79000, high: 86000, last: 83000, close: 83494, yday: 81000, vol: VOLUME, trades: TRADES, ...totals };
+  const merged = mergeRangeInfo(watchRow, info);
+  check('ارزش کارت از پاسخ اطلاعات است، نه عکس دیده‌بان', merged.value === VALUE && merged.valueSource === 'info');
+  check('حجم کارت هم از همان پاسخ است (پیش از این `vol` روی `volume` نمی‌نشست)', merged.volume === VOLUME);
+  check('تعداد معامله و قیمت‌های کندل از همان پاسخ‌اند', merged.trades === TRADES && merged.close === 83494 && merged.first === 80000);
+  check('موقعیت باز که پاسخ اطلاعات ندارد از عکس دیده‌بان می‌ماند', merged.oi === 12011);
+
+  const legacy = mergeRangeInfo(watchRow, { first: 1, low: 1, high: 1, last: 1, close: 1, vol: 99 });
+  check('سرورِ قدیمی بی ارزش: `vol` حجم است، ارزش از دیده‌بان و منبعش گفته می‌شود',
+    legacy.volume === 99 && legacy.value === 5516563710000 && legacy.valueSource === 'watch');
+  const nullValue = mergeRangeInfo(watchRow, { value: null, volume: null });
+  check('null بالادست رویِ عددِ معلوم نمی‌نشیند', nullValue.value === 5516563710000 && nullValue.volume === 8306);
+  check('پاسخِ خطادار ادغام نمی‌شود',
+    mergeRangeInfo(watchRow, { error: 'TypeError: x', value: 1 }).value === 5516563710000);
+
+  const server = readSrc('../server/server.mjs');
+  check('`/api/infos` ارزش و حجم را از همان GetClosingPriceInfo می‌دهد', server.includes('...infoTotals(d),'));
+  const map = readSrc('../ui/live-market-map.mjs');
+  check('کندل با ادغام صریح ساخته می‌شود، نه با پخش خام پاسخ',
+    map.includes('mergeRangeInfo(row, cached.items[row.ins])') && !map.includes('...(cached.items[row.ins] || {})'));
+}
+
+group('۳۰۳. امضای تغییر ردیف دیده‌بان ارزش و تعداد را هم می‌بیند');
+{
+  check('امضا ارزش و تعداد معامله هر دو سمت را دارد',
+    ['qTotCap_C', 'qTotCap_P', 'zTotTran_C', 'zTotTran_P'].every((k) => WATCH_TRACK.includes(k)));
+  const row = { insCode_C: 'C1', insCode_P: 'P1', qTotTran5J_C: VOLUME, qTotCap_C: VALUE, oP_C: 12011 };
+  const first = diffWatchRows([row]);
+  const fixedValue = { ...row, qTotCap_C: VALUE - 1000000 };
+  const second = diffWatchRows([fixedValue], first.byKey);
+  check('اصلاح ارزش بی تغییر حجم، «تغییر» شمرده و پخش می‌شود', second.changed.length === 1);
+  check('ردیف بی‌تغییر پخش نمی‌شود', diffWatchRows([row], first.byKey).changed.length === 0);
+  check('امضا از همان فهرست ساخته می‌شود', watchRowSig(row).split(',').length === WATCH_TRACK.length);
+  const server = readSrc('../server/server.mjs');
+  check('سرور فهرست محلیِ کهنه ندارد و از ماژول مشترک می‌خواند',
+    !server.includes('const TRACK = [') && server.includes('diffWatchRows(rows, watch.byKey)'));
+}
+
+group('۳۰۳. پس از بستن بازار، عکس نهایی');
+{
+  const today = 20260930;
+  const now = Date.UTC(2026, 8, 30, 10, 0, 0);
+  const base = { phase: 'after', today, now, everySec: 300, maxPulls: 12 };
+  check('در بازار باز این مسیر تصمیم نمی‌گیرد (حلقهٔ عادی می‌پرسد)', !afterCloseDue({ ...base, phase: 'open', watch: {} }));
+  check('پیش از باز شدن و روز تعطیل چیزی پرسیده نمی‌شود',
+    !afterCloseDue({ ...base, phase: 'before', watch: {} }) && !afterCloseDue({ ...base, phase: 'holiday', watch: {} }));
+  check('عکسی که مال امروز نیست بی‌درنگ گرفته می‌شود',
+    afterCloseDue({ ...base, watch: { day: 20260929, at: now - 1000 } }));
+  check('عکس امروز تا فاصلهٔ کُند دوباره گرفته نمی‌شود',
+    !afterCloseDue({ ...base, watch: { day: today, at: now - 60_000 } }));
+  check('پس از فاصله، عکس دیگری گرفته می‌شود',
+    afterCloseDue({ ...base, watch: { day: today, at: now - 300_000 } }));
+  check('عکس نهایی ثابت‌شده دیگر پرسیده نمی‌شود',
+    !afterCloseDue({ ...base, watch: { day: today, at: now - 900_000, finalDay: today } }));
+  check('بیش از سقف پرسیده نمی‌شود',
+    !afterCloseDue({ ...base, watch: { day: today, at: now - 900_000, afterPulls: 12 } }));
+
+  const lastOpenTick = { day: today, phase: 'open', afterPulls: 0, finalDay: 0 };
+  const moved = afterCloseState({ phase: 'after', today, prev: lastOpenTick, changedCount: 3 });
+  check('عکس پس از بستن که ارقامش عوض شد هنوز نهایی نیست', moved.afterPulls === 1 && moved.finalDay === 0);
+  const settled = afterCloseState({ phase: 'after', today, prev: { ...lastOpenTick, ...moved }, changedCount: 0 });
+  check('دو عکس پشت‌سرهم یکی شدند: عکس نهایی', settled.finalDay === today && settled.afterPulls === 2);
+  const fresh = afterCloseState({ phase: 'after', today, prev: { day: 20260929, afterPulls: 7, finalDay: 20260929 }, changedCount: 0, first: false });
+  check('روز تازه شمار را از صفر می‌گیرد و عکس دیروز را نهایی امروز نمی‌خواند',
+    fresh.afterPulls === 1 && fresh.finalDay === 0);
+  check('عکس اولِ سرورِ تازه‌روشن‌شده نهایی خوانده نمی‌شود',
+    afterCloseState({ phase: 'after', today, prev: { day: today }, changedCount: 0, first: true }).finalDay === 0);
+  const server = readSrc('../server/server.mjs');
+  check('حلقهٔ دیده‌بان در فاز بسته فقط با همین قاعده می‌پرسد',
+    /if \(!gate\.open && !afterCloseDue\(\{/.test(server) && server.includes('S.afterCloseRefreshSec'));
+}
+
+group('۳۰۳. عکس دیروز «امروز» خوانده نمی‌شود');
+{
+  // ساعت تزریقی: ۱۱:۰۰ تهران ۳۰ سپتامبر و ۱۲:۲۹ تهران ۲۹ سپتامبر
+  const todayAt = Date.UTC(2026, 8, 30, 7, 30, 0);
+  const ydayAt = Date.UTC(2026, 8, 29, 8, 59, 0);
+  const today = tehranDateNumber(todayAt);
+  check('ساعت‌های تزریقی دو روز مختلف تهران‌اند', today > 0 && tehranDateNumber(ydayAt) !== today);
+
+  const live = watchSession({ phase: 'open', at: todayAt, today });
+  check('عکس بازار باز امروز، امروز است', live.current && live.date === today);
+  const leftover = watchSession({ phase: 'after', at: ydayAt, today });
+  check('عکسی که از دیروز در حافظه مانده، جلسهٔ قبل است و روزش گفته می‌شود',
+    !leftover.current && leftover.date === tehranDateNumber(ydayAt));
+  const preOpen = watchSession({ phase: 'before', at: todayAt, today });
+  check('عکس پیش از باز شدن، حتی با ساعت امروز، امروز نیست', !preOpen.current && preOpen.why.length > 0);
+  check('روز تعطیل هم جلسهٔ قبل است', !watchSession({ phase: 'holiday', at: todayAt, today }).current);
+  check('بی عکس، هیچ روزی ادعا نمی‌شود', !watchSession({ phase: 'open', at: 0, today }).current);
+
+  const current = rangeHeading({ current: true, final: true });
+  check('عنوان کندل امروز فقط برای عکس امروز است',
+    current.title === 'کندل قیمت امروز قراردادها' && current.note.includes('نهایی'));
+  const old = rangeHeading({ current: false, date: 20260929, why: 'عکس از جلسهٔ قبل مانده است' }, (d) => `«${d}»`);
+  check('عکس جلسهٔ قبل با برچسب و تاریخش نشان داده می‌شود',
+    old.title === 'کندل قیمت جلسهٔ قبل («20260929»)' && !old.current);
+  check('روزِ نامعلوم «امروز» ادعا نمی‌کند', !rangeHeading(null).title.includes('امروز'));
+
+  const server = readSrc('../server/server.mjs');
+  check('داشبورد زنده روزِ عکس را همراه می‌فرستد',
+    server.includes('session: { ...session, final:') && server.includes('phase: fromWatch ? watch.phase : marketOpen().phase'));
+  const map = readSrc('../ui/live-market-map.mjs');
+  check('عنوان کندل از روزِ عکس ساخته می‌شود', map.includes('rangeHeading(marketContext.session, dateLabel)'));
+}
+
+group('۳۰۳. ارزش ریزمعاملهٔ اختیار با اندازهٔ قرارداد');
+{
+  const trades = [
+    { sequence: 1, time: 90010, price: 83000, quantity: 10, canceled: false, canceledKnown: true },
+    { sequence: 2, time: 90020, price: 84000, quantity: 5, canceled: false, canceledKnown: true },
+  ];
+  const contract = { ins: 'C1', name: 'ضفزر729', kind: 'call', strike: 80000, days: 20, endDate: 20261021 };
+  const sized = liveOptionTape({ trades, contract: { ...contract, size: 1000 }, settings: {} });
+  check('ارزش هر معامله = تعداد × قیمت × اندازهٔ قرارداد',
+    sized[0].value === 10 * 83000 * 1000 && sized[1].cumulativeValue === (10 * 83000 + 5 * 84000) * 1000);
+  const unsized = liveOptionTape({ trades, contract, settings: {} });
+  check('اندازهٔ نامعلوم ارزش نامعلوم می‌دهد، نه عددِ هزار برابر کمتر',
+    Number.isNaN(unsized[0].value) && Number.isNaN(unsized[1].cumulativeValue) && unsized[1].cumulativeVolume === 15);
+}

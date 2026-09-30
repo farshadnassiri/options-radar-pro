@@ -89,6 +89,31 @@ export const fmt = {
   },
   int: (v) => (Number.isFinite(v) ? grouped(v) : '—'),
   /**
+   * ارزش معامله: ریالِ داخلی، **تومان** در نمایش (قاعدهٔ ۷ پروتکل).
+   *
+   * گزارش صاحب پروژه (ضفزر729): «ارزش معاملات کندل درست نیست.» عدد خامِ
+   * بالادست ریال است و بی‌واحد چاپ می‌شد؛ کنار هر عدد تومانی ده برابر
+   * بزرگ‌تر دیده می‌شد. `toman` عدد کامل برای ستونِ جدول است (واحد در
+   * سرستون)، `tomanShort` عدد کوتاه **با** واحد برای کارت و راهنما.
+   */
+  toman: (rial) => (Number.isFinite(rial) ? grouped(rial / 10) : '—'),
+  tomanShort: (rial) => {
+    if (!Number.isFinite(rial)) return '—';
+    const t = rial / 10;
+    const tiers = [[1e12, 'هزار میلیارد'], [1e9, 'میلیارد'], [1e6, 'میلیون']];
+    const show = (x, unit) => `${faNum(stripNegZero(x.toFixed(1)))} ${unit} تومان`;
+    // واحد از روی مقدارِ **گردشده** تعیین می‌شود (همان مرز گرد شدن دور ۳۹):
+    // ۹۹۹٫۹۶ میلیون تومان باید «۱٫۰ میلیارد» شود، نه «۱۰۰۰٫۰ میلیون».
+    for (let i = 0; i < tiers.length; i++) {
+      const [base, unit] = tiers[i];
+      if (Math.abs(t) < base) continue;
+      const r = Number((t / base).toFixed(1));
+      if (i > 0 && Math.abs(r) >= 1000) return show(t / tiers[i - 1][0], tiers[i - 1][1]);
+      return show(t / base, unit);
+    }
+    return `${grouped(t)} تومان`;
+  },
+  /**
    * عدد بسیار کوچک، بی‌آنکه صفر شود.
    *
    * `num` زیر یک، چهار رقم اعشار می‌دهد. برای گامای یک قرارداد — که مرتبهٔ

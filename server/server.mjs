@@ -46,6 +46,8 @@ import { makeThrottleWatch, throttleNote } from '../core/throttle-watch.mjs';
 import { JOURNAL_CAP, appendEntry, makeEntry, normalizeJournal } from '../core/journal.mjs';
 import { writeJsonAtomic } from './atomic-json.mjs';
 import { watchHealth } from '../core/watch-health.mjs';
+import { afterCloseDue, afterCloseState, diffWatchRows, watchSession } from '../core/watch-snapshot.mjs';
+import { infoTotals } from '../core/range-info.mjs';
 import { makeJobQueue } from './job-queue.mjs';
 import { GENERAL_LANE, TAPE_LANE, laneLimits, laneOf, makeBucket } from './rate-lanes.mjs';
 import { createDataLog, tehranDay } from './datalog.mjs';
@@ -762,17 +764,12 @@ function marketOpen() {
 // ————————————————————————————————— حلقه دیده‌بان و پخش رویداد —————————————————————————————————
 
 const clients = new Set();
-let watch = { at: null, rows: [], byKey: new Map() };
+// `day`/`phase`: روز و فازِ بازار هنگام گرفتن همین عکس — عکسی که از دیروز
+// مانده باید «جلسهٔ قبل» خوانده شود، نه امروز. `afterPulls`/`finalDay`
+// شمار عکس‌های پس از بستن و روزی که عکس نهایی ثابت شد (`core/watch-snapshot.mjs`).
+let watch = { at: null, rows: [], byKey: new Map(), day: 0, phase: '', afterPulls: 0, finalDay: 0 };
 
-const TRACK = [
-  'pDrCotVal_UA', 'pClosing_UA', 'pMeDem_C', 'qTitMeDem_C', 'pMeOf_C', 'qTitMeOf_C',
-  'pDrCotVal_C', 'pClosing_C', 'oP_C', 'qTotTran5J_C',
-  'pMeDem_P', 'qTitMeDem_P', 'pMeOf_P', 'qTitMeOf_P',
-  'pDrCotVal_P', 'pClosing_P', 'oP_P', 'qTotTran5J_P',
-];
 
-const rowKey = (r) => `${r.insCode_C ?? ''}|${r.insCode_P ?? ''}`;
-const rowSig = (r) => TRACK.map((k) => r[k] ?? '').join(',');
 
 function broadcast(event, payload) {
   const msg = `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
@@ -794,19 +791,20 @@ async function watchTick() {
   const gate = marketOpen();
   stat.paused = !gate.open;
   stat.pauseReason = gate.why;
-  if (!gate.open) return true;
+  // ═══ پس از بستن، عکس نهایی ═══
+  //
+  // پیش از این، بستنِ بازار یعنی هیچ درخواستی؛ عکس روی آخرین تیکِ پیش از
+  // بستن یخ می‌زد و ارزش/حجم/موقعیت بازِ آن «نهایی» نبود، در حالی که
+  // قیمت پایانیِ کندل (`/api/infos`) نهایی بود. حالا در فاز `after` با
+  // فاصلهٔ کُند می‌پرسیم تا عکس ثابت شود — شرحش کنار `afterCloseDue`.
+  const today = tehranDateNumber();
+  if (!gate.open && !afterCloseDue({
+    phase: gate.phase, today, watch,
+    everySec: S.afterCloseRefreshSec, maxPulls: S.afterCloseMaxPulls,
+  })) return true;
 
   const t0 = Date.now();
   try {
-    // ═══ مهلتِ خودِ حلقه، جدا از مهلتِ هر درخواست ═══
-    //
-    // `get` سه تلاش دارد و هر تلاش `timeoutMs`، ولی می‌تواند به درخواستی
-    // بپیوندد که خودش پشتِ صف است. با ارثِ اولویت آن صف دیگر بی‌انتها نیست،
-    // ولی حلقهٔ زنده نباید امیدش را به هیچ ضمانتِ بیرونی ببندد: اگر یک دور
-    // در این مهلت برنگشت، رهایش می‌کنیم و دورِ بعد را می‌زنیم.
-    //
-    // درخواست پشتِ سر لغو نمی‌شود؛ اگر بعداً برسد در کش می‌نشیند و دورِ بعد
-    // مجانی از آن استفاده می‌کند. آنچه لغو می‌شود **انتظارِ** ماست، نه کار.
     const js = await Promise.race([
       get('/Instrument/GetInstrumentOptionMarketWatch/0', S.ttlWatchSec, 1),
       sleep(watchDeadlineMs()).then(() => {
@@ -814,16 +812,10 @@ async function watchTick() {
       }),
     ]);
     const rows = firstList(js);
-    const next = new Map();
-    const changed = [];
-    for (const r of rows) {
-      const k = rowKey(r);
-      const sig = rowSig(r);
-      next.set(k, sig);
-      if (watch.byKey.get(k) !== sig) changed.push(r);
-    }
+    const { byKey: next, changed } = diffWatchRows(rows, watch.byKey);
     const first = watch.rows.length === 0;
-    watch = { at: Date.now(), rows, byKey: next };
+    const after = afterCloseState({ phase: gate.phase, today, prev: watch, changedCount: changed.length, first });
+    watch = { at: Date.now(), rows, byKey: next, day: today, phase: gate.phase, ...after };
     stat.watchTicks += 1;
     stat.watchRows = rows.length;
     stat.lastWatchAt = watch.at;
@@ -1492,9 +1484,18 @@ async function handleRequest(req, res, u) {
     // پایه‌ها دیده می‌شود تا «بی‌معامله» با «بدون تغییر» اشتباه نشود؛ نماد
     // بی‌معامله در مخرج درصدهای مثبت/منفی وارد نمی‌شود و جدا می‌ماند.
     if (p === '/api/live-dashboard') {
-      const sourceRows = watch.rows.length
+      const boardPath = '/Instrument/GetInstrumentOptionMarketWatch/0';
+      const fromWatch = watch.rows.length > 0;
+      const sourceRows = fromWatch
         ? watch.rows
-        : firstList(await get('/Instrument/GetInstrumentOptionMarketWatch/0', Math.max(60, S.ttlMetaSec), 4));
+        : firstList(await get(boardPath, Math.max(60, S.ttlMetaSec), 4));
+      // عکس مال کدام جلسه است؟ فازِ **هنگام گرفتن عکس** تصمیم می‌گیرد، نه
+      // الان: عکسی که از دیروز در حافظه مانده، یا پیش از باز شدن گرفته شده،
+      // «جلسهٔ قبل» است و رابط نباید زیر عنوان «امروز» نشانش دهد.
+      const boardAt = fromWatch ? watch.at : (cachedAt(boardPath) || Date.now());
+      const session = watchSession({
+        phase: fromWatch ? watch.phase : marketOpen().phase, at: boardAt, today: tehranDateNumber(),
+      });
       const instruments = breadthInstruments(sourceRows).slice(0, 80);
       // دیده‌بان اختیار در پاسخ واقعی حجم/تعداد معامله پایه را نمی‌فرستد؛
       // بنابراین برای تشخیص «بی‌معامله» باید نوار همه پایه‌های یکتا دیده
@@ -1527,7 +1528,8 @@ async function handleRequest(req, res, u) {
         // ممیزی: «ساعت بالای داشبورد هر ۵ ثانیه تازه می‌شود، حتی وقتی عکس
         // زنجیره چند دقیقه قدیمی است.» درست بود: `at` زمانِ پاسخ است، نه
         // زمانِ عکس. حالا هر دو می‌روند و رابط می‌تواند سن واقعی را بگوید.
-        at: Date.now(), snapshotAt: watch.at || null,
+        at: Date.now(), snapshotAt: boardAt || null,
+        session: { ...session, final: Number(watch.finalDay) > 0 && Number(watch.finalDay) === session.date },
         count: instruments.length, traded: snapshot.traded,
         failed, snapshot, timeline,
         // گردش واقعی پایه‌ها همین‌جا به عکس زنجیره برمی‌گردد؛ پیش از این
@@ -2206,6 +2208,11 @@ async function handleRequest(req, res, u) {
             low: Number(d.priceMin) || 0, high: Number(d.priceMax) || 0,
             first: Number(d.priceFirst) || 0, yday: Number(d.priceYesterday) || 0,
             vol: Number(d.qTotTran5J) || 0, trades: Number(d.zTotTran) || 0,
+            // ارزش و حجم از **همان** پاسخی که قیمت‌های کندل را می‌دهد، تا
+            // عددِ کنار کندل با خودِ کندل هم‌زمان باشد. نام `volume` همان
+            // نامِ ردیفِ زنجیره است؛ `vol` برای مصرف‌کننده‌های قدیمی می‌ماند.
+            // ارزشِ نیامده «نامعلوم» است (null)، نه صفر.
+            ...infoTotals(d),
             state: String(st.cEtaval || '').trim(), stateTitle: String(st.cEtavalTitle || '').trim(),
             staleSec: hE ? Math.max(0, nowT - secs) : null,
           }];

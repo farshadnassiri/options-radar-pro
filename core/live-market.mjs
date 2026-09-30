@@ -66,6 +66,15 @@ export function liveOptionTape({ trades = [], baseTrades = [], contract = {}, se
   const rFree = finite(settings.rFree);
   const divYield = finite(settings.divYield);
   const kind = contract.kind === 'put' ? 'put' : 'call';
+  // ═══ ارزش با اندازهٔ قرارداد ═══
+  //
+  // «حجم» نوار اختیار به **قرارداد** است و هر قرارداد `size` سهم دارد
+  // (معمولاً ۱٬۰۰۰). «تعداد × قیمت» بی این ضرب، ارزش را هزار برابر کمتر
+  // می‌نوشت — همان خطایی که `tapeValue` در `live-day.mjs` برای سری روزانه
+  // بست ولی ستون «ارزش» جدول ریزمعامله هنوز داشت. اندازهٔ نامعلوم، ارزشِ
+  // نامعلوم می‌دهد (NaN)، نه عددِ بی‌اندازه.
+  const size = finite(contract.size);
+  const lot = size > 0 ? size : NaN;
 
   let baseAt = 0, basePrice = NaN, cumulativeVolume = 0, cumulativeValue = 0;
   const out = [];
@@ -79,7 +88,7 @@ export function liveOptionTape({ trades = [], baseTrades = [], contract = {}, se
       baseAt += 1;
     }
     cumulativeVolume += row.quantity;
-    cumulativeValue += row.quantity * row.price;
+    cumulativeValue += row.quantity * row.price * lot;
     const iv = Number.isFinite(basePrice) && Number.isFinite(T) && strike > 0
       ? impliedVol(kind, row.price, basePrice, strike, T, rFree, divYield, {
         lo: finite(settings.ivLo), hi: finite(settings.ivHi),
@@ -90,7 +99,7 @@ export function liveOptionTape({ trades = [], baseTrades = [], contract = {}, se
       ins: String(contract.ins || ''), name: String(contract.name || ''),
       kind, days, endDate: finite(contract.endDate), strike,
       sequence: row.sequence, time: row.time, second,
-      price: row.price, quantity: row.quantity, value: row.quantity * row.price,
+      price: row.price, quantity: row.quantity, value: row.quantity * row.price * lot,
       cumulativeVolume, cumulativeValue,
       basePrice,
       iv: Number.isFinite(iv) ? iv : NaN,
