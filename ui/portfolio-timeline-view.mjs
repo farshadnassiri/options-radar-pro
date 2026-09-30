@@ -6,8 +6,8 @@
 //
 // چهار مرز:
 //
-// **هیچ عدد مالی تازه‌ای اینجا ساخته نمی‌شود.** تنها کارِ عددی، تقسیم بر
-// ده برای تبدیل ریال به تومان است. جمع، تفریق و درصد کارِ موتور است.
+// **هیچ عدد مالی تازه‌ای اینجا ساخته نمی‌شود.** تنها کار، قالب‌بندیِ ریال
+// است (بزرگ‌ها «میلیون ریال»). جمع، تفریق و درصد کارِ موتور است.
 //
 // **نبودِ عدد «—» می‌شود، نه صفر.** پلهٔ نامعلوم روی نمودار `null` می‌ماند
 // تا خط بشکند، و در جدول علتش را با خودش می‌برد.
@@ -38,9 +38,9 @@ const finite = (value) => {
   const out = Number(value);
   return Number.isFinite(out) ? out : null;
 };
-/** ریال به تومان، فقط برای نمایش. */
-const toman = (rial) => (finite(rial) === null ? null : finite(rial) / 10);
-const moneyText = (rial) => (finite(rial) === null ? '—' : fmt.money(toman(rial)));
+/** ریال، همان واحدِ موتور (۱۴۰۵/۰۷/۰۸: پیش از این بر ده تقسیم و «تومان» می‌شد). */
+const rial = (value) => finite(value);
+const moneyText = (value) => (finite(value) === null ? '—' : fmt.rialText(finite(value)));
 const pctText = (value) => (finite(value) === null ? '—' : `${fmt.pct(finite(value))}٪`);
 
 const clockText = (second) => {
@@ -141,7 +141,7 @@ export function portfolioTimelineView(series) {
       // از تصویر را می‌بیند.
       partial: step.totalPnlRial === null && step.knownCount > 0,
       partialText: step.totalPnlRial === null && step.knownCount > 0
-        ? `جمعِ ${faDigits(String(step.knownCount))} استراتژیِ معلوم ${moneyText(step.knownPnlRial)} تومان است؛ ${faDigits(String(step.unknownIds.length))} استراتژی نامعلوم مانده، پس جمع کل ساخته نمی‌شود`
+        ? `جمعِ ${faDigits(String(step.knownCount))} استراتژیِ معلوم ${moneyText(step.knownPnlRial)} است؛ ${faDigits(String(step.unknownIds.length))} استراتژی نامعلوم مانده، پس جمع کل ساخته نمی‌شود`
         : '',
       unknownCount: step.unknownIds.length,
       rows: step.rows.map((row) => {
@@ -188,11 +188,11 @@ export function portfolioTimelineView(series) {
       second: step.at.second,
       granularity: 'trade',
       timeLabel: clockText(step.at.second),
-      total: finite(step.totalPnlRial) === null ? null : toman(step.totalPnlRial),
+      total: finite(step.totalPnlRial) === null ? null : rial(step.totalPnlRial),
     };
     for (const item of strategies) {
       const row = step.rows.find((entry) => entry.positionId === item.positionId);
-      point[item.key] = finite(row?.pnlRial) === null ? null : toman(row.pnlRial);
+      point[item.key] = finite(row?.pnlRial) === null ? null : rial(row.pnlRial);
     }
     return point;
   });
@@ -224,7 +224,7 @@ export function portfolioTimelineView(series) {
     // دو درصد در کارند و شبیه هم‌اند: یکی روی سرمایهٔ درگیر، یکی روی
     // سرمایهٔ شروع جلسه. عددِ بی‌مبنا در سرخط، خواننده را به مقایسهٔ اشتباه
     // با ستون جدول می‌کشاند.
-    headlineText: `${faDigits(String(stepViews.length))} پله · آخرین سود و زیان ${last.totalText} تومان${last.pctText === '—' ? '' : ` · ${last.pctText} روی سرمایهٔ درگیر`}`,
+    headlineText: `${faDigits(String(stepViews.length))} پله · آخرین سود و زیان ${last.totalText}${last.pctText === '—' ? '' : ` · ${last.pctText} روی سرمایهٔ درگیر`}`,
   };
 }
 

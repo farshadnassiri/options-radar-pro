@@ -52,20 +52,20 @@ async function stop(child) {
 
 function activeDraft170(id) {
   const setup = createPortfolioStepOneDraft({
-    id, baseIns: '900001', capitalToman: '1000000000', reserveToman: '0',
+    id, baseIns: '900001', capitalRialInput: '10000000000', reserveRialInput: '0',
     startDate: 20260622, startSecond: 9 * 3600,
     endDate: 20260722, endSecond: 12 * 3600,
     grain: 'halfHour', createdAt: 170,
   });
   const outlook = createPortfolioOutlookDraft(setup.draft, {
-    direction: 'bullish', targetPriceToman: '12000', rangeLowToman: '11000',
-    rangeHighToman: '13000', volatilityView: 'higher', expectedVolatilityPct: '40',
+    direction: 'bullish', targetPriceRialInput: '120000', rangeLowRialInput: '110000',
+    rangeHighRialInput: '130000', volatilityView: 'higher', expectedVolatilityPct: '40',
     confidencePct: '70', thesis: 'آزمون snapshot بزرگ مأموریت فعال',
   });
   const risk = createPortfolioRiskDraft(outlook.draft, {
     maxLossPct: '10', maxDrawdownPct: '20', minFreeCapitalPct: '10',
     maxMarginUsePct: '50', allowUnlimitedRisk: 'no',
-    minUnderlyingDailyValueToman: '10000000', minOptionDailyValueToman: '1000000',
+    minUnderlyingDailyValueRialInput: '100000000', minOptionDailyValueRialInput: '10000000',
     minOpenInterest: '10', maxSpreadPct: '8', maxBookTakePct: '30',
     requireFullBook: 'no',
   });

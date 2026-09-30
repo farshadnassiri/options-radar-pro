@@ -32,8 +32,8 @@ export const POSITIONS_VIEW_REASONS = PORTFOLIO_POSITIONS_REASONS;
 
 const text = (value) => String(value ?? '').trim();
 
-/** ریال به تومان، فقط برای نمایش. عدد نامعتبر «—» می‌شود، نه صفر. */
-const toman = (rial) => (Number.isFinite(rial) ? fmt.int(rial / 10) : '—');
+/** ریال، فقط قالب‌بندی. عدد نامعتبر «—» می‌شود، نه صفر. */
+const money = (rial) => fmt.rialText(rial);
 
 const count = (value) => (Number.isFinite(Number(value)) ? faDigits(String(Number(value))) : '—');
 
@@ -51,11 +51,11 @@ const SIDE_LABEL = Object.freeze({ buy: 'خرید', sell: 'فروش' });
 function legText(leg) {
   const kind = KIND_LABEL[leg.kind] || faDigits(text(leg.kind)) || '—';
   const side = SIDE_LABEL[leg.side] || faDigits(text(leg.side)) || '—';
-  const strike = Number.isFinite(leg.strike) ? `${toman(leg.strike)} تومان` : '—';
+  const strike = Number.isFinite(leg.strike) ? `${money(leg.strike)}` : '—';
   const expiry = Number.isFinite(Number(leg.expiry))
     ? faDigits(historyDateLabel(Number(leg.expiry))) : '—';
   return `${side} ${kind} · اعمال ${strike} · سررسید ${expiry}`
-    + ` · ${count(leg.filled)} قرارداد · ${toman(leg.vwap)} تومان`;
+    + ` · ${count(leg.filled)} قرارداد · ${money(leg.vwap)}`;
 }
 
 /** کیفیت داده، با علتش. همان‌جا که ردیف است، نه جای دیگر. */
@@ -102,8 +102,8 @@ function valueCells(valued) {
   if (!valued) {
     return {
       hasValuation: false,
-      valueTomanText: '—',
-      unrealizedTomanText: '—',
+      valueRialText: '—',
+      unrealizedRialText: '—',
       unrealizedTone: '',
       valuedWhy: '',
     };
@@ -111,8 +111,8 @@ function valueCells(valued) {
   if (!valued.valued) {
     return {
       hasValuation: true,
-      valueTomanText: '—',
-      unrealizedTomanText: '—',
+      valueRialText: '—',
+      unrealizedRialText: '—',
       unrealizedTone: '',
       // «—»ی خالی می‌تواند «هنوز نیامده» خوانده شود؛ علت روشن می‌کند
       // که سنجیده شد و نشد.
@@ -121,8 +121,8 @@ function valueCells(valued) {
   }
   return {
     hasValuation: true,
-    valueTomanText: toman(valued.valueRial),
-    unrealizedTomanText: toman(valued.unrealizedRial),
+    valueRialText: money(valued.valueRial),
+    unrealizedRialText: money(valued.unrealizedRial),
     // سود منفی باید بدون گشتن دیده شود.
     unrealizedTone: signTone(valued.unrealizedRial),
     valuedWhy: '',
@@ -141,9 +141,9 @@ function toRow(row, valued = null) {
     familyLabelFromId: STRATEGY_FAMILIES[text(row.familyId)] || faDigits(text(row.familyId)) || '—',
     openQtyText: count(row.openQty),
     initialQtyText: count(row.initialQty),
-    capitalTomanText: toman(row.capitalRial),
-    entryCashTomanText: toman(row.entryCashRial),
-    realizedTomanText: toman(row.realizedRial),
+    capitalRialText: money(row.capitalRial),
+    entryCashRialText: money(row.entryCashRial),
+    realizedRialText: money(row.realizedRial),
     realizedTone: Number.isFinite(row.realizedRial) ? signTone(row.realizedRial) : '',
     realizedWhy: faDigits(text(row.realizedWhy)),
     // پاها هرکدام یک عبارت کامل‌اند؛ ستون‌بندی‌شان کار تب است.
@@ -194,10 +194,10 @@ export function closeDoneText(result) {
   if (!result?.ok) return '';
   const what = result.kind === 'close' ? 'موقعیت بسته شد' : 'حجم کم شد';
   return `${what} — ${count(result.qty)} قرارداد`
-    + ` · نقد خروج ${toman(result.exitCashRial)} تومان`
-    + ` · کارمزد ${toman(result.feeRial)} تومان`
+    + ` · نقد خروج ${money(result.exitCashRial)}`
+    + ` · کارمزد ${money(result.feeRial)}`
     + (Number.isFinite(result.realizedRial)
-      ? ` · سود تحقق‌یافته ${toman(result.realizedRial)} تومان` : '')
+      ? ` · سود تحقق‌یافته ${money(result.realizedRial)}` : '')
     + (result.status === 'open' ? ` · باقی‌مانده ${count(result.remainingQty)}` : '');
 }
 
@@ -221,8 +221,8 @@ function valuationSummary(valuation) {
     };
   }
   return {
-    valuationText: `ارزش جاری ${toman(totals.valueRial)} تومان`
-      + ` · سود تحقق‌نیافته ${toman(totals.unrealizedRial)} تومان`,
+    valuationText: `ارزش جاری ${money(totals.valueRial)}`
+      + ` · سود تحقق‌نیافته ${money(totals.unrealizedRial)}`,
     valuationTone: signTone(totals.unrealizedRial),
     valuationWhy: '',
   };

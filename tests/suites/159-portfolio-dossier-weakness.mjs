@@ -96,8 +96,8 @@ group('۱۵۹. استخراج ضعف‌های مستند پرونده');
     && shown159.rows.every((row) => row.severityLabel && row.title && row.description));
   const money159 = shown159.rows.find((row) => row.code === 'risk-breached:maxMarginUse')
     ?.evidence.find((row) => row.key === 'headroomRial')?.valueText;
-  check('شاهد مالی تومان و رقم فارسی است',
-    money159 === '−۶۰,۰۰۰ تومان' && !/[0-9]/.test(money159));
+  check('شاهد مالی ریال و رقم فارسی است',
+    money159 === '−۶۰۰,۰۰۰ ریال' && !/[0-9]/.test(money159), money159);
   check('شاهد درصدی واحد خودش را دارد',
     shown159.rows.find((row) => row.code === 'risk-near:missionLossCap')
       ?.evidence.some((row) => row.key === 'headroomPct' && row.valueText.endsWith('٪')));
@@ -112,7 +112,7 @@ group('۱۵۹. استخراج ضعف‌های مستند پرونده');
     !/تصمیم بد|اشتباه کردی|از ترس|از طمع/.test(core159));
   const viewCode159 = readSrc('../ui/portfolio-dossier-weakness-view.mjs')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  check('نمایش شاهد مالی جز ریال به تومان حساب نمی‌کند',
-    /value\s*\/\s*10/.test(viewCode159)
+  check('نمایش شاهد مالی هیچ حسابی نمی‌کند؛ فقط قالب ریال',
+    /fmt\.rialText\(value\)/.test(viewCode159) && !/value\s*\/\s*10/.test(viewCode159)
     && !/value\s*[*+\-]\s*/.test(viewCode159));
 }

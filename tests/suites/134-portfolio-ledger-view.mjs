@@ -6,6 +6,7 @@ import { portfolioRankedPlans } from '../../core/portfolio-plans.mjs';
 import { commitPortfolioPlan } from '../../core/portfolio-commit.mjs';
 import { portfolioCapitalLedger } from '../../core/portfolio-ledger.mjs';
 import { breachText, portfolioLedgerView } from '../../ui/portfolio-ledger-view.mjs';
+import { fmt } from '../../ui/fmt.mjs';
 
 group('۱۳۴. دفتر سرمایه در تب');
 {
@@ -37,7 +38,7 @@ group('۱۳۴. دفتر سرمایه در تب');
     !noMission134.ok && noMission134.reason === 'missingMission'
     && noMission134.why.length > 0 && noMission134.risks.length === 0);
   check('و هیچ عددی در حالت ناموفق ساخته نمی‌شود',
-    noMission134.committedTomanText === '—' && noMission134.freeTomanText === '—'
+    noMission134.committedRialText === '—' && noMission134.freeRialText === '—'
     && noMission134.headlineText === '');
   check('جلسهٔ نبوده هم پیام خودش را دارد',
     portfolioLedgerView(null).reason === 'noSession');
@@ -56,8 +57,8 @@ group('۱۳۴. دفتر سرمایه در تب');
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   const rialMath134 = viewCode134.match(/Rial[A-Za-z]*\s*[*+\-]/g) || [];
   const rialDiv134 = (viewCode134.match(/Rial[A-Za-z]*\s*\/\s*[0-9]+/g) || [])
-    .filter((hit) => !/\/\s*10$/.test(hit));
-  check('لایهٔ نمایش روی عدد ریالی جز تقسیم بر ده حساب نمی‌کند',
+    .filter(Boolean);
+  check('لایهٔ نمایش روی عدد ریالی هیچ حسابی نمی‌کند (فقط قالب ریال)',
     rialMath134.length === 0 && rialDiv134.length === 0,
     [...rialMath134, ...rialDiv134].join(' ،') || 'هیچ');
   check('و هیچ درصدی هم اینجا ساخته نمی‌شود',
@@ -67,18 +68,16 @@ group('۱۳۴. دفتر سرمایه در تب');
     !/portfolioCapitalRequirement|analyzePayoff|strategyMargin|ledgerRoomFor/
       .test(viewCode134));
   check('هر عدد نمایش‌داده‌شده در خروجی دفتر عیناً هست',
-    view134.committedTomanText === new Intl.NumberFormat('en-US')
-      .format(ledger134.committed.totalRial / 10)
-      .replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]).replace(/,/g, ','),
-    view134.committedTomanText);
+    view134.committedRialText === fmt.rialText(ledger134.committed.totalRial),
+    view134.committedRialText);
 
-  // ── بند ۲: رقم فارسی و تومان ────────────────────────────────────────
+  // ── بند ۲: رقم فارسی و ریال ────────────────────────────────────────
   // `code`، `key`، `familyId` و `state` شناسه‌اند نه متن نمایشی؛ به چشم
   // کاربر نمی‌رسند و لاتین‌بودنشان درست است.
   const IDS_134 = new Set(['code', 'key', 'familyId', 'state', 'reason']);
   const shown134 = [
-    view134.headlineText, view134.baseTomanText, view134.committedTomanText,
-    view134.freeTomanText, view134.freePctText, view134.countText,
+    view134.headlineText, view134.baseRialText, view134.committedRialText,
+    view134.freeRialText, view134.freePctText, view134.countText,
     view134.positionsText,
     ...view134.components.flatMap((row) => Object.entries(row)),
     ...view134.families.flatMap((row) => Object.entries(row)),
@@ -89,13 +88,12 @@ group('۱۳۴. دفتر سرمایه در تب');
   check('هیچ رقم لاتینی در متن نمایشی نیست',
     shown134.every((value) => !/[0-9]/.test(value)),
     shown134.filter((v) => /[0-9]/.test(v)).slice(0, 3).join(' | ') || 'هیچ');
-  check('واحد همه‌جا تومان است، نه ریال',
-    view134.committedTomanText !== '—'
-    && !/ریال/.test([...shown134, view134.headlineText].join(' ')));
-  check('تبدیل واحد درست انجام شده — ده برابر کوچک‌تر از ریال',
-    near(Number(view134.freeTomanText.replace(/,/g, '')
-      .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))),
-    ledger134.free.rial / 10, 1e-9), view134.freeTomanText);
+  check('واحد همه‌جا ریال است، نه تومان',
+    view134.committedRialText !== '—'
+    && !/تومان/.test([...shown134, view134.headlineText].join(' ')));
+  // ۱۴۰۵/۰۷/۰۸: دیگر تقسیم بر ده نیست؛ همان ریالِ دفتر با واحد.
+  check('عدد آزاد همان ریالِ دفتر است، بی تبدیل',
+    view134.freeRialText === fmt.rialText(ledger134.free.rial), view134.freeRialText);
 
   // ── بند ۳: فاصله تا شکستن ───────────────────────────────────────────
   const minFree134 = view134.risks.find((row) => row.code === 'minFreeCapital');
@@ -105,8 +103,8 @@ group('۱۳۴. دفتر سرمایه در تب');
     && minFree134.label === ledger134.risk.minFreeCapital.label
     && maxMargin134.label === ledger134.risk.maxMarginUse.label);
   check('هر قید، اکنون و حد و فاصله را با هم نشان می‌دهد',
-    [minFree134, maxMargin134].every((row) => row.currentText.includes('تومان')
-      && row.limitText.includes('تومان') && row.headroomText.includes('تومان')
+    [minFree134, maxMargin134].every((row) => row.currentText.includes('ریال')
+      && row.limitText.includes('ریال') && row.headroomText.includes('ریال')
       && row.currentText.includes('٪') && row.headroomText.includes('٪')));
   check('فاصله در حالت رعایت‌شده «جا مانده» است، نه فقط یک تیک',
     minFree134.breached === false && minFree134.stateLabel === 'رعایت شده'
@@ -188,7 +186,7 @@ group('۱۳۴. دفتر سرمایه در تب');
     withBlind134.unpriced.why.includes('در جمع بالا نیامده')
     && !/[0-9]/.test(withBlind134.unpriced.why), withBlind134.unpriced.why);
   check('جلسه‌ای که فقط ثبت بی‌عدد دارد، «خالی» علامت نمی‌خورد',
-    withBlind134.empty === false && withBlind134.committedTomanText === '۰');
+    withBlind134.empty === false && withBlind134.committedRialText === '۰ ریال');
 
   // ── اتصال به تب ─────────────────────────────────────────────────────
   const tabSrc134 = readSrc('../ui/tabs/portfolio-time.mjs');

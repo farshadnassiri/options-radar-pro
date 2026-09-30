@@ -9,7 +9,7 @@
 //
 // **هیچ عدد مالی تازه‌ای اینجا ساخته نمی‌شود.** هر عددی که نمایش داده
 // می‌شود باید در ورودی عیناً موجود باشد. تنها کاری که با عدد می‌شود
-// قالب‌بندی است و تبدیل ریال به تومان برای نمایش. اگر لایهٔ نمایش عدد
+// قالب‌بندیِ ریال برای نمایش. اگر لایهٔ نمایش عدد
 // بسازد، هیچ آزمونی جلویش را نمی‌گیرد و کاربر تفاوتش را نمی‌بیند.
 //
 // **امتیاز بدون علت نمایش داده نمی‌شود.** هر ردیف می‌گوید کدام جزء
@@ -32,12 +32,12 @@ export const PROPOSALS_REASONS = PORTFOLIO_PLANS_REASONS;
 const text = (value) => String(value ?? '').trim();
 
 /**
- * ریال به تومان، فقط برای نمایش.
+ * ریال، فقط قالب‌بندی.
  *
  * تقسیم بر ده تبدیل واحد است نه محاسبهٔ تازه؛ همان کاری که تب از قبل
  * برای سرمایه و بودجه می‌کند. عدد نامعتبر «—» می‌شود، نه صفر.
  */
-const toman = (rial) => (Number.isFinite(rial) ? fmt.int(rial / 10) : '—');
+const money = (rial) => fmt.rialText(rial);
 
 /** برچسب خوانا برای یک جزء امتیاز، با سهمش. */
 function driverText(driver) {
@@ -160,12 +160,12 @@ export function portfolioSessionProposals(session, evidence, { limit = 3, family
         ? fmt.int(source.entry.executableQty) : '—',
       liftedText: driverText(row.lifted),
       draggedText: driverText(row.dragged),
-      capitalTomanText: toman(row.basis?.capitalRial),
+      capitalRialText: money(row.basis?.capitalRial),
       // سود و زیانِ نامحدود عدد نمی‌گیرد؛ همان چیزی که موتور گفت.
-      maxProfitTomanText: payoff && payoff.unlimitedProfit ? 'نامحدود' : toman(payoff?.maxProfitRial),
-      maxLossTomanText: payoff && payoff.unlimitedLoss ? 'نامحدود' : toman(payoff?.maxLossRial),
+      maxProfitRialText: payoff && payoff.unlimitedProfit ? 'نامحدود' : money(payoff?.maxProfitRial),
+      maxLossRialText: payoff && payoff.unlimitedLoss ? 'نامحدود' : money(payoff?.maxLossRial),
       judgedPointText: row.basis?.judgedPoint
-        ? `${toman(row.basis.judgedPoint.pnlRial)} تومان` : '—',
+        ? `${money(row.basis.judgedPoint.pnlRial)}` : '—',
       qualityLabel: quality.label,
       qualityReason: quality.reason,
     };

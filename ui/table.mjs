@@ -28,7 +28,7 @@ const HEAT = {
   prob: ['--accent-soft', '--accent'],
 };
 
-const NUM_FMT = new Set(['money', 'toman', 'pct', 'num', 'int']);
+const NUM_FMT = new Set(['money', 'mrial', 'pct', 'num', 'int']);
 
 /**
  * جابه‌جایی یک ستون به جای ستون دیگر.
@@ -532,6 +532,9 @@ export function makeTable(host, cols, opts = {}) {
 
   function rowClass(r) {
     if (r.__flash) return 'flash';
+    // ردیفِ کانونِ یک مقایسه (تب «مقایسه در زنجیره»): همان قراردادی که
+    // بقیهٔ ردیف‌ها با آن سنجیده می‌شوند.
+    if (r.__focus) return 'focus';
     // `=== false` عمدی است. این جدول فقط ردیف استراتژی نمی‌گیرد؛ ردیف رصد
     // بازار اصلاً مفهوم «قابل اجرا» ندارد و `undefined` می‌آورد. با `!r.executable`
     // همهٔ آن ردیف‌ها خاکستریِ «غیرقابل اجرا» می‌شدند — و چون این کلاس طیف

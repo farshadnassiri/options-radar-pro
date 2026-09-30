@@ -106,7 +106,7 @@ group('۱۵۰. هشدارهای مسیر در تب');
   // ── بند ۴: «چه چیزی عوض شد» روی همان ردیف ───────────────────────────
   const capRow150 = broken150.rows.find((row) => row.code === 'missionLossCap');
   check('عدد لحظهٔ ثبت روی همان ردیف است',
-    capRow150.atCommitText.includes('تومان'), capRow150.atCommitText);
+    capRow150.atCommitText.includes('ریال'), capRow150.atCommitText);
   check('و تفاوتش هم',
     capRow150.changeText.includes('نسبت به لحظهٔ ثبت'), capRow150.changeText);
   check('تغییرِ صفر، متنِ بی‌مورد نمی‌سازد',
@@ -125,14 +125,14 @@ group('۱۵۰. هشدارهای مسیر در تب');
   check('هیچ رقم لاتینی در متن نمایشی نیست',
     shown150.every((value) => !/[0-9]/.test(value)),
     shown150.filter((v) => /[0-9]/.test(v)).slice(0, 3).join(' | ') || 'هیچ');
-  check('واحد تومان است، نه ریال',
-    !shown150.join(' ').includes('ریال'));
+  check('واحد ریال است، نه تومان',
+    !shown150.join(' ').includes('تومان') && shown150.join(' ').includes('ریال'));
   const viewCode150 = readSrc('../ui/portfolio-watch-view.mjs')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   const rialMath150 = viewCode150.match(/Rial[A-Za-z]*\s*[*+\-]/g) || [];
   const rialDiv150 = (viewCode150.match(/Rial[A-Za-z]*\s*\/\s*[0-9]+/g) || [])
-    .filter((hit) => !/\/\s*10$/.test(hit));
-  check('لایهٔ نمایش روی عدد ریالی جز تقسیم بر ده حساب نمی‌کند',
+    .filter(Boolean);
+  check('لایهٔ نمایش روی عدد ریالی هیچ حسابی نمی‌کند (فقط قالب ریال)',
     rialMath150.length === 0 && rialDiv150.length === 0,
     [...rialMath150, ...rialDiv150].join(' ،') || 'هیچ');
   check('و خودش قیدی نمی‌سنجد — فقط نتیجه را قالب می‌دهد',

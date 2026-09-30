@@ -68,7 +68,7 @@ group('۱۵۳. پروندهٔ پایان در تب');
   // ── بند ۴: تحقق‌یافته جدا از تحقق‌نیافته ────────────────────────────
   // کنارِ هم نشستنشان یعنی خواننده جمعشان می‌کند، و آن جمع هیچ‌کدام نیست.
   check('تحقق‌یافته عدد و لحن خودش را دارد',
-    view153.realized.totalText.includes('تومان')
+    view153.realized.totalText.includes('ریال')
     && view153.realized.tone === 'loss', view153.realized.totalText);
   const viewCode153 = readSrc('../ui/portfolio-closeout-view.mjs')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -83,7 +83,7 @@ group('۱۵۳. پروندهٔ پایان در تب');
   check('ردیف هر موقعیتِ بسته‌شده اجزایش را دارد',
     view153.realized.rows.length === 1
     && view153.realized.rows[0].closedQtyText === '۴۰'
-    && view153.realized.rows[0].exitCashText.includes('تومان'));
+    && view153.realized.rows[0].exitCashText.includes('ریال'));
   // جمعِ نامعلوم عدد نمی‌گیرد.
   const blind153 = JSON.parse(JSON.stringify(shut153.session));
   delete blind153.events.find((e) => e?.data?.closeVersion !== undefined)
@@ -122,12 +122,12 @@ group('۱۵۳. پروندهٔ پایان در تب');
   check('هیچ رقم لاتینی در متن نمایشی نیست',
     shown153.every((value) => !/[0-9]/.test(value)),
     shown153.filter((v) => /[0-9]/.test(v)).slice(0, 3).join(' | ') || 'هیچ');
-  check('واحد تومان است، نه ریال',
-    !shown153.join(' ').includes('ریال'));
+  check('واحد ریال است، نه تومان',
+    !shown153.join(' ').includes('تومان') && shown153.join(' ').includes('ریال'));
   const rialMath153 = viewCode153.match(/Rial[A-Za-z]*\s*[*+\-]/g) || [];
   const rialDiv153 = (viewCode153.match(/Rial[A-Za-z]*\s*\/\s*[0-9]+/g) || [])
-    .filter((hit) => !/\/\s*10$/.test(hit));
-  check('لایهٔ نمایش روی عدد ریالی جز تقسیم بر ده حساب نمی‌کند',
+    .filter(Boolean);
+  check('لایهٔ نمایش روی عدد ریالی هیچ حسابی نمی‌کند (فقط قالب ریال)',
     rialMath153.length === 0 && rialDiv153.length === 0,
     [...rialMath153, ...rialDiv153].join(' ،') || 'هیچ');
 

@@ -1,5 +1,6 @@
 // ۱۴۱. ارزش و سود در تب
 
+import { fmt } from '../../ui/fmt.mjs';
 import { check, group, readSrc } from '../harness.mjs';
 import { BULLISH_OUTLOOK, WIDE_RISK, portfolioFixture } from '../fixtures/portfolio.mjs';
 import { portfolioRankedPlans } from '../../core/portfolio-plans.mjs';
@@ -27,18 +28,16 @@ group('۱۴۱. ارزش و سود در تب');
   const view141 = portfolioSessionPositionsView(done141.session, val141);
   const row141 = view141.rows[0] || {};
 
-  // ── بند ۱: ارزش و سود، فارسی و تومان ────────────────────────────────
+  // ── بند ۱: ارزش و سود، فارسی و ریال ────────────────────────────────
   check('ارزش جاری و سود هر دو ستون خودشان را دارند',
-    row141.hasValuation === true && row141.valueTomanText !== '—'
-    && row141.unrealizedTomanText !== '—');
-  const shown141 = [row141.valueTomanText, row141.unrealizedTomanText,
+    row141.hasValuation === true && row141.valueRialText !== '—'
+    && row141.unrealizedRialText !== '—');
+  const shown141 = [row141.valueRialText, row141.unrealizedRialText,
     view141.valuationText];
   check('هیچ رقم لاتینی در این ستون‌ها نیست',
     shown141.every((value) => !/[0-9]/.test(value)), shown141.join(' | '));
-  check('واحد تومان است و ده برابر کوچک‌تر از ریال',
-    Number(row141.valueTomanText.replace(/,/g, '')
-      .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)))
-      === val141.rows[0].valueRial / 10, row141.valueTomanText);
+  check('واحد ریال است و همان ریالِ موتور',
+    row141.valueRialText === fmt.rialText(val141.rows[0].valueRial), row141.valueRialText);
 
   // ── بند ۲: منفی از مثبت جدا ─────────────────────────────────────────
   // خرید روی ask و ارزش‌گذاری روی bid: این موقعیت از لحظهٔ اول در زیان
@@ -46,16 +45,16 @@ group('۱۴۱. ارزش و سود در تب');
   check('پیش‌شرط: این موقعیت در زیان است',
     val141.rows[0].unrealizedRial < 0, `${val141.rows[0].unrealizedRial}`);
   check('سود منفی نشانِ «زیان» می‌گیرد',
-    row141.unrealizedTone === 'loss' && row141.unrealizedTomanText.startsWith('−'),
-    `${row141.unrealizedTone} | ${row141.unrealizedTomanText}`);
+    row141.unrealizedTone === 'loss' && row141.unrealizedRialText.startsWith('−'),
+    `${row141.unrealizedTone} | ${row141.unrealizedRialText}`);
   const gain141 = JSON.parse(JSON.stringify(val141));
   gain141.rows[0].unrealizedRial = 123_456;
   gain141.totals.unrealizedRial = 123_456;
   const gainRow141 = portfolioSessionPositionsView(done141.session, gain141).rows[0];
   check('و سود مثبت نشانِ «سود»',
     gainRow141.unrealizedTone === 'gain'
-    && !gainRow141.unrealizedTomanText.startsWith('−'),
-    `${gainRow141.unrealizedTone} | ${gainRow141.unrealizedTomanText}`);
+    && !gainRow141.unrealizedRialText.startsWith('−'),
+    `${gainRow141.unrealizedTone} | ${gainRow141.unrealizedRialText}`);
 
   // ── بند ۳: موقعیتِ بی‌ارزش، علتش را می‌گوید ─────────────────────────
   const rejected141 = JSON.parse(JSON.stringify(fx141.evidence));
@@ -64,10 +63,10 @@ group('۱۴۱. ارزش و سود در تب');
   const blindView141 = portfolioSessionPositionsView(done141.session, blindVal141);
   const blindRow141 = blindView141.rows[0] || {};
   check('موقعیتی که ارزش ندارد، «—»ی خالی نمی‌گیرد',
-    blindRow141.valueTomanText === '—' && blindRow141.valuedWhy.length > 0
+    blindRow141.valueRialText === '—' && blindRow141.valuedWhy.length > 0
     && !/[0-9]/.test(blindRow141.valuedWhy), blindRow141.valuedWhy);
   check('و صفر هم نمی‌گیرد',
-    blindRow141.unrealizedTomanText === '—' && blindRow141.unrealizedTone === '');
+    blindRow141.unrealizedRialText === '—' && blindRow141.unrealizedTone === '');
   check('ولی بقیهٔ ردیف سالم می‌ماند',
     blindRow141.statusLabel === 'باز' && blindRow141.openQtyText === '۴۰'
     && blindRow141.legTexts.length > 0);
@@ -76,7 +75,7 @@ group('۱۴۱. ارزش و سود در تب');
   const plain141 = portfolioSessionPositionsView(done141.session);
   check('بدون ارزش‌گذاری، جدول همان جدول قبلی است',
     plain141.ok && plain141.rows[0].hasValuation === false
-    && plain141.rows[0].valueTomanText === '—'
+    && plain141.rows[0].valueRialText === '—'
     && plain141.rows[0].legTexts.length > 0, plain141.why);
   // «ارزش‌گذاری انجام نشد» و «انجام شد ولی این موقعیت ارزش ندارد» دو
   // چیزند: اولی ستون را ساکت می‌گذارد، دومی علت دارد.
@@ -107,15 +106,15 @@ group('۱۴۱. ارزش و سود در تب');
     portfolioSessionValuation(closed141.session, fx141.evidence));
   check('جلسه‌ای بدون موقعیتِ باز، جمعِ صفرِ ساختگی نمی‌سازد',
     closedView141.valuationText === '' && closedView141.valuationWhy === ''
-    && closedView141.rows[0].valueTomanText === '—', closedView141.valuationWhy);
+    && closedView141.rows[0].valueRialText === '—', closedView141.valuationWhy);
 
   // ── بند ۵: تنها تقسیم بر ده ─────────────────────────────────────────
   const viewCode141 = readSrc('../ui/portfolio-positions-view.mjs')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   const rialMath141 = viewCode141.match(/Rial[A-Za-z]*\s*[*+\-]/g) || [];
   const rialDiv141 = (viewCode141.match(/Rial[A-Za-z]*\s*\/\s*[0-9]+/g) || [])
-    .filter((hit) => !/\/\s*10$/.test(hit));
-  check('لایهٔ نمایش روی عدد ریالی جز تقسیم بر ده حساب نمی‌کند',
+    .filter(Boolean);
+  check('لایهٔ نمایش روی عدد ریالی هیچ حسابی نمی‌کند (فقط قالب ریال)',
     rialMath141.length === 0 && rialDiv141.length === 0,
     [...rialMath141, ...rialDiv141].join(' ،') || 'هیچ');
   check('و خودش ارزش‌گذاری نمی‌کند — فقط نتیجه را قالب می‌دهد',
@@ -130,8 +129,8 @@ group('۱۴۱. ارزش و سود در تب');
       .test(tabSrc141)
     && /portfolioSessionPositionsView\(session, valuation\)/.test(tabSrc141));
   check('دو ستون تازه در سرستون هستند',
-    tabSrc141.includes('<th>ارزش جاری (تومان)</th>')
-    && tabSrc141.includes('<th>سود تحقق‌نیافته (تومان)</th>')
+    tabSrc141.includes('<th>ارزش جاری</th>')
+    && tabSrc141.includes('<th>سود تحقق‌نیافته</th>')
     && tabSrc141.includes('data-label="سود تحقق‌نیافته"'));
   check('نشانِ سود و زیان روی خانه می‌نشیند',
     /class="\$\{esc\(row\.unrealizedTone\)\}"/.test(tabSrc141));

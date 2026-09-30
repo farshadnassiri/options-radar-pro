@@ -115,13 +115,13 @@ group('۱۵۷. سرمایه نهایی و فاصله از هدف');
   })());
 
   const view157 = portfolioDossierAnalysisView(analysis157);
-  check('نمایش سرمایه و هدف، تومان و رقم فارسی است',
-    view157.initialText === '۱,۰۰۰,۰۰۰ تومان'
-    && view157.finalText === '۱,۰۰۰,۰۰۰ تومان'
-    && view157.targetProfitText === '۲۵۰,۰۰۰ تومان'
+  check('نمایش سرمایه و هدف، ریال (بزرگ‌ها میلیون ریال) و رقم فارسی است',
+    view157.initialText === '۱۰ میلیون ریال'
+    && view157.finalText === '۱۰ میلیون ریال'
+    && view157.targetProfitText === '۲٫۵ میلیون ریال'
     && view157.targetReturnText.includes('۲۵') && view157.targetReturnText.endsWith('٪'));
   check('فاصله منفی لحن زیان و حکم خودش را دارد',
-    view157.targetGapText === '−۲۵۰,۰۰۰ تومان'
+    view157.targetGapText === '−۲٫۵ میلیون ریال'
     && view157.targetTone === 'loss' && view157.targetStateLabel === 'هدف محقق نشد');
   const unknownView157 = portfolioDossierAnalysisView(unknownAnalysis157);
   check('نمایش نامعلوم خط تیره است، نه صفر',
@@ -134,6 +134,7 @@ group('۱۵۷. سرمایه نهایی و فاصله از هدف');
   const viewCode157 = readSrc('../ui/portfolio-dossier-analysis-view.mjs')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const arithmetic157 = viewCode157.match(/analysis\.[A-Za-z]+\s*[*+\-\/]\s*/g) || [];
-  check('لایه نمایش جز تبدیل ریال به تومان حساب مالی ندارد',
-    arithmetic157.length === 0 && /rial\s*\/\s*10/.test(viewCode157), arithmetic157.join('، '));
+  check('لایه نمایش حساب مالی ندارد؛ فقط قالب ریال',
+    arithmetic157.length === 0 && /fmt\.rialText\(rial\)/.test(viewCode157) && !/rial\s*\/\s*10/.test(viewCode157),
+    arithmetic157.join('، '));
 }

@@ -24,9 +24,8 @@ import { normalizeHistoryDate } from './history.mjs';
 import { moment, momentKey, laterThan, INTRADAY_START_SECOND, INTRADAY_END_SECOND } from './trading-calendar.mjs';
 import { seedFrom } from './rng.mjs';
 
-/** واحد داخلی پول ریال است. تبدیل به تومان فقط در لایهٔ نمایش. */
-export const RIAL_PER_TOMAN = 10;
-export const DEFAULT_CAPITAL_RIAL = 1_000_000_000 * RIAL_PER_TOMAN;   // یک میلیارد تومان
+/** واحد پول ریال است، در موتور و در نمایش (بزرگ‌ها «میلیون ریال»). */
+export const DEFAULT_CAPITAL_RIAL = 10_000_000_000;   // ده میلیارد ریال
 
 export const SESSION_STATES = {
   open: 'باز',

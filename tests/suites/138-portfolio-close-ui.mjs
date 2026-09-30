@@ -41,7 +41,7 @@ group('۱۳۸. بستن موقعیت در تب');
   const doneText138 = closeDoneText(closed138);
   check('خبر بستن کامل، حجم و نقد و کارمزد را می‌گوید',
     doneText138.includes('موقعیت بسته شد') && doneText138.includes('نقد خروج')
-    && doneText138.includes('کارمزد') && doneText138.includes('تومان'), doneText138);
+    && doneText138.includes('کارمزد') && doneText138.includes('ریال'), doneText138);
   // نقدِ مثبت یعنی پول وارد شد. عوض‌کردن علامت در لایهٔ نمایش یعنی ساختن
   // عددی که موتور نگفته.
   check('علامت نقد خروج دست‌نخورده می‌ماند',
@@ -84,8 +84,8 @@ group('۱۳۸. بستن موقعیت در تب');
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   const rialMath138 = viewCode138.match(/Rial[A-Za-z]*\s*[*+\-]/g) || [];
   const rialDiv138 = (viewCode138.match(/Rial[A-Za-z]*\s*\/\s*[0-9]+/g) || [])
-    .filter((hit) => !/\/\s*10$/.test(hit));
-  check('لایهٔ نمایش روی عدد ریالی جز تقسیم بر ده حساب نمی‌کند',
+    .filter(Boolean);
+  check('لایهٔ نمایش روی عدد ریالی هیچ حسابی نمی‌کند (فقط قالب ریال)',
     rialMath138.length === 0 && rialDiv138.length === 0,
     [...rialMath138, ...rialDiv138].join(' ،') || 'هیچ');
   check('و خودش موتور بستن را صدا نمی‌زند — فقط نتیجه‌اش را قالب می‌دهد',

@@ -10,6 +10,7 @@ import {
   contractBreakeven, breakevenGap, breakevenGapPct, contractAnalytics, reviveDashboardUniverse,
 } from '/core/decision-dashboard.mjs';
 import { numOrNaN } from '/core/num.mjs';
+import { mountChainCompare } from '/ui/chain-compare-view.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -169,6 +170,9 @@ const EMBEDDED_MODES = [
 // دیگر را هم می‌سازد.
 export const DASHBOARD_MODES = [
   { id: 'explorer', title: 'نقشه و زنجیره', hint: 'نقشه بازار، سررسید، کندل روزانه و زنجیره', views: [], explorer: true },
+  // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۸): «هر قرارداد در قیاس با سایر قراردادهای
+  // همان زنجیره سنجیده شود… بهترند یا بدتر؟» — منطق در `core/chain-compare.mjs`.
+  { id: 'compare', title: 'مقایسه در زنجیره', hint: 'یک قرارداد در برابر هم‌زنجیره‌هایش: رتبه، گرانی، نقدشوندگی', views: [], compare: true },
   { id: 'pulse', title: 'نبض و جهت بازار', hint: 'وسعت، روند و تغییر نسبت به دیروز', views: pulseViews },
   { id: 'liquidity', title: 'نقدینگی و سررسید', hint: 'ارزش، حجم، موقعیت باز و تمرکز', views: liquidityViews },
   { id: 'volatility', title: 'تلاطم و انتظارات', hint: 'IV لحظه‌ای و تحلیل نگاه باز', views: volatilityViews },
@@ -178,7 +182,7 @@ export const DASHBOARD_MODES = [
 
 const METRICS = {
   changePct: ['تغییر آخرین نسبت به پایانی دیروز ٪', (value) => `${fmt.pct(value)}٪`],
-  value: ['ارزش معامله', fmt.tomanShort], volume: ['حجم', fmt.int], trades: ['تعداد معامله', fmt.int],
+  value: ['ارزش معامله', fmt.rialText], volume: ['حجم', fmt.int], trades: ['تعداد معامله', fmt.int],
   oi: ['موقعیت باز', fmt.int], oiChange: ['تغییر موقعیت باز', fmt.int],
   oiChangePct: ['تغییر موقعیت باز ٪', (value) => `${fmt.pct(value)}٪`],
   ivPct: ['تلاطم ضمنی ٪', (value) => `${fmt.pct(value)}٪`],
@@ -239,7 +243,7 @@ const COLS_CONTRACT = [
   // نه» همان‌قدر کار می‌کند.
   col('spreadRankPct', 'صدک فاصله مظنه ٪', 'pct', { group: 'مظنه', heat: 'loss' }),
   col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('value', 'ارزش معامله (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('value', 'ارزش معامله (میلیون ریال)', 'mrial', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
   col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
   col('oiYday', 'موقعیت باز دیروز', 'int', { group: 'تعهد انباشته' }),
@@ -322,12 +326,12 @@ const COLS_UNDERLYING = [
   col('callVolumePct', 'سهم کال از حجم ٪', 'pct', { group: 'گردش امروز' }),
   col('putVol', 'حجم پوت', 'int', { group: 'گردش امروز' }),
   col('putVolumePct', 'سهم پوت از حجم ٪', 'pct', { group: 'گردش امروز' }),
-  col('value', 'ارزش معاملات اختیار (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('callValue', 'ارزش کال (تومان)', 'toman', { group: 'گردش امروز' }),
+  col('value', 'ارزش معاملات اختیار (میلیون ریال)', 'mrial', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('callValue', 'ارزش کال (میلیون ریال)', 'mrial', { group: 'گردش امروز' }),
   col('callValuePct', 'سهم کال از ارزش ٪', 'pct', { group: 'گردش امروز' }),
-  col('putValue', 'ارزش پوت (تومان)', 'toman', { group: 'گردش امروز' }),
+  col('putValue', 'ارزش پوت (میلیون ریال)', 'mrial', { group: 'گردش امروز' }),
   col('putValuePct', 'سهم پوت از ارزش ٪', 'pct', { group: 'گردش امروز' }),
-  col('uaValue', 'ارزش معاملات نماد پایه (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('uaValue', 'ارزش معاملات نماد پایه (میلیون ریال)', 'mrial', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('uaVolume', 'حجم نماد پایه', 'int', { group: 'گردش امروز' }),
   col('uaTrades', 'تعداد معامله نماد پایه', 'int', { group: 'گردش امروز' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
@@ -369,9 +373,9 @@ const COLS_EXPIRY = [
   col('callVolumePct', 'سهم کال از حجم ٪', 'pct', { group: 'گردش امروز' }),
   col('putVolume', 'حجم پوت', 'int', { group: 'گردش امروز' }),
   col('putVolumePct', 'سهم پوت از حجم ٪', 'pct', { group: 'گردش امروز' }),
-  col('value', 'ارزش معامله (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('callValue', 'ارزش کال (تومان)', 'toman', { group: 'گردش امروز', base: true }),
-  col('putValue', 'ارزش پوت (تومان)', 'toman', { group: 'گردش امروز', base: true }),
+  col('value', 'ارزش معامله (میلیون ریال)', 'mrial', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('callValue', 'ارزش کال (میلیون ریال)', 'mrial', { group: 'گردش امروز', base: true }),
+  col('putValue', 'ارزش پوت (میلیون ریال)', 'mrial', { group: 'گردش امروز', base: true }),
   col('callValuePct', 'سهم کال از ارزش ٪', 'pct', { group: 'گردش امروز' }),
   col('putValuePct', 'سهم پوت از ارزش ٪', 'pct', { group: 'گردش امروز' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز' }),
@@ -411,10 +415,10 @@ const COLS_GROUP = [
   col('callVolumePct', 'سهم کال از حجم ٪', 'pct', { group: 'گردش امروز' }),
   col('putVolume', 'حجم پوت', 'int', { group: 'گردش امروز' }),
   col('putVolumePct', 'سهم پوت از حجم ٪', 'pct', { group: 'گردش امروز' }),
-  col('value', 'ارزش معامله (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('callValue', 'ارزش کال (تومان)', 'toman', { group: 'گردش امروز' }),
+  col('value', 'ارزش معامله (میلیون ریال)', 'mrial', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('callValue', 'ارزش کال (میلیون ریال)', 'mrial', { group: 'گردش امروز' }),
   col('callValuePct', 'سهم کال از ارزش ٪', 'pct', { group: 'گردش امروز' }),
-  col('putValue', 'ارزش پوت (تومان)', 'toman', { group: 'گردش امروز' }),
+  col('putValue', 'ارزش پوت (میلیون ریال)', 'mrial', { group: 'گردش امروز' }),
   col('putValuePct', 'سهم پوت از ارزش ٪', 'pct', { group: 'گردش امروز' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز', base: true }),
   col('callTrades', 'تعداد معامله کال', 'int', { group: 'گردش امروز' }),
@@ -443,9 +447,9 @@ const COLS_TAPE = [
   col('price', 'قیمت', 'money', { group: 'معامله', base: true }),
   col('changeFromFirstPct', 'تغییر از اولین معامله ٪', 'pct', { group: 'معامله', heat: 'gain', sign: true }),
   col('quantity', 'حجم', 'int', { group: 'معامله', base: true }),
-  col('value', 'ارزش (تومان)', 'toman', { group: 'معامله', base: true, heat: 'gain' }),
+  col('value', 'ارزش (میلیون ریال)', 'mrial', { group: 'معامله', base: true, heat: 'gain' }),
   col('cumulativeVolume', 'حجم تجمعی', 'int', { group: 'تجمعی', base: true }),
-  col('cumulativeValue', 'ارزش تجمعی (تومان)', 'toman', { group: 'تجمعی', base: true }),
+  col('cumulativeValue', 'ارزش تجمعی (میلیون ریال)', 'mrial', { group: 'تجمعی', base: true }),
   col('basePrice', 'قیمت پایه هم‌زمان', 'money', { group: 'مرجع', base: true }),
   col('premiumPctBase', 'پریمیوم ٪ قیمت پایه', 'pct', { group: 'مرجع' }),
   col('moneynessPct', 'فاصله اعمال از پایه ٪', 'pct', { group: 'مرجع' }),
@@ -564,7 +568,7 @@ const COLS_BOARD = [
   col('askQty', 'حجم عرضه', 'int', { group: 'مظنه' }),
   col('mid', 'میانه مظنه', 'money', { group: 'مظنه' }),
   col('volume', 'حجم', 'int', { group: 'گردش امروز', base: true, heat: 'gain' }),
-  col('value', 'ارزش معامله (تومان)', 'toman', { group: 'گردش امروز', base: true, heat: 'gain' }),
+  col('value', 'ارزش معامله (میلیون ریال)', 'mrial', { group: 'گردش امروز', base: true, heat: 'gain' }),
   col('trades', 'تعداد معامله', 'int', { group: 'گردش امروز', base: true }),
   col('oi', 'موقعیت باز', 'int', { group: 'تعهد انباشته', base: true }),
   col('oiChange', 'تغییر موقعیت باز', 'int', { group: 'تعهد انباشته', base: true, heat: 'gain', sign: true }),
@@ -651,7 +655,7 @@ function barChart(rows, metric) {
   return `<div class="decision-bars" aria-label="${esc(label)}">${rows.slice(0, 16).map((row) => {
     const value = Number(row[metric]);
     const fill = signed ? (value > 0 ? 'var(--gain)' : value < 0 ? 'var(--loss)' : 'var(--muted)') : 'var(--bar-fill)';
-    return `<article><header><b>${esc(rowName(row))}</b><strong class="${tone(signed ? value : 0)}">${formatter(value)}</strong></header><i><b style="--bar:${Math.min(100, Math.abs(value) / max * 100)}%;--series:${fill}"></b></i><small>تغییر آخرین با پایانی دیروز: ${fmt.pct(row.changePct)}٪ · ارزش ${fmt.tomanShort(row.value)}</small></article>`;
+    return `<article><header><b>${esc(rowName(row))}</b><strong class="${tone(signed ? value : 0)}">${formatter(value)}</strong></header><i><b style="--bar:${Math.min(100, Math.abs(value) / max * 100)}%;--series:${fill}"></b></i><small>تغییر آخرین با پایانی دیروز: ${fmt.pct(row.changePct)}٪ · ارزش ${fmt.rialText(row.value)}</small></article>`;
   }).join('')}</div>`;
 }
 
@@ -859,6 +863,8 @@ export async function mount(root, { state, api }) {
     </section>
     <div class="decision-main">${DASHBOARD_MODES.map((mode, modeIndex) => mode.explorer
       ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div id="dd-market-explorer"></div></section>`
+      : mode.compare
+        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-compare-host></div></section>`
       : mode.mod
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
         : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host>${busyBlock('در حال دریافت نخستین عکس بازار… این مرحله چند ثانیه طول می‌کشد.', { lines: 4 })}</div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</div>`;
@@ -900,6 +906,19 @@ export async function mount(root, { state, api }) {
   const modeOf = () => DASHBOARD_MODES.find((mode) => mode.id === activeMode);
   const viewOf = () => (modeOf()?.views || []).find((view) => view[0] === activeViews[activeMode]);
   const explorerVisible = () => activeMode === 'explorer';
+  // تب مقایسه تنبل سوار می‌شود: تا کاربر بازش نکرده، هیچ کاری نمی‌کند.
+  let compareView = null;
+  const compare = () => {
+    if (!compareView) {
+      compareView = mountChainCompare(root.querySelector('[data-compare-host]'), {
+        getUniverse: () => payload.universe,
+        getSelection: () => marketExplorer.selection(),
+        pick: (row) => { marketExplorer.pickContract(row); compareView.paint(); },
+        params: greekParams,
+      });
+    }
+    return compareView;
+  };
 
   function paintInterval() {
     $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه`;
@@ -1104,7 +1123,7 @@ export async function mount(root, { state, api }) {
       return;
     }
     if (view[2] === 'board-moneyness') {
-      host.innerHTML = `<p class="note">هر سطل، فاصله قیمت اعمال از قیمت جاری پایه است. سطل‌ها ثابت‌اند تا دو نماد و دو روز با هم مقایسه شوند.</p>${stackedBars(moneynessDistribution(scoped.contracts || [], board.metric), { label: `توزیع ${metricLabel}`, formatter: board.metric === 'value' ? fmt.tomanShort : fmt.int })}`;
+      host.innerHTML = `<p class="note">هر سطل، فاصله قیمت اعمال از قیمت جاری پایه است. سطل‌ها ثابت‌اند تا دو نماد و دو روز با هم مقایسه شوند.</p>${stackedBars(moneynessDistribution(scoped.contracts || [], board.metric), { label: `توزیع ${metricLabel}`, formatter: board.metric === 'value' ? fmt.rialText : fmt.int })}`;
       return;
     }
     // آخرین نمای تابلو: اعمال در برابر سربه‌سر.
@@ -1145,9 +1164,9 @@ export async function mount(root, { state, api }) {
       host.innerHTML = painCurve(maxPain(ladders())[0]);
       return true;
     }
-    if (kind === 'heatmap-value') { host.innerHTML = heatmap(contracts, { metric: 'value', formatter: fmt.tomanShort, label: 'جمع ارزش معامله هر خانه.' }); return true; }
+    if (kind === 'heatmap-value') { host.innerHTML = heatmap(contracts, { metric: 'value', formatter: fmt.rialText, label: 'جمع ارزش معامله هر خانه.' }); return true; }
     if (kind === 'heatmap-iv') { host.innerHTML = heatmap(contracts, { metric: 'ivPct', formatter: (v) => `${fmt.pct(v)}٪`, label: 'میانگین تلاطم ضمنی هر خانه.' }); return true; }
-    if (kind === 'histogram-money') { host.innerHTML = stackedBars(moneynessDistribution(contracts, 'value'), { label: 'توزیع ارزش روی فاصله اعمال', formatter: fmt.tomanShort }); return true; }
+    if (kind === 'histogram-money') { host.innerHTML = stackedBars(moneynessDistribution(contracts, 'value'), { label: 'توزیع ارزش روی فاصله اعمال', formatter: fmt.rialText }); return true; }
     if (kind === 'histogram-change') { host.innerHTML = histogram(contracts.map((row) => row.changePct), { label: 'توزیع تغییر نسبت به پایانی دیروز', unit: '٪' }); return true; }
     if (kind === 'histogram-iv') { host.innerHTML = histogram(contracts.map((row) => row.ivPct), { label: 'توزیع تلاطم ضمنی', unit: '٪' }); return true; }
     if (kind === 'term-structure' || kind === 'term-skew') {
@@ -1192,6 +1211,7 @@ export async function mount(root, { state, api }) {
     // نمی‌شود.
     $('dd-toolbar').hidden = !mode?.views?.length;
     if (mode?.explorer) { paintLevels(); return; }
+    if (mode?.compare) { compare().paint(); return; }
     if (mode?.mod) { await mountEmbedded(mode); return; }
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
     if (!panel || !view) return;

@@ -42,22 +42,22 @@ group('۱۷۸. سفر یکپارچه استودیو تا Excel و جلسه بع�
   const id178 = `final-browser-journey-178-${process.pid}`;
   const setup178 = createPortfolioStepOneDraft({
     id: id178, baseIns: fx178.baseSession.baseIns,
-    capitalToman: '1000000000', reserveToman: '0',
+    capitalRialInput: '10000000000', reserveRialInput: '0',
     startDate: fx178.at.date, startSecond: fx178.at.second,
     endDate: 20260620, endSecond: 12 * 3600,
     grain: 'halfHour', createdAt: 178,
   });
   const outlook178 = createPortfolioOutlookDraft(setup178.draft, {
-    direction: 'bullish', targetPriceToman: '1140',
-    rangeLowToman: '', rangeHighToman: '', volatilityView: 'higher',
+    direction: 'bullish', targetPriceRialInput: '11400',
+    rangeLowRialInput: '', rangeHighRialInput: '', volatilityView: 'higher',
     expectedVolatilityPct: '35', confidencePct: '70',
     thesis: 'پذیرش یکپارچه سفر از فرم تا جلسه بعد',
   });
   const risk178 = createPortfolioRiskDraft(outlook178.draft, {
     maxLossPct: '50', maxDrawdownPct: '60', minFreeCapitalPct: '10',
     maxMarginUsePct: '40', allowUnlimitedRisk: 'yes',
-    minUnderlyingDailyValueToman: '10000000',
-    minOptionDailyValueToman: '1000000', minOpenInterest: '100',
+    minUnderlyingDailyValueRialInput: '100000000',
+    minOptionDailyValueRialInput: '10000000', minOpenInterest: '100',
     maxSpreadPct: '8', maxBookTakePct: '50', requireFullBook: 'no',
   });
   const allocation178 = createPortfolioAllocationDraft(risk178.draft, [
@@ -219,7 +219,7 @@ group('۱۷۸. سفر یکپارچه استودیو تا Excel و جلسه بع�
     const nextId178 = `${id178}-next`;
     const nextSetup178 = createPortfolioStepOneDraft({
       id: nextId178, baseIns: '900002',
-      capitalToman: continuityView178.capitalInputText, reserveToman: '0',
+      capitalRialInput: continuityView178.capitalInputText, reserveRialInput: '0',
       startDate: 20260621, startSecond: 10 * 3600,
       endDate: 20260721, endSecond: 12 * 3600,
       grain: 'daily', createdAt: 179,

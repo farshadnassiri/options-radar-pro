@@ -1,11 +1,11 @@
 // مدل نمایش روند سرمایه. همه جمع، تفریق و درصدها در core انجام شده‌اند؛
-// این فایل فقط ریال را به تومان و اعداد را به رقم فارسی تبدیل می‌کند.
+// این فایل فقط ریال را قالب‌بندی (بزرگ‌ها «میلیون ریال») و اعداد را فارسی می‌کند.
 
 import { faDigits, fmt, signTone } from './fmt.mjs';
 import { momentText } from './portfolio-clock-view.mjs';
 
 const text = (value) => faDigits(String(value ?? '').trim());
-const money = (rial) => (Number.isFinite(rial) ? `${fmt.int(rial / 10)} تومان` : '—');
+const money = (rial) => fmt.rialText(rial);
 const pct = (value) => (Number.isFinite(value) ? `${fmt.num(value)}٪` : '—');
 const signed = (value, format) => {
   if (!Number.isFinite(value)) return '—';

@@ -19,21 +19,21 @@ group('۱۶۵. اتصال سرمایه قطعی به فرم جلسه بعد');
 
   check('پرونده کامل، اقدام آماده با سرمایه قطعی می‌سازد',
     view165.ok && view165.available && view165.state === 'ready'
-    && view165.capitalText === '۱,۰۰۰,۰۰۰ تومان'
-    && view165.capitalInputText === '۱,۰۰۰,۰۰۰');
+    && view165.capitalText === '۱۰ میلیون ریال'
+    && view165.capitalInputText === '۱۰,۰۰۰,۰۰۰');
   check('نماد، جلسه، سبد و لحظه منشأ برای نمایش آماده‌اند',
     view165.baseText === '۹۰۰۰۰۱'
     && view165.sourceSessionText.includes('۱۶۵')
     && view165.sourcePortfolioText.includes('۱۶۵')
     && view165.closedAtText.includes('۱۴۰۵'));
-  check('متن‌های مدل رقم لاتین و واحد ریال ندارند',
+  check('متن‌های مدل رقم لاتین و واحد تومان ندارند',
     [view165.capitalText, view165.capitalInputText, view165.baseText,
       view165.sourceSessionText, view165.sourcePortfolioText, view165.closedAtText]
-      .every((value) => !/[0-9]/.test(value) && !String(value).includes('ریال')));
+      .every((value) => !/[0-9]/.test(value) && !String(value).includes('تومان')));
 
   const step165 = createPortfolioStepOneDraft({
     id: 'pt-next-165', baseIns: 'new-base',
-    capitalToman: view165.capitalInputText, reserveToman: '۰',
+    capitalRialInput: view165.capitalInputText, reserveRialInput: '۰',
     startDate: 20260621, startSecond: 36_000,
     endDate: 20260622, endSecond: 43_200,
     grain: 'daily', createdAt: 2_000,
@@ -57,7 +57,7 @@ group('۱۶۵. اتصال سرمایه قطعی به فرم جلسه بعد');
   })());
   check('سرمایه دست‌کاری‌شده و شناسه تکراری رد می‌شوند', (() => {
     const wrong = createPortfolioStepOneDraft({
-      id: 'pt-wrong-165', baseIns: 'new-base', capitalToman: '۹۹۹', reserveToman: '۰',
+      id: 'pt-wrong-165', baseIns: 'new-base', capitalRialInput: '۹۹۹۰', reserveRialInput: '۰',
       startDate: 20260621, startSecond: 36_000, endDate: 20260622, endSecond: 43_200,
       grain: 'daily',
     });
@@ -73,7 +73,7 @@ group('۱۶۵. اتصال سرمایه قطعی به فرم جلسه بعد');
     dossier.realized.totalRial = -1_000;
     const view = portfolioCapitalContinuityView(session, dossier);
     return view.ok && !view.available && view.state === 'exhausted'
-      && view.capitalText === '۰ تومان' && view.why.includes('صفر');
+      && view.capitalText === '۰ ریال' && view.why.includes('صفر');
   })());
   check('پرونده ناقص هیچ سرمایه یا lineage برای فرم نمی‌دهد', (() => {
     const dossier = structuredClone(closed165.dossier);

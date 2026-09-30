@@ -2,7 +2,7 @@
 //
 // صاحب پروژه: «اعداد ارزش معاملات در کندل قیمت امروز قراردادها صحیح نیست.»
 // ممیزی پنج علت پیدا کرد و این دسته هر پنج را قفل می‌کند:
-//   ۱. ارزش به ریال و بی‌واحد چاپ می‌شد (قاعده: تومان در نمایش).
+//   ۱. ارزش به ریال و بی‌واحد چاپ می‌شد (حالا ریال با واحد، بزرگ‌ها میلیون ریال).
 //   ۲. قیمت‌های کندل از `/api/infos` بودند و ارزش/حجم از عکس دیده‌بان؛ و
 //      `vol` پاسخ اطلاعات هرگز روی `volume` ردیف نمی‌نشست.
 //   ۳. پس از بستن بازار عکس دیده‌بان یخ می‌زد و تا فردا «امروز» خوانده می‌شد.
@@ -23,31 +23,34 @@ const VALUE = 1051266669000;
 const VOLUME = 12591;
 const TRADES = 3016;
 
-group('۳۰۳. ارزش معاملات — تومان با واحد در نمایش');
+// ۱۴۰۵/۰۷/۰۸: صاحب پروژه «ریال همه‌جا، بزرگ‌ها میلیون ریال» خواست؛ این گروه
+// پیش از این تومان را قفل می‌کرد و حالا ریال را.
+group('۳۰۳. ارزش معاملات — ریال با واحد در نمایش');
 {
-  check('ارزش ضفزر729 به تومان و با واحد کوتاه می‌شود',
-    fmt.tomanShort(VALUE) === '۱۰۵٫۱ میلیارد تومان', fmt.tomanShort(VALUE));
-  check('عدد کامل تومانی برای ستون جدول، بی ریالِ اضافه',
-    fmt.toman(VALUE) === '۱۰۵,۱۲۶,۶۶۶,۹۰۰', fmt.toman(VALUE));
-  check('عدد روز قبل (۵۵۱٫۷ میلیارد ریال‌نما) هم به تومان می‌رود',
-    fmt.tomanShort(5516563710000) === '۵۵۱٫۷ میلیارد تومان', fmt.tomanShort(5516563710000));
-  check('مرز گرد شدن: ۹۹۹٫۹۶ میلیون تومان «۱٫۰ میلیارد» است، نه «۱۰۰۰٫۰ میلیون»',
-    fmt.tomanShort(9999600000) === '۱٫۰ میلیارد تومان', fmt.tomanShort(9999600000));
-  check('بالای هزار میلیارد تومان واحد خودش را دارد',
-    fmt.tomanShort(123456789012345) === '۱۲٫۳ هزار میلیارد تومان', fmt.tomanShort(123456789012345));
-  check('ارزش نامعلوم «—» است، نه صفر تومان',
-    fmt.tomanShort(NaN) === '—' && fmt.toman(NaN) === '—' && fmt.tomanShort(undefined) === '—');
-  check('صفر واقعی صفر تومان است', fmt.tomanShort(0) === '۰ تومان');
+  check('ارزش ضفزر729 به میلیون ریال و با واحد',
+    fmt.rialText(VALUE) === '۱,۰۵۱,۲۶۷ میلیون ریال', fmt.rialText(VALUE));
+  check('ستون جدول عدد میلیون ریال است، واحد در سرستون',
+    fmt.mrial(VALUE) === '۱,۰۵۱,۲۶۷' && fmt.rial(VALUE) === '۱,۰۵۱,۲۶۶,۶۶۹,۰۰۰', fmt.mrial(VALUE));
+  check('زیر هزار میلیون یک رقم اعشار، بی «٫۰»',
+    fmt.rialText(2500000) === '۲٫۵ میلیون ریال' && fmt.rialText(2000000) === '۲ میلیون ریال');
+  check('مرز گرد شدن: ۹۹۹٫۹۶ میلیون «۱,۰۰۰ میلیون» است، نه «۱۰۰۰٫۰»',
+    fmt.rialText(999960000) === '۱,۰۰۰ میلیون ریال', fmt.rialText(999960000));
+  check('زیر یک میلیون، خودِ ریال', fmt.rialText(25000) === '۲۵,۰۰۰ ریال');
+  check('ارزش نامعلوم «—» است، نه صفر ریال',
+    fmt.rialText(NaN) === '—' && fmt.mrial(NaN) === '—' && fmt.rialText(undefined) === '—');
+  check('صفر واقعی صفر ریال است', fmt.rialText(0) === '۰ ریال');
+  check('هیچ قالب تومانی باقی نمانده', fmt.toman === undefined && fmt.tomanShort === undefined);
 
   const map = readSrc('../ui/live-market-map.mjs');
-  check('عدد کنار کندل با تومان کوتاه چاپ می‌شود، نه ریالِ بی‌واحد',
-    map.includes("rangeSort === 'value' ? fmt.tomanShort(row.value)") && !/fmt\.money\([a-z.]*[vV]alue\)/.test(map));
+  check('عدد کنار کندل با ریالِ دارای واحد چاپ می‌شود',
+    map.includes("rangeSort === 'value' ? fmt.rialText(row.value)") && !/fmt\.money\([a-z.]*[vV]alue\)/.test(map));
   const dash = readSrc('../ui/tabs/live-market-dashboard.mjs');
   check('هیچ ارزش معامله‌ای در داشبورد با fmt.money چاپ نمی‌شود',
     !/col\('(value|callValue|putValue|uaValue|cumulativeValue)', [^)]*'money'/.test(dash)
-    && !dash.includes('ارزش ${fmt.money(row.value)}') && !/formatter: fmt\.money/.test(dash.replace(/function \w+\([^)]*formatter = fmt\.money[^)]*\)/g, '')));
+    && !dash.includes('ارزش ${fmt.money(row.value)}') && !/formatter: fmt\.money/.test(dash.replace(/function \w+\([^)]*formatter = fmt\.money[^)]*\)/g, ''))
+    && dash.includes("col('value', 'ارزش معامله (میلیون ریال)', 'mrial',"));
   const table = readSrc('../ui/table.mjs');
-  check('ستون تومانی عددی است (راست‌چین، نقشهٔ گرما)', /NUM_FMT = new Set\(\[[^\]]*'toman'/.test(table));
+  check('ستون میلیون ریال عددی است (راست‌چین، نقشهٔ گرما)', /NUM_FMT = new Set\(\[[^\]]*'mrial'/.test(table));
 }
 
 group('۳۰۳. عددهای کنار کندل از همان پاسخی که خود کندل');

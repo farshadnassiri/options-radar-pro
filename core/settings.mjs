@@ -347,10 +347,12 @@ export const SCHEMA = [
   // نشود، و دیگری اینکه سند صریح خواسته قاعدهٔ رژیم بازار در تنظیمات
   // **دیده شود** — قاعده‌ای که کاربر نتواند ببیندش، برچسبی است که به او
   // تحمیل شده.
-  { key: 'bkCapitalToman', group: 'bereket', kind: 'num', scope: 'client',
-    def: 1_000_000_000, min: 1_000_000, max: 1_000_000_000_000, step: 1_000_000, unit: 'تومان',
+  // ۱۴۰۵/۰۷/۰۸: «واحد ارقام حتماً ریال». نام کلید عوض شد تا مقدارِ ذخیره‌شدهٔ
+  // تومانی بی‌صدا ریال خوانده نشود؛ `sanitize` کلید قدیمی را ×۱۰ منتقل می‌کند.
+  { key: 'bkCapitalRial', group: 'bereket', kind: 'num', scope: 'client',
+    def: 10_000_000_000, min: 10_000_000, max: 10_000_000_000_000, step: 10_000_000, unit: 'ریال',
     label: 'سرمایه مجازی هر جلسه',
-    hint: 'واحد داخلی همهٔ محاسبه‌ها ریال است و این عدد فقط در لایهٔ نمایش تومان می‌ماند. با یک میلیارد تومان، نقدشوندگی مسئلهٔ اول است نه انتخاب استراتژی — پس این عدد بیش از آنکه سقف سرمایه باشد، تعیین می‌کند کدام ساختارها اصلاً ساختنی‌اند.' },
+    hint: 'واحد همهٔ محاسبه‌ها و نمایش‌ها ریال است. با ده میلیارد ریال، نقدشوندگی مسئلهٔ اول است نه انتخاب استراتژی — پس این عدد بیش از آنکه سقف سرمایه باشد، تعیین می‌کند کدام ساختارها اصلاً ساختنی‌اند.' },
   { key: 'bkLookbackMonths', group: 'bereket', kind: 'num', scope: 'client',
     def: 3, min: 1, max: 24, step: 1, unit: 'ماه',
     label: 'بازهٔ انتخاب لحظهٔ شروع',
@@ -412,8 +414,16 @@ export function defaults() {
 }
 
 /** ورودی ناشناخته را دور می‌ریزد و اعداد را در کران خودشان می‌بندد. */
+// کلیدهای کنارگذاشته: مقدار قدیمی با ضریبش به کلید تازه می‌رود، فقط اگر
+// کلید تازه هنوز ذخیره نشده باشد.
+const LEGACY_KEYS = [['bkCapitalToman', 'bkCapitalRial', 10]];
+
 export function sanitize(input = {}) {
   const out = defaults();
+  input = { ...(input || {}) };
+  for (const [old, key, factor] of LEGACY_KEYS) {
+    if (old in input && !(key in input) && Number.isFinite(Number(input[old]))) input[key] = Number(input[old]) * factor;
+  }
   for (const f of SCHEMA) {
     if (!(f.key in input)) continue;
     let v = input[f.key];

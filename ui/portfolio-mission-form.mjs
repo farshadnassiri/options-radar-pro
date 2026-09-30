@@ -1,5 +1,6 @@
 // آداپتر خالص مرحله نخست فرم مأموریت.
-// رابط تومان و رشتهٔ فارسی می‌گیرد؛ هسته فقط ریال و لحظه معتبر می‌بیند.
+// رابط ریال و رشتهٔ فارسی می‌گیرد؛ هسته همان ریال و لحظه معتبر را می‌بیند.
+// (۱۴۰۵/۰۷/۰۸: ورودی تومان بود و ×۱۰ می‌شد؛ صاحب پروژه ریال را همه‌جا خواست.)
 
 import {
   activatePortfolioSession, createPortfolioSession, portfolioCapitalPlan,
@@ -16,8 +17,8 @@ const DIGITS = { '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5
 
 const latinDigits = (value) => String(value ?? '').replace(/[۰-۹٠-٩]/g, (digit) => DIGITS[digit]);
 
-/** متن تومان با رقم فارسی/عربی و جداکننده → عدد صحیح تومان. */
-export function parseTomanInput(value) {
+/** متن ریال با رقم فارسی/عربی و جداکننده → عدد صحیح ریال. */
+export function parseRialInput(value) {
   const normalized = latinDigits(value).replace(/[٬,،\s_]/g, '');
   if (!/^\d+$/.test(normalized)) return NaN;
   const amount = Number(normalized);
@@ -33,29 +34,28 @@ export function parsePercentInput(value) {
 }
 
 export function parseIntegerInput(value) {
-  return parseTomanInput(value);
+  return parseRialInput(value);
 }
 
-export function tomanToRial(value) {
-  const toman = typeof value === 'number' ? value : parseTomanInput(value);
-  const rial = toman * 10;
-  return Number.isSafeInteger(toman) && toman >= 0 && Number.isSafeInteger(rial) ? rial : NaN;
+export function rialFromInput(value) {
+  const rial = typeof value === 'number' ? value : parseRialInput(value);
+  return Number.isSafeInteger(rial) && rial >= 0 ? rial : NaN;
 }
 
-function capitalArgs({ capitalToman, reserveToman }) {
+function capitalArgs({ capitalRialInput, reserveRialInput }) {
   return {
-    initialCapitalRial: tomanToRial(capitalToman),
-    reserveRial: tomanToRial(reserveToman),
+    initialCapitalRial: rialFromInput(capitalRialInput),
+    reserveRial: rialFromInput(reserveRialInput),
   };
 }
 
 /** خلاصه زنده سرمایه؛ اعتبارسنجی و تفریق فقط از مدل session می‌آید. */
-export function previewPortfolioCapital({ capitalToman, reserveToman } = {}) {
+export function previewPortfolioCapital({ capitalRialInput, reserveRialInput } = {}) {
   const made = createPortfolioSession({
     id: 'preview', baseIns: 'preview',
     start: { date: 20260101, second: 9 * 3600 },
     end: { date: 20260102, second: 9 * 3600 },
-    ...capitalArgs({ capitalToman, reserveToman }),
+    ...capitalArgs({ capitalRialInput, reserveRialInput }),
   });
   return made.ok
     ? { ok: true, why: '', plan: portfolioCapitalPlan(made.session) }
@@ -67,7 +67,7 @@ export function previewPortfolioCapital({ capitalToman, reserveToman } = {}) {
  * هنوز مأموریت، تخصیص یا snapshot قفل نمی‌شود.
  */
 export function createPortfolioStepOneDraft({
-  id = '', baseIns = '', capitalToman, reserveToman,
+  id = '', baseIns = '', capitalRialInput, reserveRialInput,
   startDate = 0, startSecond = NaN, endDate = 0, endSecond = NaN,
   grain = '', createdAt = 0,
 } = {}) {
@@ -78,7 +78,7 @@ export function createPortfolioStepOneDraft({
     id, baseIns,
     start: { date: Number(startDate), second: Number(startSecond) },
     end: { date: Number(endDate), second: Number(endSecond) },
-    ...capitalArgs({ capitalToman, reserveToman }),
+    ...capitalArgs({ capitalRialInput, reserveRialInput }),
     createdAt,
   });
   if (!made.ok) return { ok: false, why: made.why, draft: null };
@@ -100,27 +100,27 @@ function formFail(why) {
   return { ok: false, why, draft: null };
 }
 
-function optionalToman(value, label) {
+function optionalRial(value, label) {
   if (String(value ?? '').trim() === '') return { ok: true, value: null };
-  const rial = tomanToRial(value);
+  const rial = rialFromInput(value);
   return Number.isFinite(rial)
     ? { ok: true, value: rial }
-    : { ok: false, why: `${label} باید عدد صحیح و معتبر تومان باشد` };
+    : { ok: false, why: `${label} باید عدد صحیح و معتبر ریال باشد` };
 }
 
 /** مرحله دوم را بدون ساخت هدف، ریسک یا نقدشوندگی پنهان به draft وصل می‌کند. */
 export function createPortfolioOutlookDraft(stepOneDraft, {
-  direction = '', targetPriceToman = '', rangeLowToman = '', rangeHighToman = '',
+  direction = '', targetPriceRialInput = '', rangeLowRialInput = '', rangeHighRialInput = '',
   volatilityView = '', expectedVolatilityPct = '', confidencePct = '', thesis = '',
 } = {}) {
   if (!stepOneDraft?.session || stepOneDraft.step !== 'setup') {
     return formFail('پیش‌نویس معتبر مرحله نخست لازم است');
   }
-  const target = optionalToman(targetPriceToman, 'قیمت هدف');
+  const target = optionalRial(targetPriceRialInput, 'قیمت هدف');
   if (!target.ok) return formFail(target.why);
-  const low = optionalToman(rangeLowToman, 'کران پایین قیمت');
+  const low = optionalRial(rangeLowRialInput, 'کران پایین قیمت');
   if (!low.ok) return formFail(low.why);
-  const high = optionalToman(rangeHighToman, 'کران بالای قیمت');
+  const high = optionalRial(rangeHighRialInput, 'کران بالای قیمت');
   if (!high.ok) return formFail(high.why);
   const confidence = parsePercentInput(confidencePct);
   if (!Number.isFinite(confidence)) return formFail('اطمینان باید عددی بین صفر و صد باشد');
@@ -155,11 +155,11 @@ function requiredPercent(value, label) {
     : { ok: false, why: `${label} باید درصدی معتبر باشد` };
 }
 
-function requiredToman(value, label) {
-  const parsed = tomanToRial(value);
+function requiredRial(value, label) {
+  const parsed = rialFromInput(value);
   return Number.isFinite(parsed)
     ? { ok: true, value: parsed }
-    : { ok: false, why: `${label} باید عدد صحیح و معتبر تومان باشد` };
+    : { ok: false, why: `${label} باید عدد صحیح و معتبر ریال باشد` };
 }
 
 function explicitChoice(value, label) {
@@ -188,9 +188,9 @@ function riskInputFromForm(form = {}) {
 }
 
 function liquidityInputFromForm(form = {}) {
-  const underlying = requiredToman(form.minUnderlyingDailyValueToman, 'حداقل ارزش روزانه نماد پایه');
+  const underlying = requiredRial(form.minUnderlyingDailyValueRialInput, 'حداقل ارزش روزانه نماد پایه');
   if (!underlying.ok) return formFail(underlying.why);
-  const option = requiredToman(form.minOptionDailyValueToman, 'حداقل ارزش روزانه اختیار');
+  const option = requiredRial(form.minOptionDailyValueRialInput, 'حداقل ارزش روزانه اختیار');
   if (!option.ok) return formFail(option.why);
   const minOpenInterest = parseIntegerInput(form.minOpenInterest);
   if (!Number.isFinite(minOpenInterest)) return formFail('حداقل موقعیت باز باید عدد صحیح نامنفی باشد');

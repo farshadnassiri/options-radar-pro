@@ -10,7 +10,7 @@
 //
 //   ۱. آیا اصلاً منحنی‌ای هست — و اگر نه، چرا.
 //   ۲. آرگومان‌هایی که `mountPayoff` می‌خواهد.
-//   ۳. متن‌های خلاصه، فارسی و تومان.
+//   ۳. متن‌های خلاصه، فارسی و ریال.
 //
 // دو مرز دیگر:
 //
@@ -30,11 +30,11 @@ export const PAYOFF_VIEW_REASONS = PORTFOLIO_PAYOFF_REASONS;
 
 const text = (value) => String(value ?? '').trim();
 
-/** ریال به تومان، فقط برای نمایش. */
-const toman = (rial) => (Number.isFinite(rial) ? fmt.int(rial / 10) : '—');
+/** ریال، فقط قالب‌بندی؛ بزرگ‌ها «میلیون ریال». */
+const money = (rial) => fmt.rialText(rial);
 
-/** قیمت پایه هم تومان نوشته می‌شود، مثل هر عدد دیگری در رابط. */
-const price = (rial) => (Number.isFinite(rial) ? `${fmt.int(rial / 10)} تومان` : '—');
+/** قیمت پایه هم ریال نوشته می‌شود، مثل هر عدد دیگری در رابط. */
+const price = (rial) => fmt.rialText(rial);
 
 function fail(reason, why = '') {
   return {
@@ -78,8 +78,8 @@ export function portfolioPayoffView(session) {
       ? curve.breakevens.map(price).join(' و ')
       : 'در این بازه سربه‌سری ندارد',
     // بریدگیِ منحنی در لبه نباید شبیه سقف دیده شود.
-    maxProfitText: curve.unlimitedProfit ? 'نامحدود' : `${toman(curve.maxProfitRial)} تومان`,
-    maxLossText: curve.unlimitedLoss ? 'نامحدود' : `${toman(curve.maxLossRial)} تومان`,
+    maxProfitText: curve.unlimitedProfit ? 'نامحدود' : `${money(curve.maxProfitRial)}`,
+    maxLossText: curve.unlimitedLoss ? 'نامحدود' : `${money(curve.maxLossRial)}`,
     atMaxProfitText: curve.unlimitedProfit ? '' : price(curve.atMaxProfit),
     atMaxLossText: curve.unlimitedLoss ? '' : price(curve.atMaxLoss),
     unlimitedLoss: curve.unlimitedLoss,
@@ -88,7 +88,7 @@ export function portfolioPayoffView(session) {
       ? curve.strikes.map(price).join(' · ') : '—',
     positionsText: `${faDigits(String(built.positions.length))} موقعیت باز`
       + ` · ${faDigits(String(built.legs.length))} پا`,
-    netCashText: `${toman(curve.netCashRial)} تومان`,
+    netCashText: `${money(curve.netCashRial)}`,
   };
 }
 

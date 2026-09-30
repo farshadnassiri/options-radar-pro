@@ -1,5 +1,6 @@
 // ۱۳۶. موقعیت‌های جلسه در تب
 
+import { fmt } from '../../ui/fmt.mjs';
 import { check, group, readSrc } from '../harness.mjs';
 import { BULLISH_OUTLOOK, WIDE_RISK, portfolioFixture } from '../fixtures/portfolio.mjs';
 import { portfolioRankedPlans } from '../../core/portfolio-plans.mjs';
@@ -45,17 +46,15 @@ group('۱۳۶. موقعیت‌های جلسه در تب');
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   const rialMath136 = code136.match(/Rial[A-Za-z]*\s*[*+\-]/g) || [];
   const rialDiv136 = (code136.match(/Rial[A-Za-z]*\s*\/\s*[0-9]+/g) || [])
-    .filter((hit) => !/\/\s*10$/.test(hit));
-  check('لایهٔ نمایش روی عدد ریالی جز تقسیم بر ده حساب نمی‌کند',
+    .filter(Boolean);
+  check('لایهٔ نمایش روی عدد ریالی هیچ حسابی نمی‌کند (فقط قالب ریال)',
     rialMath136.length === 0 && rialDiv136.length === 0,
     [...rialMath136, ...rialDiv136].join(' ،') || 'هیچ');
   check('و موتور را برای ساختن عدد صدا نمی‌زند',
     !/analyzePayoff|walkBook|portfolioCapitalRequirement|replayPortfolioSession/
       .test(code136));
-  check('سرمایهٔ نمایش‌داده‌شده ده برابر کوچک‌تر از ریالِ سند است',
-    Number(row136.capitalTomanText.replace(/,/g, '')
-      .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)))
-      === doc136.capitalRial / 10, row136.capitalTomanText);
+  check('سرمایهٔ نمایش‌داده‌شده همان ریالِ سند است، با واحد',
+    row136.capitalRialText === fmt.rialText(doc136.capitalRial), row136.capitalRialText);
 
   // ── بند ۱: پاها، خوانا و کامل ───────────────────────────────────────
   check('هر پا یک ردیف دارد، به تعداد پاهای سند',
@@ -65,7 +64,7 @@ group('۱۳۶. موقعیت‌های جلسه در تب');
     /^(خرید|فروش) (اختیار خرید|اختیار فروش) ·/.test(leg136), leg136);
   check('و اعمال و سررسید و حجم و قیمت ورود را دارد',
     leg136.includes('اعمال') && leg136.includes('سررسید')
-    && leg136.includes('قرارداد') && leg136.includes('تومان'), leg136);
+    && leg136.includes('قرارداد') && leg136.includes('ریال'), leg136);
   // «اختیار خرید» نوع قرارداد است و «خرید» سمت معامله؛ اگر یکی شوند ردیف
   // بی‌معنی می‌شود.
   check('واژه‌های نوع قرارداد همان‌اند که بقیهٔ رابط به کار می‌برد',
@@ -116,7 +115,7 @@ group('۱۳۶. موقعیت‌های جلسه در تب');
     blindRow136.documented === false && blindRow136.legTexts.length === 0
     && blindRow136.why.length > 0 && !/[0-9]/.test(blindRow136.why), blindRow136.why);
   check('عدد نداشته «—» می‌شود، نه صفر',
-    blindRow136.capitalTomanText === '—' && blindRow136.entryCashTomanText === '—'
+    blindRow136.capitalRialText === '—' && blindRow136.entryCashRialText === '—'
     && blindRow136.qualityLabel === '—');
   check('ولی حجم و وضعیتش که از بازپخش می‌آید سالم است',
     blindRow136.statusLabel === 'باز' && blindRow136.openQtyText === '۴۰');

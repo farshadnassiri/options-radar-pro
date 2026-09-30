@@ -29,7 +29,7 @@ import { PORTFOLIO_FINAL_RANKING_VERSION } from '../core/portfolio-final-ranking
 export const CLOSEOUT_VIEW_REASONS = PORTFOLIO_CLOSEOUT_REASONS;
 
 const text = (value) => String(value ?? '').trim();
-const toman = (rial) => (Number.isFinite(rial) ? fmt.int(rial / 10) : '—');
+const money = (rial) => fmt.rialText(rial);
 const count = (value) => faDigits(String(Number(value) || 0));
 const isObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const own = (row, key) => !!row && Object.prototype.hasOwnProperty.call(row, key);
@@ -133,7 +133,7 @@ function rankingRow(row) {
     defText: faDigits(text(row.defId)) || '—',
     rankText: Number.isInteger(row.rank) ? count(row.rank) : '—',
     returnText: Number.isFinite(row.returnPct) ? `${fmt.pct(row.returnPct)}٪` : '—',
-    profitText: Number.isFinite(row.realizedRial) ? `${toman(row.realizedRial)} تومان` : '—',
+    profitText: Number.isFinite(row.realizedRial) ? `${money(row.realizedRial)}` : '—',
     percentileText: Number.isFinite(row.percentile) ? `${fmt.pct(row.percentile)}٪` : '—',
     tone: Number.isFinite(row.realizedRial) ? signTone(row.realizedRial) : '',
   };
@@ -152,7 +152,7 @@ export function portfolioDossierView(session, d) {
     reason: null,
     session,
     // سند خام موتور برای ذخیره است. مدل نمایشی پایین جایگزین سند نیست؛
-    // متن‌های تومان و رقم فارسی را نمی‌شود فردا به حسابداری خام برگرداند.
+    // متن‌های ریالی و رقم فارسی را نمی‌شود فردا به حسابداری خام برگرداند.
     dossier: d,
     headlineText: d.early
       ? 'جلسه زودتر از پایانش بسته شد'
@@ -162,7 +162,7 @@ export function portfolioDossierView(session, d) {
     realized: {
       // جمعِ نامعلوم عدد نمی‌گیرد.
       totalText: Number.isFinite(realized.totalRial)
-        ? `${toman(realized.totalRial)} تومان` : '—',
+        ? `${money(realized.totalRial)}` : '—',
       tone: Number.isFinite(realized.totalRial) ? signTone(realized.totalRial) : '',
       unknownText: realized.unknown.length
         ? `${count(realized.unknown.length)} موقعیت سند کاملی نداشت، پس جمع ساخته نشد`
@@ -171,15 +171,15 @@ export function portfolioDossierView(session, d) {
         id: row.id,
         idText: faDigits(text(row.id)),
         closedQtyText: count(row.closedQty),
-        exitCashText: `${toman(row.exitCashRial)} تومان`,
-        feeText: `${toman(row.exitFeeRial)} تومان`,
-        realizedText: `${toman(row.realizedRial)} تومان`,
+        exitCashText: `${money(row.exitCashRial)}`,
+        feeText: `${money(row.exitFeeRial)}`,
+        realizedText: `${money(row.realizedRial)}`,
         tone: signTone(row.realizedRial),
       })),
     },
     accountingText: acc
       ? `${count(acc.entries.count)} ورود · ${count(acc.exits.count)} خروج`
-        + ` · کارمزد ${toman(acc.fees.totalRial)} تومان`
+        + ` · کارمزد ${money(acc.fees.totalRial)}`
       : '',
     accountingWhy: faDigits(text(d.accountingWhy)),
     // تعهدِ باز، حتی پس از بستن، صریح می‌ماند.

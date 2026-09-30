@@ -7,7 +7,7 @@ import { generateCandidates } from '../../core/bereket-candidates.mjs';
 import { buildChain, underlyingList } from '../../core/chain.mjs';
 import { historyDateLabel } from '../../core/history.mjs';
 import {
-  createPortfolioStepOneDraft, parseTomanInput, previewPortfolioCapital, tomanToRial,
+  createPortfolioStepOneDraft, parseRialInput, previewPortfolioCapital, rialFromInput,
 } from '../../ui/portfolio-mission-form.mjs';
 
 
@@ -18,27 +18,28 @@ import {
 group('۱۱۵. پوسته UI مأموریت — مرحله نخست');
 {
   check('ورودی یک میلیارد تومان با رقم فارسی خوانده می‌شود',
-    parseTomanInput('۱,۰۰۰,۰۰۰,۰۰۰') === 1_000_000_000);
+    parseRialInput('۱,۰۰۰,۰۰۰,۰۰۰') === 1_000_000_000);
   check('رقم عربی و فاصله هم بدون اعشار خوانده می‌شوند',
-    parseTomanInput('١ ٢٣٤') === 1234);
+    parseRialInput('١ ٢٣٤') === 1234);
   check('متن و اعشار سرمایه عدد معتبر ساخته نمی‌کنند',
-    Number.isNaN(parseTomanInput('یک میلیارد')) && Number.isNaN(parseTomanInput('۱۲٫۵')));
-  check('تومان فقط یک بار به ریال تبدیل می‌شود', tomanToRial('۱,۰۰۰') === 10_000);
-  check('عدد بیرون بازه امن ریال پذیرفته نمی‌شود', Number.isNaN(tomanToRial(Number.MAX_SAFE_INTEGER)));
+    Number.isNaN(parseRialInput('یک میلیارد')) && Number.isNaN(parseRialInput('۱۲٫۵')));
+  // ۱۴۰۵/۰۷/۰۸: ورودی خودش ریال است؛ دیگر ×۱۰ نمی‌شود.
+  check('ورودی ریال بی تبدیل ریال می‌ماند', rialFromInput('۱,۰۰۰') === 1_000);
+  check('عدد بیرون بازه امن ریال پذیرفته نمی‌شود', Number.isNaN(rialFromInput(Number.MAX_SAFE_INTEGER + 2)));
 
   const preview = previewPortfolioCapital({
-    capitalToman: '۱,۰۰۰,۰۰۰,۰۰۰', reserveToman: '۲۰۰,۰۰۰,۰۰۰',
+    capitalRialInput: '۱,۰۰۰,۰۰۰,۰۰۰۰', reserveRialInput: '۲۰۰,۰۰۰,۰۰۰۰',
   });
   check('خلاصه زنده سرمایه از همان مدل session می‌آید',
     preview.ok && preview.plan.initialRial === 10_000_000_000
     && preview.plan.reserveRial === 2_000_000_000
     && preview.plan.allocatableRial === 8_000_000_000);
   check('ذخیره بیشتر از سرمایه در پیش‌نمایش رد می‌شود',
-    !previewPortfolioCapital({ capitalToman: '۱۰۰', reserveToman: '۱۰۱' }).ok);
+    !previewPortfolioCapital({ capitalRialInput: '۱۰۰۰', reserveRialInput: '۱۰۱۰' }).ok);
 
   const stepArgs = {
     id: 'pt-ui-test', baseIns: '900001',
-    capitalToman: '۱,۰۰۰,۰۰۰,۰۰۰', reserveToman: '۲۰۰,۰۰۰,۰۰۰',
+    capitalRialInput: '۱,۰۰۰,۰۰۰,۰۰۰۰', reserveRialInput: '۲۰۰,۰۰۰,۰۰۰۰',
     startDate: 20260521, startSecond: 9 * 3600,
     endDate: 20260621, endSecond: 12 * 3600 + 1800,
     grain: 'halfHour', createdAt: 123,

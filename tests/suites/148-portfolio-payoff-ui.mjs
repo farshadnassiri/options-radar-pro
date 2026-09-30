@@ -64,10 +64,10 @@ group('۱۴۸. نمودار بازده سبد در تب');
   // نموداری که سربه‌سری داخلش نباشد بی‌فایده است؛ بازه را خودِ نمودار از
   // همین نقاط می‌سازد.
   check('سربه‌سری‌ها دیده می‌شوند، با واحد',
-    view148.breakevenText.includes('تومان')
+    view148.breakevenText.includes('ریال')
     && curve148.breakevens.length > 0, view148.breakevenText);
   check('نقاط شکست هم دیده می‌شوند',
-    view148.strikesText.includes('تومان')
+    view148.strikesText.includes('ریال')
     && curve148.strikes.length > 0, view148.strikesText);
   check('و هر دو از موتور می‌آیند، نه از عددِ ثابت',
     !/\b(9000|10000|1000)\b/.test(code148));
@@ -79,8 +79,8 @@ group('۱۴۸. نمودار بازده سبد در تب');
     view148.unlimitedProfit === true && view148.maxProfitText === 'نامحدود'
     && view148.atMaxProfitText === '');
   check('و زیانِ محدود عددش را با محلش دارد',
-    view148.unlimitedLoss === false && view148.maxLossText.includes('تومان')
-    && view148.atMaxLossText.includes('تومان'));
+    view148.unlimitedLoss === false && view148.maxLossText.includes('ریال')
+    && view148.atMaxLossText.includes('ریال'));
   // منحنی در لبهٔ نمودار بریده می‌شود؛ اگر عدد کنارش سقفی نشان دهد،
   // بریدگی شبیه سقفِ زیان دیده می‌شود.
   check('تب دربارهٔ لبهٔ نمودار هشدار می‌دهد وقتی زیان سقف ندارد',
@@ -93,12 +93,12 @@ group('۱۴۸. نمودار بازده سبد در تب');
   check('هیچ رقم لاتینی در متن نمایشی نیست',
     shown148.every((value) => !/[0-9]/.test(value)),
     shown148.filter((v) => /[0-9]/.test(v)).slice(0, 3).join(' | ') || 'هیچ');
-  check('واحد همه‌جا تومان است، نه ریال',
-    !shown148.join(' ').includes('ریال'));
+  check('واحد همه‌جا ریال است، نه تومان',
+    !shown148.join(' ').includes('تومان') && shown148.join(' ').includes('ریال'));
   const rialMath148 = code148.match(/Rial[A-Za-z]*\s*[*+\-]/g) || [];
   const rialDiv148 = (code148.match(/Rial[A-Za-z]*\s*\/\s*[0-9]+/g) || [])
-    .filter((hit) => !/\/\s*10$/.test(hit));
-  check('لایهٔ نمایش روی عدد ریالی جز تقسیم بر ده حساب نمی‌کند',
+    .filter(Boolean);
+  check('لایهٔ نمایش روی عدد ریالی هیچ حسابی نمی‌کند (فقط قالب ریال)',
     rialMath148.length === 0 && rialDiv148.length === 0,
     [...rialMath148, ...rialDiv148].join(' ،') || 'هیچ');
   // قیمت پایه هم تومان است، مثل هر عدد دیگری در رابط.
