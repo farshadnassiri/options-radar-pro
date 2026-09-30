@@ -10,6 +10,7 @@ import {
   contractBreakeven, breakevenGap, breakevenGapPct, contractAnalytics, reviveDashboardUniverse,
 } from '/core/decision-dashboard.mjs';
 import { numOrNaN } from '/core/num.mjs';
+import { mountChainCompare } from '/ui/chain-compare-view.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -169,6 +170,9 @@ const EMBEDDED_MODES = [
 // دیگر را هم می‌سازد.
 export const DASHBOARD_MODES = [
   { id: 'explorer', title: 'نقشه و زنجیره', hint: 'نقشه بازار، سررسید، کندل روزانه و زنجیره', views: [], explorer: true },
+  // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۸): «هر قرارداد در قیاس با سایر قراردادهای
+  // همان زنجیره سنجیده شود… بهترند یا بدتر؟» — منطق در `core/chain-compare.mjs`.
+  { id: 'compare', title: 'مقایسه در زنجیره', hint: 'یک قرارداد در برابر هم‌زنجیره‌هایش: رتبه، گرانی، نقدشوندگی', views: [], compare: true },
   { id: 'pulse', title: 'نبض و جهت بازار', hint: 'وسعت، روند و تغییر نسبت به دیروز', views: pulseViews },
   { id: 'liquidity', title: 'نقدینگی و سررسید', hint: 'ارزش، حجم، موقعیت باز و تمرکز', views: liquidityViews },
   { id: 'volatility', title: 'تلاطم و انتظارات', hint: 'IV لحظه‌ای و تحلیل نگاه باز', views: volatilityViews },
@@ -859,6 +863,8 @@ export async function mount(root, { state, api }) {
     </section>
     <div class="decision-main">${DASHBOARD_MODES.map((mode, modeIndex) => mode.explorer
       ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div id="dd-market-explorer"></div></section>`
+      : mode.compare
+        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-compare-host></div></section>`
       : mode.mod
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
         : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host>${busyBlock('در حال دریافت نخستین عکس بازار… این مرحله چند ثانیه طول می‌کشد.', { lines: 4 })}</div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</div>`;
@@ -900,6 +906,19 @@ export async function mount(root, { state, api }) {
   const modeOf = () => DASHBOARD_MODES.find((mode) => mode.id === activeMode);
   const viewOf = () => (modeOf()?.views || []).find((view) => view[0] === activeViews[activeMode]);
   const explorerVisible = () => activeMode === 'explorer';
+  // تب مقایسه تنبل سوار می‌شود: تا کاربر بازش نکرده، هیچ کاری نمی‌کند.
+  let compareView = null;
+  const compare = () => {
+    if (!compareView) {
+      compareView = mountChainCompare(root.querySelector('[data-compare-host]'), {
+        getUniverse: () => payload.universe,
+        getSelection: () => marketExplorer.selection(),
+        pick: (row) => { marketExplorer.pickContract(row); compareView.paint(); },
+        params: greekParams,
+      });
+    }
+    return compareView;
+  };
 
   function paintInterval() {
     $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه`;
@@ -1192,6 +1211,7 @@ export async function mount(root, { state, api }) {
     // نمی‌شود.
     $('dd-toolbar').hidden = !mode?.views?.length;
     if (mode?.explorer) { paintLevels(); return; }
+    if (mode?.compare) { compare().paint(); return; }
     if (mode?.mod) { await mountEmbedded(mode); return; }
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
     if (!panel || !view) return;

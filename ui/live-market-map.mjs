@@ -697,6 +697,13 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       normalizeSelection(preserve); paintSummary(); paintUnderlying(); paintMapMode(); await paintMap();
     },
     selection: () => ({ uaIns, endDate, contractIns }),
+    // انتخاب از بیرونِ نقشه (تب «مقایسه در زنجیره»)، بی پرش صفحه. انتخاب
+    // همچنان یک منبع دارد: همین‌جا.
+    pickContract(row) {
+      if (!row) return;
+      uaIns = String(row.uaIns); endDate = String(row.endDate); contractIns = String(row.ins);
+      normalizeSelection(true); paintUnderlying(); emit('contract');
+    },
     // برگشت به تب نقشه: همان‌جا که دوباره دیده می‌شود، اگر کهنه بود تازه شود.
     refreshRanges: () => loadDailyRanges(),
     dispose() { mapHandle?.dispose(); },
