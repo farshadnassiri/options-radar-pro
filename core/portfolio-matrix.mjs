@@ -21,12 +21,22 @@ const finite = (value) => {
 /**
  * از فهرست ردیف‌های ریسه، ماتریس متراکم می‌سازد.
  *
- * ستون‌ها اجتماع مرتبِ همهٔ روزهای معتبرِ دیده‌شده‌اند؛ سطرها به همان ترتیب
- * `rows` می‌مانند تا رابط بتواند با اندیس، ردیف را به شناسه‌اش وصل کند.
+ * ستون‌ها `calendar` (روزهای معاملاتی پایه در بازه، از `historyCalendar`)
+ * به‌علاوهٔ هر روز معتبرِ دیده‌شده‌اند. روزی که هیچ ترکیبی در آن قیمت
+ * معتبر نداشت در تقویم **می‌ماند**؛ خانه‌هایش نامعلوم است ولی ستونش در مخرج
+ * پوشش شمرده می‌شود. بی تقویم، پوشش سه روزِ با یک روزِ خالی «۱۰۰٪»
+ * درمی‌آمد، نه ۶۶٫۶۷٪ (گزارش ۱ اکتبر).
+ *
+ * سطرها به همان ترتیب `rows` می‌مانند تا رابط بتواند با اندیس، ردیف را به
+ * شناسه‌اش وصل کند.
  */
-export function buildPnlMatrix(rows = []) {
+export function buildPnlMatrix(rows = [], { calendar = [] } = {}) {
   const list = Array.isArray(rows) ? rows : [];
   const seen = new Set();
+  for (const day of Array.isArray(calendar) ? calendar : []) {
+    const date = finite(day);
+    if (date !== null) seen.add(date);
+  }
   for (const row of list) {
     for (const point of row?.path?.daily || []) {
       const date = finite(point?.date);

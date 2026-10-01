@@ -1,7 +1,7 @@
 // محاسبات سنگین تحلیل تاریخی بیرون از نخ رابط کاربری.
 
 import { CATALOG, GROUPS, byId } from '../strategies/catalog.mjs';
-import { contractCensus, generateHistoricalCombos, historyPrice, normalizeHistoryDate, replayHistory, rollingEntryMatrix } from '../core/history.mjs';
+import { contractCensus, generateHistoricalCombos, historyCalendar, historyPrice, normalizeHistoryDate, replayHistory, rollingEntryMatrix } from '../core/history.mjs';
 import { summarizePortfolio } from '../core/portfolio.mjs';
 import { buildPnlMatrix } from '../core/portfolio-matrix.mjs';
 import { applyIntradayMark, marksAt } from '../core/intraday-mark.mjs';
@@ -17,13 +17,43 @@ import { momentKey, momentsFor } from '../core/intraday-grid.mjs';
 // دور می‌ریزد. با پرچم، حلقه در جای امن برمی‌گردد و **هرچه تا آن لحظه
 // ساخته شده** با برچسب «ناتمام» گزارش می‌شود. کاربری که بعد از سه دقیقه
 // توقف می‌زند، سه دقیقه نتیجه دارد، نه هیچ.
-let stopRequested = false;
+//
+// ═══ چرا پرچم تنها کافی نبود ═══
+//
+// حلقه داخل `onmessage` همگام بود. پیام `stop` یک رویداد دیگر است و تا
+// رویداد جاری تمام نشود پردازش نمی‌شود — `postMessage` پیشرفت هم حلقهٔ
+// رویداد را آزاد نمی‌کند. پس پرچم هرگز وسط اجرا عوض نمی‌شد: هر ۳۶ استراتژی
+// کامل می‌شد و پاسخ `stopped: false` بود (گزارش ۱ اکتبر). حالا محاسبه
+// قطعه‌قطعه است: بعد از هر استراتژی و هر چند ده میلی‌ثانیه بازپخش، یک
+// نوبت به حلقهٔ رویداد داده می‌شود تا پیام توقف برسد.
+//
+// کارها پشت‌سرهم می‌مانند (صف)، مثل پیش از این. توقف به **همهٔ کارهایی**
+// می‌خورد که پیش از آن رسیده‌اند، نه به کاری که بعدش می‌رسد.
+let stopEpoch = 0;
+let queue = Promise.resolve();
+const BREATHE_MS = 25;
+const nextTurn = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 self.onmessage = (event) => {
   const m = event.data;
-  if (m?.type === 'stop') { stopRequested = true; return; }
-  stopRequested = false;
-  const cancel = () => stopRequested;
+  if (m?.type === 'stop') { stopEpoch += 1; return; }
+  const epoch = stopEpoch;
+  const stopRequested = () => stopEpoch !== epoch;
+  // `handle` خطایش را خودش به رابط می‌فرستد. اگر همان فرستادن هم شکست،
+  // صف نباید بشکند: زنجیرِ ردشده همهٔ کارهای بعدی را بی‌صدا می‌خورد.
+  queue = queue.then(() => handle(m, stopRequested)).catch(() => {});
+};
+
+async function handle(m, stopRequested) {
+  const cancel = stopRequested;
+  let lastTurn = Date.now();
+  // نوبت به حلقهٔ رویداد، ولی نه بیش از هر ۲۵ میلی‌ثانیه: هر نوبت چند
+  // میلی‌ثانیه هزینه دارد و ده‌ها هزار بازپخش را کُند می‌کرد.
+  const breathe = async (force = false) => {
+    if (!force && Date.now() - lastTurn < BREATHE_MS) return;
+    await nextTurn();
+    lastTurn = Date.now();
+  };
   try {
     if (m.type === 'combos') {
       const def = byId(m.defId);
@@ -36,7 +66,8 @@ self.onmessage = (event) => {
       const rows = [];
       let stoppedAt = generated.stopped;
       for (let i = 0; i < generated.combos.length; i++) {
-        if (stopRequested) { stoppedAt = true; break; }
+        await breathe();
+        if (stopRequested()) { stoppedAt = true; break; }
         const combo = generated.combos[i];
         const replay = replayHistory({
           legs: combo.legs, seriesByIns: m.seriesByIns, baseIns: combo.uaIns,
@@ -94,7 +125,8 @@ self.onmessage = (event) => {
       let priced = 0;
       let stoppedAt = false;
       for (let index = 0; index < moments.length; index++) {
-        if (stopRequested) { stoppedAt = true; break; }
+        await breathe(true);
+        if (stopRequested()) { stoppedAt = true; break; }
         const second = moments[index];
         const marks = marksAt(m.tape, second);
         const marked = applyIntradayMark(m.seriesByIns, marks, { date: m.endDate, second });
@@ -153,7 +185,10 @@ self.onmessage = (event) => {
       const settings = m.settings;
       let stoppedAt = false;
       for (let strategyIndex = 0; strategyIndex < definitions.length; strategyIndex++) {
-        if (stopRequested) { stoppedAt = true; break; }
+        // نوبتِ قطعی بین دو استراتژی، پس از پیام پیشرفتِ استراتژی قبلی:
+        // توقفی که با دیدنِ همان پیام زده شد، همین‌جا دیده می‌شود.
+        if (strategyIndex > 0) await breathe(true);
+        if (stopRequested()) { stoppedAt = true; break; }
         const def = definitions[strategyIndex];
         const generated = generateHistoricalCombos({
           def, ua: m.ua, seriesByIns: m.seriesByIns, startDate: m.startDate,
@@ -164,7 +199,8 @@ self.onmessage = (event) => {
         let accepted = 0;
         let replayed = 0;
         for (const combo of generated.combos) {
-          if (stopRequested) { stoppedAt = true; break; }
+          await breathe();
+          if (stopRequested()) { stoppedAt = true; break; }
           replayed += 1;
           // بازپخشِ هر ترکیب گران است و یک استراتژی می‌تواند ده‌ها هزار
           // ترکیب داشته باشد. بی این خط، نوار پیشرفت بین دو استراتژی
@@ -281,7 +317,12 @@ self.onmessage = (event) => {
       // ماتریس پیش از پاک‌کردن فهرست روزانه ساخته می‌شود. از این به بعد
       // رابط با همین ماتریس کار می‌کند: مبنا، آماره، بازه و وزن، همه
       // لحظه‌ای و بدون اجرای دوباره.
-      const matrix = buildPnlMatrix(rows);
+      //
+      // ستون‌ها تقویم معاملاتی پایه در بازه‌اند، نه فقط روزهای معتبر
+      // ترکیب‌ها: روزی که هیچ اختیاری قیمت نداشت باید ستونِ نامعلوم بماند،
+      // وگرنه پوشش داده بیش‌برآورد می‌شود.
+      const calendar = historyCalendar(m.seriesByIns?.[String(m.ua?.ins)] || [], m.startDate, m.endDate);
+      const matrix = buildPnlMatrix(rows, { calendar });
       // مسیر خودِ نماد پایه روی همان ستون‌ها، تا نمودار روند بتواند «این
       // استراتژی نسبت به نگه‌داشتن خود سهم چه کرد» را نشان دهد. روزی که
       // قیمت پایانی ندارد `null` می‌ماند.
@@ -314,4 +355,4 @@ self.onmessage = (event) => {
   } catch (error) {
     self.postMessage({ type: 'error', id: m.id, error: String(error?.message || error) });
   }
-};
+}
