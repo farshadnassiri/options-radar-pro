@@ -119,7 +119,7 @@ group('۳۱۵-۱. پاسخ فقط مال انتخاب خودش');
     && daily.includes('if (my !== dailySeq || want !== ua) return;') && daily.includes('if (String(body.ua) !== want) return;') && !daily.includes('if (loading) return;'));
   check('نوسان ضمنی (روزانه): با عوض‌شدن نماد، دادهٔ قبلی همان لحظه کنار می‌رود', daily.includes('if (want !== ua) {') && daily.includes('data = null;'));
   const rng = view.slice(view.indexOf('async function loadRange('), view.indexOf('function paintRange() {'));
-  check('نوسان ضمنی (بازه): همان نگهبان، با قرارداد هم', rng.includes('const my = ++rangeSeq;') && rng.includes("if (String(body.ua) !== want || String(body.ins || '') !== ins) return;"));
+  check('نوسان ضمنی (بازه): همان نگهبان، با قرارداد هم', rng.includes('const my = ++rangeSeq;') && rng.includes('if (my !== rangeSeq || want !== ua) return;') && rng.includes("if (String(body.ua) !== want) throw new Error("));
   const rank = readSrc('../ui/vol-rank-view.mjs');
   const rload = rank.slice(rank.indexOf('async function load(force = false) {'), rank.indexOf('  function paint() {'));
   check('رتبه: همان نگهبان، تا خلاصهٔ نماد الف به‌نام ب ذخیره نشود', rload.includes('if (my !== loadSeq || want !== ua) return;') && rload.includes('if (String(body.ua) !== want) return;') && !rload.includes('if (loading) return;'));

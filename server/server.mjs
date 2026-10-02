@@ -917,6 +917,9 @@ const IV_BUILD_DAYS_MAX = 60;
 const ivBuildFile = (ua, day, mode) => path.join(IV_BUILD_DIR, ua, `${day}.${mode}.json`);
 let ivBuild = { running: false, total: 0, done: 0, failed: 0, lastError: '', finishedAt: 0 };
 const ivBuildQueue = new Map();
+// روزی که ساختش شکست: علتش به رابط می‌رسد تا «ساخته‌نشده» بی‌پایان نماند.
+// فقط دکمهٔ ساخت (build=1) دوباره امتحانش می‌کند.
+const ivBuildFailed = new Map();
 
 async function readIvBuild(ua, day, mode) {
   try {
@@ -933,12 +936,45 @@ async function thresholdLimits(ua, day) {
   catch { return []; }
 }
 
+// ═══ دامنهٔ مجاز بی انتظار ═══
+//
+// گزارش صاحب پروژه (۱۴۰۵/۰۷/۱۱): «نمودار بازه و تایم‌فریم کار نمی‌کند و
+// نمودار را نمی‌سازد». بازتولید: پاسخ `/api/vol/intraday` برای هر روزِ
+// ضبط‌شده، پشت سرِ هم، منتظر دامنهٔ مجازِ آن روز از بالادست می‌ماند — با
+// اولویت پایین و پشت درخواست‌های رصد لحظه‌ای — و رابط روی «در حال دریافت…»
+// می‌ماند. دامنه فقط برای تشخیص صفِ پایه است و نبودش «نامعلوم» است، نه
+// خطا. پس پاسخ دیگر منتظرش نمی‌ماند: اگر در حافظه هست همان، وگرنه در
+// پس‌زمینه گرفته می‌شود و پرسش بعدی (هر چند ثانیه) آن را دارد.
+const limitsMemo = new Map();
+const LIMITS_RETRY_MS = 10 * 60000;
+function limitsNow(ua, day) {
+  const key = `${ua}|${day}`;
+  const hit = limitsMemo.get(key);
+  if (hit && (hit.value || hit.pending || Date.now() - hit.at < LIMITS_RETRY_MS)) return hit.value || null;
+  const entry = { value: null, pending: true, at: Date.now() };
+  limitsMemo.set(key, entry);
+  evictOldest(limitsMemo, 2000);
+  thresholdLimits(ua, day).then((rows) => {
+    entry.pending = false; entry.at = Date.now();
+    entry.value = rows.length ? rows : null;
+  });
+  return null;
+}
+
+/** چرا پایه در روزِ بازسازی قیمت نداشت — خطای شبکه با «روزِ خالی» یکی نیست. */
+function baseTapeWhy(got, ua, day) {
+  if (got?.error) return `ریزمعاملهٔ پایه دریافت نشد (${got.error})`;
+  if (!got?.rows?.length) return `ریزمعاملهٔ پایه برای ${day} خالی آمد (تعطیل، توقف نماد یا سهمیهٔ بالادست)`;
+  return `پایه ${ua} در ${day} معامله‌ای در جلسه نداشت`;
+}
+
 async function buildIvDay(ua, day, mode) {
   if (!(day < tehranDateNumber())) return null;
-  const baseTape = (await fetchHistoricalTape(ua, String(day))).rows || [];
+  const baseGot = await fetchHistoricalTape(ua, String(day));
+  const baseTape = baseGot.rows || [];
   const closeSecond = momentsFor('m60').at(-1);
   const spot = markAt(baseTape, closeSecond)?.price;
-  if (!(spot > 0)) throw new Error(`پایه ${ua} در ${day} معامله‌ای نداشت`);
+  if (!(spot > 0)) throw new Error(baseTapeWhy(baseGot, ua, day));
   let panel = await readPanel(day);
   if (!panel) panel = await savePanel(day, await get(dayPath(day), ROSTER_SCAN_TTL, PANEL_PRIORITY));
   const traded = panel?.prices || {};
@@ -1025,7 +1061,9 @@ async function buildIvContractDay(ua, ins, day, mode) {
   const meta = await contractMetaFor(ua, ins, day);
   if (!meta) throw new Error(`قرارداد ${ins} در دفتر قراردادهای پایهٔ ${ua} نیست`);
   if (!(meta[2] >= day)) throw new Error(`قرارداد ${ins} در ${day} سررسید شده بود`);
-  const baseTape = (await fetchHistoricalTape(ua, String(day))).rows || [];
+  const baseGot = await fetchHistoricalTape(ua, String(day));
+  const baseTape = baseGot.rows || [];
+  if (!baseTape.length) throw new Error(baseTapeWhy(baseGot, ua, day));
   const tapes = { [ins]: (await fetchHistoricalTape(ins, String(day))).rows || [] };
   const books = {};
   if (mode === 'book') {
@@ -1053,7 +1091,10 @@ function sliceTransport(day, ins) {
 }
 
 function queueIvBuild(ua, days, mode, ins = '') {
-  for (const day of days) ivBuildQueue.set(`${ua}|${day}|${mode}|${ins}`, { ua, day, mode, ins });
+  for (const day of days) {
+    ivBuildFailed.delete(`${ua}|${day}|${mode}|${ins}`);
+    ivBuildQueue.set(`${ua}|${day}|${mode}|${ins}`, { ua, day, mode, ins });
+  }
   if (ivBuild.running || !ivBuildQueue.size) return;
   ivBuild = { running: true, total: ivBuildQueue.size, done: 0, failed: 0, lastError: '', finishedAt: 0 };
   (async () => {
@@ -1068,6 +1109,8 @@ function queueIvBuild(ua, days, mode, ins = '') {
       } catch (e) {
         ivBuild.failed += 1;
         ivBuild.lastError = `${job.day}: ${e.message || e}`;
+        ivBuildFailed.set(key, { why: String(e.message || e), at: Date.now() });
+        evictOldest(ivBuildFailed, 500);
       } finally {
         ivBuild.done += 1;
         ivBuild.total = Math.max(ivBuild.total, ivBuild.done + ivBuildQueue.size);
@@ -2177,7 +2220,7 @@ async function handleRequest(req, res, u) {
           }
           out.push(sliceTransport({
             date: day, source: 'record', provisional: isToday, broken: live.broken,
-            limits: await thresholdLimits(ua, day),
+            limits: limitsNow(ua, day), limitsPending: !limitsMemo.get(`${ua}|${day}`)?.value,
             ...compactRecordMoments(recordMoments(live.frames, ua, cut)),
           }, insWanted));
           continue;
@@ -2196,10 +2239,19 @@ async function handleRequest(req, res, u) {
           const own = await readIvContractBuild(ua, insWanted, day, mode);
           if (own) { out.push(pickMoments(own, seconds)); continue; }
         }
+        const failed = ivBuildFailed.get(`${ua}|${day}|${mode}|${insWanted}`);
+        const queued = ivBuildQueue.has(`${ua}|${day}|${mode}|${insWanted}`);
+        if (failed && !build && !queued) {
+          out.push({ date: day, source: 'failed', why: failed.why, provisional: false, contracts: {}, moments: [] });
+          continue;
+        }
         pending.push(day);
-        out.push({ date: day, source: 'pending', provisional: false, contracts: {}, moments: [] });
+        out.push({ date: day, source: 'pending', queued, provisional: false, contracts: {}, moments: [] });
       }
-      if (build && pending.length) queueIvBuild(ua, pending, mode, insWanted);
+      if (build && pending.length) {
+        queueIvBuild(ua, pending, mode, insWanted);
+        for (const day of out) if (day.source === 'pending') day.queued = true;
+      }
       const perDay = insWanted ? ivContractCost(mode) : ivBuildCost(mode);
       return sendJson(res, 200, {
         ua, ins: insWanted, grain, mode, today, nowSecond, days: out,

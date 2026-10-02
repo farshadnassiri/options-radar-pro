@@ -149,8 +149,8 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       paintExpiry();
       return;
     }
-    if (event.target.closest('[data-ivc-range-go]')) { loadRange(); return; }
-    if (event.target.closest('[data-ivc-build-go]')) loadRange({ build: true });
+    const go = event.target.closest('[data-ivc-range-go]');
+    if (go) loadRange({ build: go.dataset.build === '1' });
   });
 
   // ═══ دادهٔ روزانه (نمودار ۱ و ۲) ═══
@@ -330,6 +330,23 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     return { from: deskFrom(t, Number(opts.span)), to: t, keep: Number(opts.span) };
   }
 
+  // ═══ بازه و تایم‌فریم: دریافت، ساخت و رسم ═══
+  //
+  // گزارش صاحب پروژه (۱۴۰۵/۰۷/۱۱): «کار نمی‌کند و نمودار را نمی‌سازد».
+  // سه ایراد بود: (۱) سرور پیش از پاسخ منتظر دامنهٔ مجاز هر روز از بالادست
+  // می‌ماند و رابط روی «در حال دریافت…» گیر می‌کرد (حالا سرور منتظر نمی‌ماند
+  // و اینجا هم پس از چند ثانیه گفته می‌شود سرور هنوز پاسخ نداده)؛ (۲) دکمهٔ
+  // ساخت کل بازهٔ گشاد را می‌ساخت نه روزهای نمایش‌داده را، و هزینه‌اش با
+  // شمار روزها نمی‌خواند؛ (۳) روزِ ساخته‌نشده یا شکست‌خورده جز پیامِ کلی
+  // چیزی نمی‌گفت. حالا «رسم نمودار» همان روزهای نمایش‌داده را — اگر ضبط و
+  // ساخته نشده‌اند — با هزینهٔ نوشته‌شده روی خود دکمه می‌سازد و می‌کشد، و
+  // روزِ شکست‌خورده علتش را می‌گوید.
+  let rangeView = null, slowTimer = null;
+
+  function rangeKey(span) {
+    return `${ua}|${span.keep}|${span.from}|${span.to}|${opts.grain}|${opts.mode}|${opts.rInstrument}`;
+  }
+
   async function loadRange({ build = false } = {}) {
     if (!ua) return;
     const want = ua;
@@ -339,17 +356,23 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     const span = rangeDates();
     if (span.error) { q('[data-ivc-rstatus]').textContent = span.error; return; }
     const ins = opts.rInstrument === 'index' ? '' : String(opts.rInstrument);
-    q('[data-ivc-rstatus]').textContent = 'در حال دریافت…';
+    // ساخت فقط برای روزهایی که نمایش داده می‌شوند، نه بازهٔ گشادِ پرسش.
+    const from = build && rangeView?.key === rangeKey(span) && rangeView.firstDay ? rangeView.firstDay : span.from;
+    clearTimeout(slowTimer);
+    q('[data-ivc-rstatus]').textContent = build ? 'ساخت روزهای ضبط‌نشده آغاز شد…' : 'در حال دریافت…';
+    slowTimer = setTimeout(() => {
+      if (my === rangeSeq) q('[data-ivc-rstatus]').textContent = 'در حال دریافت… سرور هنوز پاسخ نداده (رصد لحظه‌ای هم در حال دریافت است)';
+    }, 4000);
     try {
       if (!calendar) {
         try { calendar = await (await fetcher('/api/vol/calendar', { cache: 'no-store' })).json(); } catch { calendar = { known: false, holidays: [] }; }
       }
-      const url = `/api/vol/intraday?ua=${encodeURIComponent(want)}&from=${span.from}&to=${span.to}&grain=${opts.grain}&mode=${opts.mode}${ins ? `&ins=${ins}` : ''}${build ? '&build=1' : ''}`;
+      const url = `/api/vol/intraday?ua=${encodeURIComponent(want)}&from=${from}&to=${span.to}&grain=${opts.grain}&mode=${opts.mode}${ins ? `&ins=${ins}` : ''}${build ? '&build=1' : ''}`;
       const response = await fetcher(url, { cache: 'no-store', signal: rangeCtrl?.signal });
       const body = await response.json();
       if (my !== rangeSeq || want !== ua) return;
       if (!response.ok || body.error) throw new Error(body.error || `HTTP ${response.status}`);
-      if (String(body.ua) !== want || String(body.ins || '') !== ins) return;
+      if (String(body.ua) !== want) throw new Error('پاسخ سرور مال نماد دیگری بود');
       // «N روز اخیر» یعنی N روز معاملاتیِ آخر؛ بازه را گشاد گرفتیم.
       const days = span.keep ? body.days.slice(-span.keep) : body.days;
       const api = { ...body, days };
@@ -365,32 +388,58 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       if (my !== rangeSeq || want !== ua) return;
       rangeApi = api;
       rangePoints = points;
+      rangeView = { key: rangeKey(span), firstDay: days[0]?.date || 0, perDay: Number(body.cost?.perDay) || 0, ins };
       paintRange();
     } catch (e) {
       if (my !== rangeSeq || e?.name === 'AbortError') return;
       q('[data-ivc-rstatus]').textContent = `دریافت ناموفق بود: ${faDigits(String(e?.message || e))}`;
+    } finally {
+      if (my === rangeSeq) clearTimeout(slowTimer);
     }
+  }
+
+  /** وضعیت روزهای نمایش‌داده — خالص از روی پاسخ. */
+  function rangeState() {
+    const days = rangeApi?.days || [];
+    const count = (src) => days.filter((d) => d.source === src).length;
+    const building = Boolean(rangeApi?.build?.running || rangeApi?.build?.queued) && days.some((d) => d.source === 'pending' && d.queued);
+    const pending = days.filter((d) => d.source === 'pending' && !d.queued).length;
+    const failed = days.filter((d) => d.source === 'failed');
+    return {
+      days: days.length, record: count('record'), built: count('trades') + count('book'), none: count('none'),
+      pending, queued: days.filter((d) => d.source === 'pending' && d.queued).length, failed, building,
+      cost: (pending + failed.length) * (rangeView?.perDay || 0),
+    };
   }
 
   function paintRange() {
     if (!rangeApi) return;
-    const count = (src) => rangeApi.days.filter((d) => d.source === src).length;
-    const rec = count('record'), built = count('trades') + count('book'), pending = count('pending');
-    const parts = [`${faDigits(rangeApi.days.length)} روز: ${faDigits(rec)} ضبط زنده، ${faDigits(built)} بازسازی‌شده${pending ? `، ${faDigits(pending)} ساخته‌نشده` : ''}`];
-    if (rangeApi.build?.running || rangeApi.build?.queued) parts.push(`ساخت ادامه دارد (${faDigits(rangeApi.build.done)} از ${faDigits(rangeApi.build.total)})`);
-    if (rangeApi.grainServed?.rebuild && rangeApi.grainServed.rebuild !== rangeApi.grain) parts.push('روزهای بازسازی‌شده گام ۵ دقیقه دارند');
+    const st = rangeState();
+    const parts = [`${faDigits(st.days)} روز: ${faDigits(st.record)} ضبط زنده، ${faDigits(st.built)} بازسازی‌شده`];
+    if (st.pending) parts.push(`${faDigits(st.pending)} ساخته‌نشده`);
+    if (st.queued) parts.push(`${faDigits(st.queued)} در صف ساخت`);
+    if (st.none) parts.push(`${faDigits(st.none)} بی ضبط (امروز)`);
+    if (st.building) parts.push(`ساخت ادامه دارد (${faDigits(rangeApi.build.done)} از ${faDigits(rangeApi.build.total)})`);
+    if (st.failed.length) parts.push(`${faDigits(st.failed.length)} روز ساخته نشد: ${faDigits(st.failed[0].why || '')}`);
+    if (rangeApi.grainServed?.rebuild && rangeApi.grainServed.rebuild !== rangeApi.grain && st.built) parts.push('روزهای بازسازی‌شده گام ۵ دقیقه دارند');
     const valid = rangePoints.filter((pt) => isNum(pt.value)).length;
     parts.push(`${faDigits(valid)} از ${faDigits(rangePoints.length)} لحظه نوسان دارد`);
     q('[data-ivc-rstatus]').textContent = parts.join(' · ');
-    q('[data-ivc-build]').innerHTML = pending && !(rangeApi.build?.running || rangeApi.build?.queued)
-      ? `<div class="vd-build"><span>${faDigits(pending)} روزِ گذشته ضبط نشده و هنوز بازسازی نشده. ساختشان حدود ${faDigits(fmt.int(rangeApi.cost?.requests || 0))} درخواست به بالادست می‌زند و یک بار برای همیشه ذخیره می‌شود.</span><button type="button" class="primary" data-ivc-build-go>ساخت روزهای گذشته</button></div>`
+    const toBuild = st.pending + st.failed.length;
+    const go = q('[data-ivc-range-go]');
+    go.textContent = toBuild && !st.building
+      ? `رسم نمودار و ساخت ${faDigits(toBuild)} روز (حدود ${faDigits(fmt.int(st.cost))} درخواست)`
+      : 'رسم نمودار';
+    go.dataset.build = toBuild && !st.building ? '1' : '';
+    q('[data-ivc-build]').innerHTML = toBuild && !st.building
+      ? `<div class="vd-build"><span>${faDigits(toBuild)} روز از این بازه ضبط زنده ندارد و هنوز از ریزمعامله بازسازی نشده. «رسم نمودار» آن‌ها را می‌سازد (حدود ${faDigits(fmt.int(st.cost))} درخواست به بالادست، یک بار برای همیشه) و نمودار با رسیدن هر روز کامل‌تر می‌شود.</span></div>`
       : '';
     clearTimeout(rangePoll);
-    if (rangeApi.build?.running || rangeApi.build?.queued) rangePoll = setTimeout(() => { if (isVisible()) loadRange(); }, 8000);
-    const ins = opts.rInstrument === 'index' ? '' : String(opts.rInstrument);
-    const c = ins ? data?.contracts.find((x) => String(x.ins) === ins) : null;
+    const arm = () => { rangePoll = setTimeout(() => { if (isVisible()) loadRange(); else arm(); }, 8000); };
+    if (st.building || st.queued) arm();
+    const c = rangeView?.ins ? data?.contracts.find((x) => String(x.ins) === rangeView.ins) : null;
     setChart('range', (echarts, tokens) => rangeOption(rangePoints, { grain: opts.grain, label: c ? `نوسان ضمنی ${contractLabel(c)}` : 'شاخص نوسان ضمنی' }, tokens),
-      pending ? 'روزهای این بازه هنوز ساخته نشده‌اند — دکمهٔ «ساخت روزهای گذشته».' : 'در این بازه لحظه‌ای نوسان ضمنی نساخت.');
+      toBuild || st.building || st.queued ? 'روزهای این بازه هنوز ساخته نشده‌اند — «رسم نمودار» را بزن؛ نمودار با ساخته‌شدن هر روز پر می‌شود.' : 'در این بازه لحظه‌ای نوسان ضمنی نساخت.');
   }
 
   return {
@@ -408,7 +457,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       paintExpiry();
     },
     resize() { for (const handle of charts.values()) handle.resize(); },
-    dispose() { clearTimeout(poll); clearTimeout(rangePoll); dailySeq += 1; rangeSeq += 1; dailyCtrl?.abort(); rangeCtrl?.abort(); for (const handle of charts.values()) handle.dispose(); charts.clear(); },
+    dispose() { clearTimeout(poll); clearTimeout(rangePoll); clearTimeout(slowTimer); dailySeq += 1; rangeSeq += 1; dailyCtrl?.abort(); rangeCtrl?.abort(); for (const handle of charts.values()) handle.dispose(); charts.clear(); },
     get ua() { return ua; },
     get data() { return data; },
   };

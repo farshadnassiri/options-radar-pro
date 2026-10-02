@@ -129,6 +129,6 @@ group('۳۱۶-هـ. نمودارها و سیم‌کشی');
   check('سرور: تاریخچهٔ تلاطم موقعیت باز را برمی‌گرداند', server.includes('const oi = {};') && /return sendJson\(res, 200, \{\s*oi,/.test(server));
   const contractBuild = server.slice(server.indexOf('async function buildIvContractDay'), server.indexOf('/** فقط یک قرارداد از یک روزِ فرم انتقال'));
   check('سرور: بازسازی یک قرارداد هرگز امروز را نمی‌سازد', contractBuild.includes('if (!(day < tehranDateNumber())) return null;'));
-  check('سرور: `ins` فقط عدد، و ساخت فقط با build=1', server.includes("if (insWanted && !/^\\d{5,25}$/.test(insWanted))") && server.includes('if (build && pending.length) queueIvBuild(ua, pending, mode, insWanted);'));
+  check('سرور: `ins` فقط عدد، و ساخت فقط با build=1', server.includes("if (insWanted && !/^\\d{5,25}$/.test(insWanted))") && server.includes('if (build && pending.length) {\n        queueIvBuild(ua, pending, mode, insWanted);'));
   check('موقعیت باز روزانه در مخزن نمی‌رود', readSrc('../.gitignore').includes('data/day-oi/'));
 }
