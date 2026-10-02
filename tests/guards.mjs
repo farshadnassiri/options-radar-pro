@@ -495,10 +495,13 @@ group('۱۰. رنگ سری‌ها جداپذیر است');
 //
 // سقف‌ها با `node tools/next.mjs` یکی هستند تا عامل پیش از آنکه CI قرمز
 // شود خودش ببیند.
+//
+// `NEXT.md` (سقف ۸) در ۱۴۰۵/۰۷/۱۰ برداشته شد: برای تحویل کار بین چند عامل
+// بود و حالا یک عامل مستقیم روی `main` کار می‌کند. قواعدش به
+// `PROTOCOL.md` و صف بازش به `TASK_STATUS.md` رفت.
 group('۹. بودجهٔ خواندنِ اجباری از سقف نگذشته');
 {
   const CAPS = [
-    ['NEXT.md', 8],
     ['PROTOCOL.md', 8],
     ['AGENTS.md', 16],
     ['WORKLOG.md', 48],
@@ -512,7 +515,7 @@ group('۹. بودجهٔ خواندنِ اجباری از سقف نگذشته');
     check(`${file} زیر ${capKb} کیلوبایت است`, size > 0 && size <= capKb * 1024,
       `${(size / 1024).toFixed(1)}k از ${capKb}k`);
   }
-  check('جمع خواندن اجباری زیر ۹۶ کیلوبایت است', total <= 96 * 1024,
+  check('جمع خواندن اجباری زیر ۸۸ کیلوبایت است', total <= 88 * 1024,
     `${(total / 1024).toFixed(1)}k`);
 
   // بارگذار باید نازک بماند. هر ادعایی که اینجا نوشته شود، دوباره همان
@@ -528,7 +531,7 @@ group('۹. بودجهٔ خواندنِ اجباری از سقف نگذشته');
   check('هیچ دستهٔ آزمونی از ۴۰ کیلوبایت نگذشته', big.length === 0, big.join(' ،') || 'همه کوچک');
 
   // ابزارهایی که پروتکل به آن‌ها ارجاع می‌دهد باید واقعاً باشند.
-  for (const f of ['NEXT.md', 'PROTOCOL.md', 'BACKLOG.md', 'tools/next.mjs', 'tools/check.mjs', 'tools/progress.mjs', 'tools/ci.mjs', 'tests/harness.mjs']) {
+  for (const f of ['PROTOCOL.md', 'BACKLOG.md', 'tools/next.mjs', 'tools/check.mjs', 'tools/progress.mjs', 'tools/ci.mjs', 'tests/harness.mjs']) {
     check(`${f} موجود است`, fs.existsSync(path.join(ROOT, f)));
   }
 }

@@ -1,11 +1,12 @@
 // راهنمای شروع کار — جای گشتن در مخزن.
 //
 // چرا هست: بیشترِ توکنی که یک عامل می‌سوزاند صرف «کجاست؟» می‌شود، نه صرف
-// نوشتن کد. سه پرسش تکراری است: کار بعدی چیست، آزمونم را کجا بنویسم،
-// کدام ماژول این تابع را دارد. هر سه اینجا با یک اجرا جواب می‌گیرند.
+// نوشتن کد. دو پرسش تکراری است: آزمونم را کجا بنویسم، و کدام ماژول این
+// تابع را دارد. هر دو اینجا با یک اجرا جواب می‌گیرند. کار را صاحب پروژه
+// تعیین می‌کند؛ کارهای باز در `TASK_STATUS.md` است.
 //
 // اجرا:
-//   node tools/next.mjs              کار بعدی، دروازه، بودجهٔ خواندن
+//   node tools/next.mjs              شاخه، دروازه، پیشرفت، بودجهٔ خواندن
 //   node tools/next.mjs suites وجه   دستهٔ آزمونِ مربوط را پیدا کن
 //   node tools/next.mjs map margin   ماژول‌ها و صادراتشان را پیدا کن
 
@@ -76,14 +77,10 @@ const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
 const base = git('rev-parse', '--short', 'origin/main') || git('rev-parse', '--short', 'main');
 const ahead = git('rev-list', '--count', 'origin/main..HEAD') || '?';
 
-const next = fs.existsSync(path.join(ROOT, 'NEXT.md')) ? read('NEXT.md') : '';
-const task = (next.match(/^##\s+کار\s*\n+###\s+(.+)$/m) || next.match(/^##\s+کار[^\n]*\n+(.+)$/m) || [, '—'])[1];
-const suiteHint = (next.match(/tests\/suites\/([\w.-]+\.mjs)/) || [, null])[1];
-
-console.log(`شاخه       ${branch}   (${ahead} کامیت جلوتر از origin/main @ ${base})`);
-console.log(`کار بعدی   ${task.trim()}`);
-console.log(`دستهٔ آزمون ${suiteHint ? `tests/suites/${suiteHint}` : 'در NEXT.md مشخص نشده — node tools/next.mjs suites <کلیدواژه>'}`);
-console.log(`دروازه     node tools/check.mjs`);
+// همه‌چیز روی `main` است (`PROTOCOL.md` §۱۱)؛ شاخهٔ دیگر یعنی چیزی جا مانده.
+console.log(`شاخه       ${branch}   (${ahead} کامیت پوش‌نشده · origin/main @ ${base})${branch === 'main' ? '' : '   ✘ کار روی main است'}`);
+console.log(`دستهٔ آزمون node tools/next.mjs suites <کلیدواژه>`);
+console.log(`دروازه     node tools/check.mjs   ← سبز، بعد git push origin main`);
 
 const prog = spawnSync(process.execPath, [path.join(ROOT, 'tools/progress.mjs'), '--line'], { cwd: ROOT, encoding: 'utf8' });
 if (prog.stdout.trim()) console.log(prog.stdout.trim());
@@ -91,7 +88,7 @@ if (prog.stdout.trim()) console.log(prog.stdout.trim());
 // ── بودجهٔ خواندن ─────────────────────────────────────────────────────
 // همان سقف‌هایی که نگهبان ۹ می‌سنجد. اگر اینجا زرد شد، پیش از آنکه CI
 // قرمز شود بایگانی کنید.
-const CAPS = { 'NEXT.md': 8, 'PROTOCOL.md': 8, 'AGENTS.md': 16, 'WORKLOG.md': 48, 'TASK_STATUS.md': 24 };
+const CAPS = { 'PROTOCOL.md': 8, 'AGENTS.md': 16, 'WORKLOG.md': 48, 'TASK_STATUS.md': 24 };
 let total = 0;
 const parts = Object.entries(CAPS).map(([f, capKb]) => {
   const size = fs.existsSync(path.join(ROOT, f)) ? fs.statSync(path.join(ROOT, f)).size : 0;
