@@ -24,6 +24,8 @@ import { expiryAtmIv, interpolateVariance, quantile, percentileOf } from './vol-
 import { fitSmile } from './chain-compare.mjs';
 import { momentsFor } from './intraday-grid.mjs';
 import { normalizeHistoryDate } from './history.mjs';
+import { quoteAt } from './moment-quote.mjs';
+import { queueFromLimits, limitsAt } from './iv-record.mjs';
 
 export const VOL_INTRADAY_VERSION = 1;
 
@@ -53,6 +55,8 @@ export const INTRADAY_FLAGS = {
   nearestExpiry: 'افق هدف بین دو سررسید نیفتاد؛ نزدیک‌ترین سررسید',
   assumedCalendar: 'تقویم آینده فرضی (data/holidays.json نیست)',
   staleDropped: 'مظنهٔ کهنه کنار رفت',
+  baseAgeUnknown: 'زمان آخرین معاملهٔ پایه نامعلوم (ضبط پس از آغاز جلسه شروع شد)',
+  rebuilt: 'بازسازی از ریزمعامله، نه ضبط زنده',
 };
 
 /** پارامترهای مسیر درون‌روزی: تنظیمات + انتخاب همان نما. */
@@ -382,4 +386,51 @@ export function intradayRealized(days = [], { stepSec = 300, tradingDaysYr = 240
 export function realizedSoFar(points = [], { stepSec = 300, tradingDaysYr = 240, sessionLength = 12600, jumpCut = 0.2 } = {}) {
   const day = intradayRealized([{ date: 0, points }], { stepSec, tradingDaysYr, sessionLength, jumpCut }).days[0];
   return { rvPct: day?.rvIntradayPct ?? NaN, returns: day?.returns ?? 0, coveredSec: day?.coveredSec ?? 0, cut: day?.cut ?? false };
+}
+
+// ═══════════════════ فرم انتقال → نقطه‌های شاخص ═══════════════════
+
+export const INTRADAY_SOURCES = {
+  record: 'ضبط زندهٔ دیده‌بان',
+  trades: 'بازسازی از ریزمعامله',
+  book: 'بازسازی از دفتر سفارش',
+  pending: 'هنوز ساخته نشده',
+  none: 'داده‌ای نیست',
+};
+
+/**
+ * یک روزِ فرم انتقال (`core/iv-record.mjs`) → نقطه‌های شاخص با همان موتور.
+ *
+ * هر لحظه فقط از مظنه و معاملهٔ تا همان ثانیه ساخته می‌شود (`quoteAt`
+ * و فرم انتقال هر دو در ثانیهٔ لحظه می‌بُرند). صفِ پایه از دامنهٔ مجاز همان
+ * روز؛ دامنهٔ نامعلوم «نامعلوم» است، نه «عادی». `keepContracts` تلاطم هر
+ * قرارداد را هم نگه می‌دارد (برای لبخند و جدول زنجیره).
+ */
+export function transportPoints(day, ctx, { keepContracts = false } = {}) {
+  const meta = day?.contracts || {};
+  const p = ctx.params;
+  return (day?.moments || []).map(([second, basePrice, , baseLastAt, quotes]) => {
+    const at = { date: day.date, second };
+    const price = n(basePrice);
+    const lastAt = n(baseLastAt);
+    const queue = queueFromLimits(price, limitsAt(day.limits, second));
+    const base = { price, priceSource: 'trade', ageSec: isNum(lastAt) ? second - lastAt : NaN, queue };
+    const observations = Object.entries(quotes || {}).map(([ins, q]) => {
+      const row = meta[ins] || [];
+      return {
+        ins, kind: row[0], strike: row[1], expiry: row[2],
+        quote: quoteAt({ record: { bid: q[0], ask: q[1], at: q[2], last: q[3], lastAt: q[4] }, second, maxAgeSec: p.maxAgeSec, basis: p.priceBasis }),
+      };
+    });
+    const r = ivIndexAt({ at, base, observations }, ctx);
+    const flags = new Set(r.flags);
+    if (price > 0 && !isNum(lastAt)) flags.add('baseAgeUnknown');
+    if (day.source === 'trades' || day.source === 'book') flags.add('rebuilt');
+    return {
+      second, value: r.ivPct, bid: r.bidPct, ask: r.askPct, price, spot: price, queue: queue.key,
+      why: r.why, flags: [...flags], skew: r.skewPct, termSlope: r.termSlope, used: r.used,
+      maxAge: r.maxAge, expiries: r.expiries || [], term: r.term,
+      ...(keepContracts ? { contracts: r.contracts } : {}),
+    };
+  });
 }

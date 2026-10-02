@@ -23,7 +23,7 @@ import { normalizeTrades, normalizeTradesDetailed } from '../core/backtest.mjs';
 import { closingCoverage, coversDailyDate, trustedDailyRows } from '../core/daily-trust.mjs';
 import { chooseTape, dailyExpectation } from '../core/tape-choice.mjs';
 import { upstreamShape, upstreamShapeLabel } from '../core/upstream-shape.mjs';
-import { normalizeBookEvents } from '../core/book-history.mjs';
+import { normalizeBookEvents, bookAt } from '../core/book-history.mjs';
 import {
   makeArchive, chainRowsFrom, archiveNote, archiveBoardDownNote, archiveQuality, archiveName, validArchiveDate,
 } from '../core/watch-archive.mjs';
@@ -34,7 +34,11 @@ import {
 } from '../core/option-roster.mjs';
 import { dayPath, scanBoardRows, tradingDays } from '../core/roster-scan.mjs';
 import { panelFromDay, panelSlice } from '../core/day-panel.mjs';
-import { parseHolidays } from '../core/vol-clock.mjs';
+import { parseHolidays, sessionOf } from '../core/vol-clock.mjs';
+import { recordFrame, parseRecord, recordMoments, compactRecordMoments, rebuildMoments, limitsFrom, pickMoments, IV_RECORD_VERSION } from '../core/iv-record.mjs';
+import { tehranSecondOfDay } from '../core/live-quote.mjs';
+import { momentsFor, normalizeGrain } from '../core/intraday-grid.mjs';
+import { markAt } from '../core/intraday-mark.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
 import { infoPath, instrumentInfo, optionSpec, optionSpecPath } from '../core/roster-catalog.mjs';
 import { readJsonSafe } from '../core/json-safe.mjs';
@@ -825,6 +829,7 @@ async function watchTick() {
     // بار اول کل عکس، بعد فقط ردیف‌های تغییرکرده
     broadcast('watch', { at: watch.at, full: first, count: rows.length, rows: first ? rows : changed });
     archiveToday(rows).catch((e) => logErr('بایگانی دیده‌بان', e));
+    recordIv(rows, gate, today).catch((e) => { ivRec.lastError = `${e.name}: ${e.message}`; logErr('ضبط تلاطم', e); });
     return true;
   } catch (e) {
     logErr('دور دیده‌بان', e);
@@ -832,6 +837,183 @@ async function watchTick() {
     return false;
   }
 }
+
+// ——————————————————————— ضبط تلاطم زنده ———————————————————————
+//
+// «امروز از بازگشایی» در میز تلاطم از همین ضبط می‌آید: هر `volRecordStepSec`
+// یک قاب از **همان** عکسِ دیده‌بان (`core/iv-record.mjs`) — بی هیچ
+// درخواستِ اضافه به بالادست. فقط در جلسهٔ باز؛ پس از بستن، تابلو ارقام
+// نهایی را نگه می‌دارد و قابِ بیرون از جلسه «لحظهٔ معاملاتی» نیست.
+// نخستین قاب پس از روشن‌شدن سرور کامل است، پس پرونده با خاموش‌وروشن شدن
+// خراب نمی‌شود؛ فقط فاصلهٔ خاموشی خالی می‌ماند.
+const IV_LIVE_DIR = path.join(ROOT, 'data', 'iv-live');
+const IV_BUILD_DIR = path.join(ROOT, 'data', 'iv-intraday');
+let ivRec = { day: 0, prev: null, lastAt: -Infinity, frames: 0, bytes: 0, lastError: '' };
+const ivLiveFile = (day) => path.join(IV_LIVE_DIR, `${day}.jsonl`);
+
+async function recordIv(rows, gate, today) {
+  if (!S.volRecord || !gate.open) return;
+  const second = tehranSecondOfDay();
+  const session = sessionOf(S);
+  if (!(second >= session.open && second <= session.close)) return;
+  if (ivRec.day !== today) ivRec = { day: today, prev: null, lastAt: -Infinity, frames: 0, bytes: 0, lastError: '' };
+  if (second - ivRec.lastAt < num(S.volRecordStepSec, 60)) return;
+  const { frame, state } = recordFrame(rows, { second, prev: ivRec.prev });
+  const line = `${JSON.stringify(frame)}\n`;
+  // حالت پیش از نوشتن جلو می‌رود تا دورِ بعد همین قاب را دوباره ننویسد؛
+  // اگر نوشتن شکست، قابِ بعد کامل می‌شود.
+  ivRec.prev = state;
+  ivRec.lastAt = second;
+  try {
+    await fs.mkdir(IV_LIVE_DIR, { recursive: true });
+    await fs.appendFile(ivLiveFile(today), line);
+    ivRec.frames += 1;
+    ivRec.bytes += line.length;
+  } catch (e) {
+    ivRec.prev = null;
+    throw e;
+  }
+}
+
+const ivRecStatus = () => ({
+  on: Boolean(S.volRecord), day: ivRec.day, frames: ivRec.frames, bytes: ivRec.bytes,
+  lastSecond: Number.isFinite(ivRec.lastAt) ? ivRec.lastAt : null, stepSec: num(S.volRecordStepSec, 60),
+  lastError: ivRec.lastError,
+});
+
+// پروندهٔ روزِ گذشته عوض نمی‌شود و نگه داشته می‌شود؛ پروندهٔ امروز با
+// اندازه‌اش سنجیده می‌شود تا هر پرسش آن را دوباره نخواند.
+const ivLiveMemo = new Map();
+async function readIvLive(day) {
+  let size = 0;
+  try { size = (await fs.stat(ivLiveFile(day))).size; } catch { return null; }
+  const memo = ivLiveMemo.get(day);
+  if (memo && memo.size === size) return memo.parsed;
+  const parsed = parseRecord(await fs.readFile(ivLiveFile(day), 'utf8'));
+  ivLiveMemo.set(day, { size, parsed });
+  evictOldest(ivLiveMemo, 20);
+  return parsed;
+}
+
+// ——— بازسازی روزِ بسته‌شده ———
+//
+// روزی که ضبط نشده (پیش از روشن‌شدنِ ضبط، یا سرور خاموش بود) از ریزمعامله
+// ساخته می‌شود — و در حالت `book` از دفتر سفارش هم. هزینه پیش از ساخت گفته
+// می‌شود و ساخت فقط با `build=1` آغاز می‌شود. نتیجه در
+// `data/iv-intraday/<ua>/<day>.<mode>.json` برای همیشه می‌ماند، چون روزِ
+// گذشته عوض نمی‌شود. امروز هرگز اینجا ساخته یا ذخیره نمی‌شود.
+//
+// قراردادها: از دفتر قراردادها (سررسیدشده‌ها هم)، فقط آن‌هایی که آن روز
+// معامله شدند (پروندهٔ روزانه)، درون باند حول آخرین قیمت پایه، تا چهار
+// قرارداد نزدیک هر سمت در سه سررسید نزدیک. گام پنج‌دقیقه؛ دانهٔ درشت‌تر
+// نمونه‌ای از همین لحظه‌هاست.
+const IV_BUILD_GRAIN = 'm5';
+const IV_BUILD_BAND_PCT = 25;
+const IV_BUILD_PER_SIDE = 4;
+const IV_BUILD_EXPIRIES = 3;
+const IV_BUILD_PRIORITY = 8;
+const IV_BUILD_DAYS_MAX = 60;
+const ivBuildFile = (ua, day, mode) => path.join(IV_BUILD_DIR, ua, `${day}.${mode}.json`);
+let ivBuild = { running: false, total: 0, done: 0, failed: 0, lastError: '', finishedAt: 0 };
+const ivBuildQueue = new Map();
+
+async function readIvBuild(ua, day, mode) {
+  try {
+    const out = JSON.parse(await fs.readFile(ivBuildFile(ua, day, mode), 'utf8'));
+    return out?.version === IV_RECORD_VERSION ? out : null;
+  } catch { return null; }
+}
+
+/** درخواست‌های تقریبیِ یک روز — پیش از آنکه کاربر دکمه را بزند. */
+const ivBuildCost = (mode) => 2 + 1 + 1 + IV_BUILD_PER_SIDE * 2 * IV_BUILD_EXPIRIES * (mode === 'book' ? 3 : 2);
+
+async function thresholdLimits(ua, day) {
+  try { return limitsFrom(firstList(await get(historicalPath('threshold', ua, String(day)), S.ttlDailySec, 7))); }
+  catch { return []; }
+}
+
+async function buildIvDay(ua, day, mode) {
+  if (!(day < tehranDateNumber())) return null;
+  const baseTape = (await fetchHistoricalTape(ua, String(day))).rows || [];
+  const closeSecond = momentsFor('m60').at(-1);
+  const spot = markAt(baseTape, closeSecond)?.price;
+  if (!(spot > 0)) throw new Error(`پایه ${ua} در ${day} معامله‌ای نداشت`);
+  let panel = await readPanel(day);
+  if (!panel) panel = await savePanel(day, await get(dayPath(day), ROSTER_SCAN_TTL, PANEL_PRIORITY));
+  const traded = panel?.prices || {};
+  const volCol = (panel?.columns || []).indexOf('vol');
+  const board = await boardRowsForIndex();
+  const universe = await rosterRangeUniverse(day, day, board);
+  const pool = [];
+  for (const row of [...universe.rows, ...board]) {
+    if (String(row?.uaInsCode) !== ua) continue;
+    const strike = num(row?.strikePrice, 0);
+    const expiry = num(row?.expiryGregorian, 0) || num(row?.endDate, 0);
+    if (!(strike > 0) || !(expiry > day) || Math.abs(strike / spot - 1) * 100 > IV_BUILD_BAND_PCT) continue;
+    for (const [sfx, kind] of [['C', 'call'], ['P', 'put']]) {
+      const ins = String(row?.[`insCode_${sfx}`] || '');
+      const values = traded[ins];
+      if (!ins || !values || !(num(values[volCol], 0) > 0)) continue;
+      pool.push({ ins, kind, strike, expiry, otm: kind === 'call' ? strike >= spot : strike <= spot });
+    }
+  }
+  const seen = new Set();
+  const expiries = [...new Set(pool.map((c) => c.expiry))].sort((a, b) => a - b).slice(0, IV_BUILD_EXPIRIES);
+  const meta = {};
+  for (const expiry of expiries) {
+    for (const kind of ['call', 'put']) {
+      pool.filter((c) => c.expiry === expiry && c.kind === kind && !seen.has(c.ins))
+        .sort((a, b) => Math.abs(Math.log(a.strike / spot)) - Math.abs(Math.log(b.strike / spot)))
+        .slice(0, IV_BUILD_PER_SIDE)
+        .forEach((c) => { seen.add(c.ins); meta[c.ins] = [c.kind, c.strike, c.expiry]; });
+    }
+  }
+  const tapes = {}, books = {};
+  for (const ins of Object.keys(meta)) {
+    tapes[ins] = (await fetchHistoricalTape(ins, String(day))).rows || [];
+    if (mode === 'book') {
+      try { books[ins] = normalizeBookEvents(firstList(await get(historicalPath('book', ins, String(day)), S.ttlDailySec, IV_BUILD_PRIORITY))); }
+      catch { books[ins] = []; }
+    }
+  }
+  const built = rebuildMoments({ seconds: momentsFor(IV_BUILD_GRAIN), baseTape, tapes, books, meta, markAt, bookAt });
+  const out = {
+    version: IV_RECORD_VERSION, ua, date: day, source: mode, provisional: false, grain: IV_BUILD_GRAIN,
+    limits: await thresholdLimits(ua, day), builtAt: Date.now(), spotClose: spot,
+    picked: { band: IV_BUILD_BAND_PCT, perSide: IV_BUILD_PER_SIDE, expiries, pool: pool.length },
+    ...built,
+  };
+  await fs.mkdir(path.dirname(ivBuildFile(ua, day, mode)), { recursive: true });
+  await writeJsonAtomic(ivBuildFile(ua, day, mode), out);
+  return out;
+}
+
+function queueIvBuild(ua, days, mode) {
+  for (const day of days) ivBuildQueue.set(`${ua}|${day}|${mode}`, { ua, day, mode });
+  if (ivBuild.running || !ivBuildQueue.size) return;
+  ivBuild = { running: true, total: ivBuildQueue.size, done: 0, failed: 0, lastError: '', finishedAt: 0 };
+  (async () => {
+    while (ivBuildQueue.size) {
+      // تازه‌ترین روز اول: مقایسه با «دیروز» از همه پرکاربردتر است.
+      const [key, job] = [...ivBuildQueue.entries()].sort((a, b) => b[1].day - a[1].day)[0];
+      ivBuildQueue.delete(key);
+      try {
+        if (!(await readIvBuild(job.ua, job.day, job.mode))) await buildIvDay(job.ua, job.day, job.mode);
+      } catch (e) {
+        ivBuild.failed += 1;
+        ivBuild.lastError = `${job.day}: ${e.message || e}`;
+      } finally {
+        ivBuild.done += 1;
+        ivBuild.total = Math.max(ivBuild.total, ivBuild.done + ivBuildQueue.size);
+      }
+    }
+    ivBuild.running = false;
+    ivBuild.finishedAt = Date.now();
+  })();
+}
+
+/** لحظه‌های یک دانه؛ «روز» یعنی فقط پایان جلسه. */
+const grainSeconds = (grain) => (grain === 'day' ? momentsFor('m60').slice(-1) : momentsFor(grain));
 
 // ——————————————————————— بایگانی دیده‌بان ———————————————————————
 //
@@ -1517,6 +1699,7 @@ async function handleRequest(req, res, u) {
         // بار به تفکیکِ سرویس، تا گزارشِ بعدی به‌جای «۲۰۸۲ درخواست» بگوید
         // کدام سرویس آن را خورده و کدام‌یک خطا داده.
         byEndpoint: tally.snapshot(12), worstEndpoint: tally.worstError(),
+        ivRecord: ivRecStatus(),
       });
     }
 
@@ -1828,6 +2011,73 @@ async function handleRequest(req, res, u) {
         contracts: [...contracts.values()], panels,
         build: panelStatus(missing),
         roster: { missingDays: rosterGap, build: buildStatus(rosterGap), coverage: built.coverage, contracts: built.contracts },
+      });
+    }
+
+    // ——— تلاطم درون‌روزی یک پایه ———
+    //
+    // هر روز به یک شکل برمی‌گردد (`core/iv-record.mjs`، «فرم انتقال») با
+    // برچسب منبع: `record` (ضبط زنده)، `trades`/`book` (بازسازی)، `pending`
+    // (هنوز ساخته نشده) یا `none`. تلاطم اینجا حساب نمی‌شود: موتورِ یکتا در
+    // `core/vol-intraday.mjs` در رابط اجرا می‌شود، پس پارامترها کش را باطل
+    // نمی‌کنند و یک عدد همه‌جا یکی است. امروز همیشه `provisional` است و فقط
+    // تا لحظهٔ آخرین قاب.
+    if (p === '/api/vol/intraday') {
+      const ua = String(u.searchParams.get('ua') || '').trim();
+      const vFrom = u.searchParams.get('from') || '', vTo = u.searchParams.get('to') || '';
+      if (!/^\d{5,25}$/.test(ua)) return sendJson(res, 400, { error: '«ua» باید کد نماد پایه باشد' });
+      for (const [name, value] of [['from', vFrom], ['to', vTo]]) {
+        if (!validArchiveDate(value)) return sendJson(res, 400, { error: `«${name}» باید هشت رقم میلادی باشد` });
+      }
+      if (Number(vTo) < Number(vFrom)) return sendJson(res, 400, { error: 'پایان بازه پیش از آغاز آن است' });
+      const grain = normalizeGrain(u.searchParams.get('grain') || 'm5');
+      const mode = u.searchParams.get('mode') === 'book' ? 'book' : 'trades';
+      const build = u.searchParams.get('build') === '1';
+      const today = tehranDateNumber();
+      const days = tradingDays(vFrom, vTo).filter((day) => day <= today).slice(-IV_BUILD_DAYS_MAX);
+      const seconds = grainSeconds(grain);
+      const nowSecond = tehranSecondOfDay();
+      const out = [];
+      const pending = [];
+      for (const day of days) {
+        const live = await readIvLive(day);
+        if (live?.frames.length) {
+          const isToday = day === today;
+          let cut = seconds;
+          if (isToday) {
+            const lastFrame = live.frames.at(-1).t;
+            cut = seconds.filter((second) => second <= Math.min(nowSecond, lastFrame));
+            // لحظهٔ «حالا»: آخرین قاب، اگر از آخرین مرز دانه جلوتر است.
+            if (!cut.length || cut.at(-1) < lastFrame) cut = [...cut, lastFrame];
+          }
+          out.push({
+            date: day, source: 'record', provisional: isToday, broken: live.broken,
+            limits: await thresholdLimits(ua, day),
+            ...compactRecordMoments(recordMoments(live.frames, ua, cut)),
+          });
+          continue;
+        }
+        if (day === today) {
+          out.push({ date: day, source: 'none', provisional: true, why: S.volRecord ? 'ضبط امروز هنوز قابی ندارد' : 'ضبط تلاطم زنده خاموش است', contracts: {}, moments: [] });
+          continue;
+        }
+        const cached = await readIvBuild(ua, day, mode);
+        if (cached) {
+          // دانهٔ یک‌دقیقه همهٔ مرزهای پنج‌دقیقه را دارد، پس همان گام ساخت برمی‌گردد.
+          out.push(pickMoments(cached, seconds));
+          continue;
+        }
+        pending.push(day);
+        out.push({ date: day, source: 'pending', provisional: false, contracts: {}, moments: [] });
+      }
+      if (build && pending.length) queueIvBuild(ua, pending, mode);
+      return sendJson(res, 200, {
+        ua, grain, mode, today, nowSecond, days: out,
+        grainServed: { record: grain, rebuild: grain === 'm1' ? IV_BUILD_GRAIN : grain },
+        pending: pending.length,
+        cost: { perDay: ivBuildCost(mode), requests: pending.length * ivBuildCost(mode) },
+        build: { ...ivBuild, queued: ivBuildQueue.size },
+        recorder: ivRecStatus(),
       });
     }
 

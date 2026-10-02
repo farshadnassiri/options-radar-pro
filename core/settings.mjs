@@ -353,6 +353,13 @@ export const SCHEMA = [
   { key: 'volQuoteMaxAgeSec', group: 'vol', kind: 'num', scope: 'client',
     def: 900, min: 60, max: 3600, step: 60, unit: 'ثانیه', label: 'بیشینهٔ سن مظنه در شاخص درون‌روزی',
     hint: 'مظنه یا معامله‌ای کهنه‌تر از این وارد شاخص لحظه نمی‌شود؛ اگر همه کهنه بودند، شاخص آن لحظه خالی می‌ماند با علت.' },
+  // ضبط از همان عکسِ دیده‌بان است (`core/iv-record.mjs`)؛ درخواستی به بالادست
+  // اضافه نمی‌کند. خاموش‌کردنش «امروز از بازگشایی» را در میز تلاطم خالی می‌گذارد.
+  { key: 'volRecord', group: 'vol', kind: 'bool', scope: 'server',
+    def: true, label: 'ضبط تلاطم زنده از دیده‌بان',
+    hint: 'هر چند ثانیه بهترین خرید و فروش و آخرین معاملهٔ قراردادهای نزدیک پایه در data/iv-live/ نوشته می‌شود. درخواست اضافه‌ای نمی‌زند؛ حدود چند مگابایت در روز.' },
+  { key: 'volRecordStepSec', group: 'vol', kind: 'num', scope: 'server',
+    def: 60, min: 15, max: 600, step: 15, unit: 'ثانیه', label: 'گام ضبط تلاطم زنده' },
   { key: 'shockPct', group: 'vol', kind: 'num', scope: 'client',
     def: 10, min: 1, max: 60, step: 1, unit: 'درصد', label: 'شوک سناریو' },
 

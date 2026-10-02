@@ -90,8 +90,11 @@ group('۲۷۶. یک مسیرِ مشترک برای ریزمعاملهٔ تاری
     server.includes('async function fetchHistoricalTape(code, date'));
   // معیار پذیرشِ ۱ و ۳: هر سه مسیر باید یک جواب بدهند، پس هر سه باید از
   // یک تابع بگذرند. شمارشِ فراخوان‌ها همین را می‌گزد.
-  const calls = (server.match(/fetchHistoricalTape\(/g) || []).length;
-  check('و هر سه مسیر از همان می‌گذرند — دسته‌ای، تکی و hist', calls === 4);
+  // بازسازی تلاطم درون‌روزی (`buildIvDay`، پایه و قراردادها) مصرف‌کنندهٔ
+  // چهارم است و او هم از همین می‌گذرد؛ از شمارش سه مسیرِ اصلی بیرون است.
+  const build = server.slice(server.indexOf('async function buildIvDay'), server.indexOf('function queueIvBuild'));
+  const calls = (server.match(/fetchHistoricalTape\(/g) || []).length - (build.match(/fetchHistoricalTape\(/g) || []).length;
+  check('و هر سه مسیر از همان می‌گذرند — دسته‌ای، تکی و hist', calls === 4 && (build.match(/fetchHistoricalTape\(/g) || []).length === 2);
   check('/api/trades دیگر مستقیم مسیر اول را نمی‌خواند',
     !server.includes('firstList(await get(historicalTradesPath(ins, date)'));
   check('/api/hist ریزمعامله را به دریافت‌کنندهٔ مشترک می‌سپارد',
