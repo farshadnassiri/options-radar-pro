@@ -82,6 +82,25 @@ export function basisMeta(basisId) {
 }
 
 /**
+ * اجزای مخرج از `replay.entry` خامِ موتور تاریخ.
+ *
+ * ریسه همین تبدیل را پیش از فرستادن انجام می‌دهد (`capital` عدد، نه شیء؛
+ * `margin` دو میدان جدا). هر جای رابط که بازپخش را **خودش** دوباره اجرا
+ * می‌کند — کارت جزئیات، حساسیت، سنجش ساعت‌به‌ساعت — باید همین شکل را
+ * بسازد، وگرنه درصدِ جزئیات با درصدِ جدول روی دو مخرج متفاوت می‌نشیند.
+ */
+export function basisEntryOf(entry) {
+  const capital = entry?.capital;
+  return {
+    marginGross: entry?.margin?.margin ?? entry?.marginGross,
+    marginNet: entry?.margin?.marginNet ?? entry?.marginNet,
+    netCash: entry?.netCash,
+    capital: capital !== null && typeof capital === 'object' ? capital.value : capital,
+    notional: entry?.notional,
+  };
+}
+
+/**
  * مقدار مخرج برای یک ورود.
  *
  * `entry` همان چیزی است که موتور تاریخ در `replay.entry` می‌سازد و ورکر

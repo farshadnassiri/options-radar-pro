@@ -151,3 +151,26 @@ export function windowNote(result) {
   if (!gone) return `همهٔ ${kept} قیمت اعمال وارد ترکیب‌سازی شد`;
   return `${kept} قیمت اعمال وارد شد؛ ${gone} تا بیرون پنجرهٔ انتخابی بود`;
 }
+
+/**
+ * «بال مساوی» — قاعدهٔ تنظیم `wingsEqualWidth`، برای پویش زنده و تاریخی.
+ *
+ * باترفلای (سه اعمال): دو فاصله باید یکی باشند؛ ۹۰-۱۰۰-۱۱۰ می‌ماند،
+ * ۹۰-۱۰۰-۱۳۰ می‌افتد.
+ *
+ * کندور (چهار اعمال): فقط دو **بال بیرونی** هم‌عرض‌اند؛ تنهٔ میانی عرض
+ * دلخواه دارد. پیش از این هر دو مسیر همهٔ فاصله‌های پیاپی را برابر
+ * می‌خواستند، پس ۸۰۰-۹۰۰-۱۱۰۰-۱۲۰۰ (بال‌ها ۱۰۰ و ۱۰۰، تنه ۲۰۰) حذف می‌شد —
+ * سخت‌گیرتر از برچسب «باترفلای و کندور فقط با بال مساوی» (گزارش ۱ اکتبر).
+ *
+ * رواداری: ۲٪ عرض بال یا یک ریال، هر کدام بزرگ‌تر — همان قاعدهٔ پیشین.
+ */
+export function equalWings(strikes) {
+  const ks = Array.isArray(strikes) ? strikes : [];
+  if (ks.length < 3) return true;
+  const same = (a, b) => Math.abs(a - b) <= Math.max(1, Math.abs(a) * 0.02);
+  if (ks.length === 4) return same(ks[1] - ks[0], ks[3] - ks[2]);
+  const width = ks[1] - ks[0];
+  for (let i = 2; i < ks.length; i++) if (!same(width, ks[i] - ks[i - 1])) return false;
+  return true;
+}

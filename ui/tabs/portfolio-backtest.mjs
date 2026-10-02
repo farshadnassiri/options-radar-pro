@@ -5,7 +5,7 @@ import { feesOf } from '/core/settings.mjs';
 import {
   HISTORY_BASES, basisMatrix, censusNote, entrySensitivity, flattenActiveContracts,
   historyDateLabel, historyMarketMetrics, historyPrice, emptyPortfolioReason,
-  normalizeHistoryDate, replayHistory,
+  normalizeHistoryDate, rebaseReplay, replayHistory,
 } from '/core/history.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
@@ -25,7 +25,7 @@ import {
   histogramOption, parallelOption, raceOption, sankeyOption, scatterOption, treeOption,
   treemapOption, trendOption,
 } from '/ui/portfolio-analysis-view.mjs';
-import { RETURN_BASES, DEFAULT_RETURN_BASIS, returnOnBasis } from '/core/portfolio-basis.mjs';
+import { RETURN_BASES, DEFAULT_RETURN_BASIS, basisMeta, returnOnBasis } from '/core/portfolio-basis.mjs';
 import { STATISTICS, WEIGHTINGS, DEFAULT_STATISTIC, DEFAULT_WEIGHTING } from '/core/portfolio-stats.mjs';
 import {
   DEFAULT_HEATMAP_MODE, HEATMAP_MODES, METRICS, analyzePortfolio,
@@ -1777,11 +1777,22 @@ export async function mount(root, { state, api }) {
     return `${item.legs.map((leg) => nameOf(leg, 'قرارداد')).join(' + ')} · اعمال ${item.strikes.map((strike) => fmt.int(strike)).join(' / ')}`;
   }
 
+  // کارت جزئیات، نمودار مسیر و حساسیت همه روی **مبنای عدسی** — همان مخرج
+  // ستون «بازده» جدول. پیش از این از `returnPct` خام موتور (درگیر خالص)
+  // می‌خواندند: همان معامله در جدول ۳۲٫۷۲٪ و در کارت ۸۳٫۷۷٪ بود، بی اینکه
+  // تغییرِ مخرج جایی گفته شود (گزارش ۱ اکتبر).
+  const detailBasis = () => basisMeta(lens.basisId) || basisMeta(DEFAULT_RETURN_BASIS);
+  const onLens = (replay) => rebaseReplay(replay, detailBasis().id);
+
   function renderReplay(item, replay, manual = false) {
     const final = replay.rows.find((row) => row.date === Number($('pb-exit-date').dataset.value) && row.status === 'ok');
     if (!final) { root.querySelector('#pb-detail-result').innerHTML = '<p class="empty-note">با این قیمت‌های دستی، نتیجه معتبر روز سنجش ساخته نشد.</p>'; return; }
-    root.querySelector('#pb-detail-result').innerHTML = `<div class="portfolio-detail-kpis"><article><span>سود/زیان ${manual ? 'دستی' : 'مشاهده‌شده'}</span><b class="${signTone(final.netPnl)}">${fmt.money(final.netPnl)}</b></article><article><span>بازده</span><b class="${signTone(final.returnPct)}">${fmt.pct(final.returnPct)}٪</b></article><article><span>تغییر پایه</span><b class="${signTone(final.baseCumulativePct)}">${fmt.pct(final.baseCumulativePct)}٪</b></article><article><span>کل کارمزد</span><b>${fmt.money(final.totalFees)}</b></article></div><div id="pb-path-chart" class="portfolio-line-chart"></div><div class="history-table-wrap"><table class="history-table"><thead><tr><th>پا</th><th>جهت</th><th>ورود</th><th>خروج</th><th>اثر ناخالص</th><th>کارمزد</th><th>اثر خالص</th><th>حجم / ارزش خروج</th></tr></thead><tbody>${final.perLeg.map((leg, index) => `<tr><td>${fmt.int(index + 1)} · ${esc(nameOf(leg, 'پایه'))}</td><td>${replay.priced[index].side === 'buy' ? 'خرید' : 'فروش'}</td><td>${fmt.money(leg.entryPrice)}</td><td>${fmt.money(leg.exitPrice)}</td><td class="${signTone(leg.grossPnl)}">${fmt.money(leg.grossPnl)}</td><td>${fmt.money(leg.entryFee + leg.exitFee)}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td><td>${fmt.int(leg.volume)} · ${fmt.money(leg.value)}</td></tr>`).join('')}</tbody></table></div>`;
-    lineChart(root.querySelector('#pb-path-chart'), replay.rows);
+    const basis = detailBasis();
+    const denominator = replay.basis?.ok
+      ? `مخرج ${esc(basis.short)}: ${fmt.money(replay.basis.denominator)}`
+      : esc(replay.basis?.why || 'مخرج نامعلوم است');
+    root.querySelector('#pb-detail-result').innerHTML = `<div class="portfolio-detail-kpis"><article><span>سود/زیان ${manual ? 'دستی' : 'مشاهده‌شده'}</span><b class="${signTone(final.netPnl)}">${fmt.money(final.netPnl)}</b></article><article><span>بازده روی ${esc(basis.short)}</span><b class="${signTone(final.returnPct)}">${pctCell(final.returnPct)}</b><small>${denominator}</small></article><article><span>تغییر پایه</span><b class="${signTone(final.baseCumulativePct)}">${fmt.pct(final.baseCumulativePct)}٪</b></article><article><span>کل کارمزد</span><b>${fmt.money(final.totalFees)}</b></article></div><div id="pb-path-chart" class="portfolio-line-chart"></div><div class="history-table-wrap"><table class="history-table"><thead><tr><th>پا</th><th>جهت</th><th>ورود</th><th>خروج</th><th>اثر ناخالص</th><th>کارمزد</th><th>اثر خالص</th><th>حجم / ارزش خروج</th></tr></thead><tbody>${final.perLeg.map((leg, index) => `<tr><td>${fmt.int(index + 1)} · ${esc(nameOf(leg, 'پایه'))}</td><td>${replay.priced[index].side === 'buy' ? 'خرید' : 'فروش'}</td><td>${fmt.money(leg.entryPrice)}</td><td>${fmt.money(leg.exitPrice)}</td><td class="${signTone(leg.grossPnl)}">${fmt.money(leg.grossPnl)}</td><td>${fmt.money(leg.entryFee + leg.exitFee)}</td><td class="${signTone(leg.netPnl)}">${fmt.money(leg.netPnl)}</td><td>${fmt.int(leg.volume)} · ${fmt.money(leg.value)}</td></tr>`).join('')}</tbody></table></div>`;
+    lineChart(root.querySelector('#pb-path-chart'), replay.rows, { yLabel: `بازده روی ${basis.short} (درصد)` });
   }
 
   function renderSensitivity(item, args) {
@@ -1791,18 +1802,19 @@ export async function mount(root, { state, api }) {
     for (let value = step; value < range; value += step) shocks.push(-value, value);
     shocks.push(-range, range);
     shocks.sort((a, b) => a - b);
-    const sensitivity = entrySensitivity(args, shocks);
-    const matrix = basisMatrix(args);
+    const lensBasis = detailBasis();
+    const sensitivity = entrySensitivity(args, shocks, { basisId: lensBasis.id });
+    const matrix = basisMatrix(args, { basisId: lensBasis.id });
     const host = root.querySelector('#pb-sensitivity');
-    host.innerHTML = `<div class="portfolio-sensitivity-grid"><section><h3>شوک قیمت ورود هر پا</h3><div class="history-table-wrap"><table class="history-table portfolio-small-table"><thead><tr><th>پا</th>${shocks.map((shock) => `<th>${fmt.pct(shock)}٪</th>`).join('')}</tr></thead><tbody>${item.legs.map((leg, legIndex) => `<tr><td>${esc(nameOf(leg, `پای ${legIndex + 1}`))}</td>${shocks.map((shock) => { const cell = sensitivity.find((row) => row.legIndex === legIndex && row.shockPct === shock); return `<td><button type="button" class="portfolio-cell ${signTone(cell?.result?.returnPct)}" data-shock="${shock}" data-leg="${legIndex}">${fmt.pct(cell?.result?.returnPct)}٪</button></td>`; }).join('')}</tr>`).join('')}</tbody></table></div></section><section><h3>ماتریس مبنای ورود × خروج</h3><div class="portfolio-basis-matrix">${matrix.map((cell) => `<button type="button" class="${signTone(cell.result?.returnPct)}" data-entry="${cell.entry}" data-exit="${cell.exit}"><small>${HISTORY_BASES.find(([key]) => key === cell.entry)?.[1]} ← ${HISTORY_BASES.find(([key]) => key === cell.exit)?.[1]}</small><b>${fmt.pct(cell.result?.returnPct)}٪</b></button>`).join('')}</div></section></div><p id="pb-cell-detail" class="portfolio-note">روی هر خانه کلیک کن تا سناریوی قیمت همان خانه را ببینی.</p>`;
+    host.innerHTML = `<p class="portfolio-note">بازدهِ هر خانه روی مبنای «${esc(lensBasis.label)}» است — همان مخرج جدول.</p><div class="portfolio-sensitivity-grid"><section><h3>شوک قیمت ورود هر پا</h3><div class="history-table-wrap"><table class="history-table portfolio-small-table"><thead><tr><th>پا</th>${shocks.map((shock) => `<th>${fmt.pct(shock)}٪</th>`).join('')}</tr></thead><tbody>${item.legs.map((leg, legIndex) => `<tr><td>${esc(nameOf(leg, `پای ${legIndex + 1}`))}</td>${shocks.map((shock) => { const cell = sensitivity.find((row) => row.legIndex === legIndex && row.shockPct === shock); return `<td><button type="button" class="portfolio-cell ${signTone(cell?.result?.returnPct)}" data-shock="${shock}" data-leg="${legIndex}">${fmt.pct(cell?.result?.returnPct)}٪</button></td>`; }).join('')}</tr>`).join('')}</tbody></table></div></section><section><h3>ماتریس مبنای ورود × خروج</h3><div class="portfolio-basis-matrix">${matrix.map((cell) => `<button type="button" class="${signTone(cell.result?.returnPct)}" data-entry="${cell.entry}" data-exit="${cell.exit}"><small>${HISTORY_BASES.find(([key]) => key === cell.entry)?.[1]} ← ${HISTORY_BASES.find(([key]) => key === cell.exit)?.[1]}</small><b>${fmt.pct(cell.result?.returnPct)}٪</b></button>`).join('')}</div></section></div><p id="pb-cell-detail" class="portfolio-note">روی هر خانه کلیک کن تا سناریوی قیمت همان خانه را ببینی.</p>`;
     host.onclick = (event) => {
       const shock = event.target.closest('[data-shock]'), basis = event.target.closest('[data-entry]');
       if (shock) {
         const cell = sensitivity.find((row) => row.legIndex === Number(shock.dataset.leg) && row.shockPct === Number(shock.dataset.shock));
-        root.querySelector('#pb-cell-detail').textContent = cell?.result ? `پای ${fmt.int(Number(shock.dataset.leg) + 1)} با شوک ${fmt.pct(cell.shockPct)}٪: قیمت ورود ${fmt.money(cell.entryPrice)}، سود خالص ${fmt.money(cell.result.netPnl)} و بازده ${fmt.pct(cell.result.returnPct)}٪.` : 'این سناریو داده معتبر ندارد.';
+        root.querySelector('#pb-cell-detail').textContent = cell?.result ? `پای ${fmt.int(Number(shock.dataset.leg) + 1)} با شوک ${fmt.pct(cell.shockPct)}٪: قیمت ورود ${fmt.money(cell.entryPrice)}، سود خالص ${fmt.money(cell.result.netPnl)} و بازده روی ${lensBasis.short} ${pctCell(cell.result.returnPct)}.` : 'این سناریو داده معتبر ندارد.';
       } else if (basis) {
         const cell = matrix.find((row) => row.entry === basis.dataset.entry && row.exit === basis.dataset.exit);
-        root.querySelector('#pb-cell-detail').textContent = cell?.result ? `ورود ${basis.textContent.trim()}: سود خالص ${fmt.money(cell.result.netPnl)} و بازده ${fmt.pct(cell.result.returnPct)}٪.` : 'این مبنای ورود و خروج داده معتبر ندارد.';
+        root.querySelector('#pb-cell-detail').textContent = cell?.result ? `ورود ${basis.textContent.trim()}: سود خالص ${fmt.money(cell.result.netPnl)} و بازده روی ${lensBasis.short} ${pctCell(cell.result.returnPct)}.` : 'این مبنای ورود و خروج داده معتبر ندارد.';
       }
     };
   }
@@ -1925,7 +1937,7 @@ export async function mount(root, { state, api }) {
   function showDetail(item) {
     root.querySelectorAll('[data-result]').forEach((row) => row.classList.toggle('selected', row.dataset.result === item.id));
     const detail = $('pb-detail'); detail.hidden = false;
-    const replay = replayHistory(replayArgs(item));
+    const replay = onLens(replayHistory(replayArgs(item)));
     if (!replay.ok) { detail.innerHTML = `<section class="card"><p class="empty-note">${esc(replay.error)}</p></section>`; return; }
     detail.innerHTML = `<section class="card"><div class="section-head"><div><p class="eyebrow">جزئیات قابل کلیک</p><h2>${esc(item.strategyName)} · ${esc(comboName(item))}</h2></div><div class="backtest-head-actions"><span>${item.feasible ? 'قابل اجرا در ساختار بازار' : 'فقط سناریوی ساختاری'}</span><button type="button" id="pb-watch">ادامه در آزمایشگاه آپشن</button><button type="button" class="ghost" id="pb-live-watch">رصد زنده با معاملات امروز</button></div></div><div id="pb-detail-result"></div></section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">قیمت دستی واقعی برای هر قرارداد</p><h2>بازمحاسبه بدون دست‌کاری قیمت سایر پاها</h2></div><button type="button" class="primary" id="pb-manual-run">بازمحاسبه دستی</button></div><div class="portfolio-manual">${replay.priced.map((leg, index) => `<label>${fmt.int(index + 1)} · ${esc(nameOf(leg, 'پایه'))}<input type="number" min="0" step="1" data-manual="${index}" value="${leg.price}"></label>`).join('')}</div></section>
@@ -1937,7 +1949,7 @@ export async function mount(root, { state, api }) {
     renderSensitivity(item, replayArgs(item));
     detail.querySelector('#pb-manual-run').onclick = () => {
       const manualEntry = Object.fromEntries([...detail.querySelectorAll('[data-manual]')].map((input) => [input.dataset.manual, safeNum(input.value, NaN)]));
-      const manualReplay = replayHistory(replayArgs(item, manualEntry));
+      const manualReplay = onLens(replayHistory(replayArgs(item, manualEntry)));
       if (manualReplay.ok) renderReplay(item, manualReplay, true);
       else detail.querySelector('#pb-detail-result').innerHTML = `<p class="empty-note">${esc(manualReplay.error)}</p>`;
     };

@@ -8,10 +8,10 @@ import { num, ok, EPS } from './num.mjs';
 import { grossCash, entryFees, analyzePayoff } from './payoff.mjs';
 import { analyzeMixed, isSingleExpiry } from './mixed.mjs';
 import { strategyMargin, capitalBase } from './margin.mjs';
-import { notionalOf } from './portfolio-basis.mjs';
+import { basisDenominator, basisEntryOf, notionalOf } from './portfolio-basis.mjs';
 import { marginParamsOf } from './settings.mjs';
 import { jalaliToGregorian, gregorianToJalali } from './jalali.mjs';
-import { selectStrikes, windowMode } from './strike-window.mjs';
+import { equalWings, selectStrikes, windowMode } from './strike-window.mjs';
 import {
   legContractSize, comboContractSize, blockedExpirySet, withoutBlockedExpiries,
 } from './chain.mjs';
@@ -577,6 +577,21 @@ export function summarizeReplay(rows, entry = {}) {
   };
 }
 
+const calendarOf = (baseIndex, start, end) => [...baseIndex.keys()]
+  .filter((d) => d >= start && d <= end).sort((a, b) => a - b);
+
+/**
+ * تقویم معاملاتی نماد پایه در [شروع، پایان] — همان روزهایی که
+ * `replayHistory` برای هر ترکیب پیمایش می‌کند.
+ *
+ * ماتریس جاروب «آزمون همه» ستون‌هایش را از همین می‌گیرد، نه از اجتماع
+ * روزهای معتبرِ ترکیب‌ها؛ وگرنه روزی که هیچ اختیاری قیمت نداشت از تقویم
+ * می‌افتاد و پوشش داده بیش‌برآورد می‌شد (گزارش ۱ اکتبر).
+ */
+export function historyCalendar(baseRows = [], startDate, endDate) {
+  return calendarOf(indexHistory(baseRows), normalizeHistoryDate(startDate), normalizeHistoryDate(endDate));
+}
+
 /**
  * بازپخش یک ترکیب انتخاب‌شده. seriesByIns شیء ins → آرایه روزانه است.
  */
@@ -628,7 +643,7 @@ export function replayHistory({
     // است؛ وگرنه ارزش اسمی دو بار در تعداد ضرب می‌شد.
     spot, notional: notionalOf(priced, spot, 1),
   };
-  const dates = [...baseIndex.keys()].filter((d) => d >= start && d <= end).sort((a, b) => a - b);
+  const dates = calendarOf(baseIndex, start, end);
   const rows = [];
   let peak = -Infinity, previousPnl = NaN;
   let previousLegPnl = [];
@@ -715,10 +730,32 @@ function choose(arr, k, cancel = null) {
   return out;
 }
 
-function equalWidth(strikes) {
-  if (strikes.length < 3) return true;
-  const width = strikes[1] - strikes[0];
-  return strikes.slice(2).every((k, i) => Math.abs((k - strikes[i + 1]) - width) <= Math.max(1, width * 0.02));
+/**
+ * نردبان قیمت اعمال یک مجموعهٔ سررسید.
+ *
+ * تک‌سررسیدی: همهٔ اعمال‌های همان سررسید، مثل همیشه.
+ *
+ * چندسررسیدی: هر جایگاه اعمال (`slot`) از سررسیدِ **پاهای خودش** می‌آید.
+ * پیش از این نردبان فقط از سررسید نزدیک ساخته می‌شد، پس اعمالی که فقط
+ * پای دورِ مورب داشت هیچ‌وقت انتخاب نمی‌شد: نزدیک فقط کال ۱٬۱۰۰ و دور
+ * فقط کال ۱٬۰۰۰ — صفر مورب، در حالی که موتور بازپخش همان دو پا را معتبر
+ * می‌ساخت (گزارش ۱ اکتبر). جایگاهی که چند پا دارد (تقویمی) اعمالی
+ * می‌خواهد که برای **همهٔ** آن پاها فهرست شده باشد، تا اعمالِ یک‌سررسیدی
+ * بودجهٔ پنجره را نخورد.
+ */
+function strikeLadder(contracts, exSet, legAt, byKey) {
+  if (exSet.length < 2) {
+    return [...new Set(contracts.filter((c) => c.expiry === exSet[0]).map((c) => c.strike))]
+      .sort((a, b) => a - b);
+  }
+  const used = new Set(legAt.map((leg) => leg.expiry));
+  const all = [...new Set(contracts.filter((c) => used.has(c.expiry)).map((c) => c.strike))];
+  const slots = [...new Set(legAt.map((leg) => leg.slot))];
+  return all
+    .filter((k) => slots.some((slot) => legAt
+      .filter((leg) => leg.slot === slot)
+      .every((leg) => byKey.has(`${leg.expiry}|${leg.kind}|${k}`))))
+    .sort((a, b) => a - b);
 }
 
 /** تمام ترکیب‌های ساختاری یک استراتژی روی قراردادهای فعال. */
@@ -773,16 +810,17 @@ export function generateHistoricalCombos({
   const byKey = new Map(contracts.map((c) => [`${c.expiry}|${c.kind}|${c.strike}`, c]));
   const out = [];
   let built = 0, noEntry = 0, noLiquidity = 0, outOfWindow = 0, noPriceStrikes = 0, stopped = false, probeHit = false;
-  // نوع قراردادهایی که خودِ این استراتژی لازم دارد — پای سهم پایه نوع
-  // اختیار ندارد و در این آزمون نمی‌آید.
-  const kinds = new Set(def.legs.filter((t) => t.kind !== 'underlying').map((t) => t.kind));
+  // پاهای اختیارِ خودِ این استراتژی — پای سهم پایه نوع اختیار ندارد و در
+  // نردبان و آزمون قیمت ورود نمی‌آید.
+  const optionLegs = def.legs.filter((t) => t.kind !== 'underlying');
   const buckets = [];
 
   for (let setIndex = 0; setIndex < expirySets.length; setIndex += 1) {
     if (cancel && cancel()) { stopped = true; break; }
     const exSet = expirySets[setIndex];
-    const listed = [...new Set(contracts.filter((c) => c.expiry === exSet[0]).map((c) => c.strike))]
-      .sort((a, b) => a - b);
+    // هر پا با سررسید **خودش**: (نوع، سررسید) هر پای اختیار در این مجموعه.
+    const legAt = optionLegs.map((t) => ({ kind: t.kind, slot: t.slot, expiry: exSet[Math.min(t.exp, exSet.length - 1)] }));
+    const listed = strikeLadder(contracts, exSet, legAt, byKey);
 
     // ── قیمت ورود، پیش از پنجره ──────────────────────────────────────
     //
@@ -794,11 +832,13 @@ export function generateHistoricalCombos({
     // آزمون روی نوعِ همین استراتژی است، نه «هر قراردادی»: استراتژی
     // فقط-کال نباید قیمت اعمالی را نگه دارد که فقط پوتش قیمت دارد.
     //
-    // مبنا سررسید نزدیکِ همین مجموعه است. پای سررسید دور هم آزموده
-    // می‌شود، ولی جلوتر در `hasEntry` — اینجا فقط چیزی برداشته می‌شود که
-    // قطعاً بی‌فایده است.
-    const priceable = new Set(listed.filter((k) => [...kinds].some((kind) => {
-      const c = byKey.get(`${exSet[0]}|${kind}|${k}`);
+    // هر پا در سررسید خودش آزموده می‌شود. پیش از این مبنا فقط سررسید
+    // نزدیک بود، پس اعمالی که فقط پای دورِ مورب داشت «بی‌قیمت» شمرده
+    // می‌شد و مورب معتبر هرگز ساخته نمی‌شد (گزارش ۱ اکتبر). همهٔ پاها
+    // باهم جلوتر در `hasEntry` آزموده می‌شوند — اینجا فقط چیزی برداشته
+    // می‌شود که قطعاً بی‌فایده است.
+    const priceable = new Set(listed.filter((k) => legAt.some(({ kind, expiry }) => {
+      const c = byKey.get(`${expiry}|${kind}|${k}`);
       return c && Number.isFinite(historyPrice(indexes.get(String(c.ins))?.get(start), entryBasis));
     })));
     const alive = filtered ? listed.filter((k) => priceable.has(k)) : listed;
@@ -823,7 +863,7 @@ export function generateHistoricalCombos({
       // پرسشِ توقف هر ۴۰۹۶ ترکیب. کمتر از این، خودِ پرسیدن هزینه می‌شود؛
       // بیشتر از این، دکمهٔ توقف کُند به نظر می‌رسد.
       if (cancel && (sIndex & 4095) === 4095 && cancel()) { stopped = true; break; }
-      if (filtered && def.strikes >= 3 && settings.wingsEqualWidth && !equalWidth(strikeSet)) continue;
+      if (filtered && def.strikes >= 3 && settings.wingsEqualWidth && !equalWings(strikeSet)) continue;
       built += 1;
       // پاهای اختیار اول، تا اندازه پای سهم پایه از قراردادهای همین
       // ترکیب بیاید. `contracts[0]` قرارداد اول کل فهرست بود، نه لزوماً
@@ -890,12 +930,40 @@ export function generateHistoricalCombos({
   return { combos: out, built, noEntry, noLiquidity, outOfWindow, noPriceStrikes, stopped };
 }
 
-/** مقایسه چهار مبنای ورود × چهار مبنای آفست در آخرین روز معتبر. */
-export function basisMatrix(args) {
+/**
+ * همان بازپخش، با بازده روی مبنای انتخابی (`core/portfolio-basis.mjs`).
+ *
+ * `returnPct` موتور همیشه روی «درگیر خالص» (`entry.capital`) است. جدول
+ * «آزمون همه» مبنای عدسی را دارد — پیش‌فرض «درگیر ناخالص» — پس کارتِ
+ * جزئیاتِ همان معامله ۸۳٫۷۷٪ نشان می‌داد و جدول ۳۲٫۷۲٪، بی هیچ توضیحی
+ * (گزارش ۱ اکتبر). سود ریالی دست نمی‌خورد؛ فقط مخرج عوض می‌شود و نامش
+ * در `basis` همراه می‌آید. مخرجِ نامعلوم یا نامثبت، بازده `NaN` می‌دهد —
+ * به مبنای دیگری نمی‌افتد.
+ */
+export function rebaseReplay(replay, basisId) {
+  if (!replay?.ok) return replay;
+  const den = basisDenominator(basisEntryOf(replay.entry), basisId);
+  const pctOf = (pnl) => (den.ok && Number.isFinite(pnl) ? (pnl / den.value) * 100 : NaN);
+  const rows = replay.rows.map((row) => (row.status === 'missing' ? row : { ...row, returnPct: pctOf(row.netPnl) }));
+  return {
+    ...replay, rows, summary: summarizeReplay(rows, replay.entry),
+    basis: { id: den.basisId, label: den.label, ok: den.ok, denominator: den.value, why: den.why },
+  };
+}
+
+const rebased = (replay, basisId) => (basisId ? rebaseReplay(replay, basisId) : replay);
+
+/**
+ * مقایسه چهار مبنای ورود × چهار مبنای آفست در آخرین روز معتبر.
+ *
+ * `basisId` اختیاری است: با آن، بازدهِ هر خانه روی همان مبنای عدسی است؛
+ * بی آن، روی مخرج خود موتور.
+ */
+export function basisMatrix(args, { basisId = null } = {}) {
   const rows = [];
   for (const [entry] of HISTORY_BASES) {
     for (const [exit] of HISTORY_BASES) {
-      const replay = replayHistory({ ...args, entryBasis: entry, exitBasis: exit, manualEntry: {} });
+      const replay = rebased(replayHistory({ ...args, entryBasis: entry, exitBasis: exit, manualEntry: {} }), basisId);
       rows.push({ entry, exit, ok: replay.ok, result: replay.summary?.last || null });
     }
   }
@@ -903,14 +971,14 @@ export function basisMatrix(args) {
 }
 
 /** حساسیت قیمت ورود هر پا با شوک درصدی؛ آفست در آخرین روز بازه ثابت می‌ماند. */
-export function entrySensitivity(args, shocks = [-10, -5, 0, 5, 10]) {
+export function entrySensitivity(args, shocks = [-10, -5, 0, 5, 10], { basisId = null } = {}) {
   const base = replayHistory(args);
   if (!base.ok) return [];
   const out = [];
   for (let i = 0; i < base.priced.length; i++) {
     for (const shockPct of shocks) {
       const manualEntry = Object.fromEntries(base.priced.map((l, j) => [j, j === i ? l.price * (1 + shockPct / 100) : l.price]));
-      const replay = replayHistory({ ...args, manualEntry });
+      const replay = rebased(replayHistory({ ...args, manualEntry }), basisId);
       out.push({ legIndex: i, shockPct, entryPrice: manualEntry[i], result: replay.summary?.last || null });
     }
   }

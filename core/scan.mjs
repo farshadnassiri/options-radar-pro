@@ -19,7 +19,7 @@ import {
   underlyingQuote, legContractSize, comboContractSize,
   blockedExpirySet, expiryBlocked,
 } from './chain.mjs';
-import { selectStrikes } from './strike-window.mjs';
+import { equalWings, selectStrikes } from './strike-window.mjs';
 
 // سررسیدهای پرشده جای اصلی‌شان `core/chain.mjs` است، چون فقط مسیر زنده
 // نیست که به آن نیاز دارد — تحلیل تاریخی و بک‌تست هم باید همان سررسید را
@@ -39,16 +39,6 @@ function combos(arr, k) {
   };
   pick(0, []);
   return out;
-}
-
-/** بال مساوی: فاصله‌ها باید یکی باشند. باترفلای ۹۰-۱۰۰-۱۱۰ می‌ماند، ۹۰-۱۰۰-۱۳۰ می‌افتد. */
-function equalWidth(ks) {
-  if (ks.length < 3) return true;
-  const w = ks[1] - ks[0];
-  for (let i = 2; i < ks.length; i++) {
-    if (Math.abs(ks[i] - ks[i - 1] - w) > Math.max(1, w * 0.02)) return false;
-  }
-  return true;
 }
 
 // سطل‌های شمارشیِ نوار تشخیص. `evaluated` هم شمارشی است و باید جمع شود —
@@ -146,22 +136,35 @@ export function generateCombos(def, ua, s, funnel = emptyFunnel()) {
   // که هر دو در نوار تشخیص شمرده و گفته می‌شوند.
   for (const exSet of pairs) {
     const near = exSet[0];
-    // قیمت اعمال باید در همه سررسیدهای این ترکیب موجود باشد
-    const shared = near.strikeList.filter((row) => exSet.every((ex) => ex.strikes.has(row.strike)));
+    // هر پا در سررسید **خودش**. جایگاه اعمالی که چند پا دارد (تقویمی)
+    // اعمالی می‌خواهد که در همهٔ سررسیدهای آن پاها باشد؛ ولی مورب دو
+    // جایگاه دارد که هرکدام فقط یک سررسید را می‌بیند. پیش از این اعمال
+    // باید در **همهٔ** سررسیدهای ترکیب بود، پس نزدیکِ فقط ۱٬۱۰۰ و دورِ فقط
+    // ۱٬۰۰۰ هیچ موربی نمی‌ساخت (گزارش ۱ اکتبر).
+    const legAt = def.legs.filter((t) => t.kind !== 'underlying')
+      .map((t) => ({ slot: t.slot, ex: exSet[Math.min(t.exp, exSet.length - 1)] }));
+    const slots = [...new Set(legAt.map((leg) => leg.slot))];
+    const ladder = exSet.length < 2
+      ? near.strikeList.map((row) => row.strike)
+      : [...new Set(exSet.flatMap((ex) => ex.strikeList.map((row) => row.strike)))]
+        .filter((k) => slots.some((slot) => legAt.filter((leg) => leg.slot === slot).every((leg) => leg.ex.strikes.has(k))))
+        .sort((a, b) => a - b);
     const pick = selectStrikes({
-      strikes: shared.map((row) => row.strike), spot,
+      strikes: ladder, spot,
       mode: s.comboWindowMode, pct: s.comboWindowPct, steps: s.comboWindowSteps,
     });
     funnel.outOfWindow += pick.dropped.length;
     const inWin = new Set(pick.picked);
-    const usable = shared.filter((row) => inWin.has(row.strike));
-    if (usable.length < def.strikes) continue;
+    const ks = ladder.filter((k) => inWin.has(k));
+    if (ks.length < def.strikes) continue;
 
-    const ks = usable.map((r) => r.strike);
     const sets = def.strikes === 1 ? ks.map((k) => [k]) : combos(ks, def.strikes);
 
     for (const set of sets) {
-      if (def.strikes >= 3 && s.wingsEqualWidth && !equalWidth(set)) continue;
+      if (def.strikes >= 3 && s.wingsEqualWidth && !equalWings(set)) continue;
+      // اعمالِ این جایگاه در سررسیدِ پای خودش فهرست نشده: ترکیبی نیست
+      // که ساخته شود.
+      if (!legAt.every((leg) => leg.ex.strikes.has(set[leg.slot - 1]))) continue;
       funnel.built += 1;
 
       // پاها و مظنه‌ها.
