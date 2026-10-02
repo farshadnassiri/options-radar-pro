@@ -34,6 +34,7 @@ import {
 } from '../core/option-roster.mjs';
 import { dayPath, scanBoardRows, tradingDays } from '../core/roster-scan.mjs';
 import { panelFromDay, panelSlice } from '../core/day-panel.mjs';
+import { parseHolidays } from '../core/vol-clock.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
 import { infoPath, instrumentInfo, optionSpec, optionSpecPath } from '../core/roster-catalog.mjs';
 import { readJsonSafe } from '../core/json-safe.mjs';
@@ -1754,6 +1755,23 @@ async function handleRequest(req, res, u) {
         // مصرف‌کننده باید بتواند حلقهٔ خودش را هم متوقف کند، نه اینکه
         // بستهٔ بعدی را بفرستد و سهمیه را باز هم بسوزاند.
         ...(state.throttled ? { throttled: true, throttleNote: throttleNote(state), stopped } : {}),
+      });
+    }
+
+    // ——— تقویم آینده برای ساعت تلاطم ———
+    //
+    // تعطیلات رسمی را بالادست نمی‌دهد و برنامه حدسش نمی‌زند: صاحب پروژه
+    // فهرست را در `data/holidays.json` می‌گذارد. نبودنش `known: false` است
+    // و رابط «تقویم آینده فرضی» نشان می‌دهد.
+    if (p === '/api/vol/calendar') {
+      let raw = null, error = '';
+      try { raw = JSON.parse(await fs.readFile(path.join(ROOT, 'data', 'holidays.json'), 'utf8')); }
+      catch (e) { error = e.code === 'ENOENT' ? '' : `${e.name}: ${e.message}`; }
+      const parsed = raw ? parseHolidays(raw) : { holidays: [], dropped: 0, ok: false };
+      return sendJson(res, 200, {
+        known: parsed.ok, holidays: parsed.holidays, dropped: parsed.dropped,
+        source: parsed.ok ? 'data/holidays.json' : '',
+        note: parsed.ok ? '' : (error ? `data/holidays.json خوانده نشد: ${error}` : 'data/holidays.json نیست؛ تقویم آینده فرضی است (فقط روزهای کاری هفته)'),
       });
     }
 
