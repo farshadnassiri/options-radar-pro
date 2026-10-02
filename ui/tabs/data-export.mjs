@@ -1,5 +1,7 @@
 // تب مستقل «خروجی دیتا» — کشف همه قراردادهای بازه و خروجی ریزمعامله.
 
+import { loadVolContext, volContextTable } from '/ui/vol-context.mjs';
+import { sheet as xlsxSheet } from '/ui/xlsx.mjs';
 import { buildChain } from '/core/chain.mjs';
 import {
   DATA_EXPORT_BATCH_CAP, DATA_EXPORT_FRAMES, blankAuditSummary, dataExportBlankAudit,
@@ -1154,18 +1156,39 @@ export async function mount(root, { state, api }) {
    * می‌شدند، عوض‌کردنِ تایم‌فریم یعنی چند دقیقه دریافتِ دوباره برای داده‌ای
    * که همین‌جا در دست است.
    */
+  /**
+   * برگ «تلاطم» هر پایه: شاخص روزانه، رتبه، صدک و تلاطم تاریخی در بازهٔ
+   * خروجی، از همان موتور تب «رتبه و صدک تلاطم». ساختی آغاز نمی‌شود؛ روزِ
+   * بی‌پرونده علتش را در ستون خودش دارد. شکستِ این برگ خروجی را نمی‌اندازد.
+   */
+  async function volSheets(ready) {
+    const bases = [...new Map((ready.instruments || []).filter((item) => item.baseIns).map((item) => [String(item.baseIns), item.baseName || ''])).entries()].slice(0, 6);
+    const out = [];
+    for (const [ins, name] of bases) {
+      try {
+        const loaded = await loadVolContext(ins, { from: ready.range?.from, to: ready.range?.to, settings: state.settings });
+        const table = volContextTable(loaded.history, ready.range?.from, ready.range?.to, name);
+        if (table.rows.length) out.push(xlsxSheet(`تلاطم ${name || ins}`.slice(0, 31), table.headers, table.rows));
+      } catch { /* برگ تلاطم اختیاری است */ }
+    }
+    return out;
+  }
+
   async function exportPrepared() {
     if (!prepared) { setStatus('اول ریزمعاملات را آماده کنید.', true); return; }
     exporting = true; updateRunState();
     try {
       const frame = $('de-frame').value, derived = $('de-derived').checked;
       const window = currentWindow(), continuous = $('de-continuous').checked;
-      const sheets = buildDataExportSheets({ ...prepared, frame, derived, window, continuous });
+      const dataSheets = buildDataExportSheets({ ...prepared, frame, derived, window, continuous });
+      const vol = await volSheets(prepared);
+      const sheets = [...dataSheets, ...vol];
       const bytes = await downloadXlsx(dataExportFilename(prepared.range, frame), sheets);
       paintResult(prepared.instruments, prepared.pairs, prepared.items, bytes);
       setStatus(`فایل Excel در تایم‌فریم «${dataExportFrame(frame).label}»`
         + ` و پنجرهٔ ${faDigits(clockLabel(window.start))} تا ${faDigits(clockLabel(window.end))} ساخته و به مرورگر سپرده شد`
-        + `${sheets.length > prepared.instruments.length + 2 ? ` — ابزارِ پرردیف به چند برگ تقسیم شد (${fmt.int(sheets.length)} برگ).` : '.'}`
+        + `${dataSheets.length > prepared.instruments.length + 2 ? ` — ابزارِ پرردیف به چند برگ تقسیم شد (${fmt.int(dataSheets.length)} برگ).` : '.'}`
+        + `${vol.length ? ` برگ تلاطم ${fmt.int(vol.length)} پایه هم افزوده شد.` : ''}`
         + ' تایم‌فریم و ساعت را عوض کنید و دوباره همین دکمه را بزنید — دریافت دوباره لازم نیست.');
     } catch (error) {
       setStatus(`دانلود خروجی انجام نشد: ${error.message}`, true); logError('data-export:download', error);

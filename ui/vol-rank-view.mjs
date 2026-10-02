@@ -38,7 +38,7 @@ export const VR_CHARTS = [
   ['term', 'ساختار زمانی امروز', 'تلاطم در پولِ هر سررسید در آخرین روزِ دارای شاخص؛ شیب مثبت یعنی بازار برای آیندهٔ دورتر تلاطم بیشتری قیمت داده.'],
   ['dist', 'توزیع IV در بازه', 'هیستوگرام شاخص در بازهٔ رتبه؛ خط عمودی جای امروز است.'],
   ['scatter', 'IV در برابر HV', 'هر نقطه یک روز؛ بالای قطر یعنی بازار تلاطمی بیش از تلاطم تحقق‌یافتهٔ اخیر قیمت داده.'],
-  ['fwd', 'IV در برابر تحقق‌یافتهٔ بعدی', 'IV هر روز در برابر تلاطمی که در ۲۰ روز بعد واقعاً رخ داد؛ بالای قطر یعنی پریمیوم گران درآمد.'],
+  ['fwd', 'IV در برابر تحقق‌یافتهٔ بعدی (پس‌نگری)', 'پس‌نگری: IV هر روز در برابر تلاطمی که در ۲۰ روز بعد واقعاً رخ داد — در همان روز معلوم نبود. بالای قطر یعنی پریمیوم گران درآمد.'],
   ['spread', 'فاصلهٔ IV و HV در زمان', 'IV منهای HV هم‌افق؛ مثبت یعنی صرفِ ریسک تلاطم.'],
 ];
 
@@ -98,7 +98,7 @@ export function volKpiHtml(history) {
     ['IV − HV', ppText(history.spreadNow), isNum(history.ratioNow) ? `نسبت ${fmt.num(history.ratioNow)} برابر` : '—'],
     ['کمینه / میانه / بیشینهٔ IV', `${pctText(history.stats.min)} · ${pctText(history.stats.median)} · ${pctText(history.stats.max)}`, `در بازهٔ دریافت‌شده`],
     ['پوشش', pctText(history.stats.coverage), `${faDigits(history.stats.ivDays)} روز شاخص از ${faDigits(history.stats.days)} روز معاملاتی`],
-    ['صرف تلاطم در گذشته', isNum(history.stats.fwdRichPct) ? `${fmt.int(Math.round(history.stats.fwdRichPct))}٪ روزها` : '—',
+    ['صرف تلاطم در گذشته (پس‌نگری)', isNum(history.stats.fwdRichPct) ? `${fmt.int(Math.round(history.stats.fwdRichPct))}٪ روزها` : '—',
       isNum(history.stats.fwdEdgeMean) ? `IV به‌طور میانگین ${ppText(history.stats.fwdEdgeMean)} نسبت به تحقق‌یافتهٔ بعدی` : 'آیندهٔ کافی هنوز نیامده'],
   ];
   return tiles.map(([label, value, note]) => `<article class="lmm-stat"><small>${esc(label)}</small><strong>${value}</strong><span>${esc(note)}</span></article>`).join('');
@@ -430,8 +430,8 @@ export const VR_COLUMNS = [
   { key: 'spread', label: 'IV − HV (واحد)', fmt: 'pct', heat: 'loss' },
   { key: 'ratio', label: 'IV ÷ HV', fmt: 'num' },
   { key: 'hvp', label: 'صدک HV', fmt: 'num' },
-  { key: 'fwdRv', label: 'تحقق‌یافتهٔ بعدی ٪', fmt: 'pct' },
-  { key: 'fwdEdge', label: 'IV − تحقق‌یافته', fmt: 'pct' },
+  { key: 'fwdRv', label: 'پس‌نگری: تحقق‌یافتهٔ بعدی ٪', fmt: 'pct' },
+  { key: 'fwdEdge', label: 'پس‌نگری: IV − تحقق‌یافته', fmt: 'pct' },
   { key: 'returnPct', label: 'بازده روز پایه ٪', fmt: 'pct', heat: 'gain' },
   { key: 'expiriesText', label: 'سررسیدهای شاخص', fmt: 'text' },
   { key: 'used', label: 'قرارداد به‌کاررفته', fmt: 'int' },

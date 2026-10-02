@@ -22,6 +22,7 @@
 // الان» داشت و در جمعِ سبد می‌نشست. حالا موقعیتِ سررسیدگذشته نه قیمت
 // می‌گیرد، نه ارزش‌گذاری می‌شود، و در جدول خودش با علتش می‌نشیند.
 
+import { paintVolContext } from '/ui/vol-context.mjs';
 import { markToMarket, captureEntryRisk, blankPosition } from '/core/positions.mjs';
 import {
   positionOpenState, trackInstruments, dailyPnlSeries, intradayPnlSeries,
@@ -243,6 +244,7 @@ export async function mount(root, { state, api }) {
 
     <section class="card" id="det-card" style="display:none">
       <h3 id="det-title">جزئیات موقعیت</h3>
+      <div id="det-vol"></div>
       <div class="detail" id="det"></div>
     </section>
 
@@ -915,6 +917,8 @@ export async function mount(root, { state, api }) {
     if (chart) chartRange = chart.view();
     root.querySelector('#det-card').style.display = '';
     root.querySelector('#det-title').textContent = `${p.title} — ${displayName(p.uaName, p.uaIns, 'دارایی پایه بدون نام')}`;
+    // تلاطم روز ورود در برابر امروز — فقط وقتی موقعیتِ باز عوض شد، نه هر پانزده ثانیه.
+    if (!sameRow) paintVolContext(root.querySelector('#det-vol'), { ua: p.uaIns, name: p.uaName, entry: entryDateNumber(p), exit: todayNumber(), settings: state.settings });
 
     const gk = (value) => (Number.isFinite(value) ? fmt.small(value) : '—');
     const ivPctCell = (value) => (Number.isFinite(value) ? `${fmt.pct(value)}٪` : '—');

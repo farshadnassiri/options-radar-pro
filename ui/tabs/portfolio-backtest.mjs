@@ -1,4 +1,5 @@
 import { CATALOG, GROUPS } from '/strategies/catalog.mjs';
+import { paintVolContext } from '/ui/vol-context.mjs';
 import { goHandoff } from '/ui/handoff.mjs';
 import { buildChain } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
@@ -237,6 +238,7 @@ export async function mount(root, { state, api }) {
   <div class="pb-panel" data-panel="overview" hidden>
     <p class="pb-census" id="pb-census" role="status" aria-live="polite"></p>
     <div class="backtest-kpis" id="pb-kpis"></div>
+    <div id="pb-vol-context"></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">سرخط‌ها</p><h2>ده سؤالی که آدم واقعاً می‌پرسد</h2></div><span>روی هر کارت کلیک کن تا همان استراتژی انتخاب شود</span></div><div id="pb-highlights" class="pb-highlights"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">گزارش خانواده‌ها</p><h2>بهترین و بدترین عضو هر خانواده</h2></div></div><div id="pb-groups" class="history-table-wrap"></div></section>
   </div>
@@ -1019,6 +1021,13 @@ export async function mount(root, { state, api }) {
     ];
     $('pb-kpis').innerHTML = cards.map(([label, value, tone]) => `<article class="${tone}"><span>${esc(label)}</span><b>${value}</b></article>`).join('');
     paintHighlights();
+    // زمینهٔ تلاطم ورود و خروجِ همین بازه: رتبه‌بندی در کدام وضعیت تلاطم ساخته شد.
+    const dayOf = (key) => (Number(key) > 1e9 ? momentDate(key) : Number(key));
+    paintVolContext($('pb-vol-context'), {
+      ua: ua?.ins, name: ua?.name, settings: state.settings,
+      entry: dayOf(analysis.range.from) || Number($('pb-entry-date').dataset.value),
+      exit: dayOf(analysis.range.to) || Number($('pb-exit-date').dataset.value),
+    });
     $('pb-groups').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>خانواده</th><th>استراتژی</th><th>ترکیب</th><th>سودده</th><th>بازده (${esc(analysis.statisticLabel)})</th><th>بهترین عضو</th><th>بدترین عضو</th></tr></thead><tbody>${
       analysis.groups.map((row) => `<tr><td>${esc(row.groupName)}</td><td>${fmt.int(row.strategies)}</td><td>${fmt.int(row.samples)}</td><td>${fmt.int(row.wins)} · ${pctCell(row.winPct)}</td><td class="${signTone(row.returnStat)}">${pctCell(row.returnStat)}</td><td>${esc(row.bestStrategy?.strategyName || '—')}</td><td>${esc(row.worstStrategy?.strategyName || '—')}</td></tr>`).join('')}</tbody></table>`;
   }

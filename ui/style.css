@@ -4687,6 +4687,20 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 [data-vol-desk-card] .vd-card { margin: 0 0 12px; }
 .sx-vol { margin-top: 12px; }
 
+/* ——— زمینهٔ تلاطم در نماهای تاریخی (ui/vol-context.mjs) ——— */
+.vc-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin: 10px 0; }
+.vc-cell { display: grid; gap: 3px; min-width: 0; padding: 9px 11px; border: 1px solid var(--line-soft); border-inline-start: 3px solid var(--muted); border-radius: var(--radius-md); background: var(--panel-2); }
+.vc-cell[data-tone="cool"] { border-inline-start-color: var(--accent); }
+.vc-cell[data-tone="hot"] { border-inline-start-color: var(--warn); }
+.vc-cell[data-empty="true"] { opacity: 0.75; }
+.vc-cell small { color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
+.vc-cell b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.vc-cell span { color: var(--ink-2); font-size: var(--fs-xs); }
+.vc-hindsight { border-style: dashed; border-inline-start-style: solid; border-inline-start-color: var(--line); background: var(--panel); }
+.vc-link { align-content: center; justify-items: start; }
+.history-table tr[data-tone="cool"] th { color: var(--accent-ink); }
+.history-table tr[data-tone="hot"] th { color: var(--warn); }
+
 .pb-skin {
   --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */
   --pb-hair: 1px solid var(--line-soft);            /* مرز مویی مشترک */

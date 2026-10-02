@@ -1,4 +1,5 @@
 import { saveBlob } from '/ui/save-file.mjs';
+import { paintVolContext } from '/ui/vol-context.mjs';
 import { CATALOG, GROUPS, byId } from '/strategies/catalog.mjs';
 import { buildChain, comboContractSize } from '/core/chain.mjs';
 import { feesOf } from '/core/settings.mjs';
@@ -138,7 +139,7 @@ export async function mount(root, { state }) {
     <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">روز ایجاد</p><h2>تاریخ ورود</h2></div><span>فقط روز دارای ترکیب معتبر</span></div><div id="bt-entry-date"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">روز سنجش</p><h2>تاریخ خروج آزمایشی</h2></div><span>فقط روز دارای قیمت همه پاها</span></div><div id="bt-exit-date"></div></section></div>
     <section class="card"><div class="section-head"><div><p class="eyebrow">قراردادهای واقعی</p><h2>ترکیب استراتژی</h2></div><span id="bt-combo-count">—</span></div><label class="backtest-combo">ترکیب قراردادها<select id="bt-combo"></select></label><p class="note" id="bt-fast-note" hidden></p><div id="bt-legs" class="backtest-legs"></div></section>
-    <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت پاها در روز ایجاد</h2></div><span>هر کارت یک پای استراتژی</span></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div></section>
+    <div class="backtest-date-grid"><section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی ورود</p><h2>قیمت پاها در روز ایجاد</h2></div><span>هر کارت یک پای استراتژی</span></div>${basisRail('bt-entry-basis', 'LAST')}<div id="bt-entry-market"></div><div id="bt-entry-vol"></div></section>
     <section class="card"><div class="section-head"><div><p class="eyebrow">دکمه ریلی سنجش</p><h2>قیمت پاها در روز خروج</h2></div><span>همان قراردادهای ترکیب</span></div>${basisRail('bt-exit-basis', 'LAST')}<div id="bt-exit-market"></div></section></div>
     <section class="card backtest-runbar"><p id="bt-run-note">برای هر ثانیهٔ معامله بین ۹:۰۰ تا ۱۲:۳۰، آخرین قیمت مشاهده‌شده تمام پاها روی یک خط زمانی مشترک قرار می‌گیرد. این ارزش‌گذاری مشاهده‌ای است و تضمین اجرای هم‌زمان نیست.</p><div class="backtest-run-actions"><button type="button" class="primary" id="bt-run">اجرای بک‌تست</button><button type="button" class="ghost" id="bt-live">رصد زنده موقعیت از ورود تاریخی</button></div></section>
     </div>
@@ -147,6 +148,7 @@ export async function mount(root, { state }) {
       <div class="bt-panel" data-panel="bt-overview" hidden>
       <section class="card backtest-overview"><div class="section-head"><div><p class="eyebrow">گام اول نتیجه</p><h2>عملکرد کلی این بازه</h2></div><span id="bt-overview-range">—</span></div>
         <div class="backtest-kpis" id="bt-kpis"></div>
+        <div id="bt-vol-context"></div>
         <div class="backtest-chart-grid"><section><div class="section-head"><h3>سود و زیان مبلغی</h3><span>ریال</span></div><div id="bt-money-chart" class="backtest-chart"></div></section><section><div class="section-head"><h3>بازده و تغییر نماد پایه</h3><span>درصد</span></div><div id="bt-return-chart" class="backtest-chart"></div></section></div>
       </section>
       <section class="card"><div class="section-head"><div><p class="eyebrow">اثر هر پایه</p><h2>جزئیات پاهای استراتژی در روز سنجش</h2></div><span id="bt-final-source">—</span></div><div id="bt-leg-table" class="history-table-wrap"></div></section>
@@ -355,6 +357,8 @@ export async function mount(root, { state }) {
     $('bt-entry-market').innerHTML = marketSnapshot(strategyLegSnapshots(legs, seriesByIns, entry), entryRail.dataset.value || 'LAST', 'entry', manualEntry);
     $('bt-exit-market').innerHTML = marketSnapshot(strategyLegSnapshots(legs, seriesByIns, exit), exitRail.dataset.value || 'LAST', 'exit', manualExit);
     paintManualNotes();
+    // تلاطم در روز ورود — بی «پس‌نگری»: هنگام انتخاب ورود، آینده نباید دیده شود.
+    paintVolContext($('bt-entry-vol'), { ua: ua?.ins, name: ua?.name, entry, settings: state.settings, hindsight: false });
   }
 
   const manualStore = (scope) => (scope === 'entry' ? manualEntry : manualExit);
@@ -966,6 +970,7 @@ export async function mount(root, { state }) {
     chart($('bt-money-chart'), path, [{ key: 'netPnl', label: 'سود و زیان خالص', color: 'var(--accent)' }], { money: true });
     chart($('bt-return-chart'), path, [{ key: 'returnPct', label: 'بازده استراتژی', color: 'var(--accent)' }, { key: 'basePct', label: 'تغییر پایه', color: 'var(--cmp1)' }, { key: 'baseCumulativePct', label: 'تغییر پایه', color: 'var(--cmp1)' }]);
     $('bt-overview-range').textContent = `${dateLabel(replay.startDate)} تا ${dateLabel(replay.endDate)} · ${fmt.int(replay.summary.validDays)} روز معتبر`;
+    paintVolContext($('bt-vol-context'), { ua: ua?.ins, name: ua?.name, entry: replay.startDate, exit: replay.endDate, settings: state.settings });
   }
 
   /**

@@ -1,4 +1,6 @@
 import { saveBlob } from '/ui/save-file.mjs';
+import { paintVolContext, volContextsFor } from '/ui/vol-context.mjs';
+import { regimeBuckets } from '/core/vol-context.mjs';
 import { CATALOG, GROUPS, byId } from '/strategies/catalog.mjs';
 import {
   buildChain, comboContractSize, legContractSize, blockedExpirySet, expiryBlocked,
@@ -374,6 +376,8 @@ export async function mount(root, { state }) {
         <div id="h-trade-detail" class="trade-detail" hidden></div>
         <div class="section-head holding-head"><div><p class="eyebrow">تجمیع همه تاریخ‌های ورود</p><h3>پروفایل افق نگهداری</h3></div><span>برای کشف افق پایدار، میانه بازده با جریمه پراکندگی رتبه‌بندی می‌شود.</span></div>
         <div id="h-holding-profile" class="history-table-wrap"><p class="empty-note">پس از محاسبه ماتریس ساخته می‌شود.</p></div>
+        <div class="section-head holding-head"><div><p class="eyebrow">تلاطم ضمنی روز ورود</p><h3>نتیجه بر حسب وضعیت تلاطم ورود</h3></div><span>هر خانهٔ ماتریس با پلهٔ صدک تلاطمِ روز ورودش؛ فقط داده‌ای که همان روز معلوم بود</span></div>
+        <div id="h-vol-regime" class="history-table-wrap"><p class="empty-note">پس از محاسبه ماتریس ساخته می‌شود.</p></div>
       </section>
     </section>`;
 
@@ -493,7 +497,10 @@ export async function mount(root, { state }) {
       </div>
     </div>
     <div class="frozen-facts">${facts.map(([key, value, tone]) => `<div><span>${esc(key)}</span><b class="${tone}">${esc(value)}</b></div>`).join('')}</div>
-    <div class="frozen-legs">${cards}</div>`;
+    <div class="frozen-legs">${cards}</div>
+    <div class="frozen-vol" data-frozen-vol></div>`;
+    // زمینهٔ تلاطم ورود و خروج همین موقعیت (`core/vol-context.mjs`).
+    paintVolContext(host.querySelector('[data-frozen-vol]'), { ua: ua?.ins, name: ua?.name, entry: replay.startDate, exit: replay.endDate, settings: state.settings });
   }
 
   function toggleFrozenFold() {
@@ -1312,6 +1319,8 @@ export async function mount(root, { state }) {
     ];
     host.hidden = false;
     host.innerHTML = `<div class="section-head"><div><p class="eyebrow">جزئیات خانه انتخاب‌شده</p><h3>${faDigits(historyDateLabel(entryDate))} تا ${faDigits(historyDateLabel(exitDate))}</h3></div><button type="button" class="ghost" data-close-detail>بستن</button></div><div class="trade-detail-kpis">${metrics.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div><div class="history-chart" data-trade-path></div><div class="history-table-wrap"><table class="history-table"><thead><tr><th>تاریخ</th><th>روز</th><th>پایه</th><th>بازده پایه</th><th>سود خالص</th><th>بازده انباشته</th><th>تغییر همان روز</th><th>افت از قله</th><th>قیمت/اثر هر پا</th></tr></thead><tbody>${path.map((r, index) => { const daily = index === 0 ? r.netPnl : r.pnlDelta; return `<tr><td>${r.dateLabel}</td><td>${r.dayName}</td><td>${fmt.money(r.baseClose)}</td><td class="${signTone(r.baseCumulativePct)}">${fmt.pct(r.baseCumulativePct)}</td><td class="${signTone(r.netPnl)}">${fmt.money(r.netPnl)}</td><td class="${signTone(r.returnPct)}">${fmt.pct(r.returnPct)}</td><td class="${signTone(daily)}">${fmt.money(daily)}</td><td class="${signTone(r.drawdown)}">${fmt.money(r.drawdown)}</td><td>${r.perLeg.map((leg, i) => `${faDigits(i + 1)}: ${fmt.money(leg.exitPrice)} / ${fmt.money(leg.netPnl)}`).join('<br>')}</td></tr>`; }).join('')}</tbody></table></div>`;
+    host.querySelector('[data-trade-path]').insertAdjacentHTML('beforebegin', '<div data-trade-vol></div>');
+    paintVolContext(host.querySelector('[data-trade-vol]'), { ua: ua?.ins, name: ua?.name, entry: entryDate, exit: exitDate, settings: state.settings });
     lineChart(host.querySelector('[data-trade-path]'), path, [
       { key: 'returnPct', label: 'بازده انباشته', color: '#0b6e6b' },
       { key: 'baseCumulativePct', label: 'بازده پایه', color: '#7254a3' },
@@ -1496,6 +1505,10 @@ export async function mount(root, { state }) {
       ['مبنای ورود', () => basisName(rollingArgs.entryBasis)], ['مبنای خروج', () => basisName(rollingArgs.exitBasis)],
       ['تعداد واحد', () => rollingArgs.units],
       ['تاریخ ورود', ({ cell }) => historyDateLabel(cell.entryDate)], ['روز ورود', ({ cell }) => historyDayName(cell.entryDate)],
+      ['IV ورود ٪', ({ cell }) => (rollingVol.get(cell.entryDate)?.ok ? rollingVol.get(cell.entryDate).ivPct : '')],
+      ['IVR ورود', ({ cell }) => (rollingVol.get(cell.entryDate)?.ok ? rollingVol.get(cell.entryDate).ivr : '')],
+      ['IVP ورود', ({ cell }) => (rollingVol.get(cell.entryDate)?.ok ? rollingVol.get(cell.entryDate).ivp : '')],
+      ['وضعیت تلاطم ورود', ({ cell }) => (rollingVol.get(cell.entryDate)?.ok ? rollingVol.get(cell.entryDate).regime.label : '')],
       ['تاریخ خروج', ({ cell }) => historyDateLabel(cell.exitDate)], ['روز خروج', ({ cell }) => historyDayName(cell.exitDate)],
       ['روز معاملاتی نگهداری', ({ cell }) => cell.holdingTradingDays], ['روز تقویمی نگهداری', ({ cell }) => cell.holdingCalendarDays],
       ['قیمت پایه خروج', ({ cell }) => cell.baseClose], ['تغییر روزانه پایه ٪', ({ cell }) => cell.baseDailyPct],
@@ -1572,6 +1585,30 @@ export async function mount(root, { state }) {
     } catch (error) { setStatus(error.message, true); }
   }
 
+  // ═══ وضعیت تلاطم هر تاریخ ورود ═══
+  //
+  // زمینه از `core/vol-context.mjs`: رتبه و صدک هر روز فقط از روزهای پیش از
+  // خودش. ستون‌های خروجی ماتریس هم از همین نقشه پر می‌شوند؛ تا بار نشده،
+  // خالی می‌مانند (نه حدس).
+  let rollingVol = new Map();
+  async function renderVolRegime(result) {
+    const host = $('h-vol-regime');
+    rollingVol = new Map();
+    const entriesList = [...new Set((result.cells || []).map((cell) => cell.entryDate))];
+    if (!entriesList.length || !ua?.ins) { host.innerHTML = '<p class="empty-note">خانه‌ای نیست.</p>'; return; }
+    host.innerHTML = '<p class="empty-note">در حال خواندن تلاطم روزهای ورود…</p>';
+    try {
+      rollingVol = await volContextsFor(ua.ins, entriesList, { settings: state.settings });
+      if (rollingResult !== result) return;
+      const rows = regimeBuckets(result.cells.map((cell) => ({ regimeId: rollingVol.get(cell.entryDate)?.ok ? rollingVol.get(cell.entryDate).regime.id : 'unknown', value: cell.returnPct })));
+      const known = entriesList.filter((date) => rollingVol.get(date)?.ok).length;
+      host.innerHTML = `<table class="history-table"><thead><tr><th>وضعیت تلاطم ورود (از IVP)</th><th>خانه</th><th>میانگین بازده انباشته</th><th>درصد سودده</th></tr></thead><tbody>${rows.map((row) => `<tr data-tone="${esc(row.tone)}"><th scope="row">${esc(row.label)}</th><td class="n">${fmt.int(row.n)}</td><td class="n ${signTone(row.mean)}">${fmt.pct(row.mean)}٪</td><td class="n">${fmt.pct(row.winPct)}٪</td></tr>`).join('')}</tbody></table>
+        <p class="note">${faDigits(known)} از ${faDigits(entriesList.length)} تاریخ ورود شاخص تلاطم داشت. پوشش کم یعنی پرونده‌های روزانه هنوز ساخته نشده‌اند (تب «رتبه و صدک تلاطم»).</p>`;
+    } catch (error) {
+      host.innerHTML = `<p class="empty-note">تلاطم روزهای ورود خوانده نشد: ${esc(faDigits(String(error?.message || error)))}</p>`;
+    }
+  }
+
   async function renderRolling() {
     if (!currentArgs) return;
     const button = $('h-rolling'); button.disabled = true;
@@ -1598,7 +1635,7 @@ export async function mount(root, { state }) {
     rollingResult = result;
     const allDates = result.dates || [];
     if (!allDates.length) { $('h-return-matrix').textContent = 'داده‌ای برای ماتریس نیست.'; return; }
-    renderReturnMatrix(); renderHoldingProfile();
+    renderReturnMatrix(); renderHoldingProfile(); renderVolRegime(result);
     $('h-matrix-export-csv').disabled = false; $('h-matrix-export-excel').disabled = false;
     $('h-trade-detail').hidden = true;
     setStatus(`ماتریس با ورود ${basisName(rollingArgs.entryBasis)} و خروج ${basisName(rollingArgs.exitBasis)} آماده شد.`);

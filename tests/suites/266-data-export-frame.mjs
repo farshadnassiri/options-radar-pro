@@ -205,7 +205,9 @@ group('۲۶۶. تب خروجی دیتا');
   // عوض‌کردن تایم‌فریم نباید دریافت را باطل کند: شیت‌ها موقع خروجی ساخته
   // می‌شوند، نه موقع دریافت.
   check('شیت‌ها موقع خروجی ساخته می‌شوند، نه موقع دریافت',
-    tab.includes('const sheets = buildDataExportSheets({ ...prepared, frame, derived, window, continuous })'));
+    // برگ تلاطم (۱۴۰۵/۰۷/۱۱) کنار همان شیت‌ها و در همان لحظهٔ خروجی می‌نشیند.
+    tab.includes('const dataSheets = buildDataExportSheets({ ...prepared, frame, derived, window, continuous })')
+    && tab.includes('const sheets = [...dataSheets, ...vol];'));
   check('و تغییر تایم‌فریم دادهٔ گرفته‌شده را باطل نمی‌کند',
     !/de-frame'\)\.addEventListener\('change', \(\) => \{\s*invalidatePrepared/.test(tab));
   check('جدول نتیجه ستون ردیف خروجی دارد', tab.includes('<th>ردیف خروجی</th>'));
