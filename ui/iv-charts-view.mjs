@@ -31,7 +31,7 @@ import {
   contractDailySeries, underlyingDailySeries, expiriesOf, defaultPicks, contractLabel, contractIntradaySeries,
 } from '../core/iv-chart.mjs';
 import {
-  MASTER_SERIES, RANGE_SPANS, RANGE_GRAINS, instrumentOptionsHtml, masterOption, expiryOption, rangeOption, masterSummary,
+  MASTER_SERIES, RANGE_SPANS, RANGE_GRAINS, INDEX_LABEL, instrumentOptionsHtml, masterOption, expiryOption, rangeOption, masterSummary,
 } from './iv-charts-options.mjs';
 
 export { masterOption, expiryOption, rangeOption, instrumentOptionsHtml, masterSummary } from './iv-charts-options.mjs';
@@ -47,13 +47,17 @@ const STORE = 'options-radar:iv-charts';
 
 function loadOpts() {
   const base = {
-    instrument: 'index', priceBasis: 'close', show: { iv: true, ma: false, hv: true, price: true, volume: true, oi: true },
+    instrument: '', priceBasis: 'close', show: { index: true, iv: true, ma: false, hv: true, price: true, volume: true, oi: true },
     expiry: 0, kind: 'both', withIndex: true, picks: {},
-    rInstrument: 'index', span: 5, rFrom: '', rTo: '', grain: 'm5', mode: 'trades',
+    rInstrument: '', rIndex: true, span: 5, rFrom: '', rTo: '', grain: 'm5', mode: 'trades',
   };
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) || '{}');
-    return { ...base, ...saved, show: { ...base.show, ...(saved.show || {}) } };
+    const out = { ...base, ...saved, show: { ...base.show, ...(saved.show || {}) } };
+    // شاخص پایه دیگر گزینهٔ فهرست نیست؛ انتخابِ ذخیره‌شدهٔ قدیمی به تیک می‌رود.
+    if (out.instrument === 'index') { out.instrument = ''; out.show.index = true; }
+    if (out.rInstrument === 'index') { out.rInstrument = ''; out.rIndex = true; }
+    return out;
   } catch { return base; }
 }
 function saveOpts(opts) {
@@ -67,7 +71,7 @@ function saveOpts(opts) {
 export function mountIvCharts(host, { getSelection, getPayload = () => null, getSettings = () => ({}), isVisible = () => true, fetcher = (...a) => fetch(...a) } = {}) {
   let opts = loadOpts();
   let ua = '', data = null, dailySeq = 0, rangeSeq = 0, dailyCtrl = null, rangeCtrl = null, poll = null, tries = 0;
-  let range = null, calendar = null, rangeApi = null, rangePoints = [], rangePoll = null, liveSeen = '';
+  let range = null, calendar = null, rangeApi = null, rangePoints = {}, rangePoll = null, liveSeen = '';
   const charts = new Map();
   const seriesMemo = new Map();
 
@@ -75,11 +79,11 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     <section class="card ivc-master">
       <div class="section-head"><div><p class="eyebrow">نمودار مادر · روزانه</p><h2 data-ivc-title>نوسان ضمنی در طول زمان</h2></div><span data-ivc-status class="note" role="status"></span></div>
       <div class="ivc-controls">
-        <label class="ivc-wide">نماد<select data-ivc="instrument"></select></label>
+        <label class="ivc-wide">قرارداد<select data-ivc="instrument"></select></label>
         <label>مبنای قیمت<select data-ivc="priceBasis">${IV_PRICE_BASES.map(([v, t]) => `<option value="${v}"${v === opts.priceBasis ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
         <div class="ivc-range" data-ivc-range></div>
       </div>
-      <div class="ivc-toggles" role="group" aria-label="سری‌های نمودار">${MASTER_SERIES.map(([id, label]) => `<label class="check"><input type="checkbox" data-ivc-show="${id}"${opts.show[id] !== false ? ' checked' : ''}> ${esc(label)}</label>`).join('')}</div>
+      <div class="ivc-toggles" role="group" aria-label="سری‌های نمودار">${MASTER_SERIES.map(([id, label]) => `<label class="check${id === 'index' ? ' ivc-index-toggle' : ''}"><input type="checkbox" data-ivc-show="${id}"${opts.show[id] !== false ? ' checked' : ''}> ${esc(label)}</label>`).join('')}</div>
       <div class="ivc-chart" data-ivc-chart="master"></div>
       <p class="note" data-ivc-summary></p>
     </section>
@@ -88,7 +92,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       <div class="ivc-controls">
         <label>سررسید<select data-ivc="expiry"></select></label>
         <label>نوع<select data-ivc="kind"><option value="both">خرید و فروش</option><option value="call">فقط خرید (کال)</option><option value="put">فقط فروش (پوت)</option></select></label>
-        <label class="check"><input type="checkbox" data-ivc="withIndex"${opts.withIndex ? ' checked' : ''}> شاخص پایه هم</label>
+        <label class="check ivc-index-toggle"><input type="checkbox" data-ivc="withIndex"${opts.withIndex ? ' checked' : ''}> ${INDEX_LABEL}</label>
         <div class="ivc-buttons"><button type="button" class="ghost" data-ivc-pick="near">نزدیک به پول</button><button type="button" class="ghost" data-ivc-pick="all">همه</button><button type="button" class="ghost" data-ivc-pick="none">هیچ</button></div>
       </div>
       <div class="ivc-chips" data-ivc-chips></div>
@@ -97,7 +101,8 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     <section class="card ivc-intraday">
       <div class="section-head"><div><p class="eyebrow">بازه و تایم‌فریم</p><h3>نوسان ضمنی در بازهٔ دلخواه</h3></div><span class="note">امروز از ضبط زنده؛ روزهای ضبط‌نشده از بازسازی ریزمعامله (با دکمه، هزینه پیش از آن گفته می‌شود)</span></div>
       <div class="ivc-controls">
-        <label class="ivc-wide">نماد<select data-ivc="rInstrument"></select></label>
+        <label class="ivc-wide">قرارداد<select data-ivc="rInstrument"></select></label>
+        <label class="check ivc-index-toggle"><input type="checkbox" data-ivc="rIndex"${opts.rIndex ? ' checked' : ''}> ${INDEX_LABEL}</label>
         <label>بازه<select data-ivc="span">${RANGE_SPANS.map(([v, t]) => `<option value="${v}"${Number(v) === Number(opts.span) ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
         <label data-ivc-custom>از (شمسی)<input type="text" data-ivc="rFrom" dir="ltr" placeholder="۱۴۰۵/۰۷/۰۱" value="${esc(opts.rFrom)}"></label>
         <label data-ivc-custom>تا (شمسی)<input type="text" data-ivc="rTo" dir="ltr" placeholder="۱۴۰۵/۰۷/۰۹" value="${esc(opts.rTo)}"></label>
@@ -138,7 +143,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     else if (key === 'instrument') paintMaster();
     else if (key === 'expiry' || key === 'kind' || key === 'withIndex') paintExpiry();
     else if (key === 'span') { paintCustom(); if (Number(value) !== 0) loadRange(); }
-    else if (key === 'rInstrument' || key === 'grain' || key === 'mode') loadRange();
+    else if (key === 'rInstrument' || key === 'rIndex' || key === 'grain' || key === 'mode') loadRange();
   });
   host.addEventListener('click', (event) => {
     const pick = event.target.closest('[data-ivc-pick]');
@@ -163,11 +168,11 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     dailyCtrl = typeof AbortController === 'function' ? new AbortController() : null;
     clearTimeout(poll);
     if (want !== ua) {
-      data = null; seriesMemo.clear(); rangeApi = null; rangePoints = [];
+      data = null; seriesMemo.clear(); rangeApi = null; rangePoints = {};
       for (const handle of charts.values()) handle.dispose();
       charts.clear();
       // نماد تازه: قرارداد انتخابی نقشه پیش‌فرض نمودار مادر می‌شود.
-      opts = { ...opts, instrument: sel.contractIns ? String(sel.contractIns) : 'index', rInstrument: sel.contractIns ? String(sel.contractIns) : 'index', expiry: Number(sel.endDate) || 0 };
+      opts = { ...opts, instrument: sel.contractIns ? String(sel.contractIns) : '', rInstrument: sel.contractIns ? String(sel.contractIns) : '', expiry: Number(sel.endDate) || 0 };
     }
     ua = want;
     if (!ua) {
@@ -211,10 +216,12 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
   function fillSelects() {
     const contracts = data.contracts;
     const t = data.today;
-    if (opts.instrument !== 'index' && !contracts.some((c) => String(c.ins) === String(opts.instrument))) opts.instrument = 'index';
-    if (opts.rInstrument !== 'index' && !contracts.some((c) => String(c.ins) === String(opts.rInstrument))) opts.rInstrument = 'index';
-    field('instrument').innerHTML = instrumentOptionsHtml(contracts, opts.instrument, { uaName: uaName(), today: t });
-    field('rInstrument').innerHTML = instrumentOptionsHtml(contracts, opts.rInstrument, { uaName: uaName(), today: t });
+    // قرارداد پیش‌فرض: انتخاب نقشه، وگرنه کالِ نزدیک به پولِ نزدیک‌ترین سررسید باز.
+    const valid = (ins) => contracts.some((c) => String(c.ins) === String(ins));
+    if (!valid(opts.instrument)) opts.instrument = defaultContract();
+    if (!valid(opts.rInstrument)) opts.rInstrument = opts.instrument;
+    field('instrument').innerHTML = instrumentOptionsHtml(contracts, opts.instrument, { today: t });
+    field('rInstrument').innerHTML = instrumentOptionsHtml(contracts, opts.rInstrument, { today: t });
     const expiries = expiriesOf(contracts, t);
     if (!expiries.includes(Number(opts.expiry))) opts.expiry = expiries[0] || 0;
     field('expiry').innerHTML = expiries.map((e) => `<option value="${e}"${e === Number(opts.expiry) ? ' selected' : ''}>${dateLabel(e)}${e < t ? ' (سررسیدشده)' : ''}</option>`).join('');
@@ -222,6 +229,15 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     q('[data-ivc-title]').textContent = name ? `نوسان ضمنی در طول زمان · ${name}` : 'نوسان ضمنی در طول زمان';
     const b = data.api;
     q('[data-ivc-status]').textContent = `${faDigits(b.have)} از ${faDigits(b.days)} روز پروندهٔ قیمت دارد${b.build?.running || b.build?.queued ? ` · ساخت ادامه دارد (${faDigits(b.build.done)} از ${faDigits(b.build.total)})` : b.missing ? ` · ${faDigits(b.missing)} روز هنوز نیست` : ''} · ${faDigits(data.contracts.length)} قرارداد`;
+  }
+
+  function defaultContract() {
+    const contracts = data?.contracts || [];
+    const sel = getSelection() || {};
+    if (sel.contractIns && contracts.some((c) => String(c.ins) === String(sel.contractIns))) return String(sel.contractIns);
+    const expiry = expiriesOf(contracts, data?.today || 0)[0];
+    return defaultPicks(contracts, { expiry, spot: spotNow(), kind: 'call', perKind: 1 })[0]
+      || defaultPicks(contracts, { expiry, spot: spotNow(), kind: 'put', perKind: 1 })[0] || '';
   }
 
   /** امضای عکس زندهٔ همین نماد — برای اینکه تیکِ بی‌تغییر نمودار را از نو نسازد. */
@@ -282,13 +298,13 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
 
   function paintMaster() {
     if (!data) return;
-    const index = opts.instrument === 'index';
-    const contract = index ? null : data.contracts.find((c) => String(c.ins) === String(opts.instrument));
-    const rows = index ? indexRows() : contractRows(opts.instrument);
-    const title = index ? `شاخص نوسان ضمنی ${uaName()}` : `تاریخچهٔ قرارداد ${contract ? contractLabel(contract) : ''}`;
-    q('[data-ivc-summary]').textContent = masterSummary(rows);
-    host.querySelector('[data-ivc-show="hv"]').closest('label').hidden = !index;
-    setChart('master', (echarts, tokens) => masterOption(rows, { show: opts.show, title, index }, tokens),
+    const contract = opts.instrument ? data.contracts.find((c) => String(c.ins) === String(opts.instrument)) : null;
+    const rows = contract ? contractRows(contract.ins) : [];
+    // شاخص پایه همیشه ساخته می‌شود: خطش با تیک، و HV و IVR/IVP هم از آن است.
+    const idx = indexRows();
+    const title = contract ? `تاریخچهٔ قرارداد ${contractLabel(contract)}${opts.show.index !== false ? ` و ${INDEX_LABEL}` : ''}` : `${INDEX_LABEL} ${uaName()}`;
+    q('[data-ivc-summary]').textContent = masterSummary(contract ? rows : idx);
+    setChart('master', (echarts, tokens) => masterOption(rows, { indexRows: idx, show: opts.show, title }, tokens),
       'در این بازه نوسان ضمنی ساخته نشد — پوشش پرونده‌ها را در خط وضعیت ببین.');
   }
 
@@ -344,7 +360,19 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
   let rangeView = null, slowTimer = null;
 
   function rangeKey(span) {
-    return `${ua}|${span.keep}|${span.from}|${span.to}|${opts.grain}|${opts.mode}|${opts.rInstrument}`;
+    return `${ua}|${span.keep}|${span.from}|${span.to}|${opts.grain}|${opts.mode}|${opts.rInstrument}|${opts.rIndex}`;
+  }
+
+  /** یک سری: قرارداد (`ins`) یا شاخص پایه (بی `ins`). */
+  async function fetchRangeSeries({ want, from, span, ins, build }) {
+    const url = `/api/vol/intraday?ua=${encodeURIComponent(want)}&from=${from}&to=${span.to}&grain=${opts.grain}&mode=${opts.mode}${ins ? `&ins=${ins}` : ''}${build ? '&build=1' : ''}`;
+    const response = await fetcher(url, { cache: 'no-store', signal: rangeCtrl?.signal });
+    const body = await response.json();
+    if (!response.ok || body.error) throw new Error(body.error || `HTTP ${response.status}`);
+    if (String(body.ua) !== want) throw new Error('پاسخ سرور مال نماد دیگری بود');
+    // «N روز اخیر» یعنی N روز معاملاتیِ آخر؛ بازه را گشاد گرفتیم.
+    const days = span.keep ? body.days.slice(-span.keep) : body.days;
+    return { ...body, days };
   }
 
   async function loadRange({ build = false } = {}) {
@@ -355,7 +383,9 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     rangeCtrl = typeof AbortController === 'function' ? new AbortController() : null;
     const span = rangeDates();
     if (span.error) { q('[data-ivc-rstatus]').textContent = span.error; return; }
-    const ins = opts.rInstrument === 'index' ? '' : String(opts.rInstrument);
+    const ins = String(opts.rInstrument || '');
+    // شاخص پایه با تیک؛ بی قرارداد، شاخص تنها سری است.
+    const withIndex = Boolean(opts.rIndex) || !ins;
     // ساخت فقط برای روزهایی که نمایش داده می‌شوند، نه بازهٔ گشادِ پرسش.
     const from = build && rangeView?.key === rangeKey(span) && rangeView.firstDay ? rangeView.firstDay : span.from;
     clearTimeout(slowTimer);
@@ -367,28 +397,26 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       if (!calendar) {
         try { calendar = await (await fetcher('/api/vol/calendar', { cache: 'no-store' })).json(); } catch { calendar = { known: false, holidays: [] }; }
       }
-      const url = `/api/vol/intraday?ua=${encodeURIComponent(want)}&from=${from}&to=${span.to}&grain=${opts.grain}&mode=${opts.mode}${ins ? `&ins=${ins}` : ''}${build ? '&build=1' : ''}`;
-      const response = await fetcher(url, { cache: 'no-store', signal: rangeCtrl?.signal });
-      const body = await response.json();
+      const [apiC, apiI] = await Promise.all([
+        ins ? fetchRangeSeries({ want, from, span, ins, build }) : null,
+        withIndex ? fetchRangeSeries({ want, from, span, ins: '', build }) : null,
+      ]);
       if (my !== rangeSeq || want !== ua) return;
-      if (!response.ok || body.error) throw new Error(body.error || `HTTP ${response.status}`);
-      if (String(body.ua) !== want) throw new Error('پاسخ سرور مال نماد دیگری بود');
-      // «N روز اخیر» یعنی N روز معاملاتیِ آخر؛ بازه را گشاد گرفتیم.
-      const days = span.keep ? body.days.slice(-span.keep) : body.days;
-      const api = { ...body, days };
       const settings = getSettings();
-      let points;
-      if (ins) {
+      let pointsC = null, pointsI = null;
+      if (apiC) {
         const ctx = intradayContext(settings, { holidays: calendar?.holidays || [], holidaysKnown: Boolean(calendar?.known) });
-        points = contractIntradaySeries(days, ins, ctx);
-      } else {
-        const computed = await computeDeskDays(api, settings, calendar);
-        points = computed.flatMap((d) => d.points.map((pt) => ({ ...pt, date: d.date })));
+        pointsC = contractIntradaySeries(apiC.days, ins, ctx);
+      }
+      if (apiI) {
+        const computed = await computeDeskDays(apiI, settings, calendar);
+        pointsI = computed.flatMap((d) => d.points.map((pt) => ({ ...pt, date: d.date })));
       }
       if (my !== rangeSeq || want !== ua) return;
-      rangeApi = api;
-      rangePoints = points;
-      rangeView = { key: rangeKey(span), firstDay: days[0]?.date || 0, perDay: Number(body.cost?.perDay) || 0, ins };
+      rangeApi = { contract: apiC, index: apiI };
+      rangePoints = { contract: pointsC, index: pointsI };
+      const primary = apiC || apiI;
+      rangeView = { key: rangeKey(span), firstDay: primary.days[0]?.date || 0, ins };
       paintRange();
     } catch (e) {
       if (my !== rangeSeq || e?.name === 'AbortError') return;
@@ -398,17 +426,25 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     }
   }
 
-  /** وضعیت روزهای نمایش‌داده — خالص از روی پاسخ. */
+  /** وضعیت روزهای نمایش‌داده — جمعِ سری قرارداد و شاخص. */
   function rangeState() {
-    const days = rangeApi?.days || [];
+    const apis = [rangeApi?.contract, rangeApi?.index].filter(Boolean);
+    const primary = apis[0];
+    const days = primary?.days || [];
     const count = (src) => days.filter((d) => d.source === src).length;
-    const building = Boolean(rangeApi?.build?.running || rangeApi?.build?.queued) && days.some((d) => d.source === 'pending' && d.queued);
-    const pending = days.filter((d) => d.source === 'pending' && !d.queued).length;
-    const failed = days.filter((d) => d.source === 'failed');
+    let pending = 0, queued = 0, cost = 0, building = false;
+    const failed = [];
+    for (const api of apis) {
+      const p = api.days.filter((d) => d.source === 'pending' && !d.queued).length;
+      const f = api.days.filter((d) => d.source === 'failed');
+      const qd = api.days.filter((d) => d.source === 'pending' && d.queued).length;
+      pending += p; queued += qd; failed.push(...f);
+      cost += (p + f.length) * (Number(api.cost?.perDay) || 0);
+      if ((api.build?.running || api.build?.queued) && qd) building = true;
+    }
     return {
       days: days.length, record: count('record'), built: count('trades') + count('book'), none: count('none'),
-      pending, queued: days.filter((d) => d.source === 'pending' && d.queued).length, failed, building,
-      cost: (pending + failed.length) * (rangeView?.perDay || 0),
+      pending, queued, failed, building, cost, build: primary?.build || {},
     };
   }
 
@@ -419,27 +455,32 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     if (st.pending) parts.push(`${faDigits(st.pending)} ساخته‌نشده`);
     if (st.queued) parts.push(`${faDigits(st.queued)} در صف ساخت`);
     if (st.none) parts.push(`${faDigits(st.none)} بی ضبط (امروز)`);
-    if (st.building) parts.push(`ساخت ادامه دارد (${faDigits(rangeApi.build.done)} از ${faDigits(rangeApi.build.total)})`);
+    if (st.building) parts.push(`ساخت ادامه دارد (${faDigits(st.build.done)} از ${faDigits(st.build.total)})`);
     if (st.failed.length) parts.push(`${faDigits(st.failed.length)} روز ساخته نشد: ${faDigits(st.failed[0].why || '')}`);
-    if (rangeApi.grainServed?.rebuild && rangeApi.grainServed.rebuild !== rangeApi.grain && st.built) parts.push('روزهای بازسازی‌شده گام ۵ دقیقه دارند');
-    const valid = rangePoints.filter((pt) => isNum(pt.value)).length;
-    parts.push(`${faDigits(valid)} از ${faDigits(rangePoints.length)} لحظه نوسان دارد`);
+    const primaryApi = rangeApi.contract || rangeApi.index;
+    if (primaryApi.grainServed?.rebuild && primaryApi.grainServed.rebuild !== primaryApi.grain && st.built) parts.push('روزهای بازسازی‌شده گام ۵ دقیقه دارند');
+    const mainPoints = rangePoints.contract || rangePoints.index || [];
+    const valid = mainPoints.filter((pt) => isNum(pt.value)).length;
+    parts.push(`${faDigits(valid)} از ${faDigits(mainPoints.length)} لحظه نوسان دارد`);
     q('[data-ivc-rstatus]').textContent = parts.join(' · ');
     const toBuild = st.pending + st.failed.length;
     const go = q('[data-ivc-range-go]');
     go.textContent = toBuild && !st.building
-      ? `رسم نمودار و ساخت ${faDigits(toBuild)} روز (حدود ${faDigits(fmt.int(st.cost))} درخواست)`
+      ? `رسم نمودار و ساخت روزهای ضبط‌نشده (حدود ${faDigits(fmt.int(st.cost))} درخواست)`
       : 'رسم نمودار';
     go.dataset.build = toBuild && !st.building ? '1' : '';
     q('[data-ivc-build]').innerHTML = toBuild && !st.building
-      ? `<div class="vd-build"><span>${faDigits(toBuild)} روز از این بازه ضبط زنده ندارد و هنوز از ریزمعامله بازسازی نشده. «رسم نمودار» آن‌ها را می‌سازد (حدود ${faDigits(fmt.int(st.cost))} درخواست به بالادست، یک بار برای همیشه) و نمودار با رسیدن هر روز کامل‌تر می‌شود.</span></div>`
+      ? `<div class="vd-build"><span>بخشی از روزهای این بازه ضبط زنده ندارد و هنوز از ریزمعامله بازسازی نشده. «رسم نمودار» آن‌ها را می‌سازد (حدود ${faDigits(fmt.int(st.cost))} درخواست به بالادست، یک بار برای همیشه) و نمودار با رسیدن هر روز کامل‌تر می‌شود.</span></div>`
       : '';
     clearTimeout(rangePoll);
     const arm = () => { rangePoll = setTimeout(() => { if (isVisible()) loadRange(); else arm(); }, 8000); };
     if (st.building || st.queued) arm();
     const c = rangeView?.ins ? data?.contracts.find((x) => String(x.ins) === rangeView.ins) : null;
-    setChart('range', (echarts, tokens) => rangeOption(rangePoints, { grain: opts.grain, label: c ? `نوسان ضمنی ${contractLabel(c)}` : 'شاخص نوسان ضمنی' }, tokens),
-      toBuild || st.building || st.queued ? 'روزهای این بازه هنوز ساخته نشده‌اند — «رسم نمودار» را بزن؛ نمودار با ساخته‌شدن هر روز پر می‌شود.' : 'در این بازه لحظه‌ای نوسان ضمنی نساخت.');
+    const contractPoints = rangePoints.contract;
+    setChart('range', (echarts, tokens) => (contractPoints
+      ? rangeOption(contractPoints, { indexPoints: rangePoints.index, grain: opts.grain, label: `نوسان ضمنی ${c ? contractLabel(c) : 'قرارداد'}` }, tokens)
+      : rangeOption(rangePoints.index || [], { grain: opts.grain, label: INDEX_LABEL }, tokens)),
+    toBuild || st.building || st.queued ? 'روزهای این بازه هنوز ساخته نشده‌اند — «رسم نمودار» را بزن؛ نمودار با ساخته‌شدن هر روز پر می‌شود.' : 'در این بازه لحظه‌ای نوسان ضمنی نساخت.');
   }
 
   return {

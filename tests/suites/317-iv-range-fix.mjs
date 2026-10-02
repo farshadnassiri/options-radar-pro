@@ -90,10 +90,10 @@ group('۳۱۷-ب. منبع');
   check('روز شکست‌خورده با علت برمی‌گردد و فقط ساخت دوباره امتحانش می‌کند', ep.includes("source: 'failed', why: failed.why") && server.includes('ivBuildFailed.set(key, { why: String(e.message || e), at: Date.now() });'));
   check('خطای شبکهٔ پایه با «روزِ خالی» یکی نیست', server.includes('ریزمعاملهٔ پایه دریافت نشد') && server.includes('خالی آمد (تعطیل، توقف نماد یا سهمیهٔ بالادست)'));
   const view = readSrc('../ui/iv-charts-view.mjs');
-  const load = view.slice(view.indexOf('async function loadRange('), view.indexOf('/** وضعیت روزهای نمایش‌داده'));
+  const load = view.slice(view.indexOf('async function fetchRangeSeries('), view.indexOf('/** وضعیت روزهای نمایش‌داده'));
   check('رابط: ساخت فقط روزهای نمایش‌داده (نه بازهٔ گشاد)', load.includes('const from = build && rangeView?.key === rangeKey(span) && rangeView.firstDay ? rangeView.firstDay : span.from;'));
   check('رابط: پاسخ ناهمخوان بی‌صدا گیر نمی‌کند', !load.includes("String(body.ins || '') !== ins) return;") && load.includes("throw new Error('پاسخ سرور مال نماد دیگری بود')"));
   check('رابط: کندی سرور گفته می‌شود', load.includes('سرور هنوز پاسخ نداده'));
-  check('رابط: «رسم نمودار» روزهای ضبط‌نشده را با هزینهٔ نوشته‌شده می‌سازد', view.includes('if (go) loadRange({ build: go.dataset.build === \'1\' });') && view.includes('`رسم نمودار و ساخت ${faDigits(toBuild)} روز (حدود ${faDigits(fmt.int(st.cost))} درخواست)`'));
+  check('رابط: «رسم نمودار» روزهای ضبط‌نشده را با هزینهٔ نوشته‌شده می‌سازد', view.includes('if (go) loadRange({ build: go.dataset.build === \'1\' });') && view.includes('`رسم نمودار و ساخت روزهای ضبط‌نشده (حدود ${faDigits(fmt.int(st.cost))} درخواست)`'));
   check('رابط: تا وقتی روزی در صف است نظرسنجی ادامه دارد', view.includes('if (st.building || st.queued) arm();'));
 }

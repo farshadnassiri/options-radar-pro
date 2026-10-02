@@ -4667,6 +4667,9 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ivc-range { flex: 1 1 320px; min-width: 0; }
 .ivc-toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 8px; }
 .ivc-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+/* شاخص نوسان ضمنی پایه: سری اصلی هر نمودار، با تیک — پررنگ‌تر از بقیه. */
+.ivc-index-toggle { padding: 3px 10px; border: 1px dashed var(--ink-2); border-radius: var(--radius-pill); color: var(--ink) !important; font-weight: 800; }
+.ivc-index-toggle:has(input:checked) { border-style: solid; background: var(--panel-2); }
 .ivc-chart { height: 460px; }
 .ivc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; max-height: 160px; overflow-y: auto; }
 .ivc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border: 1px solid var(--line-soft); border-radius: var(--radius-pill); background: var(--panel-2); color: var(--ink); font-size: var(--fs-xs); cursor: pointer; }

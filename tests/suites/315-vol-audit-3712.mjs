@@ -118,7 +118,7 @@ group('۳۱۵-۱. پاسخ فقط مال انتخاب خودش');
   check('نوسان ضمنی (روزانه): شماره، لغو، و رد پاسخ کهنه یا مال نماد دیگر', daily.includes('const my = ++dailySeq;') && daily.includes('dailyCtrl?.abort();')
     && daily.includes('if (my !== dailySeq || want !== ua) return;') && daily.includes('if (String(body.ua) !== want) return;') && !daily.includes('if (loading) return;'));
   check('نوسان ضمنی (روزانه): با عوض‌شدن نماد، دادهٔ قبلی همان لحظه کنار می‌رود', daily.includes('if (want !== ua) {') && daily.includes('data = null;'));
-  const rng = view.slice(view.indexOf('async function loadRange('), view.indexOf('function paintRange() {'));
+  const rng = view.slice(view.indexOf('async function fetchRangeSeries('), view.indexOf('function paintRange() {'));
   check('نوسان ضمنی (بازه): همان نگهبان، با قرارداد هم', rng.includes('const my = ++rangeSeq;') && rng.includes('if (my !== rangeSeq || want !== ua) return;') && rng.includes("if (String(body.ua) !== want) throw new Error("));
   const rank = readSrc('../ui/vol-rank-view.mjs');
   const rload = rank.slice(rank.indexOf('async function load(force = false) {'), rank.indexOf('  function paint() {'));
@@ -157,7 +157,7 @@ group('۳۱۵-۶. سرعت: کش روزها و ریسه');
   const t2 = deskDays({ ua: '1', days: [grown] }, ctx)[0].points;
   check('امروز: لحظه‌های قبلی از کش، فقط لحظهٔ تازه حساب می‌شود', t2.length === t1.length + 1 && t2.slice(0, t1.length).every((pt, i) => pt === t1[i]));
   const view = readSrc('../ui/iv-charts-view.mjs');
-  check('نمودار بازه محاسبهٔ شاخص را به ریسه می‌سپارد', view.includes('await computeDeskDays(api, settings, calendar)') && !view.includes('deskDays(api, ctx)'));
+  check('نمودار بازه محاسبهٔ شاخص را به ریسه می‌سپارد', view.includes('await computeDeskDays(apiI, settings, calendar)') && !view.includes('deskDays(api, ctx)'));
   const compute = readSrc('../ui/vol-desk-compute.mjs');
   check('ریسه با جایگزینِ همان‌جا وقتی Worker نیست', compute.includes("new Worker('/worker/vol-desk-worker.mjs', { type: 'module' })") && compute.includes("typeof Worker === 'undefined'"));
   const { computeDeskDays } = await import('../../ui/vol-desk-compute.mjs');
