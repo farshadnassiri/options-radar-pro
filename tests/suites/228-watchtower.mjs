@@ -231,8 +231,9 @@ group('۲۲۸-ه. فهرست سنجه‌ها، کامل و دسته‌بندی�
     && src.includes('WATCH_METRIC_GROUPS.map'));
   // «آیتم‌های کامل و قابل انتخاب» — چهار خانواده، تا کاربر شرطِ سود و
   // زیان و نقدشوندگی و سربه‌سری را جدا پیدا کند.
-  check('چهار خانوادهٔ سنجه هست و هر خانواده دست‌کم دو سنجه دارد',
-    WATCH_METRIC_GROUPS.length === 4
+  // خانوادهٔ پنجم «تلاطم» (۱۴۰۵/۰۷/۱۱، میز تلاطم) — دستهٔ ۳۱۴.
+  check('پنج خانوادهٔ سنجه هست و هر خانواده دست‌کم دو سنجه دارد',
+    WATCH_METRIC_GROUPS.length === 5
     && WATCH_METRIC_GROUPS.every((one) => WATCH_METRICS.filter((row) => row.group === one).length >= 2),
     WATCH_METRIC_GROUPS.join('، '));
   check('پنجرهٔ روز فقط وقتی مرجع نسبی است دیده می‌شود',

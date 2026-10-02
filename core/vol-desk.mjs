@@ -146,3 +146,24 @@ export function hourlyPattern(model, seconds = []) {
     return { second, mean: mean(deltas), n: deltas.length };
   });
 }
+
+/**
+ * سنجه‌های تلاطم برای دیده‌بان شرطی (`core/watch-rule.mjs`).
+ *
+ * مقدارهای درون‌روزی فقط وقتی هست که امروز زنده است: شرطی که روی «IV اکنون»
+ * گذاشته شده نباید با عددِ آخرین جلسهٔ دیروز آتش کند. رتبه و صدک روزانه از
+ * خلاصهٔ تب رتبه می‌آیند و برچسب تاریخ خودشان را دارند.
+ */
+export function volWatchValues(model) {
+  const live = Boolean(model?.live && model.now);
+  const pick = (value) => (live && isNum(value) ? value : NaN);
+  return {
+    ivNow: pick(model?.now?.value),
+    ivChangeOpen: pick(model?.change),
+    ivChangeYday: pick(model?.changeYday),
+    ivSamePct: pick(model?.same?.percentile),
+    ivp: isNum(model?.summary?.ivp) ? model.summary.ivp : NaN,
+    ivr: isNum(model?.summary?.ivr) ? model.summary.ivr : NaN,
+    live, second: live ? model.now.second : NaN,
+  };
+}

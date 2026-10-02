@@ -24,7 +24,9 @@
 - [x] ف۳ داده: ضبط از دیده‌بان (`core/iv-record.mjs`)، بازسازی روزهای قبل، `/api/vol/intraday`، `tools/vol-intraday-probe.mjs` (دستهٔ ۳۱۱)
 - [x] ف۴ میز تلاطم (`ui/tabs/vol-desk.mjs`، `core/vol-desk.mjs`)، حالت «میز تلاطم درون‌روزی» در رصد لحظه‌ای، کارت فشرده و کارت‌های «در جست‌وجوی استراتژی‌ها» (دستهٔ ۳۱۲)
 - [x] ف۵ زمینهٔ تلاطم (`core/vol-context.mjs`، `ui/vol-context.mjs`) در آزمایشگاه، تحلیل تاریخی و ماتریس، آزمون همه، خروجی دیتا و موقعیت‌ها؛ «پس‌نگری» جدا (دستهٔ ۳۱۳)
-- [ ] ف۶ سنجه‌های دیده‌بان و ابزار آزمون آخر هفته
+- [x] ف۶ شش سنجهٔ «تلاطم» در دیده‌بان شرطی (`ui/vol-watch.mjs`)، `tools/vol-weekend-test.mjs` (`core/vol-basis-test.mjs`، دستهٔ ۳۱۴)
+
+برای صاحب پروژه روی دادهٔ واقعی: `node tools/vol-intraday-probe.mjs --ua <کد>` در جلسهٔ باز و `node tools/vol-weekend-test.mjs --ua <کد> --build` پس از چند هفته ضبط؛ `data/holidays.json` از روی `data/holidays.example.json`.
 
 ## کارهای باز (از `NEXT.md`، ۱۴۰۵/۰۷/۱۰)
 

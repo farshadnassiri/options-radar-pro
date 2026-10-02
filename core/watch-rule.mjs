@@ -80,6 +80,22 @@ export const WATCH_METRICS = [
     hint: 'برای شرطی که به خودِ سهم بسته است، نه به ساختار.' },
   { id: 'daysLeft', label: 'روز مانده تا سررسید', unit: 'day', group: 'بازار',
     hint: 'برای «سه روز مانده خبرم کن».' },
+
+  // ── تلاطم نماد پایه (میز تلاطم، `core/vol-desk.mjs`) ──
+  //
+  // چهار سنجهٔ اول درون‌روزی‌اند و فقط وقتی امروز ضبط زنده دارد عدد دارند؛
+  // بیرون از جلسه یا بی ضبط، `NaN` و شرط برقرار نمی‌شود. دو سنجهٔ آخر
+  // روزانه‌اند (از تب «رتبه و صدک تلاطم»).
+  { id: 'ivNow', label: 'تلاطم ضمنی اکنون ٪', unit: 'pct', group: 'تلاطم',
+    hint: 'شاخص تلاطم ضمنی درون‌روزیِ نماد پایه در آخرین لحظهٔ ضبط امروز.' },
+  { id: 'ivChangeOpen', label: 'تغییر تلاطم از بازگشایی (واحد)', unit: 'num', group: 'تلاطم',
+    hint: 'اکنون منهای بازگشایی امروز، به واحد درصد.' },
+  { id: 'ivChangeYday', label: 'تغییر تلاطم از دیروز همین ساعت (واحد)', unit: 'num', group: 'تلاطم' },
+  { id: 'ivSamePct', label: 'صدک هم‌ساعت تلاطم', unit: 'pct', group: 'تلاطم',
+    hint: 'اکنون کجای مقادیرِ همین ساعت در روزهای گذشته است؛ صد یعنی بالاتر از همه.' },
+  { id: 'ivp', label: 'IVP روزانه', unit: 'pct', group: 'تلاطم',
+    hint: 'صدک تلاطم ضمنی روزانه از تب «رتبه و صدک تلاطم».' },
+  { id: 'ivr', label: 'IVR روزانه', unit: 'pct', group: 'تلاطم' },
 ];
 
 const METRIC_BY_ID = new Map(WATCH_METRICS.map((row) => [row.id, row]));
@@ -419,7 +435,7 @@ export function evaluateWatch({ rules = [], snapshots = [], prev = {}, nowMs = 0
  * یک جا ساخته می‌شود چون هم حلقهٔ شرط می‌خواهدش و هم جدولِ پیش‌نمایش.
  * دو نسخهٔ جدا یعنی روزی شرط روی عددی آتش می‌کند که جدول نشانش نمی‌دهد.
  */
-export function watchSnapshot(row, { baseIns = '', baseName = '', basePrice = NaN, day = null } = {}) {
+export function watchSnapshot(row, { baseIns = '', baseName = '', basePrice = NaN, day = null, vol = null } = {}) {
   const gap = row?.gap || {};
   const metrics = row?.metrics || {};
   const verdict = row?.verdict || {};
@@ -457,6 +473,13 @@ export function watchSnapshot(row, { baseIns = '', baseName = '', basePrice = Na
     // `NaN` یعنی شرط برقرار نمی‌شود — نه اینکه با عددِ تاریخی برقرار شود.
     dayLow: num(day?.low, NaN),
     dayHigh: num(day?.high, NaN),
+    // تلاطم نماد پایه (`volWatchValues`)؛ نبودش `NaN` است، نه صفر.
+    ivNow: num(vol?.ivNow, NaN),
+    ivChangeOpen: num(vol?.ivChangeOpen, NaN),
+    ivChangeYday: num(vol?.ivChangeYday, NaN),
+    ivSamePct: num(vol?.ivSamePct, NaN),
+    ivp: num(vol?.ivp, NaN),
+    ivr: num(vol?.ivr, NaN),
     history: { current: column('current'), coveragePct: column('coveragePct'),
       roomPct: column('roomPct'), basePrice: column('basePrice') },
   };

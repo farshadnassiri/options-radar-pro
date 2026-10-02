@@ -28,6 +28,7 @@
 // می‌نشیند، یا هیچ‌وقت زنگ نمی‌زند یا صد بار می‌زند — و هر دو یعنی خاموشش
 // می‌کند.
 
+import { makeVolWatch } from '/ui/vol-watch.mjs';
 import { faDigits, fmt, signTone } from '/ui/fmt.mjs';
 import { buildChain } from '/core/chain.mjs';
 import { byId } from '/strategies/catalog.mjs';
@@ -188,6 +189,8 @@ export async function mount(root, { state }) {
   // و آن‌وقت ستونِ حرکت **ساخته نمی‌شود**، نه اینکه صفر شود.
   const lastBasePrice = new Map();
   let built = [], matched = [], table = null;
+  const volWatch = makeVolWatch({ getSettings: () => state.settings });
+  let volPending = false;
   let activeLoad = null, mounted = true, universeVersion = 0;
   // ── رصد ───────────────────────────────────────────────────────────────
   //
@@ -459,8 +462,14 @@ export async function mount(root, { state }) {
       cooldownSec: Number($('wt-cooldown').value), sound: $('wt-sound').checked,
     });
     if (!rule.ok) { setStatus(`قاعده ساخته نشد: ${rule.why}`, true); return; }
+    // شرطِ تلاطم و پایه‌ای که هنوز سنجه‌اش خوانده نشده: یک بار بخوان و دوباره بسنج.
+    if (!volPending && rule.rule.conditions.some((c) => watchMetric(c.metric)?.group === 'تلاطم')
+      && built.some(({ ua }) => !volWatch.get(ua.ins))) {
+      volPending = true;
+      volWatch.refresh(built.map(({ ua }) => ua.ins)).finally(() => { if (mounted) evaluateNow(skipped); setTimeout(() => { volPending = false; }, 60000); });
+    }
     const snapshots = built.map(({ row, ua }) => watchSnapshot(row, {
-      baseIns: String(ua.ins), baseName: nameOf(ua), basePrice: row.spot,
+      baseIns: String(ua.ins), baseName: nameOf(ua), basePrice: row.spot, vol: volWatch.get(ua.ins),
     }));
     const byKey = new Map(built.map(({ row, ua }) => [row.key, { row, ua }]));
     const verdict = evaluateWatch({ rules: [rule.rule], snapshots, prev: {}, nowMs: 0, previewCross: true });
@@ -775,6 +784,9 @@ export async function mount(root, { state }) {
       const nowSec = tehranSecondOfDay();
       const today = tehranDateNumber();
       const depth = liveDepth();
+      // سنجه‌های تلاطم پایه‌ها (هر پایه حداکثر دقیقه‌ای یک بار، از سرور محلی).
+      await volWatch.refresh(built.map(({ ua }) => ua.ins));
+      if (gen !== watchGen || !mounted) return;
       const snapshots = [];
       let covered = 0, stale = 0;
       const freshKeys = new Set();
@@ -818,6 +830,7 @@ export async function mount(root, { state }) {
           baseIns: String(ua.ins), baseName: nameOf(ua),
           basePrice: livedBase,
           day: dayRange.get(row.key),
+          vol: volWatch.get(ua.ins),
         }));
         covered += 1;
       }
@@ -899,7 +912,7 @@ export async function mount(root, { state }) {
       if (!found) return NaN;
       const snapshot = watchSnapshot(found.row, {
         baseIns: String(found.ua.ins), baseName: nameOf(found.ua), basePrice: found.row.spot,
-        day: dayRange.get(row.key),
+        day: dayRange.get(row.key), vol: volWatch.get(found.ua.ins),
       });
       let best = NaN;
       for (const rule of active) {
