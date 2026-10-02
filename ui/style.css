@@ -4657,36 +4657,27 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
   .vr-chart-square { height: 380px; }
 }
 
-/* ——— میز تلاطم (ui/vol-desk-view.mjs، ui/vol-desk-card.mjs) ——— */
-.vd-pick { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: end; }
-.vd-pick label { display: grid; gap: 4px; min-width: min(320px, 100%); color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
+/* ——— تب «نوسان ضمنی» در رصد لحظه‌ای (ui/iv-charts-view.mjs) ——— */
+.ivc { display: grid; gap: 12px; }
+.ivc-controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin: 6px 0 10px; }
+.ivc-controls > label { display: grid; gap: 4px; color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
+.ivc-controls > label.check { display: flex; align-items: center; gap: 6px; }
+.ivc-controls .ivc-wide { min-width: min(340px, 100%); }
+.ivc-controls .ivc-wide select { width: 100%; }
+.ivc-range { flex: 1 1 320px; min-width: 0; }
+.ivc-toggles { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 8px; }
+.ivc-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.ivc-chart { height: 460px; }
+.ivc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; max-height: 160px; overflow-y: auto; }
+.ivc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border: 1px solid var(--line-soft); border-radius: var(--radius-pill); background: var(--panel-2); color: var(--ink); font-size: var(--fs-xs); cursor: pointer; }
+.ivc-chip[data-kind="put"] { border-style: dashed; }
+.ivc-chip small { color: var(--muted); }
+.ivc-chip:has(input:checked) { border-color: var(--accent-line); background: var(--accent-soft); }
 .vd-build { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--warn-line); border-radius: var(--radius-md); background: var(--warn-soft); color: var(--ink); font-size: var(--fs-sm); }
-.vd-now { display: grid; gap: 10px; margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--line-soft); border-inline-start: 4px solid var(--muted); border-radius: var(--radius-md); background: var(--panel); }
-.vd-now[data-live="true"] { border-inline-start-color: var(--accent); }
-.vd-now-head { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: end; justify-content: space-between; }
-.vd-now-head > div:first-child { display: grid; gap: 2px; }
-.vd-now-head small, .vd-range small { color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
-.vd-now-head strong { color: var(--ink); font-size: calc(var(--fs-lg) * 1.8); font-variant-numeric: tabular-nums; font-weight: 900; line-height: 1.1; }
-.vd-now-head span { color: var(--ink-2); font-size: var(--fs-xs); }
-.vd-now-head .vd-stale { color: var(--warn); font-weight: 700; }
-.vd-range { display: grid; gap: 4px; justify-items: start; }
-.vd-range .cc-bar { width: 200px; }
-.vd-range .cc-bar > i { background: var(--accent); }
-.vd-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
-.vd-card { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; align-items: end; padding: 10px 12px; border: 1px solid var(--line-soft); border-inline-start: 4px solid var(--muted); border-radius: var(--radius-md); background: var(--panel-2); }
-.vd-card[data-live="true"] { border-inline-start-color: var(--accent); }
-.vd-card > div:first-child { grid-column: 1 / -1; display: grid; gap: 2px; }
-.vd-card small { color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
-.vd-card strong { color: var(--ink); font-size: var(--fs-lg); font-variant-numeric: tabular-nums; font-weight: 900; }
-.vd-card span { color: var(--ink-2); font-size: var(--fs-xs); }
-.vd-card > div:not(:first-child) { display: grid; gap: 2px; }
-.vd-card > div b { font-variant-numeric: tabular-nums; }
-.vd-card > div.gain b { color: var(--gain); }
-.vd-card > div.loss b { color: var(--loss); }
-.vd-card > button { grid-column: 1 / -1; justify-self: start; }
 .vr-compare tr[data-daily="true"] th { color: var(--muted); }
-[data-vol-desk-card] .vd-card { margin: 0 0 12px; }
-.sx-vol { margin-top: 12px; }
+@media (max-width: 760px) {
+  .ivc-chart { height: 360px; }
+}
 
 /* ——— زمینهٔ تلاطم در نماهای تاریخی (ui/vol-context.mjs) ——— */
 .vc-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin: 10px 0; }
@@ -4698,7 +4689,6 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .vc-cell b { color: var(--ink); font-variant-numeric: tabular-nums; }
 .vc-cell span { color: var(--ink-2); font-size: var(--fs-xs); }
 .vc-hindsight { border-style: dashed; border-inline-start-style: solid; border-inline-start-color: var(--line); background: var(--panel); }
-.vc-link { align-content: center; justify-items: start; }
 .history-table tr[data-tone="cool"] th { color: var(--accent-ink); }
 .history-table tr[data-tone="hot"] th { color: var(--warn); }
 

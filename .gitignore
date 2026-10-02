@@ -9,6 +9,8 @@ data/option-roster.json
 data/option-roster.checkpoint.json
 # پرونده‌های قیمت روزانهٔ کال و پوت (رتبهٔ تلاطم) — محلی، از بالادست ساخته می‌شوند
 data/day-panels/
+# موقعیت باز روزانه از تابلو (نمودار تاریخی نوسان ضمنی) — محلی
+data/day-oi/
 data/journal.json
 # R5-21: لاگِ جریانِ داده — محلی است و برای بررسی جدا فرستاده می‌شود
 data/logs/

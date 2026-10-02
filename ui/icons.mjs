@@ -77,6 +77,6 @@ export const TAB_ICON = {
   settings: 'sliders', chain: 'grid', 'live-market': 'wave', 'open-view': 'wave', history: 'clock', backtest: 'play',
   'data-export': 'download',
   'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert', datalog: 'flow',
-  'strategy-explorer': 'search', watchtower: 'bell', 'vol-desk': 'gauge',
+  'strategy-explorer': 'search', watchtower: 'bell',
   positions: 'briefcase', roll: 'rotate',
 };

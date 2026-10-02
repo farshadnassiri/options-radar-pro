@@ -12,8 +12,7 @@ import {
 import { numOrNaN } from '/core/num.mjs';
 import { mountChainCompare } from '/ui/chain-compare-view.mjs';
 import { mountVolRank } from '/ui/vol-rank-view.mjs';
-import { mountVolDesk } from '/ui/vol-desk-view.mjs';
-import { mountDeskCard } from '/ui/vol-desk-card.mjs';
+import { mountIvCharts } from '/ui/iv-charts-view.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -173,6 +172,11 @@ const EMBEDDED_MODES = [
 // دیگر را هم می‌سازد.
 export const DASHBOARD_MODES = [
   { id: 'explorer', title: 'نقشه و زنجیره', hint: 'نقشه بازار، سررسید، کندل روزانه و زنجیره', views: [], explorer: true },
+  // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۱): «هدف دیدن نوسان ضمنی در طول زمان است» —
+  // نمودار مادر روزانه برای شاخص پایه یا هر قرارداد، قراردادهای یک سررسید روی
+  // هم، و نمودار بازه در تایم‌فریم دلخواه (`core/iv-chart.mjs`). جای «میز
+  // تلاطم» را گرفت؛ نماد از همین نقشه.
+  { id: 'iv-charts', title: 'نوسان ضمنی', hint: 'نوسان ضمنی هر نماد و قرارداد در طول زمان، قراردادهای یک سررسید، و بازه در تایم‌فریم دلخواه', views: [], ivCharts: true },
   // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۰۸): «هر قرارداد در قیاس با سایر قراردادهای
   // همان زنجیره سنجیده شود… بهترند یا بدتر؟» — منطق در `core/chain-compare.mjs`.
   { id: 'compare', title: 'مقایسه در زنجیره', hint: 'یک قرارداد در برابر هم‌زنجیره‌هایش: رتبه، گرانی، نقدشوندگی', views: [], compare: true },
@@ -182,9 +186,6 @@ export const DASHBOARD_MODES = [
   // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۰): «IV Rank و IV Percentile… در تبی جدا»،
   // با مقایسه در برابر تلاطم تاریخی — منطق در `core/vol-rank.mjs`.
   { id: 'vol-rank', title: 'رتبه و صدک تلاطم', hint: 'IV Rank، IV Percentile و تلاطم تاریخی نماد انتخابی', views: [], volRank: true },
-  // نسخهٔ ۲ (۱۴۰۵/۰۷/۱۱): «IV لحظه‌ای در برابر بازگشایی و روزهای قبل» — همان
-  // میز تب «میز تلاطم»، با نماد انتخابیِ همین نقشه (`core/vol-desk.mjs`).
-  { id: 'vol-desk', title: 'میز تلاطم درون‌روزی', hint: 'IV اکنون در برابر بازگشایی، دیروز و همین ساعت در روزهای قبل', views: [], volDesk: true },
   { id: 'board', title: 'اختیارهای پرمعامله', hint: 'سربه‌سر وزنی هر سررسید و فاصله از قیمت جاری', views: boardViews, board: true },
   ...EMBEDDED_MODES.map((mode) => ({ ...mode, views: [] })),
 ];
@@ -875,9 +876,9 @@ export async function mount(root, { state, api }) {
       : mode.compare
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-compare-host></div></section>`
       : mode.volRank
-        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-vol-desk-card></div><div data-vol-rank-host></div></section>`
-      : mode.volDesk
-        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-vol-desk-host></div></section>`
+        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-vol-rank-host></div></section>`
+      : mode.ivCharts
+        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-iv-charts-host></div></section>`
       : mode.mod
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
         : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host>${busyBlock('در حال دریافت نخستین عکس بازار… این مرحله چند ثانیه طول می‌کشد.', { lines: 4 })}</div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</div>`;
@@ -945,26 +946,18 @@ export async function mount(root, { state, api }) {
     }
     return volRankView;
   };
-  // میز تلاطم و کارت فشرده‌اش هم با همان انتخاب نقشه.
-  const deskUa = () => {
-    const ins = String(marketExplorer.selection()?.uaIns || '');
-    const name = payload?.universe?.underlyings?.find((row) => String(row.ins) === ins)?.name || '';
-    return { ins, name };
-  };
-  let volDeskView = null, deskCard = null;
-  const volDesk = () => {
-    if (!volDeskView) {
-      volDeskView = mountVolDesk(root.querySelector('[data-vol-desk-host]'), {
-        getUa: deskUa,
+  // تب «نوسان ضمنی» هم تنبل سوار می‌شود و نماد را از همان نقشه می‌گیرد.
+  let ivChartsView = null;
+  const ivCharts = () => {
+    if (!ivChartsView) {
+      ivChartsView = mountIvCharts(root.querySelector('[data-iv-charts-host]'), {
+        getSelection: () => marketExplorer.selection(),
+        getPayload: () => payload,
         getSettings: () => state.settings,
-        isVisible: () => activeMode === 'vol-desk' && root.isConnected,
+        isVisible: () => activeMode === 'iv-charts' && root.isConnected,
       });
     }
-    return volDeskView;
-  };
-  const card = () => {
-    if (!deskCard) deskCard = mountDeskCard(root.querySelector('[data-vol-desk-card]'), { getUa: deskUa, getSettings: () => state.settings });
-    return deskCard;
+    return ivChartsView;
   };
 
   function paintInterval() {
@@ -1259,8 +1252,8 @@ export async function mount(root, { state, api }) {
     $('dd-toolbar').hidden = !mode?.views?.length;
     if (mode?.explorer) { paintLevels(); return; }
     if (mode?.compare) { compare().paint(); return; }
-    if (mode?.volRank) { card().refresh(); volRank().paint(); return; }
-    if (mode?.volDesk) { volDesk().paint(); return; }
+    if (mode?.volRank) { volRank().paint(); return; }
+    if (mode?.ivCharts) { ivCharts().paint(); return; }
     if (mode?.mod) { await mountEmbedded(mode); return; }
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
     if (!panel || !view) return;
@@ -1398,7 +1391,7 @@ export async function mount(root, { state, api }) {
     busyBar?.dispose();
     openViewController?.dispose?.();
     marketExplorer.dispose();
-    volRankView?.dispose(); volDeskView?.dispose(); deskCard?.dispose();
+    volRankView?.dispose(); ivChartsView?.dispose();
     for (const dispose of embedded.values()) { try { dispose?.(); } catch { /* برچیدن نباید بترکد */ } }
   };
 }

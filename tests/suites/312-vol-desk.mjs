@@ -78,56 +78,20 @@ group('۳۱۲-ج. بی‌داده');
   check('فقط روزهای ساخته‌نشده: علت pending', pending.why === 'pending' && pending.now === null);
 }
 
-group('۳۱۲-د. سازنده‌های رابط');
+group('۳۱۲-د. رابط میز برداشته شد (۱۴۰۵/۰۷/۱۱)');
 {
-  const view = await import('../../ui/vol-desk-view.mjs');
-  const card = await import('../../ui/vol-desk-card.mjs');
-  const link = await import('../../ui/vol-desk-link.mjs');
-  const tokens = { ink: '#000', muted: '#666', line: '#ccc', lineSoft: '#eee', panel: '#fff', panel2: '#f5f5f5', accent: '#06c', accent2: '#0a6', accentSoft: '#cdf', warn: '#c60', warnSoft: '#fdc', series: ['#1', '#2', '#3', '#4', '#5', '#6'], palette: ['#a', '#b', '#c'] };
-  const days = [day(20260929, 50, 2), day(20260930, 46, -1), day(20261001, 52, 2, { until: OPEN + 7200, provisional: true })];
-  const m = deskModel({ days, today: 20261001, ctx });
-  const html = view.deskNowHtml(m, { uaName: 'اهرم' });
-  check('کارت اکنون: عدد، برچسب موقت و نام', html.includes('موقت') && html.includes('اهرم') && /data-live="true"/.test(html));
-  check('کارت اکنون بی رقم لاتین در متن', !/>[^<]*[0-9][^<]*</.test(html.replace(/style="[^"]*"/g, '').replace(/data-[a-z-]+="[^"]*"/g, '')), html.match(/>[^<]*[0-9][^<]*</)?.[0] || '');
-  check('کارت بی‌داده علت می‌گوید', view.deskNowHtml(deskModel({ days: [], today: 1, ctx })).includes('روزی در بازه نیست'));
-  const builders = ['pathOption', 'overlayOption', 'changeOption', 'multiOption', 'scatterOption', 'distOption'];
-  check('نمودارها گزینه می‌سازند', builders.every((b) => view[b](m, tokens)?.series?.length > 0), builders.filter((b) => !view[b](m, tokens)).join());
-  const empty = deskModel({ days: [], today: 1, ctx });
-  check('نمودار بی‌داده null (پیام خالی، نه نمودار تهی)', builders.every((b) => view[b](empty, tokens) === null));
-  check('نقشهٔ حرارتی و الگوی ساعتی', view.heatOption(m, tokens, grid)?.series[0].data.length > 0 && view.hourlyOption(m, tokens, grid)?.series.length === 2);
-  check('مسیر امروز: نوار خرید تا فروش + خط بازگشایی + روز قبل', (() => {
-    const o = view.pathOption(m, tokens);
-    return o.series.length === 4 && o.series[2].markLine?.data?.[0]?.yAxis === 52.5;
-  })());
-  // روز بسته‌شده با لحظه‌های خالیِ پس از ۱۱:۰۰ (تمرکز روی آخرین جلسه).
-  const closed = deskModel({ days: [day(20260930, 46, -1), day(20261001, 52, 2, { until: OPEN + 7200 })], today: 20261002, ctx });
-  const mom = view.deskMomentRows(closed);
-  check('جدول لحظه‌ها: لحظهٔ خالی علت دارد، تازه‌ترین اول', mom[0].second === undefined && mom.some((r) => r.whyText && !Number.isFinite(r.value)) && mom.at(-1).timeText === '۰۹:۱۵');
-  check('جدول روزها برچسب منبع و موقت', view.deskDayTableRows(m)[0].dateText.includes('موقت') && view.deskDayTableRows(m)[0].sourceText.includes('ضبط'));
-  check('بازهٔ تقویمی گشاد برای N روز معاملاتی', view.deskFrom(20261001, 10) === 20260909);
-  const status = view.deskStatusText({ days: [{ source: 'record' }, { source: 'trades' }, { source: 'pending' }], recorder: { on: true, stepSec: 60, frames: 12 }, build: {} }, m);
-  check('خط وضعیت شمار منابع و ضبط', status.includes('۱ ضبط زنده') && status.includes('۱ بازسازی‌شده') && status.includes('۱ ساخته‌نشده') && status.includes('۱۲ قاب'));
-  const c = card.deskCardHtml(m, { ins: '123', name: 'اهرم' });
-  check('کارت فشرده: اکنون، از بازگشایی، دیروز، پیوند میز', c.includes('از بازگشایی') && c.includes('data-vol-desk="123"') && c.includes('اهرم'));
-  const mem = new Map();
-  const storage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v) };
-  link.writeDeskUa({ ins: '9', name: 'خودرو' }, storage);
-  check('نماد میز در حافظه می‌ماند', link.readDeskUa(storage).ins === '9' && link.readDeskUa(storage).name === 'خودرو');
-  check('پیوند بی نماد هیچ نمی‌سازد', link.volDeskLinkHtml({}) === '');
-}
-
-group('۳۱۲-هـ. سیم‌کشی');
-{
+  // خواستهٔ صاحب پروژه: «تب میز نوسان را حذف کن… بقیهٔ آیتم‌های میز را حذف
+  // کن»؛ نمودارهای نوسان ضمنی به تب «نوسان ضمنی» رصد لحظه‌ای رفتند. مدل
+  // `core/vol-desk.mjs` می‌ماند: سنجه‌های تلاطمِ دیده‌بان شرطی رویش‌اند.
+  const fs = await import('node:fs');
+  const gone = ['ui/tabs/vol-desk.mjs', 'ui/vol-desk-view.mjs', 'ui/vol-desk-card.mjs', 'ui/vol-desk-link.mjs'];
+  check('پرونده‌های رابط میز نیستند', gone.every((f) => !fs.existsSync(new URL(`../../${f}`, import.meta.url))));
   const app = readSrc('../ui/app.mjs');
-  check('تب «میز تلاطم» در فهرست', app.includes("{ id: 'vol-desk', title: 'میز تلاطم'") && app.includes("mod: '/ui/tabs/vol-desk.mjs'"));
+  check('تب «میز تلاطم» از فهرست کناری رفت', !app.includes("id: 'vol-desk'") && !app.includes('/ui/tabs/vol-desk.mjs'));
   const dash = readSrc('../ui/tabs/live-market-dashboard.mjs');
-  check('حالت میز در رصد لحظه‌ای، با نماد همان نقشه', dash.includes("{ id: 'vol-desk', title: 'میز تلاطم درون‌روزی'") && dash.includes('if (mode?.volDesk) { volDesk().paint(); return; }')
-    && dash.includes("const ins = String(marketExplorer.selection()?.uaIns || '');"));
-  check('کارت فشرده بالای «رتبه و صدک تلاطم»', dash.includes('<div data-vol-desk-card></div><div data-vol-rank-host></div>'));
-  const sx = readSrc('../ui/tabs/strategy-explorer.mjs');
-  check('کارت‌های تلاطم در «در جست‌وجوی استراتژی‌ها»', sx.includes("mountDeskCard(") && sx.includes("localStorage.getItem('picker.selected')"));
-  const cardSrc = readSrc('../ui/vol-desk-card.mjs');
-  check('کارت فشرده هرگز ساخت را آغاز نمی‌کند', !cardSrc.includes('build=1'));
-  const viewSrc = readSrc('../ui/vol-desk-view.mjs');
-  check('میز فقط با دکمه می‌سازد و هزینه را پیش از آن می‌گوید', viewSrc.includes("load({ build: true })") && viewSrc.includes('api.cost?.requests'));
+  check('حالت میز و کارت فشرده از رصد لحظه‌ای رفتند', !dash.includes("id: 'vol-desk'") && !dash.includes('mountDeskCard') && !dash.includes('data-vol-desk-card'));
+  check('کارت‌های میز از «در جست‌وجوی استراتژی‌ها» رفتند', !readSrc('../ui/tabs/strategy-explorer.mjs').includes('mountDeskCard'));
+  check('نوار زمینهٔ تلاطم دیگر به میز پیوند نمی‌دهد', !readSrc('../ui/vol-context.mjs').includes('vol-desk-link'));
+  const { deskFrom } = await import('../../core/vol-desk.mjs');
+  check('بازهٔ تقویمی گشاد برای N روز معاملاتی (به core رفت)', deskFrom(20261001, 10) === 20260909);
 }

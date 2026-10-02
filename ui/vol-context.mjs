@@ -12,7 +12,6 @@ import { historyDateLabel, normalizeHistoryDate } from '../core/history.mjs';
 import { tehranDateNumber } from '../core/tehran-day.mjs';
 import { buildVolHistory, panelObservations, volParams, volRangeFor, VOL_DEFAULTS } from '../core/vol-rank.mjs';
 import { volContextAt, volContextBetween, VOL_CONTEXT_WHY, VOL_HINDSIGHT_LABEL, VOL_HINDSIGHT_NOTE } from '../core/vol-context.mjs';
-import { volDeskLinkHtml } from './vol-desk-link.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (ch) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -29,7 +28,7 @@ const memo = new Map();
  * همان پارامترهایی که کاربر در تب «رتبه و صدک تلاطم» برگزیده — وگرنه
  * عددِ اینجا با عدد آنجا یکی نمی‌شد.
  */
-function rankOpts() {
+export function rankOpts() {
   try {
     const saved = JSON.parse(globalThis.localStorage?.getItem('options-radar:vol-rank') || '{}') || {};
     const pick = (key) => (saved[key] !== undefined ? saved[key] : VOL_DEFAULTS[key]);
@@ -125,7 +124,6 @@ export function volContextPairHtml(pair, { ua = null, note = '', hindsight = tru
     ${exit ? volContextCell(exit, 'تلاطم در خروج') : ''}
     ${exit ? `<div class="vc-cell"><small>تغییر میان ورود و خروج</small><b>${signed(pair.ivChange)}</b><span>IVP ${signed(pair.ivpChange, '')}</span></div>` : ''}
     ${hindsight ? hs : ''}
-    ${ua?.ins ? `<div class="vc-cell vc-link">${volDeskLinkHtml(ua, { label: 'میز تلاطم' })}</div>` : ''}
   </div>${note ? `<p class="note">${esc(note)}</p>` : ''}`;
 }
 

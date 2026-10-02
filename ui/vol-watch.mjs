@@ -5,10 +5,10 @@
 // ساختی آغاز نمی‌شود. خطا سنجه را `NaN` می‌گذارد، نه صفر.
 
 import { readVolSummary } from './vol-rank-store.mjs';
-import { deskFrom } from './vol-desk-view.mjs';
+
 import { tehranDateNumber } from '../core/tehran-day.mjs';
 import { intradayContext } from '../core/vol-intraday.mjs';
-import { deskDays, deskModel, volWatchValues } from '../core/vol-desk.mjs';
+import { deskDays, deskModel, volWatchValues, deskFrom } from '../core/vol-desk.mjs';
 
 export const VOL_WATCH_TTL_MS = 60000;
 

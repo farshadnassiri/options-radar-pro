@@ -830,6 +830,7 @@ async function watchTick() {
     broadcast('watch', { at: watch.at, full: first, count: rows.length, rows: first ? rows : changed });
     archiveToday(rows).catch((e) => logErr('بایگانی دیده‌بان', e));
     recordIv(rows, gate, today).catch((e) => { ivRec.lastError = `${e.name}: ${e.message}`; logErr('ضبط تلاطم', e); });
+    saveDayOi(rows, gate.phase, today).catch((e) => logErr('موقعیت باز روزانه', e));
     return true;
   } catch (e) {
     logErr('دور دیده‌بان', e);
@@ -988,8 +989,71 @@ async function buildIvDay(ua, day, mode) {
   return out;
 }
 
-function queueIvBuild(ua, days, mode) {
-  for (const day of days) ivBuildQueue.set(`${ua}|${day}|${mode}`, { ua, day, mode });
+// ——— بازسازی یک قرارداد ———
+//
+// نمودار بازه و تایم‌فریم (تب «نوسان ضمنی») تلاطم **یک قرارداد** را هم
+// می‌خواهد، و بازسازیِ عمومی فقط چهار قرارداد نزدیک هر سمت را دارد. پس اگر
+// قرارداد خواسته‌شده در آن نبود، فقط همان قرارداد و پایه از ریزمعامله ساخته
+// می‌شود (دو تا سه درخواست در روز) و جدا ماندگار می‌شود. امروز هرگز.
+const ivContractFile = (ua, ins, day, mode) => path.join(IV_BUILD_DIR, ua, `${day}.${mode}.c${ins}.json`);
+const ivContractCost = (mode) => 2 + 1 + (mode === 'book' ? 3 : 2);
+
+async function readIvContractBuild(ua, ins, day, mode) {
+  try {
+    const out = JSON.parse(await fs.readFile(ivContractFile(ua, ins, day, mode), 'utf8'));
+    return out?.version === IV_RECORD_VERSION ? out : null;
+  } catch { return null; }
+}
+
+async function contractMetaFor(ua, ins, day) {
+  const board = await boardRowsForIndex();
+  const universe = await rosterRangeUniverse(day, day, board);
+  for (const row of [...universe.rows, ...board]) {
+    if (String(row?.uaInsCode) !== ua) continue;
+    for (const [sfx, kind] of [['C', 'call'], ['P', 'put']]) {
+      if (String(row?.[`insCode_${sfx}`] || '') !== ins) continue;
+      const strike = num(row?.strikePrice, 0);
+      const expiry = num(row?.expiryGregorian, 0) || num(row?.endDate, 0);
+      if (strike > 0 && expiry > 0) return [kind, strike, expiry];
+    }
+  }
+  return null;
+}
+
+async function buildIvContractDay(ua, ins, day, mode) {
+  if (!(day < tehranDateNumber())) return null;
+  const meta = await contractMetaFor(ua, ins, day);
+  if (!meta) throw new Error(`قرارداد ${ins} در دفتر قراردادهای پایهٔ ${ua} نیست`);
+  if (!(meta[2] >= day)) throw new Error(`قرارداد ${ins} در ${day} سررسید شده بود`);
+  const baseTape = (await fetchHistoricalTape(ua, String(day))).rows || [];
+  const tapes = { [ins]: (await fetchHistoricalTape(ins, String(day))).rows || [] };
+  const books = {};
+  if (mode === 'book') {
+    try { books[ins] = normalizeBookEvents(firstList(await get(historicalPath('book', ins, String(day)), S.ttlDailySec, IV_BUILD_PRIORITY))); }
+    catch { books[ins] = []; }
+  }
+  const built = rebuildMoments({ seconds: momentsFor(IV_BUILD_GRAIN), baseTape, tapes, books, meta: { [ins]: meta }, markAt, bookAt });
+  const out = {
+    version: IV_RECORD_VERSION, ua, ins, date: day, source: mode, provisional: false, grain: IV_BUILD_GRAIN,
+    limits: await thresholdLimits(ua, day), builtAt: Date.now(), ...built,
+  };
+  await fs.mkdir(path.dirname(ivContractFile(ua, ins, day, mode)), { recursive: true });
+  await writeJsonAtomic(ivContractFile(ua, ins, day, mode), out);
+  return out;
+}
+
+/** فقط یک قرارداد از یک روزِ فرم انتقال (و پایه‌اش). */
+function sliceTransport(day, ins) {
+  if (!ins) return day;
+  const contracts = day.contracts?.[ins] ? { [ins]: day.contracts[ins] } : {};
+  return {
+    ...day, contracts,
+    moments: (day.moments || []).map(([second, basePrice, baseAt, baseLastAt, quotes]) => [second, basePrice, baseAt, baseLastAt, quotes?.[ins] ? { [ins]: quotes[ins] } : {}]),
+  };
+}
+
+function queueIvBuild(ua, days, mode, ins = '') {
+  for (const day of days) ivBuildQueue.set(`${ua}|${day}|${mode}|${ins}`, { ua, day, mode, ins });
   if (ivBuild.running || !ivBuildQueue.size) return;
   ivBuild = { running: true, total: ivBuildQueue.size, done: 0, failed: 0, lastError: '', finishedAt: 0 };
   (async () => {
@@ -998,7 +1062,9 @@ function queueIvBuild(ua, days, mode) {
       const [key, job] = [...ivBuildQueue.entries()].sort((a, b) => b[1].day - a[1].day)[0];
       ivBuildQueue.delete(key);
       try {
-        if (!(await readIvBuild(job.ua, job.day, job.mode))) await buildIvDay(job.ua, job.day, job.mode);
+        if (job.ins) {
+          if (!(await readIvContractBuild(job.ua, job.ins, job.day, job.mode))) await buildIvContractDay(job.ua, job.ins, job.day, job.mode);
+        } else if (!(await readIvBuild(job.ua, job.day, job.mode))) await buildIvDay(job.ua, job.day, job.mode);
       } catch (e) {
         ivBuild.failed += 1;
         ivBuild.lastError = `${job.day}: ${e.message || e}`;
@@ -1014,6 +1080,50 @@ function queueIvBuild(ua, days, mode) {
 
 /** لحظه‌های یک دانه؛ «روز» یعنی فقط پایان جلسه. */
 const grainSeconds = (grain) => (grain === 'day' ? momentsFor('m60').slice(-1) : momentsFor(grain));
+
+// ——————————————————————— موقعیت باز روزانه ———————————————————————
+//
+// بالادست موقعیت بازِ تاریخی قراردادها را نمی‌دهد؛ تابلوی زنده می‌دهد. پس
+// موقعیت باز هر قرارداد از همان عکس دیده‌بان (بی درخواست اضافه) هر ده دقیقه
+// در `data/day-oi/<روز>.json` نوشته می‌شود — فقط وقتی عکس مال امروز است
+// (جلسهٔ باز یا پس از بستن)، نه پیش از بازگشایی که تابلو هنوز دیروز است.
+// نمودار تاریخی نوسان ضمنی ستون «موقعیت باز» را از همین می‌خواند؛ روزهای
+// پیش از روشن‌شدن این ضبط خالی می‌مانند.
+const DAY_OI_DIR = path.join(ROOT, 'data', 'day-oi');
+const DAY_OI_EVERY_MS = 10 * 60000;
+let dayOiAt = { day: 0, at: 0 };
+const dayOiMemo = new Map();
+
+function oiFromRows(rows = []) {
+  const oi = {};
+  for (const row of rows) {
+    for (const sfx of ['C', 'P']) {
+      const ins = String(row?.[`insCode_${sfx}`] || '');
+      const value = Number(row?.[`oP_${sfx}`]);
+      if (ins && Number.isFinite(value) && value >= 0) oi[ins] = value;
+    }
+  }
+  return oi;
+}
+
+async function saveDayOi(rows, phase, today) {
+  if (!['open', 'after', 'ungated'].includes(phase)) return;
+  if (dayOiAt.day === today && Date.now() - dayOiAt.at < DAY_OI_EVERY_MS && phase !== 'after') return;
+  const oi = oiFromRows(rows);
+  if (!Object.keys(oi).length) return;
+  dayOiAt = { day: today, at: Date.now() };
+  await fs.mkdir(DAY_OI_DIR, { recursive: true });
+  await writeJsonAtomic(path.join(DAY_OI_DIR, `${today}.json`), { date: today, at: Date.now(), phase, oi });
+  dayOiMemo.delete(today);
+}
+
+async function readDayOi(day) {
+  if (dayOiMemo.has(day)) return dayOiMemo.get(day);
+  let out = null;
+  try { out = JSON.parse(await fs.readFile(path.join(DAY_OI_DIR, `${day}.json`), 'utf8'))?.oi || null; } catch { out = null; }
+  if (day < tehranDateNumber()) { dayOiMemo.set(day, out); evictOldest(dayOiMemo, 400); }
+  return out;
+}
 
 // ——————————————————————— بایگانی دیده‌بان ———————————————————————
 //
@@ -2005,7 +2115,18 @@ async function handleRequest(req, res, u) {
         else missing.push(day);
       }
       if (build && missing.length) queuePanels(missing);
+      // موقعیت باز هر روز (از ضبط روزانهٔ تابلو) و امروز از عکس زنده.
+      const oi = {};
+      for (const day of [...days, today]) {
+        const all = day === today && watch.day === today && ['open', 'after', 'ungated'].includes(watch.phase)
+          ? oiFromRows(watch.rows) : await readDayOi(day);
+        if (!all) continue;
+        const slice = {};
+        for (const ins of wanted) if (all[ins] !== undefined) slice[ins] = all[ins];
+        if (Object.keys(slice).length) oi[day] = slice;
+      }
       return sendJson(res, 200, {
+        oi,
         ua, from: Number(vFrom), to: Number(vTo), today,
         days: days.length, have: days.length - missing.length, missing: missing.length,
         contracts: [...contracts.values()], panels,
@@ -2032,6 +2153,10 @@ async function handleRequest(req, res, u) {
       if (Number(vTo) < Number(vFrom)) return sendJson(res, 400, { error: 'پایان بازه پیش از آغاز آن است' });
       const grain = normalizeGrain(u.searchParams.get('grain') || 'm5');
       const mode = u.searchParams.get('mode') === 'book' ? 'book' : 'trades';
+      // `ins` اختیاری: فقط همین قرارداد (و پایه) برمی‌گردد، و روزِ ضبط‌نشده
+      // اگر در بازسازی عمومی نبود، جدا برای همین قرارداد ساخته می‌شود.
+      const insWanted = String(u.searchParams.get('ins') || '').trim();
+      if (insWanted && !/^\d{5,25}$/.test(insWanted)) return sendJson(res, 400, { error: '«ins» باید کد قرارداد باشد' });
       const build = u.searchParams.get('build') === '1';
       const today = tehranDateNumber();
       const days = tradingDays(vFrom, vTo).filter((day) => day <= today).slice(-IV_BUILD_DAYS_MAX);
@@ -2050,11 +2175,11 @@ async function handleRequest(req, res, u) {
             // لحظهٔ «حالا»: آخرین قاب، اگر از آخرین مرز دانه جلوتر است.
             if (!cut.length || cut.at(-1) < lastFrame) cut = [...cut, lastFrame];
           }
-          out.push({
+          out.push(sliceTransport({
             date: day, source: 'record', provisional: isToday, broken: live.broken,
             limits: await thresholdLimits(ua, day),
             ...compactRecordMoments(recordMoments(live.frames, ua, cut)),
-          });
+          }, insWanted));
           continue;
         }
         if (day === today) {
@@ -2062,20 +2187,25 @@ async function handleRequest(req, res, u) {
           continue;
         }
         const cached = await readIvBuild(ua, day, mode);
-        if (cached) {
+        if (cached && (!insWanted || cached.contracts?.[insWanted])) {
           // دانهٔ یک‌دقیقه همهٔ مرزهای پنج‌دقیقه را دارد، پس همان گام ساخت برمی‌گردد.
-          out.push(pickMoments(cached, seconds));
+          out.push(sliceTransport(pickMoments(cached, seconds), insWanted));
           continue;
+        }
+        if (insWanted) {
+          const own = await readIvContractBuild(ua, insWanted, day, mode);
+          if (own) { out.push(pickMoments(own, seconds)); continue; }
         }
         pending.push(day);
         out.push({ date: day, source: 'pending', provisional: false, contracts: {}, moments: [] });
       }
-      if (build && pending.length) queueIvBuild(ua, pending, mode);
+      if (build && pending.length) queueIvBuild(ua, pending, mode, insWanted);
+      const perDay = insWanted ? ivContractCost(mode) : ivBuildCost(mode);
       return sendJson(res, 200, {
-        ua, grain, mode, today, nowSecond, days: out,
+        ua, ins: insWanted, grain, mode, today, nowSecond, days: out,
         grainServed: { record: grain, rebuild: grain === 'm1' ? IV_BUILD_GRAIN : grain },
         pending: pending.length,
-        cost: { perDay: ivBuildCost(mode), requests: pending.length * ivBuildCost(mode) },
+        cost: { perDay, requests: pending.length * perDay },
         build: { ...ivBuild, queued: ivBuildQueue.size },
         recorder: ivRecStatus(),
       });

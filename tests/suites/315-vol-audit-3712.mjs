@@ -59,10 +59,9 @@ group('۳۱۵-۲. «اکنون» فقط وقتی اکنون است');
   check('پس از بستن بازار → «بیرون از جلسه»', at(46000).liveWhy === 'closed' && Number.isNaN(volWatchValues(at(46000)).ivNow));
   const closedDay = deskModel({ days: [{ date, source: 'record', provisional: false, points: fresh }], today: date + 1, ctx });
   check('روز گذشته هرگز زنده نیست', closedDay.live === false && closedDay.liveWhy === 'notToday');
-  const view = readSrc('../ui/vol-desk-view.mjs');
-  check('کارت «اکنون» را فقط برای زنده می‌نویسد و کهنگی را با سن می‌گوید', view.includes("if (model?.live) return 'تلاطم ضمنی اکنون (موقت)';") && view.includes('deskStaleNote(model)'));
-  check('میز و کارت و دیده‌بان ساعت سرور را می‌دهند', view.includes('nowSecond: clockNow()')
-    && readSrc('../ui/vol-desk-card.mjs').includes('compareDays: 5, nowSecond') && readSrc('../ui/vol-watch.mjs').includes('compareDays: 10, nowSecond'));
+  // کارت «اکنون» میز با خود میز برداشته شد (۱۴۰۵/۰۷/۱۱)؛ دیده‌بان شرطی
+  // همچنان از همین مدل می‌خواند و ساعت سرور را می‌دهد.
+  check('دیده‌بان ساعت سرور را می‌دهد', readSrc('../ui/vol-watch.mjs').includes('compareDays: 10, nowSecond'));
 }
 
 group('۳۱۵-۴. نوار خرید و فروش فقط از دفتر سالم');
@@ -113,18 +112,18 @@ group('۳۱۵-۵. کش زمینهٔ تلاطم');
 
 group('۳۱۵-۱. پاسخ فقط مال انتخاب خودش');
 {
-  const view = readSrc('../ui/vol-desk-view.mjs');
-  const load = view.slice(view.indexOf('async function load({ build = false } = {}) {'), view.indexOf('/** ساعت سرور در لحظهٔ پاسخ'));
-  check('میز: شماره، لغو، و رد پاسخ کهنه یا مال نماد دیگر', load.includes('const my = ++loadSeq;') && load.includes('controller?.abort();')
-    && load.includes('if (my !== loadSeq) return;') && load.includes('if (String(body.ua) !== want.ins) return;'));
-  check('میز: «در حال دریافت» دیگر دریافتِ نماد تازه را کنار نمی‌گذارد', !load.includes('if (loading) return;'));
-  check('میز: با عوض‌شدن نماد، عدد قبلی همان لحظه پاک می‌شود', load.includes('if (want.ins !== ua.ins || !want.ins) clearForSwitch(want);'));
+  // میز برداشته شد؛ همان نگهبان در تب «نوسان ضمنی» (هر دو دریافتش).
+  const view = readSrc('../ui/iv-charts-view.mjs');
+  const daily = view.slice(view.indexOf('async function loadDaily() {'), view.indexOf('const uaName = () =>'));
+  check('نوسان ضمنی (روزانه): شماره، لغو، و رد پاسخ کهنه یا مال نماد دیگر', daily.includes('const my = ++dailySeq;') && daily.includes('dailyCtrl?.abort();')
+    && daily.includes('if (my !== dailySeq || want !== ua) return;') && daily.includes('if (String(body.ua) !== want) return;') && !daily.includes('if (loading) return;'));
+  check('نوسان ضمنی (روزانه): با عوض‌شدن نماد، دادهٔ قبلی همان لحظه کنار می‌رود', daily.includes('if (want !== ua) {') && daily.includes('data = null;'));
+  const rng = view.slice(view.indexOf('async function loadRange('), view.indexOf('function paintRange() {'));
+  check('نوسان ضمنی (بازه): همان نگهبان، با قرارداد هم', rng.includes('const my = ++rangeSeq;') && rng.includes("if (String(body.ua) !== want || String(body.ins || '') !== ins) return;"));
   const rank = readSrc('../ui/vol-rank-view.mjs');
   const rload = rank.slice(rank.indexOf('async function load(force = false) {'), rank.indexOf('  function paint() {'));
   check('رتبه: همان نگهبان، تا خلاصهٔ نماد الف به‌نام ب ذخیره نشود', rload.includes('if (my !== loadSeq || want !== ua) return;') && rload.includes('if (String(body.ua) !== want) return;') && !rload.includes('if (loading) return;'));
-  const card = readSrc('../ui/vol-desk-card.mjs');
-  check('کارت فشرده: همان نگهبان', card.includes('if (my !== seq) return;') && card.includes('if (String(body.ua) !== ua.ins) return;'));
-  check('سرور ua را در پاسخ تلاطم تاریخی و درون‌روزی می‌فرستد', /return sendJson\(res, 200, \{\s*ua, from:/.test(readSrc('../server/server.mjs')) && readSrc('../server/server.mjs').includes('ua, grain, mode, today, nowSecond, days: out,'));
+  check('سرور ua را در پاسخ تلاطم تاریخی و درون‌روزی می‌فرستد', /return sendJson\(res, 200, \{[\s\S]{0,40}ua, from:/.test(readSrc('../server/server.mjs')) && readSrc('../server/server.mjs').includes('ua, ins: insWanted, grain, mode, today, nowSecond, days: out,'));
 }
 
 group('۳۱۵-۶. سرعت: کش روزها و ریسه');
@@ -157,8 +156,8 @@ group('۳۱۵-۶. سرعت: کش روزها و ریسه');
   const grown = { ...today, moments: [...today.moments, [45000, S, 45000, 45000, today.moments[0][4]]] };
   const t2 = deskDays({ ua: '1', days: [grown] }, ctx)[0].points;
   check('امروز: لحظه‌های قبلی از کش، فقط لحظهٔ تازه حساب می‌شود', t2.length === t1.length + 1 && t2.slice(0, t1.length).every((pt, i) => pt === t1[i]));
-  const view = readSrc('../ui/vol-desk-view.mjs');
-  check('میز محاسبه را به ریسه می‌سپارد', view.includes('await computeDeskDays(api, settings, calendar)') && !view.includes('deskDays(api, ctx)'));
+  const view = readSrc('../ui/iv-charts-view.mjs');
+  check('نمودار بازه محاسبهٔ شاخص را به ریسه می‌سپارد', view.includes('await computeDeskDays(api, settings, calendar)') && !view.includes('deskDays(api, ctx)'));
   const compute = readSrc('../ui/vol-desk-compute.mjs');
   check('ریسه با جایگزینِ همان‌جا وقتی Worker نیست', compute.includes("new Worker('/worker/vol-desk-worker.mjs', { type: 'module' })") && compute.includes("typeof Worker === 'undefined'"));
   const { computeDeskDays } = await import('../../ui/vol-desk-compute.mjs');

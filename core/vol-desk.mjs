@@ -243,3 +243,11 @@ export function volWatchValues(model) {
     live, second: live ? model.now.second : NaN,
   };
 }
+
+/** روزِ تقویمیِ چند روز معاملاتی پیش — بازه را گشاد می‌گیریم؛ سرور روزهای معاملاتی را برمی‌دارد. */
+export function deskFrom(today, span) {
+  const s = String(today);
+  const d = new Date(Date.UTC(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8))));
+  d.setUTCDate(d.getUTCDate() - Math.ceil(Number(span) * 1.6) - 6);
+  return Number(d.toISOString().slice(0, 10).replace(/-/g, ''));
+}
