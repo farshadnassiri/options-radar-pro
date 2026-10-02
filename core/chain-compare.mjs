@@ -108,11 +108,14 @@ export function fitSmile(points = []) {
   const size = degree + 1;
   const A = Array.from({ length: size }, () => new Array(size).fill(0));
   const B = new Array(size).fill(0);
-  for (const { x, y } of pts) {
+  // وزن اختیاری (مثلاً وگا، در میز تلاطم): بی `w` هر نقطه وزن یک دارد و
+  // برازش دقیقاً همان کمترین مربعاتِ پیشین است.
+  for (const { x, y, w } of pts) {
+    const weight = Number.isFinite(w) && w > 0 ? w : 1;
     const pow = Array.from({ length: size }, (_, i) => x ** i);
     for (let i = 0; i < size; i++) {
-      B[i] += pow[i] * y;
-      for (let j = 0; j < size; j++) A[i][j] += pow[i] * pow[j];
+      B[i] += weight * pow[i] * y;
+      for (let j = 0; j < size; j++) A[i][j] += weight * pow[i] * pow[j];
     }
   }
   const coef = solve(A, B);

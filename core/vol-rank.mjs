@@ -127,8 +127,11 @@ export function observationIv(obs, spot, date, settings = {}) {
  * پایه درون‌یابی می‌شوند؛ اگر فقط یک سمت در باند بود، همان — با پرچم
  * `oneSided`، چون چولگی آن را از تلاطم واقعیِ در پول دور می‌کند.
  */
-export function expiryAtmIv(rows = [], spot, bandPct = VOL_DEFAULTS.bandPct) {
+export function expiryAtmIv(rows = [], spot, bandPct = VOL_DEFAULTS.bandPct, target = spot) {
   const S = finite(spot);
+  // `target` قیمت اعمالی است که تلاطمش خواسته شده — پیش‌فرض خودِ پایه (در
+  // پول). مسیر درون‌روزی با `۱٫۱ × پایه` چولگی را از همین می‌گیرد.
+  const X = finite(target);
   const byStrike = new Map();
   for (const row of rows) {
     if (!isNum(row?.ivPct)) continue;
@@ -143,12 +146,12 @@ export function expiryAtmIv(rows = [], spot, bandPct = VOL_DEFAULTS.bandPct) {
     .map((s) => ({ strike: s.strike, ivPct: mean(s.values), count: s.values.length, kinds: [...s.kinds] }))
     .sort((a, b) => a.strike - b.strike);
   if (!strikes.length) return { ivPct: NaN, why: 'noAtm', strikes: [], used: 0, oneSided: false };
-  const below = [...strikes].reverse().find((s) => s.strike <= S);
-  const above = strikes.find((s) => s.strike >= S);
+  const below = [...strikes].reverse().find((s) => s.strike <= X);
+  const above = strikes.find((s) => s.strike >= X);
   if (below && above) {
     const ivPct = below.strike === above.strike
       ? below.ivPct
-      : below.ivPct + ((S - below.strike) / (above.strike - below.strike)) * (above.ivPct - below.ivPct);
+      : below.ivPct + ((X - below.strike) / (above.strike - below.strike)) * (above.ivPct - below.ivPct);
     const used = below.strike === above.strike ? below.count : below.count + above.count;
     return { ivPct, why: 'ok', strikes: [below.strike, above.strike], used, oneSided: false };
   }
@@ -203,12 +206,10 @@ export function ivIndexOfDay({ date, spot, observations = [] } = {}, params = {}
   const lower = [...usable].reverse().find((row) => row.dte <= T);
   const upper = usable.find((row) => row.dte >= T);
   if (lower && upper && lower.expiry !== upper.expiry) {
-    const v1 = (lower.ivPct / 100) ** 2 * lower.dte;
-    const v2 = (upper.ivPct / 100) ** 2 * upper.dte;
-    const vT = v1 + ((v2 - v1) * (T - lower.dte)) / (upper.dte - lower.dte);
-    if (vT > 0) {
+    const cm = interpolateVariance(lower.ivPct, lower.dte, upper.ivPct, upper.dte, T);
+    if (Number.isFinite(cm)) {
       return {
-        date: day, spot: S, ivPct: Math.sqrt(vT / T) * 100, why: 'ok', term, method: 'cm',
+        date: day, spot: S, ivPct: cm, why: 'ok', term, method: 'cm',
         expiries: [lower.expiry, upper.expiry], dte: T, used: lower.used + upper.used,
         flags: [lower, upper].some((row) => row.oneSided) ? ['oneSided'] : [],
       };
@@ -221,6 +222,19 @@ export function ivIndexOfDay({ date, spot, observations = [] } = {}, params = {}
     expiries: [nearest.expiry], dte: nearest.dte, used: nearest.used,
     flags: ['nearestExpiry', ...(nearest.oneSided ? ['oneSided'] : [])],
   };
+}
+
+/**
+ * درون‌یابی واریانس×زمان بین دو سررسید، در افق `T`.
+ *
+ * واحد زمان آزاد است (روز تقویمی در شاخص روزانه، سال در مسیر درون‌روزی) —
+ * فقط باید هر سه یکی باشند. واریانسِ کل نامثبت، نامعلوم است.
+ */
+export function interpolateVariance(iv1, t1, iv2, t2, T) {
+  const v1 = (iv1 / 100) ** 2 * t1;
+  const v2 = (iv2 / 100) ** 2 * t2;
+  const vT = v1 + ((v2 - v1) * (T - t1)) / (t2 - t1);
+  return vT > 0 && T > 0 ? Math.sqrt(vT / T) * 100 : NaN;
 }
 
 export const IV_INDEX_WHY = {
