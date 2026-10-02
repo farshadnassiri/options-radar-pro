@@ -427,7 +427,10 @@ export function transportPoints(day, ctx, { keepContracts = false } = {}) {
     if (price > 0 && !isNum(lastAt)) flags.add('baseAgeUnknown');
     if (day.source === 'trades' || day.source === 'book') flags.add('rebuilt');
     return {
-      second, value: r.ivPct, bid: r.bidPct, ask: r.askPct, price, spot: price, queue: queue.key,
+      // `queue` بولی است چون `intradayRealized` لحظهٔ صف را با همین کنار می‌گذارد؛
+      // کلید کامل (`normal`/`unknown`/…) در `queueKey`.
+      second, value: r.ivPct, bid: r.bidPct, ask: r.askPct, price, spot: price,
+      queue: ['buyQueue', 'sellQueue', 'halted'].includes(queue.key), queueKey: queue.key,
       why: r.why, flags: [...flags], skew: r.skewPct, termSlope: r.termSlope, used: r.used,
       maxAge: r.maxAge, expiries: r.expiries || [], term: r.term,
       ...(keepContracts ? { contracts: r.contracts } : {}),

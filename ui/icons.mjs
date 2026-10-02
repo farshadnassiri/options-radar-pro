@@ -23,6 +23,7 @@ const PATHS = {
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   wave: '<path d="M3 15c2.5 0 2.5-7 5-7s2.5 10 5 10 2.5-9 5-9 2.5 4 3 4"/>',
   peak: '<path d="M3 18h4l5-11 5 11h4"/>',
+  gauge: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-6"/><circle cx="12" cy="17" r="1.2"/>',
   ratio: '<path d="M5 19V7M5 19h6"/><path d="M19 5v12M19 5h-6"/><path d="M9 5L5 9M19 19l-4-4"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6l8-3z"/>',
   swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
@@ -76,6 +77,6 @@ export const TAB_ICON = {
   settings: 'sliders', chain: 'grid', 'live-market': 'wave', 'open-view': 'wave', history: 'clock', backtest: 'play',
   'data-export': 'download',
   'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert', datalog: 'flow',
-  'strategy-explorer': 'search', watchtower: 'bell',
+  'strategy-explorer': 'search', watchtower: 'bell', 'vol-desk': 'gauge',
   positions: 'briefcase', roll: 'rotate',
 };

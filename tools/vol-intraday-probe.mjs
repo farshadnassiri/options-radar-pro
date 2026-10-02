@@ -105,7 +105,7 @@ for (const day of got.days) {
   console.log(`\n  ${day.date} — ${INTRADAY_SOURCES[day.source] || day.source}${day.provisional ? ' (موقت)' : ''}: ${Object.keys(day.contracts || {}).length} قرارداد، ${points.length} لحظه، ${ok.length} شاخص`);
   for (const pt of points) {
     const why = pt.why === 'ok' ? '' : ` ← ${INTRADAY_WHY[pt.why] || pt.why}`;
-    console.log(`    ${hms(pt.second)}  پایه ${Number.isFinite(pt.price) ? pt.price : '—'}  IV ${Number.isFinite(pt.value) ? pt.value.toFixed(2) : '—'}  [${Number.isFinite(pt.bid) ? pt.bid.toFixed(1) : '—'}…${Number.isFinite(pt.ask) ? pt.ask.toFixed(1) : '—'}]  صف ${pt.queue}${why}${pt.flags.length ? `  {${pt.flags.join(',')}}` : ''}`);
+    console.log(`    ${hms(pt.second)}  پایه ${Number.isFinite(pt.price) ? pt.price : '—'}  IV ${Number.isFinite(pt.value) ? pt.value.toFixed(2) : '—'}  [${Number.isFinite(pt.bid) ? pt.bid.toFixed(1) : '—'}…${Number.isFinite(pt.ask) ? pt.ask.toFixed(1) : '—'}]  صف ${pt.queueKey}${why}${pt.flags.length ? `  {${pt.flags.join(',')}}` : ''}`);
   }
   if (day.source !== 'pending' && points.length && !ok.length) bad += 1;
 }

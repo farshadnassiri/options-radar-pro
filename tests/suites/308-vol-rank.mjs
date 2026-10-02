@@ -279,7 +279,7 @@ group('۳۰۸-و. سیم‌کشی: سرور، تب جدا، دفتر');
   check('خط وضعیت روزهای پاسخ‌خالی را جدا می‌گوید', volStatusText({ api: { have: 5, days: 7, missing: 2, contracts: [], build: { running: false, resting: 2 } } }).includes('تعطیل رسمی یا سهمیهٔ بالادست'));
   check('data/day-panels از گیت بیرون است', readSrc('../.gitignore').includes('data/day-panels/'));
   const dash = readSrc('../ui/tabs/live-market-dashboard.mjs');
-  check('تب جدای «رتبه و صدک تلاطم» در رصد لحظه‌ای', dash.includes("{ id: 'vol-rank', title: 'رتبه و صدک تلاطم'") && dash.includes('if (mode?.volRank) { volRank().paint(); return; }'));
+  check('تب جدای «رتبه و صدک تلاطم» در رصد لحظه‌ای', dash.includes("{ id: 'vol-rank', title: 'رتبه و صدک تلاطم'") && dash.includes('if (mode?.volRank) { card().refresh(); volRank().paint(); return; }'));
   check('انتخاب نماد از همان نقشه می‌آید و «امروز» از جلسهٔ زنده', dash.includes('getSelection: () => marketExplorer.selection(),')
     && readSrc('../ui/vol-rank-view.mjs').includes('if (!session?.current || !(session.date > 0)) return null;'));
 }

@@ -148,10 +148,10 @@ group('۳۱۱-هـ. سرتاسر: بازار ← ضبط ← موتور');
   check('هر سه لحظه شاخص دارند', pts.length === 3 && pts.every((pt) => pt.why === 'ok'), pts.map((pt) => pt.why).join());
   check('شاخص = تلاطم معلوم بازار (۵۵٪)', pts.every((pt) => near(pt.value, 55, 0.3)), pts.map((pt) => pt.value?.toFixed(2)).join());
   check('نوار خرید تا فروش دو طرف شاخص', pts.every((pt) => pt.bid < pt.value && pt.value < pt.ask));
-  check('صف معلوم و عادی؛ بی پرچمِ «نامعلوم»', pts.every((pt) => pt.queue === 'normal' && !pt.flags.includes('queueUnknown')));
+  check('صف معلوم و عادی؛ بی پرچمِ «نامعلوم»', pts.every((pt) => pt.queueKey === 'normal' && pt.queue === false && !pt.flags.includes('queueUnknown')));
 
   const queued = transportPoints({ ...day, limits: [[30000, 9000, S]] }, ctx);
-  check('آ۳ پایه روی سقف دامنه → لحظه خالی با علت «صف»', queued.every((pt) => !Number.isFinite(pt.value) && pt.why === 'queue'));
+  check('آ۳ پایه روی سقف دامنه → لحظه خالی با علت «صف»', queued.every((pt) => !Number.isFinite(pt.value) && pt.why === 'queue' && pt.queue === true));
   const unknown = transportPoints({ ...day, limits: [] }, ctx);
   check('دامنهٔ نامعلوم: شاخص هست، پرچم «صف نامعلوم» هم', unknown.every((pt) => Number.isFinite(pt.value) && pt.flags.includes('queueUnknown')));
   check('ضبط برچسب «بازسازی» نمی‌گیرد', pts.every((pt) => !pt.flags.includes('rebuilt')));

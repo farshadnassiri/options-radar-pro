@@ -28,6 +28,8 @@ import { CATALOG, GROUPS } from '/strategies/catalog.mjs';
 import { GROUP_ICON, icon } from '/ui/icons.mjs';
 import { faDigits, ltr, normFa } from '/ui/fmt.mjs';
 import { mountSubtabs } from '/ui/subtabs.mjs';
+import { buildChain, underlyingList } from '/core/chain.mjs';
+import { mountDeskCard } from '/ui/vol-desk-card.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
@@ -72,6 +74,11 @@ export async function mount(root, { state, api }) {
         <div class="sx-list" data-group="${esc(key)}"></div>
       </div>`).join('')}
       <p class="note" id="sx-none" hidden>هیچ استراتژی‌ای با این جست‌وجو نخواند.</p>
+    </section>
+    <section class="card sx-vol">
+      <div class="section-head"><div><p class="eyebrow">پیش از انتخاب ساختار</p><h3>تلاطم ضمنی نمادهای منتخب</h3></div>
+        <span>اکنون در برابر بازگشایی و دیروز همین ساعت؛ برای جزئیات «میز تلاطم کامل»</span></div>
+      <div class="vd-cards" id="sx-vol"><p class="note">در انتظار عکس تابلو…</p></div>
     </section>
     <section id="sx-stage">
       <div class="empty"><p>یک استراتژی را از بالا انتخاب کن. تا انتخاب نشود، هیچ داده‌ای گرفته نمی‌شود.</p></div>
@@ -199,7 +206,34 @@ export async function mount(root, { state, api }) {
     repaint();
   });
 
+  // ═══ تلاطم نمادهای منتخب ═══
+  //
+  // انتخاب از همان انتخابگرِ تب‌های استراتژی (`picker.selected`)؛ بی انتخاب،
+  // سه نمادِ پرحجم‌تر. نام‌ها از عکس دیده‌بان، بی درخواست تازه. هر کارت
+  // میز تلاطم را برای همان نماد باز می‌کند.
+  const volHost = $('sx-vol');
+  let volCards = [];
+  let volTimer = null;
+  const mountVolCards = (rows) => {
+    if (volCards.length) return;
+    const list = underlyingList(buildChain(rows), { rFree: Number(state.settings?.rFree) });
+    let chosen = [];
+    try { chosen = JSON.parse(localStorage.getItem('picker.selected') || '[]').map(String); } catch { chosen = []; }
+    const picked = (chosen.length ? list.filter((u) => chosen.includes(String(u.ins))) : list).slice(0, chosen.length ? 4 : 3);
+    if (!picked.length) { volHost.innerHTML = '<p class="note">نمادی روی تابلو نیست.</p>'; return; }
+    volHost.innerHTML = picked.map((u) => `<div data-sx-vol="${esc(u.ins)}"></div>`).join('');
+    volCards = picked.map((u) => mountDeskCard(volHost.querySelector(`[data-sx-vol="${CSS.escape(String(u.ins))}"]`), {
+      getUa: () => ({ ins: String(u.ins), name: u.name }), getSettings: () => state.settings,
+    }));
+    const tick = () => { if (root.isConnected && !document.hidden) volCards.forEach((c) => c.refresh()); volTimer = setTimeout(tick, 60000); };
+    tick();
+  };
+  const offWatch = api?.subscribeWatch?.((w) => { if (w?.rows?.length) mountVolCards(w.rows); });
+
   return () => {
+    offWatch?.();
+    clearTimeout(volTimer);
+    volCards.forEach((c) => c.dispose());
     if (dispose) { try { dispose(); } catch { /* بی‌اهمیت */ } }
     gen += 1;
   };

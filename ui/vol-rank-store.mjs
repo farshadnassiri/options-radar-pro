@@ -36,6 +36,9 @@ export function volSummaryOf(history, { ua, lookback } = {}) {
     regimeId: history.regime?.id || 'unknown', regimeLabel: history.regime?.label || '',
     tone: history.regime?.tone || 'neutral',
     lookback: Number(lookback) || history.params?.lookback || 0,
+    // تلاطم تاریخیِ هم‌افق، برای «IV ÷ HV» در میز تلاطم.
+    hvPct: history.rows?.at(-1)?.hv?.[history.params?.hvWindow] ?? NaN,
+    hvWindow: history.params?.hvWindow || 0,
   };
 }
 
