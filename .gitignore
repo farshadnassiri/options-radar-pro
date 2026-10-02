@@ -7,6 +7,8 @@ data/watch-history/
 data/portfolio-missions/
 data/option-roster.json
 data/option-roster.checkpoint.json
+# پرونده‌های قیمت روزانهٔ کال و پوت (رتبهٔ تلاطم) — محلی، از بالادست ساخته می‌شوند
+data/day-panels/
 data/journal.json
 # R5-21: لاگِ جریانِ داده — محلی است و برای بررسی جدا فرستاده می‌شود
 data/logs/

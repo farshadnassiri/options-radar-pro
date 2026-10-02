@@ -6,6 +6,8 @@
 import { fmt, normFa } from '/ui/fmt.mjs';
 import { onFeed, retryFeed } from '/ui/app.mjs';
 import { emptyReason } from '/ui/feed-state.mjs';
+import { readVolSummary, volChipHtml } from '/ui/vol-rank-store.mjs';
+import { tehranDateNumber } from '/core/tehran-day.mjs';
 
 const KEY = 'picker.selected';
 const displayName = (entity) => {
@@ -65,13 +67,14 @@ export function makePicker(host, opts = {}) {
       : list;
     listHost.innerHTML = '';
     const frag = document.createDocumentFragment();
+    const today = tehranDateNumber();
     for (const u of shown.slice(0, 400)) {
       const row = document.createElement('label');
       row.className = 'picker-row';
       row.setAttribute('aria-selected', selected.has(u.ins) ? 'true' : 'false');
       row.innerHTML = `
         <input type="checkbox" ${selected.has(u.ins) ? 'checked' : ''}>
-        <span>${displayName(u)}</span>
+        <span>${displayName(u)} ${volChipHtml(readVolSummary(u.ins), { today })}</span>
         <span class="m">${fmt.int(u.contracts)} قرارداد</span>
         <span class="m">${fmt.int(u.quoted)} مظنه</span>
         <span class="m">${u.last ? fmt.money(u.last) : '—'}</span>`;

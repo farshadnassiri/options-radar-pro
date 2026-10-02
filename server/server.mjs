@@ -32,7 +32,8 @@ import {
   pickUniverseSource, rangeSummary, rosterAt, rosterChainRows, rosterCoverage,
   repairRosterBaseNames, repairRosterSides, rosterCovers, rosterHealth, rosterInRange, rosterNote, ROSTER_VERSION,
 } from '../core/option-roster.mjs';
-import { scanBoardRows, tradingDays } from '../core/roster-scan.mjs';
+import { dayPath, scanBoardRows, tradingDays } from '../core/roster-scan.mjs';
+import { panelFromDay, panelSlice } from '../core/day-panel.mjs';
 import { runRosterBuild } from '../core/roster-build.mjs';
 import { infoPath, instrumentInfo, optionSpec, optionSpecPath } from '../core/roster-catalog.mjs';
 import { readJsonSafe } from '../core/json-safe.mjs';
@@ -1078,7 +1079,14 @@ async function buildRoster(from, to) {
       seed,
       catalogAlreadyComplete,
       scannedDays: rosterCache.file?.days || [],
-      get: (path) => get(path, ROSTER_SCAN_TTL, ROSTER_SCAN_PRIORITY),
+      // همان پاسخِ روزانه‌ای که دفتر برای هویت می‌خواند، قیمت هم دارد؛
+      // پروندهٔ قیمتِ آن روز رایگان کنارش ذخیره می‌شود (رتبهٔ تلاطم).
+      get: async (path) => {
+        const data = await get(path, ROSTER_SCAN_TTL, ROSTER_SCAN_PRIORITY);
+        const day = panelDayOf(path);
+        if (day) await savePanel(day, data).catch(() => {});
+        return data;
+      },
       onProgress: (p) => {
         rosterBuild.stage = p.stage;
         rosterBuild.stageDone = p.done;
@@ -1141,6 +1149,98 @@ function buildStatus(missing = 0) {
     finishedAt: rosterBuild.finishedAt || 0,
   };
 }
+
+// ——————————————————————— پرونده‌های قیمت روزانه ———————————————————————
+//
+// رتبه و صدک تلاطم ضمنی، قیمت قراردادهای **هر روزِ** یک سال گذشته را
+// می‌خواهد، سررسیدشده‌ها هم. `GetInstrmentsHistoryInDay` با یک درخواست
+// پایانیِ همهٔ ابزارهای معامله‌شدهٔ آن روز را می‌دهد؛ کال و پوت‌هایش
+// (`core/day-panel.mjs`) یک‌بار برای همیشه در `data/day-panels/` می‌مانند،
+// چون روزِ گذشته عوض نمی‌شود. امروز هرگز نوشته نمی‌شود: جلسه هنوز باز است و
+// عددِ نیمه‌روز با برچسب «پایانی» ماندگار می‌شد.
+const PANEL_DIR = path.join(ROOT, 'data', 'day-panels');
+const PANEL_PRIORITY = 9;
+const PANEL_CONCURRENCY = 3;
+const PANEL_MEMO_CAP = 300;
+const PANEL_EMPTY_RETRY_MS = 6 * 3600 * 1000;
+const panelMemo = new Map();
+// روزی که پاسخِ خالی داد: یا تعطیل رسمی بود یا سهمیهٔ بالادست — از اینجا
+// نمی‌شود فهمید کدام. پس پرونده‌ای نوشته نمی‌شود (تعطیل را دائمی «خالی»
+// نمی‌کنیم) ولی تا شش ساعت دوباره پرسیده هم نمی‌شود، تا هر بار باز شدنِ
+// تب، روزهای تعطیل سال را دوباره از بالادست نخواهد.
+const panelEmptyAt = new Map();
+let panelBuild = { running: false, total: 0, done: 0, failed: 0, empty: 0, lastError: '', finishedAt: 0 };
+const panelQueue = new Set();
+
+const panelDayOf = (pathname) => {
+  const m = /GetInstrmentsHistoryInDay\/(\d{8})/.exec(String(pathname || ''));
+  return m ? Number(m[1]) : 0;
+};
+const panelFile = (day) => path.join(PANEL_DIR, `${day}.json`);
+
+async function readPanel(day) {
+  if (panelMemo.has(day)) return panelMemo.get(day);
+  try {
+    const panel = JSON.parse(await fs.readFile(panelFile(day), 'utf8'));
+    panelMemo.set(day, panel);
+    evictOldest(panelMemo, PANEL_MEMO_CAP);
+    return panel;
+  } catch { return null; }
+}
+
+async function savePanel(day, payload) {
+  if (!(day > 0) || day >= tehranDateNumber()) return null;
+  const panel = panelFromDay(payload, day);
+  // پاسخِ ردیف‌دار ولی بی‌قیمت یعنی شکلِ پاسخ عوض شده؛ پروندهٔ خالی نوشته
+  // نمی‌شود تا دفعهٔ بعد دوباره امتحان شود و خطا دیده شود.
+  if (!panel.priced) {
+    if (panel.instruments > 0) panelBuild.lastError = `پاسخ ${day} ${panel.instruments} ردیف داشت و هیچ کال یا پوتِ قیمت‌دار نداشت`;
+    else panelEmptyAt.set(day, Date.now());
+    return null;
+  }
+  panelEmptyAt.delete(day);
+  await fs.mkdir(PANEL_DIR, { recursive: true });
+  await writeJsonAtomic(panelFile(day), panel);
+  panelMemo.set(day, panel);
+  evictOldest(panelMemo, PANEL_MEMO_CAP);
+  return panel;
+}
+
+/** روزهای نبوده را در صف می‌گذارد؛ تازه‌ترین روزها اول، چون «حالا» از آن‌هاست. */
+const panelResting = (day) => Date.now() - (panelEmptyAt.get(day) || 0) < PANEL_EMPTY_RETRY_MS;
+
+function queuePanels(days) {
+  for (const day of days) if (!panelResting(day)) panelQueue.add(day);
+  if (panelBuild.running || !panelQueue.size) return;
+  panelBuild = { running: true, total: panelQueue.size, done: 0, failed: 0, empty: 0, lastError: '', finishedAt: 0 };
+  (async () => {
+    const worker = async () => {
+      while (panelQueue.size) {
+        const day = Math.max(...panelQueue);
+        panelQueue.delete(day);
+        try {
+          if (!(await readPanel(day)) && !(await savePanel(day, await get(dayPath(day), ROSTER_SCAN_TTL, PANEL_PRIORITY)))) {
+            panelBuild.empty += 1;
+          }
+        } catch (e) {
+          panelBuild.failed += 1;
+          panelBuild.lastError = `${day}: ${e.message || e}`;
+        } finally {
+          panelBuild.done += 1;
+          panelBuild.total = Math.max(panelBuild.total, panelBuild.done + panelQueue.size);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: PANEL_CONCURRENCY }, worker));
+    panelBuild.running = false;
+    panelBuild.finishedAt = Date.now();
+  })();
+}
+
+const panelStatus = (missing = []) => ({
+  ...panelBuild, queued: panelQueue.size,
+  resting: missing.filter((day) => panelResting(day)).length,
+});
 
 /**
  * ردیف‌هایی که فقط برای نگاشتِ «نام پایه → کد» لازم‌اند.
@@ -1654,6 +1754,62 @@ async function handleRequest(req, res, u) {
         // مصرف‌کننده باید بتواند حلقهٔ خودش را هم متوقف کند، نه اینکه
         // بستهٔ بعدی را بفرستد و سهمیه را باز هم بسوزاند.
         ...(state.throttled ? { throttled: true, throttleNote: throttleNote(state), stopped } : {}),
+      });
+    }
+
+    // ——— تاریخچهٔ تلاطم یک پایه ———
+    //
+    // قراردادهای این پایه در بازه (از دفتر، سررسیدشده‌ها هم، به‌علاوهٔ
+    // تابلوی امروز) و قیمت هر روزشان از پرونده‌های روزانه. پاسخ منتظر
+    // ساخت نمی‌ماند: هرچه هست برمی‌گردد، روزهای نبوده در صف می‌روند و رابط
+    // دوباره می‌پرسد. محاسبهٔ تلاطم در `core/vol-rank.mjs` است، نه اینجا.
+    if (p === '/api/vol/history') {
+      const ua = String(u.searchParams.get('ua') || '').trim();
+      const vFrom = u.searchParams.get('from') || '', vTo = u.searchParams.get('to') || '';
+      if (!/^\d{5,25}$/.test(ua)) return sendJson(res, 400, { error: '«ua» باید کد نماد پایه باشد' });
+      for (const [name, value] of [['from', vFrom], ['to', vTo]]) {
+        if (!validArchiveDate(value)) return sendJson(res, 400, { error: `«${name}» باید هشت رقم میلادی باشد` });
+      }
+      if (Number(vTo) < Number(vFrom)) return sendJson(res, 400, { error: 'پایان بازه پیش از آغاز آن است' });
+      const today = tehranDateNumber();
+      const days = tradingDays(vFrom, vTo).filter((day) => day < today);
+      const build = u.searchParams.get('build') !== '0';
+
+      const { file } = await readRoster();
+      const rosterGap = missingDays(file, tradingDays(vFrom, vTo)).length;
+      if (build && rosterNeedsBuild(file, rosterGap)) buildRoster(vFrom, vTo);
+      const board = await boardRowsForIndex();
+      const built = await rosterRangeUniverse(Number(vFrom), Number(vTo), board);
+      const contracts = new Map();
+      const add = (row, side) => {
+        const ins = String(row?.[`insCode_${side === 'call' ? 'C' : 'P'}`] || '');
+        const strike = num(row?.strikePrice, 0);
+        const expiry = num(row?.expiryGregorian, 0) || num(row?.endDate, 0);
+        if (!ins || !(strike > 0) || !(expiry > 0)) return;
+        contracts.set(ins, {
+          ins, kind: side, strike, expiry,
+          symbol: String(row?.[`lVal18AFC_${side === 'call' ? 'C' : 'P'}`] || ''),
+        });
+      };
+      for (const row of [...built.rows, ...board]) {
+        if (String(row?.uaInsCode) !== ua) continue;
+        add(row, 'call'); add(row, 'put');
+      }
+      const wanted = new Set(contracts.keys());
+      const panels = {};
+      const missing = [];
+      for (const day of days) {
+        const panel = await readPanel(day);
+        if (panel) panels[day] = panelSlice(panel, wanted);
+        else missing.push(day);
+      }
+      if (build && missing.length) queuePanels(missing);
+      return sendJson(res, 200, {
+        ua, from: Number(vFrom), to: Number(vTo), today,
+        days: days.length, have: days.length - missing.length, missing: missing.length,
+        contracts: [...contracts.values()], panels,
+        build: panelStatus(missing),
+        roster: { missingDays: rosterGap, build: buildStatus(rosterGap), coverage: built.coverage, contracts: built.contracts },
       });
     }
 

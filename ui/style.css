@@ -4617,6 +4617,46 @@ td.rich { padding-block: var(--space-1); }
   .cc-bar { width: 72px; }
 }
 
+/* ─── رتبه و صدک تلاطم (رصد لحظه‌ای) ──────────────────────────────── */
+.vr-controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin: 8px 0 12px; }
+.vr-controls label { display: grid; gap: 4px; color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
+.vr-gauges { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0; }
+.vr-gauge-card { display: grid; gap: 4px; margin: 0; padding: 10px 12px; }
+.vr-gauge { height: 150px; }
+.vr-gauge-card figcaption { display: grid; gap: 2px; text-align: center; }
+.vr-gauge-card small { color: var(--muted); font-size: var(--fs-xs); }
+.vr-gauge-card span { color: var(--ink-2); font-size: var(--fs-xs); }
+.vr-regime { display: grid; gap: 8px; margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--line-soft); border-inline-start: 4px solid var(--muted); border-radius: var(--radius-md); background: var(--panel); }
+.vr-regime[data-tone="cool"] { border-inline-start-color: var(--accent); }
+.vr-regime[data-tone="hot"] { border-inline-start-color: var(--warn); }
+.vr-regime > div { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.vr-regime small { color: var(--muted); font-size: var(--fs-xs); }
+.vr-regime strong { color: var(--ink); font-size: var(--fs-lg); }
+.vr-regime p { margin: 0; color: var(--ink-2); }
+.vr-steps { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.vr-steps li { padding: 2px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-pill); background: var(--panel-2); color: var(--muted); font-size: var(--fs-xs); }
+.vr-steps li[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); font-weight: 800; }
+.vr-steps li[aria-current="true"][data-tone="hot"] { border-color: var(--warn); background: var(--warn-soft); }
+.vr-notes { margin: 0; padding-inline-start: 18px; color: var(--muted); font-size: var(--fs-xs); }
+.vr-kpis { margin-bottom: 12px; }
+.vr-compare .cc-bar > i { background: var(--accent); }
+.vr-compare td.gain { color: var(--gain); }
+.vr-compare td.loss { color: var(--loss); }
+.vr-chart { height: 400px; }
+.vr-chip { display: inline-block; margin-inline-start: 6px; padding: 0 7px; border: 1px solid var(--line-soft); border-radius: var(--radius-pill); background: var(--panel-2); color: var(--ink-2); font-size: var(--fs-2xs); font-weight: 700; white-space: nowrap; vertical-align: middle; }
+.vr-chip[data-tone="cool"] { border-color: var(--accent-line); color: var(--accent-ink); }
+.vr-chip[data-tone="hot"] { border-color: var(--warn-line); color: var(--warn); }
+.vr-chip[data-stale="true"] { opacity: 0.6; }
+button.lmm-stat.vr-open { text-align: start; font: inherit; cursor: pointer; }
+button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
+.vr-chart-square { height: 460px; }
+@media (max-width: 760px) {
+  .vr-gauges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vr-gauge { height: 130px; }
+  .vr-chart { height: 320px; }
+  .vr-chart-square { height: 380px; }
+}
+
 
 .pb-skin {
   --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */

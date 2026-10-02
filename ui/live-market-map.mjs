@@ -13,6 +13,8 @@ import {
 } from '../core/decision-dashboard.mjs';
 import { shouldFetchRange } from './live-dashboard-scope.mjs';
 import { busyBlock } from './busy.mjs';
+import { readVolSummary, volTileParts } from './vol-rank-store.mjs';
+import { tehranDateNumber } from '../core/tehran-day.mjs';
 import { fetchInfos } from './quote-intake.mjs';
 import { mergeRangeInfo, rangeHeading } from '../core/range-info.mjs';
 
@@ -184,6 +186,12 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       ${stat('حجم اختیار', fmt.int(ua.volume), `${fmt.int(ua.callVol)} کال · ${fmt.int(ua.putVol)} پوت`)}
       ${stat('موقعیت باز', fmt.int(ua.oi), `نسبت پوت به کال ${fmt.num(ua.pcRatio)}`)}
       ${stat('ساختار زنجیره', fmt.int(ua.expiries), `${fmt.int(ua.strikes)} اعمال · ${fmt.int(ua.twoSided)} مظنه دوطرفه`)}
+      ${(() => {
+        // IVR و IVP آخرین باری که تب «رتبه و صدک تلاطم» برای این پایه
+        // ساخت؛ کلیک همان تب را باز می‌کند.
+        const [label, value, note] = volTileParts(readVolSummary(ua.ins), { today: tehranDateNumber() });
+        return `<button type="button" class="lmm-stat vr-open" data-open-mode="vol-rank"><small>${esc(label)}</small><strong>${value}</strong><span>${esc(note)}</span></button>`;
+      })()}
     </div>`;
     expiryStep.hidden = expiries().length === 0;
     expiryRail.innerHTML = expiries().map((row) => `<button type="button" data-lmm-expiry="${esc(row.endDate)}" aria-pressed="${String(row.endDate) === endDate}"><b>${dateLabel(row.endDate)}</b><small>${fmt.int(row.days)} روز · ارزش ${fmt.rialText(row.value)}</small></button>`).join('');

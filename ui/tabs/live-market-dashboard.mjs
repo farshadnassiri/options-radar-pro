@@ -11,6 +11,7 @@ import {
 } from '/core/decision-dashboard.mjs';
 import { numOrNaN } from '/core/num.mjs';
 import { mountChainCompare } from '/ui/chain-compare-view.mjs';
+import { mountVolRank } from '/ui/vol-rank-view.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -176,6 +177,9 @@ export const DASHBOARD_MODES = [
   { id: 'pulse', title: 'نبض و جهت بازار', hint: 'وسعت، روند و تغییر نسبت به دیروز', views: pulseViews },
   { id: 'liquidity', title: 'نقدینگی و سررسید', hint: 'ارزش، حجم، موقعیت باز و تمرکز', views: liquidityViews },
   { id: 'volatility', title: 'تلاطم و انتظارات', hint: 'IV لحظه‌ای و تحلیل نگاه باز', views: volatilityViews },
+  // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۰): «IV Rank و IV Percentile… در تبی جدا»،
+  // با مقایسه در برابر تلاطم تاریخی — منطق در `core/vol-rank.mjs`.
+  { id: 'vol-rank', title: 'رتبه و صدک تلاطم', hint: 'IV Rank، IV Percentile و تلاطم تاریخی نماد انتخابی', views: [], volRank: true },
   { id: 'board', title: 'اختیارهای پرمعامله', hint: 'سربه‌سر وزنی هر سررسید و فاصله از قیمت جاری', views: boardViews, board: true },
   ...EMBEDDED_MODES.map((mode) => ({ ...mode, views: [] })),
 ];
@@ -865,6 +869,8 @@ export async function mount(root, { state, api }) {
       ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div id="dd-market-explorer"></div></section>`
       : mode.compare
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-compare-host></div></section>`
+      : mode.volRank
+        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-vol-rank-host></div></section>`
       : mode.mod
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
         : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>از میان ${fmt.int(mode.views.length)} جدول و نمودار فقط نمای موردنیاز را باز کن</span></div>${mode.board ? `<div class="decision-board-controls"><label>سنجه<select id="dd-board-metric">${BOARD_METRIC_LABELS.map(([key, label]) => `<option value="${key}">${label}</option>`).join('')}</select></label><div class="decision-side-switch" role="group" aria-label="تفکیک سمت">${BOARD_SIDES.map(([key, label], index) => `<button type="button" data-board-side="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div><p class="note" id="dd-board-note">سنجه انتخابی هم رتبه‌بندی می‌کند هم وزن شاخص سربه‌سر است.</p></div>` : ''}<div class="decision-view-buttons">${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host>${busyBlock('در حال دریافت نخستین عکس بازار… این مرحله چند ثانیه طول می‌کشد.', { lines: 4 })}</div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</div>`;
@@ -918,6 +924,19 @@ export async function mount(root, { state, api }) {
       });
     }
     return compareView;
+  };
+  // تب رتبهٔ تلاطم هم تنبل سوار می‌شود؛ تاریخچه فقط وقتی باز شد گرفته می‌شود.
+  let volRankView = null;
+  const volRank = () => {
+    if (!volRankView) {
+      volRankView = mountVolRank(root.querySelector('[data-vol-rank-host]'), {
+        getSelection: () => marketExplorer.selection(),
+        getPayload: () => payload,
+        getSettings: () => state.settings,
+        isVisible: () => activeMode === 'vol-rank' && root.isConnected,
+      });
+    }
+    return volRankView;
   };
 
   function paintInterval() {
@@ -1212,6 +1231,7 @@ export async function mount(root, { state, api }) {
     $('dd-toolbar').hidden = !mode?.views?.length;
     if (mode?.explorer) { paintLevels(); return; }
     if (mode?.compare) { compare().paint(); return; }
+    if (mode?.volRank) { volRank().paint(); return; }
     if (mode?.mod) { await mountEmbedded(mode); return; }
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
     if (!panel || !view) return;
@@ -1284,6 +1304,12 @@ export async function mount(root, { state, api }) {
       $('dd-status').textContent = `به‌روزرسانی ناموفق: ${error.message}`; logError('داشبورد تصمیم‌گیری', error);
     } finally { loading = false; $('dd-refresh').disabled = false; busyBar?.busy(false); schedule(); }
   }
+
+  // کاشیِ «رتبهٔ تلاطم» روی نقشه (و هر پیوند درونی دیگر) تب خودش را باز می‌کند.
+  root.addEventListener('click', (event) => {
+    const link = event.target.closest('[data-open-mode]');
+    if (link) root.querySelector(`[data-mode="${link.dataset.openMode}"]`)?.click();
+  });
 
   root.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', async () => {
     activeMode = button.dataset.mode;
