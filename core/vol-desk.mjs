@@ -12,7 +12,7 @@
 // خوانده نمی‌شود.
 
 import {
-  transportPoints, dayClose, openPoint, valueAt, dayStats, sameTime, sameTimeSummary,
+  transportPoints, intradaySignature, dayClose, openPoint, valueAt, dayStats, sameTime, sameTimeSummary,
   intradayRealized, realizedSoFar,
 } from './vol-intraday.mjs';
 
@@ -22,12 +22,57 @@ const isNum = (value) => Number.isFinite(value);
 const valid = (points) => (points || []).filter((pt) => isNum(pt.value));
 const mean = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : NaN);
 
-/** هر روزِ پاسخ → نقطه‌های شاخص با موتور یکتا. */
-export function deskDays(api, ctx) {
+// ═══ کش نقطه‌ها ═══
+//
+// گزارش آزمون ۳۷۱۲e1a (بند ۶): ۴۰ روز × ۴۰ قرارداد × ۴۳ لحظه حدود ۱٫۵ ثانیه
+// رشتهٔ اصلی مرورگر را می‌بست و میز، کارت و دیده‌بان هر کدام همان تاریخچه را
+// از نو می‌ساختند. روزِ بسته‌شده عوض نمی‌شود، پس نقطه‌هایش با امضای داده و
+// پارامترها نگه داشته می‌شود؛ روزِ موقتِ امروز لحظه‌به‌لحظه (هر لحظه با
+// امضای خودش)، تا هر دقیقه فقط لحظه‌های تازه حساب شوند. کلید از خودِ داده
+// ساخته می‌شود، نه از نام روز: دادهٔ عوض‌شده هرگز نقطهٔ کهنه نمی‌گیرد.
+const DAY_CACHE = new Map();
+const MOMENT_CACHE = new Map();
+const DAY_CAP = 400, MOMENT_CAP = 6000;
+
+function hashOf(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(36) + text.length.toString(36);
+}
+function remember(map, key, value, cap) {
+  map.set(key, value);
+  if (map.size > cap) map.delete(map.keys().next().value);
+  return value;
+}
+
+export function clearDeskCache() { DAY_CACHE.clear(); MOMENT_CACHE.clear(); }
+export const deskCacheSize = () => ({ days: DAY_CACHE.size, moments: MOMENT_CACHE.size });
+
+function cachedPoints(day, ctx, sig) {
+  if (!day?.moments?.length) return transportPoints(day, ctx);
+  if (!day.provisional) {
+    const key = `${sig}|${hashOf(JSON.stringify(day))}`;
+    const hit = DAY_CACHE.get(key);
+    if (hit) { DAY_CACHE.delete(key); DAY_CACHE.set(key, hit); return hit; }
+    return remember(DAY_CACHE, key, transportPoints(day, ctx), DAY_CAP);
+  }
+  const head = `${sig}|${day.date}|${day.source}|${JSON.stringify(day.limits || null)}`;
+  return day.moments.map((row) => {
+    const meta = Object.keys(row[4] || {}).map((ins) => day.contracts?.[ins]);
+    const key = `${head}|${hashOf(JSON.stringify([row, meta]))}`;
+    const hit = MOMENT_CACHE.get(key);
+    if (hit) return hit;
+    return remember(MOMENT_CACHE, key, transportPoints({ ...day, moments: [row] }, ctx)[0], MOMENT_CAP);
+  });
+}
+
+/** هر روزِ پاسخ → نقطه‌های شاخص با موتور یکتا (با کش؛ `cache: false` بی کش). */
+export function deskDays(api, ctx, { cache = true } = {}) {
+  const sig = intradaySignature(ctx);
   return (api?.days || []).map((day) => ({
     date: day.date, source: day.source, provisional: Boolean(day.provisional), why: day.why || '',
     contracts: Object.keys(day.contracts || {}).length,
-    points: transportPoints(day, ctx),
+    points: cache ? cachedPoints(day, ctx, sig) : transportPoints(day, ctx),
     raw: day,
   })).sort((a, b) => a.date - b.date);
 }
@@ -51,19 +96,20 @@ export function momentDetail(day, second, ctx) {
  * `today`: روز تهران؛ `summary`: خلاصهٔ روزانهٔ رتبه (`ui/vol-rank-store.mjs`)
  * یا `null`؛ `compareDays`: چند روزِ گذشته در هم‌ساعت و الگوی ساعتی.
  */
-export function deskModel({ days = [], today = 0, ctx, summary = null, compareDays = 10 } = {}) {
+export function deskModel({ days = [], today = 0, ctx, summary = null, compareDays = 10, nowSecond = NaN } = {}) {
   const session = ctx.session;
   const skipSec = Math.max(0, Number(ctx.settings?.volOpenSkipMin ?? 15)) * 60;
   const tdy = Number(ctx.settings?.tradingDaysYr) > 0 ? Number(ctx.settings.tradingDaysYr) : 240;
   const withData = days.filter((d) => valid(d.points).length);
   const todayDay = days.find((d) => d.date === today) || null;
   const focus = todayDay && valid(todayDay.points).length ? todayDay : withData.at(-1) || null;
-  const live = Boolean(focus && focus.date === today && focus.provisional);
+  const provisional = Boolean(focus && focus.date === today && focus.provisional);
   const prior = withData.filter((d) => focus && d.date < focus.date).slice(-compareDays);
   const prev = prior.at(-1) || null;
 
   const out = {
-    version: VOL_DESK_VERSION, today, focus, live, prior, prev, days, openSec: session.open, skipSec,
+    version: VOL_DESK_VERSION, today, focus, live: false, liveWhy: provisional ? '' : 'notToday', provisional,
+    nowAgeSec: NaN, clockSecond: NaN, prior, prev, days, openSec: session.open, skipSec,
     now: null, open: null, stats: null, ydaySame: null, ydayClose: null,
     same: null, sameRows: [], rv: null, rvDays: null, summary,
     ivRv: NaN, ivHv: NaN, change: NaN, changeYday: NaN, changeYdayClose: NaN,
@@ -75,6 +121,27 @@ export function deskModel({ days = [], today = 0, ctx, summary = null, compareDa
   }
   const now = dayClose(focus.points);
   out.now = now;
+  // ═══ «اکنون» فقط وقتی اکنون است ═══
+  //
+  // گزارش آزمون ۳۷۱۲e1a (بند ۲): نقطهٔ معتبر ۹:۱۵ و نقطهٔ نامعتبرِ ۱۲:۳۰؛
+  // `dayClose` به آخرین مقدار معتبر عقب رفت و مدل باز هم «زنده» بود، پس
+  // دیده‌بان شرطی عددِ سه ساعت پیش را «IV اکنون» گرفت. موقت‌بودنِ امروز
+  // تازگی را تضمین نمی‌کند. حالا «زنده» یعنی هر چهار با هم: روزِ امروز،
+  // ساعت جلسه (از ساعت سرور، نه آخرین قاب)، آخرین لحظهٔ روز خودش معتبر، و
+  // سنِ مقدار از سقف کهنگی کمتر. وگرنه همان عدد «آخرین مقدار معتبر» است با
+  // سن و علت، و سنجه‌های دیده‌بان `NaN` می‌شوند.
+  if (provisional) {
+    const last = focus.points.reduce((a, b) => (b.second > a.second ? b : a));
+    const clock = isNum(nowSecond) ? nowSecond : last.second;
+    const maxAge = Number(ctx.params?.maxAgeSec) > 0 ? Number(ctx.params.maxAgeSec) : 900;
+    out.clockSecond = clock;
+    out.nowAgeSec = Math.max(0, clock - now.second);
+    out.liveWhy = clock < session.open || clock > session.close ? 'closed'
+      : !isNum(last.value) ? 'lastInvalid'
+        : out.nowAgeSec > maxAge ? 'old' : '';
+    out.live = out.liveWhy === '';
+    out.lastWhy = isNum(last.value) ? '' : last.why;
+  }
   out.open = openPoint(focus.points, { open: session.open, skipSec });
   out.stats = dayStats(focus.points, { open: session.open, skipSec });
   out.change = out.open ? now.value - out.open.value : NaN;
@@ -93,13 +160,22 @@ export function deskModel({ days = [], today = 0, ctx, summary = null, compareDa
   return out;
 }
 
+/** چرا مقدار نمایش‌داده «اکنون» نیست. */
+export const DESK_LIVE_WHY = {
+  notToday: 'امروز داده‌ای نیست؛ آخرین جلسه',
+  closed: 'بیرون از ساعت جلسه',
+  lastInvalid: 'آخرین لحظهٔ امروز شاخص نساخت',
+  old: 'کهنه‌تر از سقف تازگی',
+};
+
 /** ردیف‌های جدول «اکنون در برابر …». */
 export function deskCompareRows(model) {
   if (!model?.now) return [];
   const now = model.now.value;
   const row = (label, value, note = '', extra = {}) => ({ label, value, diff: isNum(value) ? now - value : NaN, note, ...extra });
   const rows = [
-    row(model.live ? 'اکنون' : 'پایان آخرین جلسه', now, model.live ? 'موقت؛ تا آخرین قاب ضبط' : ''),
+    row(model.live ? 'اکنون' : model.provisional ? 'آخرین مقدار معتبر امروز' : 'پایان آخرین جلسه', now,
+      model.live ? 'موقت؛ تا آخرین قاب ضبط' : model.provisional ? `${Math.round((model.nowAgeSec || 0) / 60)} دقیقه پیش؛ ${DESK_LIVE_WHY[model.liveWhy] || ''}` : ''),
     row('بازگشایی امروز', model.open?.value, model.open ? `نخستین لحظهٔ معتبر پس از ${Math.round(model.skipSec / 60)} دقیقهٔ اول` : 'هنوز نیست'),
     row('سقف امروز تا اکنون', model.stats?.high),
     row('کف امروز تا اکنون', model.stats?.low),

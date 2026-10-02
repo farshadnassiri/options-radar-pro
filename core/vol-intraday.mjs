@@ -101,12 +101,30 @@ function solve(kind, price, S, K, years, settings) {
  * `obs`: `{ ins, kind, strike, expiry, quote }` که `quote` خروجی `quoteAt`
  * است. همان قیمت و همان زمان به `impliedVolWhy` می‌رود که موتور تلاطم پاها
  * — تفاوت فقط مبنای زمان است، که پارامتر است.
+ *
+ * ═══ نوار خرید و فروش فقط از مظنهٔ سالم ═══
+ *
+ * گزارش آزمون ۳۷۱۲e1a (بند ۴): دفترِ ۱۸۰۰ ثانیه‌ای کنار معاملهٔ تازه داده
+ * شد. `quoteAt` دفتر را درست «کهنه» خواند و قیمت اصلی را از معامله گرفت،
+ * ولی تلاطم خرید و فروش از همان دو قیمتِ کهنه ساخته شد (۴۴٫۴۴٪ تا ۷۵٫۴۶٪)
+ * و نوارِ «اکنون» دو مظنهٔ منقضی را نشان داد. حالا IV خرید و فروش فقط وقتی
+ * ساخته می‌شود که سلامت دفتر `ok` باشد: دوطرفه، نامتقاطع، مرتب و تازه.
+ * تازگیِ معاملهٔ جایگزین اعتبار دفتر را برنمی‌گرداند.
+ *
+ * `opts.full = false` (درون شاخص) فقط تلاطم قیمت اصلی را حل می‌کند؛ خرید
+ * و فروش برای قراردادهای واردِ شاخص بعداً با `contractBand` حل می‌شوند.
+ * `opts.timeMemo` زمان تا سررسید را برای قراردادهای هم‌سررسیدِ یک لحظه
+ * یک بار حساب می‌کند.
  */
-export function contractIvAt(obs, base, at, ctx) {
+export function contractIvAt(obs, base, at, ctx, { full = true, timeMemo = null } = {}) {
   const S = n(base?.price), K = n(obs?.strike);
   const kind = obs?.kind === 'put' ? 'put' : obs?.kind === 'call' ? 'call' : null;
   const p = ctx.params;
-  const t = volTime(at, obs?.expiry, { basis: p.basis, settings: ctx.settings, calendar: ctx.calendar, offDayWeight: p.offDayWeight, expiryMoment: p.expiryMoment });
+  let t = timeMemo?.get(obs?.expiry);
+  if (!t) {
+    t = volTime(at, obs?.expiry, { basis: p.basis, settings: ctx.settings, calendar: ctx.calendar, offDayWeight: p.offDayWeight, expiryMoment: p.expiryMoment });
+    timeMemo?.set(obs?.expiry, t);
+  }
   const q = obs?.quote || {};
   const out = {
     ins: String(obs?.ins ?? ''), kind, strike: K, expiry: normalizeHistoryDate(obs?.expiry),
@@ -116,14 +134,25 @@ export function contractIvAt(obs, base, at, ctx) {
   };
   if (!kind || !(K > 0) || !(S > 0)) return { ...out, why: 'input' };
   if (!(t.years > 0)) return { ...out, why: t.why || 'expired' };
-  out.ivMid = solve(kind, n(q.mid), S, K, t.years, ctx.settings);
-  out.ivBid = solve(kind, n(q.bid), S, K, t.years, ctx.settings);
-  out.ivAsk = solve(kind, n(q.ask), S, K, t.years, ctx.settings);
-  if (n(q.lastAge) <= p.maxAgeSec) out.ivTrade = solve(kind, n(q.last), S, K, t.years, ctx.settings);
   out.ivPct = solve(kind, n(q.price), S, K, t.years, ctx.settings);
+  // میانه همان قیمت اصلی است وقتی منبعش میانه است؛ دوباره حل نمی‌شود.
+  if (q.priceSource === 'mid') out.ivMid = out.ivPct;
+  else if (q.health === 'ok') out.ivMid = solve(kind, n(q.mid), S, K, t.years, ctx.settings);
+  if (full) {
+    contractBand(out, q, S, ctx);
+    if (n(q.lastAge) <= p.maxAgeSec) out.ivTrade = solve(kind, n(q.last), S, K, t.years, ctx.settings);
+  }
   out.quoteAge = q.priceSource === 'mid' ? n(q.bookAge) : n(q.lastAge);
   if (!isNum(out.ivPct)) out.why = q.why || (n(q.price) > 0 ? 'unsolved' : 'noQuote');
   return out;
+}
+
+/** IV خرید و فروش یک قرارداد — فقط از دفترِ سالم و تازه (`health === 'ok'`). */
+export function contractBand(row, quote, spot, ctx) {
+  if (quote?.health !== 'ok' || !(row.years > 0) || !row.kind) return row;
+  row.ivBid = solve(row.kind, n(quote.bid), n(spot), row.strike, row.years, ctx.settings);
+  row.ivAsk = solve(row.kind, n(quote.ask), n(spot), row.strike, row.years, ctx.settings);
+  return row;
 }
 
 /**
@@ -134,7 +163,7 @@ export function contractIvAt(obs, base, at, ctx) {
  * ساختار زمانی، چولگی (۱۱۰٪ پایه منهای در پول)، شیب زمانی (نزدیک منهای
  * بعدی)، و تلاطم و فاصله از لبخندِ **هر قرارداد** — همان گذر، رایگان.
  */
-export function ivIndexAt({ at, base = {}, observations = [] } = {}, ctx) {
+export function ivIndexAt({ at, base = {}, observations = [] } = {}, ctx, { detail = true } = {}) {
   const p = ctx.params;
   const S = n(base.price);
   const flags = new Set();
@@ -152,12 +181,18 @@ export function ivIndexAt({ at, base = {}, observations = [] } = {}, ctx) {
   if (n(base.ageSec) > p.maxAgeSec) return empty('staleBase');
   if (!observations.length) return empty('noContracts');
 
-  const contracts = observations.map((obs) => contractIvAt(obs, base, at, ctx));
+  const timeMemo = new Map();
+  const contracts = observations.map((obs) => contractIvAt(obs, base, at, ctx, { full: detail, timeMemo }));
   const stale = observations.filter((obs) => obs?.quote?.why === 'stale').length;
   if (stale) flags.add('staleDropped');
   const inBand = (c) => Math.abs(c.strike / S - 1) * 100 <= p.bandPct;
   const sideOk = (c) => p.side === 'both' || (c.kind === 'call' ? c.strike >= S : c.strike <= S);
   const eligible = contracts.filter((c) => isNum(c.ivPct) && c.tradingDays >= p.minTradingDays && inBand(c) && sideOk(c));
+  // بی جزئیات، نوار خرید و فروش فقط برای قراردادهای واردِ شاخص حل می‌شود.
+  if (!detail) {
+    const quoteOf = new Map(contracts.map((c, i) => [c, observations[i]?.quote]));
+    for (const c of eligible) contractBand(c, quoteOf.get(c), S, ctx);
+  }
   if (eligible.some((c) => c.priceSource === 'fallback')) flags.add('fallback');
 
   // ── لبخندِ هر سررسید: x = ln(K/S)، وزن وگا ──
@@ -422,7 +457,7 @@ export function transportPoints(day, ctx, { keepContracts = false } = {}) {
         quote: quoteAt({ record: { bid: q[0], ask: q[1], at: q[2], last: q[3], lastAt: q[4] }, second, maxAgeSec: p.maxAgeSec, basis: p.priceBasis }),
       };
     });
-    const r = ivIndexAt({ at, base, observations }, ctx);
+    const r = ivIndexAt({ at, base, observations }, ctx, { detail: keepContracts });
     const flags = new Set(r.flags);
     if (price > 0 && !isNum(lastAt)) flags.add('baseAgeUnknown');
     if (day.source === 'trades' || day.source === 'book') flags.add('rebuilt');

@@ -4668,6 +4668,7 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .vd-now-head small, .vd-range small { color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
 .vd-now-head strong { color: var(--ink); font-size: calc(var(--fs-lg) * 1.8); font-variant-numeric: tabular-nums; font-weight: 900; line-height: 1.1; }
 .vd-now-head span { color: var(--ink-2); font-size: var(--fs-xs); }
+.vd-now-head .vd-stale { color: var(--warn); font-weight: 700; }
 .vd-range { display: grid; gap: 4px; justify-items: start; }
 .vd-range .cc-bar { width: 200px; }
 .vd-range .cc-bar > i { background: var(--accent); }

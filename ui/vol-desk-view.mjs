@@ -15,7 +15,8 @@ import { historyDateLabel } from '../core/history.mjs';
 import { tehranDateNumber } from '../core/tehran-day.mjs';
 import { momentsFor, momentLabel } from '../core/intraday-grid.mjs';
 import { intradayContext, INTRADAY_WHY, INTRADAY_FLAGS, INTRADAY_SOURCES } from '../core/vol-intraday.mjs';
-import { deskDays, deskModel, deskCompareRows, deskDayRows, hourlyPattern, momentDetail } from '../core/vol-desk.mjs';
+import { deskModel, deskCompareRows, deskDayRows, hourlyPattern, momentDetail, DESK_LIVE_WHY } from '../core/vol-desk.mjs';
+import { computeDeskDays } from './vol-desk-compute.mjs';
 import { QUOTE_WHY } from '../core/moment-quote.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (ch) => ({
@@ -75,6 +76,21 @@ export function deskStatusText(api, model) {
   return parts.join(' · ');
 }
 
+/** برچسب عدد اصلی: «اکنون» فقط وقتی واقعاً اکنون است. */
+export function deskNowLabel(model) {
+  if (model?.live) return 'تلاطم ضمنی اکنون (موقت)';
+  if (model?.provisional) return 'آخرین مقدار معتبر امروز (موقت، نه «اکنون»)';
+  return 'تلاطم ضمنی پایان آخرین جلسه';
+}
+
+/** چرا «اکنون» نیست و چقدر کهنه است. */
+export function deskStaleNote(model) {
+  const age = Number.isFinite(model?.nowAgeSec) ? `${faDigits(Math.round(model.nowAgeSec / 60))} دقیقه پیش` : '';
+  const why = DESK_LIVE_WHY[model?.liveWhy] || '';
+  const last = model?.liveWhy === 'lastInvalid' && model.lastWhy ? ` (${INTRADAY_WHY[model.lastWhy] || model.lastWhy})` : '';
+  return [age, `${why}${last}`].filter(Boolean).join(' · ');
+}
+
 /** کارت «اکنون». */
 export function deskNowHtml(model, { uaName = '' } = {}) {
   if (!model?.now) {
@@ -98,9 +114,10 @@ export function deskNowHtml(model, { uaName = '' } = {}) {
   ];
   return `<article class="vd-now" data-live="${model.live}">
     <div class="vd-now-head">
-      <div><small>${esc(model.live ? 'تلاطم ضمنی اکنون (موقت)' : 'تلاطم ضمنی پایان آخرین جلسه')}${uaName ? ` · ${esc(uaName)}` : ''}</small>
+      <div><small>${esc(deskNowLabel(model))}${uaName ? ` · ${esc(uaName)}` : ''}</small>
         <strong>${pctText(now.value)}</strong>
-        <span>${momentLabel(now.second)} · ${dateLabel(model.focus.date)} · ${esc(INTRADAY_SOURCES[model.focus.source] || model.focus.source)}</span></div>
+        <span>${momentLabel(now.second)} · ${dateLabel(model.focus.date)} · ${esc(INTRADAY_SOURCES[model.focus.source] || model.focus.source)}</span>
+        ${model.provisional && !model.live ? `<span class="vd-stale">${esc(deskStaleNote(model))}</span>` : ''}</div>
       <div class="vd-range" role="img" aria-label="${esc(`جای اکنون در دامنهٔ امروز: ${isNum(pos) ? Math.round(pos) : '—'} درصد`)}">
         <small>دامنهٔ امروز تا اکنون</small>
         <span class="cc-bar"><i style="--pct:${isNum(pos) ? pos.toFixed(1) : 0}%"></i><b></b></span>
@@ -417,7 +434,7 @@ export function deskFrom(today, span) {
  */
 export function mountVolDesk(host, { getUa, getSettings = () => ({}), isVisible = () => true, fetcher = (...a) => fetch(...a) } = {}) {
   let opts = loadOpts();
-  let ua = { ins: '', name: '' }, api = null, calendar = null, model = null, ctx = null, error = '', loading = false, poll = null, refs = [];
+  let ua = { ins: '', name: '' }, api = null, calendar = null, model = null, ctx = null, error = '', poll = null, refs = [];
   const charts = new Map();
   const tables = {};
 
@@ -447,47 +464,79 @@ export function mountVolDesk(host, { getUa, getSettings = () => ({}), isVisible 
     if (pick) { opts = { ...opts, chart: pick.dataset.vdChartPick }; saveOpts(opts); paintChart(); }
   });
 
+  // ═══ هر پاسخ مال همان انتخابی است که خواستش ═══
+  //
+  // گزارش آزمون ۳۷۱۲e1a (بند ۱): دریافتِ نماد الف معلق ماند، انتخاب به ب عوض
+  // شد و `load()` دوم به‌خاطر «در حال دریافت» کنار رفت — ولی نام ب نشسته
+  // بود؛ پاسخ الف رسید و IV الف زیر عنوان ب رسم شد. حالا هر دریافت شماره
+  // دارد، دریافت قبلی لغو می‌شود، پاسخی که شماره‌اش کهنه است یا `ua`اش با
+  // انتخاب نمی‌خواند دور ریخته می‌شود، و با عوض‌شدن نماد صفحه پیش از رسیدن
+  // پاسخ خالی می‌شود — هیچ‌وقت عددِ نماد قبلی زیر نام نماد تازه نمی‌ماند.
+  let loadSeq = 0, computeSeq = 0, controller = null, receivedAt = 0;
+
+  function clearForSwitch(next) {
+    ua = next; api = null; model = null; refs = [];
+    for (const handle of charts.values()) handle.dispose();
+    charts.clear();
+    for (const key of Object.keys(tables)) delete tables[key];
+    q('[data-vd-title]').textContent = next.name ? `تلاطم ضمنی درون‌روزی · ${next.name}` : 'تلاطم ضمنی درون‌روزی';
+    q('[data-vd-status]').textContent = '';
+    q('[data-vd-build]').innerHTML = '';
+    q('[data-vd-body]').innerHTML = next.ins ? `<p class="empty-note">در حال دریافت تلاطم ${esc(next.name || 'نماد')}…</p>` : '<p class="empty-note">یک نماد پایه انتخاب کن.</p>';
+  }
+
   async function load({ build = false } = {}) {
-    ua = getUa() || { ins: '', name: '' };
+    const want = { ins: String(getUa()?.ins || ''), name: String(getUa()?.name || '') };
+    const my = ++loadSeq;
+    controller?.abort();
+    controller = typeof AbortController === 'function' ? new AbortController() : null;
     clearTimeout(poll);
-    if (!ua.ins) {
-      api = null; model = null;
-      q('[data-vd-status]').textContent = '';
-      q('[data-vd-build]').innerHTML = '';
-      q('[data-vd-body]').innerHTML = '<p class="empty-note">یک نماد پایه انتخاب کن.</p>';
-      return;
-    }
-    if (loading) return;
-    loading = true;
+    if (want.ins !== ua.ins || !want.ins) clearForSwitch(want);
+    else ua = want;
+    if (!want.ins) return;
     try {
       if (!calendar) {
         try { calendar = await (await fetcher('/api/vol/calendar', { cache: 'no-store' })).json(); } catch { calendar = { known: false, holidays: [] }; }
       }
       const today = tehranDateNumber();
-      const url = `/api/vol/intraday?ua=${encodeURIComponent(ua.ins)}&from=${deskFrom(today, opts.span)}&to=${today}&grain=${opts.grain}&mode=${opts.mode}${build ? '&build=1' : ''}`;
-      const response = await fetcher(url, { cache: 'no-store' });
+      const url = `/api/vol/intraday?ua=${encodeURIComponent(want.ins)}&from=${deskFrom(today, opts.span)}&to=${today}&grain=${opts.grain}&mode=${opts.mode}${build ? '&build=1' : ''}`;
+      const response = await fetcher(url, { cache: 'no-store', signal: controller?.signal });
       const body = await response.json();
+      if (my !== loadSeq) return;
       if (!response.ok || body.error) throw new Error(body.error || `HTTP ${response.status}`);
+      if (String(body.ua) !== want.ins) return;
       api = body;
+      receivedAt = Date.now();
       error = '';
-      recompute();
+      await recompute();
+      if (my !== loadSeq) return;
+      // ساخت ادامه دارد، یا امروز هنوز جلسه است (زنده یا کهنه): تا وقتی تب
+      // دیده می‌شود دوباره بپرس — کهنه‌شدن خودش دلیل پرسیدن است، نه توقف.
       const building = body.build?.running || body.build?.queued;
-      // ساخت ادامه دارد یا امروز زنده است: تا وقتی تب دیده می‌شود دوباره بپرس.
-      const delay = building ? 8000 : model?.live ? 60000 : 0;
+      const session = ctx?.session;
+      const inSession = model?.provisional && session && clockNow() <= session.close;
+      const delay = building ? 8000 : inSession ? 60000 : 0;
       const arm = () => { poll = setTimeout(() => { if (isVisible()) load(); else arm(); }, delay); };
       if (delay) arm();
     } catch (e) {
+      if (my !== loadSeq || e?.name === 'AbortError') return;
       error = String(e?.message || e);
       q('[data-vd-status]').textContent = `دریافت تلاطم درون‌روزی ناموفق بود: ${faDigits(error)}`;
       if (!model) q('[data-vd-body]').innerHTML = `<p class="empty-note">${esc(faDigits(error))}</p>`;
-    } finally { loading = false; }
+    }
   }
 
-  function recompute() {
+  /** ساعت سرور در لحظهٔ پاسخ، به‌علاوهٔ زمانِ گذشته از آن. */
+  const clockNow = () => (Number.isFinite(api?.nowSecond) ? api.nowSecond + (Date.now() - receivedAt) / 1000 : NaN);
+
+  async function recompute() {
     if (!api) return;
-    ctx = intradayContext(getSettings(), { holidays: calendar?.holidays || [], holidaysKnown: Boolean(calendar?.known) });
-    const days = deskDays(api, ctx);
-    model = deskModel({ days, today: api.today, ctx, summary: readVolSummary(ua.ins), compareDays: opts.span });
+    const my = ++computeSeq;
+    const forUa = ua.ins, settings = getSettings();
+    ctx = intradayContext(settings, { holidays: calendar?.holidays || [], holidaysKnown: Boolean(calendar?.known) });
+    const days = await computeDeskDays(api, settings, calendar);
+    if (my !== computeSeq || forUa !== ua.ins || String(api?.ua) !== ua.ins) return;
+    model = deskModel({ days, today: api.today, ctx, summary: readVolSummary(ua.ins), compareDays: opts.span, nowSecond: clockNow() });
     refs = referenceMoments(model, ctx);
     paint();
   }
@@ -548,6 +597,7 @@ export function mountVolDesk(host, { getUa, getSettings = () => ({}), isVisible 
   return {
     load,
     paint() { if (String(getUa()?.ins || '') !== ua.ins || !api) load(); else recompute(); },
+    get ua() { return ua; },
     resize() { for (const handle of charts.values()) handle.resize(); },
     dispose() { clearTimeout(poll); for (const handle of charts.values()) handle.dispose(); charts.clear(); },
     get model() { return model; },

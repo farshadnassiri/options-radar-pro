@@ -19,9 +19,13 @@ export function makeVolWatch({ getSettings = () => ({}), fetcher = (...a) => fet
   async function one(ins) {
     const today = tehranDateNumber();
     const body = await (await fetcher(`/api/vol/intraday?ua=${encodeURIComponent(ins)}&from=${deskFrom(today, 10)}&to=${today}&grain=m5&mode=trades`, { cache: 'no-store' })).json();
+    const receivedAt = now();
     if (body.error) throw new Error(body.error);
+    if (String(body.ua) !== String(ins)) throw new Error('پاسخ مال نماد دیگری است');
     const ctx = intradayContext(getSettings(), { holidays: calendar?.holidays || [], holidaysKnown: Boolean(calendar?.known) });
-    const model = deskModel({ days: deskDays(body, ctx), today: body.today, ctx, summary: readVolSummary(ins), compareDays: 10 });
+    // ساعت سرور، نه آخرین قاب: «اکنون» کهنه نباید شرط را برقرار کند (گزارش ۳۷۱۲e1a، بند ۲).
+    const nowSecond = Number.isFinite(body.nowSecond) ? body.nowSecond + (now() - receivedAt) / 1000 : NaN;
+    const model = deskModel({ days: deskDays(body, ctx), today: body.today, ctx, summary: readVolSummary(ins), compareDays: 10, nowSecond });
     return volWatchValues(model);
   }
   return {
@@ -36,6 +40,7 @@ export function makeVolWatch({ getSettings = () => ({}), fetcher = (...a) => fet
         try { values.set(ins, await one(ins)); } catch { values.delete(ins); }
       }));
     },
-    get: (ins) => values.get(String(ins)) || null,
+    /** مقدارِ کهنه‌تر از دو دورِ تازه‌سازی دیگر داده نمی‌شود. */
+    get: (ins) => (now() - (at.get(String(ins)) || 0) <= 2 * VOL_WATCH_TTL_MS ? values.get(String(ins)) || null : null),
   };
 }

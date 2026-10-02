@@ -19,9 +19,11 @@ const ctx = intradayContext(settings, { holidaysKnown: true });
 const OPEN = ctx.session.open;
 const grid = momentsFor('m15');
 /** روز ساختگی: مقدار = پایه + شیب × ساعت‌های گذشته از آغاز. */
+// روزِ موقتِ امروز فقط تا «اکنون» لحظه دارد (سرور لحظهٔ آینده نمی‌فرستد)؛
+// روزِ بسته‌شده تا پایان جلسه، با لحظه‌های خالیِ پس از `until`.
 const day = (date, base, slope = 0, { until = Infinity, source = 'record', provisional = false } = {}) => ({
   date, source, provisional, why: '', contracts: 10,
-  points: grid.map((second) => ({
+  points: grid.filter((second) => !provisional || second <= until).map((second) => ({
     second, value: second <= until ? base + slope * ((second - OPEN) / 3600) : NaN,
     bid: base - 1, ask: base + 1, price: 10000 + (second - OPEN) / 60, queue: false, flags: [], why: second <= until ? 'ok' : 'noAtm',
   })),
@@ -97,7 +99,9 @@ group('۳۱۲-د. سازنده‌های رابط');
     const o = view.pathOption(m, tokens);
     return o.series.length === 4 && o.series[2].markLine?.data?.[0]?.yAxis === 52.5;
   })());
-  const mom = view.deskMomentRows(m);
+  // روز بسته‌شده با لحظه‌های خالیِ پس از ۱۱:۰۰ (تمرکز روی آخرین جلسه).
+  const closed = deskModel({ days: [day(20260930, 46, -1), day(20261001, 52, 2, { until: OPEN + 7200 })], today: 20261002, ctx });
+  const mom = view.deskMomentRows(closed);
   check('جدول لحظه‌ها: لحظهٔ خالی علت دارد، تازه‌ترین اول', mom[0].second === undefined && mom.some((r) => r.whyText && !Number.isFinite(r.value)) && mom.at(-1).timeText === '۰۹:۱۵');
   check('جدول روزها برچسب منبع و موقت', view.deskDayTableRows(m)[0].dateText.includes('موقت') && view.deskDayTableRows(m)[0].sourceText.includes('ضبط'));
   check('بازهٔ تقویمی گشاد برای N روز معاملاتی', view.deskFrom(20261001, 10) === 20260909);

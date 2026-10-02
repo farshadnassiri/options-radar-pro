@@ -37,11 +37,29 @@ function rankOpts() {
   } catch { return { lookback: VOL_DEFAULTS.lookback, method: VOL_DEFAULTS.method, targetDays: VOL_DEFAULTS.targetDays, priceBasis: VOL_DEFAULTS.priceBasis, hvWindow: VOL_DEFAULTS.hvWindow }; }
 }
 
+// ═══ کش: امضای کامل و عمرِ محدود ═══
+//
+// گزارش آزمون ۳۷۱۲e1a (بند ۵): کلید کش فقط پارامترهای تب رتبه را داشت، نه
+// تنظیمات موتور؛ نرخ بهره عوض شد و همان IV قبلی (۶۰٪ به‌جای ۷۳٫۴۰٪) برگشت.
+// و پاسخِ ناقص (پرونده‌ای هنوز ساخته نشده) برای همیشه می‌ماند؛ پس از
+// ساخته‌شدن پرونده هم همان «ناقص» برمی‌گشت. حالا امضا تنظیمات مؤثر بر عدد
+// را هم دارد، پاسخ کامل نیم ساعت می‌ماند، پاسخ ناقص پس از رسیدن اصلاً نگه
+// داشته نمی‌شود (پرسشِ بعدی دوباره می‌خواند)، و درخواستِ در جریان مشترک است.
+const ENGINE_KEYS = ['rFree', 'divYield', 'dayCountYear', 'tradingDaysYr', 'ivLo', 'ivHi'];
+export const VOL_CONTEXT_TTL_MS = { complete: 30 * 60000 };
+
+/** امضای هر چیزی که عدد را عوض می‌کند: پارامترهای رتبه و تنظیمات موتور. */
+export function volContextSignature(settings = {}, opts = rankOpts()) {
+  return JSON.stringify([opts.lookback, opts.method, opts.targetDays, opts.priceBasis, opts.hvWindow, ...ENGINE_KEYS.map((k) => settings?.[k] ?? null)]);
+}
+
+export function clearVolContextCache() { memo.clear(); }
+
 /**
  * تاریخچهٔ تلاطم یک پایه که `from`…`to` را بپوشاند (به‌علاوهٔ بازهٔ رتبه
- * پیش از `from`). یک بار در هر نشست برای هر پایه و بازه.
+ * پیش از `from`). با کشِ امضادار و عمر محدود؛ `now` برای آزمون.
  */
-export function loadVolContext(ua, { from = 0, to = 0, settings = {}, fetcher = (...a) => fetch(...a) } = {}) {
+export function loadVolContext(ua, { from = 0, to = 0, settings = {}, fetcher = (...a) => fetch(...a), now = () => Date.now() } = {}) {
   const code = String(ua || '');
   if (!code) return Promise.resolve(null);
   const today = tehranDateNumber();
@@ -49,14 +67,15 @@ export function loadVolContext(ua, { from = 0, to = 0, settings = {}, fetcher = 
   const start = normalizeHistoryDate(from) || end;
   const opts = rankOpts();
   const range = volRangeFor(opts.lookback, start);
-  const sig = [opts.lookback, opts.method, opts.targetDays, opts.priceBasis, opts.hvWindow].join(',');
-  const key = `${code}:${range.from}:${end}:${sig}`;
-  // بازهٔ کوچک‌ترِ داخلِ بازهٔ ساخته‌شده هم همان را می‌خواند.
-  for (const [k, value] of memo) {
-    const [c, f, t, g] = k.split(':');
-    if (c === code && g === sig && Number(f) <= range.from && Number(t) >= end) return value;
+  const sig = volContextSignature(settings, opts);
+  // بازهٔ کوچک‌ترِ داخلِ بازهٔ ساخته‌شده هم همان را می‌خواند — اگر هنوز تازه است.
+  for (const [key, entry] of memo) {
+    const fresh = entry.pending || (entry.complete && now() - entry.at < VOL_CONTEXT_TTL_MS.complete);
+    if (!fresh) { memo.delete(key); continue; }
+    if (entry.code === code && entry.sig === sig && entry.from <= range.from && entry.end >= end) return entry.job;
   }
-  const job = (async () => {
+  const entry = { code, sig, from: range.from, end, at: now(), pending: true, complete: false, job: null };
+  entry.job = (async () => {
     const [daily, response] = await Promise.all([
       fetchDailies([code], { n: 0, fetcher }),
       fetcher(`/api/vol/history?ua=${encodeURIComponent(code)}&from=${range.from}&to=${end}&build=0`, { cache: 'no-store' }),
@@ -69,9 +88,13 @@ export function loadVolContext(ua, { from = 0, to = 0, settings = {}, fetcher = 
     });
     return { ua: code, history, coverage: { have: body.have, days: body.days, missing: body.missing } };
   })();
-  memo.set(key, job);
-  job.catch(() => memo.delete(key));
-  return job;
+  const key = `${code}:${range.from}:${end}:${sig}`;
+  memo.set(key, entry);
+  entry.job.then((loaded) => {
+    entry.pending = false; entry.at = now(); entry.complete = !(loaded.coverage.missing > 0);
+    if (!entry.complete) memo.delete(key);
+  }, () => memo.delete(key));
+  return entry.job;
 }
 
 const coverageNote = (loaded) => (loaded?.coverage?.missing

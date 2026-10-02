@@ -18,6 +18,17 @@
 // بقیه فقط آنچه از قاب قبل عوض شد. `m` شناسنامهٔ قراردادِ تازه‌دیده‌شده است.
 // فقط قراردادهای درون باند (پیش‌فرض ۳۰٪ حول پایه) ضبط می‌شوند.
 //
+// `x` قراردادهایی است که در قاب قبل بودند و در این عکس **نیستند** (از تابلو
+// رفته، یا از باند بیرون افتاده)، و `xu` پایه‌هایی که کلاً نیامدند.
+//
+// ═══ چرا `x` لازم شد ═══
+//
+// گزارش آزمون ۳۷۱۲e1a (بند ۳): قاب ۱۰:۰۰ یک قرارداد داشت و قاب ۱۰:۲۰ فقط
+// نماد دیگری. چون قاب دوم کامل نبود، قرارداد رفته در حالت ماند و بازپخش
+// زمانِ مظنه‌اش را از ۱۰:۰۰ به ۱۰:۲۰ «تأیید» کرد؛ موتور با آن تلاطم ساخت و
+// سقف کهنگی دور زده شد. نبودن در عکس تازه، تأیید قیمت نیست. حالا هر قاب
+// رفته‌ها را نام می‌برد و قاب بی‌تغییر فقط حاضرها را تأیید می‌کند.
+//
 // ═══ زمان آخرین معامله ═══
 //
 // تابلو زمانِ آخرین معامله را نمی‌دهد. وقتی حجمِ تجمعی بالا رفت، معامله‌ای
@@ -67,16 +78,19 @@ export function recordFrame(rows = [], { second, prev = null, bandPct = 30 } = {
   };
   const frame = { t: second, k: keyframe ? 1 : 0 };
   const m = {}, u = {}, c = {};
+  const seenQuotes = new Set(), seenBases = new Set();
   for (const row of rows || []) {
     const part = rowParts(row);
     if (!part.ua || !(part.base[0] > 0 || part.base[1] > 0)) continue;
     const spot = part.base[0] > 0 ? part.base[0] : part.base[1];
+    seenBases.add(part.ua);
     if (keyframe || !same(state.bases.get(part.ua), part.base)) {
       u[part.ua] = part.base;
       state.bases.set(part.ua, part.base);
     }
     for (const contract of part.contracts) {
       if (!(contract.meta[2] > 0) || Math.abs(contract.meta[2] / spot - 1) * 100 > bandPct) continue;
+      seenQuotes.add(contract.ins);
       if (!state.meta.has(contract.ins) || keyframe) {
         m[contract.ins] = contract.meta;
         state.meta.add(contract.ins);
@@ -86,6 +100,14 @@ export function recordFrame(rows = [], { second, prev = null, bandPct = 30 } = {
         state.quotes.set(contract.ins, contract.quote);
       }
     }
+  }
+  if (!keyframe) {
+    const gone = [...state.quotes.keys()].filter((ins) => !seenQuotes.has(ins));
+    const goneBases = [...state.bases.keys()].filter((ua) => !seenBases.has(ua));
+    for (const ins of gone) state.quotes.delete(ins);
+    for (const ua of goneBases) state.bases.delete(ua);
+    if (gone.length) frame.x = gone;
+    if (goneBases.length) frame.xu = goneBases;
   }
   if (Object.keys(m).length) frame.m = m;
   if (Object.keys(u).length) frame.u = u;
@@ -129,7 +151,10 @@ export function recordMoments(frames = [], ua, seconds = []) {
   for (const cut of cuts) {
     while (at < frames.length && frames[at].t <= cut) {
       const frame = frames[at];
-      if (frame.k) { quotes.clear(); }
+      if (frame.k) { quotes.clear(); base = null; }
+      // رفته‌ها: نه مظنه‌شان می‌ماند، نه قاب‌های بعد تأییدشان می‌کنند.
+      for (const ins of frame.x || []) quotes.delete(ins);
+      if ((frame.xu || []).some((ua) => String(ua) === key)) base = null;
       for (const [ins, row] of Object.entries(frame.m || {})) if (String(row[0]) === key) meta.set(ins, row);
       const b = frame.u?.[key];
       if (b) {

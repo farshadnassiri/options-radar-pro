@@ -26,6 +26,8 @@
 - [x] ف۵ زمینهٔ تلاطم (`core/vol-context.mjs`، `ui/vol-context.mjs`) در آزمایشگاه، تحلیل تاریخی و ماتریس، آزمون همه، خروجی دیتا و موقعیت‌ها؛ «پس‌نگری» جدا (دستهٔ ۳۱۳)
 - [x] ف۶ شش سنجهٔ «تلاطم» در دیده‌بان شرطی (`ui/vol-watch.mjs`)، `tools/vol-weekend-test.mjs` (`core/vol-basis-test.mjs`، دستهٔ ۳۱۴)
 
+- [x] گزارش آزمون ۳۷۱۲e1a: شش یافته اصلاح شد (دستهٔ ۳۱۵)
+
 برای صاحب پروژه روی دادهٔ واقعی: `node tools/vol-intraday-probe.mjs --ua <کد>` در جلسهٔ باز و `node tools/vol-weekend-test.mjs --ua <کد> --build` پس از چند هفته ضبط؛ `data/holidays.json` از روی `data/holidays.example.json`.
 
 ## کارهای باز (از `NEXT.md`، ۱۴۰۵/۰۷/۱۰)

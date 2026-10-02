@@ -70,10 +70,17 @@ export function volCalendar({ settings = {}, holidays = [], known = false } = {}
   const session = sessionOf(settings);
   const off = new Set((holidays || []).map((d) => compactDate(d?.date ?? d)).filter(Boolean));
   const memo = new Map();
+  // هر روز یک بار: شاخص لحظه برای هر قرارداد در هر لحظه زمان تا سررسید
+  // می‌خواهد و نرمال‌سازی تاریخ بیشترِ آن هزینه بود (گزارش آزمون ۳۷۱۲e1a، بند ۶).
+  const dayMemo = new Map();
   const isTradingDay = (date) => {
+    const hit = dayMemo.get(date);
+    if (hit !== undefined) return hit;
     const d = normalizeHistoryDate(date);
     const utc = dateUtc(d);
-    return !!utc && session.weekdays.has(utc.getUTCDay()) && !off.has(d);
+    const out = !!utc && session.weekdays.has(utc.getUTCDay()) && !off.has(d);
+    if (dayMemo.size < 5000) dayMemo.set(date, out);
+    return out;
   };
   /** شمار روزهای معاملاتی و تعطیلِ **میان** دو تاریخ (هر دو سر بیرون). */
   const between = (a, b) => {

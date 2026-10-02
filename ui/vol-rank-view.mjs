@@ -537,12 +537,25 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
     paint();
   }
 
+  // ═══ پاسخ فقط مال انتخابِ خودش ═══
+  //
+  // گزارش آزمون ۳۷۱۲e1a (بند ۱) برای میز تلاطم بازتولید شد و همین الگو اینجا
+  // هم بود — بدتر: پاسخِ نماد قبلی با `ua` تازه وارد `saveVolSummary` می‌شد و
+  // IVR نماد الف به‌نام نماد ب در انتخابگر و نقشه می‌ماند. حالا هر دریافت
+  // شماره و لغو دارد، پاسخ کهنه دور ریخته می‌شود، و با عوض‌شدن نماد تاریخچهٔ
+  // قبلی همان لحظه کنار می‌رود.
+  let loadSeq = 0, controller = null;
+
   async function load(force = false) {
     const sel = getSelection() || {};
-    ua = String(sel.uaIns || '');
+    const want = String(sel.uaIns || '');
+    const my = ++loadSeq;
+    controller?.abort();
+    controller = typeof AbortController === 'function' ? new AbortController() : null;
     clearTimeout(poll);
+    if (want !== ua) { api = null; apiKey = ''; history = null; }
+    ua = want;
     if (!ua) {
-      api = null; history = null;
       q('[data-vr-status]').textContent = '';
       q('[data-vr-body]').innerHTML = '<p class="empty-note">اول روی تب «نقشه و زنجیره» یک نماد پایه انتخاب کن؛ رتبهٔ تلاطم برای همان ساخته می‌شود.</p>';
       return;
@@ -550,19 +563,21 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
     const today = tehranDateNumber();
     const range = volRangeFor(opts.lookback, today);
     const key = `${ua}:${range.from}:${range.to}`;
-    if (loading) return;
     loading = true;
     error = '';
     if (key !== apiKey) { tries = 0; history = null; q('[data-vr-body]').innerHTML = '<p class="empty-note">در حال دریافت تاریخچهٔ قیمت قراردادها و پایه…</p>'; }
     try {
-      if (baseFor !== ua || force) {
-        const got = await fetchDailies([ua], { n: 0, fetcher });
-        baseRows = got.byIns?.[ua]?.rows || [];
-        baseFor = ua;
+      let rows = baseRows;
+      if (baseFor !== want || force) {
+        const got = await fetchDailies([want], { n: 0, fetcher, signal: controller?.signal });
+        rows = got.byIns?.[want]?.rows || [];
       }
-      const response = await fetcher(`/api/vol/history?ua=${encodeURIComponent(ua)}&from=${range.from}&to=${range.to}`, { cache: 'no-store' });
+      const response = await fetcher(`/api/vol/history?ua=${encodeURIComponent(want)}&from=${range.from}&to=${range.to}`, { cache: 'no-store', signal: controller?.signal });
       const body = await response.json();
+      if (my !== loadSeq || want !== ua) return;
       if (!response.ok || body.error) throw new Error(body.error || `HTTP ${response.status}`);
+      if (String(body.ua) !== want) return;
+      baseRows = rows; baseFor = want;
       api = body; apiKey = key;
       recompute();
       // ساخت پرونده‌ها ادامه دارد: تا وقتی تب دیده می‌شود دوباره بپرس.
@@ -571,10 +586,11 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
         poll = setTimeout(() => { if (isVisible()) load(); }, 6000);
       }
     } catch (e) {
+      if (my !== loadSeq || e?.name === 'AbortError') return;
       error = String(e?.message || e);
-      q('[data-vr-status]').textContent = `دریافت تاریخچهٔ تلاطم ناموفق بود: ${error}`;
+      q('[data-vr-status]').textContent = `دریافت تاریخچهٔ تلاطم ناموفق بود: ${faDigits(error)}`;
       if (!history) q('[data-vr-body]').innerHTML = `<p class="empty-note">${esc(error)}</p>`;
-    } finally { loading = false; }
+    } finally { if (my === loadSeq) loading = false; }
   }
 
   function paint() {
