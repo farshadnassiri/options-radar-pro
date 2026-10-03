@@ -74,6 +74,12 @@ group('۳۱۷-الف. سرور واقعی: بازه بی انتظار برای �
     check('روز ضبط‌نشده: «ساخته‌نشده»، هزینهٔ هر روز گزارش می‌شود', pend?.source === 'pending' && pend.queued === false && got.cost?.perDay > 0);
     const queued = await (await fetch(`${origin}/api/vol/intraday?ua=${UA}&from=${PENDING}&to=${PENDING}&grain=m15&mode=trades&build=1`)).json();
     check('با build=1 همان پاسخ روزهای در صف را علامت می‌زند (تا رابط نظرسنجی کند)', queued.days?.[0]?.queued === true && (queued.build?.running || queued.build?.queued));
+    // گزارش آزمون ۴۰b2533، بند ۶ (دستهٔ ۳۱۸): بازهٔ بلندتر از سقف بی‌صدا کوتاه نمی‌شود.
+    const long = await (await fetch(`${origin}/api/vol/intraday?ua=${UA}&from=20230101&to=20231231&grain=m60&mode=trades`)).json();
+    check('بازهٔ بلند: ۶۰ روز آخر، و کوتاه‌شدن با شمار روزهای کنارمانده گفته می‌شود', long.days?.length === 60 && long.maxDays === 60 && long.clipped?.served === 60
+      && long.clipped.dropped === long.clipped.asked - 60 && long.clipped.dropped > 100 && long.clipped.from === long.days[0].date && long.clipped.firstAsked < long.clipped.from);
+    const short = await (await fetch(`${origin}/api/vol/intraday?ua=${UA}&from=${DAY}&to=${PENDING}&grain=m60&mode=trades`)).json();
+    check('بازهٔ کوتاه: بی علامت کوتاه‌شدن', short.clipped === null);
   } catch (e) {
     check('آزمون سرور واقعی اجرا شد', false, String(e?.message || e));
   } finally {
@@ -94,6 +100,6 @@ group('۳۱۷-ب. منبع');
   check('رابط: ساخت فقط روزهای نمایش‌داده (نه بازهٔ گشاد)', load.includes('const from = build && rangeView?.key === rangeKey(span) && rangeView.firstDay ? rangeView.firstDay : span.from;'));
   check('رابط: پاسخ ناهمخوان بی‌صدا گیر نمی‌کند', !load.includes("String(body.ins || '') !== ins) return;") && load.includes("throw new Error('پاسخ سرور مال نماد دیگری بود')"));
   check('رابط: کندی سرور گفته می‌شود', load.includes('سرور هنوز پاسخ نداده'));
-  check('رابط: «رسم نمودار» روزهای ضبط‌نشده را با هزینهٔ نوشته‌شده می‌سازد', view.includes('if (go) loadRange({ build: go.dataset.build === \'1\' });') && view.includes('`رسم نمودار و ساخت روزهای ضبط‌نشده (حدود ${faDigits(fmt.int(st.cost))} درخواست)`'));
+  check('رابط: «رسم نمودار» روزهای ضبط‌نشده را با هزینهٔ نوشته‌شده می‌سازد', view.includes('if (go) { loadRange({ build: go.dataset.build === \'1\' }); return; }') && view.includes('`رسم نمودار و ساخت روزهای ضبط‌نشده (حدود ${faDigits(fmt.int(st.cost))} درخواست)`'));
   check('رابط: تا وقتی روزی در صف است نظرسنجی ادامه دارد', view.includes('if (st.building || st.queued) arm();'));
 }

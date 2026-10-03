@@ -2202,7 +2202,11 @@ async function handleRequest(req, res, u) {
       if (insWanted && !/^\d{5,25}$/.test(insWanted)) return sendJson(res, 400, { error: '«ins» باید کد قرارداد باشد' });
       const build = u.searchParams.get('build') === '1';
       const today = tehranDateNumber();
-      const days = tradingDays(vFrom, vTo).filter((day) => day <= today).slice(-IV_BUILD_DAYS_MAX);
+      // سقف هر پاسخ ۶۰ روز معاملاتیِ آخر است؛ کوتاه‌شدن بازه گفته می‌شود (گزارش
+      // آزمون ۴۰b2533، بند ۶) تا رابط بازهٔ مؤثر و روزهای کنارمانده را بگوید.
+      const asked = tradingDays(vFrom, vTo).filter((day) => day <= today);
+      const days = asked.slice(-IV_BUILD_DAYS_MAX);
+      const clipped = asked.length > days.length ? { asked: asked.length, served: days.length, dropped: asked.length - days.length, from: days[0], firstAsked: asked[0] } : null;
       const seconds = grainSeconds(grain);
       const nowSecond = tehranSecondOfDay();
       const out = [];
@@ -2254,7 +2258,7 @@ async function handleRequest(req, res, u) {
       }
       const perDay = insWanted ? ivContractCost(mode) : ivBuildCost(mode);
       return sendJson(res, 200, {
-        ua, ins: insWanted, grain, mode, today, nowSecond, days: out,
+        ua, ins: insWanted, grain, mode, today, nowSecond, days: out, clipped, maxDays: IV_BUILD_DAYS_MAX,
         grainServed: { record: grain, rebuild: grain === 'm1' ? IV_BUILD_GRAIN : grain },
         pending: pending.length,
         cost: { perDay, requests: pending.length * perDay },

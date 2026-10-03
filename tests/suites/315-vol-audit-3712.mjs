@@ -157,7 +157,7 @@ group('۳۱۵-۶. سرعت: کش روزها و ریسه');
   const t2 = deskDays({ ua: '1', days: [grown] }, ctx)[0].points;
   check('امروز: لحظه‌های قبلی از کش، فقط لحظهٔ تازه حساب می‌شود', t2.length === t1.length + 1 && t2.slice(0, t1.length).every((pt, i) => pt === t1[i]));
   const view = readSrc('../ui/iv-charts-view.mjs');
-  check('نمودار بازه محاسبهٔ شاخص را به ریسه می‌سپارد', view.includes('await computeDeskDays(apiI, settings, calendar)') && !view.includes('deskDays(api, ctx)'));
+  check('نمودار بازه محاسبهٔ شاخص را به ریسه می‌سپارد', view.includes('await computeDeskDays(api, settings, calendar)') && !view.includes('deskDays(api, ctx)'));
   const compute = readSrc('../ui/vol-desk-compute.mjs');
   check('ریسه با جایگزینِ همان‌جا وقتی Worker نیست', compute.includes("new Worker('/worker/vol-desk-worker.mjs', { type: 'module' })") && compute.includes("typeof Worker === 'undefined'"));
   const { computeDeskDays } = await import('../../ui/vol-desk-compute.mjs');

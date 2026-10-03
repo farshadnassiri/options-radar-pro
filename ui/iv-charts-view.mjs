@@ -22,7 +22,8 @@ import { fetchDailies } from './daily-intake.mjs';
 import { rankOpts } from './vol-context.mjs';
 import { computeDeskDays } from './vol-desk-compute.mjs';
 import { historyDateLabel } from '../core/history.mjs';
-import { parseJalaliRange } from '../core/history-range.mjs';
+import { parseJalaliRange, daysBefore } from '../core/history-range.mjs';
+import { momentLabel } from '../core/intraday-grid.mjs';
 import { tehranDateNumber } from '../core/tehran-day.mjs';
 import { buildVolHistory, panelObservations, liveObservations, volParams, IV_PRICE_BASES } from '../core/vol-rank.mjs';
 import { intradayContext } from '../core/vol-intraday.mjs';
@@ -44,6 +45,23 @@ const dateLabel = (value) => faDigits(historyDateLabel(value));
 const STORE = 'options-radar:iv-charts';
 
 // ═══════════════════ سوارکردن ═══════════════════
+
+/** بزرگ‌نمایی و سری‌های خاموشِ نمودار فعلی، برای نگه‌داشتن در به‌روزرسانی. */
+function viewState(instance) {
+  try {
+    const option = instance?.getOption?.() || {};
+    const zoom = (option.dataZoom || []).map((z) => ({ start: z.start, end: z.end }));
+    const zoomed = zoom.some((z) => z.start > 0 || z.end < 100);
+    return { zoom: zoomed ? zoom : null, legend: option.legend?.[0]?.selected || null };
+  } catch { return { zoom: null, legend: null }; }
+}
+function withView(option, kept, keepLegend) {
+  if (!option || !kept) return option;
+  const out = { ...option };
+  if (kept.zoom && Array.isArray(out.dataZoom)) out.dataZoom = out.dataZoom.map((z, i) => ({ ...z, ...(kept.zoom[i] || kept.zoom[0]) }));
+  if (keepLegend && kept.legend && out.legend) out.legend = { ...out.legend, selected: { ...(out.legend.selected || {}), ...kept.legend } };
+  return out;
+}
 
 function loadOpts() {
   const base = {
@@ -72,7 +90,9 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
   let opts = loadOpts();
   let ua = '', data = null, dailySeq = 0, rangeSeq = 0, dailyCtrl = null, rangeCtrl = null, poll = null, tries = 0;
   let range = null, calendar = null, rangeApi = null, rangePoints = {}, rangePoll = null, liveSeen = '';
+  let todayAt = 0, todayBusy = false;
   const charts = new Map();
+  const chartSeq = {};
   const seriesMemo = new Map();
 
   host.innerHTML = `<div class="ivc">
@@ -99,7 +119,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       <div class="ivc-chart" data-ivc-chart="expiry"></div>
     </section>
     <section class="card ivc-intraday">
-      <div class="section-head"><div><p class="eyebrow">بازه و تایم‌فریم</p><h3>نوسان ضمنی در بازهٔ دلخواه</h3></div><span class="note">امروز از ضبط زنده؛ روزهای ضبط‌نشده از بازسازی ریزمعامله (با دکمه، هزینه پیش از آن گفته می‌شود)</span></div>
+      <div class="section-head"><div><p class="eyebrow">بازه و تایم‌فریم</p><h3>نوسان ضمنی در بازهٔ دلخواه</h3></div><span class="note">امروز از ضبط زنده و با هر تیک تازه می‌شود؛ روزهای ضبط‌نشده از بازسازی ریزمعامله (با دکمه، هزینه پیش از آن گفته می‌شود)</span></div>
       <div class="ivc-controls">
         <label class="ivc-wide">قرارداد<select data-ivc="rInstrument"></select></label>
         <label class="check ivc-index-toggle"><input type="checkbox" data-ivc="rIndex"${opts.rIndex ? ' checked' : ''}> ${INDEX_LABEL}</label>
@@ -112,7 +132,9 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       </div>
       <p class="note" data-ivc-rstatus role="status"></p>
       <div data-ivc-build></div>
+      <div data-ivc-clip></div>
       <div class="ivc-chart" data-ivc-chart="range"></div>
+      <p class="note">مبنای این نمودار با نمودار مادر یکی نیست: اینجا هر لحظه از مظنهٔ همان لحظه (میانهٔ خرید و فروش، وگرنه آخرین معاملهٔ تازه با برچسب جایگزین) و زمان معاملاتی تا سررسید است؛ نمودار مادر از قیمت پایانی یا آخرین روز و زمان تقویمی. پس دانهٔ «روزانه» اینجا لزوماً همان عدد نمودار مادر نیست.</p>
     </section>
   </div>`;
   const q = (sel) => host.querySelector(sel);
@@ -155,7 +177,15 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       return;
     }
     const go = event.target.closest('[data-ivc-range-go]');
-    if (go) loadRange({ build: go.dataset.build === '1' });
+    if (go) { loadRange({ build: go.dataset.build === '1' }); return; }
+    // بازهٔ بلندتر از سقف: «روزهای قبل‌تر» پایان بازه را پیش از اولین روزِ آمده می‌برد.
+    const prev = event.target.closest('[data-ivc-range-prev]');
+    if (prev) {
+      opts = { ...opts, rTo: historyDateLabel(daysBefore(Number(prev.dataset.ivcRangePrev), 1)) };
+      field('rTo').value = opts.rTo;
+      saveOpts(opts);
+      loadRange();
+    }
   });
 
   // ═══ دادهٔ روزانه (نمودار ۱ و ۲) ═══
@@ -253,6 +283,9 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     const payload = getPayload();
     const session = payload?.session;
     if (!session?.current || !(session.date > 0)) return null;
+    // امروز فقط وقتی در بازهٔ نمودار است؛ بازهٔ تاریخی «امروز» نمی‌گیرد (گزارش
+    // آزمون ۴۰b2533، بند ۱: خلاصهٔ بازهٔ ۰۵ تا ۰۶ مهر، ۷۰٪ امروز را آخرین گفت).
+    if (data && (session.date < data.from || session.date > data.to)) return null;
     const under = payload.universe?.underlyings?.find((row) => String(row.ins) === ua);
     const spot = opts.priceBasis === 'last' ? (Number(under?.tradeLast) || Number(under?.last)) : Number(under?.close);
     return spot > 0 ? { date: session.date, spot, contracts: payload.universe?.contracts || [] } : null;
@@ -268,7 +301,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       live: live ? { date: live.date, spot: live.spot, observations: liveObservations(live.contracts, ua, opts.priceBasis) } : null,
       from: data.from, params, settings: getSettings(),
     });
-    const rows = underlyingDailySeries(history, { baseRows: data.baseRows, oi: data.oi, from: data.from });
+    const rows = underlyingDailySeries(history, { baseRows: data.baseRows, oi: data.oi, from: data.from, to: data.to });
     seriesMemo.set(key, rows);
     return rows;
   }
@@ -282,18 +315,43 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     const lc = live?.contracts.find((c) => String(c.ins) === String(ins));
     const days = data.baseRows.map((row) => row.date).filter((d) => d >= data.from && d <= data.to && d < data.today);
     const rows = contractDailySeries({
-      contract, panels: data.panels, baseRows: data.baseRows, oi: data.oi, priceBasis: opts.priceBasis, settings: getSettings(), days,
+      contract, panels: data.panels, baseRows: data.baseRows, oi: data.oi, priceBasis: opts.priceBasis, settings: getSettings(), days, from: data.from, to: data.to,
       live: lc ? { date: live.date, spot: live.spot, price: opts.priceBasis === 'last' ? Number(lc.tradeLast) : Number(lc.close), volume: Number(lc.volume), oi: Number(lc.oi) } : null,
     });
     seriesMemo.set(key, rows);
     return rows;
   }
 
-  async function setChart(key, build, empty) {
-    charts.get(key)?.dispose();
+  /**
+   * نمودار را می‌کشد. با همان `ctx` (همان نماد، قرارداد و بازه) نمودار موجود
+   * در جا به‌روز می‌شود و بزرگ‌نمایی و سری‌های خاموش‌شدهٔ کاربر می‌مانند؛ قبلاً
+   * هر تیک نمودار را از نو می‌ساخت (گزارش آزمون ۴۰b2533، سرعت). `ctx` تازه
+   * یعنی نمای تازه، پس از نو.
+   */
+  async function setChart(key, build, empty, ctx = '', { keepLegend = true } = {}) {
+    const seq = (chartSeq[key] = (chartSeq[key] || 0) + 1);
+    const prev = charts.get(key);
+    if (prev && prev.ctx === ctx) {
+      const kept = viewState(prev.instance);
+      if (prev.update((echarts, tokens) => withView(build(echarts, tokens), kept, keepLegend)) !== false) return;
+    }
+    prev?.dispose();
     charts.delete(key);
     const handle = await mountChart(q(`[data-ivc-chart="${key}"]`), build, { empty });
-    if (handle) charts.set(key, handle);
+    if (seq !== chartSeq[key]) { handle?.dispose(); return; }
+    if (!handle) return;
+    handle.ctx = ctx;
+    charts.set(key, handle);
+    if (key === 'master') {
+      // راهنمای نمودار و تیک‌ها یک حالت‌اند: کلیک روی راهنما تیک را هم عوض می‌کند.
+      handle.instance.on('legendselectchanged', ({ selected = {} }) => {
+        const show = { ...opts.show };
+        for (const [id, label] of MASTER_SERIES) if (label in selected) show[id] = selected[label];
+        opts = { ...opts, show };
+        saveOpts(opts);
+        host.querySelectorAll('[data-ivc-show]').forEach((el) => { el.checked = show[el.dataset.ivcShow] !== false; });
+      });
+    }
   }
 
   function paintMaster() {
@@ -305,7 +363,8 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     const title = contract ? `تاریخچهٔ قرارداد ${contractLabel(contract)}${opts.show.index !== false ? ` و ${INDEX_LABEL}` : ''}` : `${INDEX_LABEL} ${uaName()}`;
     q('[data-ivc-summary]').textContent = masterSummary(contract ? rows : idx);
     setChart('master', (echarts, tokens) => masterOption(rows, { indexRows: idx, show: opts.show, title }, tokens),
-      'در این بازه نوسان ضمنی ساخته نشد — پوشش پرونده‌ها را در خط وضعیت ببین.');
+      'سری‌های روشن در این بازه داده‌ای ندارند — پوشش پرونده‌ها را در خط وضعیت ببین یا سری دیگری را روشن کن.',
+      `${ua}|${opts.instrument}|${data.from}|${data.to}|${opts.priceBasis}`, { keepLegend: false });
   }
 
   const expiryContracts = () => (data?.contracts || []).filter((c) => Number(c.expiry) === Number(opts.expiry) && (opts.kind === 'both' || c.kind === opts.kind));
@@ -332,7 +391,8 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       : '<p class="empty-note">برای این سررسید قراردادی در بازه نیست.</p>';
     const lines = list.filter((c) => picked.has(String(c.ins))).map((c) => ({ label: `${contractLabel(c)} (${c.kind === 'put' ? 'فروش' : 'خرید'} ${faDigits(fmt.int(c.strike))})`, rows: contractRows(c.ins) }));
     setChart('expiry', (echarts, tokens) => expiryOption(lines, { indexRows: opts.withIndex ? indexRows() : null }, tokens),
-      picked.size ? 'قراردادهای انتخاب‌شده در این بازه نوسان ضمنی نساختند.' : 'دست‌کم یک قرارداد را تیک بزن.');
+      picked.size ? 'قراردادهای انتخاب‌شده در این بازه نوسان ضمنی نساختند.' : 'دست‌کم یک قرارداد را تیک بزن.',
+      `${ua}|${opts.expiry}|${data.from}|${data.to}|${opts.priceBasis}`);
   }
 
   // ═══ بازه و تایم‌فریم (نمودار ۳) ═══
@@ -408,15 +468,13 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
         const ctx = intradayContext(settings, { holidays: calendar?.holidays || [], holidaysKnown: Boolean(calendar?.known) });
         pointsC = contractIntradaySeries(apiC.days, ins, ctx);
       }
-      if (apiI) {
-        const computed = await computeDeskDays(apiI, settings, calendar);
-        pointsI = computed.flatMap((d) => d.points.map((pt) => ({ ...pt, date: d.date })));
-      }
+      if (apiI) pointsI = await indexPoints(apiI, settings);
       if (my !== rangeSeq || want !== ua) return;
       rangeApi = { contract: apiC, index: apiI };
       rangePoints = { contract: pointsC, index: pointsI };
       const primary = apiC || apiI;
       rangeView = { key: rangeKey(span), firstDay: primary.days[0]?.date || 0, ins };
+      todayAt = Date.now();
       paintRange();
     } catch (e) {
       if (my !== rangeSeq || e?.name === 'AbortError') return;
@@ -426,25 +484,82 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     }
   }
 
+  async function indexPoints(api, settings) {
+    const computed = await computeDeskDays(api, settings, calendar);
+    return computed.flatMap((d) => d.points.map((pt) => ({ ...pt, date: d.date, source: d.source })));
+  }
+
+  // ═══ تازه‌سازی امروزِ نمودار بازه با تیک بازار ═══
+  //
+  // گزارش آزمون ۴۰b2533، بند ۲: تیک داشبورد نمودار مادر را تازه می‌کرد ولی
+  // نمودار بازه روی عدد قدیمی می‌ماند تا «رسم نمودار» زده شود. حالا با هر
+  // تیک فقط روزِ امروز دوباره گرفته و جایگزین می‌شود؛ روزهای گذشته دست
+  // نمی‌خورند و بزرگ‌نمایی می‌ماند. فاصلهٔ دو دریافت دست‌کم ۱۰ ثانیه است (ضبط
+  // هر ۶۰ ثانیه قاب می‌نویسد و سرور پروندهٔ امروز را با اندازه‌اش کش می‌کند)؛
+  // تیکِ درون این فاصله گم نمی‌شود و پایانش اجرا می‌شود. بازهٔ کاملاً تاریخی
+  // تازه‌سازی نمی‌خواهد.
+  const TODAY_EVERY_MS = 10000;
+  let todayTimer = null;
+  function refreshRangeToday() {
+    if (!rangeApi || !rangeView || todayBusy) return;
+    const span = rangeDates();
+    const t = today();
+    if (span.error || rangeView.key !== rangeKey(span) || !(span.to >= t)) return;
+    const primary = rangeApi.contract || rangeApi.index;
+    if (!primary.days.some((d) => d.date === t)) return;
+    const wait = TODAY_EVERY_MS - (Date.now() - todayAt);
+    if (wait > 0) {
+      if (!todayTimer) todayTimer = setTimeout(() => { todayTimer = null; if (isVisible()) refreshRangeToday(); }, wait);
+      return;
+    }
+    fetchRangeToday(t);
+  }
+  async function fetchRangeToday(t) {
+    const my = rangeSeq, want = ua, ins = rangeView.ins;
+    todayAt = Date.now();
+    todayBusy = true;
+    try {
+      const one = { from: t, to: t, keep: 0 };
+      const [c, i] = await Promise.all([
+        rangeApi.contract ? fetchRangeSeries({ want, from: t, span: one, ins, build: false }) : null,
+        rangeApi.index ? fetchRangeSeries({ want, from: t, span: one, ins: '', build: false }) : null,
+      ]);
+      const dayC = c?.days.find((d) => d.date === t), dayI = i?.days.find((d) => d.date === t);
+      const settings = getSettings();
+      const ptsC = dayC ? contractIntradaySeries([dayC], ins, intradayContext(settings, { holidays: calendar?.holidays || [], holidaysKnown: Boolean(calendar?.known) })) : null;
+      const ptsI = dayI ? await indexPoints({ ...i, days: [dayI] }, settings) : null;
+      if (my !== rangeSeq || want !== ua || !rangeApi) return;
+      const swap = (api, body, day) => (api && day ? { ...api, days: api.days.map((d) => (d.date === t ? day : d)), nowSecond: body.nowSecond } : api);
+      rangeApi = { contract: swap(rangeApi.contract, c, dayC), index: swap(rangeApi.index, i, dayI) };
+      const splice = (list, pts) => (list && pts ? [...list.filter((pt) => pt.date !== t), ...pts] : list);
+      rangePoints = { contract: splice(rangePoints.contract, ptsC), index: splice(rangePoints.index, ptsI) };
+      paintRange();
+    } catch { /* تیک بعد دوباره امتحان می‌کند */ } finally { todayBusy = false; }
+  }
+
   /** وضعیت روزهای نمایش‌داده — جمعِ سری قرارداد و شاخص. */
   function rangeState() {
     const apis = [rangeApi?.contract, rangeApi?.index].filter(Boolean);
     const primary = apis[0];
     const days = primary?.days || [];
     const count = (src) => days.filter((d) => d.source === src).length;
-    let pending = 0, queued = 0, cost = 0, building = false;
-    const failed = [];
+    // شمار روزها یکتا (روزی که هم قرارداد و هم شاخص ندارد یک روز است)؛ هزینه
+    // جمعِ هر دو، چون هر سری جدا ساخته می‌شود.
+    const pendingDays = new Set(), queuedDays = new Set(), failedOf = new Map();
+    let cost = 0, building = false;
     for (const api of apis) {
-      const p = api.days.filter((d) => d.source === 'pending' && !d.queued).length;
+      const p = api.days.filter((d) => d.source === 'pending' && !d.queued);
       const f = api.days.filter((d) => d.source === 'failed');
-      const qd = api.days.filter((d) => d.source === 'pending' && d.queued).length;
-      pending += p; queued += qd; failed.push(...f);
-      cost += (p + f.length) * (Number(api.cost?.perDay) || 0);
-      if ((api.build?.running || api.build?.queued) && qd) building = true;
+      const qd = api.days.filter((d) => d.source === 'pending' && d.queued);
+      for (const d of p) pendingDays.add(d.date);
+      for (const d of qd) queuedDays.add(d.date);
+      for (const d of f) if (!failedOf.has(d.date)) failedOf.set(d.date, d);
+      cost += (p.length + f.length) * (Number(api.cost?.perDay) || 0);
+      if ((api.build?.running || api.build?.queued) && qd.length) building = true;
     }
     return {
       days: days.length, record: count('record'), built: count('trades') + count('book'), none: count('none'),
-      pending, queued, failed, building, cost, build: primary?.build || {},
+      pending: pendingDays.size, queued: queuedDays.size, failed: [...failedOf.values()], building, cost, build: primary?.build || {},
     };
   }
 
@@ -462,7 +577,16 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     const mainPoints = rangePoints.contract || rangePoints.index || [];
     const valid = mainPoints.filter((pt) => isNum(pt.value)).length;
     parts.push(`${faDigits(valid)} از ${faDigits(mainPoints.length)} لحظه نوسان دارد`);
+    // زمان آخرین دادهٔ امروز، تا کهنه‌بودن نمودار پنهان نماند.
+    const t = today();
+    const lastToday = mainPoints.filter((pt) => pt.date === t).at(-1);
+    if (lastToday) parts.push(`امروز تا ساعت ${faDigits(momentLabel(lastToday.second))} (با تیک تازه می‌شود)`);
     q('[data-ivc-rstatus]').textContent = parts.join(' · ');
+    // بازهٔ بلندتر از سقف هر پاسخ: بازهٔ مؤثر و روزهای کنارمانده گفته می‌شوند (بند ۶).
+    const clip = primaryApi.clipped;
+    q('[data-ivc-clip]').innerHTML = clip
+      ? `<div class="vd-build"><span>بازهٔ خواسته‌شده ${faDigits(fmt.int(clip.asked))} روز معاملاتی است و هر بار حداکثر ${faDigits(fmt.int(clip.served))} روز رسم می‌شود: ${faDigits(fmt.int(clip.served))} روز آخر (از ${esc(dateLabel(clip.from))}) آمد و ${faDigits(fmt.int(clip.dropped))} روز اول (از ${esc(dateLabel(clip.firstAsked))}) کنار ماند.</span>${Number(opts.span) === 0 ? ` <button type="button" class="ghost" data-ivc-range-prev="${clip.from}">روزهای قبل‌تر</button>` : ''}</div>`
+      : '';
     const toBuild = st.pending + st.failed.length;
     const go = q('[data-ivc-range-go]');
     go.textContent = toBuild && !st.building
@@ -477,10 +601,12 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     if (st.building || st.queued) arm();
     const c = rangeView?.ins ? data?.contracts.find((x) => String(x.ins) === rangeView.ins) : null;
     const contractPoints = rangePoints.contract;
+    const days = [...(rangeApi.contract?.days || []), ...(rangeApi.index?.days || [])];
     setChart('range', (echarts, tokens) => (contractPoints
-      ? rangeOption(contractPoints, { indexPoints: rangePoints.index, grain: opts.grain, label: `نوسان ضمنی ${c ? contractLabel(c) : 'قرارداد'}` }, tokens)
-      : rangeOption(rangePoints.index || [], { grain: opts.grain, label: INDEX_LABEL }, tokens)),
-    toBuild || st.building || st.queued ? 'روزهای این بازه هنوز ساخته نشده‌اند — «رسم نمودار» را بزن؛ نمودار با ساخته‌شدن هر روز پر می‌شود.' : 'در این بازه لحظه‌ای نوسان ضمنی نساخت.');
+      ? rangeOption(contractPoints, { indexPoints: rangePoints.index, days, grain: opts.grain, label: `نوسان ضمنی ${c ? contractLabel(c) : 'قرارداد'}` }, tokens)
+      : rangeOption(rangePoints.index || [], { days, grain: opts.grain, label: INDEX_LABEL }, tokens)),
+    toBuild || st.building || st.queued ? 'روزهای این بازه هنوز ساخته نشده‌اند — «رسم نمودار» را بزن؛ نمودار با ساخته‌شدن هر روز پر می‌شود.' : 'در این بازه لحظه‌ای نوسان ضمنی نساخت.',
+    rangeView?.key || '');
   }
 
   return {
@@ -488,6 +614,9 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     paint() {
       const next = String(getSelection()?.uaIns || '');
       if (next !== ua || !data) { loadDaily(); return; }
+      // نمودار بازه از ضبط می‌آید نه از عکس تابلو (مظنه هم عوض می‌شود)، پس
+      // تازه‌سازی امروزش به امضای عکس بسته نیست؛ خودش فاصله را نگه می‌دارد.
+      refreshRangeToday();
       // فقط «امروز» ممکن است عوض شده باشد: اگر عکس زنده برای همین نماد عوض
       // نشده، نمودارها دست نمی‌خورند (بزرگ‌نمایی کاربر نمی‌پرد).
       const key = liveKey();
@@ -498,7 +627,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       paintExpiry();
     },
     resize() { for (const handle of charts.values()) handle.resize(); },
-    dispose() { clearTimeout(poll); clearTimeout(rangePoll); clearTimeout(slowTimer); dailySeq += 1; rangeSeq += 1; dailyCtrl?.abort(); rangeCtrl?.abort(); for (const handle of charts.values()) handle.dispose(); charts.clear(); },
+    dispose() { clearTimeout(poll); clearTimeout(rangePoll); clearTimeout(slowTimer); clearTimeout(todayTimer); dailySeq += 1; rangeSeq += 1; dailyCtrl?.abort(); rangeCtrl?.abort(); for (const handle of charts.values()) handle.dispose(); charts.clear(); },
     get ua() { return ua; },
     get data() { return data; },
   };

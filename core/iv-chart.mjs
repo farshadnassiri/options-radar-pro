@@ -28,7 +28,7 @@ const finite = (value) => {
 
 export const IV_DAILY_WHY = {
   noPanel: 'پروندهٔ قیمت آن روز هنوز ساخته نشده',
-  notTraded: 'آن روز قیمتی نداشت',
+  notTraded: 'آن روز معامله‌ای نداشت (قیمت تابلو مانده از قبل است)',
   noSpot: 'قیمت پایانی پایه آن روز نیست',
   input: 'سررسید گذشته یا ورودی نامعتبر',
   belowFloor: 'قیمت زیر ارزش ذاتی (نوسان حل نشد)',
@@ -42,8 +42,16 @@ export const IV_DAILY_WHY = {
  * `contract`: `{ ins, kind, strike, expiry }`؛ `panels`: نقشهٔ روز → `{ ins: [close, last, vol, trades, value, low, high] }`؛
  * `baseRows`: سری روزانهٔ پایه؛ `oi`: نقشهٔ روز → `{ ins: موقعیت باز }`؛
  * `live`: `{ date, spot, price, volume, oi }` امروز (اختیاری).
+ *
+ * `from`/`to`: بازهٔ نمودار. پس از ترکیب همهٔ منبع‌ها (پرونده، روزها و امروز)
+ * اعمال می‌شود، پس امروزِ بیرون از بازهٔ تاریخی وارد نمی‌شود (گزارش آزمون
+ * ۴۰b2533، بند ۱: پایان بازه رعایت نمی‌شد و خلاصه «امروز» را آخرین می‌گفت).
+ *
+ * روزِ بی‌معامله (حجم و تعداد صفر) نوسان نمی‌سازد، حتی اگر قیمتی دارد: آن
+ * قیمت از روزهای قبل مانده. همان قاعدهٔ شاخص (`panelObservations` و
+ * `liveObservations` با `traded`) — بند ۴ همان گزارش.
  */
-export function contractDailySeries({ contract, panels = {}, baseRows = [], oi = {}, priceBasis = 'close', settings = {}, days = [], live = null } = {}) {
+export function contractDailySeries({ contract, panels = {}, baseRows = [], oi = {}, priceBasis = 'close', settings = {}, days = [], live = null, from = 0, to = 0 } = {}) {
   const ins = String(contract?.ins ?? '');
   const spotOf = new Map(baseRows.map((row) => [normalizeHistoryDate(row?.date), finite(row?.close)]));
   const dates = [...new Set([...days.map(normalizeHistoryDate), ...Object.keys(panels).map(normalizeHistoryDate)].filter(Boolean))].sort((a, b) => a - b);
@@ -59,6 +67,7 @@ export function contractDailySeries({ contract, panels = {}, baseRows = [], oi =
     if (!Array.isArray(values)) { rows.push({ ...row, volume: 0, trades: 0, why: 'notTraded' }); continue; }
     const [close, last, vol, trades, value] = values.map(finite);
     row.close = close; row.last = last; row.volume = vol; row.trades = trades; row.value = value;
+    if (!(vol > 0) && !(trades > 0)) { rows.push({ ...row, volume: isNum(vol) ? vol : 0, why: 'notTraded' }); continue; }
     row.price = priceBasis === 'last' ? last : close;
     if (!(spot > 0)) { rows.push({ ...row, why: 'noSpot' }); continue; }
     const iv = observationIv({ kind: contract.kind, strike: contract.strike, expiry, price: row.price }, spot, date, settings);
@@ -68,26 +77,38 @@ export function contractDailySeries({ contract, panels = {}, baseRows = [], oi =
   }
   if (live && normalizeHistoryDate(live.date) && !(expiry && normalizeHistoryDate(live.date) > expiry)) {
     const date = normalizeHistoryDate(live.date);
-    const price = finite(live.price), spot = finite(live.spot);
-    const iv = price > 0 && spot > 0 ? observationIv({ kind: contract.kind, strike: contract.strike, expiry, price }, spot, date, settings) : { ivPct: NaN, why: 'notTraded' };
+    const volume = finite(live.volume);
+    const traded = volume > 0;
+    const price = traded ? finite(live.price) : NaN, spot = finite(live.spot);
+    const iv = !traded ? { ivPct: NaN, why: 'notTraded' }
+      : price > 0 && spot > 0 ? observationIv({ kind: contract.kind, strike: contract.strike, expiry, price }, spot, date, settings) : { ivPct: NaN, why: 'input' };
     const row = {
-      date, live: true, ivPct: iv.ivPct, price, close: NaN, last: NaN, volume: finite(live.volume), trades: NaN, value: NaN,
+      date, live: true, ivPct: iv.ivPct, price, close: NaN, last: NaN, volume: isNum(volume) ? volume : 0, trades: NaN, value: NaN,
       oi: finite(live.oi), spot, why: isNum(iv.ivPct) ? '' : iv.why,
     };
     const at = rows.findIndex((r) => r.date === date);
     if (at >= 0) rows[at] = row; else rows.push(row);
   }
-  return rows;
+  return inRange(rows, from, to);
+}
+
+/** فقط ردیف‌های `from <= date <= to` (کرانِ صفر یعنی بی‌کران). */
+function inRange(rows, from, to) {
+  const lo = normalizeHistoryDate(from) || 0, hi = normalizeHistoryDate(to) || 0;
+  return lo || hi ? rows.filter((row) => (!lo || row.date >= lo) && (!hi || row.date <= hi)) : rows;
 }
 
 /**
  * سری روزانهٔ پایه از تاریخچهٔ `buildVolHistory`: شاخص نوسان ضمنی، HV
  * هم‌افق، رتبه و صدک، قیمت و حجم پایه، و جمع موقعیت باز قراردادهایش.
+ *
+ * `to`: پایان بازه. تاریخچهٔ پایه همهٔ عمقش را دارد (HV و رتبه به آن نیاز
+ * دارند)؛ بی این کران، شاخص پس از پایان بازه ادامه می‌یافت و محور نمودار
+ * سررسید را هم گشاد می‌کرد (گزارش آزمون ۴۰b2533، بند ۱).
  */
-export function underlyingDailySeries(history, { baseRows = [], oi = {}, from = 0 } = {}) {
+export function underlyingDailySeries(history, { baseRows = [], oi = {}, from = 0, to = 0 } = {}) {
   const volOf = new Map(baseRows.map((row) => [normalizeHistoryDate(row?.date), finite(row?.vol ?? row?.volume)]));
-  const lo = normalizeHistoryDate(from) || 0;
-  return (history?.rows || []).filter((row) => row.date >= lo).map((row) => {
+  return inRange(history?.rows || [], from, to).map((row) => {
     const day = oi?.[row.date] || oi?.[String(row.date)];
     const values = day ? Object.values(day).map(finite).filter(isNum) : [];
     return {

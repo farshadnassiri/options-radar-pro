@@ -106,7 +106,7 @@ group('۳۱۶-هـ. نمودارها و سیم‌کشی');
   const tip = o.tooltip.formatter([{ dataIndex: 1 }]);
   check('راهنمای نقطه مثل نمونه: تاریخ، نوسان، قیمت، حجم، موقعیت باز', ['نوسان ضمنی', 'قیمت', 'حجم', 'موقعیت باز', '۲٬۷۶۴'].every((t) => tip.includes(t)) || ['نوسان ضمنی', 'قیمت', 'حجم', 'موقعیت باز'].every((t) => tip.includes(t)), tip);
   const tipEmpty = o.tooltip.formatter([{ dataIndex: 2 }]);
-  check('روز خالی در راهنما علتش را می‌گوید', tipEmpty.includes('قیمتی نداشت'));
+  check('روز خالی در راهنما علتش را می‌گوید', tipEmpty.includes('معامله‌ای نداشت'));
   const ex = view.expiryOption([{ label: 'الف', rows }, { label: 'ب', rows: [] }], { indexRows: rows }, tokens);
   check('نمودار سررسید: یک خط برای هر قرارداد دارای داده + شاخص', ex.series.length === 2 && ex.series[1].name === 'شاخص نوسان ضمنی پایه');
   const rp = view.rangeOption([{ date: 1, second: 33000, value: 50, bid: 49, ask: 51 }, { date: 2, second: 33000, value: NaN, why: 'queue' }, { date: 2, second: 33300, value: 52 }], { grain: 'm5' }, tokens);

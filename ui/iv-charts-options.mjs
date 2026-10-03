@@ -8,7 +8,7 @@ import { chartFormat } from './chart-host.mjs';
 import { historyDateLabel } from '../core/history.mjs';
 import { momentLabel } from '../core/intraday-grid.mjs';
 import { IV_INDEX_WHY } from '../core/vol-rank.mjs';
-import { INTRADAY_WHY } from '../core/vol-intraday.mjs';
+import { INTRADAY_WHY, INTRADAY_FLAGS } from '../core/vol-intraday.mjs';
 import { movingAverage, expiriesOf, contractLabel, IV_DAILY_WHY } from '../core/iv-chart.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (ch) => ({
@@ -18,6 +18,12 @@ const isNum = (value) => Number.isFinite(value);
 const dateLabel = (value) => faDigits(historyDateLabel(value));
 const pct = (value) => (isNum(value) ? `${fmt.pct(value)}٪` : '—');
 const nul = (value) => (isNum(value) ? Math.round(value * 100) / 100 : null);
+/** تفاضل با علامت؛ صفرِ گردشده بی علامت (نه «−۰٫۰۰»). */
+const signed = (d) => {
+  const shown = fmt.pct(Math.abs(d));
+  const sign = Math.round(Math.abs(d) * 100) === 0 ? '' : d > 0 ? '+' : '−';
+  return ltr(`${sign}${shown}`);
+};
 const tick = (value) => ltr(Number(value) < 0 ? `−${faDigits(String(Math.abs(value)))}` : faDigits(String(value)));
 
 // «شاخص نوسان ضمنی پایه» سری اصلیِ همهٔ نمودارهای این تب است، با تیک — نه
@@ -68,7 +74,6 @@ export function masterOption(rows = [], { indexRows = null, show = {}, title = '
   const dates = axisRows.map((row) => row.date);
   const ivs = contract ? rows.map((row) => row.ivPct) : [];
   const indexIvs = dates.map((d) => idxOf.get(d)?.ivPct);
-  if (!ivs.some(isNum) && !indexIvs.some(isNum)) return null;
   const ma = movingAverage(contract ? ivs : indexIvs, 5);
   const series = [
     { id: 'index', name: INDEX_LABEL, type: 'line', yAxisIndex: 0, data: indexIvs.map(nul), symbolSize: 4, connectNulls: false, z: 4, ...indexStyle(tokens) },
@@ -80,6 +85,11 @@ export function masterOption(rows = [], { indexRows = null, show = {}, title = '
     { id: 'volume', name: 'حجم', type: 'bar', yAxisIndex: 2, data: axisRows.map((row) => (isNum(row.volume) ? row.volume : null)), barMaxWidth: 28, itemStyle: { color: tokens.accent, opacity: 0.22 }, z: 1 },
     { id: 'oi', name: 'موقعیت باز', type: 'line', yAxisIndex: 3, data: axisRows.map((row) => (isNum(row.oi) ? row.oi : null)), symbolSize: 4, connectNulls: false, lineStyle: { width: 1.5, color: tokens.warn }, itemStyle: { color: tokens.warn } },
   ];
+  // نمودار وقتی خالی است که هیچ سریِ روشنی دادهٔ معتبر ندارد — نبودِ نوسان
+  // فقط همان سری را خالی می‌کند، نه قیمت و حجم و موقعیت باز را (گزارش آزمون
+  // ۴۰b2533، بند ۵).
+  const hasData = (s) => s.data.some((v) => v != null && (s.id !== 'volume' || v > 0));
+  if (!series.some((s) => show[s.id] !== false && hasData(s))) return null;
   const liveAt = axisRows.findIndex((row) => row.live);
   if (liveAt >= 0) series[contract ? 1 : 0].markLine = { silent: true, symbol: 'none', lineStyle: { type: 'dashed', color: tokens.muted }, label: { formatter: 'امروز (زنده)', color: tokens.muted }, data: [{ xAxis: liveAt }] };
   const selected = Object.fromEntries(series.map((s) => [s.name, show[s.id] !== false]));
@@ -97,7 +107,7 @@ export function masterOption(rows = [], { indexRows = null, show = {}, title = '
         const lines = [
           ...(contract ? [['نوسان ضمنی قرارداد', isNum(row.ivPct) ? pct(row.ivPct) : `— ${why(row)}`]] : []),
           [INDEX_LABEL, isNum(ix?.ivPct) ? pct(ix.ivPct) : `— ${why(ix)}`],
-          ...(contract && isNum(row.ivPct) && isNum(ix?.ivPct) ? [['قرارداد منهای شاخص', `${ltr(`${row.ivPct - ix.ivPct >= 0 ? '+' : '−'}${fmt.pct(Math.abs(row.ivPct - ix.ivPct))}`)} واحد`]] : []),
+          ...(contract && isNum(row.ivPct) && isNum(ix?.ivPct) ? [['قرارداد منهای شاخص', `${signed(row.ivPct - ix.ivPct)} واحد`]] : []),
           ['نوسان تاریخی پایه', pct(ix?.hvPct)],
           ['IVR · IVP شاخص', `${isNum(ix?.ivr) ? fmt.int(Math.round(ix.ivr)) : '—'} · ${isNum(ix?.ivp) ? fmt.int(Math.round(ix.ivp)) : '—'}`],
           ['قیمت', isNum(row.price) ? fmt.money(row.price) : '—'],
@@ -143,21 +153,44 @@ export function expiryOption(lines = [], { indexRows = null } = {}, tokens) {
   };
 }
 
+/** چرا روزی از بازه هیچ لحظه‌ای ندارد — برای برچسب شکاف. */
+export function gapWhy(day = {}) {
+  if (day.source === 'pending') return day.queued ? 'در صف ساخت' : 'ساخته‌نشده («رسم نمودار» می‌سازد)';
+  if (day.source === 'failed') return `ساخت ناموفق${day.why ? `: ${day.why}` : ''}`;
+  if (day.source === 'none') return day.why || 'ضبط ندارد';
+  return 'لحظه‌ای ثبت نشد';
+}
+const PRICE_SOURCE = { mid: 'میانهٔ مظنه', fallback: 'آخرین معامله (جایگزین میانه)', trade: 'آخرین معامله' };
+const SOURCE_LABEL = { record: 'ضبط زنده', trades: 'بازسازی از ریزمعامله', book: 'بازسازی از دفتر سفارش + ریزمعامله' };
+
 /**
  * نمودار بازه و تایم‌فریم: لحظه‌ها پشت‌سرهم (روز و ساعت)، مرز روزها با خط.
- * `points`: سری اصلی `[{ date, second, value, bid, ask, why }]`؛ `indexPoints`
- * اختیاری: شاخص پایه برای مقایسه. لحظهٔ خالی خالی می‌ماند.
+ * `points`: سری اصلی `[{ date, second, value, bid, ask, why, priceSource, source }]`؛
+ * `indexPoints` اختیاری: شاخص پایه برای مقایسه (با `flags`). لحظهٔ خالی
+ * خالی می‌ماند.
+ *
+ * `days`: روزهای معاملاتیِ بازه (`[{ date, source, queued, why }]`، از پاسخ
+ * سرور). روزی که هیچ لحظه‌ای ندارد یک خانهٔ خالی با علت روی محور می‌گیرد،
+ * تا خط از رویش رد نشود و شکاف دیده شود (گزارش آزمون ۴۰b2533، بند ۳). تعطیل
+ * اصلاً در `days` نیست، پس شکاف نمی‌سازد.
  */
-export function rangeOption(points = [], { indexPoints = null, grain = 'm5', band = true, label = 'نوسان ضمنی' } = {}, tokens) {
+export function rangeOption(points = [], { indexPoints = null, days = [], grain = 'm5', band = true, label = 'نوسان ضمنی' } = {}, tokens) {
   const idx = indexPoints || [];
   if (!points.some((pt) => isNum(pt.value)) && !idx.some((pt) => isNum(pt.value))) return null;
   const key = (pt) => pt.date * 1e6 + pt.second;
-  const keys = [...new Set([...points, ...idx].map(key))].sort((a, b) => a - b);
+  const withData = new Set([...points, ...idx].map((pt) => pt.date));
+  const gapOf = new Map();
+  for (const day of days || []) {
+    if (!withData.has(day.date) && !gapOf.has(day.date * 1e6)) gapOf.set(day.date * 1e6, day);
+  }
+  const keys = [...new Set([...points.map(key), ...idx.map(key), ...gapOf.keys()])].sort((a, b) => a - b);
   const mainOf = new Map(points.map((pt) => [key(pt), pt]));
   const idxOf = new Map(idx.map((pt) => [key(pt), pt]));
   const dateOf = (k) => Math.trunc(k / 1e6), secondOf = (k) => k % 1e6;
-  const cats = keys.map((k) => (grain === 'day' ? dateLabel(dateOf(k)) : `${dateLabel(dateOf(k))} ${momentLabel(secondOf(k))}`));
+  const cats = keys.map((k) => (gapOf.has(k) ? `${dateLabel(dateOf(k))} · بی داده`
+    : grain === 'day' ? dateLabel(dateOf(k)) : `${dateLabel(dateOf(k))} ${momentLabel(secondOf(k))}`));
   const starts = keys.map((k, i) => (i > 0 && dateOf(k) !== dateOf(keys[i - 1]) ? i : -1)).filter((i) => i > 0);
+  const gaps = keys.map((k, i) => (gapOf.has(k) ? i : -1)).filter((i) => i >= 0);
   const series = [];
   if (points.length) {
     series.push({
@@ -172,17 +205,32 @@ export function rangeOption(points = [], { indexPoints = null, grain = 'm5', ban
     }
   }
   if (idx.length) series.push({ name: INDEX_LABEL, type: 'line', data: keys.map((k) => nul(idxOf.get(k)?.value)), symbolSize: grain === 'day' ? 5 : 2, connectNulls: false, ...indexStyle(tokens) });
-  if (grain !== 'day' && starts.length) series[0].markLine = { silent: true, symbol: 'none', label: { show: false }, lineStyle: { type: 'dashed', color: tokens.line }, data: starts.map((i) => ({ xAxis: i })) };
+  const marks = [
+    ...(grain !== 'day' ? starts.filter((i) => !gapOf.has(keys[i])).map((i) => ({ xAxis: i })) : []),
+    ...gaps.map((i) => ({ xAxis: i, lineStyle: { type: 'solid', width: 10, opacity: 0.35, color: tokens.warn }, label: { show: true, formatter: 'بی داده', color: tokens.warn } })),
+  ];
+  if (marks.length) series[0].markLine = { silent: true, symbol: 'none', label: { show: false }, lineStyle: { type: 'dashed', color: tokens.line }, data: marks };
   return {
     legend: { top: 0, textStyle: { color: tokens.muted } },
     tooltip: {
       trigger: 'axis',
       formatter: (params) => {
         const k = keys[params[0]?.dataIndex ?? 0];
+        const head = `<b>${esc(cats[params[0]?.dataIndex ?? 0])}</b>`;
+        const gap = gapOf.get(k);
+        if (gap) return `${head}<br>این روز معاملاتی داده ندارد: ${esc(gapWhy(gap))}`;
         const main = mainOf.get(k), ix = idxOf.get(k);
         const whyOf = (pt) => esc(INTRADAY_WHY[pt?.why] || IV_DAILY_WHY[pt?.why] || pt?.why || '');
         const empty = [main && !isNum(main.value) ? `${esc(label)}: — ${whyOf(main)}` : '', ix && !isNum(ix.value) ? `${INDEX_LABEL}: — ${whyOf(ix)}` : ''].filter(Boolean);
-        return `<b>${esc(cats[params[0]?.dataIndex ?? 0])}</b><br>${params.filter((p) => p.value != null).map((p) => `${p.marker}${esc(p.seriesName)}: ${chartFormat.pct(p.value)}`).join('<br>')}${empty.length ? `<br>${empty.join('<br>')}` : ''}`;
+        // کیفیت همان نقطه: قیمت قرارداد از کجا آمد، و پرچم‌های شاخص.
+        const notes = [];
+        if (main && isNum(main.value) && PRICE_SOURCE[main.priceSource]) notes.push(`قیمت قرارداد: ${PRICE_SOURCE[main.priceSource]}`);
+        const src = (main || ix)?.source || (ix?.flags?.includes('rebuilt') ? 'trades' : '');
+        if (SOURCE_LABEL[src]) notes.push(`منبع: ${SOURCE_LABEL[src]}`);
+        const flags = (ix?.flags || []).filter((f) => f !== 'rebuilt' && INTRADAY_FLAGS[f]).map((f) => INTRADAY_FLAGS[f]);
+        if (flags.length) notes.push(`شاخص: ${flags.join('؛ ')}`);
+        const lines = params.filter((p) => p.value != null).map((p) => `${p.marker}${esc(p.seriesName)}: ${chartFormat.pct(p.value)}`);
+        return [head, ...lines, ...empty, ...notes.map((n) => `<small>${esc(n)}</small>`)].join('<br>');
       },
     },
     grid: { left: 56, right: 24, top: 64, bottom: 70, containLabel: true },
@@ -202,7 +250,7 @@ export function masterSummary(rows = []) {
   const oiDays = rows.filter((row) => isNum(row.oi)).length;
   return [
     `آخرین: ${pct(last.ivPct)} (${dateLabel(last.date)}${last.live ? '، زنده' : ''})`,
-    `تغییر در بازه: ${ltr(`${last.ivPct - first.ivPct >= 0 ? '+' : '−'}${fmt.pct(Math.abs(last.ivPct - first.ivPct))}`)} واحد`,
+    `تغییر در بازه: ${signed(last.ivPct - first.ivPct)} واحد`,
     `کمینه ${pct(Math.min(...values))} · بیشینه ${pct(Math.max(...values))}`,
     `${faDigits(ok.length)} از ${faDigits(rows.length)} روز نوسان دارد`,
     oiDays ? `موقعیت باز ${faDigits(oiDays)} روز (از ضبط تابلو)` : 'موقعیت باز تاریخی ندارد — از روز روشن‌شدن ضبط تابلو جمع می‌شود',

@@ -170,13 +170,14 @@ export async function mountChart(host, build, { onClick = null, empty = 'داد�
 
   return {
     instance,
-    update(next) { if (next) build = next; paint(); },
+    /** `false` یعنی سازنده گزینه نداد و نمودار قبلی سر جایش ماند. */
+    update(next) { if (next) build = next; return paint(); },
     resize() {
       const box = host.getBoundingClientRect();
       if (box.width < 2 || box.height < 2) return;
       instance.resize();
     },
-    dispose() { observer?.disconnect(); instance.dispose(); },
+    dispose() { observer?.disconnect(); if (!instance.isDisposed?.()) instance.dispose(); },
   };
 }
 
