@@ -322,10 +322,15 @@ async function get(pathname, ttlSec, priority = 5) {
         const queuedAt = Date.now();
         const meta = {};
         let data;
+        // پاسخ سادهٔ دیده‌بان در CDN می‌تواند چند روز کهنه باشد (فزر:
+        // ۱۹/۴۷ روز و ارزش صفر، در برابر ۱۵/۴۳ روز در پاسخ تازه).
+        // فقط نشانی شبکه مهر می‌خورد؛ کلید کش، ادغام و cachedAt ثابت‌اند.
+        const requestUrl = pathname === '/Instrument/GetInstrumentOptionMarketWatch/0'
+          ? `${url}?_=${Date.now()}` : url;
         try {
-          data = await schedule(() => fetchUpstream(url, meta), ticket.priority, ticket, pathname);
-        } catch (e) { upAttempt(dl, { pathname, url, attempt, queuedAt, meta, error: e }); throw e; }
-        upAttempt(dl, { pathname, url, attempt, queuedAt, meta, data });
+          data = await schedule(() => fetchUpstream(requestUrl, meta), ticket.priority, ticket, pathname);
+        } catch (e) { upAttempt(dl, { pathname, url: requestUrl, attempt, queuedAt, meta, error: e }); throw e; }
+        upAttempt(dl, { pathname, url: requestUrl, attempt, queuedAt, meta, data });
         // «خالی» یعنی پاسخ آمد ولی هیچ ردیفی نداشت. این با «نیامد» فرق
         // دارد و کش می‌شود — ولی نه به همان درازا.
         cache.set(url, { at: Date.now(), data, empty: firstList(data).length === 0 });

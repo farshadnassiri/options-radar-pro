@@ -126,8 +126,8 @@ group('۳۰۰. سیم‌کشی');
 {
   const server = readSrc('../server/server.mjs');
   check('هر تلاشِ بالادست ثبت می‌شود — `get` و `getFresh` هر دو',
-    (server.match(/upAttempt\(dl, \{ pathname, url, attempt, queuedAt, meta, error: e \}\)/g) || []).length === 2
-    && (server.match(/upAttempt\(dl, \{ pathname, url, attempt, queuedAt, meta, data \}\)/g) || []).length === 2);
+    (server.match(/upAttempt\(dl, \{ pathname, url(?:: requestUrl)?, attempt, queuedAt, meta, error: e \}\)/g) || []).length === 2
+    && (server.match(/upAttempt\(dl, \{ pathname, url(?:: requestUrl)?, attempt, queuedAt, meta, data \}\)/g) || []).length === 2);
   check('کش و ادغام هم ثبت می‌شوند، نه فقط رفتن به TSETMC',
     (server.match(/cat: 'cached'/g) || []).length === 2 && (server.match(/cat: 'joined'/g) || []).length === 2);
   check('تنها `fetch` بالادست همان `fetchUpstream` است', (server.match(/await fetch\(/g) || []).length === 1);
