@@ -50,8 +50,12 @@ export const IV_DAILY_WHY = {
  * روزِ بی‌معامله (حجم و تعداد صفر) نوسان نمی‌سازد، حتی اگر قیمتی دارد: آن
  * قیمت از روزهای قبل مانده. همان قاعدهٔ شاخص (`panelObservations` و
  * `liveObservations` با `traded`) — بند ۴ همان گزارش.
+ *
+ * `strikeOf(contract, date)`: قیمت اعمالِ همان روز — پیش از تعدیل سود نقدی یا
+ * افزایش سرمایه (`core/strike-adjust.mjs`)؛ بی آن، اعمالِ ذخیره‌شده. هر ردیف
+ * `strike` همان روز را دارد.
  */
-export function contractDailySeries({ contract, panels = {}, baseRows = [], oi = {}, priceBasis = 'close', settings = {}, days = [], live = null, from = 0, to = 0 } = {}) {
+export function contractDailySeries({ contract, panels = {}, baseRows = [], oi = {}, priceBasis = 'close', settings = {}, days = [], live = null, from = 0, to = 0, strikeOf = null } = {}) {
   const ins = String(contract?.ins ?? '');
   const spotOf = new Map(baseRows.map((row) => [normalizeHistoryDate(row?.date), finite(row?.close)]));
   const dates = [...new Set([...days.map(normalizeHistoryDate), ...Object.keys(panels).map(normalizeHistoryDate)].filter(Boolean))].sort((a, b) => a - b);
@@ -62,7 +66,8 @@ export function contractDailySeries({ contract, panels = {}, baseRows = [], oi =
     const panel = panels[date] || panels[String(date)];
     const values = panel?.[ins];
     const spot = spotOf.get(date);
-    const row = { date, ivPct: NaN, price: NaN, close: NaN, last: NaN, volume: NaN, trades: NaN, value: NaN, oi: finite(oi?.[date]?.[ins] ?? oi?.[String(date)]?.[ins]), spot, why: '' };
+    const strike = strikeOf ? finite(strikeOf(contract, date)) : finite(contract?.strike);
+    const row = { date, strike, ivPct: NaN, price: NaN, close: NaN, last: NaN, volume: NaN, trades: NaN, value: NaN, oi: finite(oi?.[date]?.[ins] ?? oi?.[String(date)]?.[ins]), spot, why: '' };
     if (!panel) { rows.push({ ...row, why: 'noPanel' }); continue; }
     if (!Array.isArray(values)) { rows.push({ ...row, volume: 0, trades: 0, why: 'notTraded' }); continue; }
     const [close, last, vol, trades, value] = values.map(finite);
@@ -70,7 +75,7 @@ export function contractDailySeries({ contract, panels = {}, baseRows = [], oi =
     if (!(vol > 0) && !(trades > 0)) { rows.push({ ...row, volume: isNum(vol) ? vol : 0, why: 'notTraded' }); continue; }
     row.price = priceBasis === 'last' ? last : close;
     if (!(spot > 0)) { rows.push({ ...row, why: 'noSpot' }); continue; }
-    const iv = observationIv({ kind: contract.kind, strike: contract.strike, expiry, price: row.price }, spot, date, settings);
+    const iv = observationIv({ kind: contract.kind, strike, expiry, price: row.price }, spot, date, settings);
     row.ivPct = iv.ivPct;
     row.why = isNum(iv.ivPct) ? '' : iv.why;
     rows.push(row);
@@ -83,7 +88,7 @@ export function contractDailySeries({ contract, panels = {}, baseRows = [], oi =
     const iv = !traded ? { ivPct: NaN, why: 'notTraded' }
       : price > 0 && spot > 0 ? observationIv({ kind: contract.kind, strike: contract.strike, expiry, price }, spot, date, settings) : { ivPct: NaN, why: 'input' };
     const row = {
-      date, live: true, ivPct: iv.ivPct, price, close: NaN, last: NaN, volume: isNum(volume) ? volume : 0, trades: NaN, value: NaN,
+      date, live: true, strike: finite(contract?.strike), ivPct: iv.ivPct, price, close: NaN, last: NaN, volume: isNum(volume) ? volume : 0, trades: NaN, value: NaN,
       oi: finite(live.oi), spot, why: isNum(iv.ivPct) ? '' : iv.why,
     };
     const at = rows.findIndex((r) => r.date === date);
@@ -117,6 +122,32 @@ export function underlyingDailySeries(history, { baseRows = [], oi = {}, from = 
       why: isNum(row.ivPct) ? '' : row.why,
     };
   });
+}
+
+/**
+ * چرا شاخص از روز X شروع می‌شود: اولین و آخرین روزِ دارای شاخص، و شمار علت‌های
+ * روزهای خالیِ پیش از اولین روز، میان دو سر و پس از آخرین (پرسش صاحب پروژه
+ * دربارهٔ فزر: «چرا فقط از ۳۱ خرداد رسم می‌کند؟»). `rows`: سری
+ * `underlyingDailySeries`.
+ */
+export function indexGaps(rows = []) {
+  const list = rows || [];
+  const first = list.findIndex((row) => isNum(row.ivPct));
+  let last = -1;
+  for (let i = list.length - 1; i >= 0; i -= 1) { if (isNum(list[i].ivPct)) { last = i; break; } }
+  const tally = (part) => {
+    const out = {};
+    for (const row of part) if (!isNum(row.ivPct)) out[row.why || 'unknown'] = (out[row.why || 'unknown'] || 0) + 1;
+    return Object.entries(out).sort((a, b) => b[1] - a[1]);
+  };
+  return {
+    days: list.length, ivDays: list.filter((row) => isNum(row.ivPct)).length,
+    firstDate: first >= 0 ? list[first].date : 0, lastDate: last >= 0 ? list[last].date : 0,
+    rangeFrom: list[0]?.date || 0,
+    before: tally(first >= 0 ? list.slice(0, first) : list),
+    between: first >= 0 ? tally(list.slice(first + 1, last)) : [],
+    after: last >= 0 ? tally(list.slice(last + 1)) : [],
+  };
 }
 
 /** میانگین متحرک ساده؛ پنجرهٔ ناقص یا دارای خالی، خالی. */

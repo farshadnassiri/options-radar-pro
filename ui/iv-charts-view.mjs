@@ -29,10 +29,12 @@ import { buildVolHistory, panelObservations, liveObservations, volParams, IV_PRI
 import { intradayContext } from '../core/vol-intraday.mjs';
 import { deskFrom } from '../core/vol-desk.mjs';
 import {
-  contractDailySeries, underlyingDailySeries, expiriesOf, defaultPicks, contractLabel, contractIntradaySeries,
+  contractDailySeries, underlyingDailySeries, expiriesOf, defaultPicks, contractLabel, contractIntradaySeries, indexGaps,
 } from '../core/iv-chart.mjs';
+import { baseAdjustments, strikeAdjustPlan, strikeResolver, adjustTransportDay } from '../core/strike-adjust.mjs';
 import {
   MASTER_SERIES, RANGE_SPANS, RANGE_GRAINS, INDEX_LABEL, instrumentOptionsHtml, masterOption, expiryOption, rangeOption, masterSummary,
+  gapsText, adjustText,
 } from './iv-charts-options.mjs';
 
 export { masterOption, expiryOption, rangeOption, instrumentOptionsHtml, masterSummary } from './iv-charts-options.mjs';
@@ -106,6 +108,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       <div class="ivc-toggles" role="group" aria-label="سری‌های نمودار">${MASTER_SERIES.map(([id, label]) => `<label class="check${id === 'index' ? ' ivc-index-toggle' : ''}"><input type="checkbox" data-ivc-show="${id}"${opts.show[id] !== false ? ' checked' : ''}> ${esc(label)}</label>`).join('')}</div>
       <div class="ivc-chart" data-ivc-chart="master"></div>
       <p class="note" data-ivc-summary></p>
+      <p class="note" data-ivc-gaps></p>
     </section>
     <section class="card ivc-expiry">
       <div class="section-head"><div><p class="eyebrow">قراردادهای یک سررسید</p><h3>نوسان ضمنی قراردادها روی هم</h3></div><span class="note">هر قرارداد را با تیک اضافه یا حذف کن؛ همان بازه و مبنای قیمت نمودار مادر</span></div>
@@ -222,6 +225,9 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       if (!response.ok || body.error) throw new Error(body.error || `HTTP ${response.status}`);
       if (String(body.ua) !== want) return;
       data = { ua: want, from, to, today: body.today, contracts: body.contracts || [], panels: body.panels || {}, oi: body.oi || {}, baseRows: daily.byIns?.[want]?.rows || [], api: body };
+      // اعمالِ روزهای پیش از تعدیل سود نقدی یا افزایش سرمایه (`core/strike-adjust.mjs`).
+      data.plan = strikeAdjustPlan({ contracts: data.contracts, panels: data.panels, events: baseAdjustments(data.baseRows) });
+      data.strikeOf = strikeResolver(data.plan);
       seriesMemo.clear();
       liveSeen = liveKey();
       fillSelects();
@@ -297,7 +303,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     const live = liveNow();
     const params = volParams(rankOpts());
     const history = buildVolHistory({
-      baseRows: data.baseRows, observations: panelObservations(data.contracts, data.panels, opts.priceBasis),
+      baseRows: data.baseRows, observations: panelObservations(data.contracts, data.panels, opts.priceBasis, { strikeOf: data.strikeOf }),
       live: live ? { date: live.date, spot: live.spot, observations: liveObservations(live.contracts, ua, opts.priceBasis) } : null,
       from: data.from, params, settings: getSettings(),
     });
@@ -315,7 +321,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     const lc = live?.contracts.find((c) => String(c.ins) === String(ins));
     const days = data.baseRows.map((row) => row.date).filter((d) => d >= data.from && d <= data.to && d < data.today);
     const rows = contractDailySeries({
-      contract, panels: data.panels, baseRows: data.baseRows, oi: data.oi, priceBasis: opts.priceBasis, settings: getSettings(), days, from: data.from, to: data.to,
+      contract, panels: data.panels, baseRows: data.baseRows, oi: data.oi, priceBasis: opts.priceBasis, settings: getSettings(), days, from: data.from, to: data.to, strikeOf: data.strikeOf,
       live: lc ? { date: live.date, spot: live.spot, price: opts.priceBasis === 'last' ? Number(lc.tradeLast) : Number(lc.close), volume: Number(lc.volume), oi: Number(lc.oi) } : null,
     });
     seriesMemo.set(key, rows);
@@ -362,7 +368,9 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     const idx = indexRows();
     const title = contract ? `تاریخچهٔ قرارداد ${contractLabel(contract)}${opts.show.index !== false ? ` و ${INDEX_LABEL}` : ''}` : `${INDEX_LABEL} ${uaName()}`;
     q('[data-ivc-summary]').textContent = masterSummary(contract ? rows : idx);
-    setChart('master', (echarts, tokens) => masterOption(rows, { indexRows: idx, show: opts.show, title }, tokens),
+    // چرا شاخص از این روز شروع می‌شود، و تعدیل‌های قیمت اعمال در بازه.
+    q('[data-ivc-gaps]').textContent = [gapsText(indexGaps(idx)), adjustText(data.plan)].filter(Boolean).join(' ');
+    setChart('master', (echarts, tokens) => masterOption(rows, { indexRows: idx, show: opts.show, title, contractStrike: Number(contract?.strike) }, tokens),
       'سری‌های روشن در این بازه داده‌ای ندارند — پوشش پرونده‌ها را در خط وضعیت ببین یا سری دیگری را روشن کن.',
       `${ua}|${opts.instrument}|${data.from}|${data.to}|${opts.priceBasis}`, { keepLegend: false });
   }
@@ -457,11 +465,14 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       if (!calendar) {
         try { calendar = await (await fetcher('/api/vol/calendar', { cache: 'no-store' })).json(); } catch { calendar = { known: false, holidays: [] }; }
       }
-      const [apiC, apiI] = await Promise.all([
+      let [apiC, apiI] = await Promise.all([
         ins ? fetchRangeSeries({ want, from, span, ins, build }) : null,
         withIndex ? fetchRangeSeries({ want, from, span, ins: '', build }) : null,
       ]);
       if (my !== rangeSeq || want !== ua) return;
+      // روزهای بازسازی‌شده اعمالِ دفتر را دارند؛ پیش از تعدیل، اعمالِ همان روز.
+      const fix = (api) => (api && data?.plan ? { ...api, days: api.days.map((d) => adjustTransportDay(d, data.plan)) } : api);
+      [apiC, apiI] = [fix(apiC), fix(apiI)];
       const settings = getSettings();
       let pointsC = null, pointsI = null;
       if (apiC) {

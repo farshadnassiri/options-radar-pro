@@ -135,7 +135,7 @@ group('۳۰۸-ب. شاخص یک روز: همان تلاطمی که قیمت‌ه
   const skip = ivIndexOfDay({ date: day, spot: S, observations: stale }, { targetDays: 30 }, settings);
   check('پایانیِ روزِ بی‌معامله وارد شاخص نمی‌شود', near(skip.ivPct, cm.ivPct, 1e-6));
   const near7 = ivIndexOfDay({ date: day, spot: S, observations: chain.map((o) => ({ ...o, expiry: 20260930 })) }, {}, settings);
-  check('سررسیدِ کمتر از یک هفته کنار می‌رود (تلاطم ناپایدار)', !Number.isFinite(near7.ivPct) && near7.why === 'noAtm');
+  check('سررسیدِ کمتر از یک هفته کنار می‌رود (تلاطم ناپایدار)، با علت خودش', !Number.isFinite(near7.ivPct) && near7.why === 'nearExpiry');
   const atm = expiryAtmIv([{ strike: 1100, ivPct: 40, kind: 'call' }], 1000, 15);
   check('فقط یک سمتِ پایه: همان اعمال، با پرچم یک‌طرفه', atm.ivPct === 40 && atm.oneSided);
   check('بیرون از باند در پول: نامعلوم، نه عدد', !Number.isFinite(expiryAtmIv([{ strike: 1500, ivPct: 40 }], 1000, 15).ivPct));

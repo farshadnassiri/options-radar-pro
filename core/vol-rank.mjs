@@ -175,11 +175,16 @@ export function ivIndexOfDay({ date, spot, observations = [] } = {}, params = {}
   const traded = observations.filter((obs) => obs && obs.traded !== false && finite(obs.price) > 0);
   if (!traded.length) return empty('noTrades');
 
+  // علتِ روز خالی باید همان چیزی باشد که واقعاً رخ داد (پرسش صاحب پروژه
+  // دربارهٔ فزر، ۱۴۰۵/۰۷/۱۲): «فقط قرارداد نزدیک سررسید معامله شد» با «قرارداد
+  // نزدیک قیمت پایه نبود» و «نوسانش حل نشد» یکی نیست، و همه پیش‌تر `noAtm` بودند.
   const byExpiry = new Map();
+  let nearOnly = 0, farOnly = 0;
   for (const obs of traded) {
     const expiry = normalizeHistoryDate(obs.expiry);
     const dte = daysBetween(day, expiry);
-    if (!(dte >= p.minDte) || dte > p.maxDte) continue;
+    if (!(dte >= p.minDte)) { nearOnly += 1; continue; }
+    if (dte > p.maxDte) { farOnly += 1; continue; }
     const { ivPct } = observationIv({ ...obs, expiry }, S, day, settings);
     if (!byExpiry.has(expiry)) byExpiry.set(expiry, []);
     byExpiry.get(expiry).push({ ...obs, expiry, dte, ivPct });
@@ -191,7 +196,11 @@ export function ivIndexOfDay({ date, spot, observations = [] } = {}, params = {}
     })
     .sort((a, b) => a.dte - b.dte);
   const usable = term.filter((row) => isNum(row.ivPct));
-  if (!usable.length) return { ...empty('noAtm'), term };
+  if (!byExpiry.size) return empty(farOnly && !nearOnly ? 'farExpiry' : 'nearExpiry');
+  if (!usable.length) {
+    const inBand = [...byExpiry.values()].flat().some((row) => Math.abs(finite(row.strike) / S - 1) * 100 <= p.bandPct);
+    return { ...empty(inBand ? 'ivUnsolved' : 'outOfBand'), term };
+  }
 
   if (p.method === 'front') {
     const front = usable[0];
@@ -242,6 +251,10 @@ export const IV_INDEX_WHY = {
   noSpot: 'قیمت پایانی پایه نبود',
   noTrades: 'هیچ قراردادی معامله نشد',
   noAtm: 'قرارداد معامله‌شده‌ای نزدیک قیمت پایه نبود یا تلاطمش حل نشد',
+  nearExpiry: 'فقط قراردادهای نزدیک سررسید معامله شدند (کمتر از حداقلِ روز تا سررسید، پیش‌فرض ۷ روز) و کنار رفتند',
+  farExpiry: 'فقط قراردادهای دورتر از سقفِ روز تا سررسید معامله شدند',
+  outOfBand: 'هیچ قرارداد معامله‌شده‌ای نزدیک قیمت پایه نبود (بیرون از محدودهٔ در پول، پیش‌فرض ±۱۵٪)',
+  ivUnsolved: 'قرارداد نزدیک قیمت پایه معامله شد ولی نوسانش حل نشد (قیمت زیر ارزش ذاتی یا بالای سقف نظری)',
   noPanel: 'دادهٔ قیمت قراردادهای آن روز هنوز گرفته نشده',
   outOfRange: 'بیرون از بازهٔ دریافت',
 };
@@ -313,17 +326,21 @@ export function quantile(list = [], q) {
  * چند درصد است، پس جهشِ بزرگ‌تر تعدیل قیمت (افزایش سرمایه، سود نقدی) است
  * نه نوسان — و یک تعدیل، تلاطم یک ماه را چند برابر نشان می‌دهد.
  */
-export function logReturns(closes = [], jumpCut = VOL_DEFAULTS.jumpCut) {
+export function logReturns(closes = [], jumpCut = VOL_DEFAULTS.jumpCut, refs = []) {
   const out = new Array(closes.length).fill(NaN);
-  let jumps = 0;
+  let jumps = 0, adjusted = 0;
   for (let i = 1; i < closes.length; i += 1) {
-    const a = finite(closes[i - 1]), b = finite(closes[i]);
+    const prev = finite(closes[i - 1]), b = finite(closes[i]), ref = finite(refs[i]);
+    // `refs[i]`: قیمت مرجع همان روز (`priceYesterday`). کمتر از پایانی دیروز
+    // یعنی تعدیل؛ آن‌وقت بازده از مرجع است.
+    const a = ref > 0 && prev > 0 && ref < prev && (prev - ref) / prev > 0.0005 ? ref : prev;
     if (!(a > 0) || !(b > 0)) continue;
+    if (a !== prev) adjusted += 1;
     const r = Math.log(b / a);
     if (Math.abs(r) > jumpCut) { jumps += 1; continue; }
     out[i] = r;
   }
-  return { returns: out, jumps };
+  return { returns: out, jumps, adjusted };
 }
 
 /** انحراف معیار نمونه‌ای سالانه‌شده، درصد. */
@@ -453,7 +470,7 @@ export function volRegime(ivp, ivr = NaN) {
  */
 export const PANEL_COLUMNS = ['close', 'last', 'vol', 'trades', 'value', 'low', 'high'];
 
-export function panelObservations(contracts = [], panels = {}, priceBasis = 'close') {
+export function panelObservations(contracts = [], panels = {}, priceBasis = 'close', { strikeOf = null } = {}) {
   const byIns = new Map(contracts.map((c) => [String(c.ins), c]));
   const out = new Map();
   for (const [day, row] of Object.entries(panels || {})) {
@@ -465,8 +482,10 @@ export function panelObservations(contracts = [], panels = {}, priceBasis = 'clo
       if (!c || !Array.isArray(values)) continue;
       const [close, last, vol, trades] = values.map(finite);
       const price = priceBasis === 'last' ? last : close;
+      // `strikeOf`: قیمت اعمالِ همان روز (پیش از تعدیل سود نقدی یا افزایش
+      // سرمایه، `core/strike-adjust.mjs`)؛ بی آن، اعمالِ ذخیره‌شده.
       obs.push({
-        ins: String(ins), kind: c.kind, strike: finite(c.strike), expiry: normalizeHistoryDate(c.expiry),
+        ins: String(ins), kind: c.kind, strike: strikeOf ? finite(strikeOf(c, date)) : finite(c.strike), expiry: normalizeHistoryDate(c.expiry),
         price, traded: (vol > 0) || (trades > 0),
       });
     }
@@ -503,7 +522,7 @@ export function buildVolHistory({
   for (const row of baseRows) {
     const date = normalizeHistoryDate(row?.date);
     const close = finite(row?.close);
-    if (date && close > 0) byDate.set(date, { date, close, high: finite(row.high), low: finite(row.low) });
+    if (date && close > 0) byDate.set(date, { date, close, high: finite(row.high), low: finite(row.low), yday: finite(row.yday) });
   }
   if (live && normalizeHistoryDate(live.date) && finite(live.spot) > 0) {
     const date = normalizeHistoryDate(live.date);
@@ -511,7 +530,10 @@ export function buildVolHistory({
     byDate.set(date, { date, close: finite(live.spot), high: prev?.high ?? NaN, low: prev?.low ?? NaN, live: true });
   }
   const base = [...byDate.values()].sort((a, b) => a.date - b.date);
-  const { returns, jumps } = logReturns(base.map((row) => row.close), p.jumpCut);
+  // بازده روز از قیمت مرجعِ بورس (`yday`) سنجیده می‌شود، نه پایانی دیروز: روز
+  // تعدیل (سود نقدی، افزایش سرمایه) مرجعش تعدیل‌شده است و افتِ تعدیل نوسان
+  // نیست. روزهای عادی این دو برابرند.
+  const { returns, jumps, adjusted } = logReturns(base.map((row) => row.close), p.jumpCut, base.map((row) => row.yday));
   const hv = Object.fromEntries([...new Set([...p.hvWindows, p.hvWindow])].map((w) => [w, rollingHv(returns, w, tdy)]));
   const park = rollingParkinson(base, p.hvWindow, tdy);
   const fwd = forwardRealized(returns, p.hvWindow, tdy);
@@ -575,7 +597,7 @@ export function buildVolHistory({
       min: ivKnown.length ? Math.min(...ivKnown) : NaN,
       max: ivKnown.length ? Math.max(...ivKnown) : NaN,
       mean: mean(ivKnown), median: quantile(ivKnown, 0.5),
-      jumps,
+      jumps, adjusted,
       // تلاطم ضمنی در گذشته معمولاً گران‌تر از تحقق‌یافتهٔ بعدی بوده یا ارزان‌تر؟
       fwdSamples: fwdPairs.length,
       fwdEdgeMean: mean(fwdPairs.map((row) => row.fwdEdge)),

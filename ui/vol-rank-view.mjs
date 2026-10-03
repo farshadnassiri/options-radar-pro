@@ -16,6 +16,9 @@ import { fetchDailies } from './daily-intake.mjs';
 import { saveVolSummary, volSummaryOf } from './vol-rank-store.mjs';
 import { historyDateLabel } from '../core/history.mjs';
 import { tehranDateNumber } from '../core/tehran-day.mjs';
+import { baseAdjustments, strikeAdjustPlan, strikeResolver } from '../core/strike-adjust.mjs';
+import { indexGaps } from '../core/iv-chart.mjs';
+import { gapsText, adjustText } from './iv-charts-options.mjs';
 import {
   VOL_LOOKBACKS, IV_METHODS, IV_PRICE_BASES, VOL_DEFAULTS, VOL_REGIMES, IV_INDEX_WHY, IV_INDEX_FLAGS,
   buildVolHistory, panelObservations, liveObservations, volRangeFor, volCorrelation, volParams, quantile,
@@ -151,6 +154,7 @@ export function volStatusText({ api, history, baseRows = 0, uaName = '' } = {}) 
   if (api.roster?.build?.running) parts.push('دفتر قراردادهای سررسیدشده هم در حال تکمیل است');
   parts.push(`${faDigits(api.contracts?.length || 0)} قرارداد این پایه در بازه`);
   parts.push(`${faDigits(baseRows)} روز سابقهٔ قیمت پایه برای تلاطم تاریخی`);
+  if (history?.stats?.adjusted) parts.push(`${faDigits(history.stats.adjusted)} روز تعدیل (سود نقدی یا افزایش سرمایه) در تلاطم تاریخی از قیمت مرجع سنجیده شد`);
   if (history?.stats?.jumps) parts.push(`${faDigits(history.stats.jumps)} جهش قیمتیِ تعدیلی از تلاطم تاریخی کنار رفت`);
   return parts.join(' · ');
 }
@@ -527,11 +531,14 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
   function recompute() {
     if (!api) return;
     const range = volRangeFor(opts.lookback, api.today || tehranDateNumber());
+    // اعمالِ روزهای پیش از تعدیل سود نقدی یا افزایش سرمایه (`core/strike-adjust.mjs`).
+    const plan = strikeAdjustPlan({ contracts: api.contracts, panels: api.panels, events: baseAdjustments(baseRows) });
     history = buildVolHistory({
-      baseRows, observations: panelObservations(api.contracts, api.panels, opts.priceBasis),
+      baseRows, observations: panelObservations(api.contracts, api.panels, opts.priceBasis, { strikeOf: strikeResolver(plan) }),
       live: liveInput(), from: range?.from || 0, params: params(), settings: getSettings(),
     });
     history.rangeFrom = range?.from || 0;
+    history.adjust = plan;
     // خلاصه برای انتخابگر نماد، نقشهٔ بازار و تب‌های استراتژی.
     saveVolSummary(volSummaryOf(history, { ua, lookback: opts.lookback }));
     paint();
@@ -608,6 +615,7 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
       ].map(([key, title, hint]) => `<figure class="card vr-gauge-card"><div class="vr-gauge" data-vr-gauge="${key}" role="img" aria-label="${esc(title)}"></div><figcaption><b>${esc(title)}</b><small>${esc(hint)}</small><span data-vr-gauge-text="${key}"></span></figcaption></figure>`).join('')}</div>
         <div data-vr-regime></div>
         <div class="lmm-stat-grid vr-kpis" data-vr-kpis></div>
+        <p class="note" data-vr-gaps></p>
         <section class="card"><div class="section-head"><h3>مقایسهٔ تلاطم امروز</h3><span>IV در برابر رتبه، صدک و تلاطم تاریخی</span></div><div data-vr-compare></div></section>
         <section class="card"><div class="section-head"><h3>نمودارها</h3></div>
           <div class="decision-view-buttons" data-vr-charts>${VR_CHARTS.map(([id, label], i) => `<button type="button" data-vr-chart-pick="${id}" aria-pressed="false">${fmt.int(i + 1)}. ${esc(label)}</button>`).join('')}</div>
@@ -620,6 +628,8 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
     }
     q('[data-vr-regime]').innerHTML = volRegimeHtml(history);
     q('[data-vr-kpis]').innerHTML = volKpiHtml(history);
+    // چرا شاخص از این روز شروع می‌شود، و تعدیل‌های قیمت اعمال در بازه.
+    q('[data-vr-gaps]').textContent = [gapsText(indexGaps(rangeRows(history))), adjustText(history.adjust)].filter(Boolean).join(' ');
     q('[data-vr-compare]').innerHTML = volCompareHtml(history);
     paintGauges();
     paintChart();

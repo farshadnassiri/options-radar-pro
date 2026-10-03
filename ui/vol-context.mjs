@@ -11,6 +11,7 @@ import { fetchDailies } from './daily-intake.mjs';
 import { historyDateLabel, normalizeHistoryDate } from '../core/history.mjs';
 import { tehranDateNumber } from '../core/tehran-day.mjs';
 import { buildVolHistory, panelObservations, volParams, volRangeFor, VOL_DEFAULTS } from '../core/vol-rank.mjs';
+import { baseAdjustments, strikeAdjustPlan, strikeResolver } from '../core/strike-adjust.mjs';
 import { volContextAt, volContextBetween, VOL_CONTEXT_WHY, VOL_HINDSIGHT_LABEL, VOL_HINDSIGHT_NOTE } from '../core/vol-context.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (ch) => ({
@@ -81,8 +82,11 @@ export function loadVolContext(ua, { from = 0, to = 0, settings = {}, fetcher = 
     ]);
     const body = await response.json();
     if (!response.ok || body.error) throw new Error(body.error || `HTTP ${response.status}`);
+    const baseRows = daily.byIns?.[code]?.rows || [];
+    // همان اعمالِ روزِ تب «رتبه و صدک تلاطم»، تا یک عدد همه‌جا یکی باشد.
+    const plan = strikeAdjustPlan({ contracts: body.contracts, panels: body.panels, events: baseAdjustments(baseRows) });
     const history = buildVolHistory({
-      baseRows: daily.byIns?.[code]?.rows || [], observations: panelObservations(body.contracts, body.panels, opts.priceBasis),
+      baseRows, observations: panelObservations(body.contracts, body.panels, opts.priceBasis, { strikeOf: strikeResolver(plan) }),
       from: range.from, params: volParams(opts), settings,
     });
     return { ua: code, history, coverage: { have: body.have, days: body.days, missing: body.missing } };

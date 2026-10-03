@@ -65,7 +65,7 @@ export function instrumentOptionsHtml(contracts = [], selected = '', { today = 0
  * IVR و IVP از آن است. بی قرارداد، شاخص سری اصلی است. `show`: کدام سری‌ها
  * روشن‌اند (راهنمای نمودار هم همین را خاموش و روشن می‌کند).
  */
-export function masterOption(rows = [], { indexRows = null, show = {}, title = '' } = {}, tokens) {
+export function masterOption(rows = [], { indexRows = null, show = {}, title = '', contractStrike = NaN } = {}, tokens) {
   const contract = (rows || []).length > 0;
   const idx = indexRows || [];
   const axisRows = contract ? rows : idx;
@@ -110,6 +110,9 @@ export function masterOption(rows = [], { indexRows = null, show = {}, title = '
           ...(contract && isNum(row.ivPct) && isNum(ix?.ivPct) ? [['قرارداد منهای شاخص', `${signed(row.ivPct - ix.ivPct)} واحد`]] : []),
           ['نوسان تاریخی پایه', pct(ix?.hvPct)],
           ['IVR · IVP شاخص', `${isNum(ix?.ivr) ? fmt.int(Math.round(ix.ivr)) : '—'} · ${isNum(ix?.ivp) ? fmt.int(Math.round(ix.ivp)) : '—'}`],
+          // اعمالِ آن روز اگر با اعمال کنونی فرق دارد (پیش از تعدیل سود نقدی یا افزایش سرمایه).
+          ...(contract && isNum(row.strike) && isNum(contractStrike) && row.strike !== contractStrike
+            ? [['قیمت اعمال آن روز', `${fmt.money(row.strike)} (پیش از تعدیل؛ اکنون ${fmt.money(contractStrike)})`]] : []),
           ['قیمت', isNum(row.price) ? fmt.money(row.price) : '—'],
           ['حجم', isNum(row.volume) ? fmt.int(row.volume) : '—'],
           ['موقعیت باز', isNum(row.oi) ? fmt.int(row.oi) : '—'],
@@ -239,6 +242,49 @@ export function rangeOption(points = [], { indexPoints = null, days = [], grain 
     dataZoom: zoom,
     series,
   };
+}
+
+// ═══ چرا شاخص از این روز شروع می‌شود، و تعدیل‌ها ═══
+
+const GAP_SHORT = {
+  noPanel: 'پروندهٔ قیمت قراردادها ندارد',
+  noTrades: 'هیچ قراردادی معامله نشد',
+  nearExpiry: 'فقط قرارداد کمتر از ۷ روز تا سررسید معامله شد',
+  farExpiry: 'فقط قرارداد خیلی دور از سررسید معامله شد',
+  outOfBand: 'قرارداد معامله‌شده نزدیک قیمت پایه نبود',
+  ivUnsolved: 'نوسان قرارداد نزدیک قیمت پایه حل نشد',
+  noAtm: 'قرارداد نزدیک قیمت پایه نبود',
+  noSpot: 'قیمت پایانی پایه نبود',
+};
+const gapList = (pairs) => pairs.map(([why, n]) => `${faDigits(n)} روز ${GAP_SHORT[why] || IV_INDEX_WHY[why] || 'علت نامعلوم'}`).join('، ');
+
+/** جملهٔ «شاخص از کِی و چرا نه زودتر» از `indexGaps`. */
+export function gapsText(g) {
+  if (!g?.days) return '';
+  if (!g.ivDays) return `در این بازه هیچ روزی شاخص نساخت: ${gapList(g.before)}.`;
+  const parts = [g.firstDate > g.rangeFrom && g.before.length
+    ? `شاخص از ${dateLabel(g.firstDate)} شروع می‌شود؛ پیش از آن: ${gapList(g.before)}`
+    : `شاخص از ابتدای بازه (${dateLabel(g.firstDate)}) هست`];
+  if (g.between.length) parts.push(`روزهای خالیِ میانه: ${gapList(g.between)}`);
+  if (g.after.length) parts.push(`پس از ${dateLabel(g.lastDate)}: ${gapList(g.after)}`);
+  return `${parts.join(' · ')}.`;
+}
+
+/**
+ * جملهٔ تعدیل‌ها از `strikeAdjustPlan`: فقط رویدادهایی که قراردادی با قیمتِ
+ * پیش از آن در بازه دارند.
+ */
+export function adjustText(plan) {
+  const events = (plan?.events || []).filter((e) => e.adjusted || e.kept || e.unsure);
+  if (!events.length) return '';
+  const n = (v) => faDigits(fmt.int(v));
+  return `تعدیل قیمت اعمال: ${events.map((e) => {
+    const what = e.type === 'dividend' ? `سود نقدی ${n(e.drop)} ریال` : `افزایش سرمایه (قیمت مرجع ${n(e.before)} ← ${n(e.after)})`;
+    const did = e.adjusted
+      ? `اعمالِ ${n(e.adjusted)} قرارداد برای روزهای پیش از آن به مقدار قبل از تعدیل برگردانده شد${e.kept ? `، ${n(e.kept)} قرارداد اعمالِ پیش از تعدیل را از قبل داشت` : ''}`
+      : 'اعمال ثبت‌شدهٔ قراردادها همان مقدار پیش از تعدیل بود و دست نخورد';
+    return `${dateLabel(e.date)} — ${what}${e.typeGuessed ? ' (نوع از اندازهٔ افت حدس زده شد)' : ''}: ${did}${e.unsure ? ` (${n(e.unsure)} قرارداد با رأی اکثریت)` : ''}`;
+  }).join('؛ ')}.`;
 }
 
 /** یک خط خلاصه زیر نمودار مادر. */
