@@ -351,6 +351,8 @@ const mult = (ctx, cfg) => ctx.market.size * cfg.qty;
 const copyState = (s) => ({
   ...s,
   legs: { call: s.legs.call ? { ...s.legs.call } : null, put: s.legs.put ? { ...s.legs.put } : null },
+  bySide: { call: { ...s.bySide.call }, put: { ...s.bySide.put } },
+  trades: s.trades.map((t) => ({ ...t })),
 });
 
 /** کارمزد یک معامله؛ با کارمزد خاموش صفر. */
@@ -372,10 +374,22 @@ export function openPosition(ctx, cfg, entry, i = 0, fees = {}) {
   }
   if (legs.call.strike < legs.put.strike) return { error: 'قیمت اعمال کال نباید زیر پوت باشد.' };
   const credit = (legs.call.open + legs.put.open) * M;
-  const fee = feeOf(cfg, fees, credit);
+  // دفتر هر سمت جدا: سود تحقق‌یافته و کارمزدِ هر سمت، تا «اثر انباشتهٔ هر
+  // پا» از همان دفتر بیاید و جمع دو سمت دقیقاً سود و زیان کل باشد.
+  const bySide = {
+    call: { realized: 0, fees: feeOf(cfg, fees, legs.call.open * M), received: legs.call.open * M },
+    put: { realized: 0, fees: feeOf(cfg, fees, legs.put.open * M), received: legs.put.open * M },
+  };
+  const fee = bySide.call.fees + bySide.put.fees;
+  // دفتر معامله‌های هر پا: هر قراردادی که فروخته شد، با روز و قیمت فروش و
+  // (پس از بسته‌شدن) روز و قیمت بازخرید — مبنای نمودار پرمیوم.
+  const trades = SIDES.map((side) => ({
+    side, strike: legs[side].strike, openDay: i, openPrice: legs[side].open, openSrc: legs[side].src,
+    premium: legs[side].open * M, openFee: feeOf(cfg, fees, legs[side].open * M),
+  }));
   return {
     state: {
-      legs, realized: 0, fees: fee, received: credit, paid: 0,
+      legs, bySide, trades, realized: 0, fees: fee, received: credit, paid: 0,
       initialCredit: credit, refPnl: -fee, initialRef: -fee, adjustments: 0,
       closed: false, reason: '', closedAt: -1, finalPnl: NaN,
     },
@@ -510,6 +524,35 @@ export function adjustCandidate(ctx, cfg, state, i, ev) {
   return { strike: best.strike, price: best.price, src: best.src, target, gapPct: target > 0 ? (best.gap / target) * 100 : NaN, options };
 }
 
+// ═════════════════════════ اثر هر پا ═════════════════════════
+
+/**
+ * اثر انباشتهٔ هر سمت تا پایان روز `i`، پس از اقدامِ همان روز.
+ *
+ *   اثر سمت = سود تحقق‌یافتهٔ همهٔ پاهای بسته‌شدهٔ آن سمت
+ *           + (قیمت فروش − قیمت امروز) × اندازه × تعداد  برای پای باز
+ *           − کارمزدهای آن سمت
+ *
+ * جمع دو سمت دقیقاً همان سود و زیان کل است (آزمون همین را می‌سنجد). پای
+ * بی‌قیمت، اثر آن سمت را «نداشته» می‌کند، نه صفر.
+ */
+export function sideBreakdown(ctx, cfg, state, i) {
+  const M = mult(ctx, cfg);
+  const out = {};
+  for (const side of SIDES) {
+    const book = state.bySide[side];
+    const leg = state.closed ? null : state.legs[side];
+    const q = leg ? priceAt(ctx, i, side, leg.strike) : null;
+    const unreal = leg ? (q ? (leg.open - q.price) * M : NaN) : 0;
+    out[side] = {
+      cum: book.realized + unreal - book.fees,
+      realized: book.realized, unreal, fees: book.fees, received: book.received,
+      leg: leg ? { ...leg } : null, mark: q,
+    };
+  }
+  return out;
+}
+
 // ═════════════════════════ اقدام‌ها ═════════════════════════
 
 /**
@@ -542,11 +585,18 @@ export function applyAction(ctx, cfg, state, i, action, ev, fees = {}, reason = 
     const q = ev?.marks?.[side] || priceAt(ctx, i, side, leg.strike);
     if (!q) return `قیمت ${SIDE_FA[side]} امروز نیست؛ بستنش ممکن نیست.`;
     const cost = q.price * M;
-    s.realized += (leg.open - q.price) * M;
+    const gain = (leg.open - q.price) * M;
+    s.realized += gain;
+    s.bySide[side].realized += gain;
     s.paid += cost;
     // تسویهٔ سررسید کارمزد معامله ندارد؛ پای در سود کارمزد اعمال دارد.
-    if (q.src === 'intrinsic') s.fees += cfg.fees && q.price > 0 ? leg.strike * M * num(fees?.exercise, 0) : 0;
-    else s.fees += feeOf(cfg, fees, cost);
+    const fee = q.src === 'intrinsic'
+      ? (cfg.fees && q.price > 0 ? leg.strike * M * num(fees?.exercise, 0) : 0)
+      : feeOf(cfg, fees, cost);
+    s.fees += fee;
+    s.bySide[side].fees += fee;
+    const t = s.trades.findLast((x) => x.side === side && x.closeDay == null);
+    if (t) Object.assign(t, { closeDay: i, closePrice: q.price, closeSrc: q.src, cost, closeFee: fee, realized: gain - t.openFee - fee });
     s.legs[side] = null;
     return null;
   };
@@ -575,9 +625,13 @@ export function applyAction(ctx, cfg, state, i, action, ev, fees = {}, reason = 
       const err = closeLeg(side);
       if (err) return { state, error: err, action: a };
       const credit = q.price * M;
+      const fee = feeOf(cfg, fees, credit);
       s.legs[side] = { strike: K, open: q.price, openDay: i, src: q.src };
+      s.trades.push({ side, strike: K, openDay: i, openPrice: q.price, openSrc: q.src, premium: credit, openFee: fee });
       s.received += credit;
-      s.fees += feeOf(cfg, fees, credit);
+      s.bySide[side].received += credit;
+      s.fees += fee;
+      s.bySide[side].fees += fee;
     } else {
       const err = closeLeg(side);
       if (err) return { state, error: err, action: a };
@@ -659,22 +713,30 @@ export function runPath(ctx, cfg, entry, { decide = () => null, upTo = Infinity,
   let state = opened.state;
   const steps = [];
   const series = new Array(days.length).fill(NaN);
+  const sides = { call: new Array(days.length).fill(NaN), put: new Array(days.length).fill(NaN) };
+  const noteSides = (st, i) => {
+    const b = sideBreakdown(ctx, cfg, st, i);
+    sides.call[i] = b.call.cum;
+    sides.put[i] = b.put.cum;
+    return b;
+  };
   const entryEv = evaluateDay(ctx, cfg, state, entryDay);
   series[entryDay] = entryEv.pnl;
-  steps.push({ i: entryDay, date: days[entryDay].date, ev: entryEv, action: { kind: 'open' }, state, pnl: entryEv.pnl });
+  steps.push({ i: entryDay, date: days[entryDay].date, ev: entryEv, action: { kind: 'open' }, state, pnl: entryEv.pnl, sides: noteSides(state, entryDay) });
   let pending = null;
   for (let i = entryDay + 1; i < days.length; i += 1) {
-    if (state.closed) { series[i] = state.finalPnl; continue; }
+    if (state.closed) { series[i] = state.finalPnl; noteSides(state, i); continue; }
     const ev = evaluateDay(ctx, cfg, state, i);
-    if (i >= upTo && !ev.isLast) { pending = { i, ev, state }; series[i] = ev.pnl; break; }
+    if (i >= upTo && !ev.isLast) { pending = { i, ev, state, sides: noteSides(state, i) }; series[i] = ev.pnl; break; }
     if (ev.isLast) {
       const fin = settleLast(ctx, cfg, state, i, ev, fees);
       state = fin.state;
       const step = { i, date: days[i].date, ev, wanted: { kind: 'close' }, action: fin.action, error: '', state,
         exitAt: fin.at, early: !!fin.early, incomplete: state.reason === 'incomplete', pnl: state.finalPnl };
       // خروجِ زودتر: از روز بستن به بعد، سری همان سود نهایی است.
-      for (let k = fin.at; k <= i; k += 1) series[k] = state.finalPnl;
-      for (const s of steps) if (s.i > fin.at) s.pnl = state.finalPnl;
+      for (let k = fin.at; k <= i; k += 1) { series[k] = state.finalPnl; noteSides(state, k); }
+      for (const s of steps) if (s.i > fin.at) { s.pnl = state.finalPnl; s.sides = sideBreakdown(ctx, cfg, state, s.i); }
+      step.sides = sideBreakdown(ctx, cfg, state, i);
       steps.push(step);
       continue;
     }
@@ -684,11 +746,12 @@ export function runPath(ctx, cfg, entry, { decide = () => null, upTo = Infinity,
     const step = { i, date: days[i].date, ev, wanted, action: res.action, error: res.error || '', state: res.state };
     state = res.state;
     step.pnl = state.closed ? state.finalPnl : evaluateDay(ctx, cfg, state, i).pnl;
+    step.sides = noteSides(state, i);
     series[i] = step.pnl;
     steps.push(step);
   }
   const final = state.closed ? state.finalPnl : NaN;
-  return { steps, series, state, pending, final, done: state.closed };
+  return { steps, series, sides, state, pending, final, done: state.closed };
 }
 
 /** تصمیم‌گیرِ ترکیبی: تصمیم ثبت‌شدهٔ کاربر، و سیاست برای بقیه. */
@@ -829,7 +892,12 @@ export function enumeratePaths(ctx, cfg, entry, { mode = 'trigger', options = ['
     else {
       const seen = new Set();
       acts = [];
-      for (const opt of options) {
+      // «ترکیبی»: روز آرام فقط نگه‌داشتن یا بستن؛ روزی که الگوریتم کاری
+      // پیشنهاد کرده همهٔ گزینه‌ها. «بستن» مسیر را تمام می‌کند، پس شمار
+      // مسیرها با روزها خطی می‌ماند و فقط روزهای تصمیم ضرب می‌کنند.
+      const allowed = mode === 'mixed' && ev.rec.kind === 'hold'
+        ? options.filter((o) => o === 'hold' || o === 'close' || o === 'algo') : options;
+      for (const opt of allowed) {
         const a = resolveOption(ctx, state, i, ev, opt);
         if (!a) continue;
         const key = actionKey(a);
@@ -916,6 +984,132 @@ export function whatIfMatrix(ctx, cfg, entry, decisions = {}, { options = ['algo
     rows.push({ i: step.i, date: step.date, chosen: actionKey(step.action), rec: step.ev.rec, cells });
   }
   return { rows, base };
+}
+
+// ═════════════════════════ اثر نقدی و وجه تضمین ═════════════════════════
+
+/**
+ * هر گزینه چه می‌کند — به پول.
+ *
+ *   cash         نقد امروز: پرمیوم فروش منهای هزینهٔ بازخرید (بی کارمزد)
+ *   netCash      همان، پس از کارمزد
+ *   realizedNow  سودی که با همین اقدام قطعی می‌شود
+ *   marginBefore / marginAfter / marginDelta  وجه تضمین پیش و پس از اقدام
+ *   netNeed      نیاز خالص به وجه = افزایش وجه تضمین − نقد خالص امروز؛
+ *                منفی یعنی وجه آزاد می‌شود
+ */
+export function actionImpact(ctx, cfg, state, i, ev, action, fees = {}, params = DEFAULT_PARAMS) {
+  const res = applyAction(ctx, cfg, state, i, action, ev, fees);
+  if (res.error) return { error: res.error };
+  const s = res.state;
+  const cash = (s.received - state.received) - (s.paid - state.paid);
+  const fee = s.fees - state.fees;
+  const marginBefore = labMargin(ctx, cfg, state.legs, i, params);
+  const marginAfter = s.closed ? 0 : labMargin(ctx, cfg, s.legs, i, params);
+  const after = s.closed ? null : evaluateDay(ctx, cfg, s, i);
+  return {
+    state: s, action: res.action, cash, fee, netCash: cash - fee,
+    realizedNow: s.realized - state.realized,
+    marginBefore, marginAfter, marginDelta: marginAfter - marginBefore,
+    netNeed: (marginAfter - marginBefore) - (cash - fee),
+    pnlAfter: s.closed ? s.finalPnl : after.pnl,
+    maxProfit: after ? after.maxProfit : NaN,
+    closed: s.closed,
+  };
+}
+
+/**
+ * ارزش هر اقدامِ یک مسیر: نتیجهٔ نهایی با آن اقدام منهای نتیجهٔ همان مسیر
+ * وقتی فقط همان روز «نگه‌داشتن» شود. مثبت یعنی آن اقدام سود آورد.
+ */
+export function actionValues(ctx, cfg, entry, decisions = {}, { fees = {}, entryDay = 0 } = {}) {
+  const base = runPath(ctx, cfg, entry, { decide: planDecider(decisions, 'hold'), fees, entryDay });
+  if (base.error) return { error: base.error, items: [] };
+  const days = ctx.market.days;
+  const endAt = base.state.closedAt >= 0 ? base.state.closedAt : days.length - 1;
+  const items = [];
+  base.steps.forEach((step, k) => {
+    if (step.i <= entryDay || step.ev.isLast || !step.action || step.action.kind === 'hold') return;
+    const without = { ...decisions, [step.date]: { kind: 'hold' } };
+    const alt = runPath(ctx, cfg, entry, { decide: planDecider(without, 'hold'), fees, entryDay });
+    const before = base.steps[k - 1].state;
+    items.push({
+      i: step.i, date: step.date, action: step.action, why: step.ev.rec.why,
+      value: base.final - alt.final, altFinal: alt.final,
+      cash: (step.state.received - before.received) - (step.state.paid - before.paid),
+      sMoveAfter: days[endAt] && days[step.i] ? ((days[endAt].S - days[step.i].S) / days[step.i].S) * 100 : NaN,
+      sAt: days[step.i].S,
+    });
+  });
+  return { base, items };
+}
+
+// ═════════════════════════ کارنامه ═════════════════════════
+
+export const GRADE_BANDS = [
+  [90, 'A', 'عالی'], [75, 'B', 'خوب'], [55, 'C', 'متوسط'], [35, 'D', 'ضعیف'], [-Infinity, 'E', 'بسیار ضعیف'],
+];
+
+export function gradeOf(score) {
+  if (!fin(score)) return { letter: '—', label: 'نامعلوم' };
+  const [, letter, label] = GRADE_BANDS.find(([min]) => score >= min);
+  return { letter, label };
+}
+
+/**
+ * کارنامهٔ پایان معامله.
+ *
+ * همهٔ کارهای ممکن از روز ورود تا خروج شمرده می‌شوند (روز آرام: نگه‌داشتن
+ * یا بستن؛ روز تصمیم: همهٔ گزینه‌ها). نمرهٔ مسیر کاربر میانگین دو عدد است:
+ *   صدک     چند درصد مسیرها بدتر از مسیر کاربر بودند
+ *   کارایی  جای نتیجهٔ کاربر میان بدترین و بهترین (۰ تا ۱۰۰)
+ * بهترین مسیرها با ارزش تک‌تک اقدام‌هایشان برمی‌گردند تا «چرا» گفته شود؛
+ * و هر روزِ تصمیم کاربر با بهترین گزینهٔ همان روز سنجیده می‌شود (پشیمانی).
+ */
+export function gradeReport(ctx, cfg, entry, decisions = {}, { fees = {}, cap = 20000, options = ['algo', 'hold', 'close', 'defend'], top = 5, entryDay = 0 } = {}) {
+  const all = enumeratePaths(ctx, cfg, entry, { mode: 'mixed', options, cap, fees, entryDay });
+  if (all.error) return { error: all.error };
+  const mine = runPath(ctx, cfg, entry, { decide: planDecider(decisions, 'hold'), fees, entryDay });
+  const algo = runPath(ctx, cfg, entry, { decide: planDecider({}, 'algo'), fees, entryDay });
+  const summary = pathsSummary(all.paths);
+  const percentile = percentileOf(all.paths, mine.final);
+  const span = summary.max - summary.min;
+  const efficiency = fin(mine.final) && span > EPS ? ((mine.final - summary.min) / span) * 100 : fin(mine.final) ? 100 : NaN;
+  const score = fin(percentile) && fin(efficiency) ? Math.round((percentile + efficiency) / 2) : NaN;
+  const better = all.paths.filter((p) => fin(p.final) && p.final > mine.final + EPS).length;
+
+  const seen = new Set();
+  const best = [];
+  for (const p of [...all.paths].filter((x) => fin(x.final)).sort((a, b) => b.final - a.final)) {
+    const plan = {};
+    for (const c of p.choices) plan[c.date] = { ...c.action, via: 'path' };
+    const key = JSON.stringify(plan);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const vals = actionValues(ctx, cfg, entry, plan, { fees, entryDay });
+    best.push({ path: p, plan, final: p.final, run: vals.base, items: vals.items });
+    if (best.length >= top) break;
+  }
+
+  const wi = whatIfMatrix(ctx, cfg, entry, decisions, { options, continuation: 'user', fallback: 'hold', fees, entryDay });
+  const review = (wi.rows || []).map((row) => {
+    const cells = row.cells.filter((c) => c.action && fin(c.final));
+    const chosen = row.cells.find((c) => c.key === row.chosen && fin(c.final));
+    const top1 = cells.reduce((a, b) => (!a || b.final > a.final ? b : a), null);
+    return {
+      i: row.i, date: row.date, rec: row.rec, chosenKey: row.chosen,
+      chosenFinal: chosen ? chosen.final : mine.final,
+      bestOpt: top1?.opt, bestAction: top1?.action, bestFinal: top1?.final ?? NaN,
+      regret: top1 && fin(top1.final) ? Math.max(0, top1.final - (chosen ? chosen.final : mine.final)) : NaN,
+      followedAlgo: actionKey(row.rec?.action) === row.chosen,
+    };
+  });
+  const mineValues = actionValues(ctx, cfg, entry, decisions, { fees, entryDay });
+  return {
+    count: all.paths.length, truncated: all.truncated, summary,
+    mine, algo, percentile, efficiency, score, grade: gradeOf(score), rank: better + 1,
+    best, review, mineItems: mineValues.items, paths: all.paths,
+  };
 }
 
 /** وضعیتِ آغاز روز `i` در مسیرِ اجراشده. */

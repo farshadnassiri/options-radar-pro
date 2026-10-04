@@ -13,10 +13,12 @@
 import { check, group, near, readSrc } from '../harness.mjs';
 import { bsPrice } from '../../core/bs.mjs';
 import { strategyMargin } from '../../core/margin.mjs';
+import { lineChart, legGanttSvg } from '../../ui/strangle-lab-view.mjs';
 import {
   labConfig, buildLabMarket, labBases, labExpiries, pickExpiry, pricingContext, priceAt, pickEntry,
   openPosition, evaluateDay, applyAction, runPath, planDecider, enumeratePaths, pathsSummary,
   whatIfMatrix, labMargin, actionKey, adjustCandidate, percentileOf,
+  sideBreakdown, actionImpact, actionValues, gradeReport, gradeOf,
 } from '../../core/strangle-lab.mjs';
 
 const EXPIRY = 20250220;
@@ -47,6 +49,7 @@ function fixture(path, { skip = {}, sigma = 0.4 } = {}) {
 }
 
 const FEES = { option: 0.00103, exercise: 0.0005 };
+const SIDES_OK = (st) => ['call', 'put'].every((side) => near(st.trades.filter((t) => t.side === side).reduce((a, t) => a + t.premium, 0), st.bySide[side].received));
 const UP = [1000, 1005, 1020, 1045, 1070, 1090, 1110, 1120, 1140, 1150, 1160, 1170];
 
 group('۳۲۱-الف. بازار آزمایش');
@@ -247,6 +250,83 @@ group('۳۲۱-ح. همهٔ مسیرها');
   });
   check('خانهٔ «همان انتخاب» = نتیجهٔ مسیر کاربر', consistent);
   check('کلید اقدام پایدار', actionKey({ kind: 'roll', side: 'put', strike: 1050 }) === 'R:put:1050' && actionKey(null) === 'H');
+}
+
+group('۳۲۱-ی. اثر هر پا، اثر نقدی، کارنامه');
+{
+  const { market } = fixture(UP);
+  const ctx = pricingContext(market, { r: 0.3 });
+  const cfg = labConfig({ qty: 3 });
+  const entry = { call: 1200, put: 900 };
+  const run = runPath(ctx, cfg, entry, { decide: planDecider({}, 'algo'), fees: FEES });
+  const sumOk = run.steps.every((s) => near(s.sides.call.cum + s.sides.put.cum, s.pnl));
+  check('اثر کال + اثر پوت = سود و زیان کل، در همهٔ روزها', sumOk);
+  check('سری اثر هر پا هم همان جمع را دارد', run.series.every((v, i) => !Number.isFinite(v) || near(run.sides.call[i] + run.sides.put[i], v)));
+  const st0 = openPosition(ctx, cfg, entry, 0, FEES).state;
+  const b0 = sideBreakdown(ctx, cfg, st0, 0);
+  check('روز ورود: اثر هر سمت فقط کارمزد خودش است', near(b0.call.cum, -b0.call.fees) && near(b0.put.cum, -b0.put.fees)
+    && near(b0.call.fees + b0.put.fees, st0.fees));
+  const adj = run.steps.find((s) => s.action.kind === 'roll');
+  const prev = run.steps[run.steps.indexOf(adj) - 1].state;
+  check('رول پوت: اثر کال دست نمی‌خورد، فقط تحقق‌یافتهٔ پوت عوض می‌شود',
+    near(adj.state.bySide.call.realized, prev.bySide.call.realized) && !near(adj.state.bySide.put.realized, prev.bySide.put.realized));
+
+  const ev = evaluateDay(ctx, cfg, prev, adj.i);
+  const imp = actionImpact(ctx, cfg, prev, adj.i, ev, adj.action, FEES);
+  const M = 1000 * 3;
+  const want = (market.days[adj.i].put[adj.action.strike] - ev.marks.put.price) * M;
+  check('نقد امروز رول = پرمیوم تازه − بازخرید', near(imp.cash, want), `${imp.cash} / ${want}`);
+  check('وجه تضمین پس از اقدام از همان موتور', near(imp.marginAfter, labMargin(ctx, cfg, imp.state.legs, adj.i)));
+  check('نیاز خالص = افزایش وجه تضمین − نقد خالص', near(imp.netNeed, imp.marginDelta - imp.netCash));
+  const close = actionImpact(ctx, cfg, prev, adj.i, ev, { kind: 'close' }, FEES);
+  check('بستن کامل: همهٔ وجه تضمین آزاد و سود نهایی قطعی', close.marginAfter === 0 && close.marginDelta < 0 && near(close.pnlAfter, close.state.finalPnl));
+  const hold = actionImpact(ctx, cfg, prev, adj.i, ev, { kind: 'hold' }, FEES);
+  check('نگه‌داشتن: نقد صفر و وجه تضمین بی‌تغییر', hold.cash === 0 && near(hold.marginDelta, 0));
+
+  const decisions = {};
+  for (const s of run.steps) if (s.i > 0 && !s.ev.isLast && s.action.kind !== 'hold') decisions[s.date] = s.action;
+  const vals = actionValues(ctx, cfg, entry, decisions, { fees: FEES });
+  const skip = runPath(ctx, cfg, entry, { decide: planDecider({ ...decisions, [vals.items[0].date]: { kind: 'hold' } }, 'hold'), fees: FEES });
+  check('ارزش هر اقدام = نتیجه با آن − نتیجه بی آن', vals.items.length > 0 && near(vals.items[0].value, vals.base.final - skip.final));
+
+  const g = gradeReport(ctx, cfg, entry, decisions, { fees: FEES });
+  check('کارنامه: صدها مسیر شمرده شد', g.count >= 10, g.count);
+  check('نمره در بازهٔ ۰ تا ۱۰۰ و رتبه از ۱', g.score >= 0 && g.score <= 100 && g.rank >= 1 && g.rank <= g.count);
+  check('بهترین مسیرِ کارنامه همان بیشینهٔ همهٔ مسیرهاست', near(g.best[0].final, g.summary.max));
+  const replay = runPath(ctx, cfg, entry, { decide: planDecider(g.best[0].plan, 'hold'), fees: FEES });
+  check('بارگذاری بهترین مسیر همان نتیجه را بازمی‌سازد', near(replay.final, g.best[0].final));
+  check('پشیمانی هر روز منفی نیست', g.review.every((r) => !(r.regret < 0)));
+  const mixed = enumeratePaths(ctx, cfg, entry, { mode: 'mixed', fees: FEES, options: ['algo', 'hold', 'close', 'defend'] });
+  const trig = enumeratePaths(ctx, cfg, entry, { mode: 'trigger', fees: FEES, options: ['algo', 'hold', 'close', 'defend'] });
+  check('حالت ترکیبی بیشتر از حالت «فقط روز تصمیم» مسیر دارد', mixed.paths.length > trig.paths.length);
+  check('نوار نمره', gradeOf(95).letter === 'A' && gradeOf(60).letter === 'C' && gradeOf(10).letter === 'E' && gradeOf(NaN).letter === '—');
+}
+
+group('۳۲۱-ک. دفتر هر پا و نمودار تعاملی');
+{
+  const { market } = fixture(UP);
+  const ctx = pricingContext(market, { r: 0.3 });
+  const cfg = labConfig({ qty: 2 });
+  const run = runPath(ctx, cfg, { call: 1200, put: 900 }, { decide: planDecider({}, 'algo'), fees: FEES });
+  const trades = run.state.trades;
+  check('هر فروش یک ردیف: دو پای ورود + هر رول', trades.length === 2 + run.state.adjustments, trades.length);
+  check('همهٔ پاها پس از پایان بسته‌اند', trades.every((t) => t.closeDay != null));
+  check('جمع سود و زیان پاها = سود و زیان نهایی', near(trades.reduce((a, t) => a + t.realized, 0), run.final));
+  check('جمع پرمیوم پاها = پرمیوم دریافتی کل', near(trades.reduce((a, t) => a + t.premium, 0), run.state.received));
+  check('جمع پرمیوم هر سمت = دفتر همان سمت', SIDES_OK(run.state));
+
+  const dates = market.days.map((d) => d.date);
+  const html = lineChart({ id: 't', dates, upTo: 3, series: [
+    { key: 'a', label: 'الف', cls: 'pnl', values: dates.map((_, i) => i * 1000) },
+    { key: 'b', label: 'ب', cls: 'call', values: dates.map(() => 5) },
+  ], hidden: new Set(['b']) });
+  const model = JSON.parse(html.match(/data-model="([^"]*)"/)[1].replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
+  check('مدل هاور فقط سری‌های روشن را دارد', model.series.length === 1 && model.series[0].label === 'الف');
+  check('هاور از آینده خبر ندارد: پس از روز جاری عددی نیست', model.series[0].v[3] === 3000 && model.series[0].v[4] === null);
+  check('نمودار تعاملی خط عمودی هاور دارد', html.includes('sl-cross') && html.includes('sl-cross-dots'));
+  const g = legGanttSvg({ dates, trades, upTo: dates.length - 1 });
+  check('نوار عمر هر پا: یک نوار کلیک‌پذیر برای هر فروش', (g.match(/data-act="leg-sel"/g) || []).length === trades.length);
+  check('متن نمودارها رقم لاتین ندارد', !/[0-9]/.test(g.replace(/<[^>]*>/g, '').replace(/data-[a-z]+="[^"]*"/g, '')));
 }
 
 group('۳۲۱-ط. سیم‌کشی تب');
