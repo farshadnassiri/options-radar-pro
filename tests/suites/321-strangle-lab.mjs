@@ -13,7 +13,8 @@
 import { check, group, near, readSrc } from '../harness.mjs';
 import { bsPrice } from '../../core/bs.mjs';
 import { strategyMargin } from '../../core/margin.mjs';
-import { lineChart, legGanttSvg, pct } from '../../ui/strangle-lab-view.mjs';
+import { lineChart, legGanttSvg, pct, moneyPct, actionText as actTextView } from '../../ui/strangle-lab-view.mjs';
+import { capitalBase } from '../../core/margin.mjs';
 import { HELP } from '../../ui/strangle-lab-help.mjs';
 import { buildStrangleWorkbook, actionPlain } from '../../ui/strangle-lab-export.mjs';
 import { buildXlsx } from '../../ui/xlsx.mjs';
@@ -21,7 +22,7 @@ import {
   labConfig, buildLabMarket, labBases, labExpiries, pickExpiry, pricingContext, priceAt, pickEntry,
   openPosition, evaluateDay, applyAction, runPath, planDecider, enumeratePaths, pathsSummary,
   whatIfMatrix, labMargin, actionKey, adjustCandidate, percentileOf,
-  sideBreakdown, actionImpact, actionValues, gradeReport, gradeOf, tradePrice, weightedBreakevens,
+  sideBreakdown, actionImpact, actionValues, gradeReport, gradeOf, tradePrice, weightedBreakevens, labReturnBase,
 } from '../../core/strangle-lab.mjs';
 
 const EXPIRY = 20250220;
@@ -395,8 +396,36 @@ group('۳۲۱-م. خروجی اکسل روزبه‌روز');
     return days.size > 3 && [...days.values()].every((d) => d.n >= 3 && d.mine >= 1);
   })());
   check('برچسب اقدام با رقم لاتین برای اکسل', actionPlain({ kind: 'roll', side: 'put', strike: 1050 }) === 'رول پوت به 1050');
+  const withBase = buildStrangleWorkbook({ ctx, cfg, exp: { name: 'آزمون' }, run, fees: FEES, capital: 1e6, margin: 3e5, retBase: 5e5 });
+  const d2 = withBase.find((sh) => sh.name === 'روزبه‌روز');
+  const bi = d2.headers.indexOf('بازده ٪ (مبنای برنامه)');
+  check('ستون بازده ٪ با همان مبنای برنامه', bi > 0 && near(d2.rows.at(-1)[bi], (run.final / 5e5) * 100));
+  const opts2 = withBase.find((sh) => sh.name === 'گزینه‌های هر روز');
+  check('نام قرارداد در متن اقدامِ اکسل', opts2.rows.some((r) => /رول .* \(ط|رول .* \(ض/.test(r[2])));
   const bytes = await buildXlsx(sheets);
   check('فایل xlsx معتبر ساخته می‌شود (امضای zip)', bytes.length > 1000 && bytes[0] === 0x50 && bytes[1] === 0x4b, bytes.length);
+}
+
+group('۳۲۱-ن. درصد سود و زیان و نام قرارداد');
+{
+  const { market } = fixture(UP);
+  const ctx = pricingContext(market, { r: 0.3 });
+  const cfg = labConfig({ qty: 2 });
+  const st = openPosition(ctx, cfg, { call: 1200, put: 900 }, 0, FEES).state;
+  const c0 = market.days[0].call[1200], p0 = market.days[0].put[900];
+  const legs = [
+    { side: 'sell', kind: 'call', strike: 1200, price: c0, size: 1000, ratio: 2, days: market.days[0].dte },
+    { side: 'sell', kind: 'put', strike: 900, price: p0, size: 1000, ratio: 2, days: market.days[0].dte },
+  ];
+  const net = strategyMargin(legs, { S: 1000, contractSize: 1000, capitalMode: 'NET' });
+  const want = capitalBase({ legs, netCash: net.grossCash, marginNet: net.marginNet, maxLoss: Infinity }).value;
+  const base = labReturnBase(ctx, cfg, st.legs, 0, undefined, 'NET');
+  check('مبنای درصد = همان capitalBase بقیهٔ برنامه (وجه تضمین بلوکه‌شده)', near(base.value, want) && base.value > 0, `${base.value} / ${want}`);
+  check('مبنای خالص = وجه تضمین منهای پرمیوم دریافتی', near(base.value, net.margin - (c0 + p0) * 2000));
+  const gross = labReturnBase(ctx, cfg, st.legs, 0, undefined, 'GROSS');
+  check('با تنظیم «ناخالص» کل وجه تضمین', near(gross.value, net.margin));
+  check('سود و زیان با درصدش', moneyPct(50000, 1e6) === `${moneyPct(50000, NaN)} (${pct(5, 2)})`);
+  check('نام قرارداد کنار قیمت اعمال در متن اقدام', actTextView({ kind: 'roll', side: 'put', strike: 1050 }, () => 'طهرم1050').includes('طهرم1050'));
 }
 
 group('۳۲۱-ط. سیم‌کشی تب');

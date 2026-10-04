@@ -4981,7 +4981,8 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .sl-slider input[type="range"], .sl-qty input[type="range"] { width: 100%; accent-color: var(--accent); }
 .sl-seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel-2); }
 .sl-seg-item { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--ink-2); padding: 5px 10px; border-radius: var(--radius-sm); font-size: var(--fs-xs); cursor: pointer; transition: background var(--transition-fast); }
-.sl-seg-item input { position: absolute; opacity: 0; pointer-events: none; }
+.sl-seg-item { position: relative; }
+.sl-seg-item input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
 .sl-seg-item:hover { background: var(--panel); }
 .sl-seg-item.on { background: var(--accent); color: var(--on-accent); font-weight: 800; box-shadow: var(--shadow-xs); }
 .sl-switch { display: inline-flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: var(--fs-sm); }
@@ -5145,6 +5146,19 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .sl-cross-dot.becall { fill: var(--series-5); } .sl-cross-dot.beput { fill: var(--series-3); }
 .sl-cross-dot.exits { fill: var(--series-4); } .sl-cross-dot.hold { fill: var(--muted); }
 .sl-cross-dot.b1 { fill: var(--series-6); } .sl-cross-dot.b2 { fill: var(--series-3); } .sl-cross-dot.b3 { fill: var(--series-5); } .sl-cross-dot.b4 { fill: var(--series-2); }
+
+/* ── دور چهارم: نام قرارداد، دو قیمت روز ── */
+.sl-2ps { display: grid; gap: 2px; margin: 2px 0; }
+.sl-2p { display: grid; grid-template-columns: 3.4rem auto 1fr; align-items: baseline; gap: 6px; font-size: var(--fs-xs); }
+.sl-2p > span:first-child { color: var(--muted); }
+.sl-2p b { font-variant-numeric: tabular-nums; }
+.sl-2p .gain { color: var(--gain); } .sl-2p .loss { color: var(--loss); } .sl-2p .flat { color: var(--muted); }
+.sl-sym { display: block; color: var(--muted); font-size: var(--fs-3xs); }
+.sl-tip-sym { color: var(--muted); }
+.sl-leg.base { border-inline-start-color: var(--ink); }
+.sl-leg .sl-2ps { flex-basis: 100%; }
+.sl-labtabs > .sl-help { align-self: center; }
+.sl-stepper > .sl-help, .sl-entry-head > .sl-help { align-self: center; }
 
 @media (max-width: 720px) {
   .sl-setup-split { grid-template-columns: 1fr; }

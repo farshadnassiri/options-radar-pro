@@ -29,18 +29,22 @@ const date = (d) => (d ? historyDateLabel(d) : '');
 const choiceLabel = (key, v) => LAB_CHOICES[key]?.find(([k]) => k === v)?.[1] ?? v;
 
 /** برچسب اقدام با رقم لاتین — برای خانهٔ متنیِ اکسل. */
-export function actionPlain(a) {
+export function actionPlain(a, symOf = null) {
   if (!a || a.kind === 'hold') return 'نگه‌داشتن';
   if (a.kind === 'open') return 'ورود';
   if (a.kind === 'close') return 'بستن کامل';
-  if (a.kind === 'roll') return a.strike == null ? `بستن ${SIDE_FA[a.side]}` : `رول ${SIDE_FA[a.side]} به ${a.strike}`;
+  if (a.kind === 'roll') {
+    if (a.strike == null) return `بستن ${SIDE_FA[a.side]}`;
+    const sym = symOf ? symOf(a.side, Number(a.strike)) : '';
+    return `رول ${SIDE_FA[a.side]} به ${a.strike}${sym ? ` (${sym})` : ''}`;
+  }
   return '';
 }
 
 const ZONE_FA = { calm: 'آرام', band: 'در محدودهٔ تعدیل', beyond: 'فراتر از محدوده' };
 const SRC_FA = { close: 'پایانی', model: 'مدل', intrinsic: 'ارزش ذاتی', manual: 'انتخابی', ...BASIS_FA };
 
-function headerSheet({ exp, market, cfg, run, capital, margin, generatedAt, settingsInfo = {} }) {
+function headerSheet({ exp, market, cfg, run, capital, margin, retBase, generatedAt, settingsInfo = {} }) {
   const first = run.steps[0].state;
   const end = run.state?.closedAt >= 0 ? run.state.closedAt : (run.pending?.i ?? run.steps.at(-1).i);
   const rows = [
@@ -66,7 +70,9 @@ function headerSheet({ exp, market, cfg, run, capital, margin, generatedAt, sett
     ['وضعیت', run.done ? 'تمام‌شده' : 'در جریان'],
     ['علت پایان', run.done ? (CLOSE_REASON[run.state.reason] ?? run.state.reason) : ''],
     ['سود و زیان نهایی (ریال)', run.done ? n(run.final) : ''],
-    ['سود و زیان نهایی (٪ سرمایه)', run.done ? pctOf(run.final, capital) : ''],
+    ['مبنای درصد سود و زیان (سرمایهٔ درگیر، مثل بقیهٔ برنامه)', n(retBase)],
+    ['بازدهٔ نهایی ٪ (مبنای برنامه)', run.done ? pctOf(run.final, retBase) : ''],
+    ['سود و زیان نهایی (٪ سرمایهٔ تخصیصی)', run.done ? pctOf(run.final, capital) : ''],
     ['شمار تعدیل', run.state?.adjustments ?? run.steps.at(-1).state.adjustments],
     ['— قواعد الگوریتم —', ''],
     ['روز تا سررسید ورود', `${cfg.dteLo} تا ${cfg.dteHi}`],
@@ -117,7 +123,7 @@ const DAILY_HEAD = [
   'قیمت اعمال کال در دست', 'نماد کال', 'قیمت کال', 'منبع قیمت کال', 'تغییر کال', 'تغییر کال ٪', 'تلاطم ضمنی کال ٪', 'دلتای کال',
   'قیمت اعمال پوت در دست', 'نماد پوت', 'قیمت پوت', 'منبع قیمت پوت', 'تغییر پوت', 'تغییر پوت ٪', 'تلاطم ضمنی پوت ٪', 'دلتای پوت',
   'سربه‌سر وزنی کال', 'سربه‌سر وزنی پوت',
-  'سود و زیان کل', 'تغییر سود و زیان امروز', 'سود و زیان ٪ سرمایه', 'سود و زیان ٪ پرمیوم اولیه',
+  'سود و زیان کل', 'تغییر سود و زیان امروز', 'بازده ٪ (مبنای برنامه)', 'سود و زیان ٪ سرمایهٔ تخصیصی', 'سود و زیان ٪ پرمیوم اولیه',
   'اثر انباشتهٔ کال', 'اثر امروز کال', 'اثر انباشتهٔ پوت', 'اثر امروز پوت',
   'زیان شناور ٪', 'وضعیت آستانه', 'سود هدف جاری', 'پیشنهاد الگوریتم', 'اقدام پیشنهادی', 'اقدام من', 'پیروی از الگوریتم',
   'نقد امروز', 'کارمزد امروز', 'وجه تضمین پایان روز', 'وجه تضمین ٪ سرمایه',
@@ -125,7 +131,7 @@ const DAILY_HEAD = [
   'کال پس از اقدام', 'پوت پس از اقدام', 'یادداشت',
 ];
 
-function dailySheet({ ctx, cfg, run, capital, params }) {
+function dailySheet({ ctx, cfg, run, capital, params, act, retBase }) {
   const market = ctx.market;
   const symOf = (side, K) => market.strikes.find((s) => s.strike === K)?.[side]?.sym || '';
   const initial = run.steps[0].state.initialCredit;
@@ -156,17 +162,17 @@ function dailySheet({ ctx, cfg, run, capital, params }) {
     const margin = holdState.closed ? 0 : labMargin(ctx, cfg, holdState.legs, s.i, params);
     const dCall = fin(s.sides?.call?.cum) && fin(prevSides?.call?.cum) ? s.sides.call.cum - prevSides.call.cum : '';
     const dPut = fin(s.sides?.put?.cum) && fin(prevSides?.put?.cum) ? s.sides.put.cum - prevSides.put.cum : '';
-    const myAction = s.pending ? 'در انتظار تصمیم' : s.i === 0 ? 'ورود' : actionPlain(s.action);
+    const myAction = s.pending ? 'در انتظار تصمیم' : s.i === 0 ? 'ورود' : act(s.action);
     const note = [s.pending ? 'روز جاری آزمایش' : '', ev.missing?.length ? 'قیمت یکی از پاها نیامد' : '',
       s.early ? `خروج در آخرین روزِ قیمت‌دار (${date(market.days[s.exitAt]?.date)})` : '', s.error || ''].filter(Boolean).join('؛ ');
     return [
       date(day.date), historyDayName(day.date) || '', day.dte, day.S, prev ? day.S - prev.S : '', prev ? pctOf(day.S - prev.S, prev.S) : '', pctOf(day.S - market.days[0].S, market.days[0].S),
       ...legCols('call'), ...legCols('put'),
       n(be.call.value), n(be.put.value),
-      n(s.pnl), fin(s.pnl) && fin(prevPnl) ? s.pnl - prevPnl : '', pctOf(s.pnl, capital), pctOf(s.pnl, initial),
+      n(s.pnl), fin(s.pnl) && fin(prevPnl) ? s.pnl - prevPnl : '', pctOf(s.pnl, retBase), pctOf(s.pnl, capital), pctOf(s.pnl, initial),
       n(s.sides?.call?.cum), dCall, n(s.sides?.put?.cum), dPut,
       s.i === 0 ? '' : n(ev.floatPct), s.i === 0 ? '' : (ZONE_FA[ev.zone] || ''), s.i === 0 ? '' : n(ev.maxProfit),
-      s.i === 0 ? '' : (ev.rec?.text || ''), s.i === 0 ? '' : actionPlain(ev.rec?.action), myAction,
+      s.i === 0 ? '' : (ev.rec?.text || ''), s.i === 0 ? '' : act(ev.rec?.action), myAction,
       s.i === 0 || s.pending ? '' : (actionKey(s.action) === actionKey(ev.rec?.action) ? 'بله' : 'خیر'),
       n(cash), n(feeToday), n(margin), pctOf(margin, capital),
       holdState.received, holdState.paid, holdState.fees,
@@ -178,7 +184,7 @@ function dailySheet({ ctx, cfg, run, capital, params }) {
   return sheetParts('روزبه‌روز', DAILY_HEAD, rows, DAILY_HEAD.map((h) => Math.max(10, Math.min(28, h.length + 2))));
 }
 
-function legsSheet({ ctx, run }) {
+function legsSheet({ ctx, run, retBase }) {
   const market = ctx.market;
   const state = run.done ? run.state : run.pending?.state || run.steps.at(-1).state;
   const rows = (state.trades || []).map((t) => {
@@ -188,18 +194,18 @@ function legsSheet({ ctx, run }) {
       SIDE_FA[t.side], t.strike, sym, date(market.days[t.openDay]?.date), t.openPrice, SRC_FA[t.openSrc] || t.openSrc, t.premium, n(t.openFee),
       market.days[t.openDay]?.S,
       t.closeDay != null ? date(market.days[t.closeDay]?.date) : 'باز', t.closeDay != null ? t.closePrice : '', t.closeDay != null ? (SRC_FA[t.closeSrc] || t.closeSrc) : '',
-      t.closeDay != null ? t.cost : '', t.closeDay != null ? n(t.closeFee) : '', t.closeDay != null ? n(t.realized) : '',
+      t.closeDay != null ? t.cost : '', t.closeDay != null ? n(t.closeFee) : '', t.closeDay != null ? n(t.realized) : '', t.closeDay != null ? pctOf(t.realized, retBase) : '',
       t.closeDay != null ? pctOf(t.premium - t.cost, t.premium) : '',
       market.days[end]?.S, end - t.openDay,
     ];
   });
   return sheet('پاهای فروخته‌شده', ['سمت', 'قیمت اعمال', 'نماد', 'روز فروش', 'قیمت فروش', 'منبع قیمت فروش', 'پرمیوم دریافتی', 'کارمزد فروش',
-    'پایه در روز فروش', 'روز بازخرید', 'قیمت بازخرید', 'منبع قیمت بازخرید', 'هزینهٔ بازخرید', 'کارمزد بازخرید', 'سود و زیان این پا',
+    'پایه در روز فروش', 'روز بازخرید', 'قیمت بازخرید', 'منبع قیمت بازخرید', 'هزینهٔ بازخرید', 'کارمزد بازخرید', 'سود و زیان این پا', 'سود و زیان این پا ٪ (مبنای برنامه)',
     'سهم نگه‌داشته از پرمیوم ٪', 'پایه در روز بستن یا امروز', 'روزهای معاملاتی عمر پا'], rows, [8, 12, 16, 12, 12, 12, 14, 12, 12, 12, 12, 12, 14, 12, 14, 14, 14, 12]);
 }
 
 /** همهٔ کارهایی که هر روزِ تصمیم می‌شد کرد، با اثر نقدی و وجه تضمین هر کدام. */
-function optionsSheet({ ctx, cfg, run, fees, params }) {
+function optionsSheet({ ctx, cfg, run, fees, params, act, retBase }) {
   const rows = [];
   run.steps.forEach((s, k) => {
     if (k === 0 || s.ev.isLast || s.ev.closed) return;
@@ -220,13 +226,13 @@ function optionsSheet({ ctx, cfg, run, fees, params }) {
       seen.add(key);
       const imp = actionImpact(ctx, cfg, st, s.i, ev, a, fees, params);
       rows.push([
-        date(s.date), label, actionPlain(a), key === actionKey(ev.rec.action) ? 'بله' : '', key === chosen ? 'بله' : '',
-        imp.error || '', n(imp.pnlAfter), n(imp.realizedNow), n(imp.cash), n(imp.fee), n(imp.netCash),
+        date(s.date), label, act(a), key === actionKey(ev.rec.action) ? 'بله' : '', key === chosen ? 'بله' : '',
+        imp.error || '', n(imp.pnlAfter), pctOf(imp.pnlAfter, retBase), n(imp.realizedNow), n(imp.cash), n(imp.fee), n(imp.netCash),
         n(imp.marginBefore), n(imp.marginAfter), n(imp.marginDelta), n(imp.netNeed), n(imp.maxProfit),
       ]);
     }
   });
-  return sheetParts('گزینه‌های هر روز', ['تاریخ', 'گزینه', 'اقدام', 'پیشنهاد الگوریتم', 'انتخاب من', 'خطا', 'سود و زیان پس از اقدام', 'قطعی‌شده با این اقدام',
+  return sheetParts('گزینه‌های هر روز', ['تاریخ', 'گزینه', 'اقدام', 'پیشنهاد الگوریتم', 'انتخاب من', 'خطا', 'سود و زیان پس از اقدام', 'سود و زیان پس از اقدام ٪', 'قطعی‌شده با این اقدام',
     'نقد امروز (پیش از کارمزد)', 'کارمزد', 'نقد خالص', 'وجه تضمین قبل', 'وجه تضمین بعد', 'تغییر وجه تضمین', 'نیاز خالص به وجه', 'سود هدف بعدی'], rows,
   [12, 20, 18, 10, 10, 20, 16, 16, 16, 10, 14, 14, 14, 14, 14, 14]);
 }
@@ -248,7 +254,7 @@ function chainSheet({ ctx }) {
     [12, 10, 6, 10, 16, 10, 10, 10, 10, 10, 10, 16]);
 }
 
-function reportSheets({ grade }) {
+function reportSheets({ grade, act, retBase }) {
   if (!grade || grade.error) return [];
   const s = grade.summary;
   const summary = sheet('کارنامه', ['مورد', 'مقدار'], [
@@ -261,11 +267,11 @@ function reportSheets({ grade }) {
   const best = [];
   grade.best.forEach((b, k) => {
     if (!b.items.length) best.push([k + 1, n(b.final), '', 'بدون اقدام — نگه‌داشتن تا پایان', '', '', '', '']);
-    for (const it of b.items) best.push([k + 1, n(b.final), date(it.date), actionPlain(it.action), n(it.cash), n(it.sAt), n(it.sMoveAfter), n(it.value)]);
+    for (const it of b.items) best.push([k + 1, n(b.final), date(it.date), act(it.action), n(it.cash), n(it.sAt), n(it.sMoveAfter), n(it.value)]);
   });
-  const mine = grade.mineItems.map((it) => [date(it.date), actionPlain(it.action), n(it.cash), n(it.sMoveAfter), n(it.value)]);
+  const mine = grade.mineItems.map((it) => [date(it.date), act(it.action), n(it.cash), n(it.sMoveAfter), n(it.value)]);
   const regret = grade.review.filter((r) => r.regret > 0).sort((a, b) => b.regret - a.regret)
-    .map((r) => [date(r.date), actionPlain(r.bestAction), n(r.bestFinal), n(r.chosenFinal), n(r.regret), r.followedAlgo ? 'بله' : 'خیر']);
+    .map((r) => [date(r.date), act(r.bestAction), n(r.bestFinal), n(r.chosenFinal), n(r.regret), r.followedAlgo ? 'بله' : 'خیر']);
   return [
     summary,
     sheet('بهترین مسیرها', ['رتبه', 'نتیجهٔ مسیر', 'روز اقدام', 'اقدام', 'نقد همان روز', 'پایه در آن روز', 'حرکت پایه تا پایان ٪', 'ارزش این اقدام'], best, [6, 14, 12, 20, 14, 12, 14, 14]),
@@ -278,15 +284,17 @@ function reportSheets({ grade }) {
  * دفترکار کامل. ورودی همان چیزهایی است که تب دارد؛ `grade` اختیاری است
  * و فقط وقتی معامله تمام شده می‌آید.
  */
-export function buildStrangleWorkbook({ ctx, cfg, exp, run, fees = {}, params, capital = NaN, margin = NaN, grade = null, generatedAt = Date.now(), settingsInfo = {} }) {
-  const base = { ctx, cfg, exp, run, fees, params, capital, margin, market: ctx.market, generatedAt, settingsInfo };
+export function buildStrangleWorkbook({ ctx, cfg, exp, run, fees = {}, params, capital = NaN, margin = NaN, retBase = NaN, grade = null, generatedAt = Date.now(), settingsInfo = {} }) {
+  const symOf = (side, K) => ctx.market.strikes.find((x) => x.strike === Number(K))?.[side]?.sym || '';
+  const act = (a) => actionPlain(a, symOf);
+  const base = { ctx, cfg, exp, run, fees, params, capital, margin, retBase, act, market: ctx.market, generatedAt, settingsInfo };
   return [
     headerSheet(base),
     guideSheet(),
     ...dailySheet(base),
     legsSheet(base),
     ...optionsSheet(base),
-    ...reportSheets({ grade }),
+    ...reportSheets({ grade, act, retBase }),
     ...chainSheet(base),
   ];
 }

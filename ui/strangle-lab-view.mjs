@@ -39,17 +39,34 @@ export const pct = (v, digits = 1) => {
 export const price = (v) => (fin(v) ? fmt.num(v) : '—');
 export const strikeFa = (K) => (fin(K) ? fmt.int(K) : '—');
 
-/** متن کامل یک اقدام، با قیمت اعمال. */
-export function actionText(a) {
+/**
+ * نام قرارداد کنار قیمت اعمال: «کال ۲٬۷۰۰ (ضهرم0527)». نماد شناسه است،
+ * پس رقمش لاتین می‌ماند (`fmt.sym`) تا در کارگزار پیدا شود.
+ */
+export function legName(side, K, symOf) {
+  const sym = symOf ? symOf(side, Number(K)) : '';
+  return `${SIDE_FA[side]} ${strikeFa(Number(K))}${sym ? ` (${fmt.sym(sym)})` : ''}`;
+}
+
+/** متن کامل یک اقدام، با قیمت اعمال و نام قرارداد. */
+export function actionText(a, symOf = null) {
   if (!a || a.kind === 'hold') return 'نگه‌داشتن';
   if (a.kind === 'open') return 'ورود';
   if (a.kind === 'close') return 'بستن کامل';
   if (a.kind === 'algo') return 'پیشنهاد الگوریتم';
   if (a.kind === 'roll') {
-    return a.strike == null ? `بستن ${SIDE_FA[a.side]}`
-      : `رول ${SIDE_FA[a.side]} به ${strikeFa(Number(a.strike))}`;
+    return a.strike == null ? `بستن ${SIDE_FA[a.side]}` : `رول به ${legName(a.side, a.strike, symOf)}`;
   }
   return '—';
+}
+
+/**
+ * سود و زیان با درصدش: «+۱۲۵٬۰۰۰ ریال (۴٫۲۰٪)». مبنای درصد همان مبنای
+ * بازدهٔ بقیهٔ برنامه است (`labReturnBase`)؛ بی مبنا فقط ریال.
+ */
+export function moneyPct(v, base) {
+  const m = money(v, { sign: true });
+  return fin(v) && fin(base) && base > 0 ? `${m} (${pct((v / base) * 100, 2)})` : m;
 }
 
 export const reasonText = (r) => CLOSE_REASON[r] ?? r ?? '—';
@@ -182,7 +199,9 @@ export function lineChart({
     pctBase: fin(pctBase) && pctBase > 0 ? pctBase : null, pctLabel,
     upTo: fin(upTo) ? upTo : n - 1,
     notes: notes.map((t, i) => (i <= upTo ? t || '' : '')),
-    series: S.map((s) => ({ label: s.label, cls: s.cls, unit: s.unit || unit, v: s.vals.map(roundFor(s.unit || unit)) })),
+    series: S.map((s) => ({ label: s.label, cls: s.cls, unit: s.unit || unit, v: s.vals.map(roundFor(s.unit || unit)),
+      // برچسبِ هر نقطه (مثلاً نام قراردادی که آن روز در دست بود) کنار عددش در راهنما.
+      ...(s.labels ? { l: s.labels.map((t, i) => (fin(s.vals[i]) ? t || '' : '')) } : {}) })),
     bars: B.map((b) => ({ label: b.label, cls: b.cls, unit: b.unit || unit, v: b.vals.map(roundFor(b.unit || unit)) })),
   };
   return `<div class="sl-chartbox" data-chart="${esc(id)}" data-model="${esc(JSON.stringify(model))}">
@@ -193,6 +212,8 @@ export function lineChart({
     </svg></div>`;
 }
 
+const CHIPS_HELP = 'هر تراشه یک خط نمودار است با همان رنگ و شکل خط. رویش بزن تا خاموش یا روشن شود؛ تراشهٔ خط‌خورده یعنی خاموش. روی نمودار که حرکت کنی، عدد دقیق هر خطِ روشن در همان روز می‌آید.';
+
 /** نمونهٔ کوچکِ خط یا ستونِ یک سری، با همان کلاس نمودار. */
 export function keySvg(cls, bar = false) {
   return bar
@@ -202,7 +223,7 @@ export function keySvg(cls, bar = false) {
 
 /** تراشه‌های راهنمای نمودار: هر کدام یک سری را روشن و خاموش می‌کند. */
 export function legendChips(id, items = [], hidden = new Set()) {
-  return `<div class="sl-legend sl-lgs" role="group" aria-label="سری‌های نمودار">${items.map((it) => {
+  return `<div class="sl-legend sl-lgs" role="group" aria-label="سری‌های نمودار"><span class="sl-help" tabindex="0" role="button" aria-label="راهنما" data-help="${esc(CHIPS_HELP)}">؟</span>${items.map((it) => {
     const on = !hidden.has(it.key);
     // نمونهٔ خط همان کلاسِ خودِ سری است: رنگ، ضخامت و خط‌چین یکی‌اند.
     return `<button type="button" class="sl-lg${on ? ' on' : ''}" data-act="toggle-series" data-chart="${esc(id)}" data-key="${esc(it.key)}" aria-pressed="${on}">
@@ -223,11 +244,11 @@ export function tipValue(v, unit = 'money') {
  * بازخرید (یا تا امروزِ آزمایش اگر هنوز باز است). پهنای نوار عمر پاست و
  * برچسبش قیمت اعمال و پرمیوم. کلیک، کارت کامل همان پا را باز می‌کند.
  */
-export function legGanttSvg({ dates, trades = [], upTo, sel = -1, mult = 1 }) {
+export function legGanttSvg({ dates, trades = [], upTo, sel = -1, mult = 1, symOf = null, base = NaN }) {
   const n = dates.length;
   if (!trades.length) return '';
   const W = FULL, lane = 34, top = 8, h = top + trades.length * lane + 30;
-  const plotW = W - PAD.l - PAD.r - 150;
+  const plotW = W - PAD.l - PAD.r - 230;
   const x = (i) => PAD.l + (n <= 1 ? 0 : (i / (n - 1)) * plotW);
   const every = Math.max(1, Math.ceil(n / 12));
   const grid = dates.map((d, i) => (i % every === 0 || i === n - 1
@@ -236,23 +257,24 @@ export function legGanttSvg({ dates, trades = [], upTo, sel = -1, mult = 1 }) {
     const end = t.closeDay ?? Math.min(upTo, n - 1);
     const x0 = x(t.openDay), x1 = Math.max(x(end), x0 + 10);
     const yy = top + k * lane + 4;
-    const tip = `${SIDE_FA[t.side]} ${strikeFa(t.strike)}\nفروش ${dateFa(dates[t.openDay])} به ${price(t.openPrice)}\nپرمیوم ${money(t.premium)}`
-      + (t.closeDay != null ? `\nبازخرید ${dateFa(dates[t.closeDay])} به ${price(t.closePrice)}\nسود و زیان این پا ${money(t.realized, { sign: true })}` : '\nهنوز باز');
+    const tip = `${legName(t.side, t.strike, symOf)}\nفروش ${dateFa(dates[t.openDay])} به ${price(t.openPrice)}\nپرمیوم ${money(t.premium)}`
+      + (t.closeDay != null ? `\nبازخرید ${dateFa(dates[t.closeDay])} به ${price(t.closePrice)}\nسود و زیان این پا ${moneyPct(t.realized, base)}` : '\nهنوز باز');
     void mult;
     // برچسبِ نوار کوتاه بیرونِ نوار می‌نشیند؛ نتیجهٔ هر پا در ستون انتهایی.
-    const text = `${SIDE_FA[t.side]} ${strikeFa(t.strike)}، ${money(t.premium)}`;
+    const sym = symOf ? symOf(t.side, t.strike) : '';
+    const text = `${SIDE_FA[t.side]} ${strikeFa(t.strike)}${sym ? ` ${sym}` : ''}، ${money(t.premium)}`;
     const inside = x1 - x0 > text.length * 9 + 16;
     return `<g class="sl-gantt-leg ${t.side}${t.closeDay == null ? ' open' : ''}${k === sel ? ' sel' : ''}" data-act="leg-sel" data-k="${k}" data-tip="${esc(tip)}" role="button" tabindex="0" aria-label="${esc(`${SIDE_FA[t.side]} ${strikeFa(t.strike)}`)}">
       <rect x="${x0.toFixed(1)}" y="${yy}" width="${(x1 - x0).toFixed(1)}" height="${lane - 8}" rx="8"/>
       <text class="sl-gantt-label" x="${(inside ? x0 + 8 : x1 + 6).toFixed(1)}" y="${yy + lane / 2}" text-anchor="start">${esc(text)}</text>
-      ${t.closeDay != null ? `<text class="sl-gantt-res ${tone(t.realized)}" x="${W - PAD.r}" y="${yy + lane / 2}" text-anchor="end">${esc(money(t.realized, { sign: true }))}</text>` : ''}
+      ${t.closeDay != null ? `<text class="sl-gantt-res ${tone(t.realized)}" x="${W - PAD.r}" y="${yy + lane / 2}" text-anchor="end">${esc(moneyPct(t.realized, base))}</text>` : ''}
     </g>`;
   }).join('');
   return `<div class="sl-chartbox sl-gantt"><svg class="sl-chart" viewBox="0 0 ${W} ${h}" role="img" aria-label="عمر هر پا">${grid}${bars}</svg></div>`;
 }
 
 /** توزیع نتیجهٔ نهایی، با نشانه‌گذاریِ مسیرهای کلیدی. هر ستون راهنمای خودش را دارد. */
-export function histSvg({ finals, markers = [], bins = 24 }) {
+export function histSvg({ finals, markers = [], bins = 24, base = NaN }) {
   const vals = finals.filter(fin);
   if (!vals.length) return '<p class="note">هیچ مسیری نتیجهٔ نهایی معلوم ندارد.</p>';
   const W = FULL, h = 300;
@@ -267,11 +289,11 @@ export function histSvg({ finals, markers = [], bins = 24 }) {
   const by = (c) => h - PAD.b - (c / top) * (h - PAD.t - PAD.b - 50);
   const bars = counts.map((c, k) => {
     const a = lo + k * width, mid = a + width / 2;
-    const tip = `${money(a, { sign: true })} تا ${money(a + width, { sign: true })}\n${fmt.int(c)} مسیر (${pct((c / vals.length) * 100)})`;
+    const tip = `${moneyPct(a, base)} تا ${moneyPct(a + width, base)}\n${fmt.int(c)} مسیر (${pct((c / vals.length) * 100)} مسیرها)`;
     return `<rect class="sl-bar ${tone(mid)}" x="${bx(a).toFixed(1)}" y="${by(c).toFixed(1)}" width="${Math.max(1, bx(a + width) - bx(a) - 1).toFixed(1)}" height="${(h - PAD.b - by(c)).toFixed(1)}" data-tip="${esc(tip)}"/>`;
   }).join('');
   const ticks = niceTicks(lo, hi, 6).map((v) => `<text class="sl-axis" x="${bx(v).toFixed(1)}" y="${h - 8}" text-anchor="middle">${esc(axisNum(v))}</text>`).join('');
-  const marks = markers.filter((m) => fin(m.value)).map((m, k) => `<line class="sl-marker ${esc(m.cls)}" x1="${bx(m.value).toFixed(1)}" x2="${bx(m.value).toFixed(1)}" y1="${PAD.t}" y2="${h - PAD.b}" data-tip="${esc(`${m.label}: ${money(m.value, { sign: true })}`)}"/>`
+  const marks = markers.filter((m) => fin(m.value)).map((m, k) => `<line class="sl-marker ${esc(m.cls)}" x1="${bx(m.value).toFixed(1)}" x2="${bx(m.value).toFixed(1)}" y1="${PAD.t}" y2="${h - PAD.b}" data-tip="${esc(`${m.label}: ${moneyPct(m.value, base)}`)}"/>`
     + `<text class="sl-marker-label ${esc(m.cls)}" x="${bx(m.value).toFixed(1)}" y="${PAD.t + 16 + (k % 3) * 22}" text-anchor="middle">${esc(m.label)}</text>`).join('');
   const zero = lo < 0 && hi > 0 ? `<line class="sl-zero" x1="${bx(0).toFixed(1)}" x2="${bx(0).toFixed(1)}" y1="${PAD.t}" y2="${h - PAD.b}"/>` : '';
   return `<div class="sl-chartbox"><svg class="sl-chart" viewBox="0 0 ${W} ${h}" role="img" aria-label="توزیع نتیجهٔ نهایی مسیرها">${bars}${zero}${marks}${ticks}</svg></div>`;
@@ -309,7 +331,7 @@ const STEP_CLASS = { open: 'open', hold: 'hold', roll: 'adjust', close: 'close' 
  * زیر خط زمان باز می‌کند. روزهای پس از روزِ جاری «آینده»اند: تاریخ دارند،
  * قیمت ندارند.
  */
-export function timelineHtml({ days, steps, cursor, view, done, closedAt = Infinity }) {
+export function timelineHtml({ days, steps, cursor, view, done, closedAt = Infinity, symOf = null, base = NaN }) {
   const byI = new Map(steps.map((s) => [s.i, s]));
   let prevPnl = NaN;
   return `<ol class="sl-timeline" role="list">${days.map((d, i) => {
@@ -319,15 +341,16 @@ export function timelineHtml({ days, steps, cursor, view, done, closedAt = Infin
     if (s) {
       const kind = s.action?.kind || 'hold';
       cls = STEP_CLASS[kind] || 'hold';
-      label = actionText(s.action);
+      label = actionText(s.action, symOf);
       if (s.ev?.missing?.length) { cls = 'missing'; label = 'بی‌قیمت'; }
       else if (kind === 'hold' && s.ev?.rec?.kind && s.ev.rec.kind !== 'hold') { cls = 'ignored'; label = 'پیشنهاد نادیده'; }
       if (s.error) { cls = 'error'; label = s.error; }
       const change = fin(s.pnl) && fin(prevPnl) ? s.pnl - prevPnl : NaN;
       dayTone = tone(change);
-      tip += `\nپایه ${fmt.int(d.S)}\nاقدام: ${label}\nسود و زیان ${money(s.pnl, { sign: true })}`
-        + (fin(change) ? `\nتغییر امروز ${money(change, { sign: true })}` : '');
-      if (s.sides) tip += `\nاثر کال ${money(s.sides.call.cum, { sign: true })} · اثر پوت ${money(s.sides.put.cum, { sign: true })}`;
+      const held = (s.ev?.marks ? ['call', 'put'] : []).map((sd) => s.state?.legs?.[sd] ? legName(sd, s.state.legs[sd].strike, symOf) : '').filter(Boolean).join('، ');
+      tip += `\nپایه ${fmt.int(d.S)}\nاقدام: ${label}${held ? `\nدر دست: ${held}` : ''}\nسود و زیان ${moneyPct(s.pnl, base)}`
+        + (fin(change) ? `\nتغییر امروز ${moneyPct(change, base)}` : '');
+      if (s.sides) tip += `\nاثر کال ${moneyPct(s.sides.call.cum, base)}\nاثر پوت ${moneyPct(s.sides.put.cum, base)}`;
       if (fin(s.pnl)) prevPnl = s.pnl;
     } else if (i === cursor && !done) { cls = 'pending'; label = 'در انتظار تصمیم'; tip += '\nامروزِ آزمایش — در انتظار تصمیم'; }
     else if (done && i > closedAt) { cls = 'after'; label = 'پس از بستن معامله'; tip += '\nمعامله پیش‌تر بسته شده'; }
@@ -343,7 +366,7 @@ export function timelineHtml({ days, steps, cursor, view, done, closedAt = Infin
 }
 
 /** جدول «اگر آن روز…»: سطر = روز، ستون = گزینه، خانه = نتیجهٔ نهایی. */
-export function whatIfHtml({ rows, options, best }) {
+export function whatIfHtml({ rows, options, best, symOf = null, base = NaN }) {
   if (!rows.length) return '<p class="note">هنوز روزی برای مقایسه نیست — دست‌کم یک روز را پشت سر بگذار.</p>';
   const all = rows.flatMap((r) => r.cells.map((c) => c.final)).filter(fin);
   const scale = Math.max(1, ...all.map(Math.abs));
@@ -352,8 +375,8 @@ export function whatIfHtml({ rows, options, best }) {
     const strength = fin(c.final) ? Math.min(1, Math.abs(c.final) / scale) : 0;
     const level = Math.ceil(strength * 4);
     const isChosen = c.key === chosen;
-    return `<td class="sl-wi ${tone(c.final)} lv${level}${isChosen ? ' chosen' : ''}${fin(best) && fin(c.final) && Math.abs(c.final - best) < 1e-6 ? ' best' : ''}" title="${esc(actionText(c.action))}">
-      <b>${esc(money(c.final, { sign: true }))}</b><small>${esc(actionText(c.action))}</small></td>`;
+    return `<td class="sl-wi ${tone(c.final)} lv${level}${isChosen ? ' chosen' : ''}${fin(best) && fin(c.final) && Math.abs(c.final - best) < 1e-6 ? ' best' : ''}">
+      <b>${esc(money(c.final, { sign: true }))}</b><small>${fin(base) && fin(c.final) ? esc(pct((c.final / base) * 100, 2)) : ''}</small><small>${esc(actionText(c.action, symOf))}</small></td>`;
   };
   return `<div class="history-table-wrap"><table class="sl-wi-table">
     <thead><tr><th>روز</th><th>انتخاب شما</th>${options.map((o) => `<th>${esc(BRANCH_OPTIONS[o] || o)}</th>`).join('')}</tr></thead>
@@ -364,8 +387,8 @@ export function whatIfHtml({ rows, options, best }) {
 }
 
 /** تراشه‌های تصمیمِ یک مسیر. */
-export function choiceChips(choices = [], max = 10) {
-  if (!choices.length) return '<span class="sl-chip quiet">بدون انشعاب</span>';
-  const shown = choices.slice(0, max).map((c) => `<span class="sl-chip ${c.action?.kind || 'hold'}" title="${esc(dateFa(c.date))}">${esc(shortDateFa(c.date))}: ${esc(actionText(c.action))}</span>`).join('');
+export function choiceChips(choices = [], max = 10, symOf = null) {
+  if (!choices.length) return '<span class="sl-chip quiet">بدون اقدام — نگه‌داشتن تا پایان</span>';
+  const shown = choices.slice(0, max).map((c) => `<span class="sl-chip ${c.action?.kind || 'hold'}" title="${esc(dateFa(c.date))}">${esc(shortDateFa(c.date))}: ${esc(actionText(c.action, symOf))}</span>`).join('');
   return shown + (choices.length > max ? `<span class="sl-chip quiet">+${faDigits(String(choices.length - max))}</span>` : '');
 }

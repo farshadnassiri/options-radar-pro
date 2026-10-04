@@ -35,7 +35,7 @@
 
 import { num, EPS } from './num.mjs';
 import { bsPrice, bsGreeks, impliedVol, intrinsic } from './bs.mjs';
-import { strategyMargin, DEFAULT_PARAMS } from './margin.mjs';
+import { strategyMargin, capitalBase, DEFAULT_PARAMS } from './margin.mjs';
 import { normalizeHistoryDate, daysBetween } from './history.mjs';
 import { optionBreakeven, weightedMean } from './open-view.mjs';
 
@@ -223,6 +223,7 @@ export function buildLabMarket({ rows = [], dailies = {}, uaIns, expiry, from, t
   const start = normalizeHistoryDate(from);
   const end = Math.min(normalizeHistoryDate(to) || Infinity, want || Infinity);
   const uaPrices = byDate(seriesOf(dailies, ua));
+  const uaRaw = rawByDate(seriesOf(dailies, ua));
   const legPrices = { call: new Map(), put: new Map() };
   const legRaw = { call: new Map(), put: new Map() };
   for (const s of strikes) {
@@ -236,7 +237,7 @@ export function buildLabMarket({ rows = [], dailies = {}, uaIns, expiry, from, t
   const days = [];
   for (const date of [...uaPrices.keys()].sort((a, b) => a - b)) {
     if (date < start || date > end) continue;
-    const day = { date, S: uaPrices.get(date), dte: daysBetween(date, want), call: {}, put: {}, raw: { call: {}, put: {} } };
+    const day = { date, S: uaPrices.get(date), dte: daysBetween(date, want), call: {}, put: {}, raw: { call: {}, put: {} }, uaRaw: uaRaw.get(date) || {} };
     for (const side of SIDES) {
       for (const [K, series] of legPrices[side]) {
         const p = series.get(date);
@@ -896,6 +897,27 @@ export function labMargin(ctx, cfg, legs, i, params = DEFAULT_PARAMS) {
   }
   if (!list.length) return 0;
   return strategyMargin(list, { S: day.S, params, contractSize: ctx.market.size, capitalMode: 'GROSS' }).margin;
+}
+
+/**
+ * مبنای «درصد سود و زیان» — همان منطق بقیهٔ برنامه (`capitalBase` در
+ * `core/margin.mjs`، که تب تحلیل تاریخی و رصد هم با آن بازده می‌سازند):
+ * برای موقعیت بستانکار با زیان نامحدود مثل استرانگل فروش، سرمایهٔ درگیر =
+ * وجه تضمین بلوکه‌شده؛ با `capitalMode: 'NET'` (پیش‌فرض تنظیمات) منهای
+ * پرمیوم دریافتی. درصد سود و زیان = سود و زیان ÷ همین عدد.
+ */
+export function labReturnBase(ctx, cfg, legs, i, params = DEFAULT_PARAMS, capitalMode = 'NET') {
+  const day = ctx.market.days[i];
+  if (!day) return { value: NaN, label: '' };
+  const list = [];
+  for (const side of SIDES) {
+    const leg = legs?.[side];
+    if (!leg) continue;
+    list.push({ side: 'sell', kind: side, strike: leg.strike, price: leg.open, size: ctx.market.size, ratio: cfg.qty, days: day.dte });
+  }
+  if (!list.length) return { value: NaN, label: '' };
+  const m = strategyMargin(list, { S: day.S, params, contractSize: ctx.market.size, capitalMode });
+  return capitalBase({ legs: list, netCash: m.grossCash, marginNet: m.marginNet, maxLoss: Infinity });
 }
 
 // ═════════════════════════ همهٔ مسیرها ═════════════════════════
