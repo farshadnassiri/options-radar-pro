@@ -75,7 +75,7 @@ export const GROUP_ICON = {
 /** آیکون تب‌هایی که استراتژی نیستند. */
 export const TAB_ICON = {
   settings: 'sliders', chain: 'grid', 'live-market': 'wave', 'open-view': 'wave', history: 'clock', backtest: 'play',
-  'data-export': 'download',
+  'data-export': 'download', 'strangle-lab': 'gauge',
   'portfolio-backtest': 'layers', top: 'trophy', logs: 'alert', datalog: 'flow',
   'strategy-explorer': 'search', watchtower: 'bell',
   positions: 'briefcase', roll: 'rotate',

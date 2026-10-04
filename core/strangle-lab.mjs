@@ -1,0 +1,946 @@
+// موتور «استرانگل فروش در بوتهٔ آزمایش» — آزمون روزبه‌روز با دادهٔ پایانیِ همان روز.
+//
+// ═══ خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۲) ═══
+//
+// «در یک تاریخ خاص یک استرانگل ست بشه … در پایان هر روز تکنیک زیر به
+// کاربر پیشنهاد داده میشه بر اساس دیتای پایان همان روز … با انتخاب کاربر
+// معامله تعدیل میشه و میره برای روز بعد … کلیه احتمالات و اقدامات احتمالی
+// کاربر قابل مقایسه باشه.»
+//
+// الگوریتم مرجع، «الگوریتم جامع Short Strangle» است که صاحب پروژه داد:
+//   ۲.۲  فروش کال و پوت در دلتای ۱۶ تا ۲۰
+//   ۲.۳  حد سود و حد ضرر = درصدی از پرمیوم دریافتی اولیه
+//   ۳.۱  زیان شناور در محدودهٔ ۱۰ تا ۱۵٪ سود هدف ← تعدیل
+//   ۳.۲  بستن سمت سودده و فروش قیمت اعمال نزدیک‌تر با پرمیوم برابر سمت زیان‌ده
+//   ۳.۳  تکرار، تا جایی که دو قیمت اعمال یکی شوند ← استرادل
+//   ۴    قانون ۳ برابر روی استرادل
+//   ۵    خروج با سود کامل، حد ضرر کلی یا سربه‌سر
+//
+// ═══ چرا همه‌چیز پارامتر است ═══
+//
+// متن الگوریتم چند جا دو خوانش دارد (مبنای «زیان شناور» پس از تعدیل، برابری
+// پرمیوم وقتی قیمت‌های اعمال گسسته‌اند، استرادل ناپایدار وقتی هنوز روز زیادی
+// مانده). خوانش پیش‌فرض همان است که در گفت‌وگو تأیید شد، و خوانش دیگر یک
+// گزینه است، نه کدِ دوم.
+//
+// ═══ صداقت عددی ═══
+//
+// قیمت فقط «پایانیِ همان روز» است. روزی که قراردادی معامله نشده، قیمتش
+// «نداشته» می‌ماند. «قیمت مدل» (بلک-شولز با IVِ آخرین روزِ معامله‌شده) فقط
+// وقتی کاربر صریحاً روشنش کند ساخته می‌شود و هر جا نشست، `src: 'model'`
+// دارد تا رابط برچسبش بزند. نگاه به آینده هم ممنوع است: مدل فقط از
+// روزهای **پیش از** همان روز تغذیه می‌شود.
+//
+// این ماژول خالص است: نه DOM، نه شبکه. رابط در `ui/tabs/strangle-lab.mjs`.
+
+import { num, EPS } from './num.mjs';
+import { bsPrice, bsGreeks, impliedVol, intrinsic } from './bs.mjs';
+import { strategyMargin, DEFAULT_PARAMS } from './margin.mjs';
+import { normalizeHistoryDate, daysBetween } from './history.mjs';
+
+export const LAB_VERSION = 1;
+
+/** پارامترهای الگوریتم — پیش‌فرض‌ها همان متن صاحب پروژه‌اند. */
+export const LAB_DEFAULTS = Object.freeze({
+  qty: 1,
+  capitalMult: 3,          // ۱.۱ سرمایه = ۳ × وجه تضمین
+  varLimitPct: 15,         // ۱.۲ سقف زیان حساب به درصد سرمایه
+  dteLo: 45, dteHi: 50,    // ۲.۱
+  entryMethod: 'delta',    // delta | otm
+  deltaLo: 0.16, deltaHi: 0.20,
+  otmPct: 10,              // فاصلهٔ قیمت اعمال از پایه در روش «درصد فاصله»
+  tpPct: 100,              // ۲.۳ / ۵.۱ — درصد پرمیوم دریافتی اولیه
+  slPct: 100,              // ۲.۳ / ۵.۲
+  trigLo: 10, trigHi: 15,  // ۳.۱ — درصد سود هدفِ جاری
+  trigBasis: 'sinceAdjust', // sinceAdjust | sinceEntry
+  matchRule: 'nearest',    // nearest | atMost | atLeast
+  ratio3x: 3,              // ۴.۱
+  straddleExitDays: 7,     // ۴.۲
+  unstableEarly: 'hold',   // hold | close — استرادل ناپایدار با روزِ زیاد
+  breakevenRule: 'market', // market | nonNeg — ۵.۳
+  fees: true,
+  modelFill: false,
+  exitFallback: 'lastPriced', // lastPriced | none — روز خروج بی‌قیمت
+});
+
+export const LAB_CHOICES = {
+  entryMethod: [['delta', 'دلتای هدف'], ['otm', 'درصد فاصله از پایه']],
+  trigBasis: [['sinceAdjust', 'از آخرین تعدیل'], ['sinceEntry', 'از روز ورود']],
+  matchRule: [['nearest', 'نزدیک‌ترین پرمیوم'], ['atMost', 'نزدیک‌ترین، نه بیشتر'], ['atLeast', 'نزدیک‌ترین، نه کمتر']],
+  unstableEarly: [['hold', 'نگه‌داشتن با هشدار'], ['close', 'بستن فوری']],
+  breakevenRule: [['market', 'بستن به قیمت روز'], ['nonNeg', 'فقط اگر زیان نداشته باشد']],
+  exitFallback: [['lastPriced', 'آخرین روزی که همهٔ پاها معامله شدند'], ['none', 'نتیجه نامعلوم بماند']],
+};
+
+export const SIDES = ['call', 'put'];
+export const SIDE_FA = { call: 'کال', put: 'پوت' };
+
+const fin = (x) => typeof x === 'number' && Number.isFinite(x);
+const other = (side) => (side === 'call' ? 'put' : 'call');
+
+/** پیکربندی کامل: پیش‌فرض‌ها + ورودی کاربر، با مرزهای معقول. */
+export function labConfig(input = {}) {
+  const c = { ...LAB_DEFAULTS, ...(input || {}) };
+  for (const key of Object.keys(LAB_DEFAULTS)) {
+    const def = LAB_DEFAULTS[key];
+    if (typeof def === 'number') c[key] = fin(Number(c[key])) ? Number(c[key]) : def;
+    if (typeof def === 'boolean') c[key] = Boolean(c[key]);
+  }
+  for (const [key, list] of Object.entries(LAB_CHOICES)) {
+    if (!list.some(([id]) => id === c[key])) c[key] = LAB_DEFAULTS[key];
+  }
+  c.qty = Math.max(1, Math.round(c.qty));
+  if (c.trigHi < c.trigLo) c.trigHi = c.trigLo;
+  if (c.deltaHi < c.deltaLo) [c.deltaLo, c.deltaHi] = [c.deltaHi, c.deltaLo];
+  return c;
+}
+
+// ═════════════════════════ بازار: ورودیِ آزمایش ═════════════════════════
+
+/** قیمت روزانهٔ یک ردیف: پایانی، و اگر نبود آخرین معاملهٔ **همان** روز. */
+const dayPrice = (row) => {
+  if (!row) return 0;
+  const close = num(row.close, 0);
+  return close > 0 ? close : Math.max(0, num(row.last, 0));
+};
+
+const seriesOf = (dailies, ins) => {
+  const box = dailies?.[String(ins ?? '')];
+  return Array.isArray(box) ? box : (Array.isArray(box?.rows) ? box.rows : []);
+};
+
+const byDate = (rows) => {
+  const map = new Map();
+  for (const row of rows) {
+    const d = normalizeHistoryDate(row?.date);
+    const p = dayPrice(row);
+    if (d && p > 0) map.set(d, p);
+  }
+  return map;
+};
+
+/**
+ * سررسیدهای یک پایه در فهرست قراردادها، با شمار قیمت اعمال.
+ * `rows` ردیف‌های `/api/history/universe` هستند.
+ */
+export function labExpiries(rows = [], uaIns = '') {
+  const map = new Map();
+  for (const row of rows) {
+    if (String(row?.uaInsCode ?? '') !== String(uaIns)) continue;
+    const expiry = normalizeHistoryDate(num(row.expiryGregorian, 0) || num(row.endDate, 0));
+    if (!expiry || !(num(row.strikePrice, 0) > 0)) continue;
+    const box = map.get(expiry) || { expiry, strikes: 0 };
+    box.strikes += 1;
+    map.set(expiry, box);
+  }
+  return [...map.values()].sort((a, b) => a.expiry - b.expiry);
+}
+
+/** پایه‌هایی که در فهرست قرارداد دارند، با نام و شمار سررسید. */
+export function labBases(rows = []) {
+  const map = new Map();
+  for (const row of rows) {
+    const ins = String(row?.uaInsCode ?? '');
+    if (!ins) continue;
+    const box = map.get(ins) || { ins, name: String(row.lval30_UA || ins), expiries: new Set(), contracts: 0 };
+    box.expiries.add(num(row.expiryGregorian, 0) || num(row.endDate, 0));
+    box.contracts += (row.insCode_C ? 1 : 0) + (row.insCode_P ? 1 : 0);
+    map.set(ins, box);
+  }
+  return [...map.values()]
+    .map((b) => ({ ins: b.ins, name: b.name, expiries: b.expiries.size, contracts: b.contracts }))
+    .sort((a, b) => b.contracts - a.contracts || a.name.localeCompare(b.name, 'fa'));
+}
+
+/**
+ * سررسیدی که روز ورود به بازهٔ DTE نزدیک‌تر است (۲.۱).
+ * خروجی `{ expiry, dte, inRange }` است؛ `inRange` نادرست یعنی هشدار.
+ */
+export function pickExpiry(expiries = [], entryDate, cfg = LAB_DEFAULTS) {
+  const lo = num(cfg.dteLo, 45), hi = num(cfg.dteHi, 50);
+  let best = null;
+  for (const e of expiries) {
+    const dte = daysBetween(entryDate, e.expiry ?? e);
+    if (!(dte > 0)) continue;
+    const gap = dte < lo ? lo - dte : dte > hi ? dte - hi : 0;
+    if (!best || gap < best.gap || (gap === best.gap && dte < best.dte)) {
+      best = { expiry: normalizeHistoryDate(e.expiry ?? e), dte, gap };
+    }
+  }
+  return best ? { expiry: best.expiry, dte: best.dte, inRange: best.gap === 0 } : null;
+}
+
+/**
+ * بازارِ آزمایش: روزهای معاملاتیِ پایه در بازه، و قیمت پایانیِ هر قیمت اعمال.
+ *
+ * فقط روزی وارد می‌شود که خودِ پایه قیمت پایانی دارد؛ بی پایه، هیچ
+ * سود و زیان و دلتایی ساختنی نیست. قیمت قرارداد اگر آن روز نبود، کلیدش
+ * اصلاً نوشته نمی‌شود — «نداشته» با صفر اشتباه نشود.
+ */
+export function buildLabMarket({ rows = [], dailies = {}, uaIns, expiry, from, to, size = 1000 } = {}) {
+  const want = normalizeHistoryDate(expiry);
+  const ua = String(uaIns ?? '');
+  const mine = rows.filter((row) => String(row?.uaInsCode ?? '') === ua
+    && normalizeHistoryDate(num(row.expiryGregorian, 0) || num(row.endDate, 0)) === want
+    && num(row.strikePrice, 0) > 0);
+  const strikes = [];
+  const seen = new Set();
+  for (const row of mine.sort((a, b) => a.strikePrice - b.strikePrice)) {
+    const K = num(row.strikePrice, 0);
+    if (seen.has(K)) continue;
+    seen.add(K);
+    strikes.push({
+      strike: K,
+      call: row.insCode_C ? { ins: String(row.insCode_C), sym: String(row.lVal18AFC_C || '') } : null,
+      put: row.insCode_P ? { ins: String(row.insCode_P), sym: String(row.lVal18AFC_P || '') } : null,
+    });
+  }
+  const start = normalizeHistoryDate(from);
+  const end = Math.min(normalizeHistoryDate(to) || Infinity, want || Infinity);
+  const uaPrices = byDate(seriesOf(dailies, ua));
+  const legPrices = { call: new Map(), put: new Map() };
+  for (const s of strikes) {
+    for (const side of SIDES) if (s[side]) legPrices[side].set(s.strike, byDate(seriesOf(dailies, s[side].ins)));
+  }
+  const days = [];
+  for (const date of [...uaPrices.keys()].sort((a, b) => a - b)) {
+    if (date < start || date > end) continue;
+    const day = { date, S: uaPrices.get(date), dte: daysBetween(date, want), call: {}, put: {} };
+    for (const side of SIDES) {
+      for (const [K, series] of legPrices[side]) {
+        const p = series.get(date);
+        if (p > 0) day[side][K] = p;
+      }
+    }
+    days.push(day);
+  }
+  const uaName = String(mine[0]?.lval30_UA || ua);
+  const priced = days.reduce((a, d) => a + Object.keys(d.call).length + Object.keys(d.put).length, 0);
+  const slots = days.length * strikes.reduce((a, s) => a + (s.call ? 1 : 0) + (s.put ? 1 : 0), 0);
+  return {
+    uaIns: ua, uaName, expiry: want, size: num(size, 1000) || 1000,
+    from: start, to: normalizeHistoryDate(to), strikes, days,
+    coverage: { priced, slots, pct: slots ? (priced / slots) * 100 : NaN },
+  };
+}
+
+// ═════════════════════════ قیمت‌گذاری ═════════════════════════
+
+/**
+ * زمینهٔ قیمت‌گذاری: نرخ، بازده نقدی، روزِ سال و اینکه قیمت مدل مجاز است.
+ * کش IV روی خودِ بازار نمی‌نشیند تا بازار قابل‌ذخیره (JSON) بماند.
+ */
+export function pricingContext(market, { r = 0.3, q = 0, yearDays = 365, modelFill = false } = {}) {
+  return { market, r: num(r, 0.3), q: num(q, 0), yearDays: num(yearDays, 365) || 365, modelFill: !!modelFill, ivCache: new Map() };
+}
+
+const yearsOf = (ctx, dte) => Math.max(0, dte) / ctx.yearDays;
+
+/** IV از قیمت پایانیِ واقعیِ همان روز؛ بی قیمت واقعی، NaN. */
+export function ivAt(ctx, i, side, K) {
+  const key = `${side}|${K}|${i}`;
+  if (ctx.ivCache.has(key)) return ctx.ivCache.get(key);
+  const day = ctx.market.days[i];
+  const p = day?.[side]?.[K];
+  const iv = p > 0 && day.dte > 0
+    ? impliedVol(side, p, day.S, K, yearsOf(ctx, day.dte), ctx.r, ctx.q)
+    : NaN;
+  ctx.ivCache.set(key, iv);
+  return iv;
+}
+
+/**
+ * قیمت یک پا در پایان روز `i`.
+ *
+ * `{ price, src, from }` — `src` یکی از: close (پایانی همان روز)،
+ * intrinsic (روز سررسید)، model (بلک-شولز با IVِ روز `from`). بی جواب،
+ * `null` — و مصرف‌کننده باید «نداشته» نشانش دهد.
+ */
+export function priceAt(ctx, i, side, K) {
+  const day = ctx.market.days[i];
+  if (!day) return null;
+  const actual = day[side]?.[K];
+  if (actual > 0) return { price: actual, src: 'close', from: day.date };
+  if (day.dte <= 0) return { price: intrinsic(side, day.S, K), src: 'intrinsic', from: day.date };
+  if (!ctx.modelFill) return null;
+  for (let j = i - 1; j >= 0; j -= 1) {
+    if (!(ctx.market.days[j]?.[side]?.[K] > 0)) continue;
+    const iv = ivAt(ctx, j, side, K);
+    if (!fin(iv)) return null;
+    const price = bsPrice(side, day.S, K, yearsOf(ctx, day.dte), ctx.r, ctx.q, iv);
+    return fin(price) ? { price, src: 'model', from: ctx.market.days[j].date, iv } : null;
+  }
+  return null;
+}
+
+/** دلتای یک پا در روز `i` — از IVِ همان روز، یا IVِ مدل اگر مجاز باشد. */
+export function deltaAt(ctx, i, side, K) {
+  const day = ctx.market.days[i];
+  if (!day || !(day.dte > 0)) return NaN;
+  let iv = ivAt(ctx, i, side, K);
+  if (!fin(iv)) {
+    const q = priceAt(ctx, i, side, K);
+    iv = q?.src === 'model' ? q.iv : NaN;
+  }
+  if (!fin(iv)) return NaN;
+  return bsGreeks(side, day.S, K, yearsOf(ctx, day.dte), ctx.r, ctx.q, iv, ctx.yearDays).delta;
+}
+
+/** جدول قیمت اعمال‌های یک روز: قیمت، منبع، IV و دلتای هر دو سمت. */
+export function strikeBoard(ctx, i) {
+  const day = ctx.market.days[i];
+  if (!day) return [];
+  return ctx.market.strikes.map((s) => {
+    const row = { strike: s.strike, otmPct: ((s.strike - day.S) / day.S) * 100 };
+    for (const side of SIDES) {
+      if (!s[side]) { row[side] = null; continue; }
+      const q = priceAt(ctx, i, side, s.strike);
+      row[side] = {
+        sym: s[side].sym, ins: s[side].ins,
+        price: q?.price ?? NaN, src: q?.src || 'none',
+        iv: ivAt(ctx, i, side, s.strike),
+        delta: deltaAt(ctx, i, side, s.strike),
+      };
+    }
+    return row;
+  });
+}
+
+/**
+ * انتخاب قیمت‌های اعمال ورود (۲.۲).
+ *
+ * روش دلتا: نزدیک‌ترین قدرمطلق دلتا به میانهٔ بازه؛ اگر هیچ‌کدام در بازه
+ * نبود، نزدیک‌ترین با `inRange: false`. روش درصد فاصله: کال بالای پایه و
+ * پوت زیر پایه با همان درصد. کال همیشه بالاتر یا برابرِ پوت می‌ماند.
+ */
+export function pickEntry(ctx, cfg = LAB_DEFAULTS, i = 0) {
+  const day = ctx.market.days[i];
+  if (!day) return { call: null, put: null, note: 'روز ورود در داده نیست.' };
+  const board = strikeBoard(ctx, i);
+  const mid = (cfg.deltaLo + cfg.deltaHi) / 2;
+  const pick = (side) => {
+    const usable = board.filter((row) => row[side] && fin(row[side].price) && row[side].price > 0);
+    if (!usable.length) return null;
+    if (cfg.entryMethod === 'otm') {
+      const target = side === 'call' ? day.S * (1 + cfg.otmPct / 100) : day.S * (1 - cfg.otmPct / 100);
+      const best = usable.reduce((a, b) => (Math.abs(b.strike - target) < Math.abs(a.strike - target) ? b : a));
+      return { strike: best.strike, inRange: true, delta: best[side].delta };
+    }
+    const withDelta = usable.filter((row) => fin(row[side].delta));
+    if (!withDelta.length) return null;
+    const d = (row) => Math.abs(row[side].delta);
+    const best = withDelta.reduce((a, b) => (Math.abs(d(b) - mid) < Math.abs(d(a) - mid) ? b : a));
+    return { strike: best.strike, inRange: d(best) >= cfg.deltaLo - EPS && d(best) <= cfg.deltaHi + EPS, delta: best[side].delta };
+  };
+  const call = pick('call'), put = pick('put');
+  const notes = [];
+  if (!call) notes.push('برای کال قیمت یا دلتای قابل‌استفاده‌ای در روز ورود نبود.');
+  if (!put) notes.push('برای پوت قیمت یا دلتای قابل‌استفاده‌ای در روز ورود نبود.');
+  if (call && put && call.strike < put.strike) notes.push('قیمت اعمال کال زیر پوت افتاد؛ دستی اصلاح کنید.');
+  if (cfg.entryMethod === 'delta') {
+    if (call && !call.inRange) notes.push('هیچ کالی در بازهٔ دلتای هدف نبود؛ نزدیک‌ترین انتخاب شد.');
+    if (put && !put.inRange) notes.push('هیچ پوتی در بازهٔ دلتای هدف نبود؛ نزدیک‌ترین انتخاب شد.');
+  }
+  return { call: call?.strike ?? null, put: put?.strike ?? null, callInfo: call, putInfo: put, note: notes.join(' ') };
+}
+
+// ═════════════════════════ وضعیت و ارزیابی ═════════════════════════
+
+const mult = (ctx, cfg) => ctx.market.size * cfg.qty;
+
+const copyState = (s) => ({
+  ...s,
+  legs: { call: s.legs.call ? { ...s.legs.call } : null, put: s.legs.put ? { ...s.legs.put } : null },
+});
+
+/** کارمزد یک معامله؛ با کارمزد خاموش صفر. */
+const feeOf = (cfg, fees, notional) => (cfg.fees ? Math.abs(notional) * num(fees?.option, 0) : 0);
+
+/**
+ * گشایش استرانگل در پایان روز `i`.
+ * خطا یعنی قیمت ورود نیست — هیچ عددی جایش ساخته نمی‌شود.
+ */
+export function openPosition(ctx, cfg, entry, i = 0, fees = {}) {
+  const M = mult(ctx, cfg);
+  const legs = {};
+  for (const side of SIDES) {
+    const K = num(entry?.[side], NaN);
+    if (!fin(K)) return { error: `قیمت اعمال ${SIDE_FA[side]} انتخاب نشده.` };
+    const q = priceAt(ctx, i, side, K);
+    if (!q) return { error: `قیمت ${SIDE_FA[side]} ${K} در روز ورود نیست.` };
+    legs[side] = { strike: K, open: q.price, openDay: i, src: q.src };
+  }
+  if (legs.call.strike < legs.put.strike) return { error: 'قیمت اعمال کال نباید زیر پوت باشد.' };
+  const credit = (legs.call.open + legs.put.open) * M;
+  const fee = feeOf(cfg, fees, credit);
+  return {
+    state: {
+      legs, realized: 0, fees: fee, received: credit, paid: 0,
+      initialCredit: credit, refPnl: -fee, initialRef: -fee, adjustments: 0,
+      closed: false, reason: '', closedAt: -1, finalPnl: NaN,
+    },
+  };
+}
+
+/**
+ * ارزیابی پایان روز `i`، پیش از اقدام آن روز.
+ *
+ * همهٔ درصدها نسبت به همان مبنایی است که متن الگوریتم گفته:
+ *   حد سود و حد ضرر ← پرمیوم دریافتی **اولیه** (۵.۱ و ۵.۲)
+ *   آستانهٔ تعدیل ← «سود هدفِ جاری» = سودِ بیشینهٔ اکنون (۳.۲.۳)
+ */
+export function evaluateDay(ctx, cfg, state, i) {
+  const day = ctx.market.days[i];
+  const M = mult(ctx, cfg);
+  const last = ctx.market.days.length - 1;
+  const out = {
+    i, date: day?.date, S: day?.S, dte: day?.dte, isLast: i === last,
+    marks: { call: null, put: null }, missing: [], modeled: [],
+    pnl: NaN, unreal: NaN, maxProfit: NaN, floatLoss: NaN, floatPct: NaN,
+    zone: 'calm', tpHit: false, slHit: false,
+    straddle: false, ratio: NaN, unstable: false,
+    losing: null, winning: null, candidate: null,
+  };
+  if (!day || state.closed) return { ...out, closed: state.closed, pnl: state.finalPnl, rec: rec('none', 'closed') };
+  let unreal = 0, openValue = 0;
+  for (const side of SIDES) {
+    const leg = state.legs[side];
+    if (!leg) continue;
+    const q = priceAt(ctx, i, side, leg.strike);
+    out.marks[side] = q;
+    if (!q) { out.missing.push(side); continue; }
+    if (q.src === 'model') out.modeled.push(side);
+    unreal += (leg.open - q.price) * M;
+    openValue += leg.open * M;
+  }
+  out.maxProfit = state.realized + openValue - state.fees;
+  if (out.missing.length) return { ...out, rec: rec('hold', 'missing', { sides: out.missing }) };
+  out.unreal = unreal;
+  out.pnl = state.realized + unreal - state.fees;
+  const ref = cfg.trigBasis === 'sinceEntry' ? state.initialRef : state.refPnl;
+  out.floatLoss = Math.max(0, ref - out.pnl);
+  out.floatPct = out.maxProfit > EPS ? (out.floatLoss / out.maxProfit) * 100 : NaN;
+  out.zone = !(out.floatPct >= cfg.trigLo) ? 'calm' : out.floatPct <= cfg.trigHi ? 'band' : 'beyond';
+  out.tpHit = out.pnl >= (cfg.tpPct / 100) * state.initialCredit - EPS;
+  out.slHit = out.pnl <= -(cfg.slPct / 100) * state.initialCredit + EPS;
+
+  const { call, put } = state.legs;
+  if (call && put) {
+    out.straddle = Math.abs(call.strike - put.strike) < EPS;
+    const cm = out.marks.call.price, pm = out.marks.put.price;
+    out.ratio = Math.min(cm, pm) > EPS ? Math.max(cm, pm) / Math.min(cm, pm) : Infinity;
+    out.unstable = out.straddle && out.ratio >= cfg.ratio3x - EPS;
+    const moveC = cm - call.open, moveP = pm - put.open;
+    out.losing = moveC >= moveP ? 'call' : 'put';
+    out.winning = other(out.losing);
+  }
+  if (out.isLast) return { ...out, rec: rec('close', day.dte <= 0 ? 'expiry' : 'exit') };
+  if (out.slHit) return { ...out, rec: rec('close', 'sl') };
+  if (out.tpHit) return { ...out, rec: rec('close', 'tp') };
+  if (!(call && put)) return { ...out, rec: rec('hold', 'oneLeg') };
+  if (out.straddle) {
+    if (!out.unstable) return { ...out, rec: rec('hold', 'straddleStable') };
+    if (day.dte <= cfg.straddleExitDays) {
+      if (cfg.breakevenRule === 'nonNeg' && out.pnl < 0) return { ...out, rec: rec('hold', 'straddleWaitBreakeven') };
+      return { ...out, rec: rec('close', 'straddleLate') };
+    }
+    return { ...out, rec: cfg.unstableEarly === 'close' ? rec('close', 'straddleEarlyClose') : rec('hold', 'straddleEarly') };
+  }
+  if (out.zone === 'calm') return { ...out, rec: rec('hold', 'calm') };
+  const cand = adjustCandidate(ctx, cfg, state, i, out);
+  out.candidate = cand;
+  if (!cand.strike) return { ...out, rec: rec('hold', 'noCandidate', { detail: cand.why }) };
+  return { ...out, rec: rec('roll', out.zone === 'band' ? 'band' : 'beyond', { side: out.winning, strike: cand.strike }) };
+}
+
+/** متن پیشنهادِ هر علت — رابط همین‌ها را نشان می‌دهد. */
+export const REC_TEXT = {
+  closed: 'معامله بسته شده.',
+  missing: 'قیمت پایانی امروزِ یکی از پاها نیست؛ هیچ تصمیمی روی عدد ساختگی گرفته نمی‌شود.',
+  exit: 'روز خروج: بستن کامل به قیمت پایانی.',
+  expiry: 'روز سررسید: تسویه به ارزش ذاتی.',
+  sl: 'زیان به حد ضرر کلی رسید (۵.۲): خروج بی‌قیدوشرط.',
+  tp: 'سود به سود هدف رسید (۵.۱): بستن کامل.',
+  oneLeg: 'فقط یک پا باز است؛ الگوریتم این حالت را تعریف نکرده — نگه‌داشتن.',
+  straddleStable: 'استرادل پایدار (زیر ۳ برابر): نگه‌داشتن برای افول ارزش زمانی (۴.۲).',
+  straddleLate: 'استرادل ناپایدار نزدیک سررسید: خروج سربه‌سر (۴.۲ و ۵.۳).',
+  straddleWaitBreakeven: 'استرادل ناپایدار نزدیک سررسید، ولی هنوز زیان دارد؛ طبق تنظیم «فقط بدون زیان» صبر.',
+  straddleEarly: 'استرادل ناپایدار ولی هنوز روز زیادی مانده: نگه‌داشتن با هشدار.',
+  straddleEarlyClose: 'استرادل ناپایدار؛ طبق تنظیم، بستن فوری حتی با روز زیاد.',
+  calm: 'زیان شناور زیر آستانهٔ تعدیل است (۳.۱): بدون دستکاری.',
+  noCandidate: 'آستانهٔ تعدیل فعال شد ولی قیمت اعمال مناسبی با قیمتِ امروز پیدا نشد.',
+  band: 'زیان شناور در محدودهٔ تعدیل (۳.۱): بستن سمت سودده و فروش نزدیک‌تر (۳.۲).',
+  beyond: 'زیان شناور از محدودهٔ تعدیل هم گذشته؛ تعدیل دیرهنگام (۳.۲).',
+};
+
+function rec(kind, why, extra = {}) {
+  const action = kind === 'roll' ? { kind: 'roll', side: extra.side, strike: extra.strike }
+    : kind === 'close' ? { kind: 'close' } : { kind: 'hold' };
+  return { ...extra, kind, why, text: REC_TEXT[why] || '', action };
+}
+
+/**
+ * گام ۳.۲.۲: قیمت اعمال تازهٔ سمت سودده، نزدیک‌تر به بازار، با پرمیومی
+ * برابرِ پرمیوم فعلی سمت زیان‌ده. سمت سودده از قیمت اعمال سمت زیان‌ده رد
+ * نمی‌شود؛ رسیدن به آن یعنی استرادل (۳.۳).
+ */
+export function adjustCandidate(ctx, cfg, state, i, ev) {
+  const win = ev.winning, lose = ev.losing;
+  if (!win) return { strike: null, why: 'پا برای تعدیل نیست.' };
+  const target = ev.marks[lose]?.price;
+  const cur = state.legs[win].strike, edge = state.legs[lose].strike;
+  const options = [];
+  for (const s of ctx.market.strikes) {
+    if (!s[win]) continue;
+    const K = s.strike;
+    const closer = win === 'put' ? K > cur + EPS && K <= edge + EPS : K < cur - EPS && K >= edge - EPS;
+    if (!closer) continue;
+    const q = priceAt(ctx, i, win, K);
+    if (!q) continue;
+    options.push({ strike: K, price: q.price, src: q.src, gap: q.price - target });
+  }
+  let pool = options;
+  if (cfg.matchRule === 'atMost') pool = options.filter((o) => o.gap <= EPS);
+  if (cfg.matchRule === 'atLeast') pool = options.filter((o) => o.gap >= -EPS);
+  if (!pool.length) {
+    return { strike: null, target, options,
+      why: options.length ? 'هیچ قیمت اعمالی با قاعدهٔ برابری پرمیوم جور نشد.' : 'قیمت اعمال نزدیک‌تری با قیمتِ امروز نیست.' };
+  }
+  const best = pool.reduce((a, b) => (Math.abs(b.gap) < Math.abs(a.gap) ? b : a));
+  return { strike: best.strike, price: best.price, src: best.src, target, gapPct: target > 0 ? (best.gap / target) * 100 : NaN, options };
+}
+
+// ═════════════════════════ اقدام‌ها ═════════════════════════
+
+/**
+ * سه نوع اقدام کافی است:
+ *   hold                    نگه‌داشتن
+ *   close                   بستن همهٔ پاهای باز
+ *   roll {side, strike}     بستن آن سمت (اگر باز است) و فروش قیمت اعمال تازه؛
+ *                           `strike: null` یعنی فقط بستن همان سمت
+ * و `algo` که در هر روز به پیشنهاد همان روز ترجمه می‌شود.
+ */
+export const ACTION_KINDS = ['hold', 'close', 'roll', 'algo'];
+
+export function actionKey(a) {
+  if (!a || a.kind === 'hold') return 'H';
+  if (a.kind === 'close') return 'C';
+  if (a.kind === 'open') return 'O';
+  if (a.kind === 'roll') return `R:${a.side}:${a.strike ?? '-'}`;
+  return 'A';
+}
+
+/** اقدام را روی وضعیت اجرا می‌کند؛ وضعیت قبلی دست نمی‌خورد. */
+export function applyAction(ctx, cfg, state, i, action, ev, fees = {}, reason = '') {
+  const a = !action || action.kind === 'algo' ? ev?.rec?.action || { kind: 'hold' } : action;
+  if (state.closed || a.kind === 'hold') return { state, action: { kind: 'hold' } };
+  const M = mult(ctx, cfg);
+  const s = copyState(state);
+  const closeLeg = (side) => {
+    const leg = s.legs[side];
+    if (!leg) return null;
+    const q = ev?.marks?.[side] || priceAt(ctx, i, side, leg.strike);
+    if (!q) return `قیمت ${SIDE_FA[side]} امروز نیست؛ بستنش ممکن نیست.`;
+    const cost = q.price * M;
+    s.realized += (leg.open - q.price) * M;
+    s.paid += cost;
+    // تسویهٔ سررسید کارمزد معامله ندارد؛ پای در سود کارمزد اعمال دارد.
+    if (q.src === 'intrinsic') s.fees += cfg.fees && q.price > 0 ? leg.strike * M * num(fees?.exercise, 0) : 0;
+    else s.fees += feeOf(cfg, fees, cost);
+    s.legs[side] = null;
+    return null;
+  };
+  if (a.kind === 'close') {
+    for (const side of SIDES) {
+      const err = closeLeg(side);
+      if (err) return { state, error: err, action: a };
+    }
+    s.closed = true;
+    s.closedAt = i;
+    s.reason = reason || (ev?.rec?.kind === 'close' ? ev.rec.why : 'manual');
+    s.finalPnl = s.realized - s.fees;
+    return { state: s, action: a };
+  }
+  if (a.kind === 'roll') {
+    const side = a.side;
+    if (!SIDES.includes(side)) return { state, error: 'سمت تعدیل نامعتبر است.', action: a };
+    if (a.strike != null) {
+      const K = num(a.strike, NaN);
+      const otherLeg = s.legs[other(side)];
+      if (otherLeg && (side === 'put' ? K > otherLeg.strike + EPS : K < otherLeg.strike - EPS)) {
+        return { state, error: 'این قیمت اعمال از سمت مقابل رد می‌شود (استرانگل وارونه).', action: a };
+      }
+      const q = priceAt(ctx, i, side, K);
+      if (!q) return { state, error: `قیمت ${SIDE_FA[side]} ${K} امروز نیست.`, action: a };
+      const err = closeLeg(side);
+      if (err) return { state, error: err, action: a };
+      const credit = q.price * M;
+      s.legs[side] = { strike: K, open: q.price, openDay: i, src: q.src };
+      s.received += credit;
+      s.fees += feeOf(cfg, fees, credit);
+    } else {
+      const err = closeLeg(side);
+      if (err) return { state, error: err, action: a };
+    }
+    if (!s.legs.call && !s.legs.put) {
+      s.closed = true; s.closedAt = i; s.reason = 'manual'; s.finalPnl = s.realized - s.fees;
+      return { state: s, action: a };
+    }
+    s.adjustments += 1;
+    // ۳.۲.۳: مبنای آستانهٔ بعدی، سود و زیانِ همین لحظه پس از تعدیل.
+    let unreal = 0;
+    for (const sd of SIDES) {
+      const leg = s.legs[sd];
+      if (!leg) continue;
+      const q = priceAt(ctx, i, sd, leg.strike);
+      unreal += q ? (leg.open - q.price) * M : 0;
+    }
+    s.refPnl = s.realized + unreal - s.fees;
+    return { state: s, action: a };
+  }
+  return { state, action: { kind: 'hold' } };
+}
+
+// ═════════════════════════ روز خروج ═════════════════════════
+
+/**
+ * بستن روز آخر.
+ *
+ * اگر یکی از پاهای باز در روز خروج معامله نشده باشد، هیچ قیمتی جایش ساخته
+ * نمی‌شود. با `exitFallback: 'lastPriced'` خروج به آخرین روزِ پیش از آن
+ * می‌رود که **همهٔ** پاهای باز قیمت پایانیِ واقعی داشتند — روزی واقعی با
+ * قیمت واقعی. چون پاها از روزِ گشایش تا آخر دست نخورده‌اند (هر تعدیلی
+ * `openDay` را جلو می‌برد)، بستن در آن روز با همان وضعیت معتبر است. علتش
+ * `exitEarly` است تا رابط بگوید چرا روز بستن با روز خروج یکی نیست.
+ */
+export function settleLast(ctx, cfg, state, last, ev, fees = {}) {
+  const res = applyAction(ctx, cfg, state, last, { kind: 'close' }, ev, fees, ev.rec.why);
+  if (res.state.closed) return { state: res.state, at: last, action: res.action };
+  if (cfg.exitFallback === 'lastPriced') {
+    const from = Math.max(...SIDES.map((sd) => state.legs[sd]?.openDay ?? 0));
+    for (let j = last - 1; j > from; j -= 1) {
+      const evj = evaluateDay(ctx, cfg, state, j);
+      if (evj.missing.length) continue;
+      const r = applyAction(ctx, cfg, state, j, { kind: 'close' }, evj, fees, 'exitEarly');
+      if (r.state.closed) return { state: r.state, at: j, action: r.action, early: true };
+    }
+  }
+  return {
+    state: { ...state, closed: true, closedAt: last, reason: 'incomplete', finalPnl: NaN },
+    at: last, action: { kind: 'close' }, error: res.error,
+  };
+}
+
+// ═════════════════════════ مسیر ═════════════════════════
+
+/**
+ * سیاست‌های آماده برای روزهایی که کاربر تصمیمی ثبت نکرده.
+ *   algo        همیشه پیشنهاد الگوریتم
+ *   exitsOnly   فقط حد سود/ضرر و خروج استرادل؛ بدون تعدیل
+ *   hold        هیچ کاری تا روز خروج
+ */
+export const POLICIES = {
+  algo: { label: 'الگوریتم کامل', decide: (ev) => ev.rec.action },
+  exitsOnly: { label: 'فقط حد سود و ضرر', decide: (ev) => (ev.rec.kind === 'close' ? ev.rec.action : { kind: 'hold' }) },
+  hold: { label: 'نگه‌داشتن تا پایان', decide: () => ({ kind: 'hold' }) },
+};
+
+/**
+ * اجرای کامل یک مسیر.
+ *
+ * `decide(i, ev, state)` اقدام روز `i` را می‌دهد. روز آخر همیشه بسته
+ * می‌شود. `upTo` برای حالت تعاملی است: روزهای پیش از آن اجرا می‌شوند و
+ * ارزیابیِ خودِ آن روز به‌عنوان «در انتظار تصمیم» برمی‌گردد.
+ */
+export function runPath(ctx, cfg, entry, { decide = () => null, upTo = Infinity, fees = {}, entryDay = 0 } = {}) {
+  const days = ctx.market.days;
+  const opened = openPosition(ctx, cfg, entry, entryDay, fees);
+  if (opened.error) return { error: opened.error, steps: [], series: [] };
+  let state = opened.state;
+  const steps = [];
+  const series = new Array(days.length).fill(NaN);
+  const entryEv = evaluateDay(ctx, cfg, state, entryDay);
+  series[entryDay] = entryEv.pnl;
+  steps.push({ i: entryDay, date: days[entryDay].date, ev: entryEv, action: { kind: 'open' }, state, pnl: entryEv.pnl });
+  let pending = null;
+  for (let i = entryDay + 1; i < days.length; i += 1) {
+    if (state.closed) { series[i] = state.finalPnl; continue; }
+    const ev = evaluateDay(ctx, cfg, state, i);
+    if (i >= upTo && !ev.isLast) { pending = { i, ev, state }; series[i] = ev.pnl; break; }
+    if (ev.isLast) {
+      const fin = settleLast(ctx, cfg, state, i, ev, fees);
+      state = fin.state;
+      const step = { i, date: days[i].date, ev, wanted: { kind: 'close' }, action: fin.action, error: '', state,
+        exitAt: fin.at, early: !!fin.early, incomplete: state.reason === 'incomplete', pnl: state.finalPnl };
+      // خروجِ زودتر: از روز بستن به بعد، سری همان سود نهایی است.
+      for (let k = fin.at; k <= i; k += 1) series[k] = state.finalPnl;
+      for (const s of steps) if (s.i > fin.at) s.pnl = state.finalPnl;
+      steps.push(step);
+      continue;
+    }
+    let wanted = decide(i, ev, state);
+    if (ev.missing.length && wanted && wanted.kind !== 'hold') wanted = { kind: 'hold', blocked: true };
+    const res = applyAction(ctx, cfg, state, i, wanted, ev, fees, '');
+    const step = { i, date: days[i].date, ev, wanted, action: res.action, error: res.error || '', state: res.state };
+    state = res.state;
+    step.pnl = state.closed ? state.finalPnl : evaluateDay(ctx, cfg, state, i).pnl;
+    series[i] = step.pnl;
+    steps.push(step);
+  }
+  const final = state.closed ? state.finalPnl : NaN;
+  return { steps, series, state, pending, final, done: state.closed };
+}
+
+/** تصمیم‌گیرِ ترکیبی: تصمیم ثبت‌شدهٔ کاربر، و سیاست برای بقیه. */
+export function planDecider(decisions = {}, policy = 'hold') {
+  const fallback = POLICIES[policy]?.decide || POLICIES.hold.decide;
+  // تصمیمی که «پیشنهاد الگوریتم» بوده (`via: 'algo'`) در بازپخش دوباره از
+  // پیشنهادِ همان روز ساخته می‌شود: اگر کاربر روزی پیش‌تر را عوض کرد،
+  // «پیروی از الگوریتم» در روزهای بعد هم معنای خودش را نگه می‌دارد.
+  return (i, ev) => {
+    const own = decisions[ev.date];
+    if (!own) return fallback(ev);
+    return own.via === 'algo' ? ev.rec.action : own;
+  };
+}
+
+/** خلاصهٔ آماری یک مسیر برای کارت و جدول. */
+export function pathStats(run, capital) {
+  const vals = run.series.filter(fin);
+  const min = vals.length ? Math.min(...vals) : NaN;
+  const max = vals.length ? Math.max(...vals) : NaN;
+  return {
+    final: run.final, min, max,
+    finalPct: capital > 0 && fin(run.final) ? (run.final / capital) * 100 : NaN,
+    minPct: capital > 0 && fin(min) ? (min / capital) * 100 : NaN,
+    adjustments: run.state?.adjustments ?? 0,
+    reason: run.state?.reason || '',
+    closedAt: run.state?.closedAt ?? -1,
+  };
+}
+
+// ═════════════════════════ سرمایه (۱.۰) ═════════════════════════
+
+/**
+ * وجه تضمین استرانگل در روز `i` از همان موتور `strategyMargin` (قاعدهٔ
+ * ترکیبی فروش کال و پوت). سرمایه = ضریب × وجه تضمین روز ورود.
+ */
+export function labMargin(ctx, cfg, legs, i, params = DEFAULT_PARAMS) {
+  const day = ctx.market.days[i];
+  if (!day) return NaN;
+  const list = [];
+  for (const side of SIDES) {
+    const leg = legs?.[side];
+    if (!leg) continue;
+    const q = priceAt(ctx, i, side, leg.strike);
+    if (!q) return NaN;
+    list.push({ side: 'sell', kind: side, strike: leg.strike, price: q.price, size: ctx.market.size, ratio: cfg.qty, days: day.dte });
+  }
+  if (!list.length) return 0;
+  return strategyMargin(list, { S: day.S, params, contractSize: ctx.market.size, capitalMode: 'GROSS' }).margin;
+}
+
+// ═════════════════════════ همهٔ مسیرها ═════════════════════════
+
+export const BRANCH_OPTIONS = {
+  algo: 'پیشنهاد الگوریتم',
+  hold: 'نگه‌داشتن',
+  close: 'بستن کامل',
+  defend: 'رول سمت زیان‌ده به دورتر',
+};
+
+/**
+ * «دفاع»: سمت زیان‌ده یک قیمت اعمال دورتر از بازار رول می‌شود — تکنیک رایج
+ * دوم کنار الگوریتم، تا مقایسه فقط بین «کار الگوریتم» و «هیچ کار» نباشد.
+ */
+export function defendAction(ctx, state, i, ev) {
+  const side = ev.losing;
+  if (!side || !state.legs[side]) return null;
+  const cur = state.legs[side].strike;
+  const list = ctx.market.strikes.filter((s) => s[side] && (side === 'call' ? s.strike > cur + EPS : s.strike < cur - EPS));
+  const next = side === 'call' ? list[0] : list[list.length - 1];
+  if (!next || !priceAt(ctx, i, side, next.strike)) return null;
+  return { kind: 'roll', side, strike: next.strike };
+}
+
+function resolveOption(ctx, state, i, ev, opt) {
+  if (opt === 'algo') return ev.rec.action;
+  if (opt === 'hold') return { kind: 'hold' };
+  if (opt === 'close') return { kind: 'close' };
+  if (opt === 'defend') return defendAction(ctx, state, i, ev);
+  return null;
+}
+
+/**
+ * همهٔ مسیرهای ممکن، با سقف.
+ *
+ * `mode: 'trigger'` فقط در روزی انشعاب می‌دهد که الگوریتم کاری پیشنهاد
+ * کرده (تعدیل یا خروج)؛ `'every'` در هر روز. انشعاب‌های هم‌نتیجه یکی
+ * می‌شوند. وقتی شمار مسیرها به سقف رسید، از آن به بعد فقط شاخهٔ اول
+ * (پیشنهاد الگوریتم) دنبال می‌شود و `truncated` روشن می‌شود.
+ *
+ * `prefix` و `branchFrom`: تا روز `branchFrom` تصمیم‌های ثبت‌شدهٔ کاربر
+ * اجرا می‌شوند و انشعاب از همان روز شروع می‌شود — «از امروزِ آزمایش به
+ * بعد چه می‌شد».
+ */
+export function enumeratePaths(ctx, cfg, entry, { mode = 'trigger', options = ['algo', 'hold', 'close'], cap = 2000, fees = {}, entryDay = 0, prefix = null, branchFrom = 0 } = {}) {
+  const days = ctx.market.days;
+  const opened = openPosition(ctx, cfg, entry, entryDay, fees);
+  if (opened.error) return { error: opened.error, paths: [] };
+  const start = opened.state;
+  const n = days.length;
+  const series = new Float64Array(n).fill(NaN);
+  const choices = [];
+  const paths = [];
+  let truncated = false;
+  let nodes = 0;
+  series[entryDay] = evaluateDay(ctx, cfg, start, entryDay).pnl;
+
+  const leaf = (state) => {
+    paths.push({
+      id: paths.length,
+      choices: choices.slice(),
+      series: Array.from(series),
+      final: state.closed ? state.finalPnl : NaN,
+      adjustments: state.adjustments,
+      reason: state.reason,
+      closedAt: state.closedAt,
+    });
+  };
+
+  const walk = (state, i) => {
+    if (i >= n) { leaf(state); return; }
+    if (state.closed) {
+      for (let j = i; j < n; j += 1) series[j] = state.finalPnl;
+      leaf(state);
+      return;
+    }
+    nodes += 1;
+    const ev = evaluateDay(ctx, cfg, state, i);
+    let acts;
+    if (ev.isLast) acts = [{ kind: 'close' }];
+    else if (i < branchFrom) {
+      // پیش از نقطهٔ انشعاب، همان تصمیم‌های ثبت‌شده — بی شاخه.
+      const fixed = prefix ? prefix(i, ev, state) : null;
+      acts = [fixed && !ev.missing.length ? fixed : { kind: 'hold' }];
+    }
+    else if (ev.missing.length) acts = [{ kind: 'hold' }];
+    else if (mode === 'trigger' && ev.rec.kind === 'hold') acts = [{ kind: 'hold' }];
+    else {
+      const seen = new Set();
+      acts = [];
+      for (const opt of options) {
+        const a = resolveOption(ctx, state, i, ev, opt);
+        if (!a) continue;
+        const key = actionKey(a);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        acts.push({ ...a, opt });
+      }
+      if (!acts.length) acts = [{ kind: 'hold' }];
+    }
+    let cut = false;
+    if (acts.length > 1 && paths.length + 1 >= cap) { truncated = true; cut = true; acts = acts.slice(0, 1); }
+    if (ev.isLast) {
+      const fin = settleLast(ctx, cfg, state, i, ev, fees);
+      for (let k = fin.at; k <= i; k += 1) series[k] = fin.state.finalPnl;
+      walk(fin.state, i + 1);
+      return;
+    }
+    for (const a of acts) {
+      const res = applyAction(ctx, cfg, state, i, a, ev, fees, '');
+      const next = res.state;
+      series[i] = next.closed ? next.finalPnl : evaluateDay(ctx, cfg, next, i).pnl;
+      // انشعاب، و هر اقدامِ غیرِ نگه‌داشتن (حتی بی‌انشعاب) ثبت می‌شود تا
+      // بارگذاریِ همین مسیر با «نگه‌داشتن برای بقیه» دقیقاً بازسازی شود.
+      const branched = acts.length > 1 || cut || res.action.kind !== 'hold';
+      if (branched) choices.push({ i, date: days[i].date, key: actionKey(res.action), opt: a.opt, action: res.action, why: ev.rec.why });
+      walk(next, i + 1);
+      if (branched) choices.pop();
+      if (paths.length >= cap * 4) { truncated = true; return; }
+    }
+  };
+  walk(start, entryDay + 1);
+  return { paths, truncated, nodes, cap };
+}
+
+/** صدک‌ها و نسبت‌ها روی نتیجهٔ نهایی مسیرها. */
+export function pathsSummary(paths = []) {
+  const finals = paths.map((p) => p.final).filter(fin).sort((a, b) => a - b);
+  const q = (p) => {
+    if (!finals.length) return NaN;
+    const at = (finals.length - 1) * p;
+    const lo = Math.floor(at), hi = Math.ceil(at);
+    return finals[lo] + (finals[hi] - finals[lo]) * (at - lo);
+  };
+  const mean = finals.length ? finals.reduce((a, b) => a + b, 0) / finals.length : NaN;
+  return {
+    count: paths.length, known: finals.length, unknown: paths.length - finals.length,
+    min: finals[0] ?? NaN, max: finals[finals.length - 1] ?? NaN,
+    p10: q(0.1), p25: q(0.25), median: q(0.5), p75: q(0.75), p90: q(0.9), mean,
+    winRate: finals.length ? (finals.filter((v) => v > 0).length / finals.length) * 100 : NaN,
+  };
+}
+
+/** رتبهٔ صدکیِ یک عدد میان نتیجه‌ها: چند درصد مسیرها بدتر بودند. */
+export function percentileOf(paths = [], value) {
+  const finals = paths.map((p) => p.final).filter(fin);
+  if (!finals.length || !fin(value)) return NaN;
+  return (finals.filter((v) => v < value - EPS).length / finals.length) * 100;
+}
+
+/**
+ * «اگر آن روز کار دیگری می‌کردم»: برای هر روزِ مسیر کاربر و هر گزینه،
+ * نتیجهٔ نهایی — با همان تصمیم‌های کاربر تا روز قبل، گزینهٔ دیگر در همان
+ * روز، و سیاستِ `continuation` از روز بعد (`user` یعنی بازپخش تصمیم‌های
+ * بعدی خودِ کاربر).
+ */
+export function whatIfMatrix(ctx, cfg, entry, decisions = {}, { options = ['algo', 'hold', 'close', 'defend'], continuation = 'algo', fallback = 'hold', fees = {}, entryDay = 0, upTo = Infinity } = {}) {
+  const base = runPath(ctx, cfg, entry, { decide: planDecider(decisions, fallback), fees, entryDay, upTo });
+  if (base.error) return { error: base.error, rows: [] };
+  const rows = [];
+  const cont = continuation === 'user' ? planDecider(decisions, fallback) : planDecider({}, continuation);
+  for (const step of base.steps) {
+    if (step.i <= entryDay || step.ev.isLast || step.ev.missing.length || step.ev.closed) continue;
+    const prior = steps0(base.steps, step.i);
+    const cells = [];
+    for (const opt of options) {
+      const a = resolveOption(ctx, prior, step.i, step.ev, opt);
+      if (!a) { cells.push({ opt, action: null, final: NaN }); continue; }
+      const run = runPath(ctx, cfg, entry, {
+        fees, entryDay,
+        decide: (i, ev, st) => (i < step.i ? planDecider(decisions, fallback)(i, ev, st) : i === step.i ? a : cont(i, ev, st)),
+      });
+      cells.push({ opt, action: a, key: actionKey(a), final: run.final, series: run.series });
+    }
+    rows.push({ i: step.i, date: step.date, chosen: actionKey(step.action), rec: step.ev.rec, cells });
+  }
+  return { rows, base };
+}
+
+/** وضعیتِ آغاز روز `i` در مسیرِ اجراشده. */
+function steps0(steps, i) {
+  let st = steps[0].state;
+  for (const s of steps) {
+    if (s.i >= i) break;
+    st = s.state;
+  }
+  return st;
+}
+
+/** برچسب کوتاه یک اقدام برای تراشه‌ها و جدول‌ها (بی رقم؛ رقم را رابط فارسی می‌کند). */
+export function actionLabel(a) {
+  if (!a || a.kind === 'hold') return 'نگه‌داشتن';
+  if (a.kind === 'close') return 'بستن کامل';
+  if (a.kind === 'algo') return 'پیشنهاد الگوریتم';
+  if (a.kind === 'open') return 'ورود';
+  if (a.kind === 'roll') return a.strike == null ? `بستن ${SIDE_FA[a.side]}` : `رول ${SIDE_FA[a.side]} به`;
+  return '—';
+}
+
+export const CLOSE_REASON = {
+  exit: 'روز خروج', expiry: 'سررسید', sl: 'حد ضرر', tp: 'حد سود',
+  straddleLate: 'خروج سربه‌سر استرادل', straddleEarlyClose: 'استرادل ناپایدار',
+  manual: 'بستن دستی', incomplete: 'قیمت روز آخر نبود',
+  exitEarly: 'خروج در آخرین روزِ قیمت‌دار', '': '—',
+};
