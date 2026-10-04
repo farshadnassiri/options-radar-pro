@@ -13,12 +13,13 @@
 import { check, group, near, readSrc } from '../harness.mjs';
 import { bsPrice } from '../../core/bs.mjs';
 import { strategyMargin } from '../../core/margin.mjs';
-import { lineChart, legGanttSvg } from '../../ui/strangle-lab-view.mjs';
+import { lineChart, legGanttSvg, pct } from '../../ui/strangle-lab-view.mjs';
+import { HELP } from '../../ui/strangle-lab-help.mjs';
 import {
   labConfig, buildLabMarket, labBases, labExpiries, pickExpiry, pricingContext, priceAt, pickEntry,
   openPosition, evaluateDay, applyAction, runPath, planDecider, enumeratePaths, pathsSummary,
   whatIfMatrix, labMargin, actionKey, adjustCandidate, percentileOf,
-  sideBreakdown, actionImpact, actionValues, gradeReport, gradeOf,
+  sideBreakdown, actionImpact, actionValues, gradeReport, gradeOf, tradePrice, weightedBreakevens,
 } from '../../core/strangle-lab.mjs';
 
 const EXPIRY = 20250220;
@@ -40,7 +41,10 @@ function fixture(path, { skip = {}, sigma = 0.4 } = {}) {
   for (const K of STRIKES) {
     for (const side of ['call', 'put']) {
       const ins = `${side === 'call' ? 'C' : 'P'}${K}`;
-      dailies[ins] = { rows: dates.map((date, i) => ({ date, close: bsPrice(side, path[i], K, dteOf(date) / 365, 0.3, 0, sigma), last: 0 }))
+      dailies[ins] = { rows: dates.map((date, i) => {
+        const close = bsPrice(side, path[i], K, dteOf(date) / 365, 0.3, 0, sigma);
+        return { date, close, last: 0, first: close * 0.95, low: close * 0.9, high: close * 1.1, value: close * 1000 * (10 + (K % 7)), vol: 10 + (K % 7) };
+      })
         .filter((row, i) => !(skip[ins] || []).includes(i)) };
     }
   }
@@ -329,6 +333,36 @@ group('۳۲۱-ک. دفتر هر پا و نمودار تعاملی');
   check('متن نمودارها رقم لاتین ندارد', !/[0-9]/.test(g.replace(/<[^>]*>/g, '').replace(/data-[a-z]+="[^"]*"/g, '')));
 }
 
+group('۳۲۱-ل. مبنای قیمت ورود و خروج، سربه‌سر وزنی');
+{
+  const { market } = fixture(UP);
+  const ctx = pricingContext(market, { r: 0.3 });
+  const entry = { call: 1200, put: 900 };
+  const c0 = market.days[0].call[1200], p0 = market.days[0].put[900];
+  const hi = openPosition(ctx, labConfig({ entryBasis: 'high' }), entry, 0, FEES).state;
+  check('ورود با «بیشترین قیمت روز»: فروش به سقف همان روز', near(hi.legs.call.open, c0 * 1.1) && near(hi.legs.put.open, p0 * 1.1) && hi.legs.call.src === 'high');
+  const ev0 = evaluateDay(ctx, labConfig({ entryBasis: 'high' }), hi, 0);
+  check('… پس سود و زیان روز ورود = (سقف − پایانی) × اندازه − کارمزد', near(ev0.pnl, (c0 * 0.1 + p0 * 0.1) * 1000 - hi.fees));
+  check('قیمت انتخابی خالی ← خطا، نه پایانی', !!openPosition(ctx, labConfig({ entryBasis: 'manual' }), entry, 0, FEES).error);
+  const man = openPosition(ctx, labConfig({ entryBasis: 'manual', manualEntryCall: 77, manualEntryPut: 55 }), entry, 0, FEES).state;
+  check('قیمت انتخابی همان عدد کاربر', man.legs.call.open === 77 && man.legs.put.open === 55 && man.legs.call.src === 'manual');
+  const thin = structuredClone(market);
+  delete thin.days[0].raw.call[1200].first;
+  check('فیلدِ نیامده جانشین نمی‌شود: «اولین» نیست ← null', tradePrice(pricingContext(thin, { r: 0.3 }), 0, 'call', 1200, 'first') === null);
+  const lowExit = runPath(ctx, labConfig({ exitBasis: 'low' }), entry, { decide: planDecider({}, 'hold'), fees: FEES });
+  const last = market.days.length - 1;
+  const tc = lowExit.state.trades.find((t) => t.side === 'call');
+  check('خروج با «کمترین قیمت روز»: بازخرید به کف همان روز', near(tc.closePrice, market.days[last].call[1200] * 0.9) && tc.closeSrc === 'low');
+  const be = weightedBreakevens(ctx, 3);
+  let num = 0, den = 0;
+  for (const K of Object.keys(market.days[3].raw.call)) {
+    const q = market.days[3].raw.call[K];
+    num += (Number(K) + q.close) * q.value; den += q.value;
+  }
+  check('سربه‌سر وزنی کال = میانگین (اعمال + پرمیوم) با وزن ارزش معاملات', near(be.call.value, num / den));
+  check('سربه‌سر وزنی پوت زیر سربه‌سر وزنی کال', be.put.value < be.call.value);
+}
+
 group('۳۲۱-ط. سیم‌کشی تب');
 {
   const app = readSrc('../ui/app.mjs');
@@ -336,6 +370,18 @@ group('۳۲۱-ط. سیم‌کشی تب');
   const tab = readSrc('../ui/tabs/strangle-lab.mjs');
   check('تب از موتور مشترک می‌خواند، نه محاسبهٔ جدا', tab.includes("from '/core/strangle-lab.mjs'") && !/impliedVol\(|bsPrice\(/.test(tab));
   check('تب از فهرست بازه و سری روزانهٔ مشترک می‌خواند', tab.includes('/api/history/universe?from=') && tab.includes('dailiesFor('));
+  // هر «؟» متن دارد: کلیدی که در تب صدا شده و در فهرست راهنما نیست، آیکونِ خالی می‌شد.
+  const used = [...tab.matchAll(/helpIcon\('([^']+)'\)/g)].map((m) => m[1]);
+  // کلیدهایی که غیرمستقیم می‌رسند: «help:» نمودارها و نگاشت گروه‌های قواعد و زیرتب‌های مقایسه.
+  const mapped = [
+    ...[...tab.matchAll(/help: '([^']+)'/g)].map((m) => m[1]),
+    ...[...tab.matchAll(/: '((?:rules|compare)-[a-z]+)'/g)].map((m) => m[1]),
+  ];
+  const missing = [...new Set([...used, ...mapped])].filter((k) => !HELP[k]);
+  check('هر آیکون «؟» متن راهنما دارد', used.length > 40 && missing.length === 0, missing.join('، '));
+  check('هیچ متن راهنمایی اصطلاح لاتین ندارد', Object.values(HELP).every((t) => !/[A-Za-z]{3,}/.test(t)));
+  check('درصد منفی با «−»، نه خط‌تیرهٔ لاتین', pct(-0.114, 2) === '−۰٫۱۱٪'.replace('٫', '.') || pct(-0.114, 2).startsWith('−'));
+  check('حجم معامله «قرارداد» است، نه لات', !/[\s'(]لات[\s'<)`]/.test(tab));
   const icons = readSrc('../ui/icons.mjs');
   check('آیکون تب', /'strangle-lab':\s*'/.test(icons));
 }

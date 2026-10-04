@@ -28,9 +28,11 @@ import {
   labConfig, labBases, labExpiries, pickExpiry, buildLabMarket, pricingContext,
   strikeBoard, pickEntry, openPosition, applyAction, adjustCandidate, defendAction,
   runPath, planDecider, pathStats, labMargin, enumeratePaths, pathsSummary, percentileOf,
-  whatIfMatrix, actionKey, actionImpact, gradeReport, ivAt, deltaAt,
+  whatIfMatrix, actionKey, actionImpact, gradeReport, ivAt, deltaAt, weightedBreakevens, BASIS_FA,
 } from '/core/strangle-lab.mjs';
-import { parseJalaliRange, todayCompact, daysBefore, buildLine } from '/core/history-range.mjs';
+import { todayCompact, daysBefore, buildLine, calendarDays } from '/core/history-range.mjs';
+import { mountDateWheel } from '/ui/datewheel.mjs';
+import { helpIcon } from '/ui/strangle-lab-help.mjs';
 import { historyDateLabel, daysBetween, normalizeHistoryDate } from '/core/history.mjs';
 import { defaults, feesOf, marginParamsOf } from '/core/settings.mjs';
 import { dailiesFor } from '/ui/strategy-history.mjs';
@@ -38,12 +40,18 @@ import { fmt, faDigits } from '/ui/fmt.mjs';
 import { logError } from '/ui/errlog.mjs';
 import {
   esc, money, tone, pct, price, strikeFa, dateFa, shortDateFa, dayNameFa, actionText, reasonText,
-  srcBadge, lineChart, legendChips, tipValue, histSvg, gaugeHtml, timelineHtml, whatIfHtml, choiceChips, FULL, legGanttSvg,
+  srcBadge, lineChart, legendChips, tipValue, histSvg, gaugeHtml, timelineHtml, whatIfHtml, choiceChips, FULL, legGanttSvg, keySvg,
 } from '/ui/strangle-lab-view.mjs';
 
 const STORE = 'strangle-lab.v1';
 const fin = (x) => typeof x === 'number' && Number.isFinite(x);
 const uid = () => `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+/** روزِ `n` روز بعد از یک تاریخ فشرده (`daysBefore` عدد منفی نمی‌پذیرد). */
+const addDays = (compact, n) => {
+  const p = String(compact);
+  const d = new Date(Date.UTC(+p.slice(0, 4), +p.slice(4, 6) - 1, +p.slice(6, 8)) + n * 864e5);
+  return d.getUTCFullYear() * 10000 + (d.getUTCMonth() + 1) * 100 + d.getUTCDate();
+};
 const toEn = (v) => String(v ?? '').replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
 
 function readStore() {
@@ -56,8 +64,6 @@ function writeStore(store) {
   try { localStorage.setItem(STORE, JSON.stringify(store)); } catch (e) { logError('ذخیرهٔ آزمایش استرانگل', e, 'warn'); }
 }
 
-/** تاریخ شمسیِ فیلد ورودی، با رقم فارسی (خواننده هر دو رقم را می‌پذیرد). */
-const jalaliInput = (compact) => faDigits(historyDateLabel(compact));
 
 // ═════════════════════════ فرم قواعد: اسلایدر، دکمه، کلید ═════════════════════════
 
@@ -65,13 +71,13 @@ const jalaliInput = (compact) => faDigits(historyDateLabel(compact));
 const RANGES = {
   dteLo: [7, 120, 1], dteHi: [7, 120, 1],
   deltaLo: [0.05, 0.5, 0.01], deltaHi: [0.05, 0.5, 0.01], otmPct: [1, 40, 0.5],
-  qty: [1, 100, 1], capitalMult: [1, 10, 0.5], varLimitPct: [5, 50, 1],
+  capitalMult: [1, 10, 0.5], varLimitPct: [5, 50, 1],
   tpPct: [10, 300, 5], slPct: [10, 500, 10],
   trigLo: [1, 60, 1], trigHi: [1, 90, 1],
   ratio3x: [1.5, 6, 0.5], straddleExitDays: [0, 30, 1],
 };
 
-const UNIT = { otmPct: '٪', varLimitPct: '٪', tpPct: '٪', slPct: '٪', trigLo: '٪', trigHi: '٪', ratio3x: '×', capitalMult: '×', dteLo: ' روز', dteHi: ' روز', straddleExitDays: ' روز', qty: ' لات' };
+const UNIT = { otmPct: '٪', varLimitPct: '٪', tpPct: '٪', slPct: '٪', trigLo: '٪', trigHi: '٪', ratio3x: '×', capitalMult: '×', dteLo: ' روز', dteHi: ' روز', straddleExitDays: ' روز', qty: ' قرارداد' };
 const showNum = (key, v) => `${faDigits(String(Number(v)))}${UNIT[key] || ''}`;
 
 /** پارامترهای فرم قواعد: [کلید، برچسب، نوع، راهنما]. */
@@ -104,6 +110,14 @@ const RULE_FIELDS = [
     ['unstableEarly', 'ناپایدار با روز زیاد', 'pick'],
     ['breakevenRule', 'خروج سربه‌سر (۵.۳)', 'pick'],
   ]],
+  ['قیمت ورود و خروج', 'روز ورود به چه قیمتی فروختی و روز خروج به چه قیمتی پس خریدی.', [
+    ['entryBasis', 'قیمت فروشِ روز ورود', 'pick', 'برای فروشنده «بیشترین» خوش‌شانس‌ترین و «کمترین» بدشانس‌ترین فروش است'],
+    ['manualEntryCall', 'قیمت انتخابی ورود کال', 'price', 'فقط با «قیمت انتخابی»'],
+    ['manualEntryPut', 'قیمت انتخابی ورود پوت', 'price', 'فقط با «قیمت انتخابی»'],
+    ['exitBasis', 'قیمت بازخریدِ روز خروج', 'pick', 'برای فروشنده «کمترین» خوش‌شانس‌ترین و «بیشترین» بدشانس‌ترین خرید است'],
+    ['manualExitCall', 'قیمت انتخابی خروج کال', 'price', 'برای کالی که روز خروج در دست است'],
+    ['manualExitPut', 'قیمت انتخابی خروج پوت', 'price', 'برای پوتی که روز خروج در دست است'],
+  ]],
   ['داده', 'وقتی قیمتی نیست، چه شود.', [
     ['fees', 'کارمزد معامله و اعمال (از تنظیمات)', 'bool'],
     ['modelFill', 'قیمت مدل برای روز بی‌معامله', 'bool', 'بلک-شولز با IVِ آخرین روزِ معامله‌شده؛ هر جا بنشیند برچسب «مدل» دارد'],
@@ -111,8 +125,11 @@ const RULE_FIELDS = [
   ]],
 ];
 
-function rulesFormHtml(cfg, prefix = 'cfg') {
-  return RULE_FIELDS.map(([title, note, fields]) => `<fieldset class="sl-rules-group"><legend>${esc(title)}</legend>
+const GROUP_HELP = { 'ورود (۲.۱ و ۲.۲)': 'rules-entry', 'سرمایه (۱.۰)': 'rules-capital', 'حد سود و ضرر (۲.۳ و ۵)': 'rules-tpsl',
+  'تعدیل (۳)': 'rules-adjust', 'استرادل (۴)': 'rules-straddle', 'قیمت ورود و خروج': 'entryBasis', 'داده': 'rules-data' };
+
+function rulesFormHtml(cfg, prefix = 'cfg', only = null) {
+  return RULE_FIELDS.filter(([title]) => !only || only.includes(title)).map(([title, note, fields]) => `<fieldset class="sl-rules-group"><legend>${esc(title)} ${helpIcon(GROUP_HELP[title])}</legend>
     <p class="sl-hint">${esc(note)}</p>${fields.map(([key, label, kind, hint]) => {
     const id = `${prefix}-${key}`;
     const help = hint ? `<small class="sl-hint">${esc(hint)}</small>` : '';
@@ -123,6 +140,11 @@ function rulesFormHtml(cfg, prefix = 'cfg') {
     if (kind === 'pick') {
       return `<div class="sl-field"><span class="sl-field-label">${esc(label)}</span><div class="sl-seg" role="radiogroup" aria-label="${esc(label)}">${LAB_CHOICES[key]
         .map(([v, t]) => `<label class="sl-seg-item${cfg[key] === v ? ' on' : ''}"><input type="radio" name="${id}" value="${v}" data-cfg="${key}" ${cfg[key] === v ? 'checked' : ''}>${esc(t)}</label>`).join('')}</div>${help}</div>`;
+    }
+    if (kind === 'price') {
+      const basis = /Entry/.test(key) ? cfg.entryBasis : cfg.exitBasis;
+      return `<div class="sl-field${basis === 'manual' ? '' : ' sl-dim'}"><label for="${id}" class="sl-field-label">${esc(label)}</label>
+        <input type="number" id="${id}" data-cfg="${key}" min="0" step="any" value="${cfg[key] > 0 ? esc(cfg[key]) : ''}" dir="ltr" placeholder="ریال" ${basis === 'manual' ? '' : 'disabled'}>${help}</div>`;
     }
     const [min, max, step] = RANGES[key] || [0, 100, 1];
     return `<div class="sl-field sl-slider"><label for="${id}" class="sl-field-label">${esc(label)} <output for="${id}" data-out="${key}">${showNum(key, cfg[key])}</output></label>
@@ -137,21 +159,23 @@ function readRules(host, base) {
     if (el.type === 'checkbox') out[key] = el.checked;
     else if (el.type === 'radio') { if (el.checked) out[key] = el.value; }
     else if (el.tagName === 'SELECT') out[key] = el.value;
-    else out[key] = Number(toEn(el.value));
+    else if (el.disabled) continue;
+    else out[key] = Number(toEn(el.value)) || 0;
   }
   return labConfig(out);
 }
 
-/** کنترل حجم: دکمه‌های کم و زیاد، اسلایدر، و چند مقدار آماده. */
+/**
+ * حجم معامله — مثل بقیهٔ برنامه، «تعداد قرارداد»؛ نه لات، نه اندازهٔ
+ * قرارداد (آن از تنظیمات می‌آید). فیلد عددی با دو دکمهٔ کم و زیاد.
+ */
 function qtyHtml(q) {
-  const quick = [1, 2, 5, 10, 20, 50];
-  return `<div class="sl-qty" role="group" aria-label="حجم ورود به معامله">
-    <span class="sl-field-label">حجم ورود</span>
-    <button type="button" class="sl-qty-btn" data-act="qty-step" data-d="-1" aria-label="یک لات کمتر">−</button>
-    <input type="range" min="1" max="100" step="1" value="${q}" data-act="qty-range" aria-label="تعداد لات">
-    <button type="button" class="sl-qty-btn" data-act="qty-step" data-d="1" aria-label="یک لات بیشتر">+</button>
-    <b class="sl-qty-val" data-out="qty">${faDigits(String(q))} لات</b>
-    <span class="sl-qty-quick">${quick.map((n) => `<button type="button" class="sl-chip-btn${n === q ? ' on' : ''}" data-act="qty-set" data-v="${n}">${faDigits(String(n))}</button>`).join('')}</span>
+  return `<div class="sl-qty" role="group" aria-label="حجم معامله">
+    <label class="sl-field-label" for="sl-qty-input">حجم معامله</label>
+    <button type="button" class="sl-qty-btn" data-act="qty-step" data-d="-1" aria-label="یکی کمتر">−</button>
+    <input id="sl-qty-input" type="number" min="1" max="10000" step="1" value="${q}" data-act="qty-input" dir="ltr" aria-label="تعداد قرارداد">
+    <button type="button" class="sl-qty-btn" data-act="qty-step" data-d="1" aria-label="یکی بیشتر">+</button>
+    <span class="sl-hint">قرارداد</span>
   </div>`;
 }
 
@@ -180,6 +204,8 @@ export async function mount(root, { state } = {}) {
   let entryPolicy = 'algo';
   let overlayIds = new Set();
   let legSel = -1;         // پای انتخاب‌شده در نمودار پرمیوم
+  let labTab = 'decide';   // زیرتبِ فعالِ آزمایش
+  let chartSel = 'channel'; // نمودارِ فعالِ زیرتبِ نمودارها
   const hidden = Object.fromEntries(Object.entries(HIDDEN_DEFAULT).map(([k, v]) => [k, new Set(v)]));
   let busy = '';
   let alive = true;
@@ -225,6 +251,10 @@ export async function mount(root, { state } = {}) {
     renderSaved();
   };
   const sig = () => `${JSON.stringify(exp.cfg)}|${exp.entry.call}|${exp.entry.put}`;
+  // جای پیمایش: رندر دوباره نباید کاربر را به بالای صفحه پرت کند.
+  const stageEl = () => document.getElementById('stage');
+  const stageY = () => stageEl()?.scrollTop ?? 0;
+  const restoreY = (y) => { const el = stageEl(); if (el && fin(y)) el.scrollTop = y; };
 
   async function fetchUniverse(from, to) {
     const key = `${from}-${to}`;
@@ -259,7 +289,7 @@ export async function mount(root, { state } = {}) {
   function renderSaved() {
     const list = store.list;
     savedHost.innerHTML = `<div class="section-head"><div><p class="eyebrow">آزمایش‌های من</p>
-        <h3>${list.length ? `${faDigits(String(list.length))} آزمایش ذخیره‌شده` : 'هنوز آزمایشی نساخته‌ای'}</h3></div>
+        <h3>${list.length ? `${faDigits(String(list.length))} آزمایش ذخیره‌شده` : 'هنوز آزمایشی نساخته‌ای'} ${helpIcon('saved')}</h3></div>
         <button type="button" class="btn" data-act="new">＋ آزمایش تازه</button></div>
       ${list.length ? `<div class="sl-saved-list">${list.map((x) => `<div class="sl-saved-item${exp?.id === x.id ? ' active' : ''}">
           <button type="button" class="sl-saved-open" data-act="open" data-id="${esc(x.id)}">
@@ -276,30 +306,69 @@ export async function mount(root, { state } = {}) {
 
   function newDraft() {
     const today = todayCompact();
-    const from = daysBefore(today, 75);
     draft = {
-      fromText: jalaliInput(from), toText: jalaliInput(daysBefore(today, 25)),
-      from: 0, to: 0, uaIns: '', uaName: '', expiry: 0,
-      entry: { call: null, put: null }, cfg: { ...LAB_DEFAULTS }, step: 1, search: '', name: '',
+      from: daysBefore(today, 75), to: daysBefore(today, 25), uaIns: '', uaName: '', expiry: 0,
+      entry: { call: null, put: null }, cfg: { ...LAB_DEFAULTS }, step: 1, reach: 1, search: '', name: '',
     };
     exp = null; market = null; ctx = null; universe = null;
   }
 
+  const STEPS = [[1, 'تاریخ ورود و خروج'], [2, 'نماد و سررسید'], [3, 'حجم، ورود و قیمت'], [4, 'قواعد الگوریتم']];
+
+  /**
+   * تنظیم، گام‌به‌گام: هر بار فقط یک گام دیده می‌شود تا صفحه شلوغ نشود.
+   * گام‌هایی که رسیده‌ای کلیک‌پذیرند؛ گام بعد فقط وقتی باز می‌شود که دادهٔ
+   * لازمش آمده باشد.
+   */
   function renderSetup(message = '') {
+    const keepY = stageY();
     const d = draft;
     const cfg = labConfig(d.cfg);
     const bases = universe ? labBases(universe.rows) : [];
     const shownBases = d.search ? bases.filter((b) => b.name.includes(d.search.trim())) : bases;
     const expiries = d.uaIns && universe ? labExpiries(universe.rows, d.uaIns) : [];
     const suggested = d.from ? pickExpiry(expiries, d.from, cfg) : null;
-    const presets = [[45, 'ورود ۴۵ روز پیش'], [90, '۳ ماه پیش'], [180, '۶ ماه پیش'], [365, 'یک سال پیش']];
+    const stepper = `<nav class="sl-stepper" aria-label="گام‌های تنظیم">${STEPS.map(([n, t]) => `<button type="button" class="sl-stepbtn${d.step === n ? ' on' : ''}${n < d.step ? ' done' : ''}" data-act="goto-step" data-n="${n}" ${n <= d.reach ? '' : 'disabled'}>
+      <span class="sl-stepnum">${faDigits(String(n))}</span>${esc(t)}</button>`).join('<span class="sl-stepline" aria-hidden="true"></span>')}</nav>`;
 
-    let entryHtml = '';
-    if (market && ctx && d.step >= 3) {
-      const day0 = market.days[0];
-      if (!day0) {
-        entryHtml = '<p class="note warn">در این بازه پایه هیچ روزِ معامله‌ای ندارد.</p>';
-      } else {
+    let body = '';
+    if (d.step === 1) {
+      const span = daysBetween(d.from, d.to);
+      body = `<section class="card sl-step current">
+        <div class="section-head"><div><p class="eyebrow">گام ۱</p><h3>تاریخ ورود و خروج ${helpIcon('range')}</h3></div>
+          <div class="sl-span"><span>ورود</span><b>${esc(dateFa(d.from))}</b><span>خروج</span><b>${esc(dateFa(d.to))}</b>
+          <span class="sl-chip ${span > 0 ? '' : 'loss'}">${span > 0 ? `${faDigits(String(span))} روز` : 'خروج باید بعد از ورود باشد'}</span></div></div>
+        <div class="sl-cals">
+          <div><span class="field-label">تاریخ ورود</span><div id="sl-cal-from"></div></div>
+          <div><span class="field-label">تاریخ خروج</span><div id="sl-cal-to"></div></div>
+        </div>
+        <div class="bar"><span class="sp"></span><button type="button" class="btn" data-act="load-universe" ${span > 0 ? '' : 'disabled'}>دریافت قراردادهای این بازه ←</button></div>
+      </section>`;
+    } else if (d.step === 2) {
+      body = `<section class="card sl-step current">
+        <div class="section-head"><div><p class="eyebrow">گام ۲</p><h3>نماد پایه و سررسید ${helpIcon('base')}</h3></div></div>
+        ${universe ? `<p class="note">${faDigits(String(universe.rows.length))} جفت قرارداد در بازه، ${faDigits(String(bases.length))} پایه${universe.note ? ` — ${esc(universe.note)}` : ''}</p>
+          ${universe.build ? `<p class="note">${buildLine(universe.build)}</p>` : ''}` : ''}
+        ${bases.length ? `<div class="bar">
+          <div class="field"><label for="sl-search">جست‌وجوی پایه</label><input id="sl-search" type="search" value="${esc(d.search)}" placeholder="نام نماد…"></div>
+          <div class="field sl-grow"><label for="sl-base">نماد پایه</label><select id="sl-base"><option value="">— انتخاب کن —</option>${shownBases
+            .map((b) => `<option value="${esc(b.ins)}"${b.ins === d.uaIns ? ' selected' : ''}>${esc(b.name)}، ${faDigits(String(b.contracts))} قرارداد</option>`).join('')}</select></div>
+        </div>` : '<p class="note warn">در این بازه هیچ قراردادی در دفتر نیست. اگر دفتر در حال ساخت است، کمی بعد دوباره «دریافت» بزن.</p>'}
+        ${expiries.length ? `<h4 class="sl-sub">سررسید ${helpIcon('expiry')}</h4><div class="sl-expiries">${expiries.map((e) => {
+          const dte = daysBetween(d.from, e.expiry);
+          const isSug = suggested?.expiry === e.expiry;
+          return `<button type="button" class="sl-exp${Number(d.expiry) === e.expiry ? ' picked' : ''}${isSug ? ' suggested' : ''}" data-act="pick-expiry" data-expiry="${e.expiry}" ${dte > 0 ? '' : 'disabled'}>
+            <b>${esc(dateFa(e.expiry))}</b><small>${dte > 0 ? `${faDigits(String(dte))} روز تا سررسید` : 'پیش از ورود سررسید شده'}</small>
+            <small>${faDigits(String(e.strikes))} قیمت اعمال${isSug ? (suggested.inRange ? '، پیشنهاد الگوریتم' : '، نزدیک‌ترین به ۴۵ تا ۵۰ روز') : ''}</small></button>`;
+        }).join('')}</div>` : ''}
+        <div class="bar"><button type="button" class="ghost" data-act="goto-step" data-n="1">→ گام قبل</button><span class="sp"></span>
+          <button type="button" class="btn" data-act="load-market" ${d.expiry ? '' : 'disabled'}>دریافت قیمت‌های روزانه ←</button></div>
+      </section>`;
+    } else if (d.step === 3) {
+      let entryHtml = '<p class="note">قیمت‌ها هنوز نیامده‌اند.</p>';
+      const day0 = market?.days[0];
+      if (market && ctx && !day0) entryHtml = '<p class="note warn">در این بازه پایه هیچ روزِ معامله‌ای ندارد.</p>';
+      else if (market && ctx) {
         const board = strikeBoard(ctx, 0);
         const auto = pickEntry(ctx, cfg, 0);
         if (d.entry.call == null && d.entry.put == null) d.entry = { call: auto.call, put: auto.put };
@@ -312,92 +381,83 @@ export async function mount(root, { state } = {}) {
           const picked = Number(d.entry[side]) === row.strike;
           const can = fin(c.price) && c.price > 0;
           const inBand = fin(c.delta) && Math.abs(c.delta) >= cfg.deltaLo && Math.abs(c.delta) <= cfg.deltaHi;
+          const raw = day0.raw?.[side]?.[row.strike] || {};
           return `<td class="sl-board-cell ${side}${picked ? ' picked' : ''}${inBand ? ' band' : ''}">
             <button type="button" data-act="pick-strike" data-side="${side}" data-strike="${row.strike}" ${can ? '' : 'disabled'}
-              data-tip="${esc(`${c.sym}\nقیمت پایانی ${price(c.price)}\nدلتا ${fin(c.delta) ? faDigits(c.delta.toFixed(3)) : '—'}\nتلاطم ضمنی ${fin(c.iv) ? pct(c.iv * 100) : '—'}`)}">
+              data-tip="${esc(`${c.sym}\nپایانی ${price(c.price)}، آخرین ${price(raw.last)}\nاولین ${price(raw.first)}، کمترین ${price(raw.low)}، بیشترین ${price(raw.high)}\nدلتا ${fin(c.delta) ? faDigits(c.delta.toFixed(3)) : '—'}، تلاطم ضمنی ${fin(c.iv) ? pct(c.iv * 100) : '—'}`)}">
               <b>${price(c.price)}</b>${srcBadge(c.src)}<small>Δ ${fin(c.delta) ? faDigits(c.delta.toFixed(2)) : '—'}، IV ${fin(c.iv) ? pct(c.iv * 100, 0) : '—'}</small>
             </button></td>`;
         };
         entryHtml = `
           <div class="sl-entry-head">
             <div><p class="eyebrow">روز ورود</p><b>${esc(dateFa(day0.date))} ${esc(dayNameFa(day0.date))}</b>
-              ${day0.date !== d.from ? '<small class="note">تاریخ انتخابی روز معاملاتی نبود؛ اولین روزِ معامله‌شده.</small>' : ''}</div>
+              ${day0.date !== d.from ? '<small class="note">روز انتخابی معاملاتی نبود؛ اولین روزِ معامله‌شده.</small>' : ''}</div>
             <div><p class="eyebrow">قیمت پایه</p><b>${fmt.int(day0.S)}</b></div>
             <div><p class="eyebrow">روز تا سررسید</p><b>${faDigits(String(day0.dte))}</b></div>
             <div><p class="eyebrow">روزهای آزمایش</p><b>${faDigits(String(market.days.length))}</b></div>
-            <div><p class="eyebrow">پوشش قیمت قراردادها</p><b>${pct(market.coverage.pct, 0)}</b></div>
+            <div><p class="eyebrow">پوشش قیمت</p><b>${pct(market.coverage.pct, 0)}</b></div>
+            ${qtyHtml(cfg.qty)} ${helpIcon('volume')}
           </div>
           ${market.failed ? `<p class="note warn">تاریخچهٔ ${faDigits(String(market.failed))} ابزار دریافت نشد؛ دوباره «دریافت قیمت‌ها» را بزن.</p>` : ''}
-          ${auto.note ? `<p class="note">${esc(auto.note)}</p>` : ''}
-          ${qtyHtml(cfg.qty)}
-          <div class="bar sl-entry-tools">
-            ${seg('entry-method', cfg.entryMethod, LAB_CHOICES.entryMethod)}
-            <button type="button" class="ghost" data-act="auto-entry">✨ انتخاب خودکار (${esc(cfg.entryMethod === 'delta' ? `دلتای ${faDigits(cfg.deltaLo.toFixed(2))} تا ${faDigits(cfg.deltaHi.toFixed(2))}` : `${faDigits(String(cfg.otmPct))}٪ فاصله`)})</button>
-            <span class="note">روی قیمتِ هر خانه بزن تا کال یا پوتِ ورود شود. خانه‌های رنگی در بازهٔ دلتای هدف‌اند.</span>
-          </div>
-          <div class="history-table-wrap sl-board-wrap"><table class="sl-board">
-            <thead><tr><th>کال (پایانی، دلتا، IV)</th><th>قیمت اعمال</th><th>فاصله از پایه</th><th>پوت (پایانی، دلتا، IV)</th></tr></thead>
-            <tbody>${board.map((row) => `<tr class="${Math.abs(row.otmPct) < 2.5 ? 'atm' : ''}">${cell(row, 'call')}<th scope="row">${strikeFa(row.strike)}</th>
-              <td class="${tone(row.otmPct)}">${pct(row.otmPct)}</td>${cell(row, 'put')}</tr>`).join('')}</tbody>
-          </table></div>
-          <div class="sl-entry-sum">
-            ${st.error ? `<p class="note warn">${esc(st.error)}</p>` : `
-              <div class="kpi"><span>کال فروش</span><b>${strikeFa(d.entry.call)}</b><small>${price(st.state.legs.call.open)} ${srcBadge(st.state.legs.call.src)}</small></div>
-              <div class="kpi"><span>پوت فروش</span><b>${strikeFa(d.entry.put)}</b><small>${price(st.state.legs.put.open)} ${srcBadge(st.state.legs.put.src)}</small></div>
-              <div class="kpi"><span>پرمیوم دریافتی</span><b class="gain">${esc(money(st.state.initialCredit))}</b><small>${faDigits(String(cfg.qty))} لات</small></div>
-              <div class="kpi"><span>وجه تضمین</span><b>${esc(money(margin))}</b><small>قاعدهٔ ترکیبی استرانگل</small></div>
-              <div class="kpi"><span>سرمایهٔ لازم (×${faDigits(String(cfg.capitalMult))})</span><b>${esc(money(capital))}</b><small>بند ۱.۱</small></div>`}
+          <div class="sl-setup-split">
+            <div>
+              <div class="bar sl-entry-tools">
+                ${seg('entry-method', cfg.entryMethod, LAB_CHOICES.entryMethod)}
+                <button type="button" class="ghost" data-act="auto-entry">✨ انتخاب خودکار</button> ${helpIcon('entryBoard')}
+              </div>
+              ${auto.note ? `<p class="note">${esc(auto.note)}</p>` : ''}
+              <div class="history-table-wrap sl-board-wrap"><table class="sl-board">
+                <thead><tr><th>کال (پایانی، دلتا، IV)</th><th>قیمت اعمال</th><th>فاصله از پایه</th><th>پوت (پایانی، دلتا، IV)</th></tr></thead>
+                <tbody>${board.map((row) => `<tr class="${Math.abs(row.otmPct) < 2.5 ? 'atm' : ''}">${cell(row, 'call')}<th scope="row">${strikeFa(row.strike)}</th>
+                  <td class="${tone(row.otmPct)}">${pct(row.otmPct)}</td>${cell(row, 'put')}</tr>`).join('')}</tbody>
+              </table></div>
+            </div>
+            <div class="sl-setup-side">
+              <div class="sl-rules-grid one" id="sl-rules">${rulesFormHtml(cfg, 'cfg', ['قیمت ورود و خروج'])}</div>
+              <div class="sl-entry-sum">
+                ${st.error ? `<p class="note warn">${esc(st.error)}</p>` : `
+                  <div class="kpi"><span>کال فروش ${helpIcon('kpi-entry-legs')}</span><b>${strikeFa(d.entry.call)}</b><small>${price(st.state.legs.call.open)} ${srcBadge(st.state.legs.call.src)}</small></div>
+                  <div class="kpi"><span>پوت فروش ${helpIcon('kpi-entry-legs')}</span><b>${strikeFa(d.entry.put)}</b><small>${price(st.state.legs.put.open)} ${srcBadge(st.state.legs.put.src)}</small></div>
+                  <div class="kpi"><span>پرمیوم دریافتی ${helpIcon('kpi-entry-credit')}</span><b class="gain">${esc(money(st.state.initialCredit))}</b><small>${faDigits(String(cfg.qty))} قرارداد از هر سمت</small></div>
+                  <div class="kpi"><span>وجه تضمین ${helpIcon('kpi-entry-margin')}</span><b>${esc(money(margin))}</b></div>
+                  <div class="kpi"><span>سرمایهٔ لازم (×${faDigits(String(cfg.capitalMult))}) ${helpIcon('kpi-entry-capital')}</span><b>${esc(money(capital))}</b></div>`}
+              </div>
+            </div>
           </div>`;
       }
+      body = `<section class="card sl-step current">
+        <div class="section-head"><div><p class="eyebrow">گام ۳</p><h3>حجم، ورود و قیمت معامله ${helpIcon('entryBoard')}</h3></div></div>
+        ${entryHtml}
+        <div class="bar"><button type="button" class="ghost" data-act="goto-step" data-n="2">→ گام قبل</button><span class="sp"></span>
+          <button type="button" class="ghost" data-act="goto-step" data-n="4">قواعد الگوریتم ←</button>
+          <button type="button" class="btn sl-go" data-act="start" ${market?.days?.length ? '' : 'disabled'}>🚀 شروع آزمایش</button></div>
+      </section>`;
+    } else {
+      body = `<section class="card sl-step current">
+        <div class="section-head"><div><p class="eyebrow">گام ۴</p><h3>قواعد الگوریتم ${helpIcon('rules')}</h3></div>
+          <button type="button" class="ghost" data-act="rules-reset">بازگشت به پیش‌فرض متن الگوریتم</button></div>
+        <div class="sl-rules-grid" id="sl-rules">${rulesFormHtml(cfg, 'cfg', RULE_FIELDS.map(([t]) => t).filter((t) => t !== 'قیمت ورود و خروج'))}</div>
+        <div class="bar sl-start">
+          <button type="button" class="ghost" data-act="goto-step" data-n="3">→ گام قبل</button>
+          <div class="field sl-grow"><label for="sl-name">نام آزمایش</label><input id="sl-name" type="text" value="${esc(d.name || `${d.uaName} ${dateFa(market?.days[0]?.date || d.from)}`)}"></div>
+          <button type="button" class="btn sl-go" data-act="start" ${market?.days?.length ? '' : 'disabled'}>🚀 شروع آزمایش</button>
+        </div>
+      </section>`;
     }
 
-    main.innerHTML = `
-      <div class="sl-setup">
-        <section class="card sl-step${d.step === 1 ? ' current' : ''}">
-          <div class="section-head"><div><p class="eyebrow">گام ۱</p><h3>بازهٔ معامله</h3></div></div>
-          <div class="bar sl-dates">
-            <div class="field"><label for="sl-from">تاریخ ورود (شمسی)</label><input id="sl-from" type="text" dir="ltr" value="${esc(d.fromText)}" placeholder="۱۴۰۴/۰۵/۰۱"></div>
-            <div class="field"><label for="sl-to">تاریخ خروج (شمسی)</label><input id="sl-to" type="text" dir="ltr" value="${esc(d.toText)}" placeholder="۱۴۰۴/۰۶/۲۰"></div>
-            <button type="button" class="btn" data-act="load-universe">دریافت قراردادهای بازه</button>
-          </div>
-          <div class="sl-presets">${presets.map(([n, t]) => `<button type="button" class="sl-chip-btn" data-act="preset" data-n="${n}">${esc(t)}</button>`).join('')}
-            <span class="note">خروج پیش‌فرض ۵۰ روز بعد از ورود است؛ اگر بعد از سررسید باشد، سررسید پایان آزمایش است.</span></div>
-          ${universe ? `<p class="note">${faDigits(String(universe.rows.length))} جفت قرارداد در بازه، ${faDigits(String(bases.length))} پایه${universe.note ? ` — ${esc(universe.note)}` : ''}</p>
-            ${universe.build ? `<p class="note">${buildLine(universe.build)}</p>` : ''}` : ''}
-        </section>
+    main.innerHTML = `<div class="sl-setup">${stepper}${body}
+      ${message ? `<p class="note warn sl-msg" role="alert">${esc(message)}</p>` : ''}
+      <p class="note sl-busy-line" aria-live="polite">${esc(busy)}</p></div>`;
 
-        ${universe ? `<section class="card sl-step${d.step === 2 ? ' current' : ''}">
-          <div class="section-head"><div><p class="eyebrow">گام ۲</p><h3>نماد پایه و سررسید</h3></div></div>
-          ${bases.length ? `<div class="bar">
-            <div class="field"><label for="sl-search">جست‌وجوی پایه</label><input id="sl-search" type="search" value="${esc(d.search)}" placeholder="نام نماد…"></div>
-            <div class="field sl-grow"><label for="sl-base">نماد پایه</label><select id="sl-base"><option value="">— انتخاب کن —</option>${shownBases
-              .map((b) => `<option value="${esc(b.ins)}"${b.ins === d.uaIns ? ' selected' : ''}>${esc(b.name)}، ${faDigits(String(b.contracts))} قرارداد</option>`).join('')}</select></div>
-          </div>` : '<p class="note warn">در این بازه هیچ قراردادی در دفتر نیست. اگر دفتر در حال ساخت است، کمی بعد دوباره «دریافت» بزن.</p>'}
-          ${expiries.length ? `<div class="sl-expiries">${expiries.map((e) => {
-            const dte = daysBetween(d.from, e.expiry);
-            const isSug = suggested?.expiry === e.expiry;
-            return `<button type="button" class="sl-exp${Number(d.expiry) === e.expiry ? ' picked' : ''}${isSug ? ' suggested' : ''}" data-act="pick-expiry" data-expiry="${e.expiry}" ${dte > 0 ? '' : 'disabled'}>
-              <b>${esc(dateFa(e.expiry))}</b><small>${dte > 0 ? `${faDigits(String(dte))} روز تا سررسید` : 'پیش از ورود سررسید شده'}</small>
-              <small>${faDigits(String(e.strikes))} قیمت اعمال${isSug ? (suggested.inRange ? '، پیشنهاد ۲.۱' : '، نزدیک‌ترین به ۴۵ تا ۵۰') : ''}</small></button>`;
-          }).join('')}</div>
-          <div class="bar"><button type="button" class="btn" data-act="load-market" ${d.expiry ? '' : 'disabled'}>دریافت قیمت‌های روزانه</button></div>` : ''}
-        </section>` : ''}
-
-        ${d.step >= 3 ? `<section class="card sl-step current">
-          <div class="section-head"><div><p class="eyebrow">گام ۳</p><h3>حجم، ورود و قواعد</h3></div></div>
-          ${entryHtml}
-          <details class="sl-rules" ${d.rulesOpen ? 'open' : ''}><summary>⚙️ قواعد الگوریتم و پارامترها</summary>
-            <div class="sl-rules-grid" id="sl-rules">${rulesFormHtml(cfg)}</div>
-            <div class="bar"><button type="button" class="ghost" data-act="rules-reset">بازگشت به پیش‌فرض متن الگوریتم</button></div>
-          </details>
-          <div class="bar sl-start">
-            <div class="field sl-grow"><label for="sl-name">نام آزمایش</label><input id="sl-name" type="text" value="${esc(d.name || `${d.uaName} ${dateFa(market?.days[0]?.date || d.from)}`)}"></div>
-            <button type="button" class="btn sl-go" data-act="start" ${market?.days?.length ? '' : 'disabled'}>🚀 شروع آزمایش</button>
-          </div>
-        </section>` : ''}
-        ${message ? `<p class="note warn sl-msg" role="alert">${esc(message)}</p>` : ''}
-        <p class="note sl-busy-line" aria-live="polite">${esc(busy)}</p>
-      </div>`;
+    if (d.step === 1) {
+      // تقویم مشترک برنامه؛ همهٔ روزهای تقویمی تا امروز انتخاب‌پذیرند و
+      // روزِ تعطیل در گام بعد به اولین روز کاری می‌رسد.
+      const today = todayCompact();
+      const days = calendarDays(daysBefore(today, 1100), today);
+      mountDateWheel(main.querySelector('#sl-cal-from'), days, d.from, (v) => { d.from = v; if (d.to <= v) d.to = Math.min(today, addDays(v, 50)); d.reach = 1; universe = null; renderSetup(); });
+      mountDateWheel(main.querySelector('#sl-cal-to'), days, d.to, (v) => { d.to = v; d.reach = 1; universe = null; renderSetup(); });
+    }
+    restoreY(keepY);
   }
 
   // ═════════════════════════ اجرای مسیر ═════════════════════════
@@ -521,11 +581,11 @@ export async function mount(root, { state } = {}) {
     return `<section class="card sl-hero">
       <div class="sl-hero-top">
         <div class="sl-hero-title">
-          <p class="eyebrow">استرانگل فروش — ${faDigits(String(cfg.qty))} لات</p>
-          <h3>${esc(market.uaName)} <small>سررسید ${esc(dateFa(market.expiry))}</small></h3>
+          <p class="eyebrow">استرانگل فروش — ${faDigits(String(cfg.qty))} قرارداد از هر سمت</p>
+          <h3>${esc(market.uaName)} <small>سررسید ${esc(dateFa(market.expiry))}</small> ${helpIcon('status')}</h3>
           <span class="pill ${status[0]}">${esc(status[1])}</span>
         </div>
-        <div class="sl-hero-split">
+        <div class="sl-hero-split">${helpIcon('kpi-sides')}
           <div class="${tone(sides?.call?.cum)}"><span>اثر انباشتهٔ کال</span><b>${esc(money(sides?.call?.cum, { sign: true }))}</b></div>
           <div class="${tone(sides?.put?.cum)}"><span>اثر انباشتهٔ پوت</span><b>${esc(money(sides?.put?.cum, { sign: true }))}</b></div>
         </div>
@@ -535,17 +595,17 @@ export async function mount(root, { state } = {}) {
           <small>${pct(capital > 0 && fin(pnl) ? (pnl / capital) * 100 : NaN, 2)} سرمایه، ${pct(initial > 0 && fin(pnl) ? (pnl / initial) * 100 : NaN, 0)} پرمیوم اولیه</small>
         </div>
       </div>
-      <div class="sl-legs">${SIDES.map((side) => legLine(side, done ? null : st.legs[side], done ? null : ev.marks?.[side])).join('')}</div>
-      ${gaugeHtml({ pnl, tp, sl, trigger: done ? NaN : (cfg.trigLo / 100) * ev.maxProfit - (cfg.trigBasis === 'sinceEntry' ? st.initialRef : st.refPnl) })}
+      <div class="sl-legs">${helpIcon('legs')}${SIDES.map((side) => legLine(side, done ? null : st.legs[side], done ? null : ev.marks?.[side])).join('')}</div>
+      <div class="sl-gauge-wrap">${helpIcon('gauge')}${gaugeHtml({ pnl, tp, sl, trigger: done ? NaN : (cfg.trigLo / 100) * ev.maxProfit - (cfg.trigBasis === 'sinceEntry' ? st.initialRef : st.refPnl) })}</div>
       <div class="sl-kpis">
-        <div class="kpi"><span>پرمیوم اولیه</span><b>${esc(money(initial))}</b></div>
-        <div class="kpi"><span>سود هدف جاری</span><b>${esc(money(done ? NaN : ev.maxProfit))}</b><small>اگر همهٔ پاهای باز بی‌ارزش شوند</small></div>
-        <div class="kpi"><span>زیان شناور</span><b class="${ev.zone === 'calm' ? '' : 'loss'}">${pct(done ? NaN : ev.floatPct)}</b><small>آستانه ${faDigits(String(cfg.trigLo))} تا ${faDigits(String(cfg.trigHi))}٪</small></div>
-        <div class="kpi"><span>سرمایه (×${faDigits(String(cfg.capitalMult))} وجه تضمین)</span><b>${esc(money(capital))}</b><small>وجه تضمین ورود ${esc(money(margin))}</small></div>
-        <div class="kpi"><span>وجه تضمین امروز</span><b>${esc(money(todayMargin))}</b><small>${pct(capital > 0 ? (todayMargin / capital) * 100 : NaN, 0)} سرمایه</small></div>
-        <div class="kpi"><span>بدترین افت مسیر</span><b class="${varHit ? 'loss' : ''}">${pct(stats.minPct, 2)}</b><small>سقف ۱.۲: ${faDigits(String(cfg.varLimitPct))}٪ سرمایه${varHit ? ' — رد شد' : ''}</small></div>
-        <div class="kpi"><span>پایه</span><b>${fmt.int(dayNow.S)}</b><small class="${tone(dayNow.S - day0.S)}">${pct(((dayNow.S - day0.S) / day0.S) * 100)} از ورود</small></div>
-        <div class="kpi"><span>روزها</span><b>${faDigits(String(at))} از ${faDigits(String(market.days.length - 1))}</b><small>${faDigits(String(dayNow.dte))} روز تا سررسید</small></div>
+        <div class="kpi"><span>پرمیوم اولیه ${helpIcon('kpi-premium')}</span><b>${esc(money(initial))}</b></div>
+        <div class="kpi"><span>سود هدف جاری ${helpIcon('kpi-target')}</span><b>${esc(money(done ? NaN : ev.maxProfit))}</b><small>اگر همهٔ پاهای باز بی‌ارزش شوند</small></div>
+        <div class="kpi"><span>زیان شناور ${helpIcon('kpi-float')}</span><b class="${ev.zone === 'calm' ? '' : 'loss'}">${pct(done ? NaN : ev.floatPct)}</b><small>آستانه ${faDigits(String(cfg.trigLo))} تا ${faDigits(String(cfg.trigHi))}٪</small></div>
+        <div class="kpi"><span>سرمایه (×${faDigits(String(cfg.capitalMult))} وجه تضمین) ${helpIcon('kpi-capital')}</span><b>${esc(money(capital))}</b><small>وجه تضمین ورود ${esc(money(margin))}</small></div>
+        <div class="kpi"><span>وجه تضمین امروز ${helpIcon('kpi-margin')}</span><b>${esc(money(todayMargin))}</b><small>${pct(capital > 0 ? (todayMargin / capital) * 100 : NaN, 0)} سرمایه</small></div>
+        <div class="kpi"><span>بدترین افت مسیر ${helpIcon('kpi-dd')}</span><b class="${varHit ? 'loss' : ''}">${pct(stats.minPct, 2)}</b><small>سقف ۱.۲: ${faDigits(String(cfg.varLimitPct))}٪ سرمایه${varHit ? ' — رد شد' : ''}</small></div>
+        <div class="kpi"><span>پایه ${helpIcon('kpi-base')}</span><b>${fmt.int(dayNow.S)}</b><small class="${tone(dayNow.S - day0.S)}">${pct(((dayNow.S - day0.S) / day0.S) * 100)} از ورود</small></div>
+        <div class="kpi"><span>روزها ${helpIcon('kpi-days')}</span><b>${faDigits(String(at))} از ${faDigits(String(market.days.length - 1))}</b><small>${faDigits(String(dayNow.dte))} روز تا سررسید</small></div>
       </div>
     </section>`;
   }
@@ -601,7 +661,7 @@ export async function mount(root, { state } = {}) {
     const actionLine = info.pending ? 'در انتظار تصمیم' : info.v === 0 ? 'ورود به معامله' : actionText(info.step.action);
     return `<div class="sl-day ${info.pending ? 'pending' : ''}">
       <div class="sl-day-head">
-        <div><p class="eyebrow">کارت روز</p><h4>${esc(dateFa(day.date))} <small>${esc(dayNameFa(day.date))}، ${faDigits(String(day.dte))} روز تا سررسید</small></h4></div>
+        <div><p class="eyebrow">کارت روز ${helpIcon('daycard')}</p><h4>${esc(dateFa(day.date))} <small>${esc(dayNameFa(day.date))}، ${faDigits(String(day.dte))} روز تا سررسید</small></h4></div>
         <div class="sl-day-total ${tone(info.pnl)}"><span>سود و زیان انباشته</span><b>${esc(money(info.pnl, { sign: true }))}</b>
           <small>امروز <b class="${tone(info.pnlChange)}">${esc(money(info.pnlChange, { sign: true }))}</b></small></div>
       </div>
@@ -712,7 +772,7 @@ export async function mount(root, { state } = {}) {
     return `<section class="card sl-decide${pending ? ' pending' : ' past'}" id="sl-decide">
       <div class="section-head">
         <div><p class="eyebrow">${pending ? 'تصمیم پایان روز' : 'بازبینی تصمیم گذشته'}</p>
-          <h3>${esc(dateFa(day.date))} <small>${esc(dayNameFa(day.date))}، ${faDigits(String(day.dte))} روز تا سررسید</small></h3></div>
+          <h3>${esc(dateFa(day.date))} <small>${esc(dayNameFa(day.date))}، ${faDigits(String(day.dte))} روز تا سررسید</small> ${helpIcon('decide')}</h3></div>
         <div class="sl-decide-nav">
           <button type="button" class="ghost sl-mini" data-act="view-prev" ${v > 1 ? '' : 'disabled'} title="روز قبل">→ روز قبل</button>
           <button type="button" class="ghost sl-mini" data-act="view-next" ${v < (run.pending?.i ?? market.days.length - 1) ? '' : 'disabled'} title="روز بعد">روز بعد ←</button>
@@ -726,10 +786,10 @@ export async function mount(root, { state } = {}) {
       </div>
       <p class="sl-rec-text"><span class="sl-badge rec">الگوریتم</span> ${esc(ev.rec.text)}${ev.rec.detail ? ` ${esc(ev.rec.detail)}` : ''}</p>
       ${blocked ? '<p class="note warn">قیمت امروزِ یکی از پاها نیست؛ فقط «نگه‌داشتن» ممکن است. یا «قیمت مدل» را در قواعد روشن کن.</p>' : ''}
-      <p class="sl-hint">هر کارت می‌گوید با آن انتخاب سود و زیانت چه می‌شود، چه مقدار قطعی می‌شود، امروز چقدر نقد می‌گیری یا می‌پردازی، و وجه تضمین چقدر زیاد یا آزاد می‌شود. «نیاز به وجه تازه» = افزایش وجه تضمین منهای نقدی که همین امروز می‌گیری.</p>
+      <p class="sl-hint">${helpIcon('impact')} هر کارت می‌گوید با آن انتخاب سود و زیانت چه می‌شود، چه مقدار قطعی می‌شود، امروز چقدر نقد می‌گیری یا می‌پردازی، و وجه تضمین چقدر زیاد یا آزاد می‌شود. «نیاز به وجه تازه» = افزایش وجه تضمین منهای نقدی که همین امروز می‌گیری.</p>
       <div class="sl-opts">${opts.map(card).join('')}
         <div class="sl-opt custom${selId === 'custom' ? ' selected' : ''}">
-          <span class="sl-opt-title">تعدیل سفارشی</span>
+          <span class="sl-opt-title">تعدیل سفارشی ${helpIcon('custom')}</span>
           ${seg('custom-side', custom.side, SIDES.map((sd) => [sd, SIDE_FA[sd]]))}
           <select data-act="custom-strike" aria-label="قیمت اعمال تازه" ${blocked ? 'disabled' : ''}>
             <option value="">— قیمت اعمال تازه —</option>
@@ -791,16 +851,17 @@ export async function mount(root, { state } = {}) {
         <td>${s.state.legs?.call && !s.state.closed ? strikeFa(s.state.legs.call.strike) : '—'} / ${s.state.legs?.put && !s.state.closed ? strikeFa(s.state.legs.put.strike) : '—'}</td>
       </tr>`;
     }).join('');
-    return `<details class="card sl-journal"><summary><b>📒 دفتر روزانه</b> <small>${faDigits(String(run.steps.length))} روز — قیمت، تغییر، اثر هر پا و اقدام</small></summary>
-      <div class="history-table-wrap"><table class="sl-journal-table">
+    return `<section class="card sl-journal"><div class="section-head"><div><p class="eyebrow">دفتر روزانه</p><h3>📒 ${faDigits(String(run.steps.length))} روز — قیمت، تغییر، اثر هر پا و اقدام ${helpIcon('journal')}</h3></div></div>
+      <div class="history-table-wrap sl-journal-wrap"><table class="sl-journal-table">
         <thead><tr><th>روز</th><th>پایه (تغییر)</th><th>کال (تغییر)</th><th>پوت (تغییر)</th><th>اثر انباشتهٔ کال (امروز)</th><th>اثر انباشتهٔ پوت (امروز)</th><th>سود و زیان کل</th><th>زیان شناور</th><th>اقدام</th><th>کال / پوت پس از اقدام</th></tr></thead>
-        <tbody>${rows}</tbody></table></div></details>`;
+        <tbody>${rows}</tbody></table></div></section>`;
   }
 
   // ═════════════════════════ نمودارهای تعاملی ═════════════════════════
 
   function chartsHtml(run, upTo) {
     const cfg = cfgOf();
+    const { capital } = capitalOf();
     const n = market.days.length;
     const dates = market.days.map((d) => d.date);
     const initial = run.steps[0].state.initialCredit;
@@ -825,7 +886,11 @@ export async function mount(root, { state } = {}) {
     }
     const marks = run.steps.filter((s) => s.i > 0 && s.action && s.action.kind !== 'hold')
       .map((s) => ({ i: s.i, key: 'spot', cls: s.action.kind, tip: `${dateFa(s.date)}\n${actionText(s.action)}` }));
-    const spot = market.days.map((d, i) => (exp.reveal || i <= upTo ? d.S : NaN));
+    const shown = (i) => exp.reveal || i <= upTo;
+    const spot = market.days.map((d, i) => (shown(i) ? d.S : NaN));
+    const be = remember(`be|${sig()}`, () => market.days.map((_, i) => weightedBreakevens(ctx, i)));
+    const beCall = be.map((b, i) => (shown(i) ? b.call.value : NaN));
+    const bePut = be.map((b, i) => (shown(i) ? b.put.value : NaN));
     const daily = (arr) => arr.map((v, i) => (i > 0 && fin(v) && fin(arr[i - 1]) ? v - arr[i - 1] : NaN));
 
     const pnlSeries = [{ key: 'pnl', label: 'مسیر من', cls: 'pnl', values: run.series }];
@@ -836,39 +901,50 @@ export async function mount(root, { state } = {}) {
     (exp.branches || []).filter((b) => overlayIds.has(b.id)).forEach((b, k) => {
       pnlSeries.push({ key: `br-${b.id}`, label: b.name, cls: `b${(k % 4) + 1}`, values: planRun(b.decisions, 'algo').series, full: true });
     });
-
-    const total = run.series;
     const legSeries = [
-      { key: 'callCum', label: 'اثر انباشتهٔ کال', cls: 'call', values: run.sides.call },
-      { key: 'putCum', label: 'اثر انباشتهٔ پوت', cls: 'put', values: run.sides.put },
-      { key: 'total', label: 'جمع (سود و زیان کل)', cls: 'pnl', values: total },
+      { key: 'callCum', label: 'اثر انباشتهٔ کال', cls: 'callcum', values: run.sides.call },
+      { key: 'putCum', label: 'اثر انباشتهٔ پوت', cls: 'putcum', values: run.sides.put },
+      { key: 'total', label: 'جمع (سود و زیان کل)', cls: 'total', values: run.series },
     ];
     const legBars = [
-      { key: 'callDay', label: 'اثر امروزِ کال', cls: 'call', values: daily(run.sides.call) },
-      { key: 'putDay', label: 'اثر امروزِ پوت', cls: 'put', values: daily(run.sides.put) },
+      { key: 'callDay', label: 'اثر امروزِ کال', cls: 'call', values: daily(run.sides.call), bar: true },
+      { key: 'putDay', label: 'اثر امروزِ پوت', cls: 'put', values: daily(run.sides.put), bar: true },
     ];
-    const box = (id, title, sub, items, chart) => `<div class="sl-chartcard"><h4 class="sl-sub">${esc(title)}</h4>
-      <p class="sl-hint">${esc(sub)}</p>${legendChips(id, items, hidden[id])}${chart}</div>`;
-    return `<div class="sl-charts">
-      ${box('channel', 'قیمت پایه میان دو قیمت اعمال', 'کانال سبز فاصلهٔ امن است؛ تا پایه داخل آن است هر دو پا ارزش زمانی از دست می‌دهند. پله‌ها روزهای تعدیل‌اند.',
-        [{ key: 'spot', label: 'پایه', cls: 'spot' }, { key: 'callK', label: 'قیمت اعمال کال', cls: 'call' }, { key: 'putK', label: 'قیمت اعمال پوت', cls: 'put' }],
-        lineChart({ id: 'channel', dates, unit: 'price', zero: false, upTo, cursor: view, hidden: hidden.channel, notes, marks,
-          band: hidden.channel.has('band') ? null : { upper: calls, lower: puts },
+    const CHARTS = {
+      channel: {
+        title: 'قیمت پایه میان دو قیمت اعمال، و سربه‌سر وزنی کال و پوت', help: 'chart-channel',
+        items: [{ key: 'spot', label: 'پایه', cls: 'spot' }, { key: 'callK', label: 'قیمت اعمال کال', cls: 'callk' }, { key: 'putK', label: 'قیمت اعمال پوت', cls: 'putk' },
+          { key: 'beCall', label: 'سربه‌سر وزنی کال', cls: 'becall' }, { key: 'bePut', label: 'سربه‌سر وزنی پوت', cls: 'beput' }],
+        chart: () => lineChart({ id: 'channel', dates, W: FULL, h: 400, unit: 'price', zero: false, upTo, cursor: view, hidden: hidden.channel, notes, marks,
+          band: { upper: calls, lower: puts },
           series: [{ key: 'spot', label: 'پایه', cls: 'spot', values: spot, full: true },
-            { key: 'callK', label: 'قیمت اعمال کال', cls: 'call', values: calls, step: true },
-            { key: 'putK', label: 'قیمت اعمال پوت', cls: 'put', values: puts, step: true }], label: 'قیمت پایه میان دو قیمت اعمال' }))}
-      ${box('pnl', 'سود و زیان روزانه', 'خط‌چین سبز حد سود و خط‌چین قرمز حد ضرر است. شاخه‌ها و ادامهٔ آینده را از همین تراشه‌ها روشن و خاموش کن.',
-        pnlSeries.map((s) => ({ key: s.key, label: s.label, cls: s.cls })),
-        lineChart({ id: 'pnl', dates, upTo, cursor: view, hidden: hidden.pnl, notes, area: 'pnl', series: pnlSeries,
-          refs: [{ value: (cfg.tpPct / 100) * initial, label: 'حد سود', cls: 'tp' }, { value: -(cfg.slPct / 100) * initial, label: 'حد ضرر', cls: 'sl' }], label: 'سود و زیان روزانه' }))}
-      ${box('legs', 'اثر انباشته و روزانهٔ هر پا', 'خط‌ها اثر انباشتهٔ کال و پوت از روز اول‌اند و ستون‌ها اثر همان روز. جمع دو خط همان سود و زیان کل است.',
-        [...legSeries, ...legBars].map((s) => ({ key: s.key, label: s.label, cls: s.cls })),
-        lineChart({ id: 'legs', dates, upTo, cursor: view, hidden: hidden.legs, notes, series: legSeries, bars: legBars, label: 'اثر هر پا' }))}
-      ${box('prices', 'قیمت پایانی پاهای فروخته‌شده', 'قیمت همان قراردادی که آن روز در دست داشتی؛ پس از هر رول، قرارداد عوض می‌شود.',
-        [{ key: 'callPx', label: 'کال', cls: 'call' }, { key: 'putPx', label: 'پوت', cls: 'put' }],
-        lineChart({ id: 'prices', dates, unit: 'price', zero: false, upTo, cursor: view, hidden: hidden.prices, notes,
-          series: [{ key: 'callPx', label: 'کال', cls: 'call', values: callPx }, { key: 'putPx', label: 'پوت', cls: 'put', values: putPx }], label: 'قیمت پاها' }))}
-    </div>`;
+            { key: 'callK', label: 'قیمت اعمال کال', cls: 'callk', values: calls, step: true },
+            { key: 'putK', label: 'قیمت اعمال پوت', cls: 'putk', values: puts, step: true },
+            { key: 'beCall', label: 'سربه‌سر وزنی کال', cls: 'becall', values: beCall, full: true },
+            { key: 'bePut', label: 'سربه‌سر وزنی پوت', cls: 'beput', values: bePut, full: true }], label: 'قیمت پایه و سربه‌سر وزنی' }),
+      },
+      pnl: {
+        title: 'سود و زیان روزانه', help: 'chart-pnl',
+        items: pnlSeries.map((x) => ({ key: x.key, label: x.label, cls: x.cls })),
+        chart: () => lineChart({ id: 'pnl', dates, W: FULL, h: 400, upTo, cursor: view, hidden: hidden.pnl, notes, area: 'pnl', series: pnlSeries, pctBase: capital,
+          refs: [{ value: (cfg.tpPct / 100) * initial, label: 'حد سود', cls: 'tp' }, { value: -(cfg.slPct / 100) * initial, label: 'حد ضرر', cls: 'sl' }], label: 'سود و زیان روزانه' }),
+      },
+      legs: {
+        title: 'اثر انباشته و روزانهٔ هر پا', help: 'chart-legs',
+        items: [...legSeries, ...legBars].map((x) => ({ key: x.key, label: x.label, cls: x.cls, bar: x.bar })),
+        chart: () => lineChart({ id: 'legs', dates, W: FULL, h: 400, upTo, cursor: view, hidden: hidden.legs, notes, series: legSeries, bars: legBars, pctBase: capital, label: 'اثر هر پا' }),
+      },
+      prices: {
+        title: 'قیمت پایانی پاهای فروخته‌شده', help: 'chart-prices',
+        items: [{ key: 'callPx', label: 'کال', cls: 'callpx' }, { key: 'putPx', label: 'پوت', cls: 'putpx' }],
+        chart: () => lineChart({ id: 'prices', dates, W: FULL, h: 400, unit: 'price', zero: false, upTo, cursor: view, hidden: hidden.prices, notes,
+          series: [{ key: 'callPx', label: 'کال', cls: 'callpx', values: callPx }, { key: 'putPx', label: 'پوت', cls: 'putpx', values: putPx }], label: 'قیمت پاها' }),
+      },
+    };
+    const c = CHARTS[chartSel] || CHARTS.channel;
+    return `<div class="sl-chartbar">${seg('chart-sel', chartSel, [['channel', '📉 قیمت و سربه‌سر'], ['pnl', '💹 سود و زیان'], ['legs', '⚖️ اثر هر پا'], ['prices', '🏷 قیمت پاها']])}</div>
+      <div class="sl-chartcard"><h4 class="sl-sub">${esc(c.title)} ${helpIcon(c.help)}</h4>
+      ${legendChips(chartSel, c.items, hidden[chartSel])}${c.chart()}</div>`;
   }
 
   // ═════════════════════════ پرمیوم دریافتی ═════════════════════════
@@ -915,7 +991,7 @@ export async function mount(root, { state } = {}) {
       const markNow = sel.closeDay == null ? (run.pending?.ev.marks?.[sel.side] || null) : null;
       const kept = sel.closeDay != null ? ((sel.premium - sel.cost) / sel.premium) * 100 : (markNow ? ((sel.openPrice - markNow.price) / sel.openPrice) * 100 : NaN);
       return `<div class="sl-legcard ${sel.side}">
-        <header><span class="sl-badge ${sel.side}">${SIDE_FA[sel.side]}</span><b>${strikeFa(sel.strike)}</b> <span class="sl-leg-sym">${fmt.sym(sym)}</span>
+        <header>${helpIcon('legcard')}<span class="sl-badge ${sel.side}">${SIDE_FA[sel.side]}</span><b>${strikeFa(sel.strike)}</b> <span class="sl-leg-sym">${fmt.sym(sym)}</span>
           <span class="pill ${sel.closeDay == null ? 'open' : 'shut'}">${sel.closeDay == null ? 'باز' : 'بسته'}</span>
           <button type="button" class="ghost sl-mini" data-act="leg-sel" data-k="-1">✕</button></header>
         <dl class="sl-impact">
@@ -938,19 +1014,19 @@ export async function mount(root, { state } = {}) {
         </dl></div>`;
     })() : '<p class="note sl-day-empty">روی هر نوار بزن تا کارت کامل همان پا (فروش، بازخرید، پرمیوم، سود و زیان) این‌جا باز شود.</p>';
     return `<section class="card sl-premium">
-      <div class="section-head"><div><p class="eyebrow">پرمیوم</p><h3>💰 جمع پرمیوم دریافتی کال و پوت در طول معامله</h3></div></div>
+      <div class="section-head"><div><p class="eyebrow">پرمیوم</p><h3>💰 جمع پرمیوم دریافتی کال و پوت در طول معامله ${helpIcon('premium')}</h3></div></div>
       <p class="sl-hint">هر فروش تازه — روز ورود یا هر رول — پرمیوم همان روز را به سمت خودش اضافه می‌کند و نمودار پله‌ای بالا می‌رود. لایهٔ پایین کال و لایهٔ بالا پوت است؛ لبهٔ بالایی جمع هر دو. «خالص پس از بازخرید» هزینهٔ بستن پاها را هم کم می‌کند.</p>
       <div class="sl-kpis">
-        <div class="kpi"><span>پرمیوم کال</span><b class="call-ink">${esc(money(sum('call')))}</b><small>${faDigits(String(trades.filter((t) => t.side === 'call').length))} پا فروخته شد</small></div>
-        <div class="kpi"><span>پرمیوم پوت</span><b class="put-ink">${esc(money(sum('put')))}</b><small>${faDigits(String(trades.filter((t) => t.side === 'put').length))} پا فروخته شد</small></div>
-        <div class="kpi"><span>جمع پرمیوم دریافتی</span><b class="gain">${esc(money(sum('call') + sum('put')))}</b><small>پرمیوم اولیه ${esc(money(run.steps[0].state.initialCredit))}</small></div>
-        <div class="kpi"><span>هزینهٔ بازخریدها</span><b class="loss">${esc(money(cost))}</b></div>
-        <div class="kpi"><span>خالص پس از بازخرید</span><b class="${tone(sum('call') + sum('put') - cost)}">${esc(money(sum('call') + sum('put') - cost, { sign: true }))}</b><small>پیش از ارزش پاهای باز و کارمزد</small></div>
+        <div class="kpi"><span>پرمیوم کال ${helpIcon('kpi-prem-side')}</span><b class="call-ink">${esc(money(sum('call')))}</b><small>${faDigits(String(trades.filter((t) => t.side === 'call').length))} پا فروخته شد</small></div>
+        <div class="kpi"><span>پرمیوم پوت ${helpIcon('kpi-prem-side')}</span><b class="put-ink">${esc(money(sum('put')))}</b><small>${faDigits(String(trades.filter((t) => t.side === 'put').length))} پا فروخته شد</small></div>
+        <div class="kpi"><span>جمع پرمیوم دریافتی ${helpIcon('kpi-prem-total')}</span><b class="gain">${esc(money(sum('call') + sum('put')))}</b><small>پرمیوم اولیه ${esc(money(run.steps[0].state.initialCredit))}</small></div>
+        <div class="kpi"><span>هزینهٔ بازخریدها ${helpIcon('kpi-prem-cost')}</span><b class="loss">${esc(money(cost))}</b></div>
+        <div class="kpi"><span>خالص پس از بازخرید ${helpIcon('kpi-prem-net')}</span><b class="${tone(sum('call') + sum('put') - cost)}">${esc(money(sum('call') + sum('put') - cost, { sign: true }))}</b><small>پیش از ارزش پاهای باز و کارمزد</small></div>
       </div>
       ${legendChips('premium', series.map((x) => ({ key: x.key, label: x.label, cls: x.cls })), hidden.premium)}
       ${lineChart({ id: 'premium', dates, W: FULL, h: 300, upTo, cursor: view, hidden: hidden.premium, notes, series,
         areas: [{ key: 'total', cls: 'put' }, { key: 'callRecv', cls: 'call' }], label: 'جمع پرمیوم دریافتی' })}
-      <h4 class="sl-sub">عمر هر پا</h4>
+      <h4 class="sl-sub">عمر هر پا ${helpIcon('gantt')}</h4>
       ${legGanttSvg({ dates, trades, upTo, sel: legSel })}
       ${legCard}
     </section>`;
@@ -995,7 +1071,7 @@ export async function mount(root, { state } = {}) {
     const followed = g.review.filter((r) => r.followedAlgo).length;
     const ringPct = fin(g.score) ? g.score : 0;
     return `<section class="card sl-report" id="sl-report">
-      <div class="section-head"><div><p class="eyebrow">کارنامهٔ معامله، این بخش آینده را می‌بیند</p><h3>همهٔ کارهایی که از شروع تا پایان می‌شد کرد</h3></div></div>
+      <div class="section-head"><div><p class="eyebrow">کارنامهٔ معامله، این بخش آینده را می‌بیند</p><h3>همهٔ کارهایی که از شروع تا پایان می‌شد کرد ${helpIcon('report')}</h3></div></div>
       <div class="sl-report-top">
         <div class="sl-grade g${esc(g.grade.letter)}" style="--p:${ringPct}">
           <b>${esc(g.grade.letter)}</b><span>${esc(g.grade.label)}</span><small>${faDigits(String(g.score))} از ۱۰۰</small>
@@ -1009,13 +1085,13 @@ export async function mount(root, { state } = {}) {
         </div>
       </div>
       <div class="sl-kpis">
-        <div class="kpi"><span>نتیجهٔ شما</span><b class="${tone(g.mine.final)}">${esc(money(g.mine.final, { sign: true }))}</b></div>
-        <div class="kpi"><span>بهترین ممکن</span><b class="gain">${esc(money(sm.max, { sign: true }))}</b><small>فاصلهٔ شما ${esc(money(sm.max - g.mine.final))}</small></div>
-        <div class="kpi"><span>میانهٔ همهٔ مسیرها</span><b class="${tone(sm.median)}">${esc(money(sm.median, { sign: true }))}</b></div>
-        <div class="kpi"><span>الگوریتم کامل</span><b class="${tone(g.algo.final)}">${esc(money(g.algo.final, { sign: true }))}</b></div>
-        <div class="kpi"><span>پیروی شما از الگوریتم</span><b>${faDigits(String(followed))} از ${faDigits(String(g.review.length))} روز</b></div>
+        <div class="kpi"><span>نتیجهٔ شما ${helpIcon('kpi-r-mine')}</span><b class="${tone(g.mine.final)}">${esc(money(g.mine.final, { sign: true }))}</b></div>
+        <div class="kpi"><span>بهترین ممکن ${helpIcon('kpi-r-best')}</span><b class="gain">${esc(money(sm.max, { sign: true }))}</b><small>فاصلهٔ شما ${esc(money(sm.max - g.mine.final))}</small></div>
+        <div class="kpi"><span>میانهٔ همهٔ مسیرها ${helpIcon('kpi-r-median')}</span><b class="${tone(sm.median)}">${esc(money(sm.median, { sign: true }))}</b></div>
+        <div class="kpi"><span>الگوریتم کامل ${helpIcon('kpi-r-algo')}</span><b class="${tone(g.algo.final)}">${esc(money(g.algo.final, { sign: true }))}</b></div>
+        <div class="kpi"><span>پیروی شما از الگوریتم ${helpIcon('kpi-r-follow')}</span><b>${faDigits(String(followed))} از ${faDigits(String(g.review.length))} روز</b></div>
       </div>
-      <h4 class="sl-sub">🏆 بهترین کارها — و چرا</h4>
+      <h4 class="sl-sub">🏆 بهترین کارها — و چرا ${helpIcon('report-best')}</h4>
       <div class="sl-best">${g.best.map((b, k) => {
         const r = pathReason(b);
         return `<article class="sl-best-card">
@@ -1026,19 +1102,19 @@ export async function mount(root, { state } = {}) {
           <ul>${r.lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
         </article>`;
       }).join('')}</div>
-      <h4 class="sl-sub">🧭 کارهای شما و ارزش هر کدام</h4>
+      <h4 class="sl-sub">🧭 کارهای شما و ارزش هر کدام ${helpIcon('report-mine')}</h4>
       ${g.mineItems.length ? `<ul class="sl-mine-items">${g.mineItems.map((it) => `<li class="${tone(it.value)}"><b>${esc(dateFa(it.date))}</b> ${esc(actionText(it.action))}
         — ${it.value > 0 ? `این کار ${esc(money(it.value))} به نتیجه افزود` : it.value < 0 ? `این کار ${esc(money(-it.value))} از نتیجه کم کرد` : 'اثری نداشت'}
         ${it.cash ? `، نقد ${esc(money(it.cash, { sign: true }))}` : ''}، پایه پس از آن ${pct(it.sMoveAfter)}.</li>`).join('')}</ul>`
         : '<p class="note">هیچ اقدامی جز نگه‌داشتن نکردی؛ نتیجه همان «نگه‌داشتن تا پایان» است.</p>'}
-      <h4 class="sl-sub">💡 روزهایی که می‌شد بهتر تصمیم گرفت</h4>
+      <h4 class="sl-sub">💡 روزهایی که می‌شد بهتر تصمیم گرفت ${helpIcon('report-regret')}</h4>
       ${regrets.length ? `<div class="history-table-wrap"><table class="sl-cmp-table"><thead><tr><th>روز</th><th>کار شما</th><th>بهترین گزینهٔ همان روز</th><th>نتیجه با آن</th><th>هزینهٔ انتخاب شما</th></tr></thead>
         <tbody>${regrets.map((r) => `<tr><th scope="row"><button type="button" class="linklike" data-act="view" data-day="${r.i}">${esc(shortDateFa(r.date))}</button></th>
           <td>${esc(actionText(planRun(exp.decisions).steps.find((s) => s.i === r.i)?.action))}</td><td><b>${esc(actionText(r.bestAction))}</b></td>
           <td class="${tone(r.bestFinal)}">${esc(money(r.bestFinal, { sign: true }))}</td><td class="loss">${esc(money(r.regret))}</td></tr>`).join('')}</tbody></table></div>
         <p class="sl-hint">«هزینه» یعنی اگر فقط در همان روز گزینهٔ بهتر را برمی‌داشتی و بقیهٔ تصمیم‌هایت همان می‌ماند، نتیجه چقدر بهتر می‌شد.</p>`
         : '<p class="note">در هیچ روزی تغییر تنها یک تصمیم نتیجه را بهتر نمی‌کرد — آفرین.</p>'}
-      <h4 class="sl-sub">توزیع نتیجهٔ همهٔ مسیرها</h4>
+      <h4 class="sl-sub">توزیع نتیجهٔ همهٔ مسیرها ${helpIcon('hist')}</h4>
       ${histSvg({ finals: g.paths.map((p) => p.final), markers: [{ value: g.mine.final, cls: 'mine', label: 'من' }, { value: g.algo.final, cls: 'algo', label: 'الگوریتم' }, { value: sm.max, cls: 'best', label: 'بهترین' }] })}
     </section>`;
   }
@@ -1099,17 +1175,17 @@ export async function mount(root, { state } = {}) {
       </div>
       <p class="note">${fmt.int(res.paths.length)} مسیر در ${faDigits(Math.max(1, Math.round(res.ms)).toString())} میلی‌ثانیه${res.truncated ? ' — <b class="warn">به سقف رسید؛ از آن به بعد فقط شاخهٔ پیشنهاد الگوریتم دنبال شد</b>' : ''}${sum.unknown ? `، ${fmt.int(sum.unknown)} مسیر نتیجهٔ نامعلوم (قیمت روز آخر نبود)` : ''}.</p>
       <div class="sl-kpis">
-        <div class="kpi"><span>بهترین</span><b class="gain">${esc(money(sum.max, { sign: true }))}</b></div>
-        <div class="kpi"><span>میانه</span><b class="${tone(sum.median)}">${esc(money(sum.median, { sign: true }))}</b><small>صدک ۲۵ تا ۷۵: ${esc(money(sum.p25, { sign: true }))} تا ${esc(money(sum.p75, { sign: true }))}</small></div>
-        <div class="kpi"><span>بدترین</span><b class="loss">${esc(money(sum.min, { sign: true }))}</b></div>
-        <div class="kpi"><span>مسیرهای سودده</span><b>${pct(sum.winRate, 0)}</b></div>
-        <div class="kpi"><span>رتبهٔ مسیر من</span><b>${pct(rank, 0)}</b><small>از مسیرها بدتر از مسیر من بودند</small></div>
+        <div class="kpi"><span>بهترین ${helpIcon('kpi-c-best')}</span><b class="gain">${esc(money(sum.max, { sign: true }))}</b></div>
+        <div class="kpi"><span>میانه ${helpIcon('kpi-c-median')}</span><b class="${tone(sum.median)}">${esc(money(sum.median, { sign: true }))}</b><small>صدک ۲۵ تا ۷۵: ${esc(money(sum.p25, { sign: true }))} تا ${esc(money(sum.p75, { sign: true }))}</small></div>
+        <div class="kpi"><span>بدترین ${helpIcon('kpi-c-worst')}</span><b class="loss">${esc(money(sum.min, { sign: true }))}</b></div>
+        <div class="kpi"><span>مسیرهای سودده ${helpIcon('kpi-c-win')}</span><b>${pct(sum.winRate, 0)}</b></div>
+        <div class="kpi"><span>رتبهٔ مسیر من ${helpIcon('kpi-c-rank')}</span><b>${pct(rank, 0)}</b><small>از مسیرها بدتر از مسیر من بودند</small></div>
       </div>
-      <h4 class="sl-sub">بادبزن مسیرها</h4>
+      <h4 class="sl-sub">بادبزن مسیرها ${helpIcon('fan')}</h4>
       <p class="sl-hint">خط‌های کم‌رنگ همهٔ مسیرهای شمرده‌شده‌اند (سبز: سودده، قرمز: زیان‌ده). با تراشه‌ها هر مسیر را اضافه یا حذف کن؛ روی نمودار حرکت کن تا عدد دقیق هر مسیر در هر روز بیاید.</p>
       ${legendChips('fan', [{ key: 'cloud', label: 'ابر همهٔ مسیرها', cls: 'cloud' }, ...fanSeries.map((s) => ({ key: s.key, label: s.label, cls: s.cls }))], hidden.fan)}
       ${lineChart({ id: 'fan', dates, W: FULL, h: 380, series: fanSeries, cloud, hidden: hidden.fan, label: 'بادبزن سود و زیان همهٔ مسیرها' })}
-      <h4 class="sl-sub">توزیع نتیجهٔ نهایی</h4>
+      <h4 class="sl-sub">توزیع نتیجهٔ نهایی ${helpIcon('hist')}</h4>
       ${histSvg({ finals: res.paths.map((p) => p.final), markers: [
         { value: mine.final, cls: 'mine', label: 'من' }, { value: base.algo.final, cls: 'algo', label: 'الگوریتم' },
         { value: base.hold.final, cls: 'hold', label: 'نگه‌داشتن' }] })}
@@ -1223,7 +1299,7 @@ export async function mount(root, { state } = {}) {
       body = `<p class="note warn">مقایسه ساخته نشد: ${esc(e.message)}</p>`;
     }
     return `<section class="card sl-compare">
-      <div class="section-head"><div><p class="eyebrow">مقایسهٔ احتمالات، این بخش آینده را می‌بیند</p><h3>اگر جور دیگری تصمیم می‌گرفتم؟</h3></div></div>
+      <div class="section-head"><div><p class="eyebrow">مقایسهٔ احتمالات، این بخش آینده را می‌بیند</p><h3>اگر جور دیگری تصمیم می‌گرفتم؟ ${helpIcon({ paths: 'compare-paths', whatif: 'whatif', entries: 'entries', params: 'params', branches: 'branches' }[cmpTab])}</h3></div></div>
       <div class="sl-tabs" role="tablist">${tabs.map(([id, t]) => `<button type="button" role="tab" class="sl-tab${cmpTab === id ? ' on' : ''}" aria-selected="${cmpTab === id}" data-act="cmp-tab" data-tab="${id}">${esc(t)}</button>`).join('')}</div>
       <div class="sl-cmp-body">${body}</div>
     </section>`;
@@ -1231,9 +1307,19 @@ export async function mount(root, { state } = {}) {
 
   // ═════════════════════════ رندر آزمایش ═════════════════════════
 
+  const LAB_TABS = [
+    ['decide', '🎯 تصمیم روز'], ['status', '📍 وضعیت معامله'], ['timeline', '🗓 خط زمان و روزها'], ['charts', '📈 نمودارها'],
+    ['premium', '💰 پرمیوم'], ['journal', '📒 دفتر روزانه'], ['report', '📋 کارنامه'], ['compare', '🔀 مقایسهٔ مسیرها'], ['rules', '⚙️ قواعد'],
+  ];
+
+  /**
+   * آزمایش در زیرتب‌ها: هر صفحه یک مفهوم. نوار بالا همیشه هست (نام، وضعیت،
+   * سود و زیان، روز، حجم و دکمه‌های اصلی) و زیرش فقط یک پنل. منطق هیچ
+   * بخشی عوض نشده؛ فقط جای نمایش.
+   */
   function renderLab() {
     if (!market || !ctx) return;
-    const scrollY = main.closest('.stage, [class*="stage"]')?.scrollTop;
+    const keepY = stageY();
     const run = currentRun();
     if (run.error) {
       main.innerHTML = `<section class="card"><h3>آزمایش اجرا نشد</h3><p class="note warn">${esc(run.error)}</p>
@@ -1246,41 +1332,60 @@ export async function mount(root, { state } = {}) {
     exp.done = !!run.done;
     exp.final = run.final;
     const cfg = cfgOf();
-    main.innerHTML = `
-      <div class="sl-labbar">
-        <input class="sl-title-input" id="sl-exp-name" value="${esc(exp.name)}" aria-label="نام آزمایش">
-        ${qtyHtml(cfg.qty)}
-        <span class="sp"></span>
-        <button type="button" class="ghost" data-act="save-branch">🗂 ذخیره به‌عنوان شاخه</button>
-        <button type="button" class="ghost${exp.rulesOpen ? ' on' : ''}" data-act="rules-toggle">⚙️ قواعد</button>
-        <button type="button" class="ghost" data-act="reconfig">تنظیم دوباره</button>
-        <button type="button" class="ghost" data-act="restart" title="همهٔ تصمیم‌ها پاک می‌شود؛ مسیر فعلی شاخه می‌شود">↺ از نو</button>
-      </div>
-      ${exp.rulesOpen ? `<section class="card sl-rules-card"><p class="sl-hint">هر تغییر همان لحظه روی کل آزمایش اعمال می‌شود. تصمیم‌های ثبت‌شده می‌مانند؛ تصمیم‌هایی که «پیشنهاد الگوریتم» بوده‌اند با قواعد تازه دوباره ساخته می‌شوند.</p>
-        <div class="sl-rules-grid" id="sl-rules">${rulesFormHtml(cfg, 'lab')}</div>
-        <div class="bar"><button type="button" class="ghost" data-act="rules-reset">پیش‌فرض متن الگوریتم</button></div></section>` : ''}
-      ${heroHtml(run)}
-      <section class="card sl-time">
-        <div class="section-head"><div><p class="eyebrow">خط زمان معامله</p><h3>${esc(dateFa(market.days[0].date))} تا ${esc(dateFa(market.days[n - 1].date))}</h3></div>
+    const { capital } = capitalOf();
+    const lastStep = run.steps[run.steps.length - 1];
+    const pnlNow = run.done ? run.final : run.pending?.ev.pnl ?? lastStep.pnl;
+    const st = run.done ? run.state : run.pending?.state || lastStep.state;
+    const status = run.done ? (st.reason === 'incomplete' ? ['warn', 'نتیجه نامعلوم'] : ['shut', `بسته — ${reasonText(st.reason)}`])
+      : run.pending?.ev.straddle ? ['warn', 'استرادل'] : st.adjustments ? ['open', `تعدیل‌شده ×${faDigits(String(st.adjustments))}`] : ['open', 'باز'];
+    const dayNo = run.done ? Math.max(0, run.state.closedAt) : run.pending?.i ?? 0;
+
+    let panel = '';
+    switch (labTab) {
+      case 'status': panel = heroHtml(run); break;
+      case 'timeline': panel = `<section class="card sl-time">
+        <div class="section-head"><div><p class="eyebrow">خط زمان معامله</p><h3>${esc(dateFa(market.days[0].date))} تا ${esc(dateFa(market.days[n - 1].date))} ${helpIcon('timeline')}</h3></div>
           <div class="sl-legend"><span class="sl-dotkey open"></span>ورود <span class="sl-dotkey hold"></span>نگه‌داشتن <span class="sl-dotkey adjust"></span>تعدیل
           <span class="sl-dotkey close"></span>بستن <span class="sl-dotkey ignored"></span>پیشنهاد نادیده <span class="sl-dotkey missing"></span>بی‌قیمت <span class="sl-dotkey pending"></span>امروز
           <span class="sl-dotkey fill-gain"></span>روز سودده <span class="sl-dotkey fill-loss"></span>روز زیان‌ده</div></div>
         ${timelineHtml({ days: market.days, steps: run.steps, cursor: run.pending?.i, view, done: run.done, closedAt: run.state?.closedAt ?? Infinity })}
         ${dayDetailHtml(run, view ?? (run.done ? run.state.closedAt : null))}
-      </section>
-      <section class="card sl-chart-section">
-        <div class="section-head"><div><p class="eyebrow">نمودارهای تعاملی</p><h3>روی هر نمودار حرکت کن؛ عدد دقیق هر روز می‌آید</h3></div></div>
-        ${chartsHtml(run, upTo)}
-      </section>
-      ${premiumHtml(run, upTo)}
-      ${decisionHtml(run)}
-      ${journalHtml(run)}
-      ${reportHtml(run)}
-      ${compareHtml()}`;
+      </section>`; break;
+      case 'charts': panel = `<section class="card sl-chart-section">
+        <div class="section-head"><div><p class="eyebrow">نمودارهای تعاملی</p><h3>روی نمودار حرکت کن؛ عدد و درصد دقیق هر روز می‌آید</h3></div></div>
+        ${chartsHtml(run, upTo)}</section>`; break;
+      case 'premium': panel = premiumHtml(run, upTo); break;
+      case 'journal': panel = journalHtml(run); break;
+      case 'report': panel = run.done ? reportHtml(run) : `<section class="card sl-report"><h3>کارنامه ${helpIcon('report')}</h3>
+        <p class="note">کارنامه وقتی ساخته می‌شود که معامله تمام شده باشد. تا روز خروج جلو برو، یا «⏭ پیروی از الگوریتم تا پایان» را بزن.</p></section>`; break;
+      case 'compare': panel = compareHtml(); break;
+      case 'rules': panel = `<section class="card sl-rules-card">
+        <div class="section-head"><div><p class="eyebrow">قواعد</p><h3>قواعد الگوریتم و قیمت معامله ${helpIcon('rules')}</h3></div>
+          <button type="button" class="ghost" data-act="rules-reset">پیش‌فرض متن الگوریتم</button></div>
+        <p class="sl-hint">هر تغییر همان لحظه روی کل آزمایش اعمال می‌شود. تصمیم‌های ثبت‌شده می‌مانند؛ تصمیم‌هایی که «پیشنهاد الگوریتم» بوده‌اند با قواعد تازه دوباره ساخته می‌شوند.</p>
+        <div class="sl-rules-grid" id="sl-rules">${rulesFormHtml(cfg, 'lab')}</div></section>`; break;
+      default: panel = decisionHtml(run);
+    }
+
+    main.innerHTML = `
+      <div class="sl-labbar">
+        <input class="sl-title-input" id="sl-exp-name" value="${esc(exp.name)}" aria-label="نام آزمایش">
+        <span class="pill ${status[0]}">${esc(status[1])}</span>
+        <span class="sl-strip-pnl ${tone(pnlNow)}" data-tip="${esc(`سود و زیان ${run.done ? 'نهایی' : 'تا امروزِ آزمایش'}\n${pct(capital > 0 && fin(pnlNow) ? (pnlNow / capital) * 100 : NaN, 2)} سرمایه`)}">${esc(money(pnlNow, { sign: true }))}
+          <small>${pct(capital > 0 && fin(pnlNow) ? (pnlNow / capital) * 100 : NaN, 2)}</small></span>
+        <span class="sl-strip-day">روز ${faDigits(String(dayNo))} از ${faDigits(String(n - 1))}<small>${esc(shortDateFa(market.days[Math.min(dayNo, n - 1)].date))}</small></span>
+        ${qtyHtml(cfg.qty)}
+        <span class="sp"></span>
+        <button type="button" class="ghost sl-mini" data-act="save-branch" title="نسخهٔ فعلی تصمیم‌ها را برای مقایسه نگه دار">🗂 شاخه</button>
+        <button type="button" class="ghost sl-mini" data-act="reconfig">تنظیم دوباره</button>
+        <button type="button" class="ghost sl-mini" data-act="restart" title="همهٔ تصمیم‌ها پاک می‌شود؛ مسیر فعلی شاخه می‌شود">↺ از نو</button>
+      </div>
+      <div class="sl-tabs sl-labtabs" role="tablist">${LAB_TABS.map(([id, t]) => `<button type="button" role="tab" class="sl-tab${labTab === id ? ' on' : ''}${id === 'report' && !run.done ? ' dim' : ''}" aria-selected="${labTab === id}" data-act="lab-tab" data-tab="${id}">${esc(t)}</button>`).join('')}</div>
+      <div class="sl-panel" role="tabpanel">${panel}</div>`;
     const node = main.querySelector('.sl-node.viewing, .sl-node.pending');
     const strip = main.querySelector('.sl-timeline');
     if (node && strip) strip.scrollLeft += node.getBoundingClientRect().left - strip.getBoundingClientRect().left - strip.clientWidth / 2;
-    if (fin(scrollY)) main.closest('.stage, [class*="stage"]').scrollTop = scrollY;
+    restoreY(keepY);
     save();
   }
 
@@ -1298,8 +1403,9 @@ export async function mount(root, { state } = {}) {
     for (const line of root.querySelectorAll('.sl-cross')) line.setAttribute('visibility', 'hidden');
     for (const g of root.querySelectorAll('.sl-cross-dots')) g.replaceChildren();
   };
-  const placeTip = (html, ev) => {
+  const placeTip = (html, ev, help = false) => {
     tipBox.innerHTML = html;
+    tipBox.classList.toggle('help', help);
     tipBox.hidden = false;
     const pad = 14;
     const w = tipBox.offsetWidth, h = tipBox.offsetHeight;
@@ -1311,6 +1417,8 @@ export async function mount(root, { state } = {}) {
   };
 
   function onMove(ev) {
+    const helpEl = ev.target.closest?.('[data-help]');
+    if (helpEl && root.contains(helpEl)) { placeTip(`<div class="sl-tip-help">${esc(helpEl.dataset.help)}</div>`, ev, true); return; }
     const box = ev.target.closest?.('.sl-chartbox[data-model]');
     const tipEl = ev.target.closest?.('[data-tip]');
     if (tipEl && root.contains(tipEl) && (!box || tipEl.tagName !== 'svg')) {
@@ -1333,12 +1441,14 @@ export async function mount(root, { state } = {}) {
     line.setAttribute('x1', x.toFixed(1)); line.setAttribute('x2', x.toFixed(1)); line.setAttribute('visibility', 'visible');
     const dots = box.querySelector('.sl-cross-dots');
     dots.innerHTML = m.series.filter((s) => s.v[i] != null).map((s) => `<circle class="sl-cross-dot ${esc(s.cls)}" cx="${x.toFixed(1)}" cy="${y(s.v[i]).toFixed(1)}" r="5"/>`).join('');
-    const rows = [...m.series.map((s) => [s, s.v[i]]), ...m.bars.map((b) => [b, b.v[i]])]
+    // درصد سود و زیان هم کنار هر عدد ریالی، نسبت به مبنای همان نمودار.
+    const pctOf = (v, unit) => (unit === 'money' && m.pctBase ? `<small class="${tone(v)}">${esc(pct((v / m.pctBase) * 100, 2))}</small>` : '');
+    const rows = [...m.series.map((s) => [s, s.v[i], false]), ...m.bars.map((b) => [b, b.v[i], true])]
       .filter(([, v]) => v != null)
-      .map(([s, v]) => `<div class="sl-tip-row"><span class="sl-key ${esc(s.cls)}"></span><span>${esc(s.label)}</span><b class="${s.unit === 'money' ? tone(v) : ''}">${esc(tipValue(v, s.unit))}</b></div>`).join('');
+      .map(([s, v, bar]) => `<div class="sl-tip-row">${keySvg(s.cls, bar)}<span>${esc(s.label)}</span><b class="${s.unit === 'money' ? tone(v) : ''}">${esc(tipValue(v, s.unit))}</b>${pctOf(v, s.unit)}</div>`).join('');
     const d = m.dates[i];
     const note = m.notes?.[i];
-    placeTip(`<div class="sl-tip-head">${esc(dateFa(d))} <small>${esc(dayNameFa(d))}</small></div>${note ? `<div class="sl-tip-note">${esc(note)}</div>` : ''}${rows || '<div class="sl-tip-row">بی‌داده</div>'}`, ev);
+    placeTip(`<div class="sl-tip-head">${esc(dateFa(d))} <small>${esc(dayNameFa(d))}</small></div>${note ? `<div class="sl-tip-note">${esc(note)}</div>` : ''}${rows || '<div class="sl-tip-row">بی‌داده</div>'}${m.pctBase ? `<div class="sl-tip-foot">درصدها نسبت به ${esc(m.pctLabel)}: ${esc(money(m.pctBase))}</div>` : ''}`, ev);
   }
 
   // ═════════════════════════ کنش‌ها ═════════════════════════
@@ -1354,7 +1464,7 @@ export async function mount(root, { state } = {}) {
   }
 
   function setQty(q) {
-    const value = Math.max(1, Math.min(100, Math.round(Number(q) || 1)));
+    const value = Math.max(1, Math.min(10000, Math.round(Number(q) || 1)));
     if (draft && !exp) { draft.cfg = { ...readRules(main, draft.cfg), qty: value }; makeCtx(); renderSetup(); return; }
     if (exp) { exp.cfg = { ...exp.cfg, qty: value }; makeCtx(); renderLab(); }
   }
@@ -1383,7 +1493,7 @@ export async function mount(root, { state } = {}) {
     const found = store.list.find((x) => x.id === id);
     if (!found) return;
     exp = structuredClone(found);
-    draft = null; view = null; choice = null; overlayIds = new Set(); legSel = -1;
+    draft = null; view = null; choice = null; overlayIds = new Set(); legSel = -1; labTab = found.done ? 'report' : 'decide';
     main.innerHTML = '<section class="card"><p class="note sl-busy-line">در حال دریافت قراردادها و قیمت‌های روزانهٔ همان بازه…</p></section>';
     renderSaved();
     try {
@@ -1408,6 +1518,7 @@ export async function mount(root, { state } = {}) {
       case 'wi-cont': wiOpts = { ...wiOpts, continuation: v }; break;
       case 'entry-policy': entryPolicy = v; break;
       case 'reveal-policy': exp.revealPolicy = v; break;
+      case 'chart-sel': chartSel = v; break;
       case 'edit-mode': editMode = v; break;
       case 'custom-side': choice = { id: 'custom', side: v, strike: '' }; break;
       case 'entry-method':
@@ -1454,34 +1565,29 @@ export async function mount(root, { state } = {}) {
           break;
         }
         case 'qty-step': setQty(cfgOf().qty + Number(el.dataset.d)); break;
-        case 'qty-set': setQty(el.dataset.v); break;
-        case 'preset': {
-          const today = todayCompact();
-          const from = daysBefore(today, Number(el.dataset.n));
-          const to = Math.min(today, daysBefore(from, -50));
-          draft.fromText = jalaliInput(from); draft.toText = jalaliInput(to);
-          renderSetup();
+        case 'lab-tab': labTab = el.dataset.tab; renderLab(); break;
+        case 'goto-step': {
+          if (draft && Number(el.dataset.n) <= draft.reach) {
+            if (draft.step >= 3) draft.cfg = readRules(main, draft.cfg);
+            draft.step = Number(el.dataset.n); renderSetup();
+          }
           break;
         }
         case 'load-universe': {
-          draft.fromText = main.querySelector('#sl-from').value;
-          draft.toText = main.querySelector('#sl-to').value;
-          const parsed = parseJalaliRange(draft.fromText, draft.toText);
-          if (!parsed.ok) { renderSetup(parsed.error); break; }
-          draft.from = parsed.range.from; draft.to = parsed.range.to;
-          draft.uaIns = ''; draft.expiry = 0; draft.step = 2; market = null;
+          if (!(draft.to > draft.from)) { renderSetup('تاریخ خروج باید بعد از تاریخ ورود باشد.'); break; }
+          draft.uaIns = ''; draft.expiry = 0; market = null;
           busy = 'در حال دریافت فهرست قراردادهای بازه…'; renderSetup();
-          try { await fetchUniverse(draft.from, draft.to); busy = ''; renderSetup(); }
+          try { await fetchUniverse(draft.from, draft.to); busy = ''; draft.step = 2; draft.reach = 2; renderSetup(); }
           catch (e) { busy = ''; logError('فهرست قراردادهای بازه', e); renderSetup(`فهرست قراردادها دریافت نشد: ${e.message}`); }
           break;
         }
         case 'pick-expiry':
-          draft.expiry = Number(el.dataset.expiry); draft.step = 2; market = null; renderSetup(); break;
+          draft.expiry = Number(el.dataset.expiry); draft.reach = 2; market = null; renderSetup(); break;
         case 'load-market': {
           busy = 'در حال دریافت قیمت‌های روزانهٔ پایه و همهٔ قراردادهای این سررسید…'; renderSetup();
           try {
             await loadMarket(draft);
-            draft.entry = { call: null, put: null }; draft.step = 3; busy = ''; renderSetup();
+            draft.entry = { call: null, put: null }; draft.step = 3; draft.reach = 4; busy = ''; renderSetup();
           } catch (e) { busy = ''; logError('قیمت‌های روزانهٔ استرانگل', e); renderSetup(`قیمت‌ها دریافت نشد: ${e.message}`); }
           break;
         }
@@ -1504,9 +1610,9 @@ export async function mount(root, { state } = {}) {
         case 'start': await startFromDraft(); break;
         case 'reconfig':
           draft = {
-            fromText: jalaliInput(exp.from), toText: jalaliInput(exp.to), from: exp.from, to: exp.to,
+            from: exp.from, to: exp.to,
             uaIns: exp.uaIns, uaName: exp.uaName, expiry: exp.expiry, entry: { ...exp.entry },
-            cfg: { ...exp.cfg }, step: 3, search: '', name: exp.name,
+            cfg: { ...exp.cfg }, step: 3, reach: 4, search: '', name: exp.name,
           };
           exp = null; makeCtx(); renderSaved(); renderSetup();
           break;
@@ -1522,12 +1628,14 @@ export async function mount(root, { state } = {}) {
           const run = currentRun();
           const upTo = run.done ? market.days.length - 1 : run.pending?.i;
           if (d > upTo) break;
-          view = d; choice = null; renderLab();
-          root.querySelector('.sl-day')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          // از هر جا روی یک روز زدی، کارت کامل همان روز در زیرتب خط زمان باز می‌شود.
+          view = d; choice = null;
+          if (labTab !== 'timeline' && labTab !== 'charts' && labTab !== 'decide') labTab = 'timeline';
+          renderLab();
           break;
         }
-        case 'goto-decide': root.querySelector('#sl-decide')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
-        case 'goto-report': root.querySelector('#sl-report')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); break;
+        case 'goto-decide': labTab = 'decide'; renderLab(); break;
+        case 'goto-report': labTab = 'report'; renderLab(); break;
         case 'view-prev': view = Math.max(1, (view ?? exp.cursor) - 1); choice = null; renderLab(); break;
         case 'view-next': view = (view ?? exp.cursor) + 1; choice = null; renderLab(); break;
         case 'view-pending': view = null; choice = null; renderLab(); break;
@@ -1661,7 +1769,7 @@ export async function mount(root, { state } = {}) {
         return;
       }
       if (el.id === 'sl-exp-name') { exp.name = el.value.trim() || exp.name; save(); return; }
-      if (act === 'qty-range') { setQty(el.value); return; }
+      if (act === 'qty-input') { setQty(toEn(el.value)); return; }
       if (el.dataset?.cfg) {
         if (draft && !exp) { draft.cfg = readRules(main, draft.cfg); draft.rulesOpen = true; makeCtx(); renderSetup(); }
         else if (exp) { exp.cfg = readRules(main.querySelector('#sl-rules'), exp.cfg); makeCtx(); renderLab(); }

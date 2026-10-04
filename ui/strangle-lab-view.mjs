@@ -30,7 +30,12 @@ export function money(v, { sign = false } = {}) {
 }
 
 export const tone = (v) => (!fin(v) ? 'flat' : v > 0 ? 'gain' : v < 0 ? 'loss' : 'flat');
-export const pct = (v, digits = 1) => (fin(v) ? `${faDigits(v.toFixed(digits))}٪` : '—');
+// منفی با «−» همان‌طور که پول نوشته می‌شود؛ خط‌تیرهٔ لاتین کنار رقم فارسی گم می‌شود.
+export const pct = (v, digits = 1) => {
+  if (!fin(v)) return '—';
+  const text = Math.abs(v).toFixed(digits);
+  return `${v < 0 && Number(text) !== 0 ? '−' : ''}${faDigits(text)}٪`;
+};
 export const price = (v) => (fin(v) ? fmt.num(v) : '—');
 export const strikeFa = (K) => (fin(K) ? fmt.int(K) : '—');
 
@@ -105,6 +110,7 @@ const roundFor = (unit) => (v) => (!fin(v) ? null : unit === 'money' ? Math.roun
 export function lineChart({
   id, dates, W = HALF, h = 260, series = [], bars = [], band = null, area = null, areas = [], cloud = [], refs = [], marks = [],
   notes = [], upTo = Infinity, cursor = NaN, hidden = new Set(), unit = 'money', zero = unit === 'money', label = '',
+  pctBase = NaN, pctLabel = 'سرمایه',
 }) {
   const n = dates.length;
   const clip = (arr, full) => arr.map((v, i) => (full || i <= upTo ? v : NaN));
@@ -172,6 +178,8 @@ export function lineChart({
   const cur = fin(cursor) && cursor < n ? `<line class="sl-cursor" x1="${x(cursor).toFixed(1)}" x2="${x(cursor).toFixed(1)}" y1="${PAD.t}" y2="${h - PAD.b}"/>` : '';
   const model = {
     n, W, h, lo, hi, padL: PAD.l, padR: PAD.r, padT: PAD.t, padB: PAD.b, dates,
+    // درصدِ سود و زیان در راهنمای هاور: نسبت به همین مبنا (معمولاً سرمایه).
+    pctBase: fin(pctBase) && pctBase > 0 ? pctBase : null, pctLabel,
     upTo: fin(upTo) ? upTo : n - 1,
     notes: notes.map((t, i) => (i <= upTo ? t || '' : '')),
     series: S.map((s) => ({ label: s.label, cls: s.cls, unit: s.unit || unit, v: s.vals.map(roundFor(s.unit || unit)) })),
@@ -185,12 +193,20 @@ export function lineChart({
     </svg></div>`;
 }
 
+/** نمونهٔ کوچکِ خط یا ستونِ یک سری، با همان کلاس نمودار. */
+export function keySvg(cls, bar = false) {
+  return bar
+    ? `<svg class="sl-keysvg" viewBox="0 0 26 10" aria-hidden="true"><rect class="sl-bar2 ${esc(cls)} up" x="7" y="1" width="12" height="8"/></svg>`
+    : `<svg class="sl-keysvg" viewBox="0 0 26 10" aria-hidden="true"><line class="sl-line ${esc(cls)}" x1="1" y1="5" x2="25" y2="5"/></svg>`;
+}
+
 /** تراشه‌های راهنمای نمودار: هر کدام یک سری را روشن و خاموش می‌کند. */
 export function legendChips(id, items = [], hidden = new Set()) {
   return `<div class="sl-legend sl-lgs" role="group" aria-label="سری‌های نمودار">${items.map((it) => {
     const on = !hidden.has(it.key);
+    // نمونهٔ خط همان کلاسِ خودِ سری است: رنگ، ضخامت و خط‌چین یکی‌اند.
     return `<button type="button" class="sl-lg${on ? ' on' : ''}" data-act="toggle-series" data-chart="${esc(id)}" data-key="${esc(it.key)}" aria-pressed="${on}">
-      <span class="sl-key ${esc(it.cls)}"></span>${esc(it.label)}</button>`;
+      ${keySvg(it.cls, it.bar)}${esc(it.label)}</button>`;
   }).join('')}</div>`;
 }
 

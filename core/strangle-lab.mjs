@@ -37,6 +37,7 @@ import { num, EPS } from './num.mjs';
 import { bsPrice, bsGreeks, impliedVol, intrinsic } from './bs.mjs';
 import { strategyMargin, DEFAULT_PARAMS } from './margin.mjs';
 import { normalizeHistoryDate, daysBetween } from './history.mjs';
+import { optionBreakeven, weightedMean } from './open-view.mjs';
 
 export const LAB_VERSION = 1;
 
@@ -61,7 +62,16 @@ export const LAB_DEFAULTS = Object.freeze({
   fees: true,
   modelFill: false,
   exitFallback: 'lastPriced', // lastPriced | none — روز خروج بی‌قیمت
+  entryBasis: 'close',     // قیمت فروشِ روز ورود: close | last | first | low | high | manual
+  exitBasis: 'close',      // قیمت بازخریدِ روز خروج: همان گزینه‌ها
+  manualEntryCall: 0, manualEntryPut: 0, manualExitCall: 0, manualExitPut: 0,
 });
+
+/** مبناهای قیمت ورود و خروج. صفر یعنی «نیامده» و جایگزین نمی‌شود. */
+export const PRICE_BASES = [
+  ['close', 'پایانی'], ['last', 'آخرین معامله'], ['first', 'اولین معامله'],
+  ['low', 'کمترین قیمت روز'], ['high', 'بیشترین قیمت روز'], ['manual', 'قیمت انتخابی'],
+];
 
 export const LAB_CHOICES = {
   entryMethod: [['delta', 'دلتای هدف'], ['otm', 'درصد فاصله از پایه']],
@@ -70,6 +80,8 @@ export const LAB_CHOICES = {
   unstableEarly: [['hold', 'نگه‌داشتن با هشدار'], ['close', 'بستن فوری']],
   breakevenRule: [['market', 'بستن به قیمت روز'], ['nonNeg', 'فقط اگر زیان نداشته باشد']],
   exitFallback: [['lastPriced', 'آخرین روزی که همهٔ پاها معامله شدند'], ['none', 'نتیجه نامعلوم بماند']],
+  entryBasis: PRICE_BASES,
+  exitBasis: PRICE_BASES,
 };
 
 export const SIDES = ['call', 'put'];
@@ -115,6 +127,19 @@ const byDate = (rows) => {
     const d = normalizeHistoryDate(row?.date);
     const p = dayPrice(row);
     if (d && p > 0) map.set(d, p);
+  }
+  return map;
+};
+
+/** فیلدهای خامِ همان روز — فقط آن‌هایی که واقعاً آمده‌اند. */
+const rawByDate = (rows) => {
+  const map = new Map();
+  for (const row of rows) {
+    const d = normalizeHistoryDate(row?.date);
+    if (!d) continue;
+    const q = {};
+    for (const k of ['close', 'last', 'first', 'low', 'high', 'value', 'vol']) if (num(row[k], 0) > 0) q[k] = num(row[k], 0);
+    map.set(d, q);
   }
   return map;
 };
@@ -199,17 +224,25 @@ export function buildLabMarket({ rows = [], dailies = {}, uaIns, expiry, from, t
   const end = Math.min(normalizeHistoryDate(to) || Infinity, want || Infinity);
   const uaPrices = byDate(seriesOf(dailies, ua));
   const legPrices = { call: new Map(), put: new Map() };
+  const legRaw = { call: new Map(), put: new Map() };
   for (const s of strikes) {
-    for (const side of SIDES) if (s[side]) legPrices[side].set(s.strike, byDate(seriesOf(dailies, s[side].ins)));
+    for (const side of SIDES) {
+      if (!s[side]) continue;
+      const rowsOf = seriesOf(dailies, s[side].ins);
+      legPrices[side].set(s.strike, byDate(rowsOf));
+      legRaw[side].set(s.strike, rawByDate(rowsOf));
+    }
   }
   const days = [];
   for (const date of [...uaPrices.keys()].sort((a, b) => a - b)) {
     if (date < start || date > end) continue;
-    const day = { date, S: uaPrices.get(date), dte: daysBetween(date, want), call: {}, put: {} };
+    const day = { date, S: uaPrices.get(date), dte: daysBetween(date, want), call: {}, put: {}, raw: { call: {}, put: {} } };
     for (const side of SIDES) {
       for (const [K, series] of legPrices[side]) {
         const p = series.get(date);
         if (p > 0) day[side][K] = p;
+        const q = legRaw[side].get(K)?.get(date);
+        if (q && Object.keys(q).length) day.raw[side][K] = q;
       }
     }
     days.push(day);
@@ -271,6 +304,50 @@ export function priceAt(ctx, i, side, K) {
     return fin(price) ? { price, src: 'model', from: ctx.market.days[j].date, iv } : null;
   }
   return null;
+}
+
+/**
+ * قیمت معاملهٔ ورود یا خروج با مبنای انتخابی.
+ *
+ * پایانی همان `priceAt` است. «آخرین»، «اولین»، «کمترین» و «بیشترین» فقط
+ * از فیلدِ واقعیِ همان روز می‌آیند؛ اگر نیامده، `null` — هیچ مبنایی بی‌صدا
+ * جای مبنای دیگر نمی‌نشیند. «انتخابی» عددی است که کاربر نوشته. روز
+ * سررسید، بی قیمت، ارزش ذاتی است.
+ */
+export function tradePrice(ctx, i, side, K, basis = 'close', manual = 0) {
+  if (!basis || basis === 'close') return priceAt(ctx, i, side, K);
+  if (basis === 'manual') return num(manual, 0) > 0 ? { price: num(manual, 0), src: 'manual', from: ctx.market.days[i]?.date } : null;
+  const day = ctx.market.days[i];
+  const v = day?.raw?.[side]?.[K]?.[basis];
+  if (v > 0) return { price: v, src: basis, from: day.date };
+  if (day && day.dte <= 0) return { price: intrinsic(side, day.S, K), src: 'intrinsic', from: day.date };
+  return null;
+}
+
+export const BASIS_FA = Object.fromEntries(PRICE_BASES);
+
+/**
+ * سربه‌سر وزنی کال و پوتِ یک روز — همان منطق «رصد لحظه‌ای»
+ * (`optionBreakeven` و `weightedMean` از `core/open-view.mjs`):
+ *   سربه‌سر کال = قیمت اعمال + پرمیوم   ،   سربه‌سر پوت = قیمت اعمال − پرمیوم
+ * و میانگین آن‌ها با وزن ارزش معاملاتِ همان روزِ هر قرارداد. قراردادی که
+ * آن روز معامله نشده (ارزش صفر) وزنی ندارد.
+ */
+export function weightedBreakevens(ctx, i) {
+  const day = ctx.market.days[i];
+  const out = {};
+  for (const side of SIDES) {
+    const rows = [];
+    for (const s of ctx.market.strikes) {
+      const q = day?.raw?.[side]?.[s.strike];
+      const premium = q?.close || q?.last;
+      if (!q?.value || !(premium > 0)) continue;
+      rows.push({ value: optionBreakeven(side, s.strike, premium), weight: q.value });
+    }
+    const m = weightedMean(rows);
+    out[side] = { value: m.value, weight: m.weight, count: m.count };
+  }
+  return out;
 }
 
 /** دلتای یک پا در روز `i` — از IVِ همان روز، یا IVِ مدل اگر مجاز باشد. */
@@ -368,8 +445,12 @@ export function openPosition(ctx, cfg, entry, i = 0, fees = {}) {
   for (const side of SIDES) {
     const K = num(entry?.[side], NaN);
     if (!fin(K)) return { error: `قیمت اعمال ${SIDE_FA[side]} انتخاب نشده.` };
-    const q = priceAt(ctx, i, side, K);
-    if (!q) return { error: `قیمت ${SIDE_FA[side]} ${K} در روز ورود نیست.` };
+    const manual = side === 'call' ? cfg.manualEntryCall : cfg.manualEntryPut;
+    const q = tradePrice(ctx, i, side, K, cfg.entryBasis, manual);
+    if (!q) {
+      return { error: cfg.entryBasis === 'manual' ? `قیمت انتخابی ${SIDE_FA[side]} وارد نشده.`
+        : `«${BASIS_FA[cfg.entryBasis] || 'پایانی'}» ${SIDE_FA[side]} ${K} در روز ورود نیامده.` };
+    }
     legs[side] = { strike: K, open: q.price, openDay: i, src: q.src };
   }
   if (legs.call.strike < legs.put.strike) return { error: 'قیمت اعمال کال نباید زیر پوت باشد.' };
@@ -668,13 +749,27 @@ export function applyAction(ctx, cfg, state, i, action, ev, fees = {}, reason = 
  * `exitEarly` است تا رابط بگوید چرا روز بستن با روز خروج یکی نیست.
  */
 export function settleLast(ctx, cfg, state, last, ev, fees = {}) {
-  const res = applyAction(ctx, cfg, state, last, { kind: 'close' }, ev, fees, ev.rec.why);
+  // قیمت بازخرید روز خروج با مبنای خروج؛ پای بی‌قیمت `null` می‌ماند تا
+  // `applyAction` خطا بدهد و قاعدهٔ «آخرین روزِ قیمت‌دار» برسد.
+  const withExit = (e, i) => {
+    if (!cfg.exitBasis || cfg.exitBasis === 'close') return e;
+    const marks = { ...e.marks };
+    for (const sd of SIDES) {
+      const leg = state.legs[sd];
+      if (!leg) continue;
+      marks[sd] = tradePrice(ctx, i, sd, leg.strike, cfg.exitBasis, sd === 'call' ? cfg.manualExitCall : cfg.manualExitPut);
+    }
+    return { ...e, marks };
+  };
+  const exitEv = withExit(ev, last);
+  const blank = SIDES.some((sd) => state.legs[sd] && !exitEv.marks[sd]);
+  const res = blank ? { state } : applyAction(ctx, cfg, state, last, { kind: 'close' }, exitEv, fees, ev.rec.why);
   if (res.state.closed) return { state: res.state, at: last, action: res.action };
   if (cfg.exitFallback === 'lastPriced') {
     const from = Math.max(...SIDES.map((sd) => state.legs[sd]?.openDay ?? 0));
     for (let j = last - 1; j > from; j -= 1) {
-      const evj = evaluateDay(ctx, cfg, state, j);
-      if (evj.missing.length) continue;
+      const evj = withExit(evaluateDay(ctx, cfg, state, j), j);
+      if (SIDES.some((sd) => state.legs[sd] && !evj.marks[sd])) continue;
       const r = applyAction(ctx, cfg, state, j, { kind: 'close' }, evj, fees, 'exitEarly');
       if (r.state.closed) return { state: r.state, at: j, action: r.action, early: true };
     }
