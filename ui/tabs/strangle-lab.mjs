@@ -33,6 +33,7 @@ import {
 import { todayCompact, daysBefore, buildLine, calendarDays } from '/core/history-range.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { helpIcon } from '/ui/strangle-lab-help.mjs';
+import { downloadStrangleExcel } from '/ui/strangle-lab-export.mjs';
 import { historyDateLabel, daysBetween, normalizeHistoryDate } from '/core/history.mjs';
 import { defaults, feesOf, marginParamsOf } from '/core/settings.mjs';
 import { dailiesFor } from '/ui/strategy-history.mjs';
@@ -851,7 +852,8 @@ export async function mount(root, { state } = {}) {
         <td>${s.state.legs?.call && !s.state.closed ? strikeFa(s.state.legs.call.strike) : '—'} / ${s.state.legs?.put && !s.state.closed ? strikeFa(s.state.legs.put.strike) : '—'}</td>
       </tr>`;
     }).join('');
-    return `<section class="card sl-journal"><div class="section-head"><div><p class="eyebrow">دفتر روزانه</p><h3>📒 ${faDigits(String(run.steps.length))} روز — قیمت، تغییر، اثر هر پا و اقدام ${helpIcon('journal')}</h3></div></div>
+    return `<section class="card sl-journal"><div class="section-head"><div><p class="eyebrow">دفتر روزانه</p><h3>📒 ${faDigits(String(run.steps.length))} روز — قیمت، تغییر، اثر هر پا و اقدام ${helpIcon('journal')}</h3></div>
+        <button type="button" class="btn" data-act="excel">⬇ خروجی اکسل کامل ${helpIcon('excel')}</button></div>
       <div class="history-table-wrap sl-journal-wrap"><table class="sl-journal-table">
         <thead><tr><th>روز</th><th>پایه (تغییر)</th><th>کال (تغییر)</th><th>پوت (تغییر)</th><th>اثر انباشتهٔ کال (امروز)</th><th>اثر انباشتهٔ پوت (امروز)</th><th>سود و زیان کل</th><th>زیان شناور</th><th>اقدام</th><th>کال / پوت پس از اقدام</th></tr></thead>
         <tbody>${rows}</tbody></table></div></section>`;
@@ -1376,6 +1378,7 @@ export async function mount(root, { state } = {}) {
         <span class="sl-strip-day">روز ${faDigits(String(dayNo))} از ${faDigits(String(n - 1))}<small>${esc(shortDateFa(market.days[Math.min(dayNo, n - 1)].date))}</small></span>
         ${qtyHtml(cfg.qty)}
         <span class="sp"></span>
+        <button type="button" class="ghost sl-mini" data-act="excel" title="خروجی اکسل روزبه‌روز: قیمت‌ها، اثر هر پا، تصمیم‌ها، گزینه‌های هر روز، پاها و کارنامه">⬇ اکسل</button>
         <button type="button" class="ghost sl-mini" data-act="save-branch" title="نسخهٔ فعلی تصمیم‌ها را برای مقایسه نگه دار">🗂 شاخه</button>
         <button type="button" class="ghost sl-mini" data-act="reconfig">تنظیم دوباره</button>
         <button type="button" class="ghost sl-mini" data-act="restart" title="همهٔ تصمیم‌ها پاک می‌شود؛ مسیر فعلی شاخه می‌شود">↺ از نو</button>
@@ -1566,6 +1569,22 @@ export async function mount(root, { state } = {}) {
         }
         case 'qty-step': setQty(cfgOf().qty + Number(el.dataset.d)); break;
         case 'lab-tab': labTab = el.dataset.tab; renderLab(); break;
+        case 'excel': {
+          const run = currentRun();
+          const s = settings();
+          const cap = capitalOf();
+          el.disabled = true;
+          const label = el.textContent;
+          el.textContent = '⏳ در حال ساخت…';
+          try {
+            await downloadStrangleExcel({
+              ctx, cfg: cfgOf(), exp, run, fees: fees(), params: mparams(), capital: cap.capital, margin: cap.margin,
+              grade: run.done && fin(run.final) ? gradeOfRun() : null,
+              settingsInfo: { rFree: s.rFree, feeOption: cfgOf().fees ? s.feeOption : 0, feeExercise: cfgOf().fees ? s.feeExercise : 0 },
+            });
+          } finally { el.disabled = false; el.textContent = label; }
+          break;
+        }
         case 'goto-step': {
           if (draft && Number(el.dataset.n) <= draft.reach) {
             if (draft.step >= 3) draft.cfg = readRules(main, draft.cfg);

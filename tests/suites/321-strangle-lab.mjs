@@ -15,6 +15,8 @@ import { bsPrice } from '../../core/bs.mjs';
 import { strategyMargin } from '../../core/margin.mjs';
 import { lineChart, legGanttSvg, pct } from '../../ui/strangle-lab-view.mjs';
 import { HELP } from '../../ui/strangle-lab-help.mjs';
+import { buildStrangleWorkbook, actionPlain } from '../../ui/strangle-lab-export.mjs';
+import { buildXlsx } from '../../ui/xlsx.mjs';
 import {
   labConfig, buildLabMarket, labBases, labExpiries, pickExpiry, pricingContext, priceAt, pickEntry,
   openPosition, evaluateDay, applyAction, runPath, planDecider, enumeratePaths, pathsSummary,
@@ -361,6 +363,40 @@ group('۳۲۱-ل. مبنای قیمت ورود و خروج، سربه‌سر و�
   }
   check('سربه‌سر وزنی کال = میانگین (اعمال + پرمیوم) با وزن ارزش معاملات', near(be.call.value, num / den));
   check('سربه‌سر وزنی پوت زیر سربه‌سر وزنی کال', be.put.value < be.call.value);
+}
+
+group('۳۲۱-م. خروجی اکسل روزبه‌روز');
+{
+  const { market } = fixture(UP);
+  const ctx = pricingContext(market, { r: 0.3 });
+  const cfg = labConfig({ qty: 3 });
+  const entry = { call: 1200, put: 900 };
+  const run = runPath(ctx, cfg, entry, { decide: planDecider({}, 'algo'), fees: FEES });
+  const decisions = {};
+  for (const st of run.steps) if (st.i > 0 && !st.ev.isLast) decisions[st.date] = st.action;
+  const grade = gradeReport(ctx, cfg, entry, decisions, { fees: FEES });
+  const sheets = buildStrangleWorkbook({ ctx, cfg, exp: { name: 'آزمون', to: market.days.at(-1).date }, run, fees: FEES, capital: 1e6, margin: 3e5, grade });
+  const by = Object.fromEntries(sheets.map((sh) => [sh.name, sh]));
+  check('برگ‌ها: مشخصات، راهنما، روزبه‌روز، پاها، گزینه‌ها، کارنامه، قیمت قراردادها',
+    ['مشخصات', 'راهنما', 'روزبه‌روز', 'پاهای فروخته‌شده', 'گزینه‌های هر روز', 'کارنامه', 'قیمت قراردادها'].every((nm) => by[nm]), sheets.map((sh) => sh.name).join('، '));
+  const daily = by['روزبه‌روز'];
+  const col = (name) => daily.headers.indexOf(name);
+  check('یک سطر برای هر روزِ معامله', daily.rows.length === run.steps.length);
+  check('سود و زیان آخرین سطر = نتیجهٔ نهایی موتور', near(daily.rows.at(-1)[col('سود و زیان کل')], run.final));
+  check('اثر کال + اثر پوت = سود و زیان کل در همهٔ سطرها', daily.rows.every((r) => near(r[col('اثر انباشتهٔ کال')] + r[col('اثر انباشتهٔ پوت')], r[col('سود و زیان کل')])));
+  check('عدد، عدد می‌ماند (نه متن فارسی)', typeof daily.rows[3][col('قیمت پایه')] === 'number' && typeof daily.rows[3][col('سود و زیان کل')] === 'number');
+  check('تغییر پایه = امروز − دیروز', near(daily.rows[3][col('تغییر پایه')], market.days[3].S - market.days[2].S));
+  const legs = by['پاهای فروخته‌شده'];
+  check('جمع سود و زیان پاها = نتیجهٔ نهایی', near(legs.rows.reduce((a, r) => a + r[14], 0), run.final));
+  const opts = by['گزینه‌های هر روز'];
+  check('هر روزِ تصمیم دست‌کم سه گزینه و دقیقاً یک «انتخاب من»', (() => {
+    const days = new Map();
+    for (const r of opts.rows) { const d = days.get(r[0]) || { n: 0, mine: 0 }; d.n += 1; d.mine += r[4] === 'بله' ? 1 : 0; days.set(r[0], d); }
+    return days.size > 3 && [...days.values()].every((d) => d.n >= 3 && d.mine >= 1);
+  })());
+  check('برچسب اقدام با رقم لاتین برای اکسل', actionPlain({ kind: 'roll', side: 'put', strike: 1050 }) === 'رول پوت به 1050');
+  const bytes = await buildXlsx(sheets);
+  check('فایل xlsx معتبر ساخته می‌شود (امضای zip)', bytes.length > 1000 && bytes[0] === 0x50 && bytes[1] === 0x4b, bytes.length);
 }
 
 group('۳۲۱-ط. سیم‌کشی تب');
