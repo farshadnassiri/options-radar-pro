@@ -202,11 +202,41 @@ export async function runScanAll({ uaKeys, settings, qty, limit = 50 }) {
 
 /**
  * اسکنر آپشن — ترکیب آزاد روی زنجیرهٔ ریسه. `uaKeys` خالی یعنی کل بازار.
- * تلاطم تاریخی برای احتمال سود از همان کش `sigmas` می‌آید؛ نیامده، موتور
- * تلاطم ضمنی نزدیک‌به‌پول را جایگزین می‌کند و می‌گوید.
+ *
+ * شرط اجرای `book` (پیش‌فرض) دو گذر دارد: گذر اول روی سرخط دیده‌بان
+ * نامزدها را پیدا می‌کند؛ سپس دفتر سفارش پنج‌سطحی و وضعیت نماد همهٔ پاهای
+ * نامزدها و سهم پایه‌شان از `/api/books` و `/api/infos` گرفته و روی زنجیرهٔ
+ * ریسه نشانده می‌شود؛ گذر دوم فقط ترکیب‌هایی را نگه می‌دارد که همهٔ پاهایشان
+ * دفتر زنده و «مجاز» دارند. `onStage('one' | 'book' | 'two', …)` پیشرفت را
+ * می‌گوید.
  */
-export async function runComboScan({ uaKeys = [], settings, scanner }) {
+export async function runComboScan({ uaKeys = [], settings, scanner, onStage = null, codeCap = 300 }) {
   const keys = uaKeys.length ? uaKeys : chainState.list.map((u) => String(u.ins));
   const { sigma, source } = await sigmas(keys, settings);
-  return ask({ type: 'combo-scan', uaKeys: keys, settings, scanner, sigmaByUa: sigma, sigmaSourceByUa: source });
+  const base = { type: 'combo-scan', uaKeys: keys, settings, sigmaByUa: sigma, sigmaSourceByUa: source };
+  if (scanner?.execRule !== 'book') return ask({ ...base, scanner });
+  const one = await ask({ ...base, scanner: { ...scanner, execRule: 'watch', minSets: 1, limit: 400 } });
+  if (one.error) return one;
+  onStage?.('one', one);
+  const codes = [];
+  const add = (c) => { if (c && !codes.includes(String(c)) && codes.length < codeCap) codes.push(String(c)); };
+  for (const g of one.groups || []) {
+    for (const r of [g.best, ...(g.variants || [])]) {
+      for (const l of r.legsCard || []) add(l.ins);
+    }
+  }
+  if (!codes.length) return { ...one, groups: [], totalGroups: 0, totalCombos: 0, bookFetch: { asked: 0, note: 'گذر اول نامزدی نداشت' } };
+  onStage?.('book', { asked: codes.length });
+  let note = '';
+  try {
+    const quotes = await fetchQuotes(codes);
+    const data = {};
+    for (const ins of codes) data[ins] = { ...(quotes.infos.byIns[ins] || {}), ...(quotes.books.byIns[ins] || {}) };
+    await ask({ type: 'overlay', data, at: Date.now() });
+    note = quoteWarning(quotes.summary) || '';
+  } catch (e) {
+    return { ...one, groups: [], totalGroups: 0, totalCombos: 0, error: `دفتر سفارش دریافت نشد: ${e.message}` };
+  }
+  const two = await ask({ ...base, scanner });
+  return { ...two, bookFetch: { asked: codes.length, note }, firstPass: { groups: one.totalGroups, combos: one.totalCombos } };
 }

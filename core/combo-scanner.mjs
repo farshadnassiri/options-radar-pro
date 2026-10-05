@@ -49,7 +49,15 @@ export const SCANNER_DEFAULTS = Object.freeze({
   strikeWindow: 8,        // نزدیک‌ترین قیمت‌های اعمال به پایه، در هر سررسید
   allowStock: true,
   sort: 'return',         // return | pop
-  limit: 60,              // شمار گروه‌های برگشتی
+  limit: 300,             // شمار گروه‌های برگشتی (فیلتر نتیجه‌ها روی همین‌ها)
+  // شرط اجرا (درخواست صاحب پروژه، دور دوم): «بر اساس اردر بوک و شرایط
+  // لحظه‌ای بازار… اگر نمی‌شود سهم یا کال یا پوت را خرید پیشنهاد نده.»
+  //   book   فقط با دفتر سفارش زندهٔ پنج‌سطحی و وضعیت «مجاز» همهٔ پاها،
+  //          حتی سهم پایه؛ دفتری که از `bookMaxAgeSec` کهنه‌تر است قبول نیست
+  //   watch  سرخط دیده‌بان (سطح اول)؛ سریع‌تر، سهم پایه با آخرین قیمت
+  execRule: 'book',
+  bookMaxAgeSec: 90,
+  minSets: 1,             // کمترین ستی که دفتر همین لحظه جا دارد
   maxBuilt: 600000,       // سقف ترکیب ساخته‌شده در یک اسکن
   maxEval: 2500,          // سقف ترکیبی که به ارزیابی کامل می‌رسد
 });
@@ -61,6 +69,11 @@ export const VIEW_FA = Object.fromEntries(SCANNER_VIEWS);
 
 export const SCANNER_SORTS = [['return', 'بازده بیشتر'], ['pop', 'احتمال سود بیشتر']];
 
+export const EXEC_RULES = [
+  ['book', 'فقط شدنی با دفتر سفارش زنده'],
+  ['watch', 'سرخط دیده‌بان (سریع‌تر، سهم با آخرین قیمت)'],
+];
+
 export function scannerConfig(input = {}) {
   const c = { ...SCANNER_DEFAULTS, ...(input || {}) };
   for (const [k, def] of Object.entries(SCANNER_DEFAULTS)) {
@@ -69,6 +82,8 @@ export function scannerConfig(input = {}) {
   }
   if (!SCANNER_VIEWS.some(([id]) => id === c.view)) c.view = 'all';
   if (!SCANNER_SORTS.some(([id]) => id === c.sort)) c.sort = 'return';
+  if (!EXEC_RULES.some(([id]) => id === c.execRule)) c.execRule = 'book';
+  c.minSets = Math.max(1, Math.round(c.minSets));
   c.maxLegs = c.maxLegs >= 3 ? 3 : 2;
   c.maxRatio = Math.max(1, Math.min(4, Math.round(c.maxRatio)));
   c.strikeWindow = Math.max(2, Math.min(16, Math.round(c.strikeWindow)));
@@ -79,6 +94,7 @@ export function scannerConfig(input = {}) {
 export const emptyScanFunnel = () => ({
   expiries: 0, pool: 0, built: 0, unlimited: 0, overLoss: 0, noProfit: 0,
   quickPop: 0, evaluated: 0, unexecutable: 0, filtered: 0, kept: 0, truncated: false, evalCapped: 0,
+  noBook: 0, notTradable: 0, stockNoBook: 0,
 });
 
 // ═════════════════════════ نسبت‌ها ═════════════════════════
@@ -102,24 +118,56 @@ export function primitiveRatios(k, max) {
  * پاهای مجاز یک سررسید. هر عضو یک «قرارداد و سمت» است با قیمت سرخطِ همان
  * سمت؛ قراردادی که سرخطِ آن سمت را ندارد، آن سمت را نمی‌سازد.
  */
-export function legPool(ua, ex, cfg, contractSizeDeclared) {
+/**
+ * دفتر سفارشِ زنده و قابل اعتماد؟ در شرط `book`: دفتر پنج‌سطحی از
+ * `/api/books` آمده (`book` و `bookAt` را روکش ریسه می‌نشاند)، کهنه‌تر از
+ * سقف نیست، و وضعیت نماد «مجاز» است (`A…`). وضعیتِ نیامده یعنی نمی‌دانیم،
+ * و در این شرط «نمی‌دانیم» پیشنهاد نمی‌شود.
+ */
+export function liveBook(q, cfg, now) {
+  if (!q || !Array.isArray(q.book) || !q.book.length) return { ok: false, why: 'noBook' };
+  if (!(num(q.bookAt) > 0) || now - num(q.bookAt) > cfg.bookMaxAgeSec * 1000) return { ok: false, why: 'noBook' };
+  if (!String(q.state || '').toUpperCase().startsWith('A')) return { ok: false, why: 'notTradable' };
+  return { ok: true };
+}
+
+/** سرخطِ یک سمت: از دفتر زنده اگر هست، وگرنه سطح اول دیده‌بان. */
+const topOf = (q, side) => {
+  const lvl = Array.isArray(q.book) && q.book.length ? q.book[0] : q;
+  return side === 'buy' ? { price: num(lvl.ask), qty: num(lvl.askQty) } : { price: num(lvl.bid), qty: num(lvl.bidQty) };
+};
+
+export function legPool(ua, ex, cfg, contractSizeDeclared, now = Date.now(), funnel = null) {
   const spot = num(ua.last || ua.close);
   const rows = [...ex.strikeList].sort((a, b) => Math.abs(a.strike - spot) - Math.abs(b.strike - spot))
     .slice(0, cfg.strikeWindow).sort((a, b) => a.strike - b.strike);
+  const strict = cfg.execRule === 'book';
   const pool = [];
   for (const row of rows) {
     const sz = legContractSize(row.size, contractSizeDeclared);
     for (const kind of ['call', 'put']) {
       const q = row[kind];
       if (!q || !q.ins) continue;
-      if (num(q.ask) > 0 && num(q.askQty) > 0) pool.push({ kind, side: 'buy', strike: row.strike, price: num(q.ask), quote: q, size: sz.size, sizeAssumed: sz.assumed, ins: String(q.ins), name: q.name, rowSize: row.size });
-      if (num(q.bid) > 0 && num(q.bidQty) > 0) pool.push({ kind, side: 'sell', strike: row.strike, price: num(q.bid), quote: q, size: sz.size, sizeAssumed: sz.assumed, ins: String(q.ins), name: q.name, rowSize: row.size });
+      if (strict) {
+        const lb = liveBook(q, cfg, now);
+        if (!lb.ok) { if (funnel) funnel[lb.why] += 1; continue; }
+      }
+      for (const side of ['buy', 'sell']) {
+        const top = topOf(q, side);
+        if (top.price > 0 && top.qty > 0) pool.push({ kind, side, strike: row.strike, price: top.price, quote: q, size: sz.size, sizeAssumed: sz.assumed, ins: String(q.ins), name: q.name, rowSize: row.size });
+      }
     }
   }
   if (cfg.allowStock) {
     const uq = underlyingQuote(ua);
-    // فروش استقراضی سهم در بازار ما نیست؛ فقط خرید.
-    if (num(uq.ask) > 0) pool.push({ kind: 'underlying', side: 'buy', strike: 0, price: num(uq.ask), quote: uq, size: 0, ins: String(ua.ins), name: ua.name });
+    // فروش استقراضی سهم در بازار ما نیست؛ فقط خرید. در شرط `book` سهم هم
+    // باید عرضهٔ واقعی در دفتر زنده داشته باشد، نه «آخرین قیمت».
+    const lb = strict ? liveBook({ ...uq, bookAt: ua.bookAt }, cfg, now) : { ok: true };
+    const top = topOf(uq, 'buy');
+    if (!lb.ok) { if (funnel) funnel.stockNoBook += 1; }
+    else if (top.price > 0 && (!strict || top.qty > 0)) {
+      pool.push({ kind: 'underlying', side: 'buy', strike: 0, price: top.price, quote: { ...uq, bookAt: ua.bookAt }, size: 0, ins: String(ua.ins), name: ua.name });
+    }
   }
   return pool;
 }
@@ -279,6 +327,120 @@ export function liquidityScore(row, legs) {
   return { score: parts.filter(([, ok]) => ok).length, of: 4, parts: parts.map(([label, ok]) => ({ label, ok })) };
 }
 
+// ═════════════════════════ منحنی، سناریو، پلکان اجرا ═════════════════════════
+
+/**
+ * منحنی سود و زیان سررسید به شکل تکه‌های خطیِ همان موتور (`analyzePayoff`):
+ * `[{ lo, hi, a, b }]` که در هر تکه سود و زیان = a × S + b. دقیق است — کارمزد
+ * اعمال هم شکستگی‌اش را دارد — و کلون‌پذیر، پس از ریسه به رابط می‌رسد.
+ */
+export function payoffCurve(payoff) {
+  const segs = (payoff?.segments || []).map((g) => ({ lo: num(g.lo), hi: g.hi, a: num(g.a), b: num(g.b) }));
+  return { segs };
+}
+
+/** سود و زیان سررسید در قیمت S از روی منحنی. */
+export function curveAt(curve, S) {
+  const segs = curve?.segs || [];
+  const g = segs.find((x) => S >= x.lo - EPS && (S < x.hi || !Number.isFinite(x.hi))) || segs[segs.length - 1];
+  return g ? g.a * S + g.b : NaN;
+}
+
+/**
+ * سود و زیان، بازه‌به‌بازه — برای جمله‌های شرطی و خط‌کش سناریو.
+ *
+ * هر تکهٔ منحنی در ریشه‌اش شکسته می‌شود تا هر بازه یک علامت داشته باشد.
+ * خروجی از پایین به بالا: `{ lo, hi, loPct, hiPct, sign, pnlLo, pnlHi,
+ * trend, open }`؛ `trend` تخت/رو به بالا/رو به پایین، `open` یعنی بازهٔ
+ * آخرِ بی‌سقف. بازه‌های هم‌علامت و هم‌روند پیاپی یکی می‌شوند.
+ */
+export function payoffScenarios(curve, spot) {
+  const pieces = [];
+  for (const g of curve?.segs || []) {
+    const hiF = Number.isFinite(g.hi) ? g.hi : Infinity;
+    const cuts = [g.lo];
+    if (Math.abs(g.a) > EPS) {
+      const root = -g.b / g.a;
+      if (root > g.lo + EPS && root < hiF - EPS) cuts.push(root);
+    }
+    cuts.push(hiF);
+    for (let i = 0; i < cuts.length - 1; i += 1) {
+      const lo = cuts[i], hi = cuts[i + 1];
+      const mid = Number.isFinite(hi) ? (lo + hi) / 2 : lo + Math.max(lo, 1);
+      const v = g.a * mid + g.b;
+      const sign = Math.abs(v) < 1 ? 'zero' : v > 0 ? 'profit' : 'loss';
+      const trend = Math.abs(g.a) < 1e-9 ? 'flat' : g.a > 0 ? 'up' : 'down';
+      pieces.push({ lo, hi, sign, trend, pnlLo: g.a * lo + g.b, pnlHi: Number.isFinite(hi) ? g.a * hi + g.b : (trend === 'flat' ? g.b : g.a > 0 ? Infinity : -Infinity) });
+    }
+  }
+  const out = [];
+  for (const p of pieces) {
+    const last = out[out.length - 1];
+    if (last && last.sign === p.sign && last.trend === p.trend) { last.hi = p.hi; last.pnlHi = p.pnlHi; continue; }
+    out.push({ ...p });
+  }
+  const pct = (x) => (spot > 0 && Number.isFinite(x) ? ((x - spot) / spot) * 100 : x === Infinity ? Infinity : NaN);
+  return out.map((p) => ({ ...p, loPct: pct(p.lo), hiPct: pct(p.hi), open: !Number.isFinite(p.hi) }));
+}
+
+/**
+ * نقاط شکستِ حجم در دفتر سفارش: شمار ستی که با پر شدن هر سطحِ هر پا
+ * ممکن می‌شود. یک «ست» یعنی همهٔ پاها با نسبت خودشان یک بار (مثلاً فروش
+ * ۲ قرارداد + خرید ۳ قرارداد). پای سهمِ بی‌دفتر سنجیده نمی‌شود.
+ */
+export function ladderPoints(legs = [], quotes = [], maxSets = Infinity) {
+  const pts = new Set([1]);
+  legs.forEach((l, i) => {
+    const q = quotes[i] || {};
+    if (l.kind === 'underlying' && q.assumedDepth) return;
+    const per = l.kind === 'underlying' ? num(l.ratio, 1) * num(l.size, 0) : num(l.ratio, 1);
+    if (!(per > 0)) return;
+    const levels = Array.isArray(q.book) && q.book.length ? q.book : [q];
+    let cum = 0;
+    for (const lvl of levels) {
+      const price = l.side === 'buy' ? num(lvl.ask) : num(lvl.bid);
+      const qty = l.side === 'buy' ? num(lvl.askQty) : num(lvl.bidQty);
+      if (!(price > 0) || !(qty > 0)) break;
+      cum += qty;
+      const n = Math.floor(cum / per);
+      if (n >= 1) pts.add(n);
+    }
+  });
+  const max = Number.isFinite(maxSets) && maxSets >= 1 ? Math.floor(maxSets) : Math.max(...pts);
+  pts.add(max);
+  return [...pts].filter((n) => n >= 1 && n <= max).sort((a, b) => a - b);
+}
+
+/**
+ * پلکان اجرا: با هر حجمِ شکستِ دفتر، همان ترکیب دوباره با `evaluate` و
+ * همان حجم سنجیده می‌شود — قیمت هر پا میانگینِ پیمایش سطح‌های دفتر است.
+ * پس معلوم است «با چند ست چه بازده‌ای»؛ گاهی فقط سطح‌های اول بازده خوب
+ * می‌دهند و این همان را می‌گوید.
+ */
+export function executionLadder({ legs = [], quotes = [], ctx = {}, settings = {}, maxSets = Infinity, monthDays = 30, cap = 7 } = {}) {
+  let pts = ladderPoints(legs, quotes, maxSets);
+  if (pts.length > cap) {
+    const keep = new Set([pts[0], pts[pts.length - 1]]);
+    for (let k = 1; k < cap - 1; k += 1) keep.add(pts[Math.round((k * (pts.length - 1)) / (cap - 1))]);
+    pts = [...keep].sort((a, b) => a - b);
+  }
+  const out = [];
+  for (const n of pts) {
+    let r;
+    try { r = evaluate({ legs, quotes, ctx: { ...ctx, qty: n, settings: { ...settings, qtyDefault: n } } }); } catch { continue; }
+    if (!r.executable) break;
+    const optContracts = legs.filter((l) => l.kind !== 'underlying').reduce((a, l) => a + num(l.ratio, 1) * n, 0);
+    out.push({
+      n, contracts: optContracts,
+      retStaticMonthPct: Number.isFinite(r.retStaticPct) ? (r.retStaticPct * monthDays) / Math.max(1, num(ctx.days, 1)) : NaN,
+      popPct: r.popPct, netCash: r.netCash, capital: r.capital, maxLoss: r.maxLoss, maxProfit: r.maxProfit,
+      entryFee: r.entryFee, staticPnl: r.staticPnl, short: (r.dataFlags || []).includes('عمق ناکافی'),
+      legPrices: (r.legPrices || []).map((l) => l.price),
+    });
+  }
+  return out;
+}
+
 // ═════════════════════════ اسکن ═════════════════════════
 
 /** همهٔ ترکیب‌های یک سررسید، به شکل آرایهٔ پاهای قیمت‌خورده. */
@@ -305,7 +467,7 @@ const legKey = (l) => `${l.side === 'buy' ? '+' : '-'}${l.ins}`;
  * اسکن کامل. خروجی گروه‌هاست: هر گروه یک مجموعهٔ قرارداد و سمت (مستقل از
  * نسبت)، با بهترین نسبت به‌عنوان کارت و بقیه به‌عنوان «نسبت‌های دیگر».
  */
-export function comboScan({ chain, uaKeys = [], settings, scanner = {}, sigmaByUa = {}, sigmaSourceByUa = {} }) {
+export function comboScan({ chain, uaKeys = [], settings, scanner = {}, sigmaByUa = {}, sigmaSourceByUa = {}, now = Date.now() }) {
   const t0 = Date.now();
   const cfg = scannerConfig(scanner);
   // قیمت سرخطِ قابل اجرا، همیشه — تنظیم مبنای قیمت کاربر اینجا معنی ندارد.
@@ -329,7 +491,7 @@ export function comboScan({ chain, uaKeys = [], settings, scanner = {}, sigmaByU
     for (const ex of ua.expiryList || []) {
       if (ex.days < cfg.minDays || ex.days > cfg.maxDays || expiryBlocked(blocked, ua.ins, ex.endDate)) continue;
       funnel.expiries += 1;
-      const pool = legPool(ua, ex, cfg, s.contractSize);
+      const pool = legPool(ua, ex, cfg, s.contractSize, now, funnel);
       funnel.pool += pool.length;
       const hist = num(sigmaByUa[key], NaN);
       const sigma = hist > 0 ? hist : s.volSource === 'MANUAL' ? num(s.volManual, NaN)
@@ -361,19 +523,19 @@ export function comboScan({ chain, uaKeys = [], settings, scanner = {}, sigmaByU
   for (const c of cands.slice(0, cfg.maxEval)) {
     const { key, ua, ex, spot, legs, combo, quick } = c;
     const kind = classifyCombo(legs);
+    const evLegs = legs.map((l) => ({ kind: l.kind, side: l.side, ratio: l.ratio, strike: l.strike, size: l.size, sizeAssumed: l.sizeAssumed, days: ex.days, endDate: ex.endDate, ins: l.ins, name: l.name, price: undefined }));
+    const quotes = legs.map((l) => l.quote);
+    // همان زمینه برای پلکان اجرا (`executionLadder`) نگه داشته می‌شود؛ ساده و کلون‌پذیر.
+    const ctx = {
+      S: spot, Sclose: num(ua.close || ua.last), days: ex.days, size: combo.size, sizeMixed: combo.mixed,
+      qty: 1, def: { id: 'free-combo', name: kind.name },
+      underlying: ua.name, sigmaHist: c.hist > 0 ? c.hist : undefined, sigmaHistSource: sigmaSourceByUa[key],
+      // بی تلاطم تاریخی، احتمال سود از تلاطم ضمنی پاها می‌آید و آن یونانی می‌خواهد.
+      assetClass: assetClassOf(classes, ua), endDate: ex.endDate, greeks: !(c.hist > 0),
+    };
     let row;
     try {
-      row = evaluate({
-        legs: legs.map((l) => ({ kind: l.kind, side: l.side, ratio: l.ratio, strike: l.strike, size: l.size, sizeAssumed: l.sizeAssumed, days: ex.days, endDate: ex.endDate, ins: l.ins, name: l.name, price: undefined })),
-        quotes: legs.map((l) => l.quote),
-        ctx: {
-          S: spot, Sclose: num(ua.close || ua.last), days: ex.days, size: combo.size, sizeMixed: combo.mixed,
-          qty: 1, settings: s, def: { id: 'free-combo', name: kind.name },
-          underlying: ua.name, sigmaHist: c.hist > 0 ? c.hist : undefined, sigmaHistSource: sigmaSourceByUa[key],
-          // بی تلاطم تاریخی، احتمال سود از تلاطم ضمنی پاها می‌آید و آن یونانی می‌خواهد.
-          assetClass: assetClassOf(classes, ua), endDate: ex.endDate, greeks: !(c.hist > 0),
-        },
-      });
+      row = evaluate({ legs: evLegs, quotes, ctx: { ...ctx, settings: s } });
     } catch { continue; }
     funnel.evaluated += 1;
     if (!row.executable || (row.legPrices || []).some((l) => l.quality === 'none')) { funnel.unexecutable += 1; continue; }
@@ -386,16 +548,15 @@ export function comboScan({ chain, uaKeys = [], settings, scanner = {}, sigmaByU
       && Number.isFinite(row.popPct) && row.popPct >= cfg.minPop - EPS
       && (!(cfg.maxCapital > 0) || row.capital <= cfg.maxCapital + EPS)
       && liq.score >= cfg.minLiquidity
+      && (!Number.isFinite(row.maxQty) || row.maxQty >= cfg.minSets)
+      && (cfg.execRule !== 'book' || row.tradable !== false)
       && (cfg.view === 'all' || cfg.view === view)
       && row.capital > 0;
     if (!pass) { funnel.filtered += 1; continue; }
     funnel.kept += 1;
-    // منحنی کوچک سود و زیان برای کارت: ۳۲ نقطه از ۷۵٪ تا ۱۲۵٪ قیمت پایه.
-    const spark = [];
-    for (let k = 0; k <= 32; k += 1) {
-      const S = spot * (0.75 + (0.5 * k) / 32);
-      spark.push([S, typeof at === 'function' ? at(S) : NaN]);
-    }
+    // منحنی دقیق سود و زیان سررسید: همان تکه‌های خطی موتور، نه نمونه‌برداری.
+    const curve = payoffCurve(row.payoff);
+    const legsCard = legs.map((l, i) => ({ kind: l.kind, side: l.side, ratio: l.ratio, strike: l.strike, price: num(row.legPrices?.[i]?.price, l.price), name: l.name, ins: l.ins }));
     rows.push({
       ...row, payoff: undefined,
       id: `${ua.ins}|${ex.endDate}|${legs.map((l) => `${legKey(l)}x${l.ratio}`).join('|')}`,
@@ -404,8 +565,12 @@ export function comboScan({ chain, uaKeys = [], settings, scanner = {}, sigmaByU
       comboName: kind.name, named: kind.named, view, viewLabel: VIEW_FA[view],
       liquidity: liq, retStaticMonthPct,
       riskless: quick.minPnl >= -EPS,
-      legsCard: legs.map((l) => ({ kind: l.kind, side: l.side, ratio: l.ratio, strike: l.strike, price: l.price, name: l.name, ins: l.ins })),
-      spark,
+      legsCard, curve,
+      beList: (row.breakevens || []).filter((b) => b > 0).map((b) => ({ price: b, pct: ((b - spot) / spot) * 100 })),
+      scenarios: payoffScenarios(curve, spot),
+      // ورودی پلکان اجرا: پاها، مظنه با دفتر، و زمینه — برای هر نسبتی که بعداً باز شود.
+      evLegs, quotes, ctx,
+      bookLive: cfg.execRule === 'book',
       chart: { legs: row.__legs, netCash: row.netCash },
       legIns: legs.filter((l) => l.kind !== 'underlying').map((l) => l.ins),
     });
@@ -429,6 +594,10 @@ export function comboScan({ chain, uaKeys = [], settings, scanner = {}, sigmaByU
     g.items.sort(better);
     return { key: g.key, best: g.items[0], variants: g.items.slice(1, 6), count: g.items.length };
   }).sort((a, b) => better(a.best, b.best));
+  // پلکان اجرا برای کارتِ هر گروهِ برگشتی: با چه حجمی چه بازده و چه نقدی.
+  for (const g of list.slice(0, 60)) {
+    g.best.ladder = executionLadder({ legs: g.best.evLegs, quotes: g.best.quotes, ctx: g.best.ctx, settings: s, maxSets: g.best.maxQty, monthDays });
+  }
   return {
     groups: list.slice(0, cfg.limit), totalGroups: list.length, totalCombos: rows.length,
     funnel, ms: Date.now() - t0, cfg,

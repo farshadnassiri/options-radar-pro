@@ -25,7 +25,8 @@ function applyOverlay(ch) {
   const put = (q) => {
     const o = q && q.ins ? overlay.get(q.ins) : null;
     if (!o) return;
-    if (o.book) { q.book = o.book; q.depth = true; }
+    // `bookAt` زمان دریافت دفتر است؛ اسکنر آپشن دفتر کهنه را «زنده» نمی‌شمارد.
+    if (o.book) { q.book = o.book; q.depth = true; q.bookAt = o.at; }
     if (o.low != null) q.low = o.low;
     if (o.high != null) q.high = o.high;
     if (o.state) q.state = o.state;
@@ -84,7 +85,7 @@ function handleMessage(m) {
 
   if (m.type === 'overlay') {
     for (const [ins, v] of Object.entries(m.data)) {
-      if (v && !v.error) overlay.set(ins, { ...(overlay.get(ins) || {}), ...v });
+      if (v && !v.error) overlay.set(ins, { ...(overlay.get(ins) || {}), ...v, at: Number(m.at) || Date.now() });
     }
     dirty = true;
     self.postMessage({ type: 'overlay-ok', id: m.id, count: overlay.size });
@@ -129,7 +130,7 @@ function handleMessage(m) {
     const uaKeys = m.uaKeys?.length ? m.uaKeys : [...ch.keys()];
     const res = comboScan({
       chain: ch, uaKeys, settings: m.settings, scanner: m.scanner,
-      sigmaByUa: m.sigmaByUa || {}, sigmaSourceByUa: m.sigmaSourceByUa || {},
+      sigmaByUa: m.sigmaByUa || {}, sigmaSourceByUa: m.sigmaSourceByUa || {}, now: Date.now(),
     });
     self.postMessage({ type: 'combo-scan', id: m.id, ...res, uaCount: uaKeys.length });
     return;
