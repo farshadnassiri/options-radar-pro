@@ -5122,9 +5122,11 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 /* خط‌های متمایز: رنگ ناهم‌سان، و ضخامت و خط‌چینِ متفاوت تا بی رنگ هم جدا شوند. */
 .sl-line.spot { stroke: var(--ink); stroke-width: 2.5; stroke-dasharray: none; }
 .sl-line.callk { stroke: var(--call); stroke-width: 2; stroke-dasharray: 9 5; }
-.sl-line.putk { stroke: var(--put); stroke-width: 2; stroke-dasharray: 9 5; }
+.sl-line.putk { stroke: var(--put); stroke-width: 2; stroke-dasharray: 4 3; }
 .sl-line.becall { stroke: var(--series-5); stroke-width: 3; stroke-dasharray: 1 5; }
-.sl-line.beput { stroke: var(--series-3); stroke-width: 3; stroke-dasharray: 1 5; }
+.sl-line.beput { stroke: var(--series-3); stroke-width: 2.5; stroke-dasharray: 8 3 1 3; }
+/* نام هر خط سر خودش — بی رنگ هم خوانا. */
+.sl-end-label { font-size: var(--fs-xs); fill: var(--ink-2); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; }
 .sl-line.callcum, .sl-line.callpx { stroke: var(--call); stroke-width: 2.5; stroke-dasharray: none; }
 .sl-line.putcum, .sl-line.putpx { stroke: var(--put); stroke-width: 2.5; stroke-dasharray: 12 4; }
 .sl-line.total { stroke: var(--accent); stroke-width: 3.5; stroke-dasharray: none; }
@@ -5160,9 +5162,16 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .sl-labtabs > .sl-help { align-self: center; }
 .sl-stepper > .sl-help, .sl-entry-head > .sl-help { align-self: center; }
 
+/* نوار اقدام تصمیم روز زیر کارت‌ها گم نشود (گزارش آزمون ۸۳e5888 مورد ۲۰). */
+.sl-decide-actions { position: sticky; bottom: 0; z-index: 3; background: var(--panel); padding-block: var(--space-2); border-top: 1px solid var(--line-soft); }
+
 @media (max-width: 720px) {
   .sl-setup-split { grid-template-columns: 1fr; }
-  .sl-labtabs { position: static; }
+  .sl-labtabs { position: static; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+  .sl-labtabs .sl-tab { flex: 0 0 auto; }
+  /* موبایل: نمودار پهن‌تر از ستون، با پیمایش افقی داخل خودش — نه ۸۴ پیکسل ارتفاع. */
+  .sl-chartbox { overflow-x: auto; }
+  .sl-chartbox > .sl-chart { min-width: 640px; }
   .sl-hero-pnl { text-align: start; }
   .sl-hero-pnl b { font-size: var(--fs-3xl); }
   .sl-title-input { min-width: 0; width: 100%; }

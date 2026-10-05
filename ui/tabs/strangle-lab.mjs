@@ -28,7 +28,7 @@ import {
   labConfig, labBases, labExpiries, pickExpiry, buildLabMarket, pricingContext,
   strikeBoard, pickEntry, openPosition, applyAction, adjustCandidate, defendAction,
   runPath, planDecider, pathStats, labMargin, enumeratePaths, pathsSummary, percentileOf,
-  whatIfMatrix, actionKey, actionImpact, gradeReport, ivAt, deltaAt, weightedBreakevens, BASIS_FA, labReturnBase,
+  whatIfMatrix, actionKey, actionImpact, gradeReport, slForced, compareFinals, liquidityNotes, ivAt, deltaAt, weightedBreakevens, BASIS_FA, labReturnBase,
 } from '/core/strangle-lab.mjs';
 import { todayCompact, daysBefore, buildLine, calendarDays } from '/core/history-range.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
@@ -42,11 +42,15 @@ import { logError } from '/ui/errlog.mjs';
 import {
   esc, money, tone, pct, price, strikeFa, dateFa, shortDateFa, dayNameFa, actionText, reasonText,
   srcBadge, lineChart, legendChips, tipValue, histSvg, gaugeHtml, timelineHtml, whatIfHtml, choiceChips, FULL, legGanttSvg, keySvg,
-  moneyPct, legName,
+  moneyPct, legName, exactRial,
 } from '/ui/strangle-lab-view.mjs';
 
 const STORE = 'strangle-lab.v1';
 const fin = (x) => typeof x === 'number' && Number.isFinite(x);
+// نمرهٔ ذخیره‌شده فقط برای همان تصمیم‌ها، قواعد و ورود معتبر است. گزارش
+// آزمون ۸۳e5888 مورد ۵: پس از تغییر گذشته، نمرهٔ قدیمی تا بازکردن دوبارهٔ
+// کارنامه در فهرست می‌ماند.
+const gradeKeyOf = (x) => JSON.stringify([x?.decisions || {}, x?.cfg || {}, x?.entry || {}]);
 const uid = () => `x${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 /** روزِ `n` روز بعد از یک تاریخ فشرده (`daysBefore` عدد منفی نمی‌پذیرد). */
 const addDays = (compact, n) => {
@@ -99,6 +103,7 @@ const RULE_FIELDS = [
   ['حد سود و ضرر (۲.۳ و ۵)', 'هر دو نسبت به پرمیوم دریافتیِ روز ورود.', [
     ['tpPct', 'حد سود', 'num', '۱۰۰٪ یعنی کل پرمیوم — عملاً نگه‌داشتن تا سررسید'],
     ['slPct', 'حد ضرر', 'num', '۱۰۰٪ یعنی زیانی برابر کل پرمیوم (ریسک به ریوارد ۱:۱)'],
+    ['slForce', 'حد ضرر اجباری (۵.۲ «خروج بی‌قیدوشرط»)', 'bool', 'روشن: روز رسیدن به حد ضرر هر تصمیمی بستن کامل اجرا می‌شود. خاموش: فقط پیشنهاد است'],
   ]],
   ['تعدیل (۳)', 'کی و چطور سمت سودده نزدیک‌تر فروخته شود.', [
     ['trigLo', 'آستانهٔ تعدیل — از', 'num', 'درصدی از سود هدفِ جاری (۳.۱)'],
@@ -116,12 +121,14 @@ const RULE_FIELDS = [
     ['entryBasis', 'قیمت فروشِ روز ورود', 'pick', 'برای فروشنده «بیشترین» خوش‌شانس‌ترین و «کمترین» بدشانس‌ترین فروش است'],
     ['manualEntryCall', 'قیمت انتخابی ورود کال', 'price', 'فقط با «قیمت انتخابی»'],
     ['manualEntryPut', 'قیمت انتخابی ورود پوت', 'price', 'فقط با «قیمت انتخابی»'],
+    ['manualFree', 'سناریوی فرضی برای قیمت انتخابی', 'bool', 'خاموش: قیمت انتخابی فقط بین کمترین و بیشترین معاملهٔ همان روز پذیرفته می‌شود. روشن: هر عددی، با برچسب «فرضی»'],
     ['exitBasis', 'قیمت بازخریدِ روز خروج', 'pick', 'برای فروشنده «کمترین» خوش‌شانس‌ترین و «بیشترین» بدشانس‌ترین خرید است'],
     ['manualExitCall', 'قیمت انتخابی خروج کال', 'price', 'برای کالی که روز خروج در دست است'],
     ['manualExitPut', 'قیمت انتخابی خروج پوت', 'price', 'برای پوتی که روز خروج در دست است'],
   ]],
   ['داده', 'وقتی قیمتی نیست، چه شود.', [
     ['fees', 'کارمزد معامله و اعمال (از تنظیمات)', 'bool'],
+    ['staleQuotes', 'ردیف با قیمت ولی بی‌معامله (حجم صفر)', 'pick', 'پایانیِ چنین روزی مانده از روزهای قبل است؛ پیش‌فرض «نداشته» است و ورود و تعدیل با آن ممکن نیست'],
     ['modelFill', 'قیمت مدل برای روز بی‌معامله', 'bool', 'بلک-شولز با IVِ آخرین روزِ معامله‌شده؛ هر جا بنشیند برچسب «مدل» دارد'],
     ['exitFallback', 'اگر روز خروج یکی از پاها معامله نشد', 'pick', 'قیمت ساخته نمی‌شود؛ یا بستن در آخرین روزِ واقعیِ قیمت‌دار، یا نتیجهٔ نامعلوم'],
   ]],
@@ -222,7 +229,7 @@ export async function mount(root, { state } = {}) {
 
   root.innerHTML = `
     <div class="page-head sl-head">
-      <h2>🧪 استرانگل فروش در بوتهٔ آزمایش</h2>
+      <h2>🧪 استرانگل بازی</h2>
       <p>یک استرانگل فروش را در تاریخی از گذشته باز کن و روزبه‌روز جلو برو. پایان هر روز، الگوریتم با دادهٔ پایانیِ همان روز
          پیشنهاد می‌دهد — با سود و زیان، نقد و وجه تضمینِ هر گزینه — و تو تصمیم می‌گیری. هر تصمیمی را بعداً می‌توانی عوض کنی،
          همهٔ مسیرهای ممکن را کنار هم ببینی، و در پایان کارنامه بگیری.</p>
@@ -241,7 +248,7 @@ export async function mount(root, { state } = {}) {
   const mparams = () => marginParamsOf(settings());
   const makeCtx = () => {
     const s = settings();
-    ctx = market ? pricingContext(market, { r: s.rFree, q: s.divYield, yearDays: s.dayCountYear, modelFill: cfgOf().modelFill }) : null;
+    ctx = market ? pricingContext(market, { r: s.rFree, q: s.divYield, yearDays: s.dayCountYear, modelFill: cfgOf().modelFill, useStale: cfgOf().staleQuotes === 'use' }) : null;
     memo.clear();
   };
   const save = () => {
@@ -312,7 +319,7 @@ export async function mount(root, { state } = {}) {
           <button type="button" class="sl-saved-open" data-act="open" data-id="${esc(x.id)}">
             <b>${esc(x.name)}</b>
             <small>${esc(x.uaName)}، ${esc(dateFa(x.from))} تا ${esc(dateFa(x.to))}</small>
-            <small class="${tone(x.final)}">${x.done ? `نتیجه ${esc(pl(x.final))}${x.grade ? ` — نمره ${esc(x.grade)}` : ''}` : `در جریان، ${faDigits(String(Object.keys(x.decisions || {}).length))} تصمیم`}</small>
+            <small class="${tone(x.final)}">${x.done ? `نتیجه ${esc(pl(x.final))}${x.grade && x.gradeKey === gradeKeyOf(x) ? ` — نمره ${esc(x.grade)}` : ''}` : `در جریان، ${faDigits(String(Object.keys(x.decisions || {}).length))} تصمیم`}</small>
           </button>
           <button type="button" class="ghost sl-mini" data-act="dup" data-id="${esc(x.id)}" title="رونوشت">⧉</button>
           <button type="button" class="ghost sl-mini" data-act="del" data-id="${esc(x.id)}" title="حذف">✕</button>
@@ -411,8 +418,10 @@ export async function mount(root, { state } = {}) {
               ${day0.date !== d.from ? '<small class="note">روز انتخابی معاملاتی نبود؛ اولین روزِ معامله‌شده.</small>' : ''}</div>
             <div><p class="eyebrow">قیمت پایه</p><b>${fmt.int(day0.S)}</b></div>
             <div><p class="eyebrow">روز تا سررسید</p><b>${faDigits(String(day0.dte))}</b></div>
-            <div><p class="eyebrow">روزهای آزمایش</p><b>${faDigits(String(market.days.length))}</b></div>
-            <div><p class="eyebrow">پوشش قیمت</p><b>${pct(market.coverage.pct, 0)}</b></div>
+            <div><p class="eyebrow">روزهای آزمایش</p><b>${faDigits(String(market.days.length))}</b>
+              <small class="note">پایان مؤثر ${esc(dateFa(market.days.at(-1).date))}${market.days.at(-1).dte <= 0 ? ' (سررسید)' : normalizeHistoryDate(d.to) > market.days.at(-1).date ? ' (آخرین روز معاملاتی بازه)' : ''}</small></div>
+            <div><p class="eyebrow">پوشش قیمت</p><b>${pct(market.coverage.pct, 0)}</b>
+              <small class="note" title="ردیفی که قیمت دارد ولی حجم معامله‌اش صفر است در پوشش معامله شمرده نمی‌شود">معاملهٔ واقعی؛ ردیف ${pct(market.coverage.recordPct, 0)}</small></div>
             ${qtyHtml(cfg.qty)} ${helpIcon('volume')}
           </div>
           ${market.failed ? `<p class="note warn">تاریخچهٔ ${faDigits(String(market.failed))} ابزار دریافت نشد؛ دوباره «دریافت قیمت‌ها» را بزن.</p>` : ''}
@@ -432,6 +441,7 @@ export async function mount(root, { state } = {}) {
             <div class="sl-setup-side">
               <div class="sl-rules-grid one" id="sl-rules">${rulesFormHtml(cfg, 'cfg', ['قیمت ورود و خروج'])}</div>
               ${st.error ? `<p class="note warn" role="alert">${esc(st.error)}</p>` : ''}
+              ${st.error ? '' : liquidityNotes(ctx, cfg, st.state.legs, 0).map((x) => `<p class="note warn">حجم ${fmt.int(x.qty)} قرارداد ${esc(leg(x.side, x.strike))} از کل حجم معاملهٔ همان روز (${fmt.int(x.vol)} قرارداد) بیشتر است؛ نتیجه فرض می‌کند کل حجم به همین قیمت اجرا شده — نتیجهٔ نظری، نه قابل اجرا.</p>`).join('')}
               <div class="sl-entry-sum">
                 ${st.error ? ['کال فروش', 'پوت فروش', 'پرمیوم دریافتی', 'وجه تضمین', 'سرمایهٔ لازم'].map((t) => `<div class="kpi"><span>${t}</span><b>—</b><small>&nbsp;</small></div>`).join('') : `
                   <div class="kpi"><span>کال فروش ${helpIcon('kpi-entry-legs')}</span><b>${strikeFa(d.entry.call)}</b><small>${fmt.sym(symOf('call', d.entry.call))}، ${price(st.state.legs.call.open)} ${srcBadge(st.state.legs.call.src)}</small></div>
@@ -605,10 +615,11 @@ export async function mount(root, { state } = {}) {
           <span class="pill ${status[0]}">${esc(status[1])}</span>
         </div>
         <div class="sl-hero-split">${helpIcon('kpi-sides')}
-          <div class="${tone(sides?.call?.cum)}"><span>اثر انباشتهٔ کال</span><b>${esc(pl(sides?.call?.cum))}</b></div>
-          <div class="${tone(sides?.put?.cum)}"><span>اثر انباشتهٔ پوت</span><b>${esc(pl(sides?.put?.cum))}</b></div>
+          <div class="${tone(sides?.call?.cum)}" title="دقیق: ${esc(exactRial(sides?.call?.cum, { sign: true }))}"><span>اثر انباشتهٔ کال</span><b>${esc(pl(sides?.call?.cum))}</b></div>
+          <div class="${tone(sides?.put?.cum)}" title="دقیق: ${esc(exactRial(sides?.put?.cum, { sign: true }))}"><span>اثر انباشتهٔ پوت</span><b>${esc(pl(sides?.put?.cum))}</b></div>
+          <small class="sl-hint">جمع دقیق دو اثر = سود و زیان کل؛ جمع دو عدد گردشده گاهی یک ریال فرق دارد (عدد دقیق روی هر کدام).</small>
         </div>
-        <div class="sl-hero-pnl ${tone(pnl)}">
+        <div class="sl-hero-pnl ${tone(pnl)}" title="دقیق: ${esc(exactRial(pnl, { sign: true }))}${done ? '' : ' — کارمزد بازخرید احتمالی آینده هنوز کسر نشده'}">
           <span>${done ? 'سود و زیان نهایی' : `سود و زیان پایان ${esc(shortDateFa(dayNow.date))}`}</span>
           <b>${esc(pl(pnl))}</b>
           <small>${pct(capital > 0 && fin(pnl) ? (pnl / capital) * 100 : NaN, 2)} سرمایه، ${pct(initial > 0 && fin(pnl) ? (pnl / initial) * 100 : NaN, 0)} پرمیوم اولیه</small>
@@ -759,6 +770,7 @@ export async function mount(root, { state } = {}) {
       <div><dt>${imp.closed ? 'سود و زیان نهایی' : 'سود و زیان پس از اقدام'}</dt><dd class="${tone(imp.pnlAfter)}">${esc(pl(imp.pnlAfter))}</dd></div>
       ${action.kind === 'hold' ? '' : `<div><dt>قطعی‌شده با این اقدام</dt><dd class="${tone(imp.realizedNow)}">${esc(pl(imp.realizedNow))}</dd></div>`}
       <div><dt>نقد امروز (پس از کارمزد)</dt><dd class="${tone(imp.netCash)}">${action.kind === 'hold' ? 'صفر' : esc(money(imp.netCash, { sign: true }))}</dd></div>
+      ${action.kind === 'hold' ? '' : `<div class="sl-cash-split"><dt>تجزیهٔ نقد</dt><dd>ناخالص ${esc(exactRial(imp.cash, { sign: true }))} − کارمزد ${esc(exactRial(imp.fee))} = خالص ${esc(exactRial(imp.netCash, { sign: true }))}</dd></div>`}
       <div><dt>وجه تضمین</dt><dd>${esc(money(imp.marginBefore))} ← ${esc(money(imp.marginAfter))}</dd></div>
       <div class="sl-need ${need > 1 ? 'loss' : need < -1 ? 'gain' : ''}"><dt>${need > 1 ? 'نیاز به وجه تازه' : need < -1 ? 'وجه آزادشده' : 'وجه لازم'}</dt><dd>${Math.abs(need) <= 1 ? 'بی‌تغییر' : esc(money(Math.abs(need)))}</dd></div>
       ${imp.closed || action.kind === 'hold' ? '' : `<div><dt>سود هدف بعدی</dt><dd>${esc(money(imp.maxProfit))}</dd></div>`}
@@ -791,11 +803,15 @@ export async function mount(root, { state } = {}) {
         : { side: ev.winning || 'put', strike: '' };
     const board = strikeBoard(ctx, v);
     const blocked = ev.missing.length > 0;
+    // ۵.۲: روز حد ضرر اجباری هر انتخابی بستن کامل اجرا می‌شود؛ کارت‌های دیگر قفل‌اند.
+    const forced = slForced(cfgOf(), ev);
+    const losingLeg = ev.losing ? st.legs[ev.losing] : null;
+    const losingReal = losingLeg && ev.marks[ev.losing] && ev.marks[ev.losing].price > losingLeg.open;
     const card = (o) => {
       const imp = impactOf(st, v, ev, o.action);
       const fut = exp.reveal ? futureOf(v, o.action, exp.revealPolicy || 'algo') : NaN;
       const selected = o.id === selId;
-      return `<button type="button" class="sl-opt${o.recommended ? ' rec' : ''}${selected && !blocked ? ' selected' : ''}" data-act="choose" data-id="${o.id}" ${blocked && o.id !== 'hold' && o.id !== 'algo' ? 'disabled' : ''} aria-pressed="${selected ? 'true' : 'false'}">
+      return `<button type="button" class="sl-opt${o.recommended ? ' rec' : ''}${selected && !blocked ? ' selected' : ''}" data-act="choose" data-id="${o.id}" ${(blocked && o.id !== 'hold' && o.id !== 'algo') || (forced && o.action.kind !== 'close') ? 'disabled' : ''} aria-pressed="${selected ? 'true' : 'false'}">
         <span class="sl-opt-title">${o.recommended ? '<span class="sl-badge rec">پیشنهاد</span>' : ''}${esc(o.title)}${o.dup ? ' <small>(همان پیشنهاد)</small>' : ''}</span>
         <b class="sl-opt-action">${esc(actText(o.action))}</b>
         <span class="sl-opt-desc">${esc(o.desc)}</span>
@@ -820,22 +836,23 @@ export async function mount(root, { state } = {}) {
         <span>زیان شناور <b>${pct(ev.floatPct)}</b> <span class="sl-zone ${ev.zone}">${esc(zoneText)}</span></span>
         <span>سود و زیان <b class="${tone(ev.pnl)}">${esc(pl(ev.pnl))}</b></span>
         ${ev.straddle ? `<span>نسبت پرمیوم <b>${fin(ev.ratio) ? faDigits(ev.ratio.toFixed(2)) : '∞'}×</b> <span class="sl-zone ${ev.unstable ? 'beyond' : 'calm'}">${ev.unstable ? 'ناپایدار' : 'پایدار'}</span></span>` : ''}
-        ${ev.losing ? `<span>سمت زیان‌ده <b>${SIDE_FA[ev.losing]}</b></span>` : ''}
+        ${ev.losing ? `<span>${losingReal ? 'سمت زیان‌ده' : 'سمت پرفشارتر (هنوز زیر قیمت ورود)'} <b>${SIDE_FA[ev.losing]}</b></span>` : ''}
       </div>
       <p class="sl-rec-text"><span class="sl-badge rec">الگوریتم</span> ${esc(ev.rec.text)}${ev.rec.detail ? ` ${esc(ev.rec.detail)}` : ''} ${helpIcon('rec')}</p>
       ${blocked ? '<p class="note warn">قیمت امروزِ یکی از پاها نیست؛ فقط «نگه‌داشتن» ممکن است. یا «قیمت مدل» را در قواعد روشن کن.</p>' : ''}
+      ${forced ? '<p class="note warn">حد ضرر اجباری است (۵.۲): هر تصمیمی امروز بستن کامل اجرا می‌شود. برای اختیاری‌کردنش «حد ضرر اجباری» را در قواعد خاموش کن.</p>' : ''}
       <p class="sl-hint">${helpIcon('impact')} هر کارت می‌گوید با آن انتخاب سود و زیانت چه می‌شود، چه مقدار قطعی می‌شود، امروز چقدر نقد می‌گیری یا می‌پردازی، و وجه تضمین چقدر زیاد یا آزاد می‌شود. «نیاز به وجه تازه» = افزایش وجه تضمین منهای نقدی که همین امروز می‌گیری.</p>
       <div class="sl-opts">${opts.map(card).join('')}
         <div class="sl-opt custom${selId === 'custom' ? ' selected' : ''}">
           <span class="sl-opt-title">تعدیل سفارشی ${helpIcon('custom')}</span>
           ${seg('custom-side', custom.side, SIDES.map((sd) => [sd, SIDE_FA[sd]]))}
-          <select data-act="custom-strike" aria-label="قیمت اعمال تازه" ${blocked ? 'disabled' : ''}>
+          <select data-act="custom-strike" aria-label="قیمت اعمال تازه" ${blocked || forced ? 'disabled' : ''}>
             <option value="">— قیمت اعمال تازه —</option>
             <option value="none"${custom.strike === 'none' ? ' selected' : ''}>فقط بستن این سمت</option>
             ${board.filter((row) => row[custom.side]).map((row) => {
               const c = row[custom.side];
               const can = fin(c.price) && c.price > 0;
-              return `<option value="${row.strike}" ${can ? '' : 'disabled'}${String(custom.strike) === String(row.strike) ? ' selected' : ''}>${strikeFa(row.strike)}، ${price(c.price)}${c.src === 'model' ? ' (مدل)' : ''}، Δ ${fin(c.delta) ? faDigits(c.delta.toFixed(2)) : '—'}</option>`;
+              return `<option value="${row.strike}" ${can ? '' : 'disabled'}${String(custom.strike) === String(row.strike) ? ' selected' : ''}>${strikeFa(row.strike)}، ${price(c.price)}${c.src === 'model' ? ' (مدل)' : c.src === 'stale' ? ' (بی‌معامله)' : ''}، Δ ${fin(c.delta) ? faDigits(c.delta.toFixed(2)) : '—'}</option>`;
             }).join('')}
           </select>
           ${customImp ? impactRows(customImp, customAction) + (exp.reveal && !customImp.error ? `<span class="sl-future">تا پایان: <b>${esc(pl(futureOf(v, customAction, exp.revealPolicy || 'algo')))}</b></span>` : '')
@@ -893,7 +910,8 @@ export async function mount(root, { state } = {}) {
         <button type="button" class="btn" data-act="excel">⬇ خروجی اکسل کامل ${helpIcon('excel')}</button></div>
       <div class="history-table-wrap sl-journal-wrap"><table class="sl-journal-table">
         <thead><tr><th>روز</th><th>پایه (تغییر)</th><th>کال (تغییر)</th><th>پوت (تغییر)</th><th>اثر انباشتهٔ کال (امروز)</th><th>اثر انباشتهٔ پوت (امروز)</th><th>سود و زیان کل</th><th>زیان شناور</th><th>اقدام</th><th>کال / پوت پس از اقدام</th></tr></thead>
-        <tbody>${rows}</tbody></table></div></section>`;
+        <tbody>${rows}</tbody></table></div>
+      ${run.pending ? `<p class="sl-hint">روز ${esc(dateFa(market.days[run.pending.i].date))} هنوز در انتظار تصمیم است و در این جدول نیست؛ اکسل آن را به‌عنوان ردیف آخر با برچسب «در انتظار تصمیم» دارد.</p>` : ''}</section>`;
   }
 
   // ═════════════════════════ نمودارهای تعاملی ═════════════════════════
@@ -956,11 +974,11 @@ export async function mount(root, { state } = {}) {
           { key: 'beCall', label: 'سربه‌سر وزنی کال', cls: 'becall' }, { key: 'bePut', label: 'سربه‌سر وزنی پوت', cls: 'beput' }],
         chart: () => lineChart({ id: 'channel', dates, W: FULL, h: 400, unit: 'price', zero: false, upTo, cursor: view, hidden: hidden.channel, notes, marks,
           band: { upper: calls, lower: puts },
-          series: [{ key: 'spot', label: 'پایه', cls: 'spot', values: spot, full: true },
-            { key: 'callK', label: 'قیمت اعمال کال', cls: 'callk', values: calls, step: true, labels: calls.map((K) => (fin(K) ? symOf('call', K) : '')) },
-            { key: 'putK', label: 'قیمت اعمال پوت', cls: 'putk', values: puts, step: true, labels: puts.map((K) => (fin(K) ? symOf('put', K) : '')) },
-            { key: 'beCall', label: 'سربه‌سر وزنی کال', cls: 'becall', values: beCall, full: true },
-            { key: 'bePut', label: 'سربه‌سر وزنی پوت', cls: 'beput', values: bePut, full: true }], label: 'قیمت پایه و سربه‌سر وزنی' }),
+          series: [{ key: 'spot', label: 'پایه', cls: 'spot', values: spot, full: true, tag: true },
+            { key: 'callK', label: 'قیمت اعمال کال', cls: 'callk', values: calls, step: true, tag: 'اعمال کال', labels: calls.map((K) => (fin(K) ? symOf('call', K) : '')) },
+            { key: 'putK', label: 'قیمت اعمال پوت', cls: 'putk', values: puts, step: true, tag: 'اعمال پوت', labels: puts.map((K) => (fin(K) ? symOf('put', K) : '')) },
+            { key: 'beCall', label: 'سربه‌سر وزنی کال', cls: 'becall', values: beCall, full: true, tag: 'سربه‌سر کال' },
+            { key: 'bePut', label: 'سربه‌سر وزنی پوت', cls: 'beput', values: bePut, full: true, tag: 'سربه‌سر پوت' }], label: 'قیمت پایه و سربه‌سر وزنی' }),
       },
       pnl: {
         title: 'سود و زیان روزانه', help: 'chart-pnl',
@@ -1080,13 +1098,18 @@ export async function mount(root, { state } = {}) {
   }
 
   /** دلیلِ خوب‌بودنِ یک مسیر، از ارزش تک‌تک اقدام‌هایش. */
-  function pathReason(b) {
+  function pathReason(b, g) {
     const run = b.run;
     const end = run.state.closedAt >= 0 ? run.state.closedAt : market.days.length - 1;
     const sMove = ((market.days[end].S - market.days[0].S) / market.days[0].S) * 100;
     const head = `پایان: ${reasonText(run.state.reason)} در ${dateFa(market.days[end].date)}. پایه در کل دوره ${pct(sMove, 1)} حرکت کرد؛ سهم کال ${pl(run.sides.call[end])} و سهم پوت ${pl(run.sides.put[end])}.`;
     if (!b.items.length) {
-      return { head, lines: ['هیچ دستکاری‌ای نکرد. در این دوره ارزش زمانیِ هر دو پا بیش از اثر حرکت پایه کم شد، پس هر تعدیل یا بستن زودتر بخشی از این افول را از دست می‌داد.'] };
+      // متن از مقایسهٔ واقعی ساخته می‌شود، با برابرها — نه یک ادعای کلی.
+      const c = compareFinals(g?.paths || [], b.final, (p) => p.choices.some((x) => x.key !== 'H'));
+      const parts = [c.worse ? `${fmt.int(c.worse)} نتیجهٔ بدتر` : '', c.equal ? `${fmt.int(c.equal)} دقیقاً همین نتیجه` : '', c.better ? `${fmt.int(c.better)} نتیجهٔ بهتر` : ''].filter(Boolean);
+      return { head, lines: [c.known
+        ? `هیچ دستکاری‌ای نکرد. از ${fmt.int(c.known)} مسیر شمرده‌شده‌ای که روزی تعدیل کردند یا زودتر بستند، ${parts.join('، ')} داشتند${c.equal ? '؛ پس دستکاری در آن روزها لزوماً سودی را از دست نمی‌داد' : ''}.`
+        : 'هیچ دستکاری‌ای نکرد، و در مسیرهای شمرده‌شده مسیری با اقدام نبود که با آن مقایسه شود.'] };
     }
     const lines = b.items.map((it) => {
       const dir = it.sMoveAfter > 0 ? 'بالا رفت' : it.sMoveAfter < 0 ? 'پایین آمد' : 'ثابت ماند';
@@ -1106,6 +1129,7 @@ export async function mount(root, { state } = {}) {
     try { g = gradeOfRun(); } catch (e) { logError('کارنامهٔ استرانگل', e); return ''; }
     if (g.error) return `<section class="card sl-report"><p class="note warn">${esc(g.error)}</p></section>`;
     exp.grade = g.grade.letter;
+    exp.gradeKey = gradeKeyOf(exp);
     const { summary: sm } = g;
     const regrets = g.review.filter((r) => r.regret > 1).sort((a, b) => b.regret - a.regret).slice(0, 8);
     const followed = g.review.filter((r) => r.followedAlgo).length;
@@ -1117,10 +1141,10 @@ export async function mount(root, { state } = {}) {
           <b>${esc(g.grade.letter)}</b><span>${esc(g.grade.label)}</span><small>${faDigits(String(g.score))} از ۱۰۰</small>
         </div>
         <div class="sl-report-lines">
-          <p>از میان <b>${fmt.int(g.count)}</b> مسیر ممکن${g.truncated ? ' (به سقف شمارش رسید)' : ''}، مسیر شما رتبهٔ <b>${fmt.int(g.rank)}</b> را دارد؛
-            <b>${pct(g.percentile, 0)}</b> مسیرها نتیجهٔ بدتری داشتند.</p>
+          <p>از میان <b>${fmt.int(g.count)}</b> مسیر شمرده‌شده${g.truncated ? ' (به سقف شمارش رسید)' : ''} — نه همهٔ ترکیب‌های ممکنِ تصمیم — مسیر شما رتبهٔ <b>${fmt.int(g.rank)}</b> را دارد${g.versus.equal > 1 ? `، هم‌رتبه با ${fmt.int(g.versus.equal - 1)} مسیر دیگر با همین نتیجه` : ''}؛
+            <b>${pct(g.percentile, 0)}</b> مسیرها اکیداً بدتر${g.versus.equal ? `، ${pct((g.versus.equal / Math.max(1, g.versus.known)) * 100, 0)} برابر` : ''} و ${pct((g.versus.better / Math.max(1, g.versus.known)) * 100, 0)} بهتر بودند.</p>
           <p>کارایی <b>${pct(g.efficiency, 0)}</b>: نتیجهٔ شما کجای فاصلهٔ بدترین (${esc(pl(sm.min))}) تا بهترین (${esc(pl(sm.max))}) نشسته است.</p>
-          <p class="sl-hint">نمره میانگین همین دو عدد است. نوار نمره: ${GRADE_BANDS.filter(([m]) => fin(m)).map(([m, l, t]) => `${l} ${t} از ${faDigits(String(m))}`).join('، ')}، و E زیر آن.
+          <p class="sl-hint">نمره میانگین همین دو عدد است: (${pct(g.percentile, 0)} + ${pct(g.efficiency, 0)}) ÷ ۲ ≈ ${faDigits(String(g.score))}. مسیرهای برابر در «اکیداً بدتر» شمرده نمی‌شوند، پس رتبهٔ یک با برابرهای زیاد نمرهٔ صد نمی‌گیرد. نوار نمره: ${GRADE_BANDS.filter(([m]) => fin(m)).map(([m, l, t]) => `${l} ${t} از ${faDigits(String(m))}`).join('، ')}، و E زیر آن.
             مسیرها این‌طور شمرده شدند: در روز آرام «نگه‌داشتن» یا «بستن»، و در روزی که الگوریتم کاری پیشنهاد کرد همهٔ گزینه‌ها (پیشنهاد، نگه‌داشتن، بستن، رول دفاعی).</p>
         </div>
       </div>
@@ -1133,7 +1157,7 @@ export async function mount(root, { state } = {}) {
       </div>
       <h4 class="sl-sub">🏆 بهترین کارها — و چرا ${helpIcon('report-best')}</h4>
       <div class="sl-best">${g.best.map((b, k) => {
-        const r = pathReason(b);
+        const r = pathReason(b, g);
         return `<article class="sl-best-card">
           <header><span class="sl-best-rank">${faDigits(String(k + 1))}</span><b class="${tone(b.final)}">${esc(pl(b.final))}</b>
             <span class="sl-chips">${choiceChips(b.path.choices.filter((c) => c.action?.kind !== 'hold'), 6, symOf)}</span>
@@ -1372,6 +1396,7 @@ export async function mount(root, { state } = {}) {
     if (view == null || view > upTo || view < 0) view = run.done ? null : run.pending?.i;
     exp.done = !!run.done;
     exp.final = run.final;
+    if (exp.grade && (!run.done || exp.gradeKey !== gradeKeyOf(exp))) { delete exp.grade; delete exp.gradeKey; }
     const cfg = cfgOf();
     const { capital } = capitalOf();
     const lastStep = run.steps[run.steps.length - 1];
@@ -1827,7 +1852,7 @@ export async function mount(root, { state } = {}) {
         default: break;
       }
     } catch (e) {
-      logError(`استرانگل در بوتهٔ آزمایش — ${act}`, e);
+      logError(`استرانگل بازی — ${act}`, e);
       window.alert(`خطا: ${e.message}`);
     }
   }
@@ -1881,7 +1906,7 @@ export async function mount(root, { state } = {}) {
         default: break;
       }
     } catch (e) {
-      logError(`استرانگل در بوتهٔ آزمایش — ${act || el.id}`, e);
+      logError(`استرانگل بازی — ${act || el.id}`, e);
     }
   }
 
@@ -1901,9 +1926,14 @@ export async function mount(root, { state } = {}) {
     if (box) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
   }
 
+  // میان‌بر Enter برای ثبت تصمیم فقط وقتی تمرکز روی هیچ کنترلی نیست. گزارش
+  // آزمون ۸۳e5888 مورد ۲۰: Enter روی دکمه، تب یا کلید دیگری تصمیم روز را ثبت
+  // می‌کرد؛ Enter روی هر کنترل باید همان کنترل را اجرا کند.
+  const INTERACTIVE = 'button, a[href], input, select, textarea, summary, label, [role], [tabindex], [contenteditable], [data-act]';
   function onKey(ev) {
-    if (!exp || ev.target.closest('input, select, textarea')) return;
-    if (ev.key === 'Enter' && root.querySelector('[data-act="commit"]')) { ev.preventDefault(); root.querySelector('[data-act="commit"]').click(); }
+    if (!exp || ev.key !== 'Enter' || ev.target.closest(INTERACTIVE)) return;
+    const commit = root.querySelector('[data-act="commit"]');
+    if (commit && !commit.disabled) { ev.preventDefault(); commit.click(); }
   }
 
   root.addEventListener('click', onClick);

@@ -65,6 +65,15 @@ export const LAB_DEFAULTS = Object.freeze({
   entryBasis: 'close',     // قیمت فروشِ روز ورود: close | last | first | low | high | manual
   exitBasis: 'close',      // قیمت بازخریدِ روز خروج: همان گزینه‌ها
   manualEntryCall: 0, manualEntryPut: 0, manualExitCall: 0, manualExitPut: 0,
+  // قیمت انتخابی فقط در دامنهٔ معاملات واقعی همان روز پذیرفته می‌شود؛ روشن
+  // یعنی «سناریوی فرضی» — هر عددی پذیرفته و همه‌جا با برچسب «فرضی» می‌آید.
+  manualFree: false,
+  // ۵.۲ «خروج بی‌قیدوشرط»: روشن یعنی روز رسیدن به حد ضرر، هر تصمیمی بستن
+  // کامل اجرا می‌شود. خاموش یعنی فقط پیشنهاد است.
+  slForce: true,
+  // ردیفی که قیمت پایانی دارد ولی حجم و شمار معامله‌اش صفر است، قیمتِ مانده
+  // از روزهای قبل است، نه قیمت همان روز. پیش‌فرض: «نداشته».
+  staleQuotes: 'skip',
 });
 
 /** مبناهای قیمت ورود و خروج. صفر یعنی «نیامده» و جایگزین نمی‌شود. */
@@ -82,6 +91,7 @@ export const LAB_CHOICES = {
   exitFallback: [['lastPriced', 'آخرین روزی که همهٔ پاها معامله شدند'], ['none', 'نتیجه نامعلوم بماند']],
   entryBasis: PRICE_BASES,
   exitBasis: PRICE_BASES,
+  staleQuotes: [['skip', 'نداشته — مثل روز بی‌معامله'], ['use', 'استفاده با برچسب «بی‌معامله» (فرض صریح)']],
 };
 
 export const SIDES = ['call', 'put'];
@@ -121,12 +131,32 @@ const seriesOf = (dailies, ins) => {
   return Array.isArray(box) ? box : (Array.isArray(box?.rows) ? box.rows : []);
 };
 
-const byDate = (rows) => {
+/**
+ * ردیفِ «بی‌معامله»: قیمت دارد ولی حجم و شمار معاملهٔ همان روز صریحاً صفر
+ * است — پایانیِ مانده از روزهای قبل. ردیفی که این میدان‌ها را اصلاً ندارد
+ * بی‌معامله شمرده نمی‌شود (نمی‌دانیم، پس ادعا نمی‌کنیم).
+ */
+export const noTradeRow = (row) => !!row && ('vol' in row || 'trades' in row)
+  && !(num(row.vol, 0) > 0) && !(num(row.trades, 0) > 0);
+
+const byDate = (rows, { skipStale = false } = {}) => {
   const map = new Map();
   for (const row of rows) {
     const d = normalizeHistoryDate(row?.date);
     const p = dayPrice(row);
+    if (skipStale && noTradeRow(row)) continue;
     if (d && p > 0) map.set(d, p);
+  }
+  return map;
+};
+
+/** قیمت‌های ردیف‌های بی‌معامله، جدا — فقط با فرض صریح کاربر مصرف می‌شوند. */
+const staleByDate = (rows) => {
+  const map = new Map();
+  for (const row of rows) {
+    const d = normalizeHistoryDate(row?.date);
+    const p = dayPrice(row);
+    if (d && p > 0 && noTradeRow(row)) map.set(d, p);
   }
   return map;
 };
@@ -138,7 +168,8 @@ const rawByDate = (rows) => {
     const d = normalizeHistoryDate(row?.date);
     if (!d) continue;
     const q = {};
-    for (const k of ['close', 'last', 'first', 'low', 'high', 'value', 'vol']) if (num(row[k], 0) > 0) q[k] = num(row[k], 0);
+    for (const k of ['close', 'last', 'first', 'low', 'high', 'value', 'vol', 'trades']) if (num(row[k], 0) > 0) q[k] = num(row[k], 0);
+    if (noTradeRow(row) && dayPrice(row) > 0) q.noTrade = true;
     map.set(d, q);
   }
   return map;
@@ -198,6 +229,10 @@ export function pickExpiry(expiries = [], entryDate, cfg = LAB_DEFAULTS) {
 /**
  * بازارِ آزمایش: روزهای معاملاتیِ پایه در بازه، و قیمت پایانیِ هر قیمت اعمال.
  *
+ * قیمت ردیفِ بی‌معامله (`noTradeRow`) در `day[side]` نمی‌نشیند؛ جدا در
+ * `day.stale[side]` می‌ماند تا فقط با فرض صریح کاربر (`staleQuotes: 'use'`)
+ * و با برچسب مصرف شود. پوشش هم دو عدد دارد: ردیف و معاملهٔ واقعی.
+ *
  * فقط روزی وارد می‌شود که خودِ پایه قیمت پایانی دارد؛ بی پایه، هیچ
  * سود و زیان و دلتایی ساختنی نیست. قیمت قرارداد اگر آن روز نبود، کلیدش
  * اصلاً نوشته نمی‌شود — «نداشته» با صفر اشتباه نشود.
@@ -225,23 +260,27 @@ export function buildLabMarket({ rows = [], dailies = {}, uaIns, expiry, from, t
   const uaPrices = byDate(seriesOf(dailies, ua));
   const uaRaw = rawByDate(seriesOf(dailies, ua));
   const legPrices = { call: new Map(), put: new Map() };
+  const legStale = { call: new Map(), put: new Map() };
   const legRaw = { call: new Map(), put: new Map() };
   for (const s of strikes) {
     for (const side of SIDES) {
       if (!s[side]) continue;
       const rowsOf = seriesOf(dailies, s[side].ins);
-      legPrices[side].set(s.strike, byDate(rowsOf));
+      legPrices[side].set(s.strike, byDate(rowsOf, { skipStale: true }));
+      legStale[side].set(s.strike, staleByDate(rowsOf));
       legRaw[side].set(s.strike, rawByDate(rowsOf));
     }
   }
   const days = [];
   for (const date of [...uaPrices.keys()].sort((a, b) => a - b)) {
     if (date < start || date > end) continue;
-    const day = { date, S: uaPrices.get(date), dte: daysBetween(date, want), call: {}, put: {}, raw: { call: {}, put: {} }, uaRaw: uaRaw.get(date) || {} };
+    const day = { date, S: uaPrices.get(date), dte: daysBetween(date, want), call: {}, put: {}, stale: { call: {}, put: {} }, raw: { call: {}, put: {} }, uaRaw: uaRaw.get(date) || {} };
     for (const side of SIDES) {
       for (const [K, series] of legPrices[side]) {
         const p = series.get(date);
         if (p > 0) day[side][K] = p;
+        const st = legStale[side].get(K)?.get(date);
+        if (st > 0) day.stale[side][K] = st;
         const q = legRaw[side].get(K)?.get(date);
         if (q && Object.keys(q).length) day.raw[side][K] = q;
       }
@@ -250,11 +289,14 @@ export function buildLabMarket({ rows = [], dailies = {}, uaIns, expiry, from, t
   }
   const uaName = String(mine[0]?.lval30_UA || ua);
   const priced = days.reduce((a, d) => a + Object.keys(d.call).length + Object.keys(d.put).length, 0);
+  const stale = days.reduce((a, d) => a + Object.keys(d.stale.call).length + Object.keys(d.stale.put).length, 0);
   const slots = days.length * strikes.reduce((a, s) => a + (s.call ? 1 : 0) + (s.put ? 1 : 0), 0);
   return {
     uaIns: ua, uaName, expiry: want, size: num(size, 1000) || 1000,
     from: start, to: normalizeHistoryDate(to), strikes, days,
-    coverage: { priced, slots, pct: slots ? (priced / slots) * 100 : NaN },
+    // `pct` پوشش معاملهٔ واقعی است؛ `recordPct` پوشش ردیف (با بی‌معامله‌ها).
+    coverage: { priced, stale, records: priced + stale, slots,
+      pct: slots ? (priced / slots) * 100 : NaN, recordPct: slots ? ((priced + stale) / slots) * 100 : NaN },
   };
 }
 
@@ -264,8 +306,8 @@ export function buildLabMarket({ rows = [], dailies = {}, uaIns, expiry, from, t
  * زمینهٔ قیمت‌گذاری: نرخ، بازده نقدی، روزِ سال و اینکه قیمت مدل مجاز است.
  * کش IV روی خودِ بازار نمی‌نشیند تا بازار قابل‌ذخیره (JSON) بماند.
  */
-export function pricingContext(market, { r = 0.3, q = 0, yearDays = 365, modelFill = false } = {}) {
-  return { market, r: num(r, 0.3), q: num(q, 0), yearDays: num(yearDays, 365) || 365, modelFill: !!modelFill, ivCache: new Map() };
+export function pricingContext(market, { r = 0.3, q = 0, yearDays = 365, modelFill = false, useStale = false } = {}) {
+  return { market, r: num(r, 0.3), q: num(q, 0), yearDays: num(yearDays, 365) || 365, modelFill: !!modelFill, useStale: !!useStale, ivCache: new Map() };
 }
 
 const yearsOf = (ctx, dte) => Math.max(0, dte) / ctx.yearDays;
@@ -287,15 +329,21 @@ export function ivAt(ctx, i, side, K) {
  * قیمت یک پا در پایان روز `i`.
  *
  * `{ price, src, from }` — `src` یکی از: close (پایانی همان روز)،
- * intrinsic (روز سررسید)، model (بلک-شولز با IVِ روز `from`). بی جواب،
- * `null` — و مصرف‌کننده باید «نداشته» نشانش دهد.
+ * intrinsic (روز سررسید)، stale (پایانیِ ردیف بی‌معامله، فقط با فرض صریح)،
+ * model (بلک-شولز با IVِ روز `from`). بی جواب، `null` — و مصرف‌کننده باید
+ * «نداشته» نشانش دهد.
+ *
+ * روز سررسید همیشه ارزش ذاتی است، حتی اگر پایانیِ مثبتی ثبت شده باشد:
+ * قرارداد آن روز تسویه می‌شود، نه بازخرید — همان که متن پیشنهاد می‌گوید.
  */
 export function priceAt(ctx, i, side, K) {
   const day = ctx.market.days[i];
   if (!day) return null;
+  if (day.dte <= 0) return { price: intrinsic(side, day.S, K), src: 'intrinsic', from: day.date };
   const actual = day[side]?.[K];
   if (actual > 0) return { price: actual, src: 'close', from: day.date };
-  if (day.dte <= 0) return { price: intrinsic(side, day.S, K), src: 'intrinsic', from: day.date };
+  const stale = day.stale?.[side]?.[K];
+  if (ctx.useStale && stale > 0) return { price: stale, src: 'stale', from: day.date };
   if (!ctx.modelFill) return null;
   for (let j = i - 1; j >= 0; j -= 1) {
     if (!(ctx.market.days[j]?.[side]?.[K] > 0)) continue;
@@ -312,17 +360,47 @@ export function priceAt(ctx, i, side, K) {
  *
  * پایانی همان `priceAt` است. «آخرین»، «اولین»، «کمترین» و «بیشترین» فقط
  * از فیلدِ واقعیِ همان روز می‌آیند؛ اگر نیامده، `null` — هیچ مبنایی بی‌صدا
- * جای مبنای دیگر نمی‌نشیند. «انتخابی» عددی است که کاربر نوشته. روز
- * سررسید، بی قیمت، ارزش ذاتی است.
+ * جای مبنای دیگر نمی‌نشیند. روز سررسید ارزش ذاتی است.
+ *
+ * «انتخابی» عددی است که کاربر نوشته، و فقط اگر در دامنهٔ معاملات واقعی
+ * همان روز (`manualRange`) باشد پذیرفته می‌شود؛ با `free` (سناریوی فرضی)
+ * هر عدد مثبتی با `src: 'hypo'` پذیرفته می‌شود.
  */
-export function tradePrice(ctx, i, side, K, basis = 'close', manual = 0) {
+export function tradePrice(ctx, i, side, K, basis = 'close', manual = 0, free = false) {
   if (!basis || basis === 'close') return priceAt(ctx, i, side, K);
-  if (basis === 'manual') return num(manual, 0) > 0 ? { price: num(manual, 0), src: 'manual', from: ctx.market.days[i]?.date } : null;
   const day = ctx.market.days[i];
-  const v = day?.raw?.[side]?.[K]?.[basis];
-  if (v > 0) return { price: v, src: basis, from: day.date };
+  if (basis === 'manual') {
+    const m = num(manual, 0);
+    if (!(m > 0)) return null;
+    if (free) return { price: m, src: 'hypo', from: day?.date };
+    return manualCheck(ctx, i, side, K, m).ok ? { price: m, src: 'manual', from: day?.date } : null;
+  }
   if (day && day.dte <= 0) return { price: intrinsic(side, day.S, K), src: 'intrinsic', from: day.date };
+  const q = day?.raw?.[side]?.[K];
+  if (q?.noTrade && !ctx.useStale) return null;
+  const v = q?.[basis];
+  if (v > 0) return { price: v, src: q.noTrade ? 'stale' : basis, from: day.date };
   return null;
+}
+
+/**
+ * دامنهٔ معاملات واقعی یک قرارداد در روز `i`: کمینه و بیشینهٔ میدان‌های
+ * قیمتیِ آمده (کمترین، بیشترین، اولین، آخرین، پایانی). روزِ بی‌معامله یا
+ * بی‌ردیف `null` است — قیمتی برای سنجش نیست.
+ */
+export function manualRange(ctx, i, side, K) {
+  const q = ctx.market.days[i]?.raw?.[side]?.[K];
+  if (!q || q.noTrade) return null;
+  const vals = ['low', 'high', 'first', 'last', 'close'].map((k) => q[k]).filter((v) => v > 0);
+  return vals.length ? { lo: Math.min(...vals), hi: Math.max(...vals) } : null;
+}
+
+/** قیمت انتخابی در دامنهٔ همان روز هست؟ `why` متن خطا برای رابط است. */
+export function manualCheck(ctx, i, side, K, price) {
+  const range = manualRange(ctx, i, side, K);
+  if (!range) return { ok: false, range: null, why: `${SIDE_FA[side]} ${K} در آن روز معامله‌ای نداشت؛ قیمت انتخابی سنجیدنی نیست.` };
+  const ok = price >= range.lo - EPS && price <= range.hi + EPS;
+  return { ok, range, why: ok ? '' : `قیمت انتخابی ${SIDE_FA[side]} (${price}) بیرون از دامنهٔ معاملات همان روز (${range.lo} تا ${range.hi}) است.` };
 }
 
 export const BASIS_FA = Object.fromEntries(PRICE_BASES);
@@ -422,6 +500,25 @@ export function pickEntry(ctx, cfg = LAB_DEFAULTS, i = 0) {
   return { call: call?.strike ?? null, put: put?.strike ?? null, callInfo: call, putInfo: put, note: notes.join(' ') };
 }
 
+/**
+ * فرض اجرای کل حجم: پایی که حجم معامله‌اش از کل حجم معاملهٔ همان روزِ آن
+ * قرارداد بیشتر است. گزارش آزمون ۸۳e5888 مورد ۲۲: ۱۰۰۰ قرارداد در بازار
+ * کم‌معامله بی هشدار پذیرفته می‌شد. روزِ بی‌معامله حجم صفر است؛ ردیفی که
+ * میدان حجم ندارد سنجیده نمی‌شود.
+ */
+export function liquidityNotes(ctx, cfg, legs, i) {
+  const out = [];
+  for (const side of SIDES) {
+    const leg = legs?.[side];
+    const q = leg ? ctx.market.days[i]?.raw?.[side]?.[leg.strike] : null;
+    if (!q) continue;
+    const vol = q.noTrade ? 0 : q.vol;
+    if (!fin(vol)) continue;
+    if (cfg.qty > vol) out.push({ side, strike: leg.strike, vol, qty: cfg.qty });
+  }
+  return out;
+}
+
 // ═════════════════════════ وضعیت و ارزیابی ═════════════════════════
 
 const mult = (ctx, cfg) => ctx.market.size * cfg.qty;
@@ -447,9 +544,15 @@ export function openPosition(ctx, cfg, entry, i = 0, fees = {}) {
     const K = num(entry?.[side], NaN);
     if (!fin(K)) return { error: `قیمت اعمال ${SIDE_FA[side]} انتخاب نشده.` };
     const manual = side === 'call' ? cfg.manualEntryCall : cfg.manualEntryPut;
-    const q = tradePrice(ctx, i, side, K, cfg.entryBasis, manual);
+    const q = tradePrice(ctx, i, side, K, cfg.entryBasis, manual, cfg.manualFree);
     if (!q) {
-      return { error: cfg.entryBasis === 'manual' ? `قیمت انتخابی ${SIDE_FA[side]} وارد نشده.`
+      if (cfg.entryBasis === 'manual') {
+        return { error: num(manual, 0) > 0
+          ? `${manualCheck(ctx, i, side, K, num(manual, 0)).why} برای ورود فرضی «سناریوی فرضی» را روشن کنید.`
+          : `قیمت انتخابی ${SIDE_FA[side]} وارد نشده.` };
+      }
+      const stale = ctx.market.days[i]?.raw?.[side]?.[K]?.noTrade;
+      return { error: stale ? `${SIDE_FA[side]} ${K} در روز ورود معامله نشد (حجم صفر)؛ قیمتش مانده از روزهای قبل است و برای ورود پذیرفته نمی‌شود.`
         : `«${BASIS_FA[cfg.entryBasis] || 'پایانی'}» ${SIDE_FA[side]} ${K} در روز ورود نیامده.` };
     }
     legs[side] = { strike: K, open: q.price, openDay: i, src: q.src };
@@ -531,7 +634,7 @@ export function evaluateDay(ctx, cfg, state, i) {
     out.winning = other(out.losing);
   }
   if (out.isLast) return { ...out, rec: rec('close', day.dte <= 0 ? 'expiry' : 'exit') };
-  if (out.slHit) return { ...out, rec: rec('close', 'sl') };
+  if (out.slHit) return { ...out, rec: rec('close', cfg.slForce ? 'sl' : 'slSoft') };
   if (out.tpHit) return { ...out, rec: rec('close', 'tp') };
   if (!(call && put)) return { ...out, rec: rec('hold', 'oneLeg') };
   if (out.straddle) {
@@ -553,21 +656,25 @@ export function evaluateDay(ctx, cfg, state, i) {
 export const REC_TEXT = {
   closed: 'معامله بسته شده.',
   missing: 'قیمت پایانی امروزِ یکی از پاها نیست؛ هیچ تصمیمی روی عدد ساختگی گرفته نمی‌شود.',
-  exit: 'روز خروج: بستن کامل به قیمت پایانی.',
-  expiry: 'روز سررسید: تسویه به ارزش ذاتی.',
-  sl: 'زیان به حد ضرر کلی رسید (۵.۲): خروج بی‌قیدوشرط.',
+  exit: 'روز خروج: بستن کامل به قیمت مبنای خروج.',
+  expiry: 'روز سررسید: تسویه به ارزش ذاتی (نه بازخرید به قیمت پایانی).',
+  sl: 'زیان به حد ضرر کلی رسید (۵.۲): خروج بی‌قیدوشرط — هر تصمیمی، بستن کامل اجرا می‌شود.',
+  slSoft: 'زیان به حد ضرر کلی رسید (۵.۲): پیشنهاد خروج کامل (طبق تنظیم، اجباری نیست).',
   tp: 'سود به سود هدف رسید (۵.۱): بستن کامل.',
   oneLeg: 'فقط یک پا باز است؛ الگوریتم این حالت را تعریف نکرده — نگه‌داشتن.',
   straddleStable: 'استرادل پایدار (زیر ۳ برابر): نگه‌داشتن برای افول ارزش زمانی (۴.۲).',
-  straddleLate: 'استرادل ناپایدار نزدیک سررسید: خروج سربه‌سر (۴.۲ و ۵.۳).',
+  straddleLate: 'استرادل ناپایدار نزدیک سررسید: خروج به‌علت عدم توازن پرمیوم (۴.۲) — به قیمت روز، با هر سود یا زیانی.',
   straddleWaitBreakeven: 'استرادل ناپایدار نزدیک سررسید، ولی هنوز زیان دارد؛ طبق تنظیم «فقط بدون زیان» صبر.',
   straddleEarly: 'استرادل ناپایدار ولی هنوز روز زیادی مانده: نگه‌داشتن با هشدار.',
   straddleEarlyClose: 'استرادل ناپایدار؛ طبق تنظیم، بستن فوری حتی با روز زیاد.',
   calm: 'زیان شناور زیر آستانهٔ تعدیل است (۳.۱): بدون دستکاری.',
   noCandidate: 'آستانهٔ تعدیل فعال شد ولی قیمت اعمال مناسبی با قیمتِ امروز پیدا نشد.',
-  band: 'زیان شناور در محدودهٔ تعدیل (۳.۱): بستن سمت سودده و فروش نزدیک‌تر (۳.۲).',
+  band: 'زیان شناور در محدودهٔ تعدیل (۳.۱): بستن پای بهتر (کم‌رشدتر از قیمت ورود) و فروش قیمت اعمال نزدیک‌تر (۳.۲).',
   beyond: 'زیان شناور از محدودهٔ تعدیل هم گذشته؛ تعدیل دیرهنگام (۳.۲).',
 };
+
+/** روز رسیدن به حد ضرری که اجباری است؟ آن روز هر اقدامی بستن کامل است. */
+export const slForced = (cfg, ev) => !!cfg?.slForce && ev?.rec?.why === 'sl';
 
 function rec(kind, why, extra = {}) {
   const action = kind === 'roll' ? { kind: 'roll', side: extra.side, strike: extra.strike }
@@ -657,7 +764,9 @@ export function actionKey(a) {
 
 /** اقدام را روی وضعیت اجرا می‌کند؛ وضعیت قبلی دست نمی‌خورد. */
 export function applyAction(ctx, cfg, state, i, action, ev, fees = {}, reason = '') {
-  const a = !action || action.kind === 'algo' ? ev?.rec?.action || { kind: 'hold' } : action;
+  let a = !action || action.kind === 'algo' ? ev?.rec?.action || { kind: 'hold' } : action;
+  // ۵.۲: حد ضرر اجباری پیش از هر تصمیمی اجرا می‌شود.
+  if (!state.closed && slForced(cfg, ev) && a.kind !== 'close') a = { kind: 'close', forced: 'sl' };
   if (state.closed || a.kind === 'hold') return { state, action: { kind: 'hold' } };
   const M = mult(ctx, cfg);
   const s = copyState(state);
@@ -758,7 +867,7 @@ export function settleLast(ctx, cfg, state, last, ev, fees = {}) {
     for (const sd of SIDES) {
       const leg = state.legs[sd];
       if (!leg) continue;
-      marks[sd] = tradePrice(ctx, i, sd, leg.strike, cfg.exitBasis, sd === 'call' ? cfg.manualExitCall : cfg.manualExitPut);
+      marks[sd] = tradePrice(ctx, i, sd, leg.strike, cfg.exitBasis, sd === 'call' ? cfg.manualExitCall : cfg.manualExitPut, cfg.manualFree);
     }
     return { ...e, marks };
   };
@@ -1005,6 +1114,7 @@ export function enumeratePaths(ctx, cfg, entry, { mode = 'trigger', options = ['
       acts = [fixed && !ev.missing.length ? fixed : { kind: 'hold' }];
     }
     else if (ev.missing.length) acts = [{ kind: 'hold' }];
+    else if (slForced(cfg, ev)) acts = [{ kind: 'close' }];
     else if (mode === 'trigger' && ev.rec.kind === 'hold') acts = [{ kind: 'hold' }];
     else {
       const seen = new Set();
@@ -1194,6 +1304,7 @@ export function gradeReport(ctx, cfg, entry, decisions = {}, { fees = {}, cap = 
   const efficiency = fin(mine.final) && span > EPS ? ((mine.final - summary.min) / span) * 100 : fin(mine.final) ? 100 : NaN;
   const score = fin(percentile) && fin(efficiency) ? Math.round((percentile + efficiency) / 2) : NaN;
   const better = all.paths.filter((p) => fin(p.final) && p.final > mine.final + EPS).length;
+  const versus = compareFinals(all.paths, mine.final);
 
   const seen = new Set();
   const best = [];
@@ -1224,9 +1335,28 @@ export function gradeReport(ctx, cfg, entry, decisions = {}, { fees = {}, cap = 
   const mineValues = actionValues(ctx, cfg, entry, decisions, { fees, entryDay });
   return {
     count: all.paths.length, truncated: all.truncated, summary,
-    mine, algo, percentile, efficiency, score, grade: gradeOf(score), rank: better + 1,
+    mine, algo, percentile, efficiency, score, grade: gradeOf(score), rank: better + 1, versus,
     best, review, mineItems: mineValues.items, paths: all.paths,
   };
+}
+
+/**
+ * چند مسیر بدتر، برابر یا بهتر از یک نتیجه — برابرها جدا، تا متن کارنامه
+ * «هر بستن زودتر سود را از دست می‌داد» نگوید وقتی چند بستن زودتر دقیقاً همان
+ * نتیجه را داشتند. `filter` زیرمجموعهٔ مسیرها را می‌گیرد (مثلاً فقط آن‌هایی
+ * که اقدامی کردند).
+ */
+export function compareFinals(paths = [], value, filter = null) {
+  const out = { worse: 0, equal: 0, better: 0, known: 0 };
+  if (!fin(value)) return out;
+  for (const p of paths) {
+    if (!fin(p.final) || (filter && !filter(p))) continue;
+    out.known += 1;
+    if (p.final < value - EPS) out.worse += 1;
+    else if (p.final > value + EPS) out.better += 1;
+    else out.equal += 1;
+  }
+  return out;
 }
 
 /** وضعیتِ آغاز روز `i` در مسیرِ اجراشده. */
@@ -1250,8 +1380,8 @@ export function actionLabel(a) {
 }
 
 export const CLOSE_REASON = {
-  exit: 'روز خروج', expiry: 'سررسید', sl: 'حد ضرر', tp: 'حد سود',
-  straddleLate: 'خروج سربه‌سر استرادل', straddleEarlyClose: 'استرادل ناپایدار',
+  exit: 'روز خروج', expiry: 'سررسید', sl: 'حد ضرر', slSoft: 'حد ضرر', tp: 'حد سود',
+  straddleLate: 'خروج به‌علت عدم توازن پرمیوم استرادل', straddleEarlyClose: 'استرادل ناپایدار',
   manual: 'بستن دستی', incomplete: 'قیمت روز آخر نبود',
   exitEarly: 'خروج در آخرین روزِ قیمت‌دار', '': '—',
 };

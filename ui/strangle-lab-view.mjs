@@ -7,7 +7,7 @@
 // رنگ هیچ‌جا اینجا نوشته نمی‌شود: هر خط و ناحیه یک کلاس دارد و رنگش از
 // توکن‌های `ui/style.css` می‌آید (قاعدهٔ ۲-۶).
 
-import { fmt, faDigits, axisNum } from './fmt.mjs';
+import { fmt, faDigits, faNum, axisNum } from './fmt.mjs';
 import { historyDateLabel, historyDayName } from '../core/history.mjs';
 import { SIDE_FA, CLOSE_REASON, BRANCH_OPTIONS } from '../core/strangle-lab.mjs';
 
@@ -27,6 +27,18 @@ export function money(v, { sign = false } = {}) {
   const text = fmt.rialText(Math.abs(v));
   if (!sign) return v < 0 ? `−${text}` : text;
   return v > 0 ? `+${text}` : v < 0 ? `−${text}` : text;
+}
+
+/**
+ * ریالِ دقیق با دو رقم اعشار — برای تجزیه‌ای که جمعش باید با چشم وارسی
+ * شود (نقد ناخالص − کارمزد = خالص، اثر کال + اثر پوت = کل). `money` گرد
+ * می‌کند و جمعِ دو عددِ گردشده گاهی یک ریال با کلِ گردشده فرق دارد.
+ */
+export function exactRial(v, { sign = false } = {}) {
+  if (!fin(v)) return '—';
+  const body = faNum(Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/,/g, '٬'));
+  const lead = v < 0 ? '−' : sign && v > 0 ? '+' : '';
+  return `${lead}${body} ریال`;
 }
 
 export const tone = (v) => (!fin(v) ? 'flat' : v > 0 ? 'gain' : v < 0 ? 'loss' : 'flat');
@@ -71,7 +83,9 @@ export function moneyPct(v, base) {
 
 export const reasonText = (r) => CLOSE_REASON[r] ?? r ?? '—';
 export const srcBadge = (src) => (src === 'model' ? '<span class="sl-badge model" title="قیمت مدل: بلک-شولز با IVِ آخرین روزِ معامله‌شده">مدل</span>'
-  : src === 'intrinsic' ? '<span class="sl-badge intrinsic" title="روز سررسید: ارزش ذاتی">ذاتی</span>' : '');
+  : src === 'intrinsic' ? '<span class="sl-badge intrinsic" title="روز سررسید: ارزش ذاتی">ذاتی</span>'
+  : src === 'stale' ? '<span class="sl-badge model" title="آن روز معامله‌ای نشد (حجم صفر)؛ قیمت مانده از روزهای قبل است و فقط با فرض صریح شما مصرف شد">بی‌معامله</span>'
+  : src === 'hypo' ? '<span class="sl-badge model" title="سناریوی فرضی: قیمت انتخابی بی سنجش با دامنهٔ معاملات همان روز">فرضی</span>' : '');
 
 // ═════════════════════════ نمودارهای SVG ═════════════════════════
 
@@ -185,6 +199,18 @@ export function lineChart({
   }).join('')).join('');
   const cloudSvg = cloudOn ? cloud.map((c) => `<path class="sl-fan ${tone(c.final)}" d="${linePath(c.values, x, y)}"/>`).join('') : '';
   const lines = S.filter((s) => !s.noLine).map((s) => `<path class="sl-line ${esc(s.cls)}" d="${linePath(s.vals, x, y, { step: s.step })}"/>`).join('');
+  // نام مستقیم سر هر سری `tag`دار: خواندن نمودار به رنگ وابسته نماند (گزارش
+  // آزمون ۸۳e5888 مورد ۱۹). برچسب‌ها اگر روی هم بیفتند کمی جابه‌جا می‌شوند.
+  const placed = [];
+  const tagSvg = S.filter((s) => s.tag && !s.noLine).map((s) => {
+    let i = s.vals.length - 1;
+    while (i >= 0 && !fin(s.vals[i])) i -= 1;
+    if (i < 0) return '';
+    let ty = y(s.vals[i]) - 6;
+    while (placed.some((p) => Math.abs(p - ty) < 13)) ty -= 13;
+    placed.push(ty);
+    return `<text class="sl-end-label ${esc(s.cls)}" x="${(x(i) - 4).toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="start">${esc(s.tag === true ? s.label : s.tag)}</text>`;
+  }).join('');
   const refSvg = refs.filter((r) => fin(r.value)).map((r) => `<line class="sl-ref ${esc(r.cls)}" x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(r.value).toFixed(1)}" y2="${y(r.value).toFixed(1)}"/>`
     + `<text class="sl-ref-label ${esc(r.cls)}" x="${W - PAD.r - 4}" y="${(y(r.value) - 5).toFixed(1)}" text-anchor="end">${esc(r.label)}</text>`).join('');
   const markSvg = marks.map((m) => {
@@ -206,7 +232,7 @@ export function lineChart({
   };
   return `<div class="sl-chartbox" data-chart="${esc(id)}" data-model="${esc(JSON.stringify(model))}">
     <svg class="sl-chart" viewBox="0 0 ${W} ${h}" role="img" aria-label="${esc(label)}">
-      ${grid}${xlabels}${bandSvg}${areaSvg}${z}${cloudSvg}${barSvg}${refSvg}${lines}${markSvg}${cur}
+      ${grid}${xlabels}${bandSvg}${areaSvg}${z}${cloudSvg}${barSvg}${refSvg}${lines}${tagSvg}${markSvg}${cur}
       <line class="sl-cross" x1="0" x2="0" y1="${PAD.t}" y2="${h - PAD.b}" visibility="hidden"/>
       <g class="sl-cross-dots"></g>
     </svg></div>`;

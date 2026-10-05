@@ -11,7 +11,6 @@
 //   ط    سیم‌کشی تب
 
 import { check, group, near, readSrc } from '../harness.mjs';
-import { bsPrice } from '../../core/bs.mjs';
 import { strategyMargin } from '../../core/margin.mjs';
 import { lineChart, legGanttSvg, pct, moneyPct, actionText as actTextView } from '../../ui/strangle-lab-view.mjs';
 import { capitalBase } from '../../core/margin.mjs';
@@ -23,41 +22,11 @@ import {
   openPosition, evaluateDay, applyAction, runPath, planDecider, enumeratePaths, pathsSummary,
   whatIfMatrix, labMargin, actionKey, adjustCandidate, percentileOf,
   sideBreakdown, actionImpact, actionValues, gradeReport, gradeOf, tradePrice, weightedBreakevens, labReturnBase,
+  liquidityNotes, compareFinals,
 } from '../../core/strangle-lab.mjs';
 
-const EXPIRY = 20250220;
-const STRIKES = [];
-for (let K = 700; K <= 1300; K += 50) STRIKES.push(K);
-const dteOf = (dt) => Math.round((Date.UTC(2025, 1, 20) - Date.UTC(Math.trunc(dt / 1e4), Math.trunc(dt % 1e4 / 100) - 1, dt % 100)) / 864e5);
+import { EXPIRY, STRIKES, dteOf, fixture, FEES, SIDES_OK, UP } from '../strangle-fixture.mjs';
 
-/** بازار ساختگی با قیمت بلک-شولز؛ `skip` قیمت چند قرارداد را در چند روز برمی‌دارد. */
-function fixture(path, { skip = {}, sigma = 0.4 } = {}) {
-  const rows = STRIKES.map((K) => ({
-    uaInsCode: 'UA', lval30_UA: 'پایه', strikePrice: K, expiryGregorian: EXPIRY, endDate: 14031202,
-    insCode_C: `C${K}`, insCode_P: `P${K}`, lVal18AFC_C: `ض${K}`, lVal18AFC_P: `ط${K}`, contractSize: 0,
-  }));
-  rows.push({ uaInsCode: 'OTHER', lval30_UA: 'دیگر', strikePrice: 100, expiryGregorian: 20250320, insCode_C: 'X', insCode_P: '' });
-  const dates = [];
-  let d = Date.UTC(2025, 0, 5);
-  for (let i = 0; i < path.length; i += 1) { dates.push(Number(new Date(d).toISOString().slice(0, 10).replace(/-/g, ''))); d += 2 * 864e5; }
-  const dailies = { UA: { rows: dates.map((date, i) => ({ date, close: path[i], last: path[i] })) } };
-  for (const K of STRIKES) {
-    for (const side of ['call', 'put']) {
-      const ins = `${side === 'call' ? 'C' : 'P'}${K}`;
-      dailies[ins] = { rows: dates.map((date, i) => {
-        const close = bsPrice(side, path[i], K, dteOf(date) / 365, 0.3, 0, sigma);
-        return { date, close, last: 0, first: close * 0.95, low: close * 0.9, high: close * 1.1, value: close * 1000 * (10 + (K % 7)), vol: 10 + (K % 7) };
-      })
-        .filter((row, i) => !(skip[ins] || []).includes(i)) };
-    }
-  }
-  const market = buildLabMarket({ rows, dailies, uaIns: 'UA', expiry: EXPIRY, from: dates[0], to: dates.at(-1), size: 1000 });
-  return { rows, dailies, dates, market };
-}
-
-const FEES = { option: 0.00103, exercise: 0.0005 };
-const SIDES_OK = (st) => ['call', 'put'].every((side) => near(st.trades.filter((t) => t.side === side).reduce((a, t) => a + t.premium, 0), st.bySide[side].received));
-const UP = [1000, 1005, 1020, 1045, 1070, 1090, 1110, 1120, 1140, 1150, 1160, 1170];
 
 group('۳۲۱-الف. بازار آزمایش');
 {
@@ -177,8 +146,17 @@ group('۳۲۱-و. حد ضرر و روز خروج');
   const run = runPath(ctx, labConfig(), { call: 1200, put: 900 }, { decide: planDecider({}, 'algo'), fees: FEES });
   check('زیان ≥ ۱۰۰٪ پرمیوم ← حد ضرر و بستن', run.state.reason === 'sl' && run.state.closedAt < market.days.length - 1, run.state.reason);
   check('پس از بسته‌شدن، سری همان سود نهایی را نگه می‌دارد', run.series.slice(run.state.closedAt).every((v) => near(v, run.final)));
+  // گزارش آزمون ۸۳e5888 مورد ۱۴: «خروج بی‌قیدوشرط» پیشنهاد بود و `hold` پذیرفته می‌شد.
   const hold = runPath(ctx, labConfig(), { call: 1200, put: 900 }, { decide: planDecider({}, 'hold'), fees: FEES });
-  check('بی اقدام هم روز آخر بسته می‌شود', hold.state.closedAt === market.days.length - 1 && hold.state.reason === 'exit');
+  const slStep = hold.steps.find((x) => x.i === hold.state.closedAt);
+  check('حد ضرر اجباری: «نگه‌داشتن» روز حد ضرر هم بستن کامل اجرا می‌شود', hold.state.reason === 'sl' && hold.state.closedAt < market.days.length - 1
+    && slStep.wanted.kind === 'hold' && slStep.action.forced === 'sl', hold.state.reason);
+  const slDay = run.state.closedAt;
+  const all = enumeratePaths(ctx, labConfig(), { call: 1200, put: 900 }, { mode: 'mixed', options: ['algo', 'hold', 'close', 'defend'], fees: FEES });
+  check('همهٔ مسیرها هم از روز حد ضرر عبور نمی‌کنند', all.paths.every((p) => p.closedAt <= slDay));
+  const soft = runPath(ctx, labConfig({ slForce: false }), { call: 1200, put: 900 }, { decide: planDecider({}, 'hold'), fees: FEES });
+  check('حد ضرر اختیاری (تنظیم): بی اقدام تا روز آخر می‌ماند و متن «بی‌قیدوشرط» ندارد', soft.state.closedAt === market.days.length - 1 && soft.state.reason === 'exit'
+    && soft.steps.some((x) => x.ev.rec.why === 'slSoft' && !/بی‌قیدوشرط/.test(x.ev.rec.text)));
 }
 
 group('۳۲۱-ز. روز بی‌قیمت');
@@ -347,8 +325,14 @@ group('۳۲۱-ل. مبنای قیمت ورود و خروج، سربه‌سر و�
   const ev0 = evaluateDay(ctx, labConfig({ entryBasis: 'high' }), hi, 0);
   check('… پس سود و زیان روز ورود = (سقف − پایانی) × اندازه − کارمزد', near(ev0.pnl, (c0 * 0.1 + p0 * 0.1) * 1000 - hi.fees));
   check('قیمت انتخابی خالی ← خطا، نه پایانی', !!openPosition(ctx, labConfig({ entryBasis: 'manual' }), entry, 0, FEES).error);
-  const man = openPosition(ctx, labConfig({ entryBasis: 'manual', manualEntryCall: 77, manualEntryPut: 55 }), entry, 0, FEES).state;
-  check('قیمت انتخابی همان عدد کاربر', man.legs.call.open === 77 && man.legs.put.open === 55 && man.legs.call.src === 'manual');
+  const mc = c0 * 1.05, mp = p0 * 0.95;
+  const man = openPosition(ctx, labConfig({ entryBasis: 'manual', manualEntryCall: mc, manualEntryPut: mp }), entry, 0, FEES).state;
+  check('قیمت انتخابی در دامنهٔ همان روز: همان عدد کاربر', man.legs.call.open === mc && man.legs.put.open === mp && man.legs.call.src === 'manual');
+  // گزارش آزمون ۸۳e5888 مورد ۱۰: ۹۹۹٬۹۹۹ برای هر پا پذیرفته شد.
+  const wild = openPosition(ctx, labConfig({ entryBasis: 'manual', manualEntryCall: 999999, manualEntryPut: 999999 }), entry, 0, FEES);
+  check('قیمت انتخابی بیرون از کمینه و بیشینهٔ همان روز رد می‌شود', !wild.state && /بیرون از دامنه/.test(wild.error), wild.error);
+  const hypo = openPosition(ctx, labConfig({ entryBasis: 'manual', manualEntryCall: 999999, manualEntryPut: 999999, manualFree: true }), entry, 0, FEES).state;
+  check('… فقط با «سناریوی فرضی» پذیرفته می‌شود و برچسب فرضی دارد', hypo && hypo.legs.call.src === 'hypo' && hypo.legs.put.src === 'hypo');
   const thin = structuredClone(market);
   delete thin.days[0].raw.call[1200].first;
   check('فیلدِ نیامده جانشین نمی‌شود: «اولین» نیست ← null', tradePrice(pricingContext(thin, { r: 0.3 }), 0, 'call', 1200, 'first') === null);

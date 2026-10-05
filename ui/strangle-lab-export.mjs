@@ -42,9 +42,9 @@ export function actionPlain(a, symOf = null) {
 }
 
 const ZONE_FA = { calm: 'آرام', band: 'در محدودهٔ تعدیل', beyond: 'فراتر از محدوده' };
-const SRC_FA = { close: 'پایانی', model: 'مدل', intrinsic: 'ارزش ذاتی', manual: 'انتخابی', ...BASIS_FA };
+const SRC_FA = { ...BASIS_FA, close: 'پایانی', model: 'مدل', intrinsic: 'ارزش ذاتی', manual: 'انتخابی', hypo: 'فرضی (بی سنجش)', stale: 'بی‌معامله (مانده از قبل)' };
 
-function headerSheet({ exp, market, cfg, run, capital, margin, retBase, generatedAt, settingsInfo = {} }) {
+function headerSheet({ exp, market, cfg, run, capital, margin, retBase, generatedAt, settingsInfo = {}, cutoff }) {
   const first = run.steps[0].state;
   const end = run.state?.closedAt >= 0 ? run.state.closedAt : (run.pending?.i ?? run.steps.at(-1).i);
   const rows = [
@@ -56,6 +56,10 @@ function headerSheet({ exp, market, cfg, run, capital, margin, retBase, generate
     ['روز پایان یا روز جاری آزمایش', date(market.days[end]?.date)],
     ['تاریخ خروج انتخابی', date(exp.to)],
     ['روزهای معاملاتی بازه', market.days.length],
+    ['قیمت‌های این فایل تا تاریخ', date(market.days[cutoff]?.date)],
+    ['نمایش آینده', run.done ? 'معامله تمام شده — همهٔ روزها' : exp?.reveal ? 'روشن — روزهای بعد از روز جاری هم آمده' : 'خاموش — هیچ قیمتی پس از روز جاری نیامده'],
+    ['ردیف آخر برگ روزبه‌روز', run.pending ? 'روز در انتظار تصمیم (دفتر روزانهٔ صفحه آن را هنوز ندارد)' : 'آخرین روز اجراشده'],
+    ['پوشش قیمت (معاملهٔ واقعی / ردیف)', `${fin(market.coverage?.pct) ? market.coverage.pct.toFixed(1) : '—'}٪ / ${fin(market.coverage?.recordPct) ? market.coverage.recordPct.toFixed(1) : '—'}٪`],
     ['حجم معامله (قرارداد از هر سمت)', cfg.qty],
     ['اندازهٔ قرارداد (از تنظیمات)', market.size],
     ['کال فروش ورود', first.legs.call?.strike],
@@ -91,6 +95,9 @@ function headerSheet({ exp, market, cfg, run, capital, margin, retBase, generate
     ['خروج سربه‌سر', choiceLabel('breakevenRule', cfg.breakevenRule)],
     ['کارمزد', cfg.fees ? 'حساب شده' : 'حساب نشده'],
     ['قیمت مدل برای روز بی‌معامله', cfg.modelFill ? 'روشن' : 'خاموش'],
+    ['ردیف با قیمت ولی بی‌معامله', choiceLabel('staleQuotes', cfg.staleQuotes)],
+    ['حد ضرر اجباری', cfg.slForce ? 'بله — روز حد ضرر هر تصمیمی بستن کامل است' : 'خیر — فقط پیشنهاد'],
+    ['قیمت انتخابی', cfg.manualFree ? 'سناریوی فرضی (بی سنجش)' : 'فقط در دامنهٔ معاملات همان روز'],
     ['روز خروج بی‌قیمت', choiceLabel('exitFallback', cfg.exitFallback)],
     ['— پارامترهای محاسبه —', ''],
     ['نرخ بدون ریسک سالانه', n(settingsInfo.rFree)],
@@ -237,21 +244,32 @@ function optionsSheet({ ctx, cfg, run, fees, params, act, retBase }) {
   [12, 20, 18, 10, 10, 20, 16, 16, 16, 10, 14, 14, 14, 14, 14, 14]);
 }
 
-/** قیمت همهٔ قراردادهای این سررسید در همهٔ روزها — برای هر وارسی دستی. */
-function chainSheet({ ctx }) {
+/**
+ * آخرین روزی که فایل از آن قیمت می‌دهد. تا معامله در جریان است و «نمایش
+ * آینده» خاموش، همان روز جاری آزمایش — گزارش آزمون ۸۳e5888 مورد ۱۶: برگ
+ * «قیمت قراردادها» همهٔ روزها تا سررسید را داشت و آینده را لو می‌داد.
+ */
+export function exportCutoff(run, exp, market) {
+  if (run.done || exp?.reveal) return market.days.length - 1;
+  return run.pending?.i ?? run.steps.at(-1)?.i ?? 0;
+}
+
+/** قیمت همهٔ قراردادهای این سررسید تا روز جاری — برای هر وارسی دستی. */
+function chainSheet({ ctx, cutoff }) {
   const market = ctx.market;
   const rows = [];
-  for (const day of market.days) {
+  for (const day of market.days.slice(0, cutoff + 1)) {
     for (const s of market.strikes) {
       for (const side of SIDES) {
         if (!s[side]) continue;
         const q = day.raw?.[side]?.[s.strike] || {};
-        rows.push([date(day.date), day.S, SIDE_FA[side], s.strike, s[side].sym, n(q.close), n(q.last), n(q.first), n(q.low), n(q.high), n(q.vol), n(q.value)]);
+        rows.push([date(day.date), day.S, SIDE_FA[side], s.strike, s[side].sym, n(q.close), n(q.last), n(q.first), n(q.low), n(q.high), n(q.vol), n(q.trades), n(q.value),
+          q.noTrade ? 'بی‌معامله — قیمت مانده از قبل' : (q.close || q.last) ? 'معامله شد' : '']);
       }
     }
   }
-  return sheetParts('قیمت قراردادها', ['تاریخ', 'قیمت پایه', 'سمت', 'قیمت اعمال', 'نماد', 'پایانی', 'آخرین', 'اولین', 'کمترین', 'بیشترین', 'حجم', 'ارزش معاملات'], rows,
-    [12, 10, 6, 10, 16, 10, 10, 10, 10, 10, 10, 16]);
+  return sheetParts('قیمت قراردادها', ['تاریخ', 'قیمت پایه', 'سمت', 'قیمت اعمال', 'نماد', 'پایانی', 'آخرین', 'اولین', 'کمترین', 'بیشترین', 'حجم', 'شمار معامله', 'ارزش معاملات', 'وضعیت معامله'], rows,
+    [12, 10, 6, 10, 16, 10, 10, 10, 10, 10, 10, 10, 16, 24]);
 }
 
 function reportSheets({ grade, act, retBase }) {
@@ -287,7 +305,8 @@ function reportSheets({ grade, act, retBase }) {
 export function buildStrangleWorkbook({ ctx, cfg, exp, run, fees = {}, params, capital = NaN, margin = NaN, retBase = NaN, grade = null, generatedAt = Date.now(), settingsInfo = {} }) {
   const symOf = (side, K) => ctx.market.strikes.find((x) => x.strike === Number(K))?.[side]?.sym || '';
   const act = (a) => actionPlain(a, symOf);
-  const base = { ctx, cfg, exp, run, fees, params, capital, margin, retBase, act, market: ctx.market, generatedAt, settingsInfo };
+  const cutoff = exportCutoff(run, exp, ctx.market);
+  const base = { ctx, cfg, exp, run, fees, params, capital, margin, retBase, act, market: ctx.market, generatedAt, settingsInfo, cutoff };
   return [
     headerSheet(base),
     guideSheet(),
