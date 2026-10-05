@@ -158,7 +158,7 @@ group('۳۰۳. عکس دیروز «امروز» خوانده نمی‌شود');
 
   const server = readSrc('../server/server.mjs');
   check('داشبورد زنده روزِ عکس را همراه می‌فرستد',
-    server.includes('session: { ...session, final:') && server.includes('phase: fromWatch ? watch.phase : marketOpen().phase'));
+    /session: \{\s*\.\.\.session, final:/.test(server) && server.includes('phase: fromWatch ? watch.phase : marketOpen().phase'));
   const map = readSrc('../ui/live-market-map.mjs');
   check('عنوان کندل از روزِ عکس ساخته می‌شود', map.includes('rangeHeading(marketContext.session, dateLabel)'));
 }

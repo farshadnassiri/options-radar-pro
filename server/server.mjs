@@ -52,7 +52,7 @@ import { makeThrottleWatch, throttleNote } from '../core/throttle-watch.mjs';
 import { JOURNAL_CAP, appendEntry, makeEntry, normalizeJournal } from '../core/journal.mjs';
 import { writeJsonAtomic } from './atomic-json.mjs';
 import { watchHealth } from '../core/watch-health.mjs';
-import { afterCloseDue, afterCloseState, diffWatchRows, watchSession } from '../core/watch-snapshot.mjs';
+import { afterCloseDue, afterCloseState, boardFreshness, diffWatchRows, freshnessSample, staleDecision, watchSession } from '../core/watch-snapshot.mjs';
 import { infoTotals } from '../core/range-info.mjs';
 import { makeJobQueue } from './job-queue.mjs';
 import { GENERAL_LANE, TAPE_LANE, laneLimits, laneOf, makeBucket } from './rate-lanes.mjs';
@@ -132,7 +132,7 @@ const stat = {
   upstreamMsTotal: 0, upstreamCount: 0,
   lastError: null, lastErrorAt: null,
   watchTicks: 0, watchRows: 0, lastWatchAt: null, lastWatchMs: 0, watchConsecutiveFails: 0,
-  queueDepth: 0, inflight: 0, clients: 0, paused: false, pauseReason: '',
+  queueDepth: 0, inflight: 0, clients: 0, paused: false, pauseReason: '', boardStale: '',
 };
 
 // بارِ بالادست به تفکیکِ سرویس — «۲۰۸۲ درخواست» را به «کدام سرویس» تبدیل
@@ -265,13 +265,13 @@ const boostTicket = (ticket, priority) => queues[ticket?.lane || GENERAL_LANE].b
 const cache = new Map();     // url -> { at, data }
 const inflight = new Map();  // url -> { promise, ticket }
 
-async function fetchUpstream(url, meta = {}) {
+async function fetchUpstream(url, meta = {}, extraHeaders = null) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), S.timeoutMs);
   const t0 = Date.now();
   meta.start = t0;
   try {
-    const res = await fetch(url, { headers: HEADERS, signal: ac.signal });
+    const res = await fetch(url, { headers: extraHeaders ? { ...HEADERS, ...extraHeaders } : HEADERS, signal: ac.signal });
     meta.status = res.status;
     meta.bytes = Number(res.headers.get('content-length')) || null;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -325,10 +325,14 @@ async function get(pathname, ttlSec, priority = 5) {
         // پاسخ سادهٔ دیده‌بان در CDN می‌تواند چند روز کهنه باشد (فزر:
         // ۱۹/۴۷ روز و ارزش صفر، در برابر ۱۵/۴۳ روز در پاسخ تازه).
         // فقط نشانی شبکه مهر می‌خورد؛ کلید کش، ادغام و cachedAt ثابت‌اند.
-        const requestUrl = pathname === '/Instrument/GetInstrumentOptionMarketWatch/0'
-          ? `${url}?_=${Date.now()}` : url;
+        // مهر تصادفی هم دارد و سرآیند «کش نکن» (۱۴۰۵/۰۷/۱۳): مهرِ تنها
+        // گاهی باز پاسخ چندروزه می‌گرفت؛ تازگی هر عکس هم جدا سنجیده می‌شود
+        // (`boardFreshness`).
+        const isBoard = pathname === '/Instrument/GetInstrumentOptionMarketWatch/0';
+        const requestUrl = isBoard ? `${url}?_=${Date.now()}${Math.random().toString(36).slice(2, 8)}` : url;
+        const noCache = isBoard ? { 'Cache-Control': 'no-cache, no-store', Pragma: 'no-cache' } : null;
         try {
-          data = await schedule(() => fetchUpstream(requestUrl, meta), ticket.priority, ticket, pathname);
+          data = await schedule(() => fetchUpstream(requestUrl, meta, noCache), ticket.priority, ticket, pathname);
         } catch (e) { upAttempt(dl, { pathname, url: requestUrl, attempt, queuedAt, meta, error: e }); throw e; }
         upAttempt(dl, { pathname, url: requestUrl, attempt, queuedAt, meta, data });
         // «خالی» یعنی پاسخ آمد ولی هیچ ردیفی نداشت. این با «نیامد» فرق
@@ -778,7 +782,49 @@ const clients = new Set();
 // `day`/`phase`: روز و فازِ بازار هنگام گرفتن همین عکس — عکسی که از دیروز
 // مانده باید «جلسهٔ قبل» خوانده شود، نه امروز. `afterPulls`/`finalDay`
 // شمار عکس‌های پس از بستن و روزی که عکس نهایی ثابت شد (`core/watch-snapshot.mjs`).
-let watch = { at: null, rows: [], byKey: new Map(), day: 0, phase: '', afterPulls: 0, finalDay: 0 };
+// `stale`: برچسب کهنگیِ آخرین سنجش؛ `rowsStale`: خودِ ردیف‌های در دست کهنه‌اند
+// (وقتی عکس تازهٔ قبلی نگه داشته شده، اولی هست و دومی نه).
+let watch = { at: null, rows: [], byKey: new Map(), day: 0, phase: '', afterPulls: 0, finalDay: 0, stale: null, rowsStale: false };
+
+// ═══ تازگیِ عکس تابلو ═══
+//
+// CDN بالادست گاهی عکس چندجلسه‌کهنه می‌دهد (شرح کنار `boardFreshness`).
+// پایانی دیروزِ سه پایهٔ پرمعامله را با تابلوی رسمی خودِ نماد می‌سنجیم:
+// بار اول، هر دقیقه در جلسه، هر دور پس از بستن، و تا وقتی کهنه است هر دور.
+const BOARD_PATH = '/Instrument/GetInstrumentOptionMarketWatch/0';
+const BOARD_CHECK_MS = 60_000;
+// `ref`: پایانی دیروزِ مرجع از آخرین سنجش — بی هیچ درخواست، هر دور با آن
+// مقایسه می‌کنیم تا عکس کهنهٔ میان دو سنجش هم همان دور گیر بیفتد.
+let boardCheck = { at: 0, verdict: null, ref: {} };
+
+async function checkBoard(rows) {
+  const sample = freshnessSample(rows, 3);
+  const infos = {};
+  await Promise.all(sample.map(async (s) => {
+    try {
+      const d = firstDict(await get(`/ClosingPrice/GetClosingPriceInfo/${s.ins}`, S.ttlInfoSec, 2));
+      infos[s.ins] = { yday: Number(d?.priceYesterday) || 0 };
+    } catch { /* نرسید — همین نماد سنجیده نمی‌شود */ }
+  }));
+  return { ...boardFreshness(sample, infos), infos };
+}
+
+/** ردیف‌های تابلو، و اگر کهنه بود یک بار دیگر با کش پاک‌شده. */
+async function freshBoardRows(rows, { due }) {
+  if (!due || !rows.length) return { rows, verdict: boardCheck.verdict };
+  let verdict = await checkBoard(rows);
+  if (verdict.fresh === false) {
+    cache.delete(`${S.baseUrl}${BOARD_PATH}`);
+    await sleep(1500);
+    const again = firstList(await get(BOARD_PATH, S.ttlWatchSec, 1));
+    const second = again.length ? await checkBoard(again) : verdict;
+    if (again.length && second.fresh !== false) { rows = again; }
+    verdict = second;
+  }
+  boardCheck = { at: Date.now(), verdict, ref: verdict.checked ? verdict.infos : boardCheck.ref };
+  stat.boardStale = verdict.fresh === false ? verdict.why : '';
+  return { rows, verdict };
+}
 
 
 
@@ -824,11 +870,26 @@ async function watchTick() {
         throw new Error(`دور دیده‌بان در ${Math.round(watchDeadlineMs() / 1000)} ثانیه برنگشت`);
       }),
     ]);
-    const rows = firstList(js);
-    const { byKey: next, changed } = diffWatchRows(rows, watch.byKey);
     const first = watch.rows.length === 0;
+    const fetched = firstList(js);
+    const drift = boardFreshness(freshnessSample(fetched, 3), boardCheck.ref).fresh === false;
+    const due = first || drift || Boolean(watch.stale) || gate.phase === 'after' || Date.now() - boardCheck.at > BOARD_CHECK_MS;
+    const { rows, verdict } = await freshBoardRows(fetched, { due });
+    const decision = staleDecision({ verdict: due ? verdict : null, prevRows: watch.rows.length, prevStale: watch.rowsStale, at: Date.now() });
+    if (decision.keep) {
+      // عکس تازهٔ قبلی می‌ماند؛ پاسخ کهنه نه پخش می‌شود نه بایگانی.
+      watch = { ...watch, stale: { ...decision.stale, why: `${decision.stale.why} — آخرین عکس تازه نگه داشته شد` } };
+      broadcast('trouble', { at: Date.now(), message: decision.stale.why });
+      return true;
+    }
+    const { byKey: next, changed } = diffWatchRows(rows, watch.byKey);
     const after = afterCloseState({ phase: gate.phase, today, prev: watch, changedCount: changed.length, first, minutesSinceClose, settleMin: settle.settleMin });
-    watch = { at: Date.now(), rows, byKey: next, day: today, phase: gate.phase, ...after };
+    // عکس کهنه هیچ‌وقت «نهایی» نمی‌شود و شمارِ پس از بستن را هم نمی‌خورد.
+    const settled = decision.stale ? { afterPulls: Number(watch.afterPulls) || 0, finalDay: 0 } : after;
+    // اگر این دور سنجیده نشد، برچسبِ دور قبل می‌ماند.
+    const stale = due ? decision.stale : watch.stale;
+    watch = { at: Date.now(), rows, byKey: next, day: today, phase: gate.phase, ...settled, stale, rowsStale: Boolean(stale) };
+    if (stale) broadcast('trouble', { at: Date.now(), message: stale.why });
     stat.watchTicks += 1;
     stat.watchRows = rows.length;
     stat.lastWatchAt = watch.at;
@@ -1928,11 +1989,16 @@ async function handleRequest(req, res, u) {
     // پایه‌ها دیده می‌شود تا «بی‌معامله» با «بدون تغییر» اشتباه نشود؛ نماد
     // بی‌معامله در مخرج درصدهای مثبت/منفی وارد نمی‌شود و جدا می‌ماند.
     if (p === '/api/live-dashboard') {
-      const boardPath = '/Instrument/GetInstrumentOptionMarketWatch/0';
+      const boardPath = BOARD_PATH;
       const fromWatch = watch.rows.length > 0;
-      const sourceRows = fromWatch
-        ? watch.rows
-        : firstList(await get(boardPath, Math.max(60, S.ttlMetaSec), 4));
+      // مسیر جایگزین (حلقه هنوز نچرخیده) هم همان سنجش تازگی را دارد.
+      let fallbackStale = null;
+      let sourceRows = watch.rows;
+      if (!fromWatch) {
+        const fetched = await freshBoardRows(firstList(await get(boardPath, Math.max(60, S.ttlMetaSec), 4)), { due: true });
+        sourceRows = fetched.rows;
+        fallbackStale = staleDecision({ verdict: fetched.verdict, at: Date.now() }).stale;
+      }
       // عکس مال کدام جلسه است؟ فازِ **هنگام گرفتن عکس** تصمیم می‌گیرد، نه
       // الان: عکسی که از دیروز در حافظه مانده، یا پیش از باز شدن گرفته شده،
       // «جلسهٔ قبل» است و رابط نباید زیر عنوان «امروز» نشانش دهد.
@@ -1979,7 +2045,10 @@ async function handleRequest(req, res, u) {
         // زنجیره چند دقیقه قدیمی است.» درست بود: `at` زمانِ پاسخ است، نه
         // زمانِ عکس. حالا هر دو می‌روند و رابط می‌تواند سن واقعی را بگوید.
         at: Date.now(), snapshotAt: boardAt || null,
-        session: { ...session, final: Number(watch.finalDay) > 0 && Number(watch.finalDay) === session.date },
+        session: {
+          ...session, final: Number(watch.finalDay) > 0 && Number(watch.finalDay) === session.date && !watch.stale,
+          stale: fromWatch ? watch.stale || null : fallbackStale,
+        },
         count: instruments.length, traded: snapshot.traded,
         failed, snapshot, timeline,
         // گردش واقعی پایه‌ها همین‌جا به عکس زنجیره برمی‌گردد؛ پیش از این

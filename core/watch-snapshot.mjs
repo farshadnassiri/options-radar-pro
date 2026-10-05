@@ -129,3 +129,68 @@ export function watchSession({ phase = '', at = 0, today = 0 } = {}) {
   const current = Number(today) > 0 && day.date === Number(today);
   return { current, date: day.date, why: current ? '' : 'عکس از جلسهٔ قبل مانده است' };
 }
+
+// ————————————————————————————————————————————————————————————————
+// تازگیِ عکس تابلو در برابر منبع مرجع
+//
+// گزارش صاحب پروژه (۱۴۰۵/۰۷/۱۳): «وقتی سایت را از اول اجرا می‌کنم دیتایش
+// قدیمی است… انگار در حافظه مانده.» عکسِ نشان‌داده‌شده چند جلسه کهنه بود:
+// پایانی دیروزِ اطلس در آن ≈ ۱۶۴٬۹۰۰، در حالی که تابلوی رسمی ۱۶۹٬۷۲۳
+// می‌گفت؛ موقعیت باز و ارزش اختیارها هم مال همان روزها بودند — فقط گردشِ
+// خودِ پایه که از مسیر دیگری می‌آید تازه بود. CDN بالادست برای همین
+// نشانی پیش‌تر هم پاسخ چندروزه داده بود (کامیت cebe625) و مهر زمان همیشه
+// کافی نیست. و پس از بستن، دو پاسخ کهنهٔ یکسان «عکس نهایی» اعلام می‌شد و
+// تا فردا می‌ماند.
+//
+// «پایانی دیروز» در طول یک جلسه ثابت است؛ پس اگر برای پرمعامله‌ترین پایه‌ها
+// با `GetClosingPriceInfo` (منبع مرجعِ همان نماد) نخواند، عکس مال جلسهٔ
+// دیگری است — هر عدد دیگرش هم.
+// ————————————————————————————————————————————————————————————————
+
+/** نمونهٔ سنجش: پایه‌های یکتا با بیشترین ارزش معاملات اختیار، با پایانی دیروزِ تابلو. */
+export function freshnessSample(rows = [], n = 3) {
+  const byUa = new Map();
+  for (const r of rows || []) {
+    const ins = String(r?.uaInsCode ?? '');
+    const yday = Number(r?.priceYesterday_UA);
+    if (!ins || !(yday > 0)) continue;
+    const box = byUa.get(ins) || { ins, name: String(r.lval30_UA || ins), yday, close: Number(r.pClosing_UA) || 0, value: 0 };
+    box.value += (Number(r.qTotCap_C) || 0) + (Number(r.qTotCap_P) || 0);
+    byUa.set(ins, box);
+  }
+  return [...byUa.values()].sort((a, b) => b.value - a.value).slice(0, n);
+}
+
+/**
+ * حکم تازگی. `infos` نگاشت `ins → { yday }` از منبع مرجع است.
+ * `fresh: null` یعنی نتوانستیم بسنجیم (هیچ پاسخ مرجعی نیامد) — ادعای
+ * تازگی یا کهنگی نمی‌سازد.
+ */
+export function boardFreshness(sample = [], infos = {}) {
+  const stale = [];
+  let checked = 0;
+  for (const s of sample) {
+    const ref = Number(infos?.[s.ins]?.yday);
+    if (!(ref > 0)) continue;
+    checked += 1;
+    if (Math.abs(ref - s.yday) > 0.5) stale.push({ ins: s.ins, name: s.name, boardYday: s.yday, refYday: ref });
+  }
+  if (!checked) return { fresh: null, checked, stale, why: 'منبع مرجع برای سنجش تازگی پاسخ نداد' };
+  // حکم کهنگی با اکثریت: تعدیلِ قیمتِ یک نماد (افزایش سرمایه، سود نقدی)
+  // می‌تواند فقط آن یکی را ناجور کند؛ عکسِ کهنه همه را با هم.
+  if (stale.length * 2 <= checked) return { fresh: true, checked, stale, why: '' };
+  const x = stale[0];
+  return { fresh: false, checked, stale,
+    why: `عکس تابلوی بالادست کهنه است: پایانی دیروزِ ${x.name} در آن ${x.boardYday} ولی در تابلوی رسمی نماد ${x.refYday}` };
+}
+
+/**
+ * با حکم تازگی چه کنیم؟ `keep: true` یعنی عکس تازهٔ قبلی را نگه دار و
+ * این پاسخ کهنه را دور بریز؛ اگر عکس قبلی نداریم (یا آن هم کهنه بود)،
+ * همین را با برچسب `stale` نشان بده — هیچ‌وقت بی‌برچسب، هیچ‌وقت «نهایی».
+ */
+export function staleDecision({ verdict = null, prevRows = 0, prevStale = null, at = 0 } = {}) {
+  if (verdict?.fresh !== false) return { keep: false, stale: null };
+  const stale = { why: verdict.why, at: Number(at) || 0, symbols: verdict.stale.map((x) => x.name) };
+  return { keep: Number(prevRows) > 0 && !prevStale, stale };
+}

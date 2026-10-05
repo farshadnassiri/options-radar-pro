@@ -250,7 +250,7 @@ check('۶. واحد نمودار وسعت از صداکننده می‌آید، 
   && dash248.includes("breadthBars(host, scopedBreadth(scoped), { unit: 'قرارداد' })"));
 check('۸. نوار وضعیت هر دو زمان را می‌گوید و کهنگی را رنگ می‌کند',
   dash248.includes('dashboardClock({ snapshotAt: next.snapshotAt, at: next.at })')
-  && dash248.includes("$('dd-status').className = clock.stale ? 'loss' : ''"));
+  && dash248.includes("$('dd-status').className = clock.stale || boardStale ? 'loss' : ''"));
 check('۳ و ۴ و ۷ ستون خودشان را دارند',
   ['ivMidPct', 'ivBidPct', 'ivAskPct', 'ivWhyText', 'pricedToday', 'deltaMid', 'theoreticalFloor', 'floorGap']
     .every((key) => dash248.includes(`col('${key}'`)));

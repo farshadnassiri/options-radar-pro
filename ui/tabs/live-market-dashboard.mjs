@@ -1347,8 +1347,10 @@ export async function mount(root, { state, api }) {
       const stamp = clock.unknown
         ? 'زمان عکس نامعلوم'
         : `عکس ${faClock(new Date(clock.snapshotAt))} · ${faDigits(clock.ageSec)} ثانیه پیش`;
-      $('dd-status').textContent = `${stamp} · دریافت ${faClock(new Date(clock.at || Date.now()))} · ${fmt.int(next.universe?.contracts?.length || 0)} قرارداد · ${fmt.int(next.traded || 0)} پایه معامله‌شده`;
-      $('dd-status').className = clock.stale ? 'loss' : '';
+      // عکس کهنهٔ بالادست (سنجش `boardFreshness` در سرور) بی‌برچسب نمی‌ماند.
+      const boardStale = next.session?.stale?.why ? `⚠ ${next.session.stale.why} · ` : '';
+      $('dd-status').textContent = `${boardStale}${stamp} · دریافت ${faClock(new Date(clock.at || Date.now()))} · ${fmt.int(next.universe?.contracts?.length || 0)} قرارداد · ${fmt.int(next.traded || 0)} پایه معامله‌شده`;
+      $('dd-status').className = clock.stale || boardStale ? 'loss' : '';
     } catch (error) {
       $('dd-status').textContent = `به‌روزرسانی ناموفق: ${error.message}`; logError('داشبورد تصمیم‌گیری', error);
     } finally { loading = false; $('dd-refresh').disabled = false; busyBar?.busy(false); schedule(); }
