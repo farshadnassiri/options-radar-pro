@@ -10,10 +10,9 @@ import { greeksFromIvPct } from './leg-iv.mjs';
 import { bsPrice } from './bs.mjs';
 import { numOrNaN, reviveNullNumbers } from './num.mjs';
 
-export function pctVsYesterday(last, yesterday) {
-  const now = Number(last), prior = Number(yesterday);
-  return now > 0 && prior > 0 ? ((now / prior) - 1) * 100 : NaN;
-}
+// مبنای همهٔ درصدهای تغییر روزانه، پایانی روز قبل — `core/price-change.mjs`.
+import { pctVsYesterday } from './price-change.mjs';
+export { pctVsYesterday };
 
 const emptyAggregate = (seed = {}) => ({
   ...seed, contracts: 0, tradedContracts: 0, positive: 0, negative: 0, unchanged: 0,
@@ -152,10 +151,15 @@ export function decisionDashboardSnapshot(rows, settings = {}) {
             ins: String(quote.ins), name: quote.name, kind: quote.kind,
             uaIns: String(ua.ins), uaName: ua.name, endDate: expiry.endDate, days: expiry.days,
             strike: strike.strike, size: strike.size, spot,
+            // قیمت پایه هم با دو قیمتش و تغییر هر کدام نسبت به پایانی روز قبل.
+            uaLast: Number(ua.last) > 0 ? Number(ua.last) : NaN, uaClose: Number(ua.close), uaYday: ua.yday,
+            uaLastPct: pctVsYesterday(ua.last, ua.yday), uaClosePct: pctVsYesterday(ua.close, ua.yday),
             last: last > 0 ? last : NaN, lastSource, tradeLast: Number(quote.last) > 0 ? Number(quote.last) : NaN,
             close: Number(quote.close), yday: quote.yday,
             changePct: pctVsYesterday(last, quote.yday), bid: quote.bid, ask: quote.ask,
             closeChangePct: pctVsYesterday(quote.close, quote.yday),
+            // «آخرین» فقط از معامله؛ `changePct` بالا در نبود معامله پایانی را می‌سنجد.
+            lastChangePct: pctVsYesterday(quote.last, quote.yday),
             bidQty: quote.bidQty, askQty: quote.askQty, mid,
             spreadPct: mid > 0 ? ((quote.ask - quote.bid) / mid) * 100 : NaN,
             premiumPctSpot: pctSpot(last), intrinsic, timeValue,
@@ -529,7 +533,9 @@ export function strikeLadder(contracts = []) {
     let group = groups.get(groupKey);
     if (!group) {
       group = { key: groupKey, uaIns: row.uaIns, uaName: row.uaName, endDate: row.endDate,
-        days: row.days, spot: Number(row.spot), strikes: new Map() };
+        days: row.days, spot: Number(row.spot), strikes: new Map(),
+        // دو قیمت پایه برای سرنویس نردبان (آخرین و پایانی با تغییرشان).
+        uaQuote: { last: row.uaLast, close: row.uaClose, yday: row.uaYday } };
       groups.set(groupKey, group);
     }
     let rung = group.strikes.get(strike);

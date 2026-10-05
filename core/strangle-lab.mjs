@@ -168,7 +168,8 @@ const rawByDate = (rows) => {
     const d = normalizeHistoryDate(row?.date);
     if (!d) continue;
     const q = {};
-    for (const k of ['close', 'last', 'first', 'low', 'high', 'value', 'vol', 'trades']) if (num(row[k], 0) > 0) q[k] = num(row[k], 0);
+    // `yday` پایانی روز قبل است — مبنای درصد تغییر روزانه در همهٔ برنامه.
+    for (const k of ['close', 'last', 'first', 'low', 'high', 'value', 'vol', 'trades', 'yday']) if (num(row[k], 0) > 0) q[k] = num(row[k], 0);
     if (noTradeRow(row) && dayPrice(row) > 0) q.noTrade = true;
     map.set(d, q);
   }

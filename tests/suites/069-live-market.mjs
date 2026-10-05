@@ -27,7 +27,10 @@ group('۶۸. رصد لحظه‌ای بازار و IV هر معامله');
     summary68.count === 2 && summary68.volume === 17 && summary68.value === 1714
     && summary68.firstPrice === 100 && summary68.lastPrice === 102);
   check('VWAP و تغییر از اولین معامله دقیق‌اند',
-    near(summary68.vwap, 1714 / 17, 1e-10) && near(summary68.changePct, 2, 1e-10), `${summary68.vwap} | ${summary68.changePct}`);
+    near(summary68.vwap, 1714 / 17, 1e-10) && near(summary68.changeFromFirstPct, 2, 1e-10), `${summary68.vwap} | ${summary68.changeFromFirstPct}`);
+  // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۳): درصد تغییر همه‌جا نسبت به پایانی روز قبل.
+  check('درصد تغییر نوار نسبت به پایانی دیروز است، و بی آن نامعلوم',
+    near(summarizeLiveTrades(raw68, { yday: 120 }).changePct, (102 / 120 - 1) * 100, 1e-10) && Number.isNaN(summary68.changePct));
 
   const settings68 = { rFree: 0.30, divYield: 0, dayCountYear: 365, ivLo: 0.01, ivHi: 5 };
   const T68 = 30 / 365;
@@ -54,9 +57,10 @@ group('۶۸. رصد لحظه‌ای بازار و IV هر معامله');
   check('حجم و ارزش تجمعی در هر ردیف تازه جلو می‌روند',
     tape68[2].cumulativeVolume === 6
     && near(tape68[2].cumulativeValue, option68.reduce((sum, row) => sum + row.price * row.quantity * 1000, 0), 1e-8));
-  const reference68 = liveReferenceTape(base68, { ins: '11', name: 'نماد' });
-  check('مسیر پایه، تغییر قیمت و حجم تجمعی را برای نمودار می‌سازد',
-    reference68.length === 2 && near(reference68[1].changePct, 10, 1e-10) && reference68[1].cumulativeVolume === 120);
+  const reference68 = liveReferenceTape(base68, { ins: '11', name: 'نماد', yday: 10500 });
+  check('مسیر پایه، تغییر قیمت (نسبت به پایانی دیروز) و حجم تجمعی را برای نمودار می‌سازد',
+    reference68.length === 2 && near(reference68[1].changePct, (11000 / 10500 - 1) * 100, 1e-10) && reference68[1].cumulativeVolume === 120
+    && Number.isNaN(liveReferenceTape(base68, { ins: '11' })[1].changePct));
 
   const server68 = readSrc('../server/server.mjs');
   const app68 = readSrc('../ui/app.mjs');

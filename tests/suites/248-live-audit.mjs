@@ -374,7 +374,7 @@ check('۴. غنی‌سازی پیش از ساخت زنجیره انجام می�
 // ————— ۱. ردیف نماد پایه —————
 check('۱. ردیف نماد پایه نام، آخرین قیمت و تغییرش را دارد',
   mapE248.includes('lmm-paired-spot') && mapE248.includes('آخرین معاملهٔ نماد پایه')
-  && mapE248.includes('const uaChange = Number(ua?.changePct);'));
+  && mapE248.includes('const uaQ = dayQuote(ua || {});') && mapE248.includes('<i>پایانی</i>'));
 const cssE248 = readSrc('../ui/style.css');
 check('۱. و از هر ردیف دیگر جدا دیده می‌شود',
   cssE248.includes('.lmm-paired-spot td { padding: 0; background: color-mix(in srgb, var(--warn)')

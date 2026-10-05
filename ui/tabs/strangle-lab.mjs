@@ -39,6 +39,7 @@ import { defaults, feesOf, marginParamsOf } from '/core/settings.mjs';
 import { dailiesFor } from '/ui/strategy-history.mjs';
 import { fmt, faDigits } from '/ui/fmt.mjs';
 import { logError } from '/ui/errlog.mjs';
+import { dayQuote } from '/core/price-change.mjs';
 import {
   esc, money, tone, pct, price, strikeFa, dateFa, shortDateFa, dayNameFa, actionText, reasonText,
   srcBadge, lineChart, legendChips, tipValue, histSvg, gaugeHtml, timelineHtml, whatIfHtml, choiceChips, FULL, legGanttSvg, keySvg,
@@ -686,18 +687,20 @@ export async function mount(root, { state } = {}) {
   }
 
   /**
-   * دو قیمت روز — پایانی و آخرین معامله — هر کدام با تغییرش نسبت به همان
-   * قیمتِ دیروز، به ریال و درصد. `flip` برای پای فروخته‌شده: بالا رفتنِ
-   * قیمتش برای فروشنده زیان است، پس رنگ وارونه می‌شود.
+   * دو قیمت روز — پایانی و آخرین معامله — هر کدام با تغییرش نسبت به
+   * **پایانی روز قبل**، به ریال و درصد (`dayQuote`؛ مبنای همهٔ برنامه، خواستهٔ
+   * صاحب پروژه ۱۴۰۵/۰۷/۱۳). پیش از این «آخرین» با آخرینِ دیروز سنجیده می‌شد.
+   * مبنا `yday` همان ردیف است و اگر نیامده پایانی روز معاملاتی قبل. `flip`
+   * برای پای فروخته‌شده: بالا رفتنِ قیمتش برای فروشنده زیان است.
    */
   function twoPrices(now = {}, prev = {}, { flip = false } = {}) {
-    const row = (label, a, b) => {
-      const d = fin(a) && fin(b) ? a - b : NaN;
+    const q = dayQuote(now || {}, { prevClose: prev?.close });
+    const row = (label, a, d, p) => {
       const t = tone(flip ? -d : d);
       return `<div class="sl-2p"><span>${label}</span><b>${price(a)}</b>${fin(d)
-        ? `<span class="${t}">${d > 0 ? '▲' : d < 0 ? '▼' : '■'} ${price(Math.abs(d))} <small>(${pct((d / b) * 100, 2)})</small></span>` : '<span class="flat">—</span>'}</div>`;
+        ? `<span class="${t}">${d > 0 ? '▲' : d < 0 ? '▼' : '■'} ${price(Math.abs(d))} <small>(${pct(p, 2)})</small></span>` : '<span class="flat">—</span>'}</div>`;
     };
-    return `<div class="sl-2ps">${row('پایانی', now.close, prev?.close)}${row('آخرین', now.last, prev?.last)}</div>`;
+    return `<div class="sl-2ps">${row('پایانی', q.close, q.closeChange, q.closePct)}${row('آخرین', q.last, q.lastChange, q.lastPct)}</div>`;
   }
 
   function dayDetailHtml(run, v) {

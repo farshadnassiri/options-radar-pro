@@ -5179,6 +5179,15 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 }
 
 
+/* آخرین و پایانی کنار هم، با درصد تغییر نسبت به پایانی روز قبل (ui/price-pair.mjs). */
+.price-pair { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.price-pair-item { white-space: nowrap; }
+.price-pair-item > span { color: var(--muted); font-size: var(--fs-xs); }
+.price-pair-item b { font-variant-numeric: tabular-nums; }
+.price-pair-item small { font-weight: 800; }
+.price-pair-item small.gain { color: var(--gain); }
+.price-pair-item small.loss { color: var(--loss); }
+
 .pb-skin {
   --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */
   --pb-hair: 1px solid var(--line-soft);            /* مرز مویی مشترک */
@@ -5463,4 +5472,5 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
   font-size: var(--fs-xs); line-height: 1.95;
 }
 .pb-skin .pb-filter-note:empty { display: none; }
+
 

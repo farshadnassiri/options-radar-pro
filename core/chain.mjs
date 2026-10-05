@@ -381,6 +381,8 @@ export function underlyingList(chain, opt = {}) {
         close: u.close, yday: u.yday,
         changePct: (u.last || u.close) > 0 && u.yday > 0 ? (((u.last || u.close) / u.yday) - 1) * 100 : NaN,
         closeChangePct: u.close > 0 && u.yday > 0 ? ((u.close / u.yday) - 1) * 100 : NaN,
+        // «آخرین» فقط از معامله، نسبت به پایانی روز قبل.
+        lastChangePct: u.last > 0 && u.yday > 0 ? ((u.last / u.yday) - 1) * 100 : NaN,
         expiries: u.expiryList.length,
         nearestDays: u.expiryList[0]?.days ?? null,
         // گردش خودِ نماد پایه، جدا از گردش زنجیره اختیارش. تا امروز خوانده

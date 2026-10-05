@@ -10,6 +10,8 @@ import {
   contractBreakeven, breakevenGap, breakevenGapPct, contractAnalytics, reviveDashboardUniverse,
 } from '/core/decision-dashboard.mjs';
 import { numOrNaN } from '/core/num.mjs';
+import { pctVsYesterday } from '/core/price-change.mjs';
+import { pricePairHtml, pricePairText } from '/ui/price-pair.mjs';
 import { mountChainCompare } from '/ui/chain-compare-view.mjs';
 import { mountVolRank } from '/ui/vol-rank-view.mjs';
 import { mountIvCharts } from '/ui/iv-charts-view.mjs';
@@ -214,6 +216,28 @@ const METRICS = {
 // `base: true` یعنی در نمای آماده هست؛ بقیه از انتخابگر ستون اضافه می‌شوند.
 const col = (key, label, fmtName, opt = {}) => ({ key, label, fmt: fmtName, ...opt });
 
+// ── آخرین و پایانی، هر کدام با درصد تغییر نسبت به پایانی دیروز ──────────
+//
+// خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۳): هر جا قیمت نشان داده می‌شود، آخرین و
+// پایانی هر دو با درصد تغییر؛ مبنای درصد همیشه پایانی روز قبل. «آخرین» فقط
+// معامله است (`tradeLast`)؛ ستون «قیمت جاری» همان آخرین، یا پایانی اگر
+// معامله نشد، با نام صریح خودش می‌ماند.
+const PRICE_PAIR_COLS = (group) => [
+  col('tradeLast', 'آخرین معامله', 'money', { group, base: true }),
+  col('lastChangePct', 'تغییر آخرین نسبت به پایانی دیروز ٪', 'pct', { group, base: true, heat: 'gain', sign: true }),
+  col('close', 'پایانی', 'money', { group, base: true }),
+  col('closeChangePct', 'تغییر پایانی نسبت به پایانی دیروز ٪', 'pct', { group, base: true, heat: 'gain', sign: true }),
+  col('yday', 'پایانی دیروز', 'money', { group }),
+  col('last', 'قیمت جاری (آخرین، یا پایانی بی‌معامله)', 'money', { group }),
+  col('changePct', 'تغییر قیمت جاری نسبت به پایانی دیروز ٪', 'pct', { group, heat: 'gain', sign: true }),
+];
+const PRICE_PAIR_COLS_UA = [
+  col('uaLast', 'آخرین معاملهٔ پایه', 'money', { group: 'قیمت پایه' }),
+  col('uaLastPct', 'تغییر آخرین پایه نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت پایه', heat: 'gain', sign: true }),
+  col('uaClose', 'پایانی پایه', 'money', { group: 'قیمت پایه' }),
+  col('uaClosePct', 'تغییر پایانی پایه نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت پایه', heat: 'gain', sign: true }),
+];
+
 const COLS_CONTRACT = [
   col('title', 'قرارداد', 'sym', { group: 'شناسه', base: true }),
   col('uaName', 'نماد پایه', 'text', { group: 'شناسه', base: true }),
@@ -221,11 +245,9 @@ const COLS_CONTRACT = [
   col('strike', 'قیمت اعمال', 'money', { group: 'شناسه', base: true }),
   col('expiryText', 'سررسید', 'text', { group: 'شناسه', base: true }),
   col('days', 'روز مانده', 'int', { group: 'شناسه' }),
-  col('spot', 'قیمت جاری پایه', 'money', { group: 'قیمت' }),
-  col('last', 'آخرین', 'money', { group: 'قیمت', base: true }),
-  col('close', 'پایانی', 'money', { group: 'قیمت' }),
-  col('yday', 'پایانی دیروز', 'money', { group: 'قیمت' }),
-  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت', base: true, heat: 'gain', sign: true }),
+  col('spot', 'قیمت جاری پایه', 'money', { group: 'قیمت پایه' }),
+  ...PRICE_PAIR_COLS_UA,
+  ...PRICE_PAIR_COLS('قیمت'),
   col('premiumPctSpot', 'پریمیوم ٪ قیمت پایه', 'pct', { group: 'قیمت' }),
   col('moneynessPct', 'فاصله اعمال از پایه ٪', 'pct', { group: 'قیمت', sign: true }),
   // ── سربه‌سر، در خودِ زنجیره ──────────────────────────────────────────
@@ -317,10 +339,7 @@ const COLS_CONTRACT = [
 
 const COLS_UNDERLYING = [
   col('title', 'نماد پایه', 'text', { group: 'شناسه', base: true }),
-  col('last', 'آخرین', 'money', { group: 'قیمت پایه', base: true }),
-  col('close', 'پایانی', 'money', { group: 'قیمت پایه' }),
-  col('yday', 'پایانی دیروز', 'money', { group: 'قیمت پایه' }),
-  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت پایه', base: true, heat: 'gain', sign: true }),
+  ...PRICE_PAIR_COLS('قیمت پایه'),
   col('contracts', 'قرارداد', 'int', { group: 'اندازه تابلو', base: true }),
   col('strikes', 'قیمت اعمال', 'int', { group: 'اندازه تابلو' }),
   col('expiries', 'سررسید', 'int', { group: 'اندازه تابلو', base: true }),
@@ -455,7 +474,7 @@ const COLS_TAPE = [
   col('days', 'روز مانده', 'int', { group: 'شناسه' }),
   col('timeText', 'زمان', 'text', { group: 'معامله', base: true }),
   col('price', 'قیمت', 'money', { group: 'معامله', base: true }),
-  col('changeFromFirstPct', 'تغییر از اولین معامله ٪', 'pct', { group: 'معامله', heat: 'gain', sign: true }),
+  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'معامله', base: true, heat: 'gain', sign: true }),
   col('quantity', 'حجم', 'int', { group: 'معامله', base: true }),
   col('value', 'ارزش (میلیون ریال)', 'mrial', { group: 'معامله', base: true, heat: 'gain' }),
   col('cumulativeVolume', 'حجم تجمعی', 'int', { group: 'تجمعی', base: true }),
@@ -561,7 +580,9 @@ const COLS_BOARD = [
   col('days', 'روز مانده', 'int', { group: 'شناسه' }),
   col('spot', 'قیمت جاری پایه', 'money', { group: 'سربه‌سر', base: true }),
   col('last', 'پریمیوم (آخرین)', 'money', { group: 'سربه‌سر', base: true }),
-  col('close', 'قیمت پایانی قرارداد', 'money', { group: 'قیمت' }),
+  col('lastChangePct', 'تغییر آخرین معامله نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت', base: true, heat: 'gain', sign: true }),
+  col('close', 'قیمت پایانی قرارداد', 'money', { group: 'قیمت', base: true }),
+  col('closeChangePct', 'تغییر پایانی نسبت به پایانی دیروز ٪', 'pct', { group: 'قیمت', base: true, heat: 'gain', sign: true }),
   col('yday', 'پایانی دیروز قرارداد', 'money', { group: 'قیمت' }),
   col('premiumPctSpot', 'پریمیوم ٪ قیمت پایه', 'pct', { group: 'قیمت' }),
   col('intrinsic', 'ارزش ذاتی هر سهم', 'money', { group: 'قیمت' }),
@@ -571,7 +592,7 @@ const COLS_BOARD = [
   col('breakeven', 'سربه‌سر', 'money', { group: 'سربه‌سر', base: true }),
   col('breakevenGapPct', 'فاصله تا سربه‌سر ٪', 'pct', { group: 'سربه‌سر', base: true, heat: 'loss' }),
   col('moneynessPct', 'فاصله اعمال از قیمت جاری ٪', 'pct', { group: 'سربه‌سر', base: true }),
-  col('changePct', 'تغییر نسبت به پایانی دیروز ٪', 'pct', { group: 'گردش امروز', heat: 'gain' }),
+  col('changePct', 'تغییر قیمت جاری نسبت به پایانی دیروز ٪', 'pct', { group: 'گردش امروز', heat: 'gain' }),
   col('bid', 'تقاضا', 'money', { group: 'مظنه' }),
   col('bidQty', 'حجم تقاضا', 'int', { group: 'مظنه' }),
   col('ask', 'عرضه', 'money', { group: 'مظنه' }),
@@ -665,7 +686,7 @@ function barChart(rows, metric) {
   return `<div class="decision-bars" aria-label="${esc(label)}">${rows.slice(0, 16).map((row) => {
     const value = Number(row[metric]);
     const fill = signed ? (value > 0 ? 'var(--gain)' : value < 0 ? 'var(--loss)' : 'var(--muted)') : 'var(--bar-fill)';
-    return `<article><header><b>${esc(rowName(row))}</b><strong class="${tone(signed ? value : 0)}">${formatter(value)}</strong></header><i><b style="--bar:${Math.min(100, Math.abs(value) / max * 100)}%;--series:${fill}"></b></i><small>تغییر آخرین با پایانی دیروز: ${fmt.pct(row.changePct)}٪ · ارزش ${fmt.rialText(row.value)}</small></article>`;
+    return `<article><header><b>${esc(rowName(row))}</b><strong class="${tone(signed ? value : 0)}">${formatter(value)}</strong></header><i><b style="--bar:${Math.min(100, Math.abs(value) / max * 100)}%;--series:${fill}"></b></i><small>${Number(row.close) > 0 || Number(row.tradeLast) > 0 ? pricePairHtml(row) : `تغییر وزنی نسبت به پایانی دیروز: ${fmt.pct(row.changePct)}٪`} · ارزش ${fmt.rialText(row.value)}</small></article>`;
   }).join('')}</div>`;
 }
 
@@ -784,7 +805,7 @@ function ladderChart(group, { metric, formatter = fmt.int, label }) {
   if (!rungs.length) return '<p class="empty-note">در این سررسید تعهد یا گردشی روی اعمال‌ها ثبت نشده است.</p>';
   const max = Math.max(...rungs.map((rung) => Math.max(rung[`call${metric}`], rung[`put${metric}`])), 1);
   const spot = Number(group.spot);
-  return `<p class="note">${esc(group.uaName)} · سررسید ${dateLabel(group.endDate)} · قیمت جاری ${fmt.money(spot)}. ${esc(label)}</p>
+  return `<p class="note">${esc(group.uaName)} · سررسید ${dateLabel(group.endDate)} · پایه: ${group.uaQuote ? pricePairHtml(group.uaQuote) : `قیمت جاری ${fmt.money(spot)}`}. ${esc(label)}</p>
     <div class="decision-ladder">${rungs.map((rung) => {
       const near = spot > 0 && Math.abs(rung.strike / spot - 1) <= 0.025;
       return `<article class="${near ? 'is-atm' : ''}">
@@ -846,8 +867,9 @@ function expiryLeaders(scoped) {
 }
 
 // نوار ریزمعامله هم ردیف می‌دهد، نه HTML — تا مثل بقیه مرتب و صادر شود.
-function tapeRows(tape) {
-  const first = Number(tape?.[0]?.price);
+// درصد تغییر هر معامله نسبت به پایانی دیروزِ همان قرارداد — همان مبنای همهٔ
+// برنامه (`core/price-change.mjs`)، نه «اولین معاملهٔ امروز».
+function tapeRows(tape, yday = NaN) {
   return (tape || []).map((row, index) => {
     const base = Number(row.basePrice), strike = Number(row.strike), price = Number(row.price);
     const intrinsic = base > 0 && strike > 0
@@ -855,7 +877,7 @@ function tapeRows(tape) {
     return {
       ...row, sequence: index + 1, timeText: timeLabel(row.time),
       kindLabel: kindLabel(row.kind), expiryText: row.endDate ? dateLabel(row.endDate) : '',
-      changeFromFirstPct: first > 0 && price > 0 ? ((price / first) - 1) * 100 : NaN,
+      changePct: pctVsYesterday(price, yday),
       premiumPctBase: base > 0 && price > 0 ? (price / base) * 100 : NaN,
       moneynessPct: base > 0 && strike > 0 ? ((strike / base) - 1) * 100 : NaN,
       intrinsic, timeValue: Number.isFinite(intrinsic) && price > 0 ? price - intrinsic : NaN,
@@ -1084,7 +1106,7 @@ export async function mount(root, { state, api }) {
       cols = COLS_TAPE;
       if (selected().level !== 'contract' || !activeContract()) empty = 'دامنه را روی «قرارداد» بگذار و یک قرارداد انتخاب کن.';
       else if (!tape?.length) empty = 'برای قرارداد انتخابی ریزمعامله معتبر دریافت نشده است.';
-      rows = tapeRows(tape);
+      rows = tapeRows(tape, activeContract()?.yday);
     } else if (view[2] === 'expiry-leaders') {
       cols = COLS_CONTRACT; rows = decorate(expiryLeaders(scoped), 'contracts', greekParams());
     } else {

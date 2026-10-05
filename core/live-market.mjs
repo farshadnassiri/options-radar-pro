@@ -6,6 +6,7 @@
 
 import { impliedVol, impliedVolWhy } from './bs.mjs';
 import { tradeSecond } from './backtest.mjs';
+import { pctVsYesterday } from './price-change.mjs';
 
 const finite = (v) => (Number.isFinite(Number(v)) ? Number(v) : NaN);
 
@@ -24,13 +25,19 @@ export function activeLiveTrades(rows = []) {
     .sort((a, b) => tradeSecond(a.time) - tradeSecond(b.time) || a.sequence - b.sequence);
 }
 
-/** خلاصه قابل حسابرسی نوار یک نماد، از شروع بازار تا آخرین معامله پاسخ. */
-export function summarizeLiveTrades(rows = []) {
+/**
+ * خلاصه قابل حسابرسی نوار یک نماد، از شروع بازار تا آخرین معامله پاسخ.
+ *
+ * `changePct` مثل همهٔ برنامه نسبت به **پایانی روز قبل** است (`yday`؛
+ * `core/price-change.mjs`) و بی آن نامعلوم. فاصلهٔ آخرین از اولین معاملهٔ
+ * امروز سنجهٔ دیگری است و نام خودش را دارد: `changeFromFirstPct`.
+ */
+export function summarizeLiveTrades(rows = [], { yday = NaN } = {}) {
   const trades = activeLiveTrades(rows);
   if (!trades.length) return {
     count: 0, volume: 0, value: 0,
     firstPrice: NaN, lastPrice: NaN, low: NaN, high: NaN, vwap: NaN,
-    firstTime: 0, lastTime: 0, changePct: NaN,
+    firstTime: 0, lastTime: 0, changePct: NaN, changeFromFirstPct: NaN,
   };
   let volume = 0, value = 0, low = Infinity, high = -Infinity;
   for (const row of trades) {
@@ -45,7 +52,8 @@ export function summarizeLiveTrades(rows = []) {
     firstPrice: first.price, lastPrice: last.price, low, high,
     vwap: volume > 0 ? value / volume : NaN,
     firstTime: first.time, lastTime: last.time,
-    changePct: first.price > 0 ? ((last.price / first.price) - 1) * 100 : NaN,
+    changePct: pctVsYesterday(last.price, yday),
+    changeFromFirstPct: first.price > 0 ? ((last.price / first.price) - 1) * 100 : NaN,
   };
 }
 
@@ -125,7 +133,6 @@ export function liveOptionTape(args = {}) {
 /** نقاط نمودار قیمت/حجم پایه هم‌قرارداد با خروجی اختیار. */
 export function liveReferenceTape(rows = [], instrument = {}) {
   const trades = activeLiveTrades(rows);
-  const first = trades[0]?.price;
   let cumulativeVolume = 0, cumulativeValue = 0;
   return trades.map((row) => {
     cumulativeVolume += row.quantity;
@@ -137,7 +144,8 @@ export function liveReferenceTape(rows = [], instrument = {}) {
       sequence: row.sequence, time: row.time, second: tradeSecond(row.time),
       price: row.price, quantity: row.quantity, value: row.quantity * row.price,
       cumulativeVolume, cumulativeValue,
-      changePct: first > 0 ? ((row.price / first) - 1) * 100 : NaN,
+      // نسبت به پایانی روز قبلِ همان نماد، مثل همهٔ برنامه.
+      changePct: pctVsYesterday(row.price, instrument.yday),
       referenceOnly: true,
     };
   });

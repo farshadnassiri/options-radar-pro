@@ -1960,7 +1960,7 @@ async function handleRequest(req, res, u) {
         if (failedIns.has(String(item.ins))) {
           return { ...item, volume: NaN, value: NaN, trades: NaN, tapeFailed: true };
         }
-        const summary = summarizeLiveTrades(tradesByIns[item.ins] || []);
+        const summary = summarizeLiveTrades(tradesByIns[item.ins] || [], { yday: item.yday });
         return {
           ...item,
           last: summary.count ? summary.lastPrice : item.last,

@@ -17,6 +17,8 @@ import { readVolSummary, volTileParts } from './vol-rank-store.mjs';
 import { tehranDateNumber } from '../core/tehran-day.mjs';
 import { fetchInfos } from './quote-intake.mjs';
 import { mergeRangeInfo, rangeHeading } from '../core/range-info.mjs';
+import { pctVsYesterday } from '../core/price-change.mjs';
+import { dayQuote, pricePairHtml, pricePairText } from './price-pair.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'\"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;',
@@ -35,7 +37,7 @@ const CONTRACT_MAP_METRICS = [
   { key: 'value', label: 'ارزش معاملات', format: 'rialText' },
   { key: 'volume', label: 'حجم معاملات', format: 'int' },
   { key: 'oi', label: 'موقعیت باز', format: 'int' },
-  { key: 'changePct', label: 'درصد آخرین معامله', format: 'pct' },
+  { key: 'changePct', label: 'درصد تغییر نسبت به پایانی دیروز', format: 'pct' },
   { key: EQUAL_MAP_METRIC, label: 'همه هم‌اندازه', format: 'equal' },
 ];
 
@@ -174,11 +176,12 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       expiryStep.hidden = true; chainStep.hidden = true; expiryInfo.innerHTML = ''; pairedHost.innerHTML = ''; chainTable.set([]);
       return;
     }
-    const change = Number(ua.changePct);
+    const uaQ = dayQuote(ua);
     root.querySelector('[data-lmm-title]').textContent = ua.name || ua.ins;
-    root.querySelector('[data-lmm-selected]').innerHTML = `نماد انتخاب‌شده: <strong>${esc(ua.name || ua.ins)}</strong> <span class="${tone(change)}">${Number.isFinite(change) ? `${fmt.pct(change)}٪` : '—'}</span>`;
+    root.querySelector('[data-lmm-selected]').innerHTML = `نماد انتخاب‌شده: <strong>${esc(ua.name || ua.ins)}</strong> ${pricePairHtml(ua)}`;
     underlyingHost.innerHTML = `<div class="lmm-stat-grid">
-      ${stat('آخرین پایه', fmt.money(ua.last), Number.isFinite(change) ? `تغییر ${fmt.pct(change)}٪` : 'تغییر نامعلوم', tone(change))}
+      ${stat('آخرین معاملهٔ پایه', fmt.money(uaQ.last), Number.isFinite(uaQ.lastPct) ? `${fmt.pct(uaQ.lastPct)}٪ نسبت به پایانی دیروز` : 'امروز معامله نشده', tone(uaQ.lastPct))}
+      ${stat('پایانی پایه', fmt.money(uaQ.close), Number.isFinite(uaQ.closePct) ? `${fmt.pct(uaQ.closePct)}٪ نسبت به پایانی دیروز` : 'تغییر نامعلوم', tone(uaQ.closePct))}
       ${stat('ارزش خودِ پایه', fmt.rialText(ua.uaValue))}
       ${stat('ارزش کل اختیار', fmt.rialText(ua.value), `${fmt.int(ua.contracts)} قرارداد`)}
       ${stat('ارزش کال', fmt.rialText(ua.callValue), Number.isFinite(ua.callValuePct) ? `سهم ${fmt.pct(ua.callValuePct)}٪` : '')}
@@ -253,7 +256,8 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   // برای کل جدول یکی‌اند.
   const PAIRED_SKIP = new Set(['title', 'kindLabel', 'strike', 'expiryText', 'uaName']);
   const PAIRED_CATALOG = contractColumns.filter((item) => !PAIRED_SKIP.has(item.key));
-  const PAIRED_DEFAULT = ['oi', 'volume', 'ivPct', 'delta', 'breakevenGapPct', 'changePct', 'last'];
+  // آخرین و پایانی هر دو، با درصد تغییر هر کدام نسبت به پایانی دیروز.
+  const PAIRED_DEFAULT = ['oi', 'volume', 'ivPct', 'delta', 'breakevenGapPct', 'tradeLast', 'lastChangePct', 'close', 'closeChangePct'];
   const pairedByKey = new Map(PAIRED_CATALOG.map((item) => [item.key, item]));
   // ستون‌هایی که علامتشان خبر است، در هر دو سمت رنگ می‌گیرند.
   const SIGNED_KEYS = new Set(PAIRED_CATALOG.filter((item) => item.sign).map((item) => item.key));
@@ -413,12 +417,17 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     // حالا خودِ ردیف است: نام نماد، آخرین قیمت، و تغییرش نسبت به پایانی
     // دیروز — با رنگ و وزن جدا، تا چشم بدون گشتن پیدایش کند.
     const ua = selectedUa();
-    const uaChange = Number(ua?.changePct);
+    // آخرین و پایانی، هر کدام با تغییرش نسبت به پایانی دیروز (core/price-change.mjs).
+    const uaQ = dayQuote(ua || {});
+    const pctText = (v) => (Number.isFinite(v) ? `${fmt.pct(v)}٪` : '—');
     const spotRow = `<tr class="lmm-paired-spot"><td colspan="${width}"><span>
       <b>${esc(ua?.name || 'نماد پایه')}</b>
-      <strong>${fmt.money(chain.spot)}</strong>
-      <em class="${tone(uaChange)}">${Number.isFinite(uaChange) ? `${fmt.pct(uaChange)}٪` : '—'}</em>
+      <strong>${fmt.money(uaQ.last)}</strong>
+      <em class="${tone(uaQ.lastPct)}">${pctText(uaQ.lastPct)}</em>
       <i>آخرین معاملهٔ نماد پایه</i>
+      <strong>${fmt.money(uaQ.close)}</strong>
+      <em class="${tone(uaQ.closePct)}">${pctText(uaQ.closePct)}</em>
+      <i>پایانی</i>
     </span></td></tr>`;
     const ordered = sortPairedChain(chain.rows, pairedSort);
     // ── کجا بنشیند ───────────────────────────────────────────────────
@@ -537,7 +546,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       return {
         tooltip: {
           trigger: 'item', confine: true,
-          formatter: ({ data }) => `<b>${esc(data.name)}</b><br>${esc(info.label)}: ${metricText(info, data.metricValue)}<br>${mapMode === 'contracts' ? 'تغییر قرارداد' : 'تغییر پایه'}: ${chartFormat.pct(data.changePct)}<br>${mapMode === 'contracts' ? `سررسید: ${dateLabel(data.endDate)}<br>` : ''}ارزش معامله: ${fmt.rialText(data.optionValue)}`,
+          formatter: ({ data }) => `<b>${esc(data.name)}</b><br>${esc(info.label)}: ${metricText(info, data.metricValue)}<br>${esc(pricePairText(data.quote))}<br>${mapMode === 'contracts' ? `سررسید: ${dateLabel(data.endDate)}<br>` : ''}ارزش معامله: ${fmt.rialText(data.optionValue)}`,
         },
         series: [{
           type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false },
@@ -560,6 +569,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
               uaIns: mapMode === 'contracts' ? String(row.uaIns) : String(row.ins),
               contractIns: mapMode === 'contracts' ? String(row.ins) : '', endDate: row.endDate || '',
               metricValue: row.metricValue, changePct: row.changePct, optionValue: row.value,
+              quote: { tradeLast: row.tradeLast, close: row.close, yday: row.yday },
               itemStyle: {
                 color: change > 0 ? tokens.gain : change < 0 ? tokens.loss : tokens.muted,
                 opacity: 0.52 + intensity * 0.43,
@@ -579,7 +589,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     });
   }
 
-  const pctVsYday = (value, yday) => Number(value) > 0 && Number(yday) > 0 ? ((Number(value) / Number(yday)) - 1) * 100 : NaN;
+  const pctVsYday = pctVsYesterday;
 
   function paintDailyRanges() {
     const key = `${uaIns}:${endDate}`;

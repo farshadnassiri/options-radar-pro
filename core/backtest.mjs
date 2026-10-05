@@ -6,6 +6,7 @@
 
 import { grossCash, entryFees } from './payoff.mjs';
 import { EPS, num } from './num.mjs';
+import { pctVsYesterday } from './price-change.mjs';
 
 const reverseSide = (side) => (side === 'buy' ? 'sell' : 'buy');
 export const INTRADAY_START_SECOND = 9 * 3600;
@@ -150,7 +151,7 @@ export function inIntradaySession(value) {
  * می‌خواند نه از دفتر. هر کس عدد قابل‌اجرا می‌خواهد باید از آن ماژول رد
  * شود، نه از این.
  */
-export function replayIntraday({ replay, tradesByIns = {}, baseTrades = [], fees = {} }) {
+export function replayIntraday({ replay, tradesByIns = {}, baseTrades = [], fees = {}, ydayByIns = {} }) {
   if (!replay?.ok || !replay.priced?.length) return [];
   const events = [];
   const indexesByIns = new Map();
@@ -225,7 +226,11 @@ export function replayIntraday({ replay, tradesByIns = {}, baseTrades = [], fees
         entryPrice: leg.price, exitPrice: trade.price, quantity: num(trade.quantity),
         sequence: num(trade.sequence), grossPnl, entryFee, exitFee,
         netPnl: grossPnl - entryFee - exitFee,
-        pricePct: firstPrices.get(index) > 0 ? ((trade.price / firstPrices.get(index)) - 1) * 100 : NaN,
+        // درصد تغییر نسبت به پایانی روز قبلِ همان قرارداد — مبنای همهٔ برنامه
+        // (`core/price-change.mjs`). فاصله از اولین معاملهٔ همان روز سنجهٔ
+        // دیگری است و نام خودش را دارد.
+        pricePct: pctVsYesterday(trade.price, ydayByIns[String(leg.ins)]),
+        priceFromFirstPct: firstPrices.get(index) > 0 ? ((trade.price / firstPrices.get(index)) - 1) * 100 : NaN,
         secondVolume: secondVolumes.get(index) || 0,
         cumulativeVolume: cumulativeVolumes.get(index) || 0,
         tradeCount: tradeCounts.get(index) || 0,

@@ -22,6 +22,7 @@ import {
   normalizeHistoryDate, replayHistory,
 } from '/core/history.mjs';
 import { replayIntraday, bucketIntradayPath } from '/core/backtest.mjs';
+import { ydayMap } from '/core/price-change.mjs';
 import { ivParams, IV_PARAMS } from '/core/leg-iv.mjs';
 import { histVolPct, histVolSeries, resolveHistVol } from '/core/hist-vol.mjs';
 import {
@@ -475,6 +476,7 @@ export async function mount(root, { state }) {
         const points = replayIntraday({
           replay, tradesByIns: byIns, baseTrades: byIns[String(ua.ins)] || [],
           fees: feesOf(state.settings),
+          ydayByIns: ydayMap(seriesByIns, replay.priced.map((leg) => leg.ins), date),
         });
         // فیلتر جلسه اینجا لازم نیست و اگر بود هم غلط بود: `replayIntraday`
         // خودش رویداد بیرون از ۹:۰۰ تا ۱۲:۳۰ را نمی‌پذیرد، و
