@@ -9,6 +9,7 @@
 import { buildChain, underlyingList, chainStats } from '../core/chain.mjs';
 import { scan, scanAll } from '../core/scan.mjs';
 import { byId } from '../strategies/catalog.mjs';
+import { infoIsFresh } from '../core/range-info.mjs';
 
 let rowsByKey = new Map();
 let chain = null;
@@ -28,8 +29,14 @@ function applyOverlay(ch) {
     if (o.high != null) q.high = o.high;
     if (o.state) q.state = o.state;
     if (o.staleSec != null) q.staleSec = o.staleSec;
-    if (o.close) q.close = o.close;
-    if (o.last) q.last = o.last;
+    // قیمت پاسخ اطلاعات فقط اگر هم‌جلسه و دست‌کم به تازگیِ ردیف دیده‌بان
+    // باشد (شمار معامله‌اش کمتر نباشد). پیش از این روکش تا پاک‌شدن می‌ماند:
+    // پس از یک غربال، «آخرین» و «پایانی» زنجیره روی عدد آن لحظه یخ می‌زد
+    // در حالی که ارزش و حجم کنارش با هر عکس تازه می‌شد — دو لحظه در یک
+    // ردیف (گزارش صاحب پروژه ۱۴۰۵/۰۷/۱۳: ناهماهنگی عددها در رصد لحظه‌ای).
+    const fresh = infoIsFresh(o, q);
+    if (fresh && o.close) q.close = o.close;
+    if (fresh && o.last) q.last = o.last;
   };
   for (const ua of ch.values()) {
     put(ua);

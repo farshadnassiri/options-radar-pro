@@ -62,22 +62,16 @@ group('۳۰۳. عددهای کنار کندل از همان پاسخی که خو
   check('ارزشِ نیامده نامعلوم است، نه صفر', infoTotals({}).value === null && infoTotals({ qTotCap: '' }).value === null);
   check('صفرِ آمده صفر است («معامله نشد»)', infoTotals({ qTotCap: 0 }).value === 0);
 
-  // ردیف زنجیره از عکس کهنه‌تر دیده‌بان
-  const watchRow = { ins: '2650251901841248', name: 'ضفزر729', value: 5516563710000, volume: 8306, trades: 2000, oi: 12011, first: 0 };
+  // ۱۴۰۵/۰۷/۱۳: هر عددی که زنجیره هم نشان می‌دهد از همان ردیف عکس است؛
+  // پاسخ اطلاعات فقط سایهٔ کندل را می‌دهد (آزمون کامل در دستهٔ ۳۲۴).
+  const watchRow = { ins: '2650251901841248', name: 'ضفزر729', value: 5516563710000, volume: 8306, trades: 2000, oi: 12011, last: 83100, tradeLast: 83100, close: 83400, yday: 81000 };
   const info = { first: 80000, low: 79000, high: 86000, last: 83000, close: 83494, yday: 81000, vol: VOLUME, trades: TRADES, ...totals };
   const merged = mergeRangeInfo(watchRow, info);
-  check('ارزش کارت از پاسخ اطلاعات است، نه عکس دیده‌بان', merged.value === VALUE && merged.valueSource === 'info');
-  check('حجم کارت هم از همان پاسخ است (پیش از این `vol` روی `volume` نمی‌نشست)', merged.volume === VOLUME);
-  check('تعداد معامله و قیمت‌های کندل از همان پاسخ‌اند', merged.trades === TRADES && merged.close === 83494 && merged.first === 80000);
-  check('موقعیت باز که پاسخ اطلاعات ندارد از عکس دیده‌بان می‌ماند', merged.oi === 12011);
-
-  const legacy = mergeRangeInfo(watchRow, { first: 1, low: 1, high: 1, last: 1, close: 1, vol: 99 });
-  check('سرورِ قدیمی بی ارزش: `vol` حجم است، ارزش از دیده‌بان و منبعش گفته می‌شود',
-    legacy.volume === 99 && legacy.value === 5516563710000 && legacy.valueSource === 'watch');
-  const nullValue = mergeRangeInfo(watchRow, { value: null, volume: null });
-  check('null بالادست رویِ عددِ معلوم نمی‌نشیند', nullValue.value === 5516563710000 && nullValue.volume === 8306);
-  check('پاسخِ خطادار ادغام نمی‌شود',
-    mergeRangeInfo(watchRow, { error: 'TypeError: x', value: 1 }).value === 5516563710000);
+  check('ارزش، حجم، تعداد و موقعیت باز کارت همان عدد زنجیره است', merged.value === watchRow.value && merged.volume === 8306 && merged.trades === 2000 && merged.oi === 12011 && merged.valueSource === 'watch');
+  check('آخرین و پایانی کارت هم همان ردیف عکس است', merged.last === 83100 && merged.close === 83400);
+  check('سایهٔ کندل از پاسخ اطلاعات', merged.first === 80000 && merged.low === 79000 && merged.high === 86000);
+  check('پاسخِ خطادار ادغام نمی‌شود و سایه نامعلوم می‌ماند',
+    Number.isNaN(mergeRangeInfo(watchRow, { error: 'TypeError: x', low: 1 }).low));
 
   const server = readSrc('../server/server.mjs');
   check('`/api/infos` ارزش و حجم را از همان GetClosingPriceInfo می‌دهد', server.includes('...infoTotals(d),'));

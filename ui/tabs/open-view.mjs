@@ -188,13 +188,17 @@ function scopedWeights(items) {
   return out;
 }
 
-function contractTable(items) {
+// `bucket`: ارزش و حجمِ سطلِ درون‌روزی، نه کل روز. با همان نامِ «ارزش
+// معامله» کنار زنجیره که کل روز را می‌گوید، دو عددِ متفاوت با یک نام بود
+// (گزارش صاحب پروژه ۱۴۰۵/۰۷/۱۳: ناهماهنگی ارزش و حجم در رصد لحظه‌ای).
+function contractTable(items, { bucket = false } = {}) {
   if (!items.length) return '<p class="empty-note">برای این روز قرارداد تاریخی موجود نیست.</p>';
   const sorted = [...items].sort((a, b) => a.kind.localeCompare(b.kind) || (b.indexWeightPct || 0) - (a.indexWeightPct || 0));
-  return `<table class="history-table open-view-contract-table"><thead><tr><th>قرارداد</th><th>نوع</th><th>سررسید</th><th>اعمال</th><th>پریمیوم</th><th>سربه‌سر</th><th>ارزش معامله</th><th>وزن شاخص</th><th>IV</th><th>وزن IV</th><th>حجم / معامله</th><th>وضعیت</th></tr></thead><tbody>${sorted.map((item) => {
+  const scope = bucket ? ' همین سطل' : '';
+  return `<table class="history-table open-view-contract-table"><thead><tr><th>قرارداد</th><th>نوع</th><th>سررسید</th><th>اعمال</th><th>پریمیوم</th><th>سربه‌سر</th><th>ارزش معامله${scope}</th><th>وزن شاخص</th><th>IV</th><th>وزن IV</th><th>حجم / معامله${scope}</th><th>وضعیت</th></tr></thead><tbody>${sorted.map((item) => {
     const tone = item.kind === 'call' ? 'call' : 'put';
     const status = item.included ? (Number.isFinite(item.iv) ? 'وارد هر دو شاخص' : 'فقط شاخص سربه‌سر؛ IV نامعتبر') : item.premium > 0 ? 'ارزش رسمی ندارد' : 'قیمت ندارد';
-    return `<tr class="open-view-contract-${tone}"><td><b>${esc(nameOf(item, 'قرارداد اختیار'))}</b></td><td>${item.kind === 'call' ? 'کال' : 'پوت'}</td><td>${dateLabel(item.expiry)}</td><td>${fmt.money(item.strike)}</td><td>${fmt.money(item.premium)}</td><td>${fmt.money(item.breakeven)}</td><td>${fmt.money(item.value)}</td><td class="open-view-weight-cell" style="--weight:${Number.isFinite(item.indexWeightPct) ? Math.min(100, item.indexWeightPct) : 0}%">${fmt.pct(item.indexWeightPct)}٪</td><td>${Number.isFinite(item.iv) ? `${fmt.pct(item.iv * 100)}٪` : '—'}</td><td class="open-view-weight-cell open-view-iv-weight" style="--weight:${Number.isFinite(item.ivWeightPct) ? Math.min(100, item.ivWeightPct) : 0}%">${fmt.pct(item.ivWeightPct)}٪</td><td>${fmt.int(item.volume)} / ${fmt.int(item.trades)}</td><td>${status}</td></tr>`;
+    return `<tr class="open-view-contract-${tone}"><td><b>${esc(nameOf(item, 'قرارداد اختیار'))}</b></td><td>${item.kind === 'call' ? 'کال' : 'پوت'}</td><td>${dateLabel(item.expiry)}</td><td>${fmt.money(item.strike)}</td><td>${fmt.money(item.premium)}</td><td>${fmt.money(item.breakeven)}</td><td>${fmt.rialText(item.value)}</td><td class="open-view-weight-cell" style="--weight:${Number.isFinite(item.indexWeightPct) ? Math.min(100, item.indexWeightPct) : 0}%">${fmt.pct(item.indexWeightPct)}٪</td><td>${Number.isFinite(item.iv) ? `${fmt.pct(item.iv * 100)}٪` : '—'}</td><td class="open-view-weight-cell open-view-iv-weight" style="--weight:${Number.isFinite(item.ivWeightPct) ? Math.min(100, item.ivWeightPct) : 0}%">${fmt.pct(item.ivWeightPct)}٪</td><td>${fmt.int(item.volume)} / ${fmt.int(item.trades)}</td><td>${status}</td></tr>`;
   }).join('')}</tbody></table>`;
 }
 
@@ -316,9 +320,9 @@ export async function mount(root, { state }) {
       ['IV کال', weightedFormula(items, 'call', 'iv'), 'cmp1'],
       ['IV پوت', weightedFormula(items, 'put', 'iv'), 'cmp4'],
     ];
-    $('ov-day-formulas').innerHTML = cards.map(([label, result, tone], index) => `<article class="open-view-formula ${tone}"><span>${label}</span><b>${index < 2 ? fmt.money(result.value) : `${fmt.pct(result.value)}٪`}</b><code>تازه‌ترین قیمت معامله × وزن ارزش واقعی</code><small>${fmt.int(result.count)} قرارداد · مجموع ارزش ${fmt.money(result.total)}</small></article>`).join('');
-    $('ov-day-contract-count').textContent = `${fmt.int(items.length)} قرارداد در تازه‌ترین سطل`;
-    $('ov-day-contracts').innerHTML = contractTable(items);
+    $('ov-day-formulas').innerHTML = cards.map(([label, result, tone], index) => `<article class="open-view-formula ${tone}"><span>${label}</span><b>${index < 2 ? fmt.money(result.value) : `${fmt.pct(result.value)}٪`}</b><code>تازه‌ترین قیمت معامله × وزن ارزش واقعی</code><small>${fmt.int(result.count)} قرارداد · مجموع ارزش همین سطل ${fmt.rialText(result.total)}</small></article>`).join('');
+    $('ov-day-contract-count').textContent = `${fmt.int(items.length)} قرارداد در تازه‌ترین سطل — ارزش و حجم مال همین سطل‌اند، نه کل روز (کل روز در زنجیره)`;
+    $('ov-day-contracts').innerHTML = contractTable(items, { bucket: true });
   }
 
   function paintDayDetail() {
@@ -333,7 +337,7 @@ export async function mount(root, { state }) {
       ['IV کال', 'Σ(IV × ارزش) ÷ Σارزش معتبر IV', weightedFormula(items, 'call', 'iv'), 'cmp1'],
       ['IV پوت', 'Σ(IV × ارزش) ÷ Σارزش معتبر IV', weightedFormula(items, 'put', 'iv'), 'cmp4'],
     ];
-    $('ov-day-formulas').innerHTML = cards.map(([label, formula, result, tone], index) => `<article class="open-view-formula ${tone}"><span>${label}</span><b>${index < 2 ? fmt.money(result.value) : `${fmt.pct(result.value)}٪`}</b><code>${formula}</code><small>${fmt.int(result.count)} قرارداد · مجموع ارزش ${fmt.money(result.total)}</small></article>`).join('');
+    $('ov-day-formulas').innerHTML = cards.map(([label, formula, result, tone], index) => `<article class="open-view-formula ${tone}"><span>${label}</span><b>${index < 2 ? fmt.money(result.value) : `${fmt.pct(result.value)}٪`}</b><code>${formula}</code><small>${fmt.int(result.count)} قرارداد · مجموع ارزش ${fmt.rialText(result.total)}</small></article>`).join('');
     $('ov-day-contract-count').textContent = `${fmt.int(items.length)} قرارداد`;
     $('ov-day-contracts').innerHTML = contractTable(items);
   }

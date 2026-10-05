@@ -605,12 +605,20 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     const heading = rangeHeading(marketContext.session, dateLabel);
     root.querySelector('[data-lmm-range-title]').textContent = heading.title;
     if (!cached?.items) return;
-    // ارزش و حجم و تعداد از همان پاسخی که قیمت‌های کندل؛ موقعیت باز که آن
-    // پاسخ ندارد از عکس دیده‌بان می‌ماند (`core/range-info.mjs`).
-    const rows = contracts().map((row) => mergeRangeInfo(row, cached.items[row.ins]))
+    // ارزش، حجم، تعداد، موقعیت باز، آخرین و پایانی از همان ردیف عکسی که
+    // زنجیره نشان می‌دهد؛ از پاسخ اطلاعات فقط سایهٔ کندل، و فقط هم‌جلسه
+    // (`core/range-info.mjs`). هر عدد در کل تب یکی است.
+    const merged = contracts().map((row) => mergeRangeInfo(row, cached.items[row.ins]));
+    const rows = merged
       .filter((row) => Number(row.first) > 0 && Number(row.low) > 0 && Number(row.high) > 0 && Number(row.last) > 0 && Number(row.close) > 0)
       .sort((a, b) => Number(b[rangeSort]) - Number(a[rangeSort]) || a.name.localeCompare(b.name, 'fa'));
-    rangeStatus.textContent = `${fmt.int(rows.length)} قرارداد دارای بازه معتبر از ${fmt.int(contracts().length)} قرارداد · مرتب بر ${labels[rangeSort]}${heading.note ? ` · ${heading.note}` : ''}`;
+    const other = merged.filter((row) => row.rangeSource === 'otherSession').length;
+    const lagged = rows.filter((row) => row.rangeSource === 'infoLag').length;
+    rangeStatus.textContent = `${fmt.int(rows.length)} قرارداد دارای بازه معتبر از ${fmt.int(contracts().length)} قرارداد · مرتب بر ${labels[rangeSort]}`
+      + ' · ارزش، حجم، موقعیت باز و قیمت‌ها همان عدد زنجیره‌اند'
+      + `${lagged ? ` · کمینه/بیشینهٔ ${fmt.int(lagged)} قرارداد از چند ثانیه قبل است و با آخرین قیمت عکس گسترده شد` : ''}`
+      + `${other ? ` · ${fmt.int(other)} قرارداد: پاسخ کمینه/بیشینه مال جلسهٔ دیگری بود و کنار گذاشته شد` : ''}`
+      + `${heading.note ? ` · ${heading.note}` : ''}`;
     if (!rows.length) { rangeChart.innerHTML = '<p class="empty-note">بالادست برای قراردادهای این سررسید بازه معتبر امروز برنگرداند.</p>'; return; }
     rangeChart.innerHTML = `<div class="lmm-range-legend"><span>سایه: کمینه تا بیشینه</span><span>بدنه: اولین تا آخرین</span><span>نقاط: پنج قیمت مستقل</span><span>قیمت‌ها: ریال، برای هر واحد دارایی پایه</span><small>موس را روی هر کندل حرکت بده تا همه قیمت‌ها دیده شوند؛ کلیک، جزئیات را باز نگه می‌دارد.</small></div><div class="lmm-range-list">${rows.map((row) => {
       const low = Number(row.low), high = Number(row.high), first = Number(row.first), last = Number(row.last), close = Number(row.close);
