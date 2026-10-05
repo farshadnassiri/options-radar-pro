@@ -61,6 +61,20 @@ export function pushRows(watch, full) {
   return ask({ type: 'rows', full, rows: watch.rows, at: watch.at });
 }
 
+/**
+ * گردش واقعی خودِ نماد پایه (از نوار معامله، همان عدد نقشه و جدول) به
+ * زنجیرهٔ ریسه؛ تا «ارزش معاملات نماد پایه» در دیده‌بان زنجیره همان عدد
+ * باشد. ردیفِ نامعلوم (`NaN`) هم نامعلوم می‌رود، نه صفر.
+ */
+export function pushUaTurnover(underlyings = [], at = Date.now()) {
+  const data = {};
+  for (const u of underlyings || []) {
+    if (!u?.ins) continue;
+    data[String(u.ins)] = { value: Number(u.uaValue), vol: Number(u.uaVolume), trades: Number(u.uaTrades) };
+  }
+  return ask({ type: 'ua-turnover', data, at });
+}
+
 export function onChain(fn) {
   chainSubs.add(fn);
   if (chainState.list.length) fn(chainState);

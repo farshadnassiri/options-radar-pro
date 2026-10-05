@@ -809,9 +809,11 @@ async function watchTick() {
   // قیمت پایانیِ کندل (`/api/infos`) نهایی بود. حالا در فاز `after` با
   // فاصلهٔ کُند می‌پرسیم تا عکس ثابت شود — شرحش کنار `afterCloseDue`.
   const today = tehranDateNumber();
+  const minutesSinceClose = gate.phase === 'after' ? tehranNow().minutes - hhmm(S.closeHHMM) : Infinity;
+  const settle = { minutesSinceClose, fastSec: Math.max(num(S.watchIntervalSec, 5), num(S.afterCloseFastSec, 15)), settleMin: num(S.afterCloseSettleMin, 15) };
   if (!gate.open && !afterCloseDue({
     phase: gate.phase, today, watch,
-    everySec: S.afterCloseRefreshSec, maxPulls: S.afterCloseMaxPulls,
+    everySec: S.afterCloseRefreshSec, maxPulls: S.afterCloseMaxPulls, ...settle,
   })) return true;
 
   const t0 = Date.now();
@@ -825,7 +827,7 @@ async function watchTick() {
     const rows = firstList(js);
     const { byKey: next, changed } = diffWatchRows(rows, watch.byKey);
     const first = watch.rows.length === 0;
-    const after = afterCloseState({ phase: gate.phase, today, prev: watch, changedCount: changed.length, first });
+    const after = afterCloseState({ phase: gate.phase, today, prev: watch, changedCount: changed.length, first, minutesSinceClose, settleMin: settle.settleMin });
     watch = { at: Date.now(), rows, byKey: next, day: today, phase: gate.phase, ...after };
     stat.watchTicks += 1;
     stat.watchRows = rows.length;

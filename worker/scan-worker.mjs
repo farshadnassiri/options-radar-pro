@@ -16,6 +16,10 @@ let rowsByKey = new Map();
 let chain = null;
 let dirty = true;
 let overlay = new Map();     // insCode → { book, low, high, state, staleSec }
+// گردش واقعی خودِ پایه از نوار معامله (داشبورد رصد لحظه‌ای می‌فرستد)؛
+// دیده‌بان اختیار آن را ندارد و بی این، «ارزش معاملات نماد پایه» در
+// دیده‌بان زنجیره صفر یا نامعلوم بود در حالی که نقشه و جدول عدد داشتند.
+let uaTurnover = new Map();  // uaIns → { value, vol, trades }
 
 const rowKey = (r) => `${r.insCode_C ?? ''}|${r.insCode_P ?? ''}`;
 
@@ -52,6 +56,11 @@ function ensureChain() {
   if (!dirty && chain) return chain;
   chain = buildChain([...rowsByKey.values()]);
   applyOverlay(chain);
+  for (const [ins, t] of uaTurnover) {
+    const ua = chain.get(ins);
+    if (!ua) continue;
+    ua.value = t.value; ua.vol = t.vol; ua.trades = t.trades;
+  }
   dirty = false;
   return chain;
 }
@@ -89,6 +98,14 @@ function handleMessage(m) {
     }
     dirty = true;
     self.postMessage({ type: 'overlay-ok', id: m.id, count: overlay.size });
+    return;
+  }
+
+  if (m.type === 'ua-turnover') {
+    uaTurnover = new Map(Object.entries(m.data || {}));
+    dirty = true;
+    const ch = ensureChain();
+    self.postMessage({ type: 'chain', id: m.id, list: underlyingList(ch), stats: chainStats(ch), at: m.at });
     return;
   }
 

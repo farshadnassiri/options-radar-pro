@@ -203,7 +203,12 @@ export function buildChain(rows) {
         ins: uaIns,
         name: rawUaName && rawUaName !== uaIns ? rawUaName : 'دارایی پایه بدون نام',
         last: n(r.pDrCotVal_UA), close: n(r.pClosing_UA), yday: n(r.priceYesterday_UA),
-        vol: n(r.qTotTran5J_UA), trades: n(r.zTotTran_UA), value: n(r.qTotCap_UA),
+        // دیده‌بان اختیار گردش خودِ پایه را نمی‌فرستد؛ میدانِ نیامده
+        // «نامعلوم» است نه صفر (صفر یعنی «امروز معامله نشد»). عدد واقعی از
+        // نوار معاملهٔ پایه می‌رسد (`mergeUnderlyingTrades`، روکش ریسه).
+        vol: r.qTotTran5J_UA == null ? NaN : n(r.qTotTran5J_UA),
+        trades: r.zTotTran_UA == null ? NaN : n(r.zTotTran_UA),
+        value: r.qTotCap_UA == null ? NaN : n(r.qTotCap_UA),
         low: 0, high: 0, book: null, state: '', staleSec: NaN, depth: false,
         expiries: new Map(),
         contracts: 0, callContracts: 0, putContracts: 0,
@@ -212,9 +217,9 @@ export function buildChain(rows) {
     }
     ua.last = ua.last || n(r.pDrCotVal_UA);
     ua.close = ua.close || n(r.pClosing_UA);
-    ua.vol = ua.vol || n(r.qTotTran5J_UA);
-    ua.trades = ua.trades || n(r.zTotTran_UA);
-    ua.value = ua.value || n(r.qTotCap_UA);
+    if (!(ua.vol > 0) && r.qTotTran5J_UA != null) ua.vol = n(r.qTotTran5J_UA);
+    if (!(ua.trades > 0) && r.zTotTran_UA != null) ua.trades = n(r.zTotTran_UA);
+    if (!(ua.value > 0) && r.qTotCap_UA != null) ua.value = n(r.qTotCap_UA);
 
     let ex = ua.expiries.get(days);
     if (!ex) {

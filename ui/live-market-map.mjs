@@ -18,7 +18,8 @@ import { tehranDateNumber } from '../core/tehran-day.mjs';
 import { fetchInfos } from './quote-intake.mjs';
 import { mergeRangeInfo, rangeHeading } from '../core/range-info.mjs';
 import { pctVsYesterday } from '../core/price-change.mjs';
-import { dayQuote, pricePairHtml, pricePairText } from './price-pair.mjs';
+import { dayQuote, pricePairHtml } from './price-pair.mjs';
+import { mapTooltipLines } from './map-tooltip.mjs';
 
 const esc = (value) => String(value ?? '').replace(/[&<>'\"]/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;',
@@ -546,7 +547,11 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       return {
         tooltip: {
           trigger: 'item', confine: true,
-          formatter: ({ data }) => `<b>${esc(data.name)}</b><br>${esc(info.label)}: ${metricText(info, data.metricValue)}<br>${esc(pricePairText(data.quote))}<br>${mapMode === 'contracts' ? `سررسید: ${dateLabel(data.endDate)}<br>` : ''}ارزش معامله: ${fmt.rialText(data.optionValue)}`,
+          // همان عددهای جدول و کاشی‌ها، هر کدام با نام خودش (`ui/map-tooltip.mjs`).
+          formatter: ({ data }) => `<b>${esc(data.name)}</b><br>${mapTooltipLines(data.row, {
+            mode: mapMode, metricLabel: info.label, metricKey: info.key, metricText: metricText(info, data.metricValue),
+            dateText: data.endDate ? dateLabel(data.endDate) : '',
+          }).map(esc).join('<br>')}`,
         },
         series: [{
           type: 'treemap', roam: false, nodeClick: false, breadcrumb: { show: false },
@@ -569,7 +574,11 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
               uaIns: mapMode === 'contracts' ? String(row.uaIns) : String(row.ins),
               contractIns: mapMode === 'contracts' ? String(row.ins) : '', endDate: row.endDate || '',
               metricValue: row.metricValue, changePct: row.changePct, optionValue: row.value,
-              quote: { tradeLast: row.tradeLast, close: row.close, yday: row.yday },
+              row: {
+                name: row.name, tradeLast: row.tradeLast, close: row.close, yday: row.yday,
+                value: row.value, uaValue: row.uaValue, callValue: row.callValue, putValue: row.putValue,
+                volume: row.volume, oi: row.oi, trades: row.trades,
+              },
               itemStyle: {
                 color: change > 0 ? tokens.gain : change < 0 ? tokens.loss : tokens.muted,
                 opacity: 0.52 + intensity * 0.43,

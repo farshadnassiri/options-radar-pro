@@ -83,7 +83,7 @@ group('۳۲۳-ج. سیم‌کشی رابط');
   check('کارت میله‌ای و سرنویس نردبان آخرین و پایانی را نشان می‌دهند', (dash.match(/pricePairHtml\(/g) || []).length >= 2);
   const map = readSrc('../ui/live-market-map.mjs');
   check('نقشه: راهنمای هاور، کاشی پایه و ردیف پایهٔ زنجیره دو قیمت دارند',
-    map.includes('pricePairText(data.quote)') && map.includes("stat('پایانی پایه'") && map.includes('<i>پایانی</i>'));
+    map.includes('mapTooltipLines(data.row') && map.includes("stat('پایانی پایه'") && map.includes('<i>پایانی</i>'));
   check('ستون‌های پیش‌فرض زنجیرهٔ قرینه آخرین و پایانی هر دو را دارند', /PAIRED_DEFAULT = \[[^\]]*'tradeLast', 'lastChangePct', 'close', 'closeChangePct'/.test(map));
   const lab = readSrc('../ui/tabs/strangle-lab.mjs');
   check('کارت روز استرانگل: «آخرین» با پایانی روز قبل سنجیده می‌شود، نه آخرین دیروز',

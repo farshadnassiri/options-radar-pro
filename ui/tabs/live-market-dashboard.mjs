@@ -23,6 +23,7 @@ import { dashboardClock } from '/core/watch-health.mjs';
 import { busyBlock, attachBusyBar } from '/ui/busy.mjs';
 import { createOpenViewBaseSyncGate } from '/ui/open-view-selection.mjs';
 import { mountLiveMarketMap } from '/ui/live-market-map.mjs';
+import { pushUaTurnover } from '/ui/scanner.mjs';
 import { SCOPE_LEVELS, resolveScope, needsTape } from '/ui/live-dashboard-scope.mjs';
 
 // شش اسلات، و بدون چرخش. اسلات هفتم یعنی رنگی که با یکی از شش تای قبلی
@@ -1335,6 +1336,8 @@ export async function mount(root, { state, api }) {
       // `NaN`ِ سرور پس از JSON `null` است و `Number(null)` صفر؛ مرز همین‌جاست.
       next.universe = reviveDashboardUniverse(next.universe);
       payload = next; openViewController?.updateLive?.(payload);
+      // همان گردش پایه به زنجیرهٔ ریسه (دیده‌بان زنجیره و اسکنرها) — یک عدد در همه‌جا.
+      pushUaTurnover(payload.universe?.underlyings || [], next.at).catch?.(() => {});
       await marketExplorer.setUniverse(payload.universe, true, payload);
       paintLevels(); await fetchTape(); await paintView();
       // دو زمان، دو ادعا. «عکس» زمانی است که تابلو خوانده شده و «دریافت»

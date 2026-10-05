@@ -72,12 +72,23 @@ export function diffWatchRows(rows = [], prevByKey = new Map()) {
  * عکسی که روزش امروز نیست (سرور بعد از بستن روشن شده، یا از دیروز مانده)
  * بی‌درنگ گرفته می‌شود — بدون آن، اصلاً عکسی از امروز نداریم.
  */
-export function afterCloseDue({ phase, today, now = Date.now(), watch = {}, everySec = 300, maxPulls = 12 } = {}) {
+//
+// ═══ دقیقه‌های نخستِ پس از بستن، تند ═══
+//
+// گزارش صاحب پروژه (۱۴۰۵/۰۷/۱۳، ساعت ۱۲:۳۵): «رصد لحظه‌ای اطلاعات را الان
+// درست نشان نمی‌دهد… خیلی دیر به‌روز شد.» علت: پس از ۱۲:۳۰ فقط هر ۳۰۰
+// ثانیه می‌پرسیدیم، پس عکسِ پیش از بستن تا حدود ۱۲:۳۵ روی صفحه می‌ماند در
+// حالی که تابلو قیمت پایانی و ارزش نهایی را همان دقیقه‌ها منتشر می‌کرد. حالا
+// تا `settleMin` دقیقه پس از بستن هر `fastSec` ثانیه می‌پرسیم (بی سقف
+// شمار، چون پنجره کوتاه است) و پس از آن همان آهنگ کُند. پیش‌فرض‌های این
+// دو صفر است تا رفتار پیشین برای صداکنندهٔ قدیمی بماند.
+export function afterCloseDue({ phase, today, now = Date.now(), watch = {}, everySec = 300, maxPulls = 12, minutesSinceClose = Infinity, fastSec = 0, settleMin = 0 } = {}) {
   if (phase !== 'after' || !today) return false;
   if (Number(watch.day) !== Number(today)) return true;
   if (Number(watch.finalDay) === Number(today)) return false;
-  if (Number(watch.afterPulls) >= Number(maxPulls)) return false;
   const at = Number(watch.at) || 0;
+  if (Number(fastSec) > 0 && minutesSinceClose < Number(settleMin)) return now - at >= Number(fastSec) * 1000;
+  if (Number(watch.afterPulls) >= Number(maxPulls)) return false;
   return now - at >= Math.max(0, Number(everySec) || 0) * 1000;
 }
 
@@ -87,11 +98,15 @@ export function afterCloseDue({ phase, today, now = Date.now(), watch = {}, ever
  * `afterPulls` فقط برای همان روز شمرده می‌شود. عکسی که هیچ ردیفش عوض نشده
  * (و عکس قبلی هم مال همین روز بوده) عکس نهایی است.
  */
-export function afterCloseState({ phase, today, prev = {}, changedCount = 0, first = false } = {}) {
+export function afterCloseState({ phase, today, prev = {}, changedCount = 0, first = false, minutesSinceClose = Infinity, settleMin = 0 } = {}) {
   if (phase !== 'after') return { afterPulls: 0, finalDay: Number(prev.finalDay) || 0 };
   const sameDay = Number(prev.day) === Number(today);
-  const afterPulls = (sameDay ? Number(prev.afterPulls) || 0 : 0) + 1;
-  const settled = sameDay && !first && changedCount === 0;
+  // پنجرهٔ تند شمرده نمی‌شود: سقف `maxPulls` فقط برای آهنگ کُندِ پس از آن است.
+  const inFast = minutesSinceClose < Number(settleMin);
+  const afterPulls = (sameDay ? Number(prev.afterPulls) || 0 : 0) + (inFast ? 0 : 1);
+  // دو عکسِ یکسانِ پشت‌سرِهم در دقیقه‌های نخست هنوز «نهایی» نیست: تابلو قیمت
+  // پایانی را دسته‌دسته منتشر می‌کند. نهایی فقط پس از پنجرهٔ تند.
+  const settled = sameDay && !first && changedCount === 0 && !inFast;
   return { afterPulls, finalDay: settled ? Number(today) : (sameDay ? Number(prev.finalDay) || 0 : 0) };
 }
 
