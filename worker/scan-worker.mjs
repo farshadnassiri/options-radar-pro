@@ -10,6 +10,7 @@ import { buildChain, underlyingList, chainStats } from '../core/chain.mjs';
 import { scan, scanAll } from '../core/scan.mjs';
 import { byId } from '../strategies/catalog.mjs';
 import { infoIsFresh } from '../core/range-info.mjs';
+import { comboScan } from '../core/combo-scanner.mjs';
 
 let rowsByKey = new Map();
 let chain = null;
@@ -118,6 +119,19 @@ function handleMessage(m) {
       type: 'scan', id: m.id, rows, funnel: res.funnel, ms: res.ms, total: res.total,
       refine: !!m.onlyIds,
     });
+    return;
+  }
+
+  // اسکنر آپشن: ترکیب آزاد سهم، کال و پوت (`core/combo-scanner.mjs`).
+  // ردیف‌ها از پیش بی‌تابع‌اند (`payoff` حذف شده)، پس کلون می‌شوند.
+  if (m.type === 'combo-scan') {
+    const ch = ensureChain();
+    const uaKeys = m.uaKeys?.length ? m.uaKeys : [...ch.keys()];
+    const res = comboScan({
+      chain: ch, uaKeys, settings: m.settings, scanner: m.scanner,
+      sigmaByUa: m.sigmaByUa || {}, sigmaSourceByUa: m.sigmaSourceByUa || {},
+    });
+    self.postMessage({ type: 'combo-scan', id: m.id, ...res, uaCount: uaKeys.length });
     return;
   }
 

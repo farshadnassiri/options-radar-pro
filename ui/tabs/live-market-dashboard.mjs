@@ -160,6 +160,8 @@ const boardViews = [
 const EMBEDDED_MODES = [
   { id: 'chain', title: 'دیده‌بان زنجیره', hint: 'یک درخواست، کل بازار اختیار', mod: '/ui/tabs/chain.mjs' },
   { id: 'top', title: 'برترین موقعیت‌ها', hint: 'غربال روی کل کاتالوگ استراتژی', mod: '/ui/tabs/top.mjs' },
+  // ترکیب آزاد سهم، کال و پوت با نسبت‌های مختلف — بی کاتالوگ (۱۴۰۵/۰۷/۱۳).
+  { id: 'scanner', title: 'اسکنر آپشن', hint: 'ترکیب آزاد سهم، کال و پوت با ریسک محدود؛ کارت‌های یک‌نگاه', mod: '/ui/tabs/combo-scanner.mjs' },
 ];
 
 // ————— تب‌بندی صفحه —————

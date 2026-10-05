@@ -199,3 +199,14 @@ export async function runScanAll({ uaKeys, settings, qty, limit = 50 }) {
   const defIds = CATALOG.filter((d) => d.feasible).map((d) => d.id);
   return ask({ type: 'scan-all', defIds, uaKeys, settings, sigmaByUa, sigmaSourceByUa, qty, limit });
 }
+
+/**
+ * اسکنر آپشن — ترکیب آزاد روی زنجیرهٔ ریسه. `uaKeys` خالی یعنی کل بازار.
+ * تلاطم تاریخی برای احتمال سود از همان کش `sigmas` می‌آید؛ نیامده، موتور
+ * تلاطم ضمنی نزدیک‌به‌پول را جایگزین می‌کند و می‌گوید.
+ */
+export async function runComboScan({ uaKeys = [], settings, scanner }) {
+  const keys = uaKeys.length ? uaKeys : chainState.list.map((u) => String(u.ins));
+  const { sigma, source } = await sigmas(keys, settings);
+  return ask({ type: 'combo-scan', uaKeys: keys, settings, scanner, sigmaByUa: sigma, sigmaSourceByUa: source });
+}
