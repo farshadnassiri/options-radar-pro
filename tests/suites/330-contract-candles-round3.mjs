@@ -3,7 +3,7 @@
 
 import { check, group, near, readSrc } from '../harness.mjs';
 import {
-  compositeCandle, compositeByGroup, orderCandles, sortValue, backgroundBarAxis, SORT_KEYS, COMPOSITE_WEIGHTS,
+  compositeCandle, compositeByGroup, compositeValue, orderCandles, sortValue, backgroundBarAxis, SORT_KEYS, COMPOSITE_WEIGHTS,
 } from '../../core/contract-candles.mjs';
 
 const rec = (ins, o = {}) => ({
@@ -33,6 +33,30 @@ group('۳۳۰. شاخص ترکیبی: هر نقطه میانگین وزنی هم
   const g = compositeByGroup([...rs, rec('z', { uaIns: 'V', uaName: 'v', value: 5, points: pts(0, 0, 3, 3, 3) })], 'change', 'value');
   check('هر نماد/سررسید شاخص خودش را دارد', g.length === 2 && g.find((x) => x.uaIns === 'V').composite.last === 3);
   check('گزینه‌های کشویی', ['value', 'volume', 'oi', 'equal', 'median'].every((k) => COMPOSITE_WEIGHTS.some(([w]) => w === k)));
+}
+
+group('۳۳۰. خط شاخص در نمودار توزیع: همان عدد نمودار مادر');
+{
+  const rs = [
+    rec('a', { value: 10, oi: 100, points: pts(1, -2, 5, 4, 8) }),
+    rec('b', { value: 30, oi: 300, points: pts(-1, -12, -10, -9, 2) }),
+    rec('c', { value: NaN, oi: 50, points: pts(0, -1, 20, 18, 25) }),
+  ];
+  // یک عدد، دو مسیر: خط افقی نمودار مادر و خط عمودی نمودار توزیع.
+  for (const w of ['value', 'oi', 'equal', 'median']) {
+    for (const p of ['last', 'close', 'first', 'low', 'high']) {
+      const a = compositeCandle(rs, 'change', w)[p], b = compositeValue(rs, 'change', p, w).value;
+      if (Math.abs(a - b) > 1e-12) check(`هم‌خوانی ${w}/${p}`, false);
+    }
+  }
+  check('نقطه به نقطه و وزن به وزن، همان عدد کندل ترکیبی', true);
+  near('طول کندل هم شاخص دارد', compositeValue(rs, 'change', 'range', 'value').value, ((8 - -2) * 10 + (2 - -12) * 30) / 40, 1e-12);
+  const v = compositeValue(rs, 'change', 'last', 'value');
+  check('بی‌وزن شمرده نمی‌شود و گفته می‌شود', v.n === 2 && v.missingWeight === 1);
+  check('«بدون شاخص» خطی نمی‌سازد', compositeValue(rs, 'change', 'last', 'none') === null);
+  check('بی عدد، عدد نمی‌سازد', Number.isNaN(compositeValue([], 'change', 'last', 'value').value));
+  const view = readSrc('../ui/contract-candles-view.mjs');
+  check('نمودار توزیع خط شاخص را روی شاخص و نقطهٔ خودش می‌کشد', view.includes('lastHistComp = compositeValue(records, m.key, histPointUsed, opts.composite);') && view.includes("label: { formatter: `شاخص ترکیبی ${axisText(m.key, cv"));
 }
 
 group('۳۳۰. مرتب‌سازی بر هر کلید؛ نامعلوم همیشه ته صف');

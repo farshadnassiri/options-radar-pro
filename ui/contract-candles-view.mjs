@@ -27,7 +27,7 @@ import { rangeHeading } from '../core/range-info.mjs';
 import { pctVsYesterday } from '../core/price-change.mjs';
 import { IV_WHY_LABEL } from '../core/live-market.mjs';
 import {
-  CANDLE_POINTS, POINT_LABEL, CANDLE_METRICS, X_MODES, SORT_KEYS, sortValue, COMPOSITE_WEIGHTS, compositeCandle, compositeByGroup, backgroundBarAxis, metricOf, useLog, toAxis, fromAxis, logTicks,
+  CANDLE_POINTS, POINT_LABEL, CANDLE_METRICS, X_MODES, SORT_KEYS, sortValue, COMPOSITE_WEIGHTS, compositeCandle, compositeByGroup, compositeValue, backgroundBarAxis, metricOf, useLog, toAxis, fromAxis, logTicks,
   metricShape, candleRecord, underlyingDay, filterCandles, underlyingTurnover, orderCandles,
   groupBands, candleStats, flagUnusual, candleNarrative, staleInfoIds, histogram,
   SLIDER_FIELDS, SLIDER_STEPS, sliderScale, applyRanges, outlierIds, robustExtent, HIST_WEIGHTS, HIST_GROUPS, candleSummary, chainBreakevens, chainKey,
@@ -115,7 +115,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   let infoVersion = 0, fetching = false, fetchError = '', listLimit = LIST_STEP;
   let recordCache = { key: '', map: new Map() };
   let drawable = [], shapes = [], flags = new Map(), pinned = '', zoom = { sig: '', ranges: null };
-  let mother = null, hist = null, motherSeq = 0, histSeq = 0, lastHist = null;
+  let mother = null, hist = null, motherSeq = 0, histSeq = 0, lastHist = null, lastHistComp = null;
   let sliderSig = '', scales = {}, paintQueued = false;
   // حالت گذشته: روز، فهرست آن روز، و بدنهٔ ساخته‌شده.
   let pastState = { date: 0, universe: null, unders: [], picked: new Set(), loading: false, note: '', payload: null, progress: '' };
@@ -660,11 +660,18 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const every = Math.max(1, Math.ceil(edges.length / 14));
     const ticks = edges.filter((_, i) => i % every === 0);
     const s = h.stats;
-    const lines = opts.histLines ? [
-      ['میانگین', s.mean, t.accent, 'solid'], ['میانه', s.median, t.warn, 'solid'], ['چارک اول', s.q1, t.muted, 'dashed'], ['چارک سوم', s.q3, t.muted, 'dashed'],
+    const lines = !opts.histLines ? [] : [
+      ['میانگین', s.mean, t.ink, 'dashed'], ['میانه', s.median, t.warn, 'solid'], ['چارک اول', s.q1, t.muted, 'dashed'], ['چارک سوم', s.q3, t.muted, 'dashed'],
       ...(Number.isFinite(s.wMean) ? [['میانگین وزنی', s.wMean, t.accent2, 'dotted']] : []),
     ].filter(([, v]) => Number.isFinite(v) && v >= xMin && v <= xMax)
-      .map(([name, v, color, type]) => ({ xAxis: v, lineStyle: { color, type, width: 1.5 }, label: { formatter: `${name} ${axisText(m.key, v, Math.min(2, d + 1))}`, color, fontSize: 10, position: 'end' } })) : [];
+      .map(([name, v, color, type]) => ({ xAxis: v, lineStyle: { color, type, width: 1.5 }, label: { formatter: `${name} ${axisText(m.key, v, Math.min(2, d + 1))}`, color, fontSize: 10, position: 'end' } }));
+    // همان خط شاخص ترکیبیِ نمودار مادر، این‌جا عمودی و روی شاخص و نقطهٔ
+    // همین نمودار. بیرون از بازهٔ نمایش (دنبالهٔ بریده)، روی لبه با برچسب.
+    if (lastHistComp && Number.isFinite(lastHistComp.value)) {
+      const cv = lastHistComp.value, at = Math.max(xMin, Math.min(xMax, cv));
+      const wLabel = COMPOSITE_WEIGHTS.find(([k]) => k === opts.composite)?.[1] || '';
+      lines.push({ xAxis: at, lineStyle: { color: t.accent, type: 'solid', width: 3 }, label: { formatter: `شاخص ترکیبی ${axisText(m.key, cv, Math.min(2, d + 1))}${at !== cv ? ' (بیرون از بازهٔ نمایش)' : ''}`, color: t.accent, fontSize: 11, fontWeight: 700, position: 'insideEndTop' }, name: wLabel });
+    }
     const kde = opts.histKde && h.kde.length ? h.kde.map(([xv, yv]) => [xv, scale(yv)]) : [];
     const cum = opts.histCum ? h.bars.map((b) => [span(b)[1], b.cumulative]) : [];
     const chartBaseTip = chartBase(t).tooltip;
@@ -710,6 +717,8 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       tails: Number(opts.histTails) || 0, kde: !!opts.histKde,
     });
     lastHist = h;
+    const histPointUsed = m.shape === 'candle' ? opts.histPoint : 'last';
+    lastHistComp = compositeValue(records, m.key, histPointUsed, opts.composite);
     const s = h.stats, d = Math.min(2, h.decimals + 1);
     const v = (x) => metricText(m.key, x);
     q('[data-ccv-hist-stats]').innerHTML = h.count ? `<table class="ccv-stat-table"><caption>آمار ${esc(m.label)} — ${fmt.int(s.n)} ${opts.histUnit === 'underlying' ? 'نماد' : 'قرارداد'}، بی‌وزن${Number.isFinite(s.wMean) ? ' (و وزنی)' : ''}</caption>
@@ -718,7 +727,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const busiest = [...h.bars].sort((a, b) => b.total - a.total)[0];
     const skewText = Number.isFinite(s.skew) ? (s.skew > 0.5 ? 'دنبالهٔ راست بلند است: چند قرارداد خیلی بیشتر از بقیه رفته‌اند.' : s.skew < -0.5 ? 'دنبالهٔ چپ بلند است: چند قرارداد خیلی بیشتر از بقیه افت کرده‌اند.' : 'توزیع تقریباً متقارن است.') : '';
     q('[data-ccv-hist-note]').textContent = h.count
-      ? `گام هر بازه ${axisText(m.key, h.step, h.decimals)}${busiest ? ` · پرجمعیت‌ترین بازه: ${busiest.kind === 'bin' ? `${axisText(m.key, busiest.from, h.decimals)} تا ${axisText(m.key, busiest.to, h.decimals)}` : 'دنباله'} با ${fmt.int(busiest.items.length)} ${opts.histUnit === 'underlying' ? 'نماد' : 'قرارداد'}` : ''}${h.outside ? ` · ${fmt.int(h.outside)} مورد در دو سر بریده (در میله‌های کم‌رنگ دو لبه)` : ''}. ${skewText} موس را روی هر میله ببر تا نام‌ها و سهم هر گروه را ببینی.`
+      ? `گام هر بازه ${axisText(m.key, h.step, h.decimals)}${busiest ? ` · پرجمعیت‌ترین بازه: ${busiest.kind === 'bin' ? `${axisText(m.key, busiest.from, h.decimals)} تا ${axisText(m.key, busiest.to, h.decimals)}` : 'دنباله'} با ${fmt.int(busiest.items.length)} ${opts.histUnit === 'underlying' ? 'نماد' : 'قرارداد'}` : ''}${h.outside ? ` · ${fmt.int(h.outside)} مورد در دو سر بریده (در میله‌های کم‌رنگ دو لبه)` : ''}${lastHistComp && Number.isFinite(lastHistComp.value) ? ` · خط شاخص ترکیبی (${COMPOSITE_WEIGHTS.find(([k]) => k === opts.composite)?.[1] || ''}): ${v(lastHistComp.value)}${lastHistComp.missingWeight ? `، ${fmt.int(lastHistComp.missingWeight)} قرارداد بی‌وزن شمرده نشد` : ''}` : ''}. ${skewText} موس را روی هر میله ببر تا نام‌ها و سهم هر گروه را ببینی.`
       : 'برای این شاخص در گزینش فعلی عددی نیست.';
     const target = q('[data-ccv-chart="hist"]');
     if (!h.bars.length) { hist?.dispose(); hist = null; target.innerHTML = '<p class="empty-note">داده‌ای برای نمودار توزیع نیست.</p>'; return; }

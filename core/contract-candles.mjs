@@ -920,3 +920,20 @@ export function backgroundBarAxis(values = [], { log = true, share = 0.3 } = {})
   const base = lo < hi ? lo / 1.5 : hi / 10;
   return { min: base, max: base * (hi / base) ** (1 / share) };
 }
+
+/**
+ * شاخص ترکیبیِ یک نقطه — همان وزن و همان قاعدهٔ `compositeCandle`، ولی روی
+ * `metricValue` تا نقطه‌هایی مثل «طول کندل» (`range`) هم داشته باشد. نمودار
+ * توزیع همین را به‌صورت خط عمودی می‌کشد.
+ */
+export function compositeValue(records = [], metricKey = 'change', point = 'last', weight = 'value') {
+  if (!weight || weight === 'none') return null;
+  const wOf = (r) => (weight === 'equal' || weight === 'median' ? 1 : num(r[weight]));
+  const pairs = records.map((r) => [metricValue(r, metricKey, point), wOf(r)]).filter(([v, w]) => Number.isFinite(v) && Number.isFinite(w) && w > 0);
+  const total = records.filter((r) => Number.isFinite(metricValue(r, metricKey, point))).length;
+  if (!pairs.length) return { value: NaN, n: 0, missingWeight: total };
+  const value = weight === 'median'
+    ? quantile(pairs.map(([v]) => v).sort((a, b) => a - b), 0.5)
+    : pairs.reduce((a, [v, w]) => a + v * w, 0) / pairs.reduce((a, [, w]) => a + w, 0);
+  return { value, n: pairs.length, missingWeight: total - pairs.length };
+}
