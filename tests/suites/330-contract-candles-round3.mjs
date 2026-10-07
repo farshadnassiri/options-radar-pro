@@ -95,7 +95,9 @@ group('۳۳۰. سیم‌کشی رابط');
   // دور پنجم: «کندل نباشد، همان خط افقی باشد… صرفاً یک خط، نه نوار.»
   check('شاخص ترکیبی فقط یک خط افقی است: نه کندل، نه نوار، نه خط هر گروه', view.includes('data-ccv="composite"') && view.includes('refs.push({ yAxis: ax(value), lineStyle: { color: t.accent') && !view.includes('renderComposite') && !view.includes('compAreas') && !view.includes("'شاخص ترکیبی'] : []") && !view.includes('compositeCandle(drawable.slice(b.from'));
   check('نقطهٔ خط شاخص از منوی کشویی', view.includes('data-ccv="compositePoint"') && view.includes("const point = m.shape === 'candle' ? opts.compositePoint : 'mark';"));
-  check('جزئیات هاور در پنل کنار نمودار، راهنمای شناور یک خط', view.includes('<aside class="ccv-side" data-ccv-pin') && view.includes('formatter: (p) => shortTip(p)') && view.includes("mother.instance.on('mouseover'"));
+  // دور ششم: «توضیحات هاور مثل قبل باشد (نه گوشهٔ چپ)، طوری که در صفحه جا شود.»
+  check('راهنمای شناور کامل، کنار نشانگر و مهارشده در پنجره', view.includes("appendTo: 'body'") && view.includes('position: tipPosition') && view.includes('formatter: (p) => detailHtml(') && view.includes('Math.min(vh - pad - box.top - h, y)') && !view.includes('class="ccv-side"'));
+  check('جزئیات دو ستونه تا کوتاه بماند', view.includes('class="ccv-tip is-wide"') && view.includes('<div class="ccv-tip-col">'));
   check('جدول شاخص هر گروه سر جایش', view.includes('function paintComposite('));
   check('مرتب‌سازی قراردادها و جهت', view.includes('data-ccv="sortKey"') && view.includes('data-ccv="sortDir"') && view.includes('data-ccv="listSort"'));
 }

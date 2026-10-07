@@ -188,7 +188,8 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
         <div class="ccv-hidden" data-ccv-hidden></div>
       </div>
       <div class="ccv-legend" data-ccv-legend></div>
-      <div class="ccv-chart-wrap"><div class="ccv-chart" data-ccv-chart="mother"></div><aside class="ccv-side" data-ccv-pin aria-live="polite"></aside></div>
+      <div class="ccv-chart" data-ccv-chart="mother"></div>
+      <div class="ccv-pin" data-ccv-pin hidden></div>
       <div class="ccv-composite" data-ccv-composite></div>
       <div class="ccv-summary" data-ccv-summary></div>
       <div class="ccv-stats" data-ccv-stats></div>
@@ -307,53 +308,50 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
         ? `تلاطم مظنه خرید ${metricText('iv', s.marks.bid)} · میانه ${metricText('iv', s.marks.mid)} · فروش ${metricText('iv', s.marks.ask)} · آخرین ${metricText('iv', s.marks.last)}`
         : `${esc(m.label)}: ${metricText(m.key, s.mark)}`) : '';
     const flag = flags.get(r.ins);
-    return `<div class="ccv-tip" dir="rtl">
+    // دو ستون: جدول پنج قیمت یک طرف، بقیه طرف دیگر — تا راهنما کوتاه بماند و
+    // در هر پنجره‌ای جا شود.
+    return `<div class="ccv-tip is-wide" dir="rtl">
       <header><b>${esc(r.name)}</b><span>${kindLabel(r.kind)} · ${esc(r.uaName)} · اعمال ${fmt.money(r.strike)} · سررسید ${dateLabel(r.endDate)} · ${fmt.int(r.days)} روز</span></header>
       ${shapeLine ? `<p class="ccv-tip-metric">${shapeLine}</p>` : ''}
-      <table><thead><tr><th></th><th>قیمت</th><th>٪ دیروز</th><th>پایهٔ جفت</th><th>تلاطم</th><th>٪ پایه</th></tr></thead><tbody>${rows}</tbody></table>
-      <p>پایانی روز قبل ${fmt.money(r.yday)} · دامنه روز ${fmt.pct(r.dayRangePct)}٪ · جای آخرین در بازه ${fmt.pct(r.dayPositionPct)}٪ · پایه همان روز <span class="${tone(r.uaChangePct)}">${fmt.pct(r.uaChangePct)}٪</span></p>
+      <div class="ccv-tip-col"><table><thead><tr><th></th><th>قیمت</th><th>٪ دیروز</th><th>پایهٔ جفت</th><th>تلاطم</th><th>٪ پایه</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="ccv-tip-col"><p>پایانی روز قبل ${fmt.money(r.yday)} · دامنه روز ${fmt.pct(r.dayRangePct)}٪ · جای آخرین در بازه ${fmt.pct(r.dayPositionPct)}٪ · پایه همان روز <span class="${tone(r.uaChangePct)}">${fmt.pct(r.uaChangePct)}٪</span></p>
       <p>ارزش ${fmt.rialText(r.value)} · حجم ${fmt.int(r.volume)} · ${fmt.int(r.trades)} معامله · موقعیت باز ${fmt.int(r.oi)} (${fmt.pct(r.oiChangePct)}٪)</p>
       <table class="ccv-tip-be"><tbody>
         <tr><th>سربه‌سر قرارداد</th><td>${fmt.money(r.breakeven)}</td><td>فاصلهٔ پایه تا آن ${fmt.money(r.breakevenGap)} (${fmt.pct(r.breakevenGapPct)}٪)</td></tr>
-        <tr><th>سربه‌سر وزنی زنجیره</th><td>${fmt.money(r.chainBreakeven)}</td><td>${Number.isFinite(r.chainBreakeven) ? `${r.kind === 'put' ? 'پوت‌های' : 'کال‌های'} ${esc(r.uaName)} سررسید ${dateLabel(r.endDate)}، وزن ارزش، ${fmt.int(r.chainBreakevenCount)} قرارداد` : 'زنجیره معاملهٔ وزن‌دار نداشت'}</td></tr>
+        <tr><th>سربه‌سر وزنی زنجیره</th><td>${fmt.money(r.chainBreakeven)}</td><td>${Number.isFinite(r.chainBreakeven) ? `${fmt.int(r.chainBreakevenCount)} ${r.kind === 'put' ? 'پوت' : 'کال'} هم‌سررسید، وزن ارزش` : 'زنجیره معاملهٔ وزن‌دار نداشت'}</td></tr>
         <tr><th>فاصله از سربه‌سر وزنی</th><td class="${tone(r.beVsChain)}">${fmt.money(r.beVsChain)}</td><td>${Number.isFinite(r.beVsChainPct) ? `${fmt.pct(r.beVsChainPct)}٪ — ${r.beVsChain > 0 ? 'بالاتر از' : r.beVsChain < 0 ? 'پایین‌تر از' : 'برابر'} میانگین زنجیره` : '—'}</td></tr>
       </tbody></table>
       <p>مظنه ${fmt.money(r.bid)} / ${fmt.money(r.ask)} · اسپرد ${fmt.pct(r.spreadPct)}٪ · دلتا ${fmt.num(r.delta)} · اهرم مؤثر ${fmt.num(r.effectiveLeverage)} · فاصله اعمال ${fmt.pct(r.moneynessPct)}٪</p>
       ${r.rangeSource === 'infoLag' ? '<p class="note">کمینه/بیشینه از چند ثانیه قبل است و با آخرین قیمت عکس گسترده شد.</p>' : ''}
       ${flag ? `<p class="warn">غیرعادی نسبت به هم‌سررسیدها: ${flag.map((f) => (f === 'value' ? 'ارزش معامله' : 'دامنه روز')).join('، ')}</p>` : ''}
+      </div>
     </div>`;
   }
 
-  // ── پنل جزئیات کنار نمودار ──────────────────────────────────────
-  //
-  // «با هاور کردن توضیحات می‌رود پایین صفحه.» راهنمای شناورِ بلند از قاب
-  // پنجره بیرون می‌زد. حالا جزئیات کامل در پنلی ثابت کنار نمودار می‌نشیند
-  // (با پیمایش درونی خودش) و با هاور عوض می‌شود؛ کلیک آن را ثابت می‌کند.
-  // راهنمای شناور فقط یک خط است.
-  let hoverIns = '';
+  // ── جزئیات ثابت زیر نمودار (با کلیک) ───────────────────────────
   function paintPin() {
     const box = q('[data-ccv-pin]');
-    const r = drawable.find((item) => item.ins === (pinned || hoverIns));
-    if (!r) {
-      box.innerHTML = `<p class="ccv-side-empty">موس را روی یک کندل ببر تا همهٔ جزئیاتش اینجا بیاید${opts.composite !== 'none' ? '؛ خط افقی پررنگ «شاخص ترکیبی» است' : ''}. کلیک، جزئیات را ثابت نگه می‌دارد${opts.clickRemove ? ' — الان «کلیک = حذف» روشن است' : ''}.</p>`;
-      return;
-    }
-    box.innerHTML = `${pinned ? '<p class="ccv-side-pinned">ثابت شده — برای دیدن کندل‌های دیگر «بستن» را بزن</p>' : ''}${detailHtml(r)}<div class="ccv-pin-actions">${pinned ? `<button type="button" class="ghost" data-ccv-hide="${esc(r.ins)}">حذف این کندل از نمودار</button>${onOpenContract && !past ? '<button type="button" class="ghost" data-ccv-open>دیدن در زنجیره</button>' : ''}<button type="button" class="ghost" data-ccv-unpin>بستن</button>` : '<small>کلیک: ثابت کردن و دکمهٔ حذف</small>'}</div>`;
+    const r = drawable.find((item) => item.ins === pinned);
+    box.hidden = !r;
+    if (!r) { box.innerHTML = ''; return; }
+    box.innerHTML = `${detailHtml(r)}<div class="ccv-pin-actions"><button type="button" class="ghost" data-ccv-hide="${esc(r.ins)}">حذف این کندل از نمودار</button>${onOpenContract && !past ? '<button type="button" class="ghost" data-ccv-open>دیدن در زنجیره</button>' : ''}<button type="button" class="ghost" data-ccv-unpin>بستن</button></div>`;
   }
 
-
-  function hide(ins) {
-    if (!ins || opts.hidden.includes(ins)) return;
-    if (pinned === ins) pinned = '';
-    set({ hidden: [...opts.hidden, ins] });
-  }
-
-  /** یک خط کوتاه برای راهنمای شناور. */
-  function shortTip(p) {
-    const r = drawable[p.value?.[7]];
-    if (!r) return '';
-    const ch = r.points.change.last;
-    return `<div dir="rtl" class="ccv-tip"><b>${esc(r.name)}</b> <small>${kindLabel(r.kind)} · ${esc(r.uaName)}</small><br>آخرین <span class="${tone(ch)}">${fmt.pct(ch)}٪</span> · ارزش ${fmt.rialText(r.value)}</div>`;
+  /**
+   * جای راهنمای شناور: کنار نشانگر، ولی همیشه داخل پنجرهٔ مرورگر.
+   * «توضیحات هاور مثل قبل باشد، طوری که در صفحه جا شود.» راهنما به `body`
+   * می‌چسبد (نه قاب نمودار) و اگر از لبهٔ پایین یا کنار پنجره بیرون بزند، به
+   * داخل برمی‌گردد. ECharts مختصات را نسبت به قاب نمودار می‌خواهد.
+   */
+  function tipPosition(point, params, dom, rect, size) {
+    const box = q('[data-ccv-chart="mother"]').getBoundingClientRect();
+    const [w, h] = size.contentSize, pad = 10;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = point[0] + 18, y = point[1] - h / 2;
+    if (box.left + x + w > vw - pad) x = point[0] - w - 18;
+    x = Math.max(pad - box.left, Math.min(vw - pad - box.left - w, x));
+    y = Math.max(pad - box.top, Math.min(vh - pad - box.top - h, y));
+    return [x, y];
   }
 
   // ── نمودار مادر ─────────────────────────────────────────────────
@@ -478,8 +476,8 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const bottomPad = cat ? 104 : 72;
     return {
       grid: [{ left: 64, right: 54, top: 30, bottom: bottomPad }],
-      // راهنمای شناور یک خط است؛ جزئیات کامل در پنل کنار نمودار.
-      tooltip: { ...chartBaseTip, trigger: 'item', confine: true, enterable: false, formatter: (p) => shortTip(p), extraCssText: `${chartBaseTip.extraCssText} max-width: 320px; white-space: normal;` },
+      // راهنمای کامل کنار نشانگر، همیشه داخل پنجره (`tipPosition`).
+      tooltip: { ...chartBaseTip, trigger: 'item', confine: false, appendTo: 'body', enterable: false, position: tipPosition, formatter: (p) => detailHtml(drawable[p.value?.[7]] || drawable[0]), extraCssText: `${chartBaseTip.extraCssText} max-width: min(660px, 94vw); white-space: normal; padding: 8px 10px;` },
       xAxis: [cat
         ? { type: 'category', data: drawable.map((r) => r.name), axisLabel: { rotate: 60, fontSize: 10, color: t.muted, hideOverlap: true }, axisLine: { lineStyle: { color: t.line } }, triggerEvent: true }
         : { type: 'value', scale: true, name: 'فاصله اعمال از پایه ٪', nameLocation: 'middle', nameGap: 28, axisLabel: { color: t.muted, formatter: (v) => axisText('change', v) }, splitLine: { lineStyle: { color: t.lineSoft } }, triggerEvent: true }],
@@ -596,11 +594,6 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     mother = handle;
     if (mother) {
       attachAxisDrag(mother.instance);
-      mother.instance.on('mouseover', (p) => {
-        if (p.componentType !== 'series') return;
-        hoverIns = p.seriesId === 'candles' ? drawable[p.value?.[7]]?.ins || '' : '';
-        if (!pinned) paintPin();
-      });
     }
     mother?.instance.on('datazoom', () => {
       const dz = mother.instance.getOption().dataZoom || [];
