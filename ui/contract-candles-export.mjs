@@ -23,7 +23,8 @@ export const CANDLE_EXPORT_HEADERS = [
   ...CANDLE_POINTS.map((p) => `پریمیوم ${POINT_LABEL[p]} ٪ پایه`),
   ...CANDLE_POINTS.map((p) => `ارزش زمانی ${POINT_LABEL[p]} ٪ پایه`),
   'تلاطم مظنه خرید ٪', 'تلاطم میانه ٪', 'تلاطم مظنه فروش ٪', 'تلاطم آخرین (زنجیره) ٪',
-  'دامنه روز ٪', 'جای آخرین در بازه ٪', 'دلتا', 'اهرم ساده', 'اهرم مؤثر', 'فاصله تا سربه‌سر ٪', 'فاصله مظنه ٪',
+  'دامنه روز ٪', 'جای آخرین در بازه ٪', 'دلتا', 'اهرم ساده', 'اهرم مؤثر',
+  'سربه‌سر', 'فاصله تا سربه‌سر (ریال)', 'فاصله تا سربه‌سر ٪', 'سربه‌سر وزنی زنجیره', 'فاصله از سربه‌سر وزنی', 'فاصله از سربه‌سر وزنی ٪', 'فاصله مظنه ٪',
   'مظنه خرید', 'مظنه فروش', 'حجم', 'ارزش معامله (ریال)', 'تعداد معامله', 'موقعیت باز', 'تغییر موقعیت باز', 'تغییر موقعیت باز ٪',
   'تغییر پایه ٪', 'منبع کمینه/بیشینه', 'منبع بازهٔ پایه', 'غیرعادی',
 ];
@@ -39,7 +40,8 @@ export function candleExportRow(r, flags = new Map()) {
     ...CANDLE_POINTS.map((p) => n(r.points.premium[p])),
     ...CANDLE_POINTS.map((p) => n(r.points.timeValue[p])),
     n(r.ivBidPct), n(r.ivMidPct), n(r.ivAskPct), n(r.ivPct),
-    n(r.dayRangePct), n(r.dayPositionPct), n(r.delta), n(r.leverage), n(r.effectiveLeverage), n(r.breakevenGapPct), n(r.spreadPct),
+    n(r.dayRangePct), n(r.dayPositionPct), n(r.delta), n(r.leverage), n(r.effectiveLeverage),
+    n(r.breakeven), n(r.breakevenGap), n(r.breakevenGapPct), n(r.chainBreakeven), n(r.beVsChain), n(r.beVsChainPct), n(r.spreadPct),
     n(r.bid), n(r.ask), n(r.volume), n(r.value), n(r.trades), n(r.oi), n(r.oiChange), n(r.oiChangePct),
     n(r.uaChangePct), RANGE_SOURCE[r.rangeSource] || r.rangeSource, RANGE_SOURCE[r.uaRangeSource] || r.uaRangeSource,
     flags.has(r.ins) ? flags.get(r.ins).map((f) => (f === 'value' ? 'ارزش معامله' : 'دامنه روز')).join('، ') : '',
@@ -63,6 +65,7 @@ export function buildCandleSheets({ records = [], uaDays = [], flags = new Map()
     ...filterLines.map((line) => ['گزینش', line]),
     ['کندل', 'کمینه، اولین، آخرین، پایانی و بیشینهٔ امروز. آخرین، پایانی، حجم، ارزش و موقعیت باز از همان عکس زنجیره؛ اولین/کمینه/بیشینه از پاسخ اطلاعات هم‌جلسه.'],
     ['جفت پایه برای تلاطم', 'کال: کمینه↔کمینهٔ پایه، بیشینه↔بیشینهٔ پایه. پوت: کمینه↔بیشینهٔ پایه، بیشینه↔کمینهٔ پایه. اولین↔اولین، آخرین↔قیمت پایهٔ زنجیره، پایانی↔پایانی. زمان واقعی نقطه‌ها معلوم نیست؛ تلاطم کندلی تقریبی است.'],
+    ['سربه‌سر وزنی زنجیره', 'میانگین سربه‌سرِ (اعمال ± آخرین) قراردادهای همان نماد، سررسید و سمت، با وزن ارزش معاملات — همان تعریف نگاه باز و استرانگل بازی.'],
     ['غیرعادی', 'دامنهٔ روز یا ارزش معامله بالاتر از چارک سوم + ۱٫۵ × فاصلهٔ میان‌چارکی هم‌گروهان (همان نماد، سررسید و نوع؛ دست‌کم پنج عضو).'],
     ...narrative.map((line) => ['روایت', line]),
   ];

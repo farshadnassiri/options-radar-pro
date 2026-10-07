@@ -181,6 +181,8 @@ export const DASHBOARD_MODES = [
   // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۵): کندل امروز به تب جدا، با نمودار مادرِ همهٔ
   // کندل‌ها، شاخص قابل انتخاب، توزیع میله‌ای و خروجی اکسل (`core/contract-candles.mjs`).
   { id: 'candles', title: 'کندل قیمت امروز قراردادها', hint: 'نمودار مادر همهٔ کندل‌ها، تلاطم کندلی، توزیع میله‌ای و خروجی اکسل', views: [], candles: true },
+  // همان تب برای یک روز گذشته (۱۴۰۵/۰۷/۱۵): داده از `ui/contract-candles-past.mjs`.
+  { id: 'candles-past', title: 'کندل بازار در گذشته', hint: 'همان نمودار مادر، توزیع و اکسل برای یک روز گذشته', views: [], candlesPast: true },
   // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۱): «هدف دیدن نوسان ضمنی در طول زمان است» —
   // نمودار مادر روزانه برای شاخص پایه یا هر قرارداد، قراردادهای یک سررسید روی
   // هم، و نمودار بازه در تایم‌فریم دلخواه (`core/iv-chart.mjs`). جای «میز
@@ -906,6 +908,8 @@ export async function mount(root, { state, api }) {
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-compare-host></div></section>`
       : mode.volRank
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-vol-rank-host></div></section>`
+      : mode.candlesPast
+        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-candles-past-host></div></section>`
       : mode.candles
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-candles-host></div></section>`
       : mode.ivCharts
@@ -1008,6 +1012,20 @@ export async function mount(root, { state, api }) {
       });
     }
     return candlesView;
+  };
+  // تب کندل گذشته هم تنبل سوار می‌شود؛ تا کاربر روز را نخواسته، چیزی گرفته نمی‌شود.
+  let candlesPastView = null;
+  const candlesPast = () => {
+    if (!candlesPastView) {
+      candlesPastView = mountContractCandles(root.querySelector('[data-candles-past-host]'), {
+        mode: 'past',
+        getPayload: () => payload,
+        getSettings: () => state.settings,
+        greekParams,
+        isVisible: () => activeMode === 'candles-past' && root.isConnected,
+      });
+    }
+    return candlesPastView;
   };
 
   function paintInterval() {
@@ -1303,6 +1321,7 @@ export async function mount(root, { state, api }) {
     if (mode?.compare) { compare().paint(); return; }
     if (mode?.volRank) { volRank().paint(); return; }
     if (mode?.candles) { candles().paint(); return; }
+    if (mode?.candlesPast) { candlesPast().paint(); return; }
     if (mode?.ivCharts) { ivCharts().paint(); return; }
     if (mode?.mod) { await mountEmbedded(mode); return; }
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
@@ -1444,7 +1463,7 @@ export async function mount(root, { state, api }) {
     busyBar?.dispose();
     openViewController?.dispose?.();
     marketExplorer.dispose();
-    volRankView?.dispose(); ivChartsView?.dispose(); candlesView?.dispose();
+    volRankView?.dispose(); ivChartsView?.dispose(); candlesView?.dispose(); candlesPastView?.dispose();
     for (const dispose of embedded.values()) { try { dispose?.(); } catch { /* برچیدن نباید بترکد */ } }
   };
 }

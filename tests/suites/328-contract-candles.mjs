@@ -131,7 +131,7 @@ group('۳۲۸. نمودار میله‌ای: چند قرارداد در هر ب�
     points: { change: { first: 0, last: i * 3 - 30 + (i === 39 ? 500 : 0), low: -40, high: 60, close: 1 } },
   }));
   const h = histogram(recs, { metric: 'change', bins: 12 });
-  const total = h.bars.reduce((s, b) => s + b.call + b.put, 0);
+  const total = h.bars.reduce((s, b) => s + b.total, 0);
   check('هر قرارداد دقیقاً یک بار شمرده می‌شود', total === 40 && h.count === 40);
   check('دادهٔ پرت به سطل «بیشتر از» می‌رود و بازه‌ها را باز نمی‌کند', h.bars[h.bars.length - 1].kind === 'over' && h.bars[h.bars.length - 1].items[0].value > 400 && h.step <= 10);
   check('بازه‌ها گرد و پیوسته‌اند', h.bars.filter((b) => b.kind === 'bin').every((b, i, a) => i === 0 || b.from === a[i - 1].to));

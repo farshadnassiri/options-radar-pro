@@ -148,6 +148,9 @@
   --cmp2: #f79009;
   --cmp3: #0ba5ec;
   --cmp4: #66c61c;
+  /* کندل پوت در نمودار مادر: جدا از سبز/قرمزِ کال (خواستهٔ صاحب پروژه). */
+  --candle-put-up: var(--cmp1);
+  --candle-put-down: var(--cmp2);
   /* ————— رنگ سری‌های دسته‌ای —————
      شش اسلات، نه ده. ده اسلات ادعای جداپذیری‌ای بود که برقرار نبود: در
      مجموعه قبلی «قرمز و نارنجی» با اختلاف ΔE ۸٫۷ و «بنفش و آبی» با ΔE ۰٫۴
@@ -380,6 +383,8 @@ body[data-theme="board"] {
   --cmp2: #fdb022;
   --cmp3: #36bffa;
   --cmp4: #85e13a;
+  --candle-put-up: var(--cmp1);
+  --candle-put-down: var(--cmp2);
   /* همان شش رنگ پوسته روشن، عیناً: هر شش در باند روشنایی پوسته تیره هم
      می‌نشینند و کنتراست ۳:۱ با زمینه تیره دارند، پس تکرارشان تنبلی نیست —
      تصمیم است تا سریِ «حجم کال» با عوض‌شدن پوسته، رنگش عوض نشود. */
@@ -5369,13 +5374,13 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ccv-legend span { display: inline-flex; align-items: center; gap: 6px; }
 .ccv-legend > small { margin-inline-start: auto; }
 .ccv-legend i { display: inline-block; }
-.ccv-l-body { width: 9px; height: 16px; border-radius: 2px; background: var(--gain); }
+.ccv-l-body { width: 9px; height: 16px; border-radius: 2px; background: linear-gradient(var(--gain) 50%, var(--loss) 50%); }
 .ccv-l-wick { width: 2px; height: 18px; background: var(--muted); }
 .ccv-l-close { width: 8px; height: 8px; transform: rotate(45deg); background: var(--warn); }
 .ccv-l-box { width: 9px; height: 16px; border: 1.5px solid var(--ink-2); }
 .ccv-l-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-2); }
 .ccv-l-diamond { width: 8px; height: 8px; transform: rotate(45deg); background: var(--ink-2); }
-.ccv-l-hollow { width: 9px; height: 16px; border: 1.5px solid var(--loss); border-radius: 2px; }
+.ccv-l-put { width: 9px; height: 16px; border-radius: 2px; background: linear-gradient(var(--candle-put-up) 50%, var(--candle-put-down) 50%); }
 .ccv-l-flag { width: 9px; height: 16px; border: 2.5px solid var(--warn); border-radius: 2px; }
 .ccv-tip { display: grid; gap: 5px; font-size: var(--fs-xs); line-height: 1.7; text-align: start; }
 .ccv-tip header { display: grid; gap: 2px; }
@@ -5387,6 +5392,8 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ccv-tip .gain, .ccv-stat-table .gain { color: var(--gain); }
 .ccv-tip .loss, .ccv-stat-table .loss { color: var(--loss); }
 .ccv-tip .warn { color: var(--warn); font-weight: 700; }
+.ccv-tip-be td:last-child { white-space: normal; color: var(--muted); }
+.ccv-tip-be th { color: var(--ink-2); }
 .ccv-pin { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--accent-line); border-radius: var(--radius-md); background: var(--panel-2); }
 .ccv-pin-actions { display: flex; gap: 6px; margin-top: 8px; }
 .ccv-stats { margin-top: 12px; overflow-x: auto; }
@@ -5397,6 +5404,43 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ccv-story h4 { margin: 0 0 6px; }
 .ccv-story ul { margin: 0; padding-inline-start: 18px; display: grid; gap: 5px; font-size: var(--fs-sm); line-height: 1.9; }
 .ccv-more { margin-top: 8px; }
+.ccv-icons { display: flex; gap: 6px; }
+.ccv-icon { display: inline-grid; place-items: center; width: 36px; height: 36px; padding: 0; border-radius: var(--radius-md); }
+.ccv-mother:fullscreen { overflow: auto; padding: 18px; background: var(--panel); }
+.ccv-mother:fullscreen .ccv-chart { height: 74vh !important; }
+.ccv-sliders-box { margin: 4px 0 10px; padding: 8px 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--panel-2); }
+.ccv-sliders-box summary { cursor: pointer; font-weight: 800; font-size: var(--fs-xs); display: flex; align-items: center; gap: 10px; }
+.ccv-sliders { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px 18px; margin-top: 10px; }
+.ccv-slider { display: grid; gap: 4px; padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius-sm); }
+.ccv-slider.is-active { border-color: var(--accent-line); background: var(--accent-soft); }
+.ccv-slider.is-empty { color: var(--muted); font-size: var(--fs-xs); }
+.ccv-slider-head { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); }
+.ccv-slider-head output { margin-inline-start: auto; color: var(--muted); font-size: var(--fs-2xs); }
+.ccv-slider-head button { padding: 0 6px; min-height: 0; line-height: 1.4; }
+.ccv-dual { position: relative; height: 24px; direction: ltr; }
+.ccv-dual::before { content: ""; position: absolute; inset-inline: 0; top: 11px; height: 3px; border-radius: 2px; background: var(--line); }
+.ccv-dual input[type="range"] { position: absolute; inset: 0; width: 100%; margin: 0; background: none; pointer-events: none; appearance: none; -webkit-appearance: none; accent-color: var(--accent); }
+.ccv-dual input[type="range"]::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--panel); background: var(--accent); box-shadow: var(--shadow-sm); cursor: grab; }
+.ccv-dual input[type="range"]::-moz-range-thumb { pointer-events: auto; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--panel); background: var(--accent); cursor: grab; }
+.ccv-dual input[type="range"]::-webkit-slider-runnable-track { background: none; }
+.ccv-dual input[type="range"]::-moz-range-track { background: none; }
+.ccv-outliers { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 8px; font-size: var(--fs-xs); }
+.ccv-outliers label.check { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.ccv-hidden { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; color: var(--muted); }
+.ccv-hidden:empty { display: none; }
+.ccv-summary { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 12px; }
+.ccv-summary:empty { display: none; }
+.ccv-tile { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line-soft); border-inline-start: 3px solid var(--accent-line); border-radius: var(--radius-md); background: linear-gradient(135deg, var(--panel-2), var(--panel)); }
+.ccv-tile small { color: var(--muted); font-size: var(--fs-3xs); font-weight: 700; }
+.ccv-tile strong { font-size: var(--fs-sm); color: var(--ink); }
+.ccv-tile strong b { font-weight: 800; }
+.ccv-tile span { color: var(--muted); font-size: var(--fs-2xs); line-height: 1.7; }
+.ccv-tile em { display: block; font-style: normal; color: var(--warn); }
+.ccv-tile.gain { border-inline-start-color: var(--gain); } .ccv-tile.loss { border-inline-start-color: var(--loss); }
+.ccv-tile .gain { color: var(--gain); } .ccv-tile .loss { color: var(--loss); }
+.ccv-past-grid { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 14px; align-items: start; }
+.ccv-past-pick .ccv-chips { max-height: 240px; }
+@media (max-width: 720px) { .ccv-past-grid { grid-template-columns: 1fr; } }
 .lmm-candle-moved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 @media (max-width: 720px) {
   .ccv-chart { height: 440px; }

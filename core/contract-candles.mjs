@@ -33,7 +33,8 @@
 import { liveIvAt } from './live-market.mjs';
 import { mergeRangeInfo } from './range-info.mjs';
 import { pctVsYesterday } from './price-change.mjs';
-import { contractAnalytics } from './decision-dashboard.mjs';
+import { contractAnalytics, contractBreakeven, breakevenGap, breakevenGapPct } from './decision-dashboard.mjs';
+import { weightedMean } from './open-view.mjs';
 
 const num = (v) => (v === null || v === undefined || v === '' ? NaN : Number(v));
 const pos = (v) => { const x = num(v); return Number.isFinite(x) && x > 0 ? x : NaN; };
@@ -74,7 +75,7 @@ export function underlyingDay(ua = {}, info = null, spot = NaN) {
  * شاخص‌های محور عمودی. `info` پاسخ `/api/infos` همان قرارداد است و `uaDay`
  * خروجی `underlyingDay`. شاخص‌ها از همان مسیرهای زنجیره ساخته می‌شوند.
  */
-export function candleRecord(row = {}, { info = null, uaDay = null, settings = {}, params = {} } = {}) {
+export function candleRecord(row = {}, { info = null, uaDay = null, settings = {}, params = {}, chainBe = null } = {}) {
   const merged = mergeRangeInfo(row, info);
   const kind = row.kind === 'put' ? 'put' : 'call';
   const prices = Object.fromEntries(CANDLE_POINTS.map((key) => [key, pos(merged[key])]));
@@ -107,7 +108,12 @@ export function candleRecord(row = {}, { info = null, uaDay = null, settings = {
     volume: num(row.volume), value: num(row.value), trades: num(row.trades), oi: num(row.oi), oiChange: num(row.oiChange),
     oiChangePct: num(row.oiChangePct), bid: num(row.bid), ask: num(row.ask), mid: num(row.mid), spreadPct: num(row.spreadPct),
     ivPct: num(row.ivPct), ivMidPct: num(row.ivMidPct), ivBidPct: num(row.ivBidPct), ivAskPct: num(row.ivAskPct),
-    breakevenGapPct: num(row.breakevenGapPct),
+    // سربه‌سر از همان قاعدهٔ زنجیره (`contractBreakeven`: اعمال ± آخرین)؛
+    // ردیف عکس آن را ندارد و پیش از این ستون «تا سربه‌سر» خالی می‌ماند.
+    breakeven: contractBreakeven(row), breakevenGap: breakevenGap(row), breakevenGapPct: breakevenGapPct(row),
+    chainBreakeven: num(chainBe?.value), chainBreakevenCount: num(chainBe?.count),
+    beVsChain: Number.isFinite(contractBreakeven(row)) && num(chainBe?.value) > 0 ? contractBreakeven(row) - num(chainBe.value) : NaN,
+    beVsChainPct: Number.isFinite(contractBreakeven(row)) && num(chainBe?.value) > 0 ? ((contractBreakeven(row) / num(chainBe.value)) - 1) * 100 : NaN,
     delta: num(analytics.delta), leverage: num(analytics.leverage), effectiveLeverage: num(analytics.effectiveLeverage),
     dayRangePct,
     // جای آخرین قیمت در بازهٔ روز: صفر کف روز، صد سقف روز.
@@ -454,13 +460,135 @@ export function staleInfoIds(ids = [], cache = new Map(), now = Date.now(), ttlM
   });
 }
 
-// ═══ نمودار میله‌ای: چند قرارداد (یا نماد) در هر بازهٔ شاخص ═══
+
+// ═══ دستگیره‌های کشویی: بازهٔ ارزش، حجم و … ═══
 //
-// خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۵): «در یک نمودار جدا به صورت نمودار
-// میله‌ای بازه‌های تغییر قیمت و سایر پارامترها را نشان بده… مثلاً ۲۰ نماد
-// بازه تغییر x درصدی داشتند.» بازه‌ها گرد و خطی‌اند (معامله‌گر «۰ تا ۱۰٪»
-// می‌خواند نه بازهٔ لگاریتمی)، و دو دنباله در دو سطل «کمتر از» و «بیشتر
-// از» جمع می‌شوند تا یک قرارداد +۹۰۰٪ کل نمودار را باریک نکند.
+// خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۵، دور دوم): «فیلترهای دیگر از قبیل ارزش
+// معاملات قرارداد و حجم… با دستگیره کشویی، به صورت realtime.» ارزش و حجم
+// چند مرتبه پراکنده‌اند (یک قرارداد صد هزار ریال، دیگری صد میلیارد)؛ دستگیرهٔ
+// خطی همهٔ بازه را در یک درصدِ اول فشرده می‌کرد. پس این میدان‌ها روی
+// مقیاس لگاریتمی حرکت می‌کنند و صفر (معامله‌نشده) جای خودش را در ابتدای
+// مسیر دارد.
+export const SLIDER_FIELDS = Object.freeze([
+  { key: 'value', label: 'ارزش معاملات', unit: 'rial', log: true },
+  { key: 'volume', label: 'حجم (قرارداد)', unit: 'int', log: true },
+  { key: 'trades', label: 'تعداد معامله', unit: 'int', log: true },
+  { key: 'oi', label: 'موقعیت باز (قرارداد)', unit: 'int', log: true },
+  { key: 'days', label: 'روز مانده تا سررسید', unit: 'int', log: false },
+  { key: 'moneynessPct', label: 'فاصله اعمال از پایه ٪', unit: 'pct', log: false },
+  { key: 'dayRangePct', label: 'دامنه نوسان روز ٪', unit: 'pct', log: false },
+]);
+export const SLIDER_STEPS = 1000;
+
+/**
+ * نگاشت جای دستگیره (۰ تا `SLIDER_STEPS`) ↔ عدد میدان، از روی عددهای موجود.
+ * لگاریتمی وقتی میدان مثبت است؛ صفرِ واقعی در جای ۰ می‌نشیند.
+ */
+export function sliderScale(values = [], log = false) {
+  // `num`، نه `Number`: «null» نامعلوم است، نه صفر.
+  const list = values.map(num).filter(Number.isFinite);
+  if (!list.length) return null;
+  const lo = Math.min(...list), hi = Math.max(...list);
+  const positives = list.filter((v) => v > 0);
+  const useLogScale = log && positives.length > 0 && lo >= 0;
+  const pMin = useLogScale ? Math.min(...positives) : lo;
+  const zeroSlot = useLogScale && lo === 0;
+  const span = SLIDER_STEPS - (zeroSlot ? 1 : 0);
+  const toValue = (pos) => {
+    const p = Math.max(0, Math.min(SLIDER_STEPS, Number(pos)));
+    if (p <= 0) return lo;
+    if (p >= SLIDER_STEPS) return hi;
+    if (!useLogScale) return lo + ((hi - lo) * p) / SLIDER_STEPS;
+    const t = (p - (zeroSlot ? 1 : 0)) / span;
+    if (t <= 0) return zeroSlot ? 0 : pMin;
+    return hi > pMin ? Math.exp(Math.log(pMin) + t * (Math.log(hi) - Math.log(pMin))) : pMin;
+  };
+  const toPos = (value) => {
+    const v = Number(value);
+    if (!Number.isFinite(v) || v <= lo) return 0;
+    if (v >= hi) return SLIDER_STEPS;
+    if (!useLogScale) return Math.round(((v - lo) / (hi - lo)) * SLIDER_STEPS);
+    if (v < pMin) return zeroSlot ? 1 : 0;
+    const t = hi > pMin ? (Math.log(v) - Math.log(pMin)) / (Math.log(hi) - Math.log(pMin)) : 0;
+    return Math.round((zeroSlot ? 1 : 0) + t * span);
+  };
+  return { lo, hi, log: useLogScale, toValue, toPos };
+}
+
+/**
+ * بازه‌های فعال دستگیره‌ها را روی رکوردها می‌گذارد. `ranges[key] = { lo, hi }`
+ * (هر کدام `null` یعنی باز). رکوردی که آن میدان را ندارد، با بازهٔ فعال کنار
+ * می‌رود — «نمی‌دانیم» در بازه نیست — و شمارش جدا برمی‌گردد.
+ */
+export function applyRanges(records = [], ranges = {}) {
+  const active = Object.entries(ranges || {}).filter(([, r]) => r && (Number.isFinite(r.lo) || Number.isFinite(r.hi)));
+  if (!active.length) return { kept: records, cut: 0, unknown: 0 };
+  let cut = 0, unknown = 0;
+  const kept = records.filter((rec) => {
+    for (const [key, r] of active) {
+      const v = Number(rec[key]);
+      if (!Number.isFinite(v)) { unknown += 1; return false; }
+      if ((Number.isFinite(r.lo) && v < r.lo) || (Number.isFinite(r.hi) && v > r.hi)) { cut += 1; return false; }
+    }
+    return true;
+  });
+  return { kept, cut, unknown };
+}
+
+// ═══ کندل‌های پرت ═══
+//
+// «داده‌ها و کندل‌های پرت خوانش نمودار را سخت می‌کنند و مقیاس آن را به هم
+// می‌زنند.» سه راه، هیچ‌کدام عددی را عوض نمی‌کند: (۱) حذف دستی با کلیک
+// (رابط)، (۲) حذف خودکارِ بیرون از حصار توکی روی همان محوری که دیده
+// می‌شود، (۳) مقیاس مقاوم: محور از صدک‌ها، کندلِ بیرون‌زده با پیکان لبه.
+
+/** عدد شکل روی محور (لگاریتمی اگر محور لگاریتمی است). */
+const axisOf = (metric, v, log) => toAxis(metric, v, log);
+
+/**
+ * شناسهٔ کندل‌هایی که سایه‌شان از حصار توکی (k × فاصلهٔ میان‌چارکی) بیرون
+ * می‌زند — روی مختصات محور، تا روی محور لگاریتمی «پرت» همان چیزی باشد که
+ * چشم می‌بیند. کمتر از هشت کندل، حصار معنا ندارد.
+ */
+export function outlierIds(records = [], metricKey = 'change', { log = true, k = 3 } = {}) {
+  const m = metricOf(metricKey);
+  const rows = records.map((r) => ({ r, s: metricShape(r, m.key) })).filter((x) => x.s);
+  const mids = rows.map(({ s }) => axisOf(m, s.shape === 'candle' ? s.close : s.mark, log)).filter(Number.isFinite).sort((a, b) => a - b);
+  if (mids.length < 8) return [];
+  const q1 = quantile(mids, 0.25), q3 = quantile(mids, 0.75), iqr = q3 - q1;
+  const loF = q1 - k * iqr, hiF = q3 + k * iqr;
+  return rows.filter(({ s }) => {
+    const lo = axisOf(m, s.low, log), hi = axisOf(m, s.high, log);
+    return (Number.isFinite(lo) && lo < loF) || (Number.isFinite(hi) && hi > hiF);
+  }).map(({ r }) => r.ins);
+}
+
+/** بازهٔ مقاوم محور: صدک `q` کف‌ها تا صدک `1−q` سقف‌ها، در مختصات محور. */
+export function robustExtent(records = [], metricKey = 'change', { log = true, q = 0.02 } = {}) {
+  const m = metricOf(metricKey);
+  const lows = [], highs = [];
+  for (const r of records) {
+    const s = metricShape(r, m.key);
+    if (!s) continue;
+    const lo = axisOf(m, s.low, log), hi = axisOf(m, s.high, log);
+    if (Number.isFinite(lo)) lows.push(lo);
+    if (Number.isFinite(hi)) highs.push(hi);
+  }
+  if (lows.length < 5) return null;
+  lows.sort((a, b) => a - b); highs.sort((a, b) => a - b);
+  const lo = quantile(lows, q), hi = quantile(highs, 1 - q);
+  const pad = (hi - lo) * 0.04 || 0.01;
+  return { lo: lo - pad, hi: hi + pad };
+}
+
+// ═══ نمودار توزیع ═══
+//
+// خواستهٔ صاحب پروژه: «در یک نمودار جدا به صورت میله‌ای بازه‌های تغییر قیمت و
+// سایر پارامترها… مثلاً ۲۰ نماد بازه تغییر x درصدی داشتند»؛ دور دوم: «اصلاح
+// کن، دقیق‌ترش کن و پارامترهای بیشتری اضافه کن.» نسخهٔ اول برچسب بازه را با
+// گرد کردنِ نمایشی می‌نوشت (۳۷٫۵ ← ۳۸) و لبه‌ها با خطای ممیز شناور جمع
+// می‌شدند؛ حالا لبه‌ها به رقم اعشارِ گام گرد می‌شوند، هر عدد دقیقاً در یک
+// سطل [از، تا) می‌افتد، و آمار کامل، وزن، گروه، دنباله و چگالی دارد.
 
 /** گام گرد ۱–۲–۲٫۵–۵ × توان ده. */
 export function niceStep(raw) {
@@ -469,44 +597,219 @@ export function niceStep(raw) {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e;
 }
 
+/** شمار رقم اعشار لازم برای نوشتن دقیق یک گام (۲٫۵ → ۱، ۰٫۲۵ → ۲). */
+export function stepDecimals(step) {
+  for (let d = 0; d <= 8; d += 1) {
+    const x = step * 10 ** d;
+    if (Math.abs(Math.round(x) - x) < 1e-7 * Math.max(1, x)) return d;
+  }
+  return 8;
+}
+
+export const HIST_WEIGHTS = Object.freeze([
+  ['count', 'شمار'], ['value', 'ارزش معاملات'], ['volume', 'حجم'], ['trades', 'تعداد معامله'], ['oi', 'موقعیت باز'],
+]);
+export const HIST_GROUPS = Object.freeze([
+  ['kind', 'کال و پوت'], ['moneyness', 'در / به / خارج از پول'], ['underlying', 'نماد پایه'], ['expiry', 'سررسید'], ['none', 'بی‌گروه'],
+]);
+
+/** در پول، به پول (±۲٪) یا خارج از پول — از دید دارندهٔ همان قرارداد. */
+export function moneynessClass(r, band = 2) {
+  const m = num(r.moneynessPct);
+  if (!Number.isFinite(m)) return 'unknown';
+  if (Math.abs(m) <= band) return 'atm';
+  const callItm = m < 0; // اعمال زیر قیمت پایه
+  return (r.kind === 'put' ? !callItm : callItm) ? 'itm' : 'otm';
+}
+const MONEYNESS_LABEL = { itm: 'در سود', atm: 'به پول (±۲٪)', otm: 'خارج از پول', unknown: 'نامعلوم' };
+
+/** آمار توصیفی؛ وزن‌دار وقتی وزن داده شود. */
+export function describe(values = [], weights = null) {
+  const pairs = values.map((v, i) => [v, weights ? weights[i] : 1]).filter(([v, w]) => Number.isFinite(v) && Number.isFinite(w) && w >= 0);
+  const xs = pairs.map(([v]) => v).sort((a, b) => a - b);
+  const n = xs.length;
+  if (!n) return { n: 0, mean: NaN, std: NaN, median: NaN, q1: NaN, q3: NaN, iqr: NaN, min: NaN, max: NaN, skew: NaN, kurt: NaN, positive: 0, negative: 0, wMean: NaN, wMedian: NaN };
+  const mean = xs.reduce((a, b) => a + b, 0) / n;
+  const m2 = xs.reduce((a, v) => a + (v - mean) ** 2, 0) / n;
+  const m3 = xs.reduce((a, v) => a + (v - mean) ** 3, 0) / n;
+  const m4 = xs.reduce((a, v) => a + (v - mean) ** 4, 0) / n;
+  const std = n > 1 ? Math.sqrt(m2 * n / (n - 1)) : NaN;
+  const q1 = quantile(xs, 0.25), q3 = quantile(xs, 0.75);
+  const W = pairs.reduce((a, [, w]) => a + w, 0);
+  let wMean = NaN, wMedian = NaN;
+  if (weights && W > 0) {
+    wMean = pairs.reduce((a, [v, w]) => a + v * w, 0) / W;
+    const sorted = [...pairs].sort((a, b) => a[0] - b[0]);
+    let acc = 0;
+    for (const [v, w] of sorted) { acc += w; if (acc >= W / 2) { wMedian = v; break; } }
+  }
+  return {
+    n, mean, std, median: quantile(xs, 0.5), q1, q3, iqr: q3 - q1, min: xs[0], max: xs[n - 1],
+    skew: m2 > 0 && n > 2 ? m3 / m2 ** 1.5 : NaN, kurt: m2 > 0 && n > 3 ? m4 / m2 ** 2 - 3 : NaN,
+    positive: xs.filter((v) => v > 0).length, negative: xs.filter((v) => v < 0).length, wMean, wMedian,
+  };
+}
+
+const groupOf = (x, groupBy) => {
+  if (groupBy === 'kind') return x.kind === 'put' ? 'put' : 'call';
+  if (groupBy === 'moneyness') return moneynessClass(x.r || x);
+  if (groupBy === 'underlying') return String(x.uaName || x.r?.uaName || '');
+  if (groupBy === 'expiry') return String(x.endDate || x.r?.endDate || '');
+  return 'all';
+};
+
 /**
- * سطل‌ها: `{ from, to, kind: 'under'|'bin'|'over', call, put, items }`.
- * `unit: 'underlying'` هر نماد پایه را یک بار می‌شمارد — با میانهٔ کال‌هایش
- * در ستون کال و میانهٔ پوت‌هایش در ستون پوت.
+ * توزیع یک شاخص. خروجی: `{ step, decimals, start, end, bars, groups,
+ * stats, kde, total, count, outside }`. هر میله `{ kind: 'under'|'bin'|'over',
+ * from, to, total, byGroup, items }` و `total` جمع وزن است (یا شمار).
+ * `unit: 'underlying'` هر نماد پایه را با میانهٔ قراردادهایش یک بار می‌شمارد
+ * (کال و پوت جدا). `tails` کسرِ بریده از هر سر (۰ تا ۰٫۱) است؛ بریده‌ها در
+ * دو سطل «کمتر از» و «بیشتر از» جمع می‌شوند و گم نمی‌شوند.
  */
-export function histogram(records = [], { metric = 'change', point = 'last', bins = 12, unit = 'contract', tails = true } = {}) {
-  let items = records.map((r) => ({ r, kind: r.kind, name: r.name, value: metricValue(r, metric, point) })).filter((x) => Number.isFinite(x.value));
+export function histogram(records = [], {
+  metric = 'change', point = 'last', bins = 12, binWidth = 0, unit = 'contract',
+  tails = 0.02, weight = 'count', groupBy = 'kind', kde = true,
+} = {}) {
+  const wOf = (r) => (weight === 'count' ? 1 : num(r[weight]));
+  let items = records.map((r) => ({ r, kind: r.kind, name: r.name, uaName: r.uaName, endDate: r.endDate, value: metricValue(r, metric, point), w: wOf(r) }))
+    .filter((x) => Number.isFinite(x.value) && Number.isFinite(x.w) && x.w >= 0);
   if (unit === 'underlying') {
     const groups = new Map();
     for (const x of items) {
       const key = `${x.r.uaIns}:${x.kind}`;
-      if (!groups.has(key)) groups.set(key, { kind: x.kind, name: x.r.uaName, values: [] });
-      groups.get(key).values.push(x.value);
+      if (!groups.has(key)) groups.set(key, { kind: x.kind, name: x.r.uaName, uaName: x.r.uaName, endDate: '', values: [], w: 0, members: [] });
+      const g = groups.get(key); g.values.push(x.value); g.w += x.w; g.members.push(x.r);
     }
-    items = [...groups.values()].map((g) => ({ kind: g.kind, name: g.name, value: quantile(g.values.sort((a, b) => a - b), 0.5), n: g.values.length }));
+    items = [...groups.values()].map((g) => ({ kind: g.kind, name: g.name, uaName: g.uaName, endDate: g.endDate, r: { ...g.members[0], moneynessPct: NaN }, value: quantile(g.values.sort((a, b) => a - b), 0.5), w: weight === 'count' ? 1 : g.w, n: g.values.length }));
   }
-  if (!items.length) return { step: NaN, bars: [], count: 0 };
+  const empty = { step: NaN, decimals: 0, start: NaN, end: NaN, bars: [], groups: [], stats: describe([]), kde: [], total: 0, count: 0, outside: 0 };
+  if (!items.length) return empty;
   const sorted = items.map((x) => x.value).sort((a, b) => a - b);
-  const clip = tails && sorted.length >= 20;
+  const cut = Math.max(0, Math.min(0.1, Number(tails) || 0));
+  const clip = cut > 0 && sorted.length >= 20;
   // صدک بی‌درون‌یابی: با درون‌یابی، یک دادهٔ پرت نیمی از راه را تا خودش
   // می‌کشید و همان کشیدگی که قرار بود بریده شود برمی‌گشت.
   const at = (q) => sorted[Math.floor((sorted.length - 1) * q)];
-  let lo = clip ? at(0.02) : sorted[0], hi = clip ? at(0.98) : sorted[sorted.length - 1];
+  let lo = clip ? at(cut) : sorted[0], hi = clip ? at(1 - cut) : sorted[sorted.length - 1];
   if (!(hi > lo)) { lo -= 0.5; hi += 0.5; }
-  const step = niceStep((hi - lo) / Math.max(1, bins));
-  const start = Math.floor(lo / step) * step, end = Math.max(start + step, Math.ceil(hi / step) * step);
-  const count = Math.max(1, Math.round((end - start) / step));
-  const bars = Array.from({ length: count }, (_, i) => ({ kind: 'bin', from: start + i * step, to: start + (i + 1) * step, call: 0, put: 0, items: [] }));
-  const under = { kind: 'under', from: -Infinity, to: start, call: 0, put: 0, items: [] };
-  const over = { kind: 'over', from: end, to: Infinity, call: 0, put: 0, items: [] };
+  const step = Number(binWidth) > 0 ? Number(binWidth) : niceStep((hi - lo) / Math.max(1, bins));
+  const decimals = stepDecimals(step);
+  const round = (x) => Number(x.toFixed(decimals));
+  const start = round(Math.floor(lo / step + 1e-9) * step);
+  let count = Math.max(1, Math.ceil((hi - start) / step - 1e-9));
+  if (count > 400) count = 400;
+  const end = round(start + count * step);
+  const bars = Array.from({ length: count }, (_, i) => ({ kind: 'bin', from: round(start + i * step), to: round(start + (i + 1) * step), total: 0, byGroup: {}, items: [] }));
+  const under = { kind: 'under', from: -Infinity, to: start, total: 0, byGroup: {}, items: [] };
+  const over = { kind: 'over', from: end, to: Infinity, total: 0, byGroup: {}, items: [] };
   for (const x of items) {
     let bar;
     if (x.value < start) bar = under;
-    else if (x.value >= end) bar = x.value === end ? bars[bars.length - 1] : over;
-    else bar = bars[Math.min(bars.length - 1, Math.floor((x.value - start) / step))];
-    bar[x.kind === 'put' ? 'put' : 'call'] += 1;
+    else if (x.value > end) bar = over;
+    else bar = bars[Math.min(count - 1, Math.floor((x.value - start) / step + 1e-9))];
+    const g = groupOf(x, groupBy);
+    bar.total += x.w; bar.byGroup[g] = (bar.byGroup[g] || 0) + x.w;
     bar.items.push(x);
   }
-  for (const bar of [under, ...bars, over]) bar.items.sort((a, b) => b.value - a.value);
-  return { step, count: items.length, bars: [...(under.items.length ? [under] : []), ...bars, ...(over.items.length ? [over] : [])] };
+  const all = [...(under.items.length ? [under] : []), ...bars, ...(over.items.length ? [over] : [])];
+  for (const bar of all) bar.items.sort((a, b) => b.value - a.value);
+  const totals = new Map();
+  for (const x of items) { const g = groupOf(x, groupBy); totals.set(g, (totals.get(g) || 0) + x.w); }
+  const groups = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([key, w]) => ({
+    key, weight: w,
+    label: groupBy === 'kind' ? (key === 'put' ? 'پوت' : 'کال')
+      : groupBy === 'moneyness' ? MONEYNESS_LABEL[key] : groupBy === 'none' ? 'همه' : key,
+  }));
+  const total = items.reduce((a, x) => a + x.w, 0);
+  let acc = 0;
+  for (const bar of all) { acc += bar.total; bar.cumulative = total > 0 ? (acc / total) * 100 : NaN; }
+  const stats = describe(items.map((x) => x.value), weight === 'count' ? null : items.map((x) => x.w));
+  // چگالی هسته‌ای گاوسی (پهنای باند سیلورمن)، هم‌مقیاس با ارتفاع میله‌ها.
+  let curve = [];
+  if (kde && items.length >= 5 && total > 0) {
+    const spread = Math.min(stats.std, stats.iqr / 1.34 || stats.std);
+    const h = 0.9 * (spread > 0 ? spread : stats.std || step) * items.length ** -0.2;
+    if (h > 0) {
+      // منحنی تا سه پهنای باند بیرون از بازه‌ها هم کشیده می‌شود تا دنباله‌اش بریده نشود.
+      const a = start - 3 * h, b = end + 3 * h;
+      const xs = Array.from({ length: 161 }, (_, i) => a + ((b - a) * i) / 160);
+      curve = xs.map((xv) => {
+        let d = 0;
+        for (const x of items) d += x.w * Math.exp(-0.5 * ((xv - x.value) / h) ** 2);
+        return [xv, (d / (h * Math.sqrt(2 * Math.PI))) * step];
+      });
+    }
+  }
+  return { step, decimals, start, end, bars: all, groups, stats, kde: curve, total, count: items.length, outside: under.items.length + over.items.length };
+}
+
+// ═══ خلاصهٔ زیر نمودار مادر ═══
+//
+// «توضیحات تکمیلی بیشتری به صورت متنی و کوتاه زیر چارت بده (ارزش معاملات،
+// قراردادهای باز، تغییراتش و…).» هر جمع فقط از قراردادهایی است که آن عدد را
+// دارند و شمار جاافتاده‌ها کنارش برمی‌گردد — جمعِ نصفه بی‌نام ساخته نمی‌شود.
+
+/** جمع عددهای موجود، با شمار موجود و جاافتاده. */
+export function sumKnown(records = [], key) {
+  let sum = 0, known = 0;
+  for (const r of records) {
+    const v = num(r[key]);
+    if (Number.isFinite(v)) { sum += v; known += 1; }
+  }
+  return { sum: known ? sum : NaN, known, missing: records.length - known };
+}
+
+export function candleSummary(records = []) {
+  const calls = records.filter((r) => r.kind === 'call'), puts = records.filter((r) => r.kind === 'put');
+  const change = (r) => r.points?.change?.last;
+  const up = records.filter((r) => change(r) > 0).length, down = records.filter((r) => change(r) < 0).length;
+  const med = (list) => quantile(list.map(change).filter(Number.isFinite).sort((a, b) => a - b), 0.5);
+  const value = sumKnown(records, 'value'), callValue = sumKnown(calls, 'value'), putValue = sumKnown(puts, 'value');
+  const oi = sumKnown(records, 'oi'), callOi = sumKnown(calls, 'oi'), putOi = sumKnown(puts, 'oi');
+  // تغییر موقعیت باز فقط از قراردادهایی که هم امروز و هم دیروزشان معلوم است.
+  const both = records.filter((r) => Number.isFinite(num(r.oi)) && Number.isFinite(num(r.oiChange)));
+  const oiChange = both.reduce((a, r) => a + num(r.oiChange), 0);
+  const oiBase = both.reduce((a, r) => a + (num(r.oi) - num(r.oiChange)), 0);
+  // تغییر وزنی با ارزش: «پول کجا رفت»، نه میانگین قراردادهای کم‌معامله.
+  const weighted = records.filter((r) => Number.isFinite(change(r)) && num(r.value) > 0);
+  const wSum = weighted.reduce((a, r) => a + num(r.value), 0);
+  const ivRows = records.filter((r) => Number.isFinite(num(r.ivPct)) && num(r.value) > 0);
+  const ivW = ivRows.reduce((a, r) => a + num(r.value), 0);
+  const pick = (list, f, dir = 1) => list.filter((r) => Number.isFinite(f(r))).sort((a, b) => dir * (f(b) - f(a)))[0] || null;
+  return {
+    count: records.length, calls: calls.length, puts: puts.length, up, down, flat: records.length - up - down,
+    value, callValue, putValue, volume: sumKnown(records, 'volume'), trades: sumKnown(records, 'trades'),
+    oi, callOi, putOi, oiChange: both.length ? oiChange : NaN, oiChangePct: oiBase > 0 ? (oiChange / oiBase) * 100 : NaN, oiKnown: both.length,
+    medianCall: med(calls), medianPut: med(puts),
+    valueWeightedChange: wSum > 0 ? weighted.reduce((a, r) => a + change(r) * num(r.value), 0) / wSum : NaN,
+    valueWeightedIv: ivW > 0 ? ivRows.reduce((a, r) => a + num(r.ivPct) * num(r.value), 0) / ivW : NaN,
+    putCallValue: callValue.sum > 0 && Number.isFinite(putValue.sum) ? putValue.sum / callValue.sum : NaN,
+    putCallOi: callOi.sum > 0 && Number.isFinite(putOi.sum) ? putOi.sum / callOi.sum : NaN,
+    topValue: pick(records, (r) => num(r.value)),
+    topGainer: pick(records, change), topLoser: pick(records, change, -1),
+    widest: pick(records, (r) => r.dayRangePct),
+    topOiAdd: pick(records, (r) => num(r.oiChange)), topOiCut: pick(records, (r) => num(r.oiChange), -1),
+  };
+}
+
+// ═══ سربه‌سر وزنی زنجیره ═══
+//
+// «قیمت سربه‌سر وزنی زنجیرهٔ آن قرارداد و فاصلهٔ سربه‌سر قرارداد از آن.»
+// همان تعریف «رصد لحظه‌ای / نگاه باز» و «استرانگل بازی» (`optionBreakeven`
+// و `weightedMean` در `core/open-view.mjs`): میانگین سربه‌سرِ قراردادهای
+// همان نماد، همان سررسید و همان سمت، با وزن ارزش معاملات. قرارداد بی‌معامله
+// وزن ندارد. از **همهٔ** زنجیره ساخته می‌شود، نه فقط آنچه فیلتر نگه داشته.
+
+export const chainKey = (row) => `${row.uaIns}:${row.endDate}:${row.kind === 'put' ? 'put' : 'call'}`;
+
+export function chainBreakevens(contracts = []) {
+  const groups = new Map();
+  for (const row of contracts) {
+    const key = chainKey(row);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  const out = new Map();
+  for (const [key, rows] of groups) out.set(key, weightedMean(rows, (r) => contractBreakeven(r), (r) => num(r.value)));
+  return out;
 }
