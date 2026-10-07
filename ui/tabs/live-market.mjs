@@ -132,6 +132,13 @@ export function liveChart(host, series, {
     ${grid}${axes}${paths}<line class="live-market-cursor" x1="0" x2="0" y1="${P.t}" y2="${H - P.b}" hidden/>
   </svg><div class="live-market-tip" hidden></div></div><p class="note">محور عمودی: ${unit}. ${esc(note)}</p>`;
   const svg = host.querySelector('svg'), cursor = host.querySelector('.live-market-cursor'), tip = host.querySelector('.live-market-tip');
+  // آخرین نقطهٔ هر خط برای تصویر ذخیره‌شده (`ui/chart-image.mjs`)؛ خطی که
+  // آخرین نقطه‌اش زودتر است، ساعت خودش را کنارش دارد.
+  const newest = usable.reduce((best, item) => (item.points.at(-1).second > best.points.at(-1).second ? item : best), usable[0]).points.at(-1);
+  svg.setAttribute('data-chart-latest', `آخرین داده (${timeLabel(newest.time, true)}) — ${usable.map((item) => {
+    const last = item.points.at(-1);
+    return `${item.label}: ${valueFmt(last.value)}${last.second !== newest.second ? ` (${timeLabel(last.time, true)})` : ''}`;
+  }).join(' · ')}`);
   svg.addEventListener('pointermove', (event) => {
     const box = svg.getBoundingClientRect();
     const localX = ((event.clientX - box.left) / box.width) * W;

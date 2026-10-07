@@ -162,6 +162,29 @@ export function chart(host, points, series, {
     <g class="backtest-cursor" hidden><line y1="${T}" y2="${H - B}"/><g></g></g>
     <rect class="backtest-hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}"/>
   </svg><div class="backtest-tip" hidden></div></div>`;
+
+  // ── آخرین داده برای تصویر ذخیره‌شده (`ui/chart-image.mjs`) ─────────
+  //
+  // «برای نمودارهای سری زمانی، مشخصات آخرین داده داخل عکس باشد.» همان
+  // برچسب زمان و عدد راهنمای شناور؛ سری‌ای که آخرین عددش از نقطهٔ دیگری
+  // است، زمان خودش را کنارش دارد.
+  const whenOfRow = (row) => {
+    const stamp = Number.isFinite(Number(row.date)) ? dateLabel(row.date) : '—';
+    return row.granularity === 'trade' ? `${stamp} · ${faDigits(row.timeLabel ?? '')}`
+      : faDigits(row.dateLabel || (Number.isFinite(Number(row.date)) ? historyDateLabel(row.date) : '—'));
+  };
+  const lastBits = [];
+  for (const item of legend) {
+    let at = -1;
+    for (const same of series.filter((s2) => s2.label === item.label)) {
+      for (let k = rows.length - 1; k > at; k -= 1) if (Number.isFinite(cell(rows[k], same.key))) { at = Math.max(at, k); lastBits.push({ label: item.label, index: k, value: cell(rows[k], same.key) }); break; }
+    }
+  }
+  const newest = Math.max(-1, ...lastBits.map((b) => b.index));
+  const lastByLabel = new Map();
+  for (const b of lastBits) if (!lastByLabel.has(b.label) || lastByLabel.get(b.label).index < b.index) lastByLabel.set(b.label, b);
+  const latestNote = newest >= 0 ? `آخرین داده (${whenOfRow(rows[newest])}) — ${[...lastByLabel.values()].map((b) => `${b.label}: ${tipLabel(b.value)}${b.index !== newest ? ` (${whenOfRow(rows[b.index])})` : ''}`).join(' · ')}` : '';
+  host.querySelector('svg')?.setAttribute('data-chart-latest', latestNote);
   const svg = host.querySelector('svg'), cursor = host.querySelector('.backtest-cursor'), tip = host.querySelector('.backtest-tip');
   const show = (index, clientX, clientY) => {
     const row = rows[index], px = x(row, index);

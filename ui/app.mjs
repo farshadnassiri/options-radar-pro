@@ -13,6 +13,7 @@ import { installDataLog } from '/ui/datalog-client.mjs';
 import { linkLabelKey } from '/ui/feed-state.mjs';
 import { takeHandoff } from '/ui/handoff.mjs';
 import { installTableEnhance } from '/ui/table-enhance.mjs';
+import { installChartImageSaver } from '/ui/chart-image.mjs';
 import {
   SETTINGS_CHANGED_EVENT, changedSettingKeys, createSettingsSaver,
 } from '/ui/settings-sync.mjs';
@@ -721,6 +722,8 @@ document.addEventListener('keydown', (e) => {
 const getTheme = () => { try { return localStorage.getItem('theme'); } catch { return null; } };
 
 installGlobalCapture();
+// دکمهٔ «ذخیرهٔ تصویر» روی هر نمودار برنامه (ECharts، SVG، میله‌ای HTML).
+installChartImageSaver();
 // پیش از هر درخواستِ دیگری: هر `fetch` به `/api/` از این پوشش می‌گذرد.
 installDataLog({ currentTab: () => current || '' });
 

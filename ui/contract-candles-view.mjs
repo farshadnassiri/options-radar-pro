@@ -15,7 +15,7 @@ import { fmt, faDigits, faClock } from './fmt.mjs';
 import { mountChart, chartBase } from './chart-host.mjs';
 import { mountCandlePoints } from './candle-points.mjs';
 import { fetchInfos } from './quote-intake.mjs';
-import { saveBlob } from './save-file.mjs';
+import { saveChartImage } from './chart-image.mjs';
 import { icon } from './icons.mjs';
 import { mountDateWheel } from './datewheel.mjs';
 import { historyDates } from './strategy-history.mjs';
@@ -1233,11 +1233,10 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   async function exportData(kind) {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
     if (kind === 'png' || kind === 'png-hist') {
+      // همان ذخیره‌کنندهٔ سراسری: نام یکتا از تب و بخش و عنوان نمودار، و نوار عنوان.
       const handle = kind === 'png' ? mother : hist;
       if (!handle) return;
-      const url = handle.instance.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: getComputedStyle(document.body).getPropertyValue('--panel').trim() });
-      const blob = await (await fetch(url)).blob();
-      saveBlob(blob, `contract-${kind === 'png' ? 'candles' : 'distribution'}-${stamp}.png`);
+      await saveChartImage(q(kind === 'png' ? '[data-ccv-chart="mother"]' : '[data-ccv-chart="hist"]'), { extraTitle: past ? `روز ${pastState.date}` : '' });
       return;
     }
     const names = new Map((universe().underlyings || []).map((u) => [String(u.ins), u.name]));

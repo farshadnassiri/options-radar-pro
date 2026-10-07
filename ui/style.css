@@ -5468,6 +5468,11 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ccv-tip .num.gain { color: var(--gain); } .ccv-tip .num.loss { color: var(--loss); }
 .ccv-tip-metric { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--accent-soft); }
 .ccv-tip-metric .kv { border-bottom: 0; gap: 6px; }
+/* دکمهٔ سراسری «ذخیرهٔ تصویر» روی هر نمودار (`ui/chart-image.mjs`). */
+.chart-cam { position: fixed; z-index: 60; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); color: var(--ink); box-shadow: var(--shadow-sm); cursor: pointer; opacity: .9; }
+.chart-cam:hover, .chart-cam:focus-visible { opacity: 1; border-color: var(--accent-line); color: var(--accent-ink); }
+.chart-cam[disabled] { opacity: .5; cursor: progress; }
+.chart-cam[hidden] { display: none; }
 .lmm-candle-moved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 @media (max-width: 720px) {
   .ccv-chart { height: 440px; }
