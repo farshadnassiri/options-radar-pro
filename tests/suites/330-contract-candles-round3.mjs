@@ -68,6 +68,10 @@ group('۳۳۰. سیم‌کشی رابط');
   const view = readSrc('../ui/contract-candles-view.mjs');
   check('میله در همان شبکه، محور دوم پنهان، بی‌واکنش و پشت کندل', view.includes("grid: [{ left: 64, right: 54, top: 30, bottom: bottomPad }]") && view.includes('show: false, name: barLabel') && view.includes('silent: true, z: 1') && !view.includes('gridIndex: 1'));
   check('کشیدن روی محور، بزرگ‌نمایی همان محور؛ دوبار کلیک برمی‌گرداند', view.includes('function attachAxisDrag(chart)') && view.includes("dataZoomIndex: axis === 'y' ? 2 : 0") && view.includes("zr.on('dblclick'"));
-  check('کشویی شاخص ترکیبی و خط‌هایش روی نمودار', view.includes('data-ccv="composite"') && view.includes("line(comp.last, 'آخرین'") && view.includes('function paintComposite('));
+  // دور چهارم: «شاخص ترکیبی چند نمودار رسم می‌کند» — حالا فقط یک کندل.
+  check('شاخص ترکیبی فقط یک کندل است، نه نوار و چند خط', view.includes('data-ccv="composite"') && view.includes("id: 'composite', type: 'custom', renderItem: renderComposite") && !view.includes("line(comp.last, 'آخرین'") && !view.includes('compAreas') && !view.includes('compositeCandle(drawable.slice(b.from'));
+  check('کندل ترکیبی اولِ محور با برچسب خودش؛ بقیه یک خانه جابه‌جا', view.includes("[...(off ? ['شاخص ترکیبی'] : []), ...drawable.map((r) => r.name)]") && view.includes('cat ? i + off : r.moneynessPct'));
+  check('جزئیات هاور در پنل کنار نمودار، راهنمای شناور یک خط', view.includes('<aside class="ccv-side" data-ccv-pin') && view.includes('formatter: (p) => shortTip(p)') && view.includes("mother.instance.on('mouseover'"));
+  check('جدول شاخص هر گروه سر جایش', view.includes('function paintComposite('));
   check('مرتب‌سازی قراردادها و جهت', view.includes('data-ccv="sortKey"') && view.includes('data-ccv="sortDir"') && view.includes('data-ccv="listSort"'));
 }
