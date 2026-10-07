@@ -122,8 +122,9 @@ check('۵ و ۷. صفحه نوار تب دارد و بخش تاشوی «تحلی
   && !dash246.includes('decision-advanced') && css246.includes('.dd-tabbar {'));
 check('۸. تیک خودکار دیگر ریزمعامله و بازهٔ روزانه را بی‌دلیل نمی‌گیرد',
   dash246.includes('if (!needsTape(pick.level, viewOf()?.[2]))')
-  && map246.includes('shouldFetchRange({ visible: isVisible(), cached: rangeCache.get(key), now: Date.now() })')
-  && dash246.includes('isVisible: explorerVisible'));
+  && readSrc('../ui/contract-candles-view.mjs').includes('if (fetching || !isVisible()) return;')
+  && readSrc('../ui/contract-candles-view.mjs').includes('staleInfoIds(ids, infoCache, Date.now(), INFO_TTL_MS)')
+  && dash246.includes("isVisible: () => activeMode === 'candles' && root.isConnected"));
 
 // ————————————————————————————————————————————————————————————————
 // دور دوم گزارش (۱۴۰۵/۰۶/۲۳): نگاه باز لحظه‌ای، زنجیرهٔ دوطرفه،

@@ -47,17 +47,23 @@ check('نقشه بین پایه‌ها و قراردادهای نماد انتخ
   mapUi245.includes('data-lmm-map-mode="underlyings"')
   && mapUi245.includes('data-lmm-map-mode="contracts"')
   && mapUi245.includes('selectContractFromMap'));
-check('انتخاب سررسید، بازه واقعی روزانه را دسته‌ای می‌گیرد و عدد گمشده نمی‌سازد',
-  mapUi245.includes('await fetchInfos(ids)')
-  && mapUi245.includes('Number(row.first) > 0')
-  && mapUi245.includes('Number(row.low) > 0')
-  && mapUi245.includes('Number(row.high) > 0'));
+// کندل امروز از ۱۴۰۵/۰۷/۱۵ تب خودش را دارد (`ui/contract-candles-view.mjs`)؛
+// همان ادعاها روی همان کد، در جای تازه.
+const candleUi245 = readSrc('../ui/contract-candles-view.mjs');
+const candleCore245 = readSrc('../core/contract-candles.mjs');
+check('کندل امروز بازه واقعی را دسته‌ای می‌گیرد و عدد گمشده نمی‌سازد',
+  candleUi245.includes('await fetchInfos(stale)')
+  && candleCore245.includes('CANDLE_POINTS.every((key) => prices[key] > 0)')
+  && candleUi245.includes('records.filter((row) => row.valid)'));
 check('نمودار بازه، هر پنج قیمت و سه مبنای مرتب‌سازی را دارد',
-  ['کمینه', 'اولین', 'آخرین', 'پایانی', 'بیشینه'].every((label) => mapUi245.includes(label))
-  && ['value', 'volume', 'oi'].every((key) => mapUi245.includes(`'${key}'`)));
+  ['کمینه', 'اولین', 'آخرین', 'پایانی', 'بیشینه'].every((label) => candleUi245.includes(label))
+  && ['value', 'volume', 'oi'].every((key) => candleUi245.includes(`${key}: '`)));
 check('بازه امروز به کندل تعاملی تبدیل شده و درصد آخرین و پایانی را جدا نشان می‌دهد',
-  mapUi245.includes('کندل قیمت امروز قراردادها') && mapUi245.includes('mountCandlePoints')
-  && mapUi245.includes('آخرین ${fmt.pct(lastPct)}٪') && mapUi245.includes('پایانی ${fmt.pct(closePct)}٪'));
+  candleUi245.includes('کندل قیمت امروز قراردادها') && candleUi245.includes('mountCandlePoints')
+  && candleUi245.includes('آخرین ${fmt.pct(lastPct)}٪') && candleUi245.includes('پایانی ${fmt.pct(closePct)}٪'));
+check('نقشه و زنجیره دیگر کندل ندارد و به تب کندل راه می‌دهد',
+  !mapUi245.includes('mountCandlePoints') && !mapUi245.includes('fetchInfos')
+  && mapUi245.includes('data-open-mode="candles"'));
 check('زنجیره از کاتالوگ ستون مشترک استفاده می‌کند و انتخاب قرارداد دارد',
   mapUi245.includes('contractColumns.filter') && mapUi245.includes('onPick: (row) => selectContract(row.ins)')
   && dashboard245.includes('contractColumns: COLS_CONTRACT'));

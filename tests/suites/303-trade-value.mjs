@@ -41,7 +41,8 @@ group('۳۰۳. ارزش معاملات — ریال با واحد در نمای�
   check('صفر واقعی صفر ریال است', fmt.rialText(0) === '۰ ریال');
   check('هیچ قالب تومانی باقی نمانده', fmt.toman === undefined && fmt.tomanShort === undefined);
 
-  const map = readSrc('../ui/live-market-map.mjs');
+  // کندل امروز از ۱۴۰۵/۰۷/۱۵ در تب خودش است.
+  const map = readSrc('../ui/contract-candles-view.mjs');
   check('عدد کنار کندل با ریالِ دارای واحد چاپ می‌شود',
     map.includes("rangeSort === 'value' ? fmt.rialText(row.value)") && !/fmt\.money\([a-z.]*[vV]alue\)/.test(map));
   const dash = readSrc('../ui/tabs/live-market-dashboard.mjs');
@@ -75,9 +76,9 @@ group('۳۰۳. عددهای کنار کندل از همان پاسخی که خو
 
   const server = readSrc('../server/server.mjs');
   check('`/api/infos` ارزش و حجم را از همان GetClosingPriceInfo می‌دهد', server.includes('...infoTotals(d),'));
-  const map = readSrc('../ui/live-market-map.mjs');
+  const core = readSrc('../core/contract-candles.mjs'), view = readSrc('../ui/contract-candles-view.mjs');
   check('کندل با ادغام صریح ساخته می‌شود، نه با پخش خام پاسخ',
-    map.includes('mergeRangeInfo(row, cached.items[row.ins])') && !map.includes('...(cached.items[row.ins] || {})'));
+    core.includes('const merged = mergeRangeInfo(row, info);') && !/\.\.\.\(?infoCache|\.\.\.info\b/.test(core + view));
 }
 
 group('۳۰۳. امضای تغییر ردیف دیده‌بان ارزش و تعداد را هم می‌بیند');
@@ -159,8 +160,8 @@ group('۳۰۳. عکس دیروز «امروز» خوانده نمی‌شود');
   const server = readSrc('../server/server.mjs');
   check('داشبورد زنده روزِ عکس را همراه می‌فرستد',
     /session: \{\s*\.\.\.session, final:/.test(server) && server.includes('phase: fromWatch ? watch.phase : marketOpen().phase'));
-  const map = readSrc('../ui/live-market-map.mjs');
-  check('عنوان کندل از روزِ عکس ساخته می‌شود', map.includes('rangeHeading(marketContext.session, dateLabel)'));
+  const map = readSrc('../ui/contract-candles-view.mjs');
+  check('عنوان کندل از روزِ عکس ساخته می‌شود', map.includes('rangeHeading(payload().session, dateLabel)'));
 }
 
 group('۳۰۳. ارزش ریزمعاملهٔ اختیار با اندازهٔ قرارداد');

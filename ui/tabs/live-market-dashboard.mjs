@@ -15,6 +15,7 @@ import { pricePairHtml, pricePairText } from '/ui/price-pair.mjs';
 import { mountChainCompare } from '/ui/chain-compare-view.mjs';
 import { mountVolRank } from '/ui/vol-rank-view.mjs';
 import { mountIvCharts } from '/ui/iv-charts-view.mjs';
+import { mountContractCandles } from '/ui/contract-candles-view.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { breadthBars, breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -176,7 +177,10 @@ const EMBEDDED_MODES = [
 // است چون مسیر اصلی تصمیم از آنجا شروع می‌شود و انتخابش، دامنهٔ همه تب‌های
 // دیگر را هم می‌سازد.
 export const DASHBOARD_MODES = [
-  { id: 'explorer', title: 'نقشه و زنجیره', hint: 'نقشه بازار، سررسید، کندل روزانه و زنجیره', views: [], explorer: true },
+  { id: 'explorer', title: 'نقشه و زنجیره', hint: 'نقشه بازار، سررسید و زنجیره', views: [], explorer: true },
+  // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۵): کندل امروز به تب جدا، با نمودار مادرِ همهٔ
+  // کندل‌ها، شاخص قابل انتخاب، توزیع میله‌ای و خروجی اکسل (`core/contract-candles.mjs`).
+  { id: 'candles', title: 'کندل قیمت امروز قراردادها', hint: 'نمودار مادر همهٔ کندل‌ها، تلاطم کندلی، توزیع میله‌ای و خروجی اکسل', views: [], candles: true },
   // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۱): «هدف دیدن نوسان ضمنی در طول زمان است» —
   // نمودار مادر روزانه برای شاخص پایه یا هر قرارداد، قراردادهای یک سررسید روی
   // هم، و نمودار بازه در تایم‌فریم دلخواه (`core/iv-chart.mjs`). جای «میز
@@ -902,6 +906,8 @@ export async function mount(root, { state, api }) {
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-compare-host></div></section>`
       : mode.volRank
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-vol-rank-host></div></section>`
+      : mode.candles
+        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-candles-host></div></section>`
       : mode.ivCharts
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-iv-charts-host></div></section>`
       : mode.mod
@@ -944,7 +950,6 @@ export async function mount(root, { state, api }) {
   const activeContract = () => payload.universe.contracts.find((row) => String(row.ins) === selected().contractIns);
   const modeOf = () => DASHBOARD_MODES.find((mode) => mode.id === activeMode);
   const viewOf = () => (modeOf()?.views || []).find((view) => view[0] === activeViews[activeMode]);
-  const explorerVisible = () => activeMode === 'explorer';
   // تب مقایسه تنبل سوار می‌شود: تا کاربر بازش نکرده، هیچ کاری نمی‌کند.
   let compareView = null;
   const compare = () => {
@@ -985,6 +990,26 @@ export async function mount(root, { state, api }) {
     return ivChartsView;
   };
 
+  // تب کندل تنبل سوار می‌شود و گزینش خودش را دارد (نه از نقشه). کمینه و
+  // بیشینه فقط وقتی همین تب دیده می‌شود گرفته می‌شوند.
+  let candlesView = null;
+  const candles = () => {
+    if (!candlesView) {
+      candlesView = mountContractCandles(root.querySelector('[data-candles-host]'), {
+        getPayload: () => payload,
+        getSettings: () => state.settings,
+        greekParams,
+        isVisible: () => activeMode === 'candles' && root.isConnected,
+        onOpenContract: (row) => {
+          marketExplorer.pickContract(row);
+          root.querySelector('[data-mode="explorer"]')?.click();
+          root.querySelector('[data-lmm-chain-step]')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
+      });
+    }
+    return candlesView;
+  };
+
   function paintInterval() {
     $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه`;
     $('dd-interval').setAttribute('aria-valuetext', `${faDigits(intervalSec)} ثانیه`);
@@ -1004,7 +1029,6 @@ export async function mount(root, { state, api }) {
   const marketExplorer = mountLiveMarketMap($('dd-market-explorer'), {
     contractColumns: COLS_CONTRACT,
     greekParams,
-    isVisible: explorerVisible,
     onScopeChange: async (pick) => {
       if (String(pick.uaIns) !== lastUaIns) { lastUaIns = String(pick.uaIns); openViewBaseSync.request(); }
       // انتخاب روی نقشه، سطح را هم بالا می‌برد — ولی هیچ‌وقت پایین نمی‌آورد:
@@ -1278,6 +1302,7 @@ export async function mount(root, { state, api }) {
     if (mode?.explorer) { paintLevels(); return; }
     if (mode?.compare) { compare().paint(); return; }
     if (mode?.volRank) { volRank().paint(); return; }
+    if (mode?.candles) { candles().paint(); return; }
     if (mode?.ivCharts) { ivCharts().paint(); return; }
     if (mode?.mod) { await mountEmbedded(mode); return; }
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
@@ -1369,9 +1394,8 @@ export async function mount(root, { state, api }) {
       item.setAttribute('aria-selected', String(item === button));
     });
     root.querySelectorAll('[data-mode-panel]').forEach((panel) => { panel.hidden = panel.dataset.modePanel !== activeMode; });
-    // برگشت به نقشه یعنی بخش کندل دوباره دیده می‌شود؛ همان‌جا اگر کهنه شده
-    // باشد تازه می‌شود — نه در هر تیکِ پس‌زمینه.
-    if (activeMode === 'explorer') await marketExplorer.refreshRanges();
+    // تب کندل با باز شدن خودش (در `paintView`) کمینه/بیشینهٔ کهنه را تازه
+    // می‌کند — نه در هر تیکِ پس‌زمینه وقتی کسی نگاهش نمی‌کند.
     await fetchTape();
     await paintView();
   }));
@@ -1420,7 +1444,7 @@ export async function mount(root, { state, api }) {
     busyBar?.dispose();
     openViewController?.dispose?.();
     marketExplorer.dispose();
-    volRankView?.dispose(); ivChartsView?.dispose();
+    volRankView?.dispose(); ivChartsView?.dispose(); candlesView?.dispose();
     for (const dispose of embedded.values()) { try { dispose?.(); } catch { /* برچیدن نباید بترکد */ } }
   };
 }

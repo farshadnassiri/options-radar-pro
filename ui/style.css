@@ -5342,6 +5342,68 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .cs-tip-read { font-weight: 800; white-space: normal; }
 .cs-tip-read.gain { color: var(--gain); } .cs-tip-read.loss { color: var(--loss); }
 
+/* ── تب «کندل قیمت امروز قراردادها» (`ui/contract-candles-view.mjs`) ── */
+.ccv { display: grid; gap: 14px; }
+.ccv-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ccv-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin: 6px 0 10px; }
+.ccv-row > label { display: grid; gap: 4px; color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
+.ccv-row > label.check { display: flex; align-items: center; gap: 6px; }
+.ccv-row input[type="number"] { width: 140px; }
+.ccv-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.ccv-seg button { padding: 5px 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-pill); background: var(--panel-2); color: var(--ink); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.ccv-seg button[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-ink); font-weight: 800; }
+.ccv-pick { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.ccv-pick-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+.ccv-pick-head label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-xs); }
+.ccv-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.ccv-chips { display: flex; flex-wrap: wrap; gap: 6px; max-height: 170px; overflow-y: auto; }
+.ccv-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--line-soft); border-radius: var(--radius-pill); background: var(--panel-2); color: var(--ink); font-size: var(--fs-xs); cursor: pointer; }
+.ccv-chip small { color: var(--muted); font-size: var(--fs-3xs); }
+.ccv-chip:has(input:checked) { border-color: var(--accent-line); background: var(--accent-soft); }
+.ccv-ua-exp { display: grid; gap: 6px; margin-top: 8px; }
+.ccv-ua-exp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ccv-ua-exp-row b { min-width: 70px; font-size: var(--fs-xs); }
+.ccv-chart { height: 560px; }
+.ccv-chart-short { height: 380px; }
+.ccv-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0 0 6px; color: var(--muted); font-size: var(--fs-xs); }
+.ccv-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ccv-legend > small { margin-inline-start: auto; }
+.ccv-legend i { display: inline-block; }
+.ccv-l-body { width: 9px; height: 16px; border-radius: 2px; background: var(--gain); }
+.ccv-l-wick { width: 2px; height: 18px; background: var(--muted); }
+.ccv-l-close { width: 8px; height: 8px; transform: rotate(45deg); background: var(--warn); }
+.ccv-l-box { width: 9px; height: 16px; border: 1.5px solid var(--ink-2); }
+.ccv-l-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-2); }
+.ccv-l-diamond { width: 8px; height: 8px; transform: rotate(45deg); background: var(--ink-2); }
+.ccv-l-hollow { width: 9px; height: 16px; border: 1.5px solid var(--loss); border-radius: 2px; }
+.ccv-l-flag { width: 9px; height: 16px; border: 2.5px solid var(--warn); border-radius: 2px; }
+.ccv-tip { display: grid; gap: 5px; font-size: var(--fs-xs); line-height: 1.7; text-align: start; }
+.ccv-tip header { display: grid; gap: 2px; }
+.ccv-tip header span, .ccv-tip small { color: var(--muted); }
+.ccv-tip p { margin: 0; }
+.ccv-tip-metric { font-weight: 700; }
+.ccv-tip table { border-collapse: collapse; font-size: var(--fs-2xs); }
+.ccv-tip th, .ccv-tip td { padding: 2px 6px; border-bottom: 1px solid var(--line-soft); text-align: start; white-space: nowrap; }
+.ccv-tip .gain, .ccv-stat-table .gain { color: var(--gain); }
+.ccv-tip .loss, .ccv-stat-table .loss { color: var(--loss); }
+.ccv-tip .warn { color: var(--warn); font-weight: 700; }
+.ccv-pin { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--accent-line); border-radius: var(--radius-md); background: var(--panel-2); }
+.ccv-pin-actions { display: flex; gap: 6px; margin-top: 8px; }
+.ccv-stats { margin-top: 12px; overflow-x: auto; }
+.ccv-stat-table { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); }
+.ccv-stat-table caption { text-align: start; color: var(--muted); padding-bottom: 4px; }
+.ccv-stat-table th, .ccv-stat-table td { padding: 4px 8px; border-bottom: 1px solid var(--line-soft); text-align: center; white-space: nowrap; }
+.ccv-story { margin-top: 12px; }
+.ccv-story h4 { margin: 0 0 6px; }
+.ccv-story ul { margin: 0; padding-inline-start: 18px; display: grid; gap: 5px; font-size: var(--fs-sm); line-height: 1.9; }
+.ccv-more { margin-top: 8px; }
+.lmm-candle-moved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
+@media (max-width: 720px) {
+  .ccv-chart { height: 440px; }
+  .ccv-chart-short { height: 320px; }
+  .ccv-legend > small { margin-inline-start: 0; }
+}
+
 .pb-skin {
   --pb-rail: 3px;                                   /* نوار رنگی سرِ کارت */
   --pb-hair: 1px solid var(--line-soft);            /* مرز مویی مشترک */

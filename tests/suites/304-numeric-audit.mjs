@@ -216,9 +216,11 @@ group('۳۰۴. F07 — امضای ردیف هر میدانی را که زنجی�
 group('۳۰۴. F08 — واحد هر عدد کنار کندل');
 {
   const map = readSrc('../ui/live-market-map.mjs');
+  // کندل امروز از ۱۴۰۵/۰۷/۱۵ در تب خودش است.
+  const candles = readSrc('../ui/contract-candles-view.mjs');
   check('حجم و موقعیت باز کندل «قرارداد» دارند',
-    map.includes('`${fmt.int(Number(row[rangeSort]))} قرارداد`'));
-  check('واحد قیمت‌های کندل گفته می‌شود', map.includes('قیمت‌ها: ریال، برای هر واحد دارایی پایه'));
+    candles.includes('`${fmt.int(Number(row[rangeSort]))} قرارداد`'));
+  check('واحد قیمت‌های کندل گفته می‌شود', candles.includes('قیمت‌ها: ریال، برای هر واحد دارایی پایه'));
   check('آمار کل بازار واحد شمارش دارد',
     map.includes("stat('حجم اختیار (قرارداد)'") && map.includes("stat('موقعیت باز (قرارداد)'"));
 }

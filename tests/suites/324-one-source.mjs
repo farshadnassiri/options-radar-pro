@@ -50,8 +50,13 @@ group('۳۲۴-ب. روکش قیمت ریسهٔ غربال یخ نمی‌زند')
 group('۳۲۴-ج. سیم‌کشی رابط');
 {
   const map = readSrc('../ui/live-market-map.mjs');
-  check('کندل با mergeRangeInfo از همان ردیف زنجیره ساخته می‌شود', map.includes('contracts().map((row) => mergeRangeInfo(row, cached.items[row.ins]))'));
-  check('وضعیت کندل می‌گوید عددها همان زنجیره‌اند و پاسخ جلسهٔ دیگر کنار رفت', map.includes('همان عدد زنجیره‌اند') && map.includes('مال جلسهٔ دیگری بود'));
+  // کندل امروز از ۱۴۰۵/۰۷/۱۵ در تب خودش است؛ ادغام در `candleRecord`.
+  const candles = readSrc('../ui/contract-candles-view.mjs');
+  const candleCore = readSrc('../core/contract-candles.mjs');
+  check('کندل با mergeRangeInfo از همان ردیف زنجیره ساخته می‌شود',
+    candleCore.includes('const merged = mergeRangeInfo(row, info);')
+    && candles.includes("candleRecord(row, { info: infoCache.get(String(row.ins))?.info || null"));
+  check('وضعیت کندل می‌گوید عددها همان زنجیره‌اند و پاسخ جلسهٔ دیگر کنار رفت', candles.includes('همان عدد زنجیره‌اند') && candles.includes('مال جلسهٔ دیگری بود'));
   const ov = readSrc('../ui/tabs/open-view.mjs');
   check('نگاه باز: ارزش و حجم سطل با نام سطل، نه کل روز', ov.includes('contractTable(items, { bucket: true })') && ov.includes("const scope = bucket ? ' همین سطل' : '';"));
   check('نگاه باز: ارزش با واحد ریال', ov.includes('<td>${fmt.rialText(item.value)}</td>') && !ov.includes('مجموع ارزش ${fmt.money('));

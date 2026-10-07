@@ -1,7 +1,6 @@
 // مسیر اصلی رصد لحظه‌ای: نقشهٔ بازار ← نماد پایه ← سررسید ← قرارداد.
 
 import { fmt, faDigits } from './fmt.mjs';
-import { mountCandlePoints } from './candle-points.mjs';
 import { makeTable } from './table.mjs';
 import { mountChart, chartFormat } from './chart-host.mjs';
 import { historyDateLabel } from '../core/history.mjs';
@@ -11,13 +10,9 @@ import {
   twoSidedChain, chainSideMax, contractAnalytics,
   sortPairedChain, pairedSides, PAIRED_SORT_DEFAULT, spotRowPlacement,
 } from '../core/decision-dashboard.mjs';
-import { shouldFetchRange } from './live-dashboard-scope.mjs';
 import { busyBlock } from './busy.mjs';
 import { readVolSummary, volTileParts } from './vol-rank-store.mjs';
 import { tehranDateNumber } from '../core/tehran-day.mjs';
-import { fetchInfos } from './quote-intake.mjs';
-import { mergeRangeInfo, rangeHeading } from '../core/range-info.mjs';
-import { pctVsYesterday } from '../core/price-change.mjs';
 import { dayQuote, pricePairHtml } from './price-pair.mjs';
 import { mapTooltipLines } from './map-tooltip.mjs';
 
@@ -60,7 +55,7 @@ function contractRow(row, greekParams = {}) {
 }
 
 /** سوارکردن کاوشگر؛ خروجی scope فقط برای همگام‌کردن تحلیل‌های قدیمی است. */
-export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns = [], isVisible = () => true, greekParams = () => ({}) } = {}) {
+export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns = [], greekParams = () => ({}) } = {}) {
   root.innerHTML = `
     <section class="card lmm-map-card">
       <div class="section-head lmm-head"><div><p class="eyebrow">نمای اصلی رصد لحظه‌ای</p><h2 data-lmm-map-title>نقشه بازار اختیار</h2><p data-lmm-map-note>اندازه خانه از سنجه انتخابی می‌آید؛ رنگ، جهت آخرین معامله نماد پایه نسبت به پایانی دیروز است.</p></div>
@@ -75,7 +70,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       <div class="lmm-underlying" data-lmm-underlying>${busyBlock('در حال دریافت نمادهای پایه…', { lines: 3 })}</div>
       <div class="lmm-expiry-step" data-lmm-expiry-step hidden><div class="lmm-step-head"><h3>سررسیدها</h3><span>هر سررسید، آمار مستقل و زنجیره خودش را دارد.</span></div><div class="lmm-expiries" data-lmm-expiries></div></div>
       <div class="lmm-expiry-info" data-lmm-expiry-info></div>
-      <section class="lmm-day-range" data-lmm-day-range hidden><div class="lmm-step-head"><div><h3 data-lmm-range-title>کندل قیمت امروز قراردادها</h3><span>سایه: کمترین تا بیشترین · بدنه: اولین تا آخرین · لوزی: قیمت پایانی</span></div><div class="lmm-range-sort" data-lmm-range-sort role="group" aria-label="مرتب‌سازی نمودار کندلی روزانه"></div></div><div data-lmm-range-status class="note"></div><div data-lmm-range-chart></div></section>
+      <p class="note lmm-candle-moved">کندل قیمت امروز قراردادها به تب جداگانهٔ خودش رفته است، با گزینش مستقل و نمودار مادر. <button type="button" class="ghost" data-open-mode="candles">باز کردن تب کندل</button></p>
       <div class="lmm-chain-step" data-lmm-chain-step hidden><div class="lmm-step-head"><div><h3>زنجیره قرارداد</h3><span data-lmm-chain-count>کال و پوت این سررسید</span></div><div class="lmm-chain-tools"><div class="lmm-chain-kind" data-lmm-chain-layout role="group" aria-label="چیدمان زنجیره"><button type="button" data-lmm-layout="paired">زنجیره دوطرفه</button><button type="button" data-lmm-layout="flat">جدول تخت</button></div><div class="lmm-chain-kind" data-lmm-chain-kind role="group" aria-label="نوع قراردادهای زنجیره"><button type="button" data-lmm-chain-side="all">هر دو</button><button type="button" data-lmm-chain-side="call">فقط کال</button><button type="button" data-lmm-chain-side="put">فقط پوت</button></div><button type="button" class="ghost tbl-cols-btn" data-lmm-paired-cols aria-expanded="false">ستون‌ها <b></b></button></div></div><p class="note" data-lmm-chain-note></p><div class="col-panel" data-lmm-paired-panel hidden></div><div class="lmm-paired-wrap" data-lmm-paired hidden></div><div data-lmm-chain></div></div>
     </section>`;
 
@@ -85,9 +80,6 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   const expiryStep = root.querySelector('[data-lmm-expiry-step]');
   const expiryRail = root.querySelector('[data-lmm-expiries]');
   const expiryInfo = root.querySelector('[data-lmm-expiry-info]');
-  const rangeSection = root.querySelector('[data-lmm-day-range]');
-  const rangeStatus = root.querySelector('[data-lmm-range-status]');
-  const rangeChart = root.querySelector('[data-lmm-range-chart]');
   const chainStep = root.querySelector('[data-lmm-chain-step]');
   const pairedHost = root.querySelector('[data-lmm-paired]');
   const pairedPanel = root.querySelector('[data-lmm-paired-panel]');
@@ -100,17 +92,14 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   if (!MARKET_MAP_METRICS.some((item) => item.key === baseMetric)) baseMetric = 'value';
   let contractMetric = localStorage.getItem('options-radar:contract-map-metric') || 'value';
   if (!CONTRACT_MAP_METRICS.some((item) => item.key === contractMetric)) contractMetric = 'value';
-  let rangeSort = localStorage.getItem('options-radar:day-range-sort') || 'value';
-  if (!['value', 'volume', 'oi'].includes(rangeSort)) rangeSort = 'value';
   let chainSide = localStorage.getItem('options-radar:market-map-chain-side') || 'all';
   if (!['all', 'call', 'put'].includes(chainSide)) chainSide = 'all';
   // چیدمان پیش‌فرض همان چیزی است که هر تابلوی اختیار دارد: کال و پوتِ
   // هم‌اعمال روی یک ردیف. جدول تخت برای غربال و خروجی اکسل می‌ماند.
   let chainLayout = localStorage.getItem('options-radar:market-map-chain-layout') || 'paired';
   if (!['paired', 'flat'].includes(chainLayout)) chainLayout = 'paired';
-  let uaIns = '', endDate = '', contractIns = '', mapHandle = null, rangeRequest = 0;
+  let uaIns = '', endDate = '', contractIns = '', mapHandle = null;
   let marketContext = {};
-  const rangeCache = new Map();
 
   const chainTable = makeTable(chainHost, contractColumns.filter((item) => item.base), {
     all: contractColumns,
@@ -204,7 +193,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
 
   function paintExpiry() {
     const ex = selectedExpiry();
-    if (!ex) { expiryInfo.innerHTML = ''; rangeSection.hidden = true; chainStep.hidden = true; pairedHost.innerHTML = ''; chainTable.set([]); return; }
+    if (!ex) { expiryInfo.innerHTML = ''; chainStep.hidden = true; pairedHost.innerHTML = ''; chainTable.set([]); return; }
     expiryInfo.innerHTML = `<div class="lmm-scope-title"><h3>سررسید ${dateLabel(ex.endDate)}</h3><span>${fmt.int(ex.days)} روز مانده</span></div><div class="lmm-stat-grid compact">
       ${stat('ارزش کل', fmt.rialText(ex.value), `${fmt.int(ex.tradedContracts)} قرارداد معامله‌شده`)}
       ${stat('ارزش کال', fmt.rialText(ex.callValue), Number.isFinite(ex.callValuePct) ? `سهم ${fmt.pct(ex.callValuePct)}٪` : '')}
@@ -215,7 +204,6 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     </div>`;
     chainStep.hidden = false;
     paintChain();
-    loadDailyRanges();
   }
 
   function paintChain() {
@@ -598,89 +586,6 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     });
   }
 
-  const pctVsYday = pctVsYesterday;
-
-  function paintDailyRanges() {
-    const key = `${uaIns}:${endDate}`;
-    const cached = rangeCache.get(key);
-    const labels = { value: 'ارزش معاملات', volume: 'حجم معاملات', oi: 'موقعیت باز' };
-    root.querySelector('[data-lmm-range-sort]').innerHTML = Object.entries(labels).map(([id, label]) => `<button type="button" data-lmm-range-key="${id}" aria-pressed="${id === rangeSort}">${label}</button>`).join('');
-    root.querySelectorAll('[data-lmm-range-key]').forEach((button) => button.addEventListener('click', () => {
-      rangeSort = button.dataset.lmmRangeKey;
-      localStorage.setItem('options-radar:day-range-sort', rangeSort);
-      paintDailyRanges();
-    }));
-    // عنوان از روزِ عکس می‌آید: عکسی که از جلسهٔ قبل مانده «امروز» نیست.
-    const heading = rangeHeading(marketContext.session, dateLabel);
-    root.querySelector('[data-lmm-range-title]').textContent = heading.title;
-    if (!cached?.items) return;
-    // ارزش، حجم، تعداد، موقعیت باز، آخرین و پایانی از همان ردیف عکسی که
-    // زنجیره نشان می‌دهد؛ از پاسخ اطلاعات فقط سایهٔ کندل، و فقط هم‌جلسه
-    // (`core/range-info.mjs`). هر عدد در کل تب یکی است.
-    const merged = contracts().map((row) => mergeRangeInfo(row, cached.items[row.ins]));
-    const rows = merged
-      .filter((row) => Number(row.first) > 0 && Number(row.low) > 0 && Number(row.high) > 0 && Number(row.last) > 0 && Number(row.close) > 0)
-      .sort((a, b) => Number(b[rangeSort]) - Number(a[rangeSort]) || a.name.localeCompare(b.name, 'fa'));
-    const other = merged.filter((row) => row.rangeSource === 'otherSession').length;
-    const lagged = rows.filter((row) => row.rangeSource === 'infoLag').length;
-    rangeStatus.textContent = `${fmt.int(rows.length)} قرارداد دارای بازه معتبر از ${fmt.int(contracts().length)} قرارداد · مرتب بر ${labels[rangeSort]}`
-      + ' · ارزش، حجم، موقعیت باز و قیمت‌ها همان عدد زنجیره‌اند'
-      + `${lagged ? ` · کمینه/بیشینهٔ ${fmt.int(lagged)} قرارداد از چند ثانیه قبل است و با آخرین قیمت عکس گسترده شد` : ''}`
-      + `${other ? ` · ${fmt.int(other)} قرارداد: پاسخ کمینه/بیشینه مال جلسهٔ دیگری بود و کنار گذاشته شد` : ''}`
-      + `${heading.note ? ` · ${heading.note}` : ''}`;
-    if (!rows.length) { rangeChart.innerHTML = '<p class="empty-note">بالادست برای قراردادهای این سررسید بازه معتبر امروز برنگرداند.</p>'; return; }
-    rangeChart.innerHTML = `<div class="lmm-range-legend"><span>سایه: کمینه تا بیشینه</span><span>بدنه: اولین تا آخرین</span><span>نقاط: پنج قیمت مستقل</span><span>قیمت‌ها: ریال، برای هر واحد دارایی پایه</span><small>موس را روی هر کندل حرکت بده تا همه قیمت‌ها دیده شوند؛ کلیک، جزئیات را باز نگه می‌دارد.</small></div><div class="lmm-range-list">${rows.map((row) => {
-      const low = Number(row.low), high = Number(row.high), first = Number(row.first), last = Number(row.last), close = Number(row.close);
-      // هر عدد با واحدِ خودش: ارزش ریال، حجم و موقعیت باز «قرارداد» (نه سهم).
-      const rankValue = rangeSort === 'value' ? fmt.rialText(row.value)
-        : Number.isFinite(Number(row[rangeSort])) ? `${fmt.int(Number(row[rangeSort]))} قرارداد` : '—';
-      const lastPct = pctVsYday(last, row.yday), closePct = pctVsYday(close, row.yday);
-      return `<article class="${tone(last - first)}" data-lmm-range-card="${esc(row.ins)}"><header><button type="button" data-lmm-range-contract="${esc(row.ins)}"><b>${esc(row.name)}</b><small>${kindLabel(row.kind)} · اعمال ${fmt.money(row.strike)}</small></button><div class="lmm-range-stats"><strong${rangeSort === 'value' && Number.isFinite(Number(row.value)) ? ` title="${fmt.rial(Number(row.value))} ریال"` : ''}>${rankValue}</strong><span class="${tone(lastPct)}">آخرین ${fmt.pct(lastPct)}٪</span><span class="${tone(closePct)}">پایانی ${fmt.pct(closePct)}٪</span></div></header><button type="button" class="lmm-range-track" data-lmm-range-focus="${esc(row.ins)}" aria-expanded="false" aria-label="کندل روزانه ${esc(row.name)}؛ تغییر آخرین ${fmt.pct(lastPct)} درصد و پایانی ${fmt.pct(closePct)} درصد"></button><footer><span>کمینه ${fmt.money(low)}</span><span>اولین ${fmt.money(first)}</span><span>آخرین ${fmt.money(last)}</span><span>پایانی ${fmt.money(close)}</span><span>بیشینه ${fmt.money(high)}</span></footer></article>`;
-    }).join('')}</div>`;
-    rangeChart.querySelectorAll('[data-lmm-range-contract]').forEach((button) => button.addEventListener('click', () => selectContract(button.dataset.lmmRangeContract)));
-    rangeChart.querySelectorAll('[data-lmm-range-focus]').forEach((button) => button.addEventListener('click', () => {
-      const expanded = button.getAttribute('aria-expanded') === 'true';
-      rangeChart.querySelectorAll('[data-lmm-range-focus]').forEach((item) => item.setAttribute('aria-expanded', 'false'));
-      button.setAttribute('aria-expanded', String(!expanded));
-    }));
-    rangeChart.querySelectorAll('[data-lmm-range-focus]').forEach((button) => {
-      mountCandlePoints(button, rows.find((row) => String(row.ins) === button.dataset.lmmRangeFocus));
-    });
-  }
-
-  async function loadDailyRanges() {
-    const key = `${uaIns}:${endDate}`, list = contracts(), ids = list.map((row) => String(row.ins)).filter(Boolean);
-    rangeSection.hidden = !ids.length;
-    if (!ids.length) return;
-    paintDailyRanges();
-    // ── بازهٔ روزانه فقط وقتی دیده می‌شود ─────────────────────────────
-    //
-    // گزارش صاحب پروژه: «هر جا نیازی نیست دوباره شروع به دریافت دیتای
-    // نمادهای دیگر یا تاریخ‌های دیگر نکن.» این تابع تا امروز در هر تیکِ
-    // خودکار (۵ تا ۶۰ ثانیه) صدا زده می‌شد و برای هر سررسید تا سه درخواست
-    // `infos` می‌فرستاد — حتی وقتی کاربر روی تب دیگری بود و هیچ کندلی روی
-    // صفحه نبود. قاعده‌اش در `live-dashboard-scope.mjs` خالص و آزمون‌شدنی
-    // است، نه اینجا داخل بستار.
-    if (!shouldFetchRange({ visible: isVisible(), cached: rangeCache.get(key), now: Date.now() })) {
-      paintDailyRanges();
-      return;
-    }
-    const request = ++rangeRequest;
-    rangeStatus.textContent = `در حال دریافت بازه واقعی امروز برای ${fmt.int(ids.length)} قرارداد…`;
-    rangeChart.innerHTML = busyBlock(`در حال دریافت کمینه/بیشینهٔ امروز برای ${fmt.int(ids.length)} قرارداد…`, { lines: 4 });
-    try {
-      const got = await fetchInfos(ids);
-      if (got.errors.length) throw new Error(got.errors[0].why);
-      if (request !== rangeRequest || key !== `${uaIns}:${endDate}`) return;
-      rangeCache.set(key, { at: Date.now(), items: got.byIns });
-      paintDailyRanges();
-    } catch (error) {
-      if (request !== rangeRequest) return;
-      rangeStatus.textContent = `دریافت بازه روزانه ناموفق بود: ${faDigits(error.message)}`;
-      rangeChart.innerHTML = '<p class="empty-note">جدول زنجیره همچنان از عکس بازار در دسترس است.</p>';
-    }
-  }
-
   function emit(level) {
     onScopeChange?.({ level, uaIns, endDate, contractIns });
   }
@@ -739,8 +644,6 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       uaIns = String(row.uaIns); endDate = String(row.endDate); contractIns = String(row.ins);
       normalizeSelection(true); paintUnderlying(); emit('contract');
     },
-    // برگشت به تب نقشه: همان‌جا که دوباره دیده می‌شود، اگر کهنه بود تازه شود.
-    refreshRanges: () => loadDailyRanges(),
     dispose() { mapHandle?.dispose(); },
   };
 }
