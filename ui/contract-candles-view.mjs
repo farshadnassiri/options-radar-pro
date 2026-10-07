@@ -329,14 +329,15 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     return `<div class="ccv-tip is-wide" dir="rtl">
       <header><b>${esc(r.name)}</b><span>${kindLabel(r.kind)} · ${esc(r.uaName)} · اعمال ${n(fmt.money(r.strike))} · سررسید ${n(dateLabel(r.endDate))} · ${n(fmt.int(r.days))} روز</span></header>
       ${shapeRows.length ? `<div class="ccv-tip-metric"><b>${esc(m.short)}</b>${shapeRows.join('')}</div>` : ''}
-      <div class="ccv-tip-col"><table><thead><tr><th></th><th>قیمت</th><th>٪ دیروز</th><th>پایهٔ جفت</th><th>تلاطم</th><th>٪ پایه</th></tr></thead><tbody>${rows}</tbody></table>
-        ${kv('پایانی روز قبل', n(fmt.money(r.yday)))}${kv('دامنهٔ روز', n(`${fmt.pct(r.dayRangePct)}٪`))}${kv('جای آخرین در بازه', n(`${fmt.pct(r.dayPositionPct)}٪`))}${kv('پایه همان روز', pct(r.uaChangePct))}</div>
-      <div class="ccv-tip-col">
+      <!-- جدول تمام‌عرض، ردیف‌ها زیرش در دو ستونِ جدا: نسخهٔ دوستونه جدول را
+           در نیمی از عرض می‌گذاشت و با قیمت‌های واقعی روی ستون کناری می‌ریخت. -->
+      <table class="ccv-tip-prices"><thead><tr><th></th><th>قیمت</th><th>٪ دیروز</th><th>پایهٔ جفت</th><th>تلاطم</th><th>٪ پایه</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="ccv-tip-kv">
+        ${kv('پایانی روز قبل', n(fmt.money(r.yday)))}${kv('دامنهٔ روز', n(`${fmt.pct(r.dayRangePct)}٪`))}${kv('جای آخرین در بازه', n(`${fmt.pct(r.dayPositionPct)}٪`))}${kv('پایه همان روز', pct(r.uaChangePct))}
         ${kv('ارزش معاملات', n(fmt.rialText(r.value)))}${kv('حجم / تعداد', `${n(fmt.int(r.volume))} قرارداد · ${n(fmt.int(r.trades))} معامله`)}
         ${kv('موقعیت باز', `${n(fmt.int(r.oi))} (${pct(r.oiChangePct)})`)}
         ${kv('مظنه خرید / فروش', `${n(fmt.money(r.bid))} / ${n(fmt.money(r.ask))}`)}${kv('فاصلهٔ مظنه', n(`${fmt.pct(r.spreadPct)}٪`))}
         ${kv('دلتا · اهرم مؤثر', `${n(fmt.num(r.delta))} · ${n(fmt.num(r.effectiveLeverage))}`)}${kv('فاصلهٔ اعمال از پایه', pct(r.moneynessPct))}
-        <div class="ccv-tip-sep"></div>
         ${kv('سربه‌سر قرارداد', n(fmt.money(r.breakeven)))}${kv('فاصلهٔ پایه تا سربه‌سر', `${n(fmt.money(r.breakevenGap))} (${pct(r.breakevenGapPct)})`)}
         ${kv('سربه‌سر وزنی زنجیره', Number.isFinite(r.chainBreakeven) ? `${n(fmt.money(r.chainBreakeven))} <small>${n(fmt.int(r.chainBreakevenCount))} ${beSide} هم‌سررسید، وزن ارزش</small>` : '<small>زنجیره معاملهٔ وزن‌دار نداشت</small>')}
         ${kv('فاصله از سربه‌سر وزنی', Number.isFinite(r.beVsChain) ? `${n(fmt.money(r.beVsChain), tone(r.beVsChain))} (${pct(r.beVsChainPct)})` : '—')}

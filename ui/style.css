@@ -5446,12 +5446,15 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ccv-composite:empty { display: none; }
 .ccv-comp-table tr.is-total { background: var(--accent-soft); font-weight: 800; }
 .ccv-comp-table th small { color: var(--muted); font-weight: 400; }
-.ccv-tip.is-wide { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 4px 14px; font-size: var(--fs-2xs); line-height: 1.65; }
-.ccv-tip.is-wide > header, .ccv-tip.is-wide > .ccv-tip-metric { grid-column: 1 / -1; }
-.ccv-tip.is-wide .ccv-tip-col { display: grid; gap: 4px; align-content: start; min-width: 0; }
-.ccv-tip.is-wide .ccv-tip-col p { margin: 0; }
-.ccv-tip.is-wide .ccv-tip-be td:last-child { font-size: var(--fs-3xs); }
-@media (max-width: 640px) { .ccv-tip.is-wide { grid-template-columns: 1fr; } }
+.ccv-tip.is-wide { display: block; width: min(600px, 92vw); font-size: var(--fs-2xs); line-height: 1.6; }
+.ccv-tip.is-wide > * + * { margin-top: 6px; }
+.ccv-tip-prices { width: 100%; }
+.ccv-tip-prices th, .ccv-tip-prices td { text-align: center; padding: 2px 4px; }
+.ccv-tip-kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.ccv-tip-kv .kv { min-width: 0; flex-wrap: wrap; }
+.ccv-tip-kv .kv > .v { min-width: 0; overflow-wrap: anywhere; }
+.ccv-tip-kv > .note, .ccv-tip-kv > .warn { grid-column: 1 / -1; margin: 2px 0 0; }
+@media (max-width: 640px) { .ccv-tip-kv { grid-template-columns: 1fr; } }
 .ccv-chart-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 4px; }
 .ccv-chart-bar .ccv-legend { margin: 0; flex: 1; }
 .ccv-chart-bar > .note { margin: 0; color: var(--muted); font-size: var(--fs-xs); }
@@ -5465,7 +5468,6 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ccv-tip .num.gain { color: var(--gain); } .ccv-tip .num.loss { color: var(--loss); }
 .ccv-tip-metric { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--accent-soft); }
 .ccv-tip-metric .kv { border-bottom: 0; gap: 6px; }
-.ccv-tip-sep { height: 4px; }
 .lmm-candle-moved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 @media (max-width: 720px) {
   .ccv-chart { height: 440px; }

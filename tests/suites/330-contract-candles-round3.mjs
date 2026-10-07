@@ -97,7 +97,8 @@ group('۳۳۰. سیم‌کشی رابط');
   check('نقطهٔ خط شاخص از منوی کشویی', view.includes('data-ccv="compositePoint"') && view.includes("const point = m.shape === 'candle' ? opts.compositePoint : 'mark';"));
   // دور ششم: «توضیحات هاور مثل قبل باشد (نه گوشهٔ چپ)، طوری که در صفحه جا شود.»
   check('راهنمای شناور کامل، کنار نشانگر و مهارشده در پنجره', view.includes("appendTo: 'body'") && view.includes('position: tipPosition') && view.includes('formatter: (p) => detailHtml(') && view.includes('Math.min(vh - pad - box.top - h, y)') && !view.includes('class="ccv-side"'));
-  check('جزئیات دو ستونه تا کوتاه بماند', view.includes('class="ccv-tip is-wide"') && view.includes('<div class="ccv-tip-col">'));
+  // جدول قیمت تمام‌عرض و ردیف‌ها زیرش در دو ستون؛ ستونِ کنارِ جدول روی هم می‌ریخت.
+  check('جدول قیمت تمام‌عرض، ردیف‌ها زیرش در دو ستون', view.includes('class="ccv-tip is-wide"') && view.includes('<table class="ccv-tip-prices">') && view.includes('<div class="ccv-tip-kv">') && !view.includes('ccv-tip-col'));
   check('جدول شاخص هر گروه سر جایش', view.includes('function paintComposite('));
   check('مرتب‌سازی قراردادها و جهت', view.includes('data-ccv="sortKey"') && view.includes('data-ccv="sortDir"') && view.includes('data-ccv="listSort"'));
 }
