@@ -52,7 +52,7 @@ check('نقشه بین پایه‌ها و قراردادهای نماد انتخ
 const candleUi245 = readSrc('../ui/contract-candles-view.mjs');
 const candleCore245 = readSrc('../core/contract-candles.mjs');
 check('کندل امروز بازه واقعی را دسته‌ای می‌گیرد و عدد گمشده نمی‌سازد',
-  candleUi245.includes('await fetchInfos(stale)')
+  candleUi245.includes('await fetchInfos(stale, ')
   && candleCore245.includes('CANDLE_POINTS.every((key) => prices[key] > 0)')
   && candleUi245.includes('records.filter((row) => row.valid)'));
 check('نمودار بازه، هر پنج قیمت و سه مبنای مرتب‌سازی را دارد',

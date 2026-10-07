@@ -103,6 +103,7 @@ export function candleRecord(row = {}, { info = null, uaDay = null, settings = {
     endDate: String(row.endDate || ''), days: num(row.days), strike, size: num(row.size),
     spot: pos(row.spot), moneynessPct: num(row.moneynessPct),
     ...prices, yday, valid, rangeSource: merged.rangeSource, rangeLag: merged.rangeLag,
+    infoError: info && typeof info === 'object' && info.error ? String(info.error) : '',
     ua, uaRangeSource: uaDay?.rangeSource || 'none', uaChangePct: num(uaDay?.changePct),
     points: { change, iv, premium, timeValue }, ivWhy,
     volume: num(row.volume), value: num(row.value), trades: num(row.trades), oi: num(row.oi), oiChange: num(row.oiChange),
@@ -936,4 +937,52 @@ export function compositeValue(records = [], metricKey = 'change', point = 'last
     ? quantile(pairs.map(([v]) => v).sort((a, b) => a - b), 0.5)
     : pairs.reduce((a, [v, w]) => a + v * w, 0) / pairs.reduce((a, [, w]) => a + w, 0);
   return { value, n: pairs.length, missingWeight: total - pairs.length };
+}
+
+// ═══ چرا کندلی کشیده نشد ═══
+//
+// گزارش صاحب پروژه (۱۴۰۵/۰۷/۱۵، عصر): «آخرین نسخه نمودار را نمی‌سازد: ۰ کندل ·
+// ۳۸ قرارداد برای این شاخص داده ندارد.» پیام فقط می‌گفت «ندارد» و نه چرا:
+// پاسخ کمینه/بیشینه نیامده بود؟ خطا داده بود؟ مال جلسهٔ دیگری بود؟ یا خودِ
+// شاخص (مثلاً مظنه پس از بستن بازار) عدد نداشت؟ این تابع همان را می‌شمارد.
+
+/** علت نبودِ کندل هر رکورد روی یک شاخص؛ `''` یعنی کندل دارد. */
+export function candleLossReason(r, metricKey = 'change', log = true) {
+  const m = metricOf(metricKey);
+  const s = metricShape(r, m.key);
+  if (m.shape === 'candle' || m.key === 'dayRangePct' || m.key === 'dayPositionPct') {
+    if (r.rangeSource === 'none') return r.infoError ? 'infoError' : 'noInfo';
+    if (r.rangeSource === 'otherSession') return 'otherSession';
+    const gone = CANDLE_POINTS.filter((p) => !(r[p] > 0));
+    if (m.shape === 'candle' && gone.length) return `missing:${gone.join(',')}`;
+  }
+  if (!s) return 'noMetric';
+  if (!Number.isFinite(toAxis(m, s.low, log)) || !Number.isFinite(toAxis(m, s.high, log))) return 'notOnLog';
+  return '';
+}
+
+const LOSS_TEXT = {
+  noInfo: 'پاسخ کمینه/بیشینهٔ روز هنوز نیامده',
+  infoError: 'پاسخ کمینه/بیشینه خطا داد',
+  otherSession: 'پاسخ کمینه/بیشینه مال جلسهٔ دیگری بود (عکس تابلو و پاسخ اطلاعات هم‌روز نیستند)',
+  noMetric: 'این شاخص برای آن‌ها عدد ندارد',
+  notOnLog: 'عددشان روی محور لگاریتمی نمی‌نشیند (صفر یا منفی)',
+};
+const POINT_FA = { first: 'اولین', low: 'کمینه', high: 'بیشینه', last: 'آخرین', close: 'پایانی' };
+
+/** شمارش علت‌ها، به‌علاوهٔ اولین متن خطای بالادست. */
+export function candleLossSummary(records = [], metricKey = 'change', log = true) {
+  const counts = new Map();
+  let firstError = '';
+  for (const r of records) {
+    const why = candleLossReason(r, metricKey, log);
+    if (!why) continue;
+    counts.set(why, (counts.get(why) || 0) + 1);
+    if (why === 'infoError' && !firstError) firstError = String(r.infoError || '');
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([key, count]) => ({
+    key, count,
+    text: key.startsWith('missing:') ? `${key.slice(8).split(',').map((p) => POINT_FA[p]).join('، ')} در پاسخ نیامد` : LOSS_TEXT[key] || key,
+    error: key === 'infoError' ? firstError : '',
+  }));
 }

@@ -30,7 +30,7 @@ import {
   CANDLE_POINTS, POINT_LABEL, CANDLE_METRICS, X_MODES, SORT_KEYS, sortValue, COMPOSITE_WEIGHTS, compositeCandle, compositeByGroup, compositeValue, backgroundBarAxis, metricOf, useLog, toAxis, fromAxis, logTicks,
   metricShape, candleRecord, underlyingDay, filterCandles, underlyingTurnover, orderCandles,
   groupBands, candleStats, flagUnusual, candleNarrative, staleInfoIds, histogram,
-  SLIDER_FIELDS, SLIDER_STEPS, sliderScale, applyRanges, outlierIds, robustExtent, HIST_WEIGHTS, HIST_GROUPS, candleSummary, chainBreakevens, chainKey,
+  SLIDER_FIELDS, SLIDER_STEPS, sliderScale, candleLossSummary, applyRanges, outlierIds, robustExtent, HIST_WEIGHTS, HIST_GROUPS, candleSummary, chainBreakevens, chainKey,
 } from '../core/contract-candles.mjs';
 import { downloadCandleWorkbook } from './contract-candles-export.mjs';
 
@@ -44,6 +44,9 @@ const pctVsYday = pctVsYesterday;
 const STORE = 'options-radar:contract-candles';
 const PRESETS = 'options-radar:contract-candles-presets';
 const INFO_TTL_MS = 60_000;
+// درخواستی که جواب نمی‌دهد نباید پرچم «در حال دریافت» را برای همیشه بالا نگه
+// دارد؛ پس از این مهلت رها می‌شود و تیک بعدی دوباره می‌پرسد.
+const INFO_TIMEOUT_MS = 30_000;
 const LIST_STEP = 40;
 const COLOR_BY = [['direction', 'جهت · کال سبز/قرمز، پوت بنفش/نارنجی'], ['kind', 'کال و پوت'], ['underlying', 'نماد پایه'], ['expiry', 'سررسید']];
 const HIST_POINTS = [['last', 'آخرین'], ['close', 'پایانی'], ['first', 'اولین'], ['low', 'کمینه'], ['high', 'بیشینه'], ['range', 'طول کندل (بیشینه − کمینه)']];
@@ -267,13 +270,15 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     fetching = true; fetchError = '';
     paintStatus(pool.length, drawable.length);
     try {
-      const got = await fetchInfos(stale);
+      const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+      const timer = setTimeout(() => ctrl?.abort(), INFO_TIMEOUT_MS);
+      const got = await fetchInfos(stale, ctrl ? { signal: ctrl.signal } : {}).finally(() => clearTimeout(timer));
       const at = Date.now();
       for (const [ins, info] of Object.entries(got.byIns || {})) infoCache.set(String(ins), { at, info });
       if (got.errors?.length) fetchError = got.errors[0].why || '';
       infoVersion += 1;
     } catch (error) {
-      fetchError = String(error?.message || error);
+      fetchError = error?.name === 'AbortError' ? `پاسخ پس از ${fmt.int(INFO_TIMEOUT_MS / 1000)} ثانیه نیامد` : String(error?.message || error);
     } finally {
       fetching = false;
     }
@@ -335,6 +340,12 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     box.hidden = !r;
     if (!r) { box.innerHTML = ''; return; }
     box.innerHTML = `${detailHtml(r)}<div class="ccv-pin-actions"><button type="button" class="ghost" data-ccv-hide="${esc(r.ins)}">حذف این کندل از نمودار</button>${onOpenContract && !past ? '<button type="button" class="ghost" data-ccv-open>دیدن در زنجیره</button>' : ''}<button type="button" class="ghost" data-ccv-unpin>بستن</button></div>`;
+  }
+
+  function hide(ins) {
+    if (!ins || opts.hidden.includes(ins)) return;
+    if (pinned === ins) pinned = '';
+    set({ hidden: [...opts.hidden, ins] });
   }
 
   /**
@@ -577,7 +588,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const target = q('[data-ccv-chart="mother"]');
     if (!drawable.length) {
       mother?.dispose(); mother = null;
-      target.innerHTML = `<p class="empty-note">${past && !pastState.payload ? 'روز و نماد را انتخاب کن و «دریافت کندل‌های این روز» را بزن.' : fetching ? 'در حال دریافت کمینه/بیشینهٔ امروز…' : 'در این گزینش قرارداد معامله‌شده‌ای با داده برای این شاخص نیست.'}</p>`;
+      target.innerHTML = `<p class="empty-note">${past && !pastState.payload ? 'روز و نماد را انتخاب کن و «دریافت کندل‌های این روز» را بزن.' : fetching ? 'در حال دریافت کمینه/بیشینهٔ امروز…' : lossNote ? `کندلی کشیده نشد — ${esc(lossNote)}${fetchError ? ` · خطای دریافت: ${esc(faDigits(fetchError))}` : ''}` : 'در این گزینش قرارداد معامله‌شده‌ای با داده برای این شاخص نیست.'}</p>`;
       return;
     }
     if (mother) { mother.update(buildMother); return; }
@@ -914,6 +925,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   }
 
   let current = { records: [], uaDays: [] };
+  let lossNote = '';
   function paint() {
     if (past) paintPastPicker();
     const contracts = universe().contracts || [];
@@ -942,8 +954,11 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     current = { records, uaDays: usedUa };
     paintStatus(pool.length, drawable.length);
     const lost = records.length - drawable.length;
+    // علت دقیقِ هر کندلِ کشیده‌نشده، نه فقط «داده ندارد».
+    lossNote = lost > 0 ? candleLossSummary(records, m.key, opts.log)
+      .map((x) => `${fmt.int(x.count)} قرارداد: ${x.text}${x.error ? ` (${faDigits(x.error).slice(0, 80)})` : ''}`).join(' · ') : '';
     const extra = [
-      lost > 0 ? `${fmt.int(lost)} قرارداد برای این شاخص داده ندارد${useLog(m, opts.log) ? ' یا روی محور لگاریتمی نمی‌نشیند' : ''}` : '',
+      lossNote,
       ranged.cut ? `${fmt.int(ranged.cut)} بیرون از دستگیره‌ها` : '',
       ranged.unknown ? `${fmt.int(ranged.unknown)} بی‌عدد برای دستگیرهٔ فعال` : '',
       beforeHide - records.length ? `${fmt.int(beforeHide - records.length)} دستی کنار رفته` : '',
