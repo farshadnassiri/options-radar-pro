@@ -11,7 +11,7 @@
 // کندل، نمودار توزیع دقیق‌تر با آمار کامل، و همین نما برای یک روز گذشته
 // (`mode: 'past'`، داده از `ui/contract-candles-past.mjs`).
 
-import { fmt, faDigits } from './fmt.mjs';
+import { fmt, faDigits, faClock } from './fmt.mjs';
 import { mountChart, chartBase } from './chart-host.mjs';
 import { mountCandlePoints } from './candle-points.mjs';
 import { fetchInfos } from './quote-intake.mjs';
@@ -165,8 +165,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       </div>
     </section>
     <section class="card ccv-mother">
-      <div class="section-head"><div><p class="eyebrow">نمودار مادر</p><h3>همهٔ کندل‌های گزینش روی یک محور</h3><span class="note" data-ccv-count></span></div>
-        <div class="ccv-icons"><button type="button" class="ghost ccv-icon" data-ccv-export="png" title="ذخیرهٔ تصویر نمودار" aria-label="ذخیرهٔ تصویر نمودار">${icon('camera')}</button><button type="button" class="ghost ccv-icon" data-ccv-full title="تمام‌صفحه" aria-label="تمام‌صفحه">${icon('expand')}</button></div></div>
+      <div class="section-head"><div><p class="eyebrow">نمودار مادر</p><h3>همهٔ کندل‌های گزینش روی یک محور</h3><span class="note" data-ccv-count></span></div></div>
       <div class="ccv-row">
         <label>محور عمودی<select data-ccv="metric">${CANDLE_METRICS.map((m) => `<option value="${m.key}">${esc(m.label)}</option>`).join('')}</select></label>
         <label class="check" data-ccv-log-wrap><input type="checkbox" data-ccv="log"> محور لگاریتمی</label>
@@ -190,7 +189,8 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
         <button type="button" class="ghost" data-ccv-auto-outliers>حذف خودکار پرت‌ها (بیرون از ۳ × فاصلهٔ میان‌چارکی)</button>
         <div class="ccv-hidden" data-ccv-hidden></div>
       </div>
-      <div class="ccv-legend" data-ccv-legend></div>
+      <!-- «گزینهٔ دریافت تصویر را نزدیک چارت مادر بگذار تا نیاز به اسکرول به بالا نباشد.» -->
+      <div class="ccv-chart-bar"><div class="ccv-legend" data-ccv-legend></div><div class="ccv-icons"><button type="button" class="ghost ccv-icon" data-ccv-export="png" title="ذخیرهٔ تصویر نمودار مادر" aria-label="ذخیرهٔ تصویر نمودار مادر">${icon('camera')}</button><button type="button" class="ghost ccv-icon" data-ccv-full title="تمام‌صفحه" aria-label="تمام‌صفحه">${icon('expand')}</button></div></div>
       <div class="ccv-chart" data-ccv-chart="mother"></div>
       <div class="ccv-pin" data-ccv-pin hidden></div>
       <div class="ccv-composite" data-ccv-composite></div>
@@ -216,6 +216,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
         <label class="check"><input type="checkbox" data-ccv="histKde"> منحنی چگالی</label>
         <label class="check"><input type="checkbox" data-ccv="histCum"> خط تجمعی</label>
       </div>
+      <div class="ccv-chart-bar"><span class="note">موس را روی هر میله ببر: نام قراردادهای آن بازه</span><div class="ccv-icons"><button type="button" class="ghost ccv-icon" data-ccv-export="png-hist" title="ذخیرهٔ تصویر نمودار توزیع" aria-label="ذخیرهٔ تصویر نمودار توزیع">${icon('camera')}</button></div></div>
       <div class="ccv-chart ccv-chart-short" data-ccv-chart="hist"></div>
       <div class="ccv-stats" data-ccv-hist-stats></div>
       <p class="note" data-ccv-hist-note></p>
@@ -304,34 +305,47 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   };
 
   // ── راهنمای شناور و جزئیات ──────────────────────────────────────
+  //
+  // «در زمان هاور برخی اعداد و توضیحات قاطی می‌شوند و متن ناخوانا می‌شود.»
+  // علت: عددِ منفی و درصد (−۱٫۵۳٪) وسط جملهٔ فارسیِ بلندی که با «·» به هم
+  // چسبیده بود؛ الگوریتم دوجهتهٔ مرورگر علامت منفی و ٪ را جابه‌جا می‌کرد.
+  // حالا هر عدد در جزیرهٔ چپ‌به‌راستِ خودش است (`<bdi class="num">`) و هر
+  // واقعیت یک ردیف «برچسب: مقدار» دارد، نه یک جملهٔ دراز.
   function detailHtml(r) {
     const m = metricOf(opts.metric), s = metricShape(r, m.key);
-    const rows = CANDLE_POINTS.map((p) => `<tr><th>${POINT_LABEL[p]}</th><td>${fmt.money(r[p])}</td><td class="${tone(r.points.change[p])}">${fmt.pct(r.points.change[p])}٪</td><td>${fmt.money(r.ua[p])}</td><td>${Number.isFinite(r.points.iv[p]) ? `${fmt.pct(r.points.iv[p])}٪` : `<small>${esc(IV_WHY_LABEL[r.ivWhy[p]] || '—')}</small>`}</td><td>${metricText('premium', r.points.premium[p])}</td></tr>`).join('');
-    const shapeLine = s ? (s.shape === 'candle'
-      ? `${esc(m.short)}: اولین ${metricText(m.key, s.open)} · آخرین ${metricText(m.key, s.close)} · پایانی ${metricText(m.key, s.mark)} · بازه ${metricText(m.key, s.low)} تا ${metricText(m.key, s.high)}`
+    const n = (text, cls = '') => `<bdi class="num${cls ? ` ${cls}` : ''}">${text}</bdi>`;
+    const pct = (v) => n(`${fmt.pct(v)}٪`, tone(v));
+    // مقدار یک تکهٔ واحد است؛ وگرنه هر عدد و پرانتز یک آیتم flex می‌شد و از هم فاصله می‌گرفت.
+    const kv = (label, value) => `<div class="kv"><span>${label}</span><span class="v">${value}</span></div>`;
+    const rows = CANDLE_POINTS.map((p) => `<tr><th>${POINT_LABEL[p]}</th><td>${n(fmt.money(r[p]))}</td><td>${pct(r.points.change[p])}</td><td>${n(fmt.money(r.ua[p]))}</td><td>${Number.isFinite(r.points.iv[p]) ? n(`${fmt.pct(r.points.iv[p])}٪`) : `<small>${esc(IV_WHY_LABEL[r.ivWhy[p]] || '—')}</small>`}</td><td>${n(metricText('premium', r.points.premium[p]))}</td></tr>`).join('');
+    const mt = (v) => n(metricText(m.key, v));
+    const shapeRows = s ? (s.shape === 'candle'
+      ? [kv('اولین', mt(s.open)), kv('آخرین', mt(s.close)), kv('پایانی', mt(s.mark)), kv('کمینه تا بیشینه', `${mt(s.low)} تا ${mt(s.high)}`)]
       : s.shape === 'range'
-        ? `تلاطم مظنه خرید ${metricText('iv', s.marks.bid)} · میانه ${metricText('iv', s.marks.mid)} · فروش ${metricText('iv', s.marks.ask)} · آخرین ${metricText('iv', s.marks.last)}`
-        : `${esc(m.label)}: ${metricText(m.key, s.mark)}`) : '';
+        ? [kv('تلاطم مظنه خرید', mt(s.marks.bid)), kv('میانه', mt(s.marks.mid)), kv('مظنه فروش', mt(s.marks.ask)), kv('آخرین معامله', mt(s.marks.last))]
+        : [kv(esc(m.label), mt(s.mark))]) : [];
     const flag = flags.get(r.ins);
-    // دو ستون: جدول پنج قیمت یک طرف، بقیه طرف دیگر — تا راهنما کوتاه بماند و
-    // در هر پنجره‌ای جا شود.
+    const beSide = r.kind === 'put' ? 'پوت' : 'کال';
     return `<div class="ccv-tip is-wide" dir="rtl">
-      <header><b>${esc(r.name)}</b><span>${kindLabel(r.kind)} · ${esc(r.uaName)} · اعمال ${fmt.money(r.strike)} · سررسید ${dateLabel(r.endDate)} · ${fmt.int(r.days)} روز</span></header>
-      ${shapeLine ? `<p class="ccv-tip-metric">${shapeLine}</p>` : ''}
-      <div class="ccv-tip-col"><table><thead><tr><th></th><th>قیمت</th><th>٪ دیروز</th><th>پایهٔ جفت</th><th>تلاطم</th><th>٪ پایه</th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="ccv-tip-col"><p>پایانی روز قبل ${fmt.money(r.yday)} · دامنه روز ${fmt.pct(r.dayRangePct)}٪ · جای آخرین در بازه ${fmt.pct(r.dayPositionPct)}٪ · پایه همان روز <span class="${tone(r.uaChangePct)}">${fmt.pct(r.uaChangePct)}٪</span></p>
-      <p>ارزش ${fmt.rialText(r.value)} · حجم ${fmt.int(r.volume)} · ${fmt.int(r.trades)} معامله · موقعیت باز ${fmt.int(r.oi)} (${fmt.pct(r.oiChangePct)}٪)</p>
-      <table class="ccv-tip-be"><tbody>
-        <tr><th>سربه‌سر قرارداد</th><td>${fmt.money(r.breakeven)}</td><td>فاصلهٔ پایه تا آن ${fmt.money(r.breakevenGap)} (${fmt.pct(r.breakevenGapPct)}٪)</td></tr>
-        <tr><th>سربه‌سر وزنی زنجیره</th><td>${fmt.money(r.chainBreakeven)}</td><td>${Number.isFinite(r.chainBreakeven) ? `${fmt.int(r.chainBreakevenCount)} ${r.kind === 'put' ? 'پوت' : 'کال'} هم‌سررسید، وزن ارزش` : 'زنجیره معاملهٔ وزن‌دار نداشت'}</td></tr>
-        <tr><th>فاصله از سربه‌سر وزنی</th><td class="${tone(r.beVsChain)}">${fmt.money(r.beVsChain)}</td><td>${Number.isFinite(r.beVsChainPct) ? `${fmt.pct(r.beVsChainPct)}٪ — ${r.beVsChain > 0 ? 'بالاتر از' : r.beVsChain < 0 ? 'پایین‌تر از' : 'برابر'} میانگین زنجیره` : '—'}</td></tr>
-      </tbody></table>
-      <p>مظنه ${fmt.money(r.bid)} / ${fmt.money(r.ask)} · اسپرد ${fmt.pct(r.spreadPct)}٪ · دلتا ${fmt.num(r.delta)} · اهرم مؤثر ${fmt.num(r.effectiveLeverage)} · فاصله اعمال ${fmt.pct(r.moneynessPct)}٪</p>
-      ${r.rangeSource === 'infoLag' ? '<p class="note">کمینه/بیشینه از چند ثانیه قبل است و با آخرین قیمت عکس گسترده شد.</p>' : ''}
-      ${flag ? `<p class="warn">غیرعادی نسبت به هم‌سررسیدها: ${flag.map((f) => (f === 'value' ? 'ارزش معامله' : 'دامنه روز')).join('، ')}</p>` : ''}
+      <header><b>${esc(r.name)}</b><span>${kindLabel(r.kind)} · ${esc(r.uaName)} · اعمال ${n(fmt.money(r.strike))} · سررسید ${n(dateLabel(r.endDate))} · ${n(fmt.int(r.days))} روز</span></header>
+      ${shapeRows.length ? `<div class="ccv-tip-metric"><b>${esc(m.short)}</b>${shapeRows.join('')}</div>` : ''}
+      <div class="ccv-tip-col"><table><thead><tr><th></th><th>قیمت</th><th>٪ دیروز</th><th>پایهٔ جفت</th><th>تلاطم</th><th>٪ پایه</th></tr></thead><tbody>${rows}</tbody></table>
+        ${kv('پایانی روز قبل', n(fmt.money(r.yday)))}${kv('دامنهٔ روز', n(`${fmt.pct(r.dayRangePct)}٪`))}${kv('جای آخرین در بازه', n(`${fmt.pct(r.dayPositionPct)}٪`))}${kv('پایه همان روز', pct(r.uaChangePct))}</div>
+      <div class="ccv-tip-col">
+        ${kv('ارزش معاملات', n(fmt.rialText(r.value)))}${kv('حجم / تعداد', `${n(fmt.int(r.volume))} قرارداد · ${n(fmt.int(r.trades))} معامله`)}
+        ${kv('موقعیت باز', `${n(fmt.int(r.oi))} (${pct(r.oiChangePct)})`)}
+        ${kv('مظنه خرید / فروش', `${n(fmt.money(r.bid))} / ${n(fmt.money(r.ask))}`)}${kv('فاصلهٔ مظنه', n(`${fmt.pct(r.spreadPct)}٪`))}
+        ${kv('دلتا · اهرم مؤثر', `${n(fmt.num(r.delta))} · ${n(fmt.num(r.effectiveLeverage))}`)}${kv('فاصلهٔ اعمال از پایه', pct(r.moneynessPct))}
+        <div class="ccv-tip-sep"></div>
+        ${kv('سربه‌سر قرارداد', n(fmt.money(r.breakeven)))}${kv('فاصلهٔ پایه تا سربه‌سر', `${n(fmt.money(r.breakevenGap))} (${pct(r.breakevenGapPct)})`)}
+        ${kv('سربه‌سر وزنی زنجیره', Number.isFinite(r.chainBreakeven) ? `${n(fmt.money(r.chainBreakeven))} <small>${n(fmt.int(r.chainBreakevenCount))} ${beSide} هم‌سررسید، وزن ارزش</small>` : '<small>زنجیره معاملهٔ وزن‌دار نداشت</small>')}
+        ${kv('فاصله از سربه‌سر وزنی', Number.isFinite(r.beVsChain) ? `${n(fmt.money(r.beVsChain), tone(r.beVsChain))} (${pct(r.beVsChainPct)})` : '—')}
+        ${r.rangeSource === 'infoLag' ? '<p class="note">کمینه/بیشینه از چند ثانیه قبل است و با آخرین قیمت عکس گسترده شد.</p>' : ''}
+        ${flag ? `<p class="warn">غیرعادی نسبت به هم‌سررسیدها: ${flag.map((f) => (f === 'value' ? 'ارزش معامله' : 'دامنه روز')).join('، ')}</p>` : ''}
       </div>
     </div>`;
   }
+
 
   // ── جزئیات ثابت زیر نمودار (با کلیک) ───────────────────────────
   function paintPin() {
@@ -364,6 +378,32 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     y = Math.max(pad - box.top, Math.min(vh - pad - box.top - h, y));
     return [x, y];
   }
+
+  // ── عنوان داخل نمودار ──────────────────────────────────────────
+  //
+  // «در نموداری که رسم می‌شود عنوان نمودار هم نشان داده شود.» عنوان در خودِ
+  // بوم است تا در تصویر ذخیره‌شده هم بماند: شاخص، گزینش و روز عکس.
+  function scopeText() {
+    const names = new Map((universe().underlyings || []).map((u) => [String(u.ins), u.name]));
+    const uas = opts.underlyings.map((id) => names.get(id) || id);
+    const side = opts.side === 'call' ? 'فقط کال' : opts.side === 'put' ? 'فقط پوت' : 'کال و پوت';
+    const uaText = uas.length ? (uas.length > 3 ? `${uas.slice(0, 3).join('، ')} و ${fmt.int(uas.length - 3)} نماد دیگر` : uas.join('، ')) : 'همهٔ نمادها';
+    const dates = [...opts.dates.map((d) => dateLabel(d)), ...opts.expiries.map((k) => `${names.get(k.split(':')[0]) || ''} ${dateLabel(k.split(':')[1])}`)];
+    const expText = dates.length ? `سررسید ${dates.slice(0, 3).join('، ')}${dates.length > 3 ? ' …' : ''}` : 'همهٔ سررسیدها';
+    return `${side} · ${uaText} · ${expText}`;
+  }
+  function dayText() {
+    if (past) return pastState.date ? `روز ${dateLabel(pastState.date)}` : '';
+    const p = payload();
+    const at = Number(p.snapshotAt) || Number(p.at);
+    const day = p.session?.date ? dateLabel(p.session.date) : '';
+    return `${rangeHeading(p.session, dateLabel).current ? 'امروز' : day || ''}${at ? ` · عکس ${faClock(new Date(at))}` : ''}`;
+  }
+  const chartTitle = (t, text, sub) => ({
+    text, subtext: sub, left: 'center', top: 2, itemGap: 4,
+    textStyle: { color: t.ink, fontSize: 13, fontWeight: 700, fontFamily: t.font },
+    subtextStyle: { color: t.muted, fontSize: 11, fontFamily: t.font },
+  });
 
   // ── نمودار مادر ─────────────────────────────────────────────────
   function buildMother(echarts, base) {
@@ -486,7 +526,9 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const barLabel = BAR_KEYS.find(([k]) => k === opts.bars)?.[1] || '';
     const bottomPad = cat ? 104 : 72;
     return {
-      grid: [{ left: 64, right: 54, top: 30, bottom: bottomPad }],
+      title: chartTitle(t, `${m.label}${L ? ' — محور لگاریتمی' : ''}${robust ? ' — مقیاس مقاوم' : ''}`,
+        [scopeText(), `${fmt.int(drawable.length)} ${m.shape === 'point' ? 'قرارداد' : 'کندل'}`, comp ? `شاخص ترکیبی: ${COMPOSITE_WEIGHTS.find(([k]) => k === opts.composite)?.[1] || ''}` : '', dayText()].filter(Boolean).join(' · ')),
+      grid: [{ left: 64, right: 54, top: 70, bottom: bottomPad }],
       // راهنمای کامل کنار نشانگر، همیشه داخل پنجره (`tipPosition`).
       tooltip: { ...chartBaseTip, trigger: 'item', confine: false, appendTo: 'body', enterable: false, position: tipPosition, formatter: (p) => detailHtml(drawable[p.value?.[7]] || drawable[0]), extraCssText: `${chartBaseTip.extraCssText} max-width: min(660px, 94vw); white-space: normal; padding: 8px 10px;` },
       xAxis: [cat
@@ -680,8 +722,10 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const cum = opts.histCum ? h.bars.map((b) => [span(b)[1], b.cumulative]) : [];
     const chartBaseTip = chartBase(t).tooltip;
     return {
-      grid: { left: 60, right: opts.histCum ? 54 : 20, top: 44, bottom: 64, containLabel: false },
-      legend: { top: 0, textStyle: { color: t.ink }, data: [...h.groups.slice(0, 10).map((g) => g.label), ...(kde.length ? ['چگالی'] : []), ...(cum.length ? ['تجمعی'] : [])] },
+      title: chartTitle(t, `توزیع ${m.label}${m.shape === 'candle' ? ` — نقطهٔ ${HIST_POINTS.find(([k]) => k === opts.histPoint)?.[1] || ''}` : ''}`,
+        [scopeText(), `${fmt.int(h.count)} ${unit}`, `وزن: ${weightLabel}`, dayText()].filter(Boolean).join(' · ')),
+      grid: { left: 60, right: opts.histCum ? 54 : 20, top: 92, bottom: 64, containLabel: false },
+      legend: { top: 50, textStyle: { color: t.ink }, data: [...h.groups.slice(0, 10).map((g) => g.label), ...(kde.length ? ['چگالی'] : []), ...(cum.length ? ['تجمعی'] : [])] },
       tooltip: {
         ...chartBaseTip, trigger: 'item', confine: true,
         formatter: (p) => {
@@ -1187,11 +1231,12 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
 
   async function exportData(kind) {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-    if (kind === 'png') {
-      if (!mother) return;
-      const url = mother.instance.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: getComputedStyle(document.body).getPropertyValue('--panel').trim() });
+    if (kind === 'png' || kind === 'png-hist') {
+      const handle = kind === 'png' ? mother : hist;
+      if (!handle) return;
+      const url = handle.instance.getDataURL({ type: 'png', pixelRatio: 2, backgroundColor: getComputedStyle(document.body).getPropertyValue('--panel').trim() });
       const blob = await (await fetch(url)).blob();
-      saveBlob(blob, `contract-candles-${stamp}.png`);
+      saveBlob(blob, `contract-${kind === 'png' ? 'candles' : 'distribution'}-${stamp}.png`);
       return;
     }
     const names = new Map((universe().underlyings || []).map((u) => [String(u.ins), u.name]));

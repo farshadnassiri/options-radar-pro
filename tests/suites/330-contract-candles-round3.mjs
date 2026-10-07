@@ -90,7 +90,7 @@ group('۳۳۰. لایهٔ میله پشت کندل‌ها');
 group('۳۳۰. سیم‌کشی رابط');
 {
   const view = readSrc('../ui/contract-candles-view.mjs');
-  check('میله در همان شبکه، محور دوم پنهان، بی‌واکنش و پشت کندل', view.includes("grid: [{ left: 64, right: 54, top: 30, bottom: bottomPad }]") && view.includes('show: false, name: barLabel') && view.includes('silent: true, z: 1') && !view.includes('gridIndex: 1'));
+  check('میله در همان شبکه، محور دوم پنهان، بی‌واکنش و پشت کندل', view.includes("grid: [{ left: 64, right: 54, top: 70, bottom: bottomPad }]") && view.includes('show: false, name: barLabel') && view.includes('silent: true, z: 1') && !view.includes('gridIndex: 1'));
   check('کشیدن روی محور، بزرگ‌نمایی همان محور؛ دوبار کلیک برمی‌گرداند', view.includes('function attachAxisDrag(chart)') && view.includes("dataZoomIndex: axis === 'y' ? 2 : 0") && view.includes("zr.on('dblclick'"));
   // دور پنجم: «کندل نباشد، همان خط افقی باشد… صرفاً یک خط، نه نوار.»
   check('شاخص ترکیبی فقط یک خط افقی است: نه کندل، نه نوار، نه خط هر گروه', view.includes('data-ccv="composite"') && view.includes('refs.push({ yAxis: ax(value), lineStyle: { color: t.accent') && !view.includes('renderComposite') && !view.includes('compAreas') && !view.includes("'شاخص ترکیبی'] : []") && !view.includes('compositeCandle(drawable.slice(b.from'));

@@ -5452,6 +5452,20 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ccv-tip.is-wide .ccv-tip-col p { margin: 0; }
 .ccv-tip.is-wide .ccv-tip-be td:last-child { font-size: var(--fs-3xs); }
 @media (max-width: 640px) { .ccv-tip.is-wide { grid-template-columns: 1fr; } }
+.ccv-chart-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 4px; }
+.ccv-chart-bar .ccv-legend { margin: 0; flex: 1; }
+.ccv-chart-bar > .note { margin: 0; color: var(--muted); font-size: var(--fs-xs); }
+/* هر عدد جزیرهٔ چپ‌به‌راستِ خودش: منفی و ٪ در متن فارسی جابه‌جا نمی‌شوند. */
+.ccv-tip .num { unicode-bidi: isolate; direction: ltr; display: inline-block; font-variant-numeric: tabular-nums; }
+.ccv-tip td { unicode-bidi: isolate; }
+.ccv-tip .kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 1px 0; border-bottom: 1px dashed var(--line-soft); }
+.ccv-tip .kv > span:first-child { color: var(--muted); white-space: nowrap; }
+.ccv-tip .kv small { color: var(--muted); }
+.ccv-tip .kv > .v { text-align: start; }
+.ccv-tip .num.gain { color: var(--gain); } .ccv-tip .num.loss { color: var(--loss); }
+.ccv-tip-metric { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--accent-soft); }
+.ccv-tip-metric .kv { border-bottom: 0; gap: 6px; }
+.ccv-tip-sep { height: 4px; }
 .lmm-candle-moved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 @media (max-width: 720px) {
   .ccv-chart { height: 440px; }

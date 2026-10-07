@@ -46,3 +46,20 @@ group('۳۳۱. سیم‌کشی رابط');
   check('پیام خالی‌بودن علت را می‌گوید', view.includes('candleLossSummary(records, m.key, opts.log)') && view.includes('کندلی کشیده نشد —'));
   check('درخواست کمینه/بیشینه مهلت دارد و پرچم دریافت گیر نمی‌کند', view.includes('const INFO_TIMEOUT_MS = 30_000;') && view.includes("error?.name === 'AbortError'"));
 }
+
+group('۳۳۱. خوانایی هاور، عنوان در نمودار، تصویر کنار نمودار');
+{
+  const view = readSrc('../ui/contract-candles-view.mjs');
+  const css = readSrc('../ui/style.css');
+  // «در هاور برخی اعداد و توضیحات قاطی می‌شوند.» عدد منفی و ٪ وسط جملهٔ
+  // فارسی جابه‌جا می‌شد؛ هر عدد حالا جزیرهٔ چپ‌به‌راستِ خودش است.
+  const detail = view.slice(view.indexOf('function detailHtml(r) {'), view.indexOf('function paintPin() {'));
+  check('هر عدد راهنما در جزیرهٔ چپ‌به‌راست', detail.includes('<bdi class="num') && css.includes('.ccv-tip .num { unicode-bidi: isolate; direction: ltr;'));
+  check('دیگر جملهٔ درازِ «·»‌دار با عدد درصد نیست', !detail.includes('· دامنه روز ${fmt.pct(') && !detail.includes('ارزش ${fmt.rialText(r.value)} · حجم'));
+  check('ردیف برچسب: مقدار', detail.includes("const kv = (label, value) =>") && detail.includes("kv('سربه‌سر وزنی زنجیره'"));
+  check('عنوان در خودِ بوم هر دو نمودار (در تصویر هم می‌ماند)', view.includes('title: chartTitle(t, `${m.label}') && view.includes('title: chartTitle(t, `توزیع ${m.label}') && view.includes('function scopeText()'));
+  const toolbar = view.indexOf('<div class="ccv-chart-bar"><div class="ccv-legend" data-ccv-legend>');
+  const near = view.indexOf('data-ccv-export="png"', toolbar);
+  check('دکمهٔ تصویر درست بالای نمودار مادر، کنار راهنمای رنگ', toolbar > 0 && near > toolbar && near < view.indexOf('data-ccv-chart="mother"'));
+  check('نمودار توزیع هم دکمهٔ تصویر خودش را دارد', view.includes('data-ccv-export="png-hist"') && view.includes("const handle = kind === 'png' ? mother : hist;"));
+}
