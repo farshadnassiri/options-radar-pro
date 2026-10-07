@@ -49,17 +49,18 @@ const COLOR_BY = [['direction', 'جهت · کال سبز/قرمز، پوت بن�
 const HIST_POINTS = [['last', 'آخرین'], ['close', 'پایانی'], ['first', 'اولین'], ['low', 'کمینه'], ['high', 'بیشینه'], ['range', 'طول کندل (بیشینه − کمینه)']];
 const BAR_KEYS = [['none', 'بدون میله'], ['value', 'ارزش معاملات'], ['volume', 'حجم'], ['oi', 'موقعیت باز'], ['trades', 'تعداد معامله']];
 const SORT_DIRS = [['desc', 'نزولی'], ['asc', 'صعودی']];
+const COMPOSITE_POINTS = [['last', 'آخرین'], ['close', 'پایانی'], ['first', 'اولین'], ['low', 'کمینه'], ['high', 'بیشینه']];
 const TAILS = [[0, 'بی‌برش'], [0.01, '۱٪ هر سر'], [0.02, '۲٪ هر سر'], [0.05, '۵٪ هر سر']];
 
 const DEFAULTS = {
-  side: 'all', metric: 'change', log: true, xMode: 'grouped', sortKey: 'strike', sortDir: 'auto', composite: 'value', colorBy: 'direction',
+  side: 'all', metric: 'change', log: true, xMode: 'grouped', sortKey: 'strike', sortDir: 'auto', composite: 'value', compositePoint: 'last', colorBy: 'direction',
   underlyings: [], dates: [], expiries: [], top: 0, unusualOnly: false, uaSort: 'value', uaSearch: '',
   ranges: {}, hidden: [], clickRemove: false, robust: false, bars: 'value', barsLog: true,
   histMetric: 'change', histPoint: 'last', histBins: 12, histWidth: 0, histUnit: 'contract', histWeight: 'count',
   histGroup: 'kind', histTails: 0.02, histPercent: false, histLines: true, histKde: true, histCum: false,
   listSort: 'value', listDir: 'desc',
 };
-const FILTER_KEYS = ['side', 'underlyings', 'dates', 'expiries', 'top', 'unusualOnly', 'ranges', 'metric', 'log', 'xMode', 'sortKey', 'sortDir', 'composite', 'colorBy', 'bars'];
+const FILTER_KEYS = ['side', 'underlyings', 'dates', 'expiries', 'top', 'unusualOnly', 'ranges', 'metric', 'log', 'xMode', 'sortKey', 'sortDir', 'composite', 'compositePoint', 'colorBy', 'bars'];
 
 /** برچسب محور: بی دنبالهٔ «٫۰۰»؛ عدد کوچک یک یا دو رقم اعشار. */
 function axisText(metric, value, decimals = null) {
@@ -169,7 +170,8 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
         <label>محور افقی<select data-ccv="xMode">${X_MODES.map((m) => `<option value="${m.key}">${esc(m.label)}</option>`).join('')}</select></label>
         <label data-ccv-rank-wrap>مرتب‌سازی قراردادها<select data-ccv="sortKey">${SORT_KEYS.map((m) => `<option value="${m.key}">${esc(m.label)}</option>`).join('')}</select></label>
         <label data-ccv-dir-wrap>جهت<select data-ccv="sortDir"><option value="auto">پیش‌فرض</option>${opt(SORT_DIRS, opts.sortDir)}</select></label>
-        <label title="یک کندل از همهٔ کندل‌های گزینش: هر نقطه میانگین وزنی همان نقطه">شاخص ترکیبی<select data-ccv="composite">${opt(COMPOSITE_WEIGHTS, opts.composite)}</select></label>
+        <label title="یک خط افقی از همهٔ کندل‌های گزینش: میانگین وزنی همان نقطه">شاخص ترکیبی<select data-ccv="composite">${opt(COMPOSITE_WEIGHTS, opts.composite)}</select></label>
+        <label data-ccv-comp-point-wrap>خط شاخص روی<select data-ccv="compositePoint">${opt(COMPOSITE_POINTS, opts.compositePoint)}</select></label>
         <label>رنگ بر اساس<select data-ccv="colorBy">${opt(COLOR_BY, opts.colorBy)}</select></label>
         <label>لایهٔ میله پشت کندل‌ها<select data-ccv="bars">${opt(BAR_KEYS, opts.bars)}</select></label>
         <label class="check" data-ccv-barslog-wrap><input type="checkbox" data-ccv="barsLog"> میلهٔ لگاریتمی</label>
@@ -328,31 +330,17 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   // پنجره بیرون می‌زد. حالا جزئیات کامل در پنلی ثابت کنار نمودار می‌نشیند
   // (با پیمایش درونی خودش) و با هاور عوض می‌شود؛ کلیک آن را ثابت می‌کند.
   // راهنمای شناور فقط یک خط است.
-  let hoverIns = '', hoverComposite = false;
+  let hoverIns = '';
   function paintPin() {
     const box = q('[data-ccv-pin]');
     const r = drawable.find((item) => item.ins === (pinned || hoverIns));
-    if (!pinned && hoverComposite) { box.innerHTML = compositeHtml(); return; }
     if (!r) {
-      box.innerHTML = `<p class="ccv-side-empty">موس را روی یک کندل ببر تا همهٔ جزئیاتش اینجا بیاید${opts.composite !== 'none' ? '؛ کندل اولِ نمودار «شاخص ترکیبی» است' : ''}. کلیک، جزئیات را ثابت نگه می‌دارد${opts.clickRemove ? ' — الان «کلیک = حذف» روشن است' : ''}.</p>`;
+      box.innerHTML = `<p class="ccv-side-empty">موس را روی یک کندل ببر تا همهٔ جزئیاتش اینجا بیاید${opts.composite !== 'none' ? '؛ خط افقی پررنگ «شاخص ترکیبی» است' : ''}. کلیک، جزئیات را ثابت نگه می‌دارد${opts.clickRemove ? ' — الان «کلیک = حذف» روشن است' : ''}.</p>`;
       return;
     }
     box.innerHTML = `${pinned ? '<p class="ccv-side-pinned">ثابت شده — برای دیدن کندل‌های دیگر «بستن» را بزن</p>' : ''}${detailHtml(r)}<div class="ccv-pin-actions">${pinned ? `<button type="button" class="ghost" data-ccv-hide="${esc(r.ins)}">حذف این کندل از نمودار</button>${onOpenContract && !past ? '<button type="button" class="ghost" data-ccv-open>دیدن در زنجیره</button>' : ''}<button type="button" class="ghost" data-ccv-unpin>بستن</button>` : '<small>کلیک: ثابت کردن و دکمهٔ حذف</small>'}</div>`;
   }
 
-  /** جزئیات کندل شاخص ترکیبی. */
-  function compositeHtml() {
-    const m = metricOf(opts.metric), c = compositeCandle(drawable, m.key, opts.composite);
-    if (!c) return '';
-    const label = COMPOSITE_WEIGHTS.find(([k]) => k === opts.composite)?.[1] || '';
-    const v = (x) => metricText(m.key, x);
-    const rows = c.shape === 'candle'
-      ? CANDLE_POINTS.map((p) => `<tr><th>${POINT_LABEL[p]}</th><td>${v(c[p])}</td></tr>`).join('')
-      : `<tr><th>${esc(m.short)}</th><td>${v(c.mark)}</td></tr>`;
-    return `<div class="ccv-tip" dir="rtl"><header><b>شاخص ترکیبی</b><span>${esc(label)} روی «${esc(m.label)}» · ${fmt.int(c.n)} قرارداد${c.missingWeight ? ` · ${fmt.int(c.missingWeight)} بی‌وزن کنار ماند` : ''}</span></header>
-      <table><tbody>${rows}</tbody></table>
-      <p>هر نقطهٔ این کندل ${opts.composite === 'median' ? 'میانهٔ' : 'میانگین وزنیِ'} همان نقطه در همهٔ کندل‌های روی نمودار است. شاخص هر نماد و سررسید در جدول زیر نمودار.</p></div>`;
-  }
 
   function hide(ins) {
     if (!ins || opts.hidden.includes(ins)) return;
@@ -362,7 +350,6 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
 
   /** یک خط کوتاه برای راهنمای شناور. */
   function shortTip(p) {
-    if (p.seriesId === 'composite') return `<div dir="rtl" class="ccv-tip"><b>شاخص ترکیبی</b> — جزئیات در پنل کنار نمودار</div>`;
     const r = drawable[p.value?.[7]];
     if (!r) return '';
     const ch = r.points.change.last;
@@ -381,16 +368,13 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       if (!expIdx.has(r.endDate)) expIdx.set(r.endDate, expIdx.size);
     }
     const groups = { ua: uaIdx, exp: expIdx };
-    // «شاخص ترکیبی که انتخاب می‌کنم چند نمودار رسم می‌کند.» حالا یک کندل
-    // است و بس: کندل پهنِ اولِ محور با برچسب «شاخص ترکیبی». جزئیات هر گروه
-    // در جدول زیر نمودار می‌ماند، نه روی خود نمودار.
+    // «شاخص ترکیبی… کندل نباشد، همان خط افقی باشد؛ در منوی کشویی قابل
+    // انتخاب؛ صرفاً یک خط، نه نوار.» یک خط افقی سراسری روی نقطهٔ انتخابی
+    // (آخرین، پایانی، …) از میانگین وزنی همان نقطه. عدد هر گروه در جدول.
     const comp = compositeCandle(drawable, m.key, opts.composite);
-    const off = comp && cat ? 1 : 0;
-    const moneys = drawable.map((r) => r.moneynessPct).filter(Number.isFinite);
-    const compX = cat ? 0 : (moneys.length ? Math.min(...moneys) - Math.max(2, (Math.max(...moneys) - Math.min(...moneys)) * 0.06) : 0);
     const data = drawable.map((r, i) => {
       const s = shapes[i];
-      const v = [cat ? i + off : r.moneynessPct, ax(s.low), ax(s.high), ax(s.open), ax(s.close), ax(s.mark), ax(s.last), i];
+      const v = [cat ? i : r.moneynessPct, ax(s.low), ax(s.high), ax(s.open), ax(s.close), ax(s.mark), ax(s.last), i];
       return v.map((x) => (Number.isFinite(x) ? x : '-'));
     });
     const lows = data.map((d) => d[1]).filter(Number.isFinite), highs = data.map((d) => d[2]).filter(Number.isFinite);
@@ -459,7 +443,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const barAxis = showBars ? backgroundBarAxis(drawable.map((r) => r[opts.bars]), { log: !!opts.barsLog }) : null;
     const barData = barAxis ? drawable.map((r, i) => {
       const v = Number(r[opts.bars]);
-      return [cat ? i + off : r.moneynessPct, Number.isFinite(v) && (!opts.barsLog || v > 0) ? v : '-', i];
+      return [cat ? i : r.moneynessPct, Number.isFinite(v) && (!opts.barsLog || v > 0) ? v : '-', i];
     }) : [];
     const renderBar = (params, api) => {
       const i = api.value(2), r = drawable[i], s = shapes[i];
@@ -481,30 +465,13 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       if (Number.isFinite(ax(u))) refs.push({ yAxis: ax(u), label: { formatter: `پایه ${fmt.pct(u)}٪` }, lineStyle: { color: t.accent, type: 'solid' } });
     }
     if (!cat) refs.push({ xAxis: 0, label: { formatter: 'به پول', position: 'insideStartTop' } });
-    const bands = opts.xMode === 'grouped' ? groupBands(drawable).map((b) => ({ ...b, from: b.from + off, to: b.to + off })) : [];
-    const compData = comp ? [[compX, ax(comp.shape === 'candle' ? Math.min(...CANDLE_POINTS.map((p) => comp[p]).filter(Number.isFinite)) : comp.mark), ax(comp.shape === 'candle' ? Math.max(...CANDLE_POINTS.map((p) => comp[p]).filter(Number.isFinite)) : comp.mark), ax(comp.first), ax(comp.last), ax(comp.shape === 'candle' ? comp.close : comp.mark)].map((x) => (Number.isFinite(x) ? x : '-'))] : [];
-    const renderComposite = (params, api) => {
-      const x = api.value(0);
-      const lo = api.value(1), hi = api.value(2);
-      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
-      const [cx, yLo] = api.coord([x, lo]), [, yHi] = api.coord([x, hi]);
-      const bw = cat ? Math.max(12, Math.min(30, api.size([1, 0])[0] * 0.95)) : 16;
-      const kids = [{ type: 'line', shape: { x1: cx, y1: yLo, x2: cx, y2: yHi }, style: { stroke: t.accent, lineWidth: 2 } }];
-      const o = api.value(3), c = api.value(4), mk = api.value(5);
-      if (Number.isFinite(o) && Number.isFinite(c)) {
-        const [, yo] = api.coord([x, o]), [, yc] = api.coord([x, c]);
-        kids.push({ type: 'rect', shape: { x: cx - bw / 2, y: Math.min(yo, yc), width: bw, height: Math.max(2, Math.abs(yo - yc)) }, style: { fill: c >= o ? t.gain : t.loss, stroke: t.accent, lineWidth: 2.5 } });
-      } else if (Number.isFinite(mk)) {
-        const [, ym] = api.coord([x, mk]);
-        kids.push({ type: 'rect', shape: { x: cx - bw / 2, y: ym - 4, width: bw, height: 8, r: 3 }, style: { fill: t.accent } });
-      }
-      if (Number.isFinite(mk) && Number.isFinite(o)) {
-        const [, ym] = api.coord([x, mk]);
-        kids.push({ type: 'polygon', shape: { points: [[cx, ym - 5], [cx + 5, ym], [cx, ym + 5], [cx - 5, ym]] }, style: { fill: t.warn, stroke: t.panel, lineWidth: 1 } });
-      }
-      kids.push({ type: 'text', style: { text: 'شاخص', x: cx, y: Math.min(yLo, yHi) - 6, fill: t.accent, fontSize: 11, fontWeight: 700, align: 'center', verticalAlign: 'bottom' } });
-      return { type: 'group', children: kids };
-    };
+    const bands = opts.xMode === 'grouped' ? groupBands(drawable) : [];
+    if (comp) {
+      const point = m.shape === 'candle' ? opts.compositePoint : 'mark';
+      const value = comp[point] ?? comp.mark;
+      const pointLabel = m.shape === 'candle' ? COMPOSITE_POINTS.find(([k]) => k === point)?.[1] || '' : '';
+      if (Number.isFinite(ax(value))) refs.push({ yAxis: ax(value), lineStyle: { color: t.accent, type: 'solid', width: 2.5 }, label: { formatter: `شاخص ترکیبی${pointLabel ? ` (${pointLabel})` : ''} ${axisText(m.key, value)}`, color: t.accent, fontSize: 11, fontWeight: 700, position: 'insideStartTop' } });
+    }
     const chartBaseTip = chartBase(t).tooltip;
     const zoomRange = (k) => (zoom.ranges && zoom.sig === zoomSig() ? zoom.ranges[k] || {} : {});
     const barLabel = BAR_KEYS.find(([k]) => k === opts.bars)?.[1] || '';
@@ -514,7 +481,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       // راهنمای شناور یک خط است؛ جزئیات کامل در پنل کنار نمودار.
       tooltip: { ...chartBaseTip, trigger: 'item', confine: true, enterable: false, formatter: (p) => shortTip(p), extraCssText: `${chartBaseTip.extraCssText} max-width: 320px; white-space: normal;` },
       xAxis: [cat
-        ? { type: 'category', data: [...(off ? ['شاخص ترکیبی'] : []), ...drawable.map((r) => r.name)], axisLabel: { rotate: 60, fontSize: 10, color: t.muted, hideOverlap: true }, axisLine: { lineStyle: { color: t.line } }, triggerEvent: true }
+        ? { type: 'category', data: drawable.map((r) => r.name), axisLabel: { rotate: 60, fontSize: 10, color: t.muted, hideOverlap: true }, axisLine: { lineStyle: { color: t.line } }, triggerEvent: true }
         : { type: 'value', scale: true, name: 'فاصله اعمال از پایه ٪', nameLocation: 'middle', nameGap: 28, axisLabel: { color: t.muted, formatter: (v) => axisText('change', v) }, splitLine: { lineStyle: { color: t.lineSoft } }, triggerEvent: true }],
       yAxis: [
         {
@@ -536,7 +503,6 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
           type: 'custom', renderItem: renderBar, data: barData, yAxisIndex: 1, clip: true, silent: true, z: 1,
           dimensions: ['x', 'v', 'i'], encode: { x: 0, y: 1, tooltip: [] },
         }] : []),
-        ...(compData.length ? [{ id: 'composite', type: 'custom', renderItem: renderComposite, data: compData, clip: false, z: 4, dimensions: ['x', 'low', 'high', 'open', 'close', 'mark'], encode: { x: 0, y: [1, 2], tooltip: [] } }] : []),
         {
           id: 'candles', type: 'custom', renderItem, data, clip: !opts.robust, z: 3,
           dimensions: ['x', 'low', 'high', 'open', 'close', 'mark', 'last', 'i'],
@@ -620,7 +586,6 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const seq = ++motherSeq;
     const handle = await mountChart(target, buildMother, {
       onClick: (p) => {
-        if (p.seriesId === 'composite') { pinned = ''; hoverComposite = true; paintPin(); return; }
         const r = p.componentType === 'series' && p.seriesId === 'candles' ? drawable[p.value?.[7]] : null;
         if (!r) return;
         if (opts.clickRemove) { hide(r.ins); return; }
@@ -633,7 +598,6 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       attachAxisDrag(mother.instance);
       mother.instance.on('mouseover', (p) => {
         if (p.componentType !== 'series') return;
-        hoverComposite = p.seriesId === 'composite';
         hoverIns = p.seriesId === 'candles' ? drawable[p.value?.[7]]?.ins || '' : '';
         if (!pinned) paintPin();
       });
@@ -841,7 +805,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   // ── کنترل‌ها ────────────────────────────────────────────────────
   function paintControls(turnover) {
     host.querySelectorAll('[data-ccv-side]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.ccvSide === opts.side)));
-    for (const name of ['top', 'metric', 'xMode', 'sortKey', 'sortDir', 'composite', 'colorBy', 'uaSort', 'bars', 'histMetric', 'histPoint', 'histBins', 'histUnit', 'histWeight', 'histGroup', 'histTails']) {
+    for (const name of ['top', 'metric', 'xMode', 'sortKey', 'sortDir', 'composite', 'compositePoint', 'colorBy', 'uaSort', 'bars', 'histMetric', 'histPoint', 'histBins', 'histUnit', 'histWeight', 'histGroup', 'histTails']) {
       const el = field(name);
       if (el && document.activeElement !== el) el.value = String(opts[name]);
     }
@@ -853,6 +817,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     q('[data-ccv-log-wrap]').title = m.log ? '' : 'این شاخص صفر یا منفی دارد؛ محور لگاریتمی برایش معنی ندارد';
     q('[data-ccv-rank-wrap]').hidden = opts.xMode === 'moneyness';
     q('[data-ccv-dir-wrap]').hidden = opts.xMode === 'moneyness';
+    q('[data-ccv-comp-point-wrap]').hidden = opts.composite === 'none' || m.shape !== 'candle';
     q('[data-ccv-barslog-wrap]').hidden = opts.bars === 'none';
     q('[data-ccv-preset]').innerHTML = `<option value="">—</option>${Object.keys(presets).map((name) => `<option>${esc(name)}</option>`).join('')}`;
 
