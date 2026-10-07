@@ -159,10 +159,14 @@ const usedNames = new Map();
 
 const textOf = (node) => (node?.textContent || '').replace(/\s+/g, ' ').trim();
 
-/** آیا این عنصر نمودار است (نه آیکون، نه کندل کوچک داخل دکمه)؟ */
+/** عنصری که هرگز نمودار نیست: خودِ صفحه و ظرف‌های بزرگ آن. */
+const NEVER_CHART = (node) => !node || node === document.body || node === document.documentElement
+  || node.id === 'stage' || node.matches?.('main, header, nav, aside, .rail, .topbar');
+
+/** آیا این عنصر نمودار است (نه آیکون، نه کندل کوچک داخل دکمه، نه خود صفحه)؟ */
 function chartOf(target) {
   const node = target?.closest?.(CHART_SELECTOR);
-  if (!node || node.closest('.chart-cam, button, .ic, .tab-btn')) return null;
+  if (NEVER_CHART(node) || node.closest('.chart-cam, button, .ic, .tab-btn, header, nav')) return null;
   if (node.tagName?.toLowerCase() === 'svg') {
     // svgِ داخل یک نمودار ECharts مال خودِ ECharts است.
     const host = node.closest('[_echarts_instance_]');
@@ -269,6 +273,8 @@ async function snapshot(node) {
     clone.setAttribute('height', String(height));
     svgText = new XMLSerializer().serializeToString(clone);
   } else {
+    // ظرفِ بزرگ (صدها گره) تصویر نمی‌شود؛ مرورگر را قفل می‌کرد.
+    if (node.querySelectorAll('*').length > 1500) throw new Error('این بخش برای تصویر بیش از حد بزرگ است');
     const clone = node.cloneNode(true);
     inlineHtmlStyles(node, clone);
     clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
@@ -359,8 +365,14 @@ export async function saveChartImage(node, { extraTitle = '' } = {}) {
 
 /** نصب سراسری: دکمهٔ دوربین روی هر نموداری که موس رویش برود. */
 export function installChartImageSaver(root = document.body) {
-  if (!root || root.dataset?.chartImage === 'installed') return () => {};
-  root.dataset.chartImage = 'installed';
+  // ═══ نشانهٔ نصب نباید خودش «نمودار» باشد ═══
+  //
+  // گزارش صاحب پروژه: «برنامه درست کار نمی‌کند، آیکون عکس رفته آن بالا.»
+  // نسخهٔ قبل `data-chart-image` را روی body می‌گذاشت — همان ویژگی‌ای که
+  // نمودار HTML را می‌شناساند. پس کل صفحه «نمودار» شد، دوربین روی دکمهٔ
+  // پوسته در گوشهٔ صفحه نشست، و کلیکش می‌خواست کل صفحه را تصویر کند.
+  if (!root || root.dataset?.chartCam === 'on') return () => {};
+  root.dataset.chartCam = 'on';
   const cam = document.createElement('button');
   cam.type = 'button';
   cam.className = 'chart-cam';
@@ -398,6 +410,6 @@ export function installChartImageSaver(root = document.body) {
     root.removeEventListener('mouseover', onOver);
     window.removeEventListener('scroll', onScroll, true);
     cam.remove();
-    delete root.dataset.chartImage;
+    delete root.dataset.chartCam;
   };
 }

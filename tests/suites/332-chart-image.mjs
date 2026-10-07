@@ -49,10 +49,15 @@ group('۳۳۲. سیم‌کشی');
   const candles = readSrc('../ui/contract-candles-view.mjs');
   check('یک بار در app.mjs نصب می‌شود (همهٔ تب‌ها، نمودار تازهٔ فردا هم)', app.includes("import { installChartImageSaver } from '/ui/chart-image.mjs';") && app.includes('installChartImageSaver();'));
   check('هر سه گونهٔ نمودار: ECharts، SVG، میله‌ای HTML', mod.includes('const CHART_SELECTOR = `[_echarts_instance_], svg, ${HTML_CHARTS}`;') && ['.decision-bars', '.live-breadth-bars', '.live-mover-bars', '.market-bars', '.vr-gauges'].every((c) => mod.includes(c)) && mod.includes('getDataURL(') && mod.includes('<foreignObject'));
-  check('آیکون‌ها و دکمه‌ها نمودار شمرده نمی‌شوند', mod.includes("node.closest('.chart-cam, button, .ic, .tab-btn')") && mod.includes('box.width >= MIN_W && box.height >= MIN_H'));
+  check('آیکون‌ها و دکمه‌ها نمودار شمرده نمی‌شوند', mod.includes("node.closest('.chart-cam, button, .ic, .tab-btn, header, nav')") && mod.includes('box.width >= MIN_W && box.height >= MIN_H'));
   check('آخرین داده در نوار زیرِ نمودار، نه رویش', mod.includes('const y0 = headH + legendH + shot.height;') && mod.includes('canvas.height = (shot.height + headH + legendH + footH) * ratio;'));
   check('نمودار SVGِ زمانی آخرین نقطه‌اش را می‌گذارد', track.includes("setAttribute('data-chart-latest', latestNote)") && readSrc('../ui/tabs/live-market.mjs').includes("svg.setAttribute('data-chart-latest',"));
   check('راهنمای رنگِ بیرون از SVG در تصویر می‌آید', mod.includes('/legend/.test(String(c.className') && mod.includes('const legendH = info.legend?.length ? 22 : 0;'));
   check('بوم آلوده: SVG ذخیره می‌شود، نه شکست بی‌صدا', mod.includes("saveBlob(new Blob([shot.svgText], { type: 'image/svg+xml' }), `${name}.svg`);"));
   check('دکمه‌های تب کندل هم از همین مسیر', candles.includes('await saveChartImage(q(') && !candles.includes('contract-${kind'));
+  // «برنامه درست کار نمی‌کند، آیکون عکس رفته آن بالا»: نشانهٔ نصب روی body همان
+  // ویژگیِ شناسایی نمودار HTML بود و کل صفحه «نمودار» شد.
+  check('نشانهٔ نصب با گزینشگر نمودار یکی نیست', mod.includes("root.dataset.chartCam = 'on';") && !mod.includes("root.dataset.chartImage = 'installed'") && !/CHART_SELECTOR[^\n]*chart-cam/.test(mod));
+  check('صفحه، body و ظرف‌های بزرگ هرگز نمودار نیستند', mod.includes("node === document.body || node === document.documentElement") && mod.includes("node.id === 'stage'"));
+  check('ظرف HTMLِ بزرگ تصویر نمی‌شود (قفل مرورگر)', mod.includes("node.querySelectorAll('*').length > 1500"));
 }
