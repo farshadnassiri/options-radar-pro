@@ -57,7 +57,8 @@ check('کندل امروز بازه واقعی را دسته‌ای می‌گی�
   && candleUi245.includes('records.filter((row) => row.valid)'));
 check('نمودار بازه، هر پنج قیمت و سه مبنای مرتب‌سازی را دارد',
   ['کمینه', 'اولین', 'آخرین', 'پایانی', 'بیشینه'].every((label) => candleUi245.includes(label))
-  && ['value', 'volume', 'oi'].every((key) => candleUi245.includes(`${key}: '`)));
+  && ['value', 'volume', 'oi'].every((key) => candleCore245.includes(`{ key: '${key}', label:`))
+  && candleUi245.includes('SORT_KEYS.map((k) =>'));
 check('بازه امروز به کندل تعاملی تبدیل شده و درصد آخرین و پایانی را جدا نشان می‌دهد',
   candleUi245.includes('کندل قیمت امروز قراردادها') && candleUi245.includes('mountCandlePoints')
   && candleUi245.includes('آخرین ${fmt.pct(lastPct)}٪') && candleUi245.includes('پایانی ${fmt.pct(closePct)}٪'));

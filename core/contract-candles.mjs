@@ -281,25 +281,62 @@ export const X_MODES = Object.freeze([
   { key: 'grouped', label: 'نماد ← سررسید ← اعمال' },
   { key: 'ranked', label: 'رتبه' },
 ]);
-export const RANK_KEYS = Object.freeze([
-  { key: 'metric', label: 'همان شاخص محور' },
+// ═══ مرتب‌سازی ═══
+//
+// «امکان سورت قراردادها بر اساس آیتم‌های مختلف: ارزش معاملات، حجم،
+// قراردادهای باز و…» در چیدمان «رتبه» کل محور، و در چیدمان گروهی درونِ هر
+// نماد/سررسید، با همین کلید مرتب می‌شود. عددِ نامعلوم همیشه ته صف است،
+// چه صعودی چه نزولی — «نمی‌دانیم» نه بزرگ‌ترین است نه کوچک‌ترین.
+export const SORT_KEYS = Object.freeze([
+  { key: 'strike', label: 'قیمت اعمال (کال پیش از پوت)' },
+  { key: 'metric', label: 'همان شاخص محور عمودی' },
   { key: 'value', label: 'ارزش معاملات' },
   { key: 'volume', label: 'حجم' },
+  { key: 'trades', label: 'تعداد معامله' },
   { key: 'oi', label: 'موقعیت باز' },
+  { key: 'oiChange', label: 'تغییر موقعیت باز' },
+  { key: 'oiChangePct', label: 'تغییر موقعیت باز ٪' },
+  { key: 'change', label: 'درصد تغییر آخرین' },
+  { key: 'dayRangePct', label: 'دامنه نوسان روز ٪' },
+  { key: 'ivPct', label: 'تلاطم ضمنی آخرین' },
+  { key: 'delta', label: 'دلتا' },
+  { key: 'effectiveLeverage', label: 'اهرم مؤثر' },
+  { key: 'moneynessPct', label: 'فاصله اعمال از پایه ٪' },
+  { key: 'breakevenGapPct', label: 'فاصله تا سربه‌سر ٪' },
+  { key: 'beVsChainPct', label: 'فاصله از سربه‌سر وزنی ٪' },
+  { key: 'days', label: 'روز مانده' },
 ]);
+/** سازگاری: کلیدهای چیدمان رتبهٔ نسخهٔ اول. */
+export const RANK_KEYS = SORT_KEYS;
 
-/** ترتیب رکوردها برای محور دسته‌ای. */
-export function orderCandles(records = [], { xMode = 'grouped', rankKey = 'value', metric = 'change' } = {}) {
+/** عدد کلید مرتب‌سازی یک رکورد. */
+export function sortValue(r, key, metric = 'change') {
+  if (key === 'metric') return metricValue(r, metric);
+  if (key === 'change') return num(r.points?.change?.last);
+  return num(r[key]);
+}
+
+/**
+ * ترتیب رکوردها. `sortKey`/`sortDir` (`desc` پیش‌فرض، جز قیمت اعمال که
+ * صعودی است) در «رتبه» روی کل محور و در «گروهی» درون هر نماد/سررسید.
+ * `rankKey` نام قدیمی همان `sortKey` است.
+ */
+export function orderCandles(records = [], { xMode = 'grouped', sortKey, rankKey, sortDir, metric = 'change' } = {}) {
   const list = [...records];
-  const known = (v) => (Number.isFinite(v) ? v : -Infinity);
-  if (xMode === 'moneyness') return list.sort((a, b) => known(a.moneynessPct) - known(b.moneynessPct));
-  if (xMode === 'ranked') {
-    const val = (r) => (rankKey === 'metric' ? metricValue(r, metric) : num(r[rankKey]));
-    return list.sort((a, b) => known(val(b)) - known(val(a)) || a.name.localeCompare(b.name, 'fa'));
-  }
+  const key = sortKey || rankKey || (xMode === 'ranked' ? 'value' : 'strike');
+  const dir = sortDir === 'asc' || sortDir === 'desc' ? sortDir : key === 'strike' ? 'asc' : 'desc';
+  const sign = dir === 'asc' ? 1 : -1;
+  const byKey = (a, b) => {
+    if (key === 'strike') return sign * ((a.kind === b.kind ? 0 : a.kind === 'call' ? -1 : 1) || a.strike - b.strike);
+    const va = sortValue(a, key, metric), vb = sortValue(b, key, metric);
+    const fa = Number.isFinite(va), fb = Number.isFinite(vb);
+    if (fa !== fb) return fa ? -1 : 1;
+    return (fa ? sign * (va - vb) : 0) || a.name.localeCompare(b.name, 'fa');
+  };
+  if (xMode === 'moneyness') return list.sort((a, b) => (num(a.moneynessPct) || 0) - (num(b.moneynessPct) || 0));
+  if (xMode === 'ranked') return list.sort(byKey);
   return list.sort((a, b) => a.uaName.localeCompare(b.uaName, 'fa') || String(a.uaIns).localeCompare(String(b.uaIns))
-    || String(a.endDate).localeCompare(String(b.endDate))
-    || (a.kind === b.kind ? 0 : a.kind === 'call' ? -1 : 1) || a.strike - b.strike);
+    || String(a.endDate).localeCompare(String(b.endDate)) || byKey(a, b));
 }
 
 /** نوارهای گروه برای چیدمان گروهی: از کدام اندیس تا کدام، کدام نماد و سررسید. */
@@ -812,4 +849,74 @@ export function chainBreakevens(contracts = []) {
   const out = new Map();
   for (const [key, rows] of groups) out.set(key, weightedMean(rows, (r) => contractBreakeven(r), (r) => num(r.value)));
   return out;
+}
+
+// ═══ شاخص ترکیبی: یک کندل از همهٔ کندل‌ها ═══
+//
+// «چون چندین کندل داریم چطور یک شاخص از همه‌شان بسازیم؟ مثلاً میانگین وزنی
+// قیمت پایانی، میانگین وزنی قرارداد باز و…» هر نقطهٔ کندل ترکیبی، میانگینِ
+// وزنیِ همان نقطه در کندل‌های گزینش است — روی خودِ شاخص محور (درصد تغییر،
+// تلاطم، …)، نه روی قیمت ریالی که بین نمادها قابل جمع نیست. وزن قابل انتخاب
+// است؛ قراردادی که وزن یا عدد آن نقطه را ندارد در همان نقطه شمرده نمی‌شود و
+// شمارش جدا برمی‌گردد.
+export const COMPOSITE_WEIGHTS = Object.freeze([
+  ['none', 'بدون شاخص ترکیبی'],
+  ['value', 'میانگین وزنی با ارزش معاملات'],
+  ['volume', 'میانگین وزنی با حجم'],
+  ['oi', 'میانگین وزنی با موقعیت باز'],
+  ['trades', 'میانگین وزنی با تعداد معامله'],
+  ['equal', 'میانگین ساده (وزن برابر)'],
+  ['median', 'میانه (مقاوم در برابر پرت)'],
+]);
+
+export function compositeCandle(records = [], metricKey = 'change', weight = 'value') {
+  if (!weight || weight === 'none') return null;
+  const m = metricOf(metricKey);
+  const shaped = records.map((r) => ({ r, s: metricShape(r, m.key) })).filter((x) => x.s);
+  const points = m.shape === 'candle' ? CANDLE_POINTS : ['mark'];
+  const valueAt = (s, p) => (m.shape === 'candle' ? s.marks[p] : s.mark);
+  const wOf = (r) => (weight === 'equal' || weight === 'median' ? 1 : num(r[weight]));
+  const out = { metric: m.key, weight, shape: m.shape === 'candle' ? 'candle' : 'point', n: 0, missingWeight: 0 };
+  let used = new Set();
+  for (const p of points) {
+    const pairs = shaped.map(({ r, s }) => [valueAt(s, p), wOf(r), r.ins]).filter(([v, w]) => Number.isFinite(v) && Number.isFinite(w) && w > 0);
+    if (!pairs.length) { out[p] = NaN; continue; }
+    if (weight === 'median') out[p] = quantile(pairs.map(([v]) => v).sort((a, b) => a - b), 0.5);
+    else {
+      const W = pairs.reduce((a, [, w]) => a + w, 0);
+      out[p] = pairs.reduce((a, [v, w]) => a + v * w, 0) / W;
+    }
+    for (const [, , ins] of pairs) used.add(ins);
+  }
+  out.n = used.size;
+  out.missingWeight = shaped.length - used.size;
+  if (m.shape !== 'candle') { out.close = out.mark; out.last = out.mark; }
+  out.weightTotal = weight === 'equal' || weight === 'median' ? used.size : shaped.filter(({ r }) => used.has(r.ins)).reduce((a, { r }) => a + num(r[weight]), 0);
+  return out;
+}
+
+/** همان شاخص ترکیبی برای هر نماد/سررسید جدا. */
+export function compositeByGroup(records = [], metricKey = 'change', weight = 'value') {
+  const groups = new Map();
+  for (const r of records) {
+    const key = `${r.uaIns}:${r.endDate}`;
+    if (!groups.has(key)) groups.set(key, { key, uaIns: r.uaIns, uaName: r.uaName, endDate: r.endDate, rows: [] });
+    groups.get(key).rows.push(r);
+  }
+  return [...groups.values()].map((g) => ({ ...g, composite: compositeCandle(g.rows, metricKey, weight), count: g.rows.length, rows: undefined }));
+}
+
+/**
+ * محور میلهٔ پس‌زمینه: میله‌ها پایینِ همان کادر نمودار اصلی می‌نشینند و
+ * بلندترینشان `share` (پیش‌فرض ۳۰٪) ارتفاع کادر را می‌گیرد، تا کندل‌ها
+ * دیده بمانند. خروجی کمینه/بیشینهٔ محور دوم (لگاریتمی یا خطی).
+ */
+export function backgroundBarAxis(values = [], { log = true, share = 0.3 } = {}) {
+  const list = values.map(num).filter((v) => Number.isFinite(v) && (log ? v > 0 : v >= 0));
+  if (!list.length) return null;
+  const hi = Math.max(...list);
+  if (!log) return { min: 0, max: hi / share };
+  const lo = Math.min(...list);
+  const base = lo < hi ? lo / 1.5 : hi / 10;
+  return { min: base, max: base * (hi / base) ** (1 / share) };
 }

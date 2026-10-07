@@ -154,9 +154,11 @@ group('۳۲۹. سیم‌کشی رابط');
   check('پوت توخالی نیست و رنگ جدا از توکن دارد', !view.includes('hollow') && view.includes("'--candle-put-up'") && /--candle-put-up: var\(--cmp1\);[\s\S]*--candle-put-up: var\(--cmp1\);/.test(css));
   check('دستگیره‌ها هم‌زمان اعمال می‌شوند (رویداد input، یک بار در فریم)', view.includes("if (el.dataset.ccvRange) {") && view.includes('paintSoon();'));
   check('کلیک = حذف، حذف خودکار، بازگرداندن', view.includes('if (opts.clickRemove) { hide(r.ins); return; }') && view.includes('data-ccv-auto-outliers') && view.includes('data-ccv-unhide-all'));
-  check('میلهٔ زیر کندل در شبکهٔ دوم با همان بزرگ‌نمایی', view.includes("xAxisIndex: showBars ? [0, 1] : [0]") && view.includes("renderItem: renderBar"));
+  // دور سوم: میله دیگر شبکهٔ جدا ندارد، لایهٔ پشت همان کادر است (آزمون ۳۳۰).
+  check('میله با همان بزرگ‌نمایی کندل‌ها', view.includes("renderItem: renderBar") && view.includes("xAxisIndex: [0]"));
   check('آیکون ذخیرهٔ تصویر و تمام‌صفحه بالای نمودار مادر', view.includes("icon('camera')") && view.includes("icon('expand')"));
-  check('کندل در هر نما و ارتفاع', view.includes('data-ccv="perView"') && view.includes('data-ccv="height"'));
+  // دور سوم: «ارتفاع نمودار» و «کندل در هر نما» به خواستهٔ صاحب پروژه برداشته شد.
+  check('ارتفاع و کندل در هر نما دیگر نیست', !view.includes('data-ccv="perView"') && !view.includes('data-ccv="height"'));
   check('سربه‌سر وزنی زنجیره در راهنمای هاور', view.includes('سربه‌سر وزنی زنجیره') && view.includes('فاصله از سربه‌سر وزنی'));
   check('حالت گذشته هیچ‌وقت /api/infos نمی‌زند', view.includes('if (past || fetching || !isVisible()) return;'));
 }

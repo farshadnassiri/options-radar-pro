@@ -27,7 +27,7 @@ import { rangeHeading } from '../core/range-info.mjs';
 import { pctVsYesterday } from '../core/price-change.mjs';
 import { IV_WHY_LABEL } from '../core/live-market.mjs';
 import {
-  CANDLE_POINTS, POINT_LABEL, CANDLE_METRICS, X_MODES, RANK_KEYS, metricOf, useLog, toAxis, fromAxis, logTicks,
+  CANDLE_POINTS, POINT_LABEL, CANDLE_METRICS, X_MODES, SORT_KEYS, sortValue, COMPOSITE_WEIGHTS, compositeCandle, compositeByGroup, backgroundBarAxis, metricOf, useLog, toAxis, fromAxis, logTicks,
   metricShape, candleRecord, underlyingDay, filterCandles, underlyingTurnover, orderCandles,
   groupBands, candleStats, flagUnusual, candleNarrative, staleInfoIds, histogram,
   SLIDER_FIELDS, SLIDER_STEPS, sliderScale, applyRanges, outlierIds, robustExtent, HIST_WEIGHTS, HIST_GROUPS, candleSummary, chainBreakevens, chainKey,
@@ -48,19 +48,18 @@ const LIST_STEP = 40;
 const COLOR_BY = [['direction', 'جهت · کال سبز/قرمز، پوت بنفش/نارنجی'], ['kind', 'کال و پوت'], ['underlying', 'نماد پایه'], ['expiry', 'سررسید']];
 const HIST_POINTS = [['last', 'آخرین'], ['close', 'پایانی'], ['first', 'اولین'], ['low', 'کمینه'], ['high', 'بیشینه'], ['range', 'طول کندل (بیشینه − کمینه)']];
 const BAR_KEYS = [['none', 'بدون میله'], ['value', 'ارزش معاملات'], ['volume', 'حجم'], ['oi', 'موقعیت باز'], ['trades', 'تعداد معامله']];
-const HEIGHTS = [[560, 'معمولی'], [760, 'بلند'], [1000, 'خیلی بلند']];
-const PER_VIEW = [[0, 'همه در یک نما'], [30, '۳۰ کندل'], [60, '۶۰ کندل'], [100, '۱۰۰ کندل'], [150, '۱۵۰ کندل']];
+const SORT_DIRS = [['desc', 'نزولی'], ['asc', 'صعودی']];
 const TAILS = [[0, 'بی‌برش'], [0.01, '۱٪ هر سر'], [0.02, '۲٪ هر سر'], [0.05, '۵٪ هر سر']];
 
 const DEFAULTS = {
-  side: 'all', metric: 'change', log: true, xMode: 'grouped', rankKey: 'value', colorBy: 'direction',
+  side: 'all', metric: 'change', log: true, xMode: 'grouped', sortKey: 'strike', sortDir: 'auto', composite: 'value', colorBy: 'direction',
   underlyings: [], dates: [], expiries: [], top: 0, unusualOnly: false, uaSort: 'value', uaSearch: '',
-  ranges: {}, hidden: [], clickRemove: false, robust: false, bars: 'value', barsLog: true, height: 560, perView: 60,
+  ranges: {}, hidden: [], clickRemove: false, robust: false, bars: 'value', barsLog: true,
   histMetric: 'change', histPoint: 'last', histBins: 12, histWidth: 0, histUnit: 'contract', histWeight: 'count',
   histGroup: 'kind', histTails: 0.02, histPercent: false, histLines: true, histKde: true, histCum: false,
-  listSort: 'value',
+  listSort: 'value', listDir: 'desc',
 };
-const FILTER_KEYS = ['side', 'underlyings', 'dates', 'expiries', 'top', 'unusualOnly', 'ranges', 'metric', 'log', 'xMode', 'rankKey', 'colorBy', 'bars'];
+const FILTER_KEYS = ['side', 'underlyings', 'dates', 'expiries', 'top', 'unusualOnly', 'ranges', 'metric', 'log', 'xMode', 'sortKey', 'sortDir', 'composite', 'colorBy', 'bars'];
 
 /** برچسب محور: بی دنبالهٔ «٫۰۰»؛ عدد کوچک یک یا دو رقم اعشار. */
 function axisText(metric, value, decimals = null) {
@@ -98,7 +97,10 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   const readOpts = () => {
     try {
       const saved = JSON.parse(localStorage.getItem(storeKey) || '{}');
-      return { ...DEFAULTS, ...(saved && typeof saved === 'object' ? saved : {}) };
+      const body = saved && typeof saved === 'object' ? saved : {};
+      // نسخهٔ پیشین «رتبه بر» داشت؛ همان انتخاب به مرتب‌سازی تازه می‌رود.
+      if (body.rankKey && !body.sortKey) body.sortKey = body.rankKey;
+      return { ...DEFAULTS, ...body };
     } catch { return { ...DEFAULTS }; }
   };
   const readPresets = () => {
@@ -165,12 +167,12 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
         <label>محور عمودی<select data-ccv="metric">${CANDLE_METRICS.map((m) => `<option value="${m.key}">${esc(m.label)}</option>`).join('')}</select></label>
         <label class="check" data-ccv-log-wrap><input type="checkbox" data-ccv="log"> محور لگاریتمی</label>
         <label>محور افقی<select data-ccv="xMode">${X_MODES.map((m) => `<option value="${m.key}">${esc(m.label)}</option>`).join('')}</select></label>
-        <label data-ccv-rank-wrap>رتبه بر<select data-ccv="rankKey">${RANK_KEYS.map((m) => `<option value="${m.key}">${esc(m.label)}</option>`).join('')}</select></label>
+        <label data-ccv-rank-wrap>مرتب‌سازی قراردادها<select data-ccv="sortKey">${SORT_KEYS.map((m) => `<option value="${m.key}">${esc(m.label)}</option>`).join('')}</select></label>
+        <label data-ccv-dir-wrap>جهت<select data-ccv="sortDir"><option value="auto">پیش‌فرض</option>${opt(SORT_DIRS, opts.sortDir)}</select></label>
+        <label title="یک کندل از همهٔ کندل‌های گزینش: هر نقطه میانگین وزنی همان نقطه">شاخص ترکیبی<select data-ccv="composite">${opt(COMPOSITE_WEIGHTS, opts.composite)}</select></label>
         <label>رنگ بر اساس<select data-ccv="colorBy">${opt(COLOR_BY, opts.colorBy)}</select></label>
-        <label>میلهٔ زیر هر کندل<select data-ccv="bars">${opt(BAR_KEYS, opts.bars)}</select></label>
+        <label>لایهٔ میله پشت کندل‌ها<select data-ccv="bars">${opt(BAR_KEYS, opts.bars)}</select></label>
         <label class="check" data-ccv-barslog-wrap><input type="checkbox" data-ccv="barsLog"> میلهٔ لگاریتمی</label>
-        <label>ارتفاع نمودار<select data-ccv="height">${opt(HEIGHTS, opts.height)}</select></label>
-        <label title="کندل‌ها پهن می‌مانند و با نوار پایین یا چرخ موس جابه‌جا می‌شوی">کندل در هر نما<select data-ccv="perView">${opt(PER_VIEW, opts.perView)}</select></label>
       </div>
       <details class="ccv-sliders-box" open><summary>فیلترهای کشویی — همان لحظه اعمال می‌شوند <button type="button" class="ghost" data-ccv-ranges-reset>بازنشانی همه</button></summary>
         <div class="ccv-sliders" data-ccv-sliders></div>
@@ -185,6 +187,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       </div>
       <div class="ccv-legend" data-ccv-legend></div>
       <div class="ccv-chart" data-ccv-chart="mother"></div>
+      <div class="ccv-composite" data-ccv-composite></div>
       <div class="ccv-summary" data-ccv-summary></div>
       <div class="ccv-pin" data-ccv-pin hidden></div>
       <div class="ccv-stats" data-ccv-stats></div>
@@ -408,8 +411,14 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       return { type: 'group', children: kids };
     };
 
-    // میلهٔ ارزش/حجم/… زیر هر کندل، با همان رنگ و همان جای افقی.
-    const barData = showBars ? drawable.map((r, i) => {
+    // ── لایهٔ میله پشت کندل‌ها ─────────────────────────────────────
+    //
+    // «میلهٔ زیر هر کندل جدا نباشد؛ در همان نمودار اصلی، لایه‌ای پشت کادر.»
+    // محور دوم پنهان است و طوری اندازه می‌گیرد که بلندترین میله ۳۰٪ پایین
+    // کادر را بگیرد (`backgroundBarAxis`)؛ میله کم‌رنگ و بی‌واکنش است تا هاور
+    // و کلیک همیشه به خودِ کندل برسد.
+    const barAxis = showBars ? backgroundBarAxis(drawable.map((r) => r[opts.bars]), { log: !!opts.barsLog }) : null;
+    const barData = barAxis ? drawable.map((r, i) => {
       const v = Number(r[opts.bars]);
       return [cat ? i : r.moneynessPct, Number.isFinite(v) && (!opts.barsLog || v > 0) ? v : '-', i];
     }) : [];
@@ -419,9 +428,9 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       if (!r || !Number.isFinite(v)) return null;
       const box = params.coordSys;
       const [cx, y] = api.coord([api.value(0), v]);
-      const bw = cat ? Math.max(2, Math.min(14, api.size([1, 0])[0] * 0.62)) : 6;
+      const bw = cat ? Math.max(2, Math.min(18, api.size([1, 0])[0] * 0.86)) : 8;
       const bottom = box.y + box.height, top = Math.max(box.y, Math.min(bottom - 1, y));
-      return { type: 'rect', shape: { x: cx - bw / 2, y: top, width: bw, height: bottom - top }, style: { fill: colorOf(r, s, t, groups), opacity: 0.75 } };
+      return { type: 'rect', shape: { x: cx - bw / 2, y: top, width: bw, height: bottom - top }, style: { fill: colorOf(r, s, t, groups), opacity: 0.2 } };
     };
 
     // خط‌های مرجع: صفر، و تغییر خودِ پایه وقتی فقط یک نماد هست.
@@ -433,66 +442,133 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       if (Number.isFinite(ax(u))) refs.push({ yAxis: ax(u), label: { formatter: `پایه ${fmt.pct(u)}٪` }, lineStyle: { color: t.accent, type: 'solid' } });
     }
     if (!cat) refs.push({ xAxis: 0, label: { formatter: 'به پول', position: 'insideStartTop' } });
+    // ── شاخص ترکیبی: نوار کمینه تا بیشینه و خط‌های اولین/آخرین/پایانی ──
+    const comp = compositeCandle(drawable, m.key, opts.composite);
+    const compAreas = [];
+    if (comp) {
+      const label = COMPOSITE_WEIGHTS.find(([k]) => k === opts.composite)?.[1] || '';
+      const line = (v, name, color, type, width = 2) => (Number.isFinite(ax(v)) ? { yAxis: ax(v), lineStyle: { color, type, width }, label: { formatter: `شاخص ${name} ${axisText(m.key, v)}`, color, fontSize: 10, position: 'insideEndTop' } } : null);
+      if (comp.shape === 'candle') {
+        refs.push(...[line(comp.last, 'آخرین', t.accent, 'solid', 2.4), line(comp.first, 'اولین', t.accent, 'dotted', 1.5), line(comp.close, 'پایانی', t.warn, 'dashed', 1.5)].filter(Boolean));
+        if (Number.isFinite(ax(comp.low)) && Number.isFinite(ax(comp.high))) compAreas.push([{ yAxis: ax(comp.low), itemStyle: { color: t.accentSoft, opacity: 0.45 }, label: { show: true, position: 'insideTopLeft', color: t.muted, fontSize: 10, formatter: `${label}: کمینه ${axisText(m.key, comp.low)} تا بیشینه ${axisText(m.key, comp.high)}` } }, { yAxis: ax(comp.high) }]);
+      } else {
+        const l = line(comp.mark, label, t.accent, 'solid', 2.4);
+        if (l) refs.push(l);
+      }
+      // در چیدمان گروهی، آخرینِ ترکیبیِ هر نماد/سررسید روی همان نوارِ گروه.
+      if (opts.xMode === 'grouped') {
+        for (const b of groupBands(drawable)) {
+          const g = compositeCandle(drawable.slice(b.from, b.to + 1), m.key, opts.composite);
+          const v = ax(g?.last);
+          if (Number.isFinite(v) && b.to > b.from) refs.push([{ coord: [b.from, v], lineStyle: { color: t.ink, width: 2, type: 'solid' }, label: { show: false } }, { coord: [b.to, v] }]);
+        }
+      }
+    }
     const bands = opts.xMode === 'grouped' ? groupBands(drawable) : [];
     const chartBaseTip = chartBase(t).tooltip;
-    // «کندل در هر نما»: بدون بزرگ‌نمایی دستی، پنجرهٔ افقی از اول همین‌قدر
-    // کندل نشان می‌دهد تا کندل‌ها پهن و قابل مقایسه بمانند؛ بقیه با نوار.
-    const perView = Number(opts.perView) || 0;
-    const firstWindow = perView && drawable.length > perView ? { start: 0, end: (perView / drawable.length) * 100 } : {};
-    const zoomRange = (k) => (zoom.ranges && zoom.sig === zoomSig() ? zoom.ranges[k] || {} : (k < 2 ? firstWindow : {}));
-    const xAxisOf = (gridIndex, labels) => (cat
-      ? { type: 'category', gridIndex, data: drawable.map((r) => r.name), axisLabel: labels ? { rotate: 60, fontSize: 10, color: t.muted, hideOverlap: true } : { show: false }, axisTick: { show: labels }, axisLine: { lineStyle: { color: t.line } } }
-      : { type: 'value', gridIndex, scale: true, ...(labels ? { name: 'فاصله اعمال از پایه ٪', nameLocation: 'middle', nameGap: 28 } : {}), axisLabel: labels ? { color: t.muted, formatter: (v) => axisText('change', v) } : { show: false }, splitLine: { lineStyle: { color: t.lineSoft } } });
+    const zoomRange = (k) => (zoom.ranges && zoom.sig === zoomSig() ? zoom.ranges[k] || {} : {});
     const barLabel = BAR_KEYS.find(([k]) => k === opts.bars)?.[1] || '';
     const bottomPad = cat ? 104 : 72;
     return {
-      grid: showBars
-        ? [{ left: 64, right: 54, top: 30, bottom: `${cat ? 38 : 34}%` }, { left: 64, right: 54, height: '18%', bottom: bottomPad }]
-        : [{ left: 64, right: 54, top: 30, bottom: bottomPad }],
-      tooltip: { ...chartBaseTip, trigger: 'item', confine: true, enterable: false, formatter: (p) => detailHtml(drawable[p.value?.[p.seriesIndex === 1 ? 2 : 7]] || drawable[0]), extraCssText: `${chartBaseTip.extraCssText} max-width: 460px; white-space: normal;` },
-      xAxis: showBars ? [xAxisOf(0, false), xAxisOf(1, true)] : [xAxisOf(0, true)],
+      grid: [{ left: 64, right: 54, top: 30, bottom: bottomPad }],
+      tooltip: { ...chartBaseTip, trigger: 'item', confine: true, enterable: false, formatter: (p) => detailHtml(drawable[p.value?.[7]] || drawable[0]), extraCssText: `${chartBaseTip.extraCssText} max-width: 460px; white-space: normal;` },
+      xAxis: [cat
+        ? { type: 'category', data: drawable.map((r) => r.name), axisLabel: { rotate: 60, fontSize: 10, color: t.muted, hideOverlap: true }, axisLine: { lineStyle: { color: t.line } }, triggerEvent: true }
+        : { type: 'value', scale: true, name: 'فاصله اعمال از پایه ٪', nameLocation: 'middle', nameGap: 28, axisLabel: { color: t.muted, formatter: (v) => axisText('change', v) }, splitLine: { lineStyle: { color: t.lineSoft } }, triggerEvent: true }],
       yAxis: [
         {
-          type: 'value', gridIndex: 0, scale: true, axisLine: { onZero: false }, name: m.short + (L ? ' · لگاریتمی' : '') + (robust ? ' · مقاوم' : ''), nameTextStyle: { color: t.muted },
+          type: 'value', scale: true, axisLine: { onZero: false }, name: m.short + (L ? ' · لگاریتمی' : '') + (robust ? ' · مقاوم' : ''), nameTextStyle: { color: t.muted },
           ...(robust ? { min: robust.lo, max: robust.hi } : {}),
           axisLabel: { color: t.muted, formatter: (v) => axisText(m.key, fromAxis(m, v, opts.log)), ...(ticks ? { customValues: ticks } : {}) },
           ...(ticks ? { axisTick: { customValues: ticks } } : {}),
-          splitLine: { lineStyle: { color: t.lineSoft } },
+          splitLine: { lineStyle: { color: t.lineSoft } }, triggerEvent: true,
         },
-        ...(showBars ? [{
-          type: opts.barsLog ? 'log' : 'value', gridIndex: 1, name: barLabel, nameTextStyle: { color: t.muted, fontSize: 10 },
-          axisLabel: { color: t.muted, fontSize: 10, formatter: (v) => (opts.bars === 'value' ? fmt.mrial(v) : fmt.int(v)) },
-          splitLine: { lineStyle: { color: t.lineSoft } },
-        }] : []),
+        ...(barAxis ? [{ type: opts.barsLog ? 'log' : 'value', min: barAxis.min, max: barAxis.max, show: false, name: barLabel }] : []),
       ],
       dataZoom: [
-        { type: 'inside', xAxisIndex: showBars ? [0, 1] : [0], ...zoomRange(0) },
-        { type: 'slider', xAxisIndex: showBars ? [0, 1] : [0], height: 16, bottom: 8, ...zoomRange(1) },
-        { type: 'slider', yAxisIndex: 0, width: 14, right: 8, ...zoomRange(2) },
+        { type: 'inside', xAxisIndex: [0], ...zoomRange(0) },
+        { type: 'slider', xAxisIndex: [0], height: 16, bottom: 8, ...zoomRange(1) },
+        { type: 'slider', yAxisIndex: 0, width: 14, right: 8, filterMode: 'none', ...zoomRange(2) },
       ],
-      series: [{
-        type: 'custom', renderItem, data, clip: !opts.robust, xAxisIndex: 0, yAxisIndex: 0,
-        dimensions: ['x', 'low', 'high', 'open', 'close', 'mark', 'last', 'i'],
-        encode: { x: 0, y: [1, 2, 5, 6], tooltip: [] },
-        markLine: refs.length ? { silent: true, symbol: 'none', lineStyle: { color: t.muted, type: 'dashed' }, label: { color: t.muted, fontSize: 10 }, data: refs } : undefined,
-        markArea: bands.length > 1 ? {
-          silent: true,
-          data: bands.filter((_, i) => i % 2 === 0).map((b) => [
-            { xAxis: b.from, itemStyle: { color: t.accentSoft, opacity: 0.35 }, label: { show: bands.length <= 30, position: 'insideTop', color: t.muted, fontSize: 10, formatter: `${b.uaName} ${dateLabel(b.endDate)}` } },
-            { xAxis: b.to },
-          ]),
-        } : undefined,
-      }, ...(showBars ? [{
-        type: 'custom', renderItem: renderBar, data: barData, xAxisIndex: 1, yAxisIndex: 1, clip: true,
-        dimensions: ['x', 'v', 'i'], encode: { x: 0, y: 1, tooltip: [] },
-      }] : [])],
+      series: [
+        ...(barAxis ? [{
+          type: 'custom', renderItem: renderBar, data: barData, yAxisIndex: 1, clip: true, silent: true, z: 1,
+          dimensions: ['x', 'v', 'i'], encode: { x: 0, y: 1, tooltip: [] },
+        }] : []),
+        {
+          type: 'custom', renderItem, data, clip: !opts.robust, z: 3,
+          dimensions: ['x', 'low', 'high', 'open', 'close', 'mark', 'last', 'i'],
+          encode: { x: 0, y: [1, 2, 5, 6], tooltip: [] },
+          markLine: refs.length ? { silent: true, symbol: 'none', lineStyle: { color: t.muted, type: 'dashed' }, label: { color: t.muted, fontSize: 10 }, data: refs } : undefined,
+          markArea: (bands.length > 1 || compAreas.length) ? {
+            silent: true,
+            data: [...bands.filter((_, i) => i % 2 === 0).map((b) => [
+              { xAxis: b.from, itemStyle: { color: t.accentSoft, opacity: 0.35 }, label: { show: bands.length <= 30, position: 'insideTop', color: t.muted, fontSize: 10, formatter: `${b.uaName} ${dateLabel(b.endDate)}` } },
+              { xAxis: b.to },
+            ]), ...compAreas],
+          } : undefined,
+        },
+      ],
     };
   }
-  const zoomSig = () => JSON.stringify([opts.xMode, opts.metric, opts.log, opts.rankKey, opts.bars, opts.robust, opts.perView, drawable.length, drawable[0]?.ins]);
+  const zoomSig = () => JSON.stringify([opts.xMode, opts.metric, opts.log, opts.sortKey, opts.sortDir, opts.robust, drawable.length, drawable[0]?.ins]);
+
+  // ── بزرگ و کوچک کردن هر محور با کلیک و کشیدن ────────────────────
+  //
+  // «هر محور را با کلیک کردن و درگ کردن بشود بزرگ و کوچک کرد.» روی ناحیهٔ
+  // برچسب محور عمودی، کشیدن به بالا بزرگ‌نمایی و به پایین کوچک‌نمایی است؛
+  // روی محور افقی، کشیدن به راست/چپ. مرکزِ بزرگ‌نمایی همان جایی است که
+  // کلیک شد. دوبار کلیک روی محور، همان محور را به حالت کامل برمی‌گرداند.
+  function attachAxisDrag(chart) {
+    const zr = chart.getZr();
+    let drag = null;
+    const rect = () => chart.getModel()?.getComponent('grid', 0)?.coordinateSystem?.getRect?.();
+    const zoneOf = (x, y) => {
+      const g = rect();
+      if (!g) return '';
+      if (x < g.x && x > g.x - 70 && y >= g.y && y <= g.y + g.height) return 'y';
+      if (y > g.y + g.height && y < g.y + g.height + 90 && x >= g.x && x <= g.x + g.width) return 'x';
+      return '';
+    };
+    const windowOf = (index) => {
+      const dz = chart.getOption().dataZoom?.[index] || {};
+      return { start: Number.isFinite(dz.start) ? dz.start : 0, end: Number.isFinite(dz.end) ? dz.end : 100 };
+    };
+    const apply = (axis, start, end) => {
+      const lo = Math.max(0, Math.min(start, end - 0.5)), hi = Math.min(100, Math.max(end, lo + 0.5));
+      chart.dispatchAction({ type: 'dataZoom', dataZoomIndex: axis === 'y' ? 2 : 0, start: lo, end: hi });
+    };
+    zr.on('mousemove', (e) => {
+      if (drag) {
+        const g = rect();
+        const delta = drag.axis === 'y' ? (drag.py - e.offsetY) / g.height : (e.offsetX - drag.px) / g.width;
+        const factor = Math.exp(-delta * 2.2);
+        const span = Math.min(100, Math.max(0.5, (drag.w.end - drag.w.start) * factor));
+        const start = drag.anchor - (drag.anchor - drag.w.start) * (span / (drag.w.end - drag.w.start));
+        apply(drag.axis, start, start + span);
+        return;
+      }
+      const zone = zoneOf(e.offsetX, e.offsetY);
+      zr.setCursorStyle(zone === 'y' ? 'ns-resize' : zone === 'x' ? 'ew-resize' : 'default');
+    });
+    zr.on('mousedown', (e) => {
+      const axis = zoneOf(e.offsetX, e.offsetY);
+      if (!axis) return;
+      const g = rect(), w = windowOf(axis === 'y' ? 2 : 0);
+      const frac = axis === 'y' ? 1 - (e.offsetY - g.y) / g.height : (e.offsetX - g.x) / g.width;
+      drag = { axis, px: e.offsetX, py: e.offsetY, w, anchor: w.start + (w.end - w.start) * Math.max(0, Math.min(1, frac)) };
+    });
+    const end = () => { drag = null; };
+    zr.on('mouseup', end);
+    zr.on('globalout', end);
+    zr.on('dblclick', (e) => {
+      const axis = zoneOf(e.offsetX, e.offsetY);
+      if (axis) apply(axis, 0, 100);
+    });
+  }
 
   async function paintMother() {
     const target = q('[data-ccv-chart="mother"]');
-    target.style.height = `${Number(opts.height) || 560}px`;
     if (!drawable.length) {
       mother?.dispose(); mother = null;
       target.innerHTML = `<p class="empty-note">${past && !pastState.payload ? 'روز و نماد را انتخاب کن و «دریافت کندل‌های این روز» را بزن.' : fetching ? 'در حال دریافت کمینه/بیشینهٔ امروز…' : 'در این گزینش قرارداد معامله‌شده‌ای با داده برای این شاخص نیست.'}</p>`;
@@ -502,7 +578,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const seq = ++motherSeq;
     const handle = await mountChart(target, buildMother, {
       onClick: (p) => {
-        const r = drawable[p.value?.[p.seriesIndex === 1 ? 2 : 7]];
+        const r = p.componentType === 'series' ? drawable[p.value?.[7]] : null;
         if (!r) return;
         if (opts.clickRemove) { hide(r.ins); return; }
         pinned = r.ins; paintPin();
@@ -510,6 +586,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     });
     if (seq !== motherSeq) { handle?.dispose(); return; }
     mother = handle;
+    if (mother) attachAxisDrag(mother.instance);
     mother?.instance.on('datazoom', () => {
       const dz = mother.instance.getOption().dataZoom || [];
       zoom = { sig: zoomSig(), ranges: dz.map((z) => ({ start: z.start, end: z.end })) };
@@ -640,14 +717,17 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   // ── کندل‌های افقی (همان نمای قبلی، روی همین گزینش) ─────────────
   function paintList(records) {
     const rangeStatus = q('[data-lmm-range-status]'), rangeChart = q('[data-lmm-range-chart]');
-    const rangeSort = opts.listSort;
-    const labels = { value: 'ارزش معاملات', volume: 'حجم معاملات', oi: 'موقعیت باز' };
-    q('[data-lmm-range-sort]').innerHTML = Object.entries(labels).map(([id, label]) => `<button type="button" data-lmm-range-key="${id}" aria-pressed="${id === rangeSort}">${label}</button>`).join('');
-    const rows = records.filter((row) => row.valid)
-      .sort((a, b) => (Number(b[rangeSort]) || -1) - (Number(a[rangeSort]) || -1) || a.name.localeCompare(b.name, 'fa'));
+    const rangeSort = SORT_KEYS.some((k) => k.key === opts.listSort) ? opts.listSort : 'value';
+    const sortLabel = SORT_KEYS.find((k) => k.key === rangeSort)?.label || '';
+    const sortBox = q('[data-lmm-range-sort]');
+    if (!sortBox.contains(document.activeElement)) {
+      sortBox.innerHTML = `<label>مرتب بر<select data-ccv="listSort">${SORT_KEYS.map((k) => `<option value="${k.key}"${k.key === rangeSort ? ' selected' : ''}>${esc(k.label)}</option>`).join('')}</select></label><label>جهت<select data-ccv="listDir">${opt(SORT_DIRS, opts.listDir)}</select></label>`;
+    }
+    // همان مرتب‌ساز نمودار مادر؛ نامعلوم همیشه ته صف.
+    const rows = orderCandles(records.filter((row) => row.valid), { xMode: 'ranked', sortKey: rangeSort, sortDir: opts.listDir, metric: opts.metric });
     const lagged = rows.filter((row) => row.rangeSource === 'infoLag').length;
     const other = records.filter((row) => row.rangeSource === 'otherSession').length;
-    rangeStatus.textContent = `${fmt.int(rows.length)} قرارداد دارای بازه معتبر از ${fmt.int(records.length)} قرارداد گزینش · مرتب بر ${labels[rangeSort]}`
+    rangeStatus.textContent = `${fmt.int(rows.length)} قرارداد دارای بازه معتبر از ${fmt.int(records.length)} قرارداد گزینش · مرتب بر ${sortLabel}`
       + (past ? ' · همه از ردیف روزانهٔ همان روز' : ' · ارزش، حجم، موقعیت باز و قیمت‌ها همان عدد زنجیره‌اند')
       + `${lagged ? ` · کمینه/بیشینهٔ ${fmt.int(lagged)} قرارداد از چند ثانیه قبل است و با آخرین قیمت عکس گسترده شد` : ''}`
       + `${other ? ` · ${fmt.int(other)} قرارداد: پاسخ کمینه/بیشینه مال جلسهٔ دیگری بود و کنار گذاشته شد` : ''}`;
@@ -657,7 +737,13 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       const low = Number(row.low), high = Number(row.high), first = Number(row.first), last = Number(row.last), close = Number(row.close);
       // هر عدد با واحدِ خودش: ارزش ریال، حجم و موقعیت باز «قرارداد» (نه سهم).
       const rankValue = rangeSort === 'value' ? fmt.rialText(row.value)
-        : Number.isFinite(Number(row[rangeSort])) ? `${fmt.int(Number(row[rangeSort]))} قرارداد` : '—';
+        : ['volume', 'oi', 'oiChange'].includes(rangeSort) ? (Number.isFinite(Number(row[rangeSort])) ? `${fmt.int(Number(row[rangeSort]))} قرارداد` : '—')
+          : rangeSort === 'trades' ? `${fmt.int(row.trades)} معامله`
+            : rangeSort === 'strike' ? `اعمال ${fmt.money(row.strike)}`
+              : rangeSort === 'days' ? `${fmt.int(row.days)} روز`
+                : ['delta', 'effectiveLeverage'].includes(rangeSort) ? fmt.num(sortValue(row, rangeSort))
+                  : rangeSort === 'metric' ? metricText(opts.metric, sortValue(row, 'metric', opts.metric))
+                    : `${fmt.pct(sortValue(row, rangeSort))}٪`;
       const lastPct = pctVsYday(last, row.yday), closePct = pctVsYday(close, row.yday);
       return `<article class="${tone(last - first)}" data-lmm-range-card="${esc(row.ins)}"><header><button type="button" data-lmm-range-contract="${esc(row.ins)}"><b>${esc(row.name)}</b><small>${kindLabel(row.kind)} · ${esc(row.uaName)} · اعمال ${fmt.money(row.strike)} · ${dateLabel(row.endDate)}</small></button><div class="lmm-range-stats"><strong${rangeSort === 'value' && Number.isFinite(Number(row.value)) ? ` title="${fmt.rial(Number(row.value))} ریال"` : ''}>${rankValue}</strong><span class="${tone(lastPct)}">آخرین ${fmt.pct(lastPct)}٪</span><span class="${tone(closePct)}">پایانی ${fmt.pct(closePct)}٪</span></div></header><button type="button" class="lmm-range-track" data-lmm-range-focus="${esc(row.ins)}" aria-expanded="false" aria-label="کندل روزانه ${esc(row.name)}؛ تغییر آخرین ${fmt.pct(lastPct)} درصد و پایانی ${fmt.pct(closePct)} درصد"></button><footer><span>کمینه ${fmt.money(low)}</span><span>اولین ${fmt.money(first)}</span><span>آخرین ${fmt.money(last)}</span><span>پایانی ${fmt.money(close)}</span><span>بیشینه ${fmt.money(high)}</span></footer></article>`;
     }).join('')}</div>${rows.length > shown.length ? `<button type="button" class="ghost ccv-more" data-ccv-more>نمایش ${fmt.int(Math.min(LIST_STEP, rows.length - shown.length))} کندل دیگر (از ${fmt.int(rows.length - shown.length)} باقی‌مانده)</button>` : ''}`;
@@ -704,7 +790,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   // ── کنترل‌ها ────────────────────────────────────────────────────
   function paintControls(turnover) {
     host.querySelectorAll('[data-ccv-side]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.ccvSide === opts.side)));
-    for (const name of ['top', 'metric', 'xMode', 'rankKey', 'colorBy', 'uaSort', 'bars', 'height', 'perView', 'histMetric', 'histPoint', 'histBins', 'histUnit', 'histWeight', 'histGroup', 'histTails']) {
+    for (const name of ['top', 'metric', 'xMode', 'sortKey', 'sortDir', 'composite', 'colorBy', 'uaSort', 'bars', 'histMetric', 'histPoint', 'histBins', 'histUnit', 'histWeight', 'histGroup', 'histTails']) {
       const el = field(name);
       if (el && document.activeElement !== el) el.value = String(opts[name]);
     }
@@ -714,7 +800,8 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const m = metricOf(opts.metric);
     field('log').checked = !!opts.log; field('log').disabled = !m.log;
     q('[data-ccv-log-wrap]').title = m.log ? '' : 'این شاخص صفر یا منفی دارد؛ محور لگاریتمی برایش معنی ندارد';
-    q('[data-ccv-rank-wrap]').hidden = opts.xMode !== 'ranked';
+    q('[data-ccv-rank-wrap]').hidden = opts.xMode === 'moneyness';
+    q('[data-ccv-dir-wrap]').hidden = opts.xMode === 'moneyness';
     q('[data-ccv-barslog-wrap]').hidden = opts.bars === 'none';
     q('[data-ccv-preset]').innerHTML = `<option value="">—</option>${Object.keys(presets).map((name) => `<option>${esc(name)}</option>`).join('')}`;
 
@@ -758,6 +845,25 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     if (heading.note) parts.push(heading.note);
     if (opts.metric === 'iv') parts.push('تلاطم هر نقطه با قیمت پایهٔ هم‌جهت (تقریبی)');
     q('[data-ccv-status]').textContent = parts.join(' · ');
+  }
+
+  // ── جدول شاخص ترکیبی: کل گزینش و هر نماد/سررسید ──────────────
+  function paintComposite(records) {
+    const box = q('[data-ccv-composite]');
+    const m = metricOf(opts.metric);
+    const all = compositeCandle(records, m.key, opts.composite);
+    if (!all) { box.innerHTML = ''; return; }
+    const label = COMPOSITE_WEIGHTS.find(([k]) => k === opts.composite)?.[1] || '';
+    const v = (x) => metricText(m.key, x);
+    const groups = compositeByGroup(records, m.key, opts.composite).filter((g) => g.composite?.n);
+    const head = m.shape === 'candle' ? '<th>کمینه</th><th>اولین</th><th>آخرین</th><th>پایانی</th><th>بیشینه</th>' : '<th>مقدار</th>';
+    const cells = (c) => (m.shape === 'candle' ? ['low', 'first', 'last', 'close', 'high'].map((k) => `<td class="${k === 'last' && m.key === 'change' ? tone(c[k]) : ''}">${v(c[k])}</td>`).join('') : `<td>${v(c.mark)}</td>`);
+    const weightText = (c) => (opts.composite === 'value' ? fmt.rialText(c.weightTotal) : ['equal', 'median'].includes(opts.composite) ? '—' : fmt.int(c.weightTotal));
+    box.innerHTML = `<table class="ccv-stat-table ccv-comp-table"><caption>شاخص ترکیبی — ${esc(label)} روی «${esc(m.label)}»: هر نقطه، ${opts.composite === 'median' ? 'میانهٔ' : 'میانگین وزنی'} همان نقطه در کندل‌ها${all.missingWeight ? ` · ${fmt.int(all.missingWeight)} قرارداد بی‌وزن شمرده نشد` : ''}</caption>
+      <thead><tr><th></th><th>قرارداد</th><th>جمع وزن</th>${head}</tr></thead>
+      <tbody><tr class="is-total"><th>کل گزینش</th><td>${fmt.int(all.n)}</td><td>${weightText(all)}</td>${cells(all)}</tr>
+      ${groups.slice(0, 30).map((g) => `<tr><th>${esc(g.uaName)} <small>${dateLabel(g.endDate)}</small></th><td>${fmt.int(g.composite.n)}</td><td>${weightText(g.composite)}</td>${cells(g.composite)}</tr>`).join('')}</tbody></table>
+      ${groups.length > 30 ? `<p class="note">${fmt.int(groups.length - 30)} گروه دیگر در خروجی اکسل.</p>` : ''}`;
   }
 
   // ── کاشی‌های خلاصهٔ زیر نمودار ─────────────────────────────────
@@ -811,7 +917,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       .filter(({ r, s }) => s && (s.shape !== 'candle' || r.valid)
         && Number.isFinite(toAxis(m, s.low, opts.log)) && Number.isFinite(toAxis(m, s.high, opts.log))
         && (opts.xMode !== 'moneyness' || Number.isFinite(r.moneynessPct)));
-    const order = orderCandles(withShape.map((x) => x.r), { xMode: opts.xMode, rankKey: opts.rankKey, metric: m.key });
+    const order = orderCandles(withShape.map((x) => x.r), { xMode: opts.xMode, sortKey: opts.sortKey, sortDir: opts.sortDir, metric: m.key });
     const shapeOf = new Map(withShape.map((x) => [x.r.ins, x.s]));
     drawable = order; shapes = order.map((r) => shapeOf.get(r.ins));
     const usedUa = [...new Set(records.map((r) => r.uaIns))].map((ins) => uaDays.get(ins)).filter(Boolean);
@@ -827,6 +933,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     q('[data-ccv-count]').textContent = `${fmt.int(drawable.length)} ${m.shape === 'point' ? 'نقطه' : 'کندل'}${extra.length ? ` · ${extra.join(' · ')}` : ''}`;
     paintStats(drawable);
     paintSummary(drawable);
+    paintComposite(drawable);
     q('[data-ccv-story]').innerHTML = candleNarrative(drawable, { metric: m.key, log: opts.log, unusual: flags, uaDays: usedUa, f: fmt }).map((line) => `<li>${esc(line)}</li>`).join('');
     paintPin();
     paintMother();
@@ -931,8 +1038,6 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       return;
     }
     if (event.target.closest('[data-ccv-exp-clear]')) { set({ dates: [], expiries: [] }); return; }
-    const sort = event.target.closest('[data-lmm-range-key]');
-    if (sort) { listLimit = LIST_STEP; set({ listSort: sort.dataset.lmmRangeKey }); return; }
     if (event.target.closest('[data-ccv-more]')) { listLimit += LIST_STEP; paintList(current.records); return; }
     const contract = event.target.closest('[data-lmm-range-contract]');
     if (contract) { pinned = contract.dataset.lmmRangeContract; paintPin(); q('[data-ccv-pin]')?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' }); return; }
@@ -1021,7 +1126,8 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const name = el.dataset.ccv;
     if (!name || name === 'uaSearch') return;
     if (el.type === 'checkbox') { set({ [name]: el.checked }); return; }
-    if (['top', 'histBins', 'height', 'perView'].includes(name)) { set({ [name]: Math.max(0, Number(el.value) || 0) }); return; }
+    if (name === 'listSort' || name === 'listDir') listLimit = LIST_STEP;
+    if (['top', 'histBins'].includes(name)) { set({ [name]: Math.max(0, Number(el.value) || 0) }); return; }
     if (['histWidth', 'histTails'].includes(name)) { set({ [name]: Math.max(0, Number(el.value) || 0) }); return; }
     set({ [name]: el.value });
   });

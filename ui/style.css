@@ -5368,7 +5368,7 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ccv-ua-exp { display: grid; gap: 6px; margin-top: 8px; }
 .ccv-ua-exp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ccv-ua-exp-row b { min-width: 70px; font-size: var(--fs-xs); }
-.ccv-chart { height: 560px; }
+.ccv-chart { height: 600px; }
 .ccv-chart-short { height: 380px; }
 .ccv-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0 0 6px; color: var(--muted); font-size: var(--fs-xs); }
 .ccv-legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -5441,6 +5441,11 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 .ccv-past-grid { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; gap: 14px; align-items: start; }
 .ccv-past-pick .ccv-chips { max-height: 240px; }
 @media (max-width: 720px) { .ccv-past-grid { grid-template-columns: 1fr; } }
+.lmm-range-sort label { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--fs-xs); font-weight: 700; }
+.ccv-composite { margin-top: 12px; overflow-x: auto; }
+.ccv-composite:empty { display: none; }
+.ccv-comp-table tr.is-total { background: var(--accent-soft); font-weight: 800; }
+.ccv-comp-table th small { color: var(--muted); font-weight: 400; }
 .lmm-candle-moved { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 @media (max-width: 720px) {
   .ccv-chart { height: 440px; }
