@@ -15,7 +15,7 @@ group('۱۷۱. قرارداد چیدمان نوار وضعیت و پنل ظرف�
     && css171.includes('width: min(560px, calc(100vw - 32px));'));
   check('در موبایل نوار در جریان می‌ماند و روی محتوای صفحه نمی‌افتد',
     mobile171.includes('.top { position: relative;')
-    && mobile171.includes('.health { min-width: 0;'));
+    && mobile171.includes('.health { flex: 1 0 100%; min-width: 0;'));
   check('details باز تمام ردیف را می‌گیرد و پنل درون جریان است',
     mobile171.includes('.capacity[open] { flex: 1 0 100%;')
     && mobile171.includes('.capacity-panel {\n    position: static; width: 100%;'));

@@ -25,11 +25,15 @@ group('۲۷۱. لایهٔ عمقِ شیوه‌نامه');
   const rules = [...CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .map(([, sel, body]) => ({ sel: sel.trim(), body }));
   const ghostBorder = rules.filter((r) => /(^|,|\s)\.ghost(\s|,|:|\[|$)/.test(r.sel) && /border\s*:/.test(r.body));
-  const dim = ghostBorder.filter((r) => !/border:\s*\d+px solid var\(--line[\w-]*\)/.test(r.body));
-  check('هر کادرِ `.ghost` از توکنِ خطِ دیدنی می‌آید، نه از رنگِ شفاف',
+  // ۱۴۰۵/۰۷/۱۶ (گرافیت و نعنا): `.ghost` دکمه بودنش را از **سطحِ ته‌رنگ‌دار**
+  // می‌گیرد، نه از کادر. دامِ قدیمی «کادرِ شفاف روی سطحِ همان‌رنگِ کاغذ» بود؛
+  // پس هر قاعده‌ای که کادرِ `.ghost` را شفاف کند، باید سطحِ دیدنی هم بدهد.
+  const dim = ghostBorder.filter((r) => !/border:\s*\d+px solid var\(--line[\w-]*\)/.test(r.body)
+    && !/background:\s*var\(--panel-2\)/.test(r.body));
+  check('هر `.ghost` یا کادرِ دیدنی دارد یا سطحِ ته‌رنگ‌دار — هرگز هیچ‌کدام',
     ghostBorder.length >= 1 && dim.length === 0, dim.map((r) => r.sel).join(' · '));
-  check('قاعدهٔ پایهٔ `.ghost` کادرِ ورودی را دارد',
-    ghostBorder.some((r) => r.sel === '.ghost' && /border:\s*1px solid var\(--line-input\)/.test(r.body)));
+  check('قاعدهٔ پایهٔ `.ghost` سطحِ دوم را دارد (روی کارت و کاغذ دیده می‌شود)',
+    ghostBorder.some((r) => r.sel === '.ghost' && /background:\s*var\(--panel-2\)/.test(r.body)));
 
   // حبابِ راهنما نیمه‌شفاف بود و تاری هم نداشت: متن روی متن.
   check('حبابِ راهنما سطحِ مات دارد', !/background:\s*color-mix\(in srgb, var\(--panel\) 9[26]%/.test(CSS));

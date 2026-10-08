@@ -99,7 +99,9 @@ group('۲۵۲-ب. دکمه سه لایهٔ شکلی‌اش را دارد');
   // می‌شود بی‌صدا و جداگانه از دست داد.
   const btn = ruleOf('.btn, .primary');
   check('دکمه رنگِ برند را پر می‌کند', /background:\s*var\(--accent\)/.test(btn));
-  check('دکمه لبهٔ inset دارد (--shadow-xs-skeuo)', /box-shadow:\s*var\(--shadow-xs-skeuo\)/.test(btn));
+  // ۱۴۰۵/۰۷/۱۶ (گرافیت و نعنا): دکمهٔ اصلی تخت است — بی سایه و بی لبهٔ inset؛
+  // پرشدنِ رنگِ برند خودش سلسله‌مراتب را می‌گوید.
+  check('دکمه تخت است: بی سایه، با بازخوردِ فشار', /box-shadow:\s*none/.test(btn) && /\.btn:active, \.primary:active \{ transform: scale\(\.97\); \}/.test(noComments));
   check('دکمه برای شبه‌عنصرِ برجستگی، position دارد', /position:\s*relative/.test(btn));
 
   const before = ruleOf('.btn::before, .primary::before');
@@ -121,8 +123,8 @@ group('۲۵۲-ب. دکمه سه لایهٔ شکلی‌اش را دارد');
   // سلسله‌مراتب را از بین می‌برند: چشم باید *پرشدن* را ببیند تا بفهمد
   // کدام کارِ اصلی است.
   const sec = ruleOf('.btn.sec, .btn-sec');
-  check('دکمهٔ دوم کادرِ خاکستری دارد نه کادرِ برند',
-    /border:\s*1px solid var\(--line-input\)/.test(sec) && !/var\(--accent\)/.test(sec));
+  check('دکمهٔ دوم سطحِ خنثی دارد نه رنگِ برند',
+    /background:\s*var\(--panel-2\)/.test(sec) && !/var\(--accent\)/.test(sec));
   // شبه‌عنصرِ برجستگی از `.btn` به `.btn.sec` هم ارث می‌رسد؛ روی سطحِ
   // سفید، کادرِ سفیدِ ۱۲٪ دیده نمی‌شود ولی یک پیکسل فضا می‌خورد. باید
   // صریح خاموش شود.
@@ -140,7 +142,10 @@ group('۲۵۲-پ. ورودی سطحِ نشسته است، نه بخشی از ک�
   const input = noComments.slice(
     noComments.indexOf('.field input, .field select,'),
     noComments.indexOf('.field input::placeholder'));
-  check('ورودی سایهٔ سطحِ نشسته دارد', /box-shadow:\s*var\(--shadow-xs\)/.test(input));
+  // ۱۴۰۵/۰۷/۱۶: ورودیِ پرشده — سطحِ یک پله تیره‌تر، کادر فقط با هاور و فوکوس.
+  check('ورودی پرشده است: سطحِ دوم، بی سایه، کادر با هاور',
+    /background-color:\s*var\(--panel-2\)/.test(input) && /box-shadow:\s*none/.test(input)
+    && /input\[type="date"\]:hover \{\s*border-color: var\(--line-input\);/.test(noComments));
   check('گردیِ ورودی هم‌اندازهٔ دکمه است (پلهٔ md)', /border-radius:\s*var\(--radius-md\)/.test(input));
 
   // فوکوس دولایه: کادرِ داخلی سفت می‌شود و حلقهٔ بیرونی می‌نشیند. لایهٔ
@@ -159,9 +164,11 @@ group('۲۵۲-ت. نشان و سرستون با خودشان رقابت نمی�
 {
   // نشان: کادر باید پلهٔ ۲۰۰ باشد نه پلهٔ کاملِ رنگ. با کادرِ پررنگ، نشانِ
   // «بازار باز» یک حلقهٔ سبزِ سیر دارد که با خودِ متن رقابت می‌کند.
-  for (const [cls, token] of [['open', '--gain-line'], ['shut', '--warn-line'], ['down', '--loss-line']]) {
-    check(`کادرِ نشانِ .${cls} پلهٔ کم‌رنگ است`,
-      new RegExp('\\.pill\\.' + cls + '\\s*\\{[^}]*border-color:\\s*var\\(' + token + '\\)').test(noComments));
+  // ۱۴۰۵/۰۷/۱۶: نشان فقط ته‌رنگ است، بی هیچ کادری — حلقهٔ رنگی دیگر با متن رقابت نمی‌کند.
+  for (const [cls, token] of [['open', '--gain-soft'], ['shut', '--warn-soft'], ['down', '--loss-soft']]) {
+    check(`نشانِ .${cls} ته‌رنگ است و کادرِ رنگی ندارد`,
+      new RegExp('\\.pill\\.' + cls + '\\s*\\{[^}]*background:\\s*var\\(' + token + '\\)').test(noComments)
+      && !new RegExp('\\.pill\\.' + cls + '\\s*\\{[^}]*border-color').test(noComments));
   }
   check('نشان سایه ندارد — شناور نیست', /\.pill \{[^}]*box-shadow:\s*none/.test(noComments));
 
@@ -192,8 +199,10 @@ group('۲۵۲-ث. پوستهٔ برنامه — هدر، ستون ناوبری،
   // است که روی صفحه شناور است؛ ستونی که تمامِ قد کنارِ صفحه ایستاده
   // شناور نیست و آن سایه فقط لبه‌اش را تار می‌کرد.
   const rail = ruleOf('.rail');
-  check('ستون ناوبری سایهٔ سطحِ نشسته دارد نه سایهٔ شناور',
-    /box-shadow:\s*var\(--shadow-xs\)/.test(rail));
+  // ۱۴۰۵/۰۷/۱۶ (طراحی مینیمال): ستون به لبهٔ صفحه چسبید و یک خطِ مویی آن را
+  // از محتوا جدا می‌کند؛ نشسته‌تر از سایهٔ xs، و هنوز بی سایهٔ شناور.
+  check('ستون ناوبری نشسته است: بی سایهٔ شناور، با خطِ مویی',
+    /box-shadow:\s*none/.test(rail) && /border-left:\s*1px solid var\(--line\)/.test(rail) && /margin:\s*0;/.test(rail));
   check('ستون ناوبری زمینهٔ مات دارد نه نیمه‌شفاف',
     /background:\s*var\(--panel\)/.test(rail));
 
@@ -206,8 +215,8 @@ group('۲۵۲-ث. پوستهٔ برنامه — هدر، ستون ناوبری،
   const railRow = ruleOf('.rail-row');
   check('ردیفِ ناوبری در حالتِ عادی بی‌زمینه است',
     /background:\s*transparent/.test(railRow));
-  check('ردیفِ انتخاب‌شده زمینه می‌گیرد',
-    /background:\s*var\(--panel-2\)/.test(ruleOf('.rail-row[aria-current="true"]')));
+  check('ردیفِ انتخاب‌شده زمینه می‌گیرد (ته‌رنگِ برند روی سطح)',
+    /background:\s*color-mix\(in srgb, var\(--accent\) 9%, var\(--panel\)\)/.test(ruleOf('.rail-row[aria-current="true"]')));
 
   // حالتِ خالی نشانِ برجسته دارد. بی آن، صفحهٔ خالی «هنوز بار نشده» به
   // نظر می‌رسد نه «آماده، منتظرِ انتخاب».
