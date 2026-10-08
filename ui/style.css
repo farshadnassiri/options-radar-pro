@@ -3464,6 +3464,11 @@ td.gain, dd.gain { color: var(--gain); }
   border-bottom: 1px solid var(--line); border-radius: 0;
   background: transparent; box-shadow: none;
 }
+/* بازهٔ گام ۱، فقط خواندنی (۱۴۰۵/۰۷/۱۶): بازه یک بار پرسیده می‌شود. */
+.open-view-span, .history-range-readonly {
+  align-self: end; padding: 9px 12px; border-radius: var(--radius-md);
+  background: var(--panel-2); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 600;
+}
 .live-dashboard-hero h1 { margin: 0 0 6px; font-size: var(--fs-hero); font-weight: 800; line-height: 1.3; }
 .live-dashboard-hero p { max-width: 760px; margin: 0; color: var(--muted); line-height: var(--lh-normal); }
 .live-dashboard-hero > div:last-child { display: grid; justify-items: end; gap: 8px; min-width: 220px; }

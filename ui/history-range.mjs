@@ -22,7 +22,7 @@ import {
 } from '../core/history-range.mjs';
 
 export {
-  DEFAULT_PRESET, RANGE_PRESETS, buildLine, calendarDays, presetRange, rangeLabel, todayCompact,
+  DEFAULT_PRESET, RANGE_PRESETS, buildLine, calendarDays, presetRange, rangeLabel, todayCompact, clipRangeToDates,
 } from '../core/history-range.mjs';
 
 /**

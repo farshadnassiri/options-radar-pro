@@ -219,7 +219,8 @@ group('۲۱۰-ه. هر تبِ تاریخ‌دار از همان بازه می‌
     const src = readSrc(file);
     const name = file.split('/').pop();
     check(`${name} کنترل مشترک بازه را سوار می‌کند`,
-      /import \{ baseAfterRange, loadRange, mountHistoryRange \} from '\/ui\/history-range\.mjs'/.test(src)
+      // نام‌های بیشتر مجازند (مثلاً `clipRangeToDates`)؛ این سه باید باشند.
+      ['baseAfterRange', 'loadRange', 'mountHistoryRange'].every((n) => new RegExp(`import \\{[^}]*\\b${n}\\b[^}]*\\} from '/ui/history-range\\.mjs'`).test(src))
       && src.includes(`mountHistoryRange($('${host}')`)
       && src.includes(`id="${host}"`));
 

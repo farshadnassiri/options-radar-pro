@@ -182,3 +182,25 @@ export function buildLine(build) {
   }
   return '';
 }
+
+/**
+ * بازهٔ گام ۱، بریده به روزهای معاملاتیِ موجود.
+ *
+ * خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۶): «وقتی بازه زمانی داده می‌شود دوباره
+ * نباید بازه را بخواهد.» تب‌های «نگاه باز» و «تحلیل تاریخی» بازه را در گام
+ * ۱ می‌گرفتند و بعد یک انتخابگرِ «از/تا» یا «شروع/پایان» دیگر نشان می‌دادند
+ * که پیش‌فرضش اصلاً بازهٔ گام ۱ نبود (۲۰ یا ۱۵ روزِ آخر). حالا همان بازه
+ * به کار می‌رود: نخستین روزِ دارای داده از `from` به بعد و واپسین روز تا `to`.
+ *
+ * `dates` فهرستِ روزهای `YYYYMMDD` (هر ترتیبی). بازه‌ای که هیچ روزِ داده‌داری
+ * ندارد `null` است — جای خالی، نه بازه‌ای ساختگی (AGENTS.md §۲-۴).
+ * بی بازه، کلِ روزهای موجود.
+ */
+export function clipRangeToDates(dates = [], range = null) {
+  const days = [...new Set(dates.map(Number).filter((d) => Number.isFinite(d) && d > 0))].sort((a, b) => a - b);
+  if (!days.length) return null;
+  const from = Number(range?.from) || days[0];
+  const to = Number(range?.to) || days.at(-1);
+  const inside = days.filter((d) => d >= Math.min(from, to) && d <= Math.max(from, to));
+  return inside.length ? { from: inside[0], to: inside.at(-1), days: inside.length } : null;
+}

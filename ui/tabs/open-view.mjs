@@ -6,7 +6,7 @@ import { liveBaseList, liveOpenViewContracts } from '/core/decision-dashboard.mj
 import { busyBlock } from '/ui/busy.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
 import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
-import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { baseAfterRange, clipRangeToDates, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { applyLiveScope, scopeOptionsMarkup, SCOPE_LIVE } from '/ui/live-scope.mjs';
 import { fetchTapeBatch, tapeSummary, tapeWarning, usableRows } from '/ui/tape-intake.mjs';
 import { fetchDailies } from '/ui/daily-intake.mjs';
@@ -215,7 +215,7 @@ export async function mount(root, { state }) {
     <div class="open-view-mode" role="group" aria-label="حالت نگاه باز"><button type="button" data-ov-mode="live">لحظه‌ای</button><button type="button" data-ov-mode="history">تاریخی چندروزه</button></div>
     <p class="note" id="ov-mode-note"></p>
     <div id="ov-range" class="step-first" data-step="۱" data-ov-history></div>
-    <div class="open-view-form"><label class="step-next" data-step="۲">نماد پایه<select id="ov-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label data-ov-history>دامنه داده<select id="ov-scope">${scopeOptionsMarkup()}</select></label><label data-ov-history>مبنای روزانه<select id="ov-basis"><option value="CLOSE">قیمت پایانی</option><option value="LAST">آخرین معامله</option><option value="FIRST">اولین معامله</option></select></label><label data-ov-history>از تاریخ<select id="ov-from" disabled></select></label><label data-ov-history>تا تاریخ<select id="ov-to" disabled></select></label><label>سررسید انتخابی<select id="ov-expiry" disabled><option value="">پس از دریافت انتخاب می‌شود</option></select></label><button type="button" class="primary" id="ov-load" data-ov-history>ساخت نگاه چندروزه</button><button type="button" class="ghost" id="ov-excel" disabled>خروجی جامع Excel</button></div>
+    <div class="open-view-form"><label class="step-next" data-step="۲">نماد پایه<select id="ov-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label data-ov-history>دامنه داده<select id="ov-scope">${scopeOptionsMarkup()}</select></label><label data-ov-history>مبنای روزانه<select id="ov-basis"><option value="CLOSE">قیمت پایانی</option><option value="LAST">آخرین معامله</option><option value="FIRST">اولین معامله</option></select></label><input type="hidden" id="ov-from"><input type="hidden" id="ov-to"><span class="open-view-span" id="ov-span" data-ov-history>بازه: از گام ۱</span><label>سررسید انتخابی<select id="ov-expiry" disabled><option value="">پس از دریافت انتخاب می‌شود</option></select></label><button type="button" class="primary" id="ov-load" data-ov-history>ساخت نگاه چندروزه</button><button type="button" class="ghost" id="ov-excel" disabled>خروجی جامع Excel</button></div>
     <p id="ov-live-note" class="note" data-ov-history>حالت بسته فقط روزهای نهایی را می‌سازد؛ حالت «تا همین لحظه» ردیف امروز را فقط در جلسه معتبر بازار اضافه می‌کند.</p>
     <div class="open-view-model-settings"><div><p class="eyebrow">فرض‌های مدل بلک–شولز</p><h3>پارامترهای محاسبه نوسان ضمنی</h3><small id="ov-iv-current">—</small></div><div class="open-view-model-grid"><label>نرخ بدون ریسک سالانه ٪<input id="ov-rfree" type="number" min="0" max="200" step="0.1" value="${initialModel.rFreePct}"></label><label>بازده نقدی سالانه ٪<input id="ov-divyield" type="number" min="0" max="100" step="0.1" value="${initialModel.divYieldPct}"></label><label>روزهای سال<input id="ov-year-days" type="number" min="1" max="1000" step="1" value="${initialModel.yearDays}"></label><label>کمینه IV ٪<input id="ov-iv-lo" type="number" min="0.01" max="999" step="0.1" value="${initialModel.ivLoPct}"></label><label>بیشینه IV ٪<input id="ov-iv-hi" type="number" min="0.02" max="1000" step="1" value="${initialModel.ivHiPct}"></label></div><button type="button" class="ghost" id="ov-apply-iv">اعمال پارامترها</button></div>
     <p class="portfolio-note" data-ov-history>برای دیدن فرمول، وزن هر قرارداد و نمودار ریز همان روز، روی ردیف روز کلیک کن. قیمت یا ارزش گمشده با مشاهده قبلی پر نمی‌شود.</p>
@@ -358,6 +358,18 @@ export async function mount(root, { state }) {
     $('ov-daily-table').innerHTML = dailyTable(rows, selectedDate); paintDayDetail();
   }
 
+  let spanDates = [];
+  /** بازهٔ گام ۱ روی روزهای داده‌دار؛ `false` یعنی در بازه روزی نیست. */
+  function syncSpan(dates = spanDates) {
+    spanDates = dates;
+    const span = clipRangeToDates(dates, rangeUi?.range);
+    $('ov-from').value = span ? String(span.from) : ''; $('ov-to').value = span ? String(span.to) : '';
+    $('ov-span').textContent = span
+      ? `بازه: ${dateLabel(span.from)} تا ${dateLabel(span.to)} · ${faDigits(span.days)} روز معاملاتی`
+      : 'بازه: در بازهٔ گام ۱ روزِ داده‌دار نیست';
+    return Boolean(span);
+  }
+
   function computeDaily() {
     const from = normalizeHistoryDate($('ov-from').value), to = normalizeHistoryDate($('ov-to').value);
     if (!from || !to || from > to) { setStatus('تاریخ شروع باید پیش از تاریخ پایان یا برابر آن باشد.', true); return; }
@@ -453,9 +465,13 @@ export async function mount(root, { state }) {
       await applySelectedScope();
       const dates = (seriesByIns[String(ua.ins)] || []).map((row) => normalizeHistoryDate(row.date)).filter(Boolean).sort((a, b) => a - b);
       if (!dates.length) throw new Error('برای نماد پایه تاریخچه‌ای دریافت نشد');
-      const options = dates.map((date) => `<option value="${date}">${dateLabel(date)}</option>`).join('');
-      $('ov-from').innerHTML = options; $('ov-to').innerHTML = options; $('ov-from').disabled = false; $('ov-to').disabled = false;
-      $('ov-from').value = String(dates[Math.max(0, dates.length - 20)]); $('ov-to').value = String(dates.at(-1)); computeDaily();
+      // ── بازه یک بار پرسیده می‌شود (۱۴۰۵/۰۷/۱۶) ──
+      // «وقتی بازه زمانی می‌دهم دوباره پایین در کشویی بازه زمانی از من
+      // می‌خواهد.» پیش‌تر دو کشوییِ «از/تا» زیرِ گام ۱ می‌نشستند و پیش‌فرضشان
+      // بیست روزِ آخر بود، نه بازهٔ گام ۱. حالا همان بازه، بریده به روزهای
+      // داده‌دارِ همین نماد، به کار می‌رود.
+      if (!syncSpan(dates)) throw new Error('در بازهٔ گام ۱ برای این نماد پایه روز معاملاتیِ داده‌دار نیست؛ بازه را عوض کن');
+      computeDaily();
       if ($('ov-day-source').value === 'live') await loadDayIntraday();
       // پس از `computeDaily` گفته می‌شود تا جملهٔ خودش را ننویسد رویش.
       if (failedCodes.length) {
@@ -590,7 +606,7 @@ export async function mount(root, { state }) {
     $('ov-mode-title').textContent = isLive() ? 'نمای لحظه‌ای همین نماد' : 'نماد و دامنه تحلیل روزانه';
     $('ov-mode-note').textContent = isLive()
       ? 'نمودارها از ریزمعامله‌های امروز ساخته می‌شوند؛ نماد از همان انتخاب بالای صفحه می‌آید و تاریخی پرسیده نمی‌شود. برای روند چندروزه، «تاریخی چندروزه» را بزن.'
-      : 'حالت تاریخی: بازه، تاریخ شروع و پایان و مبنای روزانه را خودت می‌دهی و نمودارهای چندروزه ساخته می‌شوند.';
+      : 'حالت تاریخی: بازه را یک بار در گام ۱ می‌دهی و همان بازه، روی روزهای داده‌دارِ نماد، برای نمودارهای چندروزه به کار می‌رود.';
     $('ov-day-intraday').textContent = isLive() || $('ov-day-source').value === 'live' ? 'به‌روزرسانی لحظه‌ای' : 'محاسبه ریز این روز';
   }
 
@@ -609,8 +625,6 @@ export async function mount(root, { state }) {
     await applySelectedScope(); computeDaily();
   });
   $('ov-basis').addEventListener('change', () => { if (daily) computeDaily(); });
-  $('ov-from').addEventListener('change', () => { if (daily) computeDaily(); });
-  $('ov-to').addEventListener('change', () => { if (daily) computeDaily(); });
   $('ov-expiry').addEventListener('change', async () => {
     resetIntraday();
     if (isLive()) { await loadDayIntraday(); return; }
@@ -707,7 +721,14 @@ export async function mount(root, { state }) {
     await loadUniverseForRange(rangeUi.range);
   }
 
-  rangeUi = mountHistoryRange($('ov-range'), { onApply: (range) => { historyLoaded = true; return loadUniverseForRange(range); } });
+  rangeUi = mountHistoryRange($('ov-range'), {
+    onApply: async (range) => {
+      historyLoaded = true;
+      // تاریخچهٔ همین نماد از پیش رسیده: بازهٔ تازه بی دریافتِ دوباره روی همان می‌نشیند.
+      if (daily && spanDates.length) { if (syncSpan()) computeDaily(); else setStatus('در بازهٔ تازه برای این نماد روز داده‌داری نیست.', true); }
+      return loadUniverseForRange(range);
+    },
+  });
   applyViewMode();
   if (isLive()) {
     // در حالت لحظه‌ای هیچ درخواستی در جریان نیست؛ منتظر نخستین عکس داشبورد

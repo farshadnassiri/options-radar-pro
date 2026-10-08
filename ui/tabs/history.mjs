@@ -15,7 +15,7 @@ import { mountDateWheel } from '/ui/datewheel.mjs';
 import { defaultLegIns, manualLegProblem } from '/ui/history-legs.mjs';
 import { SCOPE_LIVE, scopeOptionsMarkup, applyLiveScope } from '/ui/live-scope.mjs';
 import { fmt, faDigits, signTone, toEnDigits, normFa, ltr } from '/ui/fmt.mjs';
-import { baseAfterRange, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
+import { baseAfterRange, clipRangeToDates, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { historyHandoffPlan, goHandoff } from '/ui/handoff.mjs';
@@ -270,8 +270,10 @@ export async function mount(root, { state }) {
     </section>
 
     <section class="card history-range" id="h-days-range" hidden>
-      <div class="range-head"><h2>بازه روزهای معاملاتی</h2><b id="h-range-label">—</b></div>
-      <div class="date-wheel-grid">
+      <div class="range-head"><h2>بازه روزهای معاملاتی</h2><b id="h-range-label" class="history-range-readonly">—</b></div>
+      <!-- بازه یک بار، در گام ۱، پرسیده می‌شود (۱۴۰۵/۰۷/۱۶). چرخ‌ها می‌مانند
+           چون ماتریس ورود × خروج و بازپخش از آن‌ها می‌خوانند، ولی دیده نمی‌شوند. -->
+      <div class="date-wheel-grid" hidden>
         <div class="date-wheel-field"><span>شروع</span><div id="h-start"></div></div>
         <div class="date-wheel-field"><span>پایان</span><div id="h-end"></div></div>
       </div>
@@ -784,6 +786,8 @@ export async function mount(root, { state }) {
         .map((r) => Number(r.date)).filter((d) => d && d >= firstContractDate && d <= lastContractDate)
         .sort((a, b) => a - b);
       if (!dates.length) throw new Error('برای نماد پایه تاریخچه‌ای برنگشت');
+      // بازه‌ای که در آن روزِ داده‌دار نیست، بی‌صدا به «همهٔ تاریخچه» نمی‌رسد.
+      if (!clipRangeToDates(dates, rangeUi?.range)) throw new Error('در بازهٔ گام ۱ برای این نماد روز معاملاتیِ داده‌دار نیست؛ بازه را عوض کن');
       mountRangeWheels();
       $('h-days-range').hidden = false;
       runBtn.disabled = false;
@@ -817,11 +821,17 @@ export async function mount(root, { state }) {
   const rangeEnd = () => Number($('h-end').dataset.value);
 
   function mountRangeWheels() {
-    rangeStartWheel = mountDateWheel($('h-start'), dates, dates[Math.max(0, dates.length - 15)], (value) => {
+    // ── بازه یک بار پرسیده می‌شود (۱۴۰۵/۰۷/۱۶) ──
+    // «وقتی بازه زمانی داده می‌شود دوباره نباید بازه را بخواهد.» پیش‌فرضِ
+    // این دو چرخ پانزده روزِ آخر بود، نه بازهٔ گام ۱؛ کاربر بازه را دو بار
+    // می‌داد و بارِ دوم بی‌خبر جای اولی را می‌گرفت. حالا همان بازهٔ گام ۱
+    // است، بریده به روزهای داده‌دار.
+    const span = clipRangeToDates(dates, rangeUi?.range);
+    rangeStartWheel = mountDateWheel($('h-start'), dates, span?.from ?? dates[0], (value) => {
       if (value > rangeEnd()) rangeEndWheel.select(value, false);
       paintRange();
     });
-    rangeEndWheel = mountDateWheel($('h-end'), dates, dates.at(-1), (value) => {
+    rangeEndWheel = mountDateWheel($('h-end'), dates, span?.to ?? dates.at(-1), (value) => {
       if (value < rangeStart()) rangeStartWheel.select(value, false);
       paintRange();
     });
@@ -830,7 +840,7 @@ export async function mount(root, { state }) {
   function paintRange() {
     if (!dates.length) return;
     const start = rangeStart(), end = rangeEnd();
-    $('h-range-label').textContent = `${historyDayName(start)} ${faDigits(historyDateLabel(start))} تا ${historyDayName(end)} ${faDigits(historyDateLabel(end))}`;
+    $('h-range-label').textContent = `${historyDayName(start)} ${faDigits(historyDateLabel(start))} تا ${historyDayName(end)} ${faDigits(historyDateLabel(end))} · از گام ۱`;
     const startRow = (seriesByIns[String(ua?.ins)] || []).find((r) => Number(r.date) === start);
     if (startRow) {
       const official = Number(startRow.value) || 0;
