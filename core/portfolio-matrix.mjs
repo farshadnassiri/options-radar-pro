@@ -18,6 +18,42 @@ const finite = (value) => {
   return Number.isFinite(out) ? out : null;
 };
 
+// ═══ چرا یک خانه خالی است (۱۴۰۵/۰۷/۱۶) ═══
+//
+// پرسش صاحب پروژه: «در پوشش داده، دیتا نرسیده به برنامه یا واقعاً معامله
+// نشده؟» عددِ پوشش این سه را یکی می‌شمرد. حالا هر خانهٔ خالی علتش را دارد:
+//
+//   untraded — آن روز برای یک پا ردیفِ قیمت‌دار نبود (معامله نشده).
+//   expired  — روز پس از سررسیدِ نزدیک‌ترین پاست؛ بازپخش همان‌جا تمام شد.
+//   failed   — تاریخچهٔ یک پا دریافت نشد، یا ریزمعاملهٔ روزِ سنجش نرسید یا
+//              پس از هر دو مسیر خالی برگشت (بی‌صدا محدودشده؟). «معامله
+//              نشد» نیست.
+//   none     — علتی ثبت نشده (اجرای قدیمی، یا روزی بیرون از بازپخش).
+
+export const GAP = { none: 0, untraded: 1, expired: 2, failed: 3 };
+export const GAP_LABELS = { untraded: 'معامله نشده', expired: 'پس از سررسید', failed: 'داده نرسید', none: 'نامعلوم' };
+
+/**
+ * علتِ روزهای خالیِ یک بازپخش.
+ *
+ * `errors`: ابزار → خطای دریافتِ تاریخچه (همهٔ روزها). `tapeErrors`: ابزار →
+ * خطای ریزمعاملهٔ روزِ سنجش (فقط `markDate`). `requestedEnd`: پایانِ خواسته؛
+ * اگر بازپخش زودتر (روزِ سررسید) تمام شده، روزهای بعد «پس از سررسید»‌اند.
+ */
+export function gapCodes(replay, { errors = {}, tapeErrors = {}, markDate = 0, requestedEnd = 0 } = {}) {
+  const priced = Array.isArray(replay?.priced) ? replay.priced : [];
+  const gaps = [];
+  for (const row of Array.isArray(replay?.rows) ? replay.rows : []) {
+    if (row?.status !== 'missing') continue;
+    const legs = (row.missingLegs || []).map((i) => String(priced[i]?.ins ?? ''));
+    const failed = legs.some((ins) => errors?.[ins] || (Number(row.date) === Number(markDate) && tapeErrors?.[ins]));
+    gaps.push([Number(row.date), failed ? GAP.failed : GAP.untraded]);
+  }
+  const end = Number(replay?.endDate) || 0;
+  const expiredAfter = end && Number(requestedEnd) > end ? end : null;
+  return { gaps, expiredAfter };
+}
+
 /**
  * از فهرست ردیف‌های ریسه، ماتریس متراکم می‌سازد.
  *
@@ -57,7 +93,39 @@ export function buildPnlMatrix(rows = [], { calendar = [] } = {}) {
       pnl[offset + column] = value;
     }
   }
-  return { dates, pnl, rowCount: list.length };
+  // علتِ هر خانهٔ خالی، هم‌شکلِ `pnl`. خانهٔ پر صفر می‌ماند.
+  const gaps = new Uint8Array(list.length * dates.length);
+  for (let rowIndex = 0; rowIndex < list.length; rowIndex++) {
+    const offset = rowIndex * dates.length;
+    const path = list[rowIndex]?.path || {};
+    for (const [date, code] of path.gaps || []) {
+      const column = columnOf.get(finite(date));
+      if (column !== undefined && Number.isNaN(pnl[offset + column])) gaps[offset + column] = code;
+    }
+    const after = finite(path.expiredAfter);
+    if (after !== null) {
+      for (let column = 0; column < dates.length; column++) {
+        if (dates[column] > after && Number.isNaN(pnl[offset + column])) gaps[offset + column] = GAP.expired;
+      }
+    }
+  }
+  return { dates, pnl, gaps, rowCount: list.length };
+}
+
+/** تفکیکِ خانه‌های خالیِ چند ردیف روی ستون‌های پنجره: شمار هر علت. */
+export function gapTally(matrix, rowIndexes = [], columns = []) {
+  const width = matrix?.dates?.length || 0;
+  const out = { observed: 0, untraded: 0, expired: 0, failed: 0, none: 0, possible: 0 };
+  const names = ['none', 'untraded', 'expired', 'failed'];
+  for (const rowIndex of rowIndexes) {
+    for (const column of columns) {
+      out.possible += 1;
+      const value = matrix?.pnl?.[rowIndex * width + column];
+      if (Number.isFinite(value)) { out.observed += 1; continue; }
+      out[names[matrix?.gaps?.[rowIndex * width + column] || 0] || 'none'] += 1;
+    }
+  }
+  return out;
 }
 
 /**
@@ -119,8 +187,13 @@ export function selectMatrixRows(matrix, indexes) {
   const src = matrix.pnl instanceof Float64Array ? matrix.pnl : Float64Array.from(matrix.pnl || []);
   const rows = indexes.filter((i) => Number.isInteger(i) && i >= 0 && (i + 1) * width <= src.length);
   const pnl = new Float64Array(rows.length * width);
+  // علتِ خانه‌های خالی هم با همان ردیف‌ها می‌رود؛ بی این، زیرمجموعه همهٔ
+  // خالی‌ها را «نامعلوم» می‌خواند.
+  const srcGaps = matrix.gaps ? (matrix.gaps instanceof Uint8Array ? matrix.gaps : Uint8Array.from(matrix.gaps)) : null;
+  const gaps = srcGaps ? new Uint8Array(rows.length * width) : null;
   for (let out = 0; out < rows.length; out += 1) {
     pnl.set(src.subarray(rows[out] * width, (rows[out] + 1) * width), out * width);
+    if (gaps && (rows[out] + 1) * width <= srcGaps.length) gaps.set(srcGaps.subarray(rows[out] * width, (rows[out] + 1) * width), out * width);
   }
-  return { ...matrix, pnl, rowCount: rows.length };
+  return { ...matrix, pnl, ...(gaps ? { gaps } : {}), rowCount: rows.length };
 }

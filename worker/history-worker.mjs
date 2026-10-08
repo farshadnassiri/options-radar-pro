@@ -3,7 +3,7 @@
 import { CATALOG, GROUPS, byId } from '../strategies/catalog.mjs';
 import { contractCensus, generateHistoricalCombos, historyCalendar, historyPrice, normalizeHistoryDate, replayHistory, rollingEntryMatrix } from '../core/history.mjs';
 import { summarizePortfolio } from '../core/portfolio.mjs';
-import { buildPnlMatrix } from '../core/portfolio-matrix.mjs';
+import { buildPnlMatrix, gapCodes } from '../core/portfolio-matrix.mjs';
 import { applyIntradayMark, marksAt } from '../core/intraday-mark.mjs';
 import { momentKey, momentsFor } from '../core/intraday-grid.mjs';
 
@@ -275,6 +275,12 @@ async function handle(m, stopRequested) {
               totalFees: final.totalFees, drawdown: final.drawdown,
             },
             path: {
+              // علتِ هر روزِ خالی (معامله نشده / پس از سررسید / داده نرسید)،
+              // فقط تا ساختِ ماتریس؛ پس از آن مثل `daily` پاک می‌شود.
+              ...(() => {
+                const { gaps, expiredAfter } = gapCodes(replay, { errors: m.errors, tapeErrors: m.tapeErrors, markDate: m.markDate, requestedEnd: m.endDate });
+                return { gaps, expiredAfter };
+              })(),
               validDays: replay.summary.validDays,
               daily: replay.rows.filter((row) => row.status === 'ok'
                 && Number.isFinite(row.netPnl) && Number.isFinite(row.returnPct)).map((row) => ({
@@ -342,14 +348,14 @@ async function handle(m, stopRequested) {
         const close = historyPrice(baseRows.get(date), 'CLOSE');
         return Number.isFinite(close) && close > 0 ? close : null;
       });
-      for (const row of rows) delete row.path.daily;
+      for (const row of rows) { delete row.path.daily; delete row.path.gaps; delete row.path.expiredAfter; }
       self.postMessage({
         type: 'portfolio', id: m.id, rows,
         report, generatedByStrategy, census,
-        matrix: { dates: matrix.dates, pnl: matrix.pnl, rowCount: matrix.rowCount, baseSeries, basePrices },
+        matrix: { dates: matrix.dates, pnl: matrix.pnl, gaps: matrix.gaps, rowCount: matrix.rowCount, baseSeries, basePrices },
         excluded: { invalidAtEnd, replayErrors, entryLiquidity, exitLiquidity, exitMissing, exitPrice },
         stopped: stoppedAt,
-      }, [matrix.pnl.buffer]);
+      }, [matrix.pnl.buffer, matrix.gaps.buffer]);
       return;
     }
   } catch (error) {

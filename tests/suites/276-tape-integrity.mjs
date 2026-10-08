@@ -125,5 +125,5 @@ group('۲۷۶. یک مسیرِ مشترک برای ریزمعاملهٔ تاری
     backtest.includes('این «بی‌معامله» نیست، «تأییدنشده» است'));
   check('خطا و خالیِ هر دو مسیر جدا شمرده می‌شوند',
     backtest.includes('let failed = 0, emptyBoth = 0;')
-      && backtest.includes('return { tape, failed, emptyBoth, total: codes.length };'));
+      && backtest.includes('return { tape, failed, emptyBoth, total: codes.length, failedIns };'));
 }

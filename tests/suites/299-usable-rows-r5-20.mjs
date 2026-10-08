@@ -53,7 +53,7 @@ group('۲۹۹. هر مصرف‌کنندهٔ نوارِ تاریخی از همی�
     pb.includes('const rows = usableRows(got, verdict);') && pb.includes('if (!rows) throw new Error(verdict.state);'));
   check('و لحظهٔ سنجشِ همهٔ ترکیب‌ها قیمت را از نوارِ بریده نمی‌گیرد',
     pb.includes('return [ins, usableRows(payload, verdict), payload.emptyBoth === true];')
-    && pb.includes('if (!rows) { if (!blank) failed += 1; continue; }'));
+    && pb.includes("if (!rows) { if (!blank) failed += 1; failedIns[String(ins)] = blank ? 'empty-both' : 'incomplete'; return; }"));
 
   const sr = readSrc('../ui/tabs/spread-radar.mjs');
   check('رادار اسپرد: شکافِ درون‌روزی روی نوارِ بریده رسم نمی‌شود',

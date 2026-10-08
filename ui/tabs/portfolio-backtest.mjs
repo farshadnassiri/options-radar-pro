@@ -526,6 +526,7 @@ export async function mount(root, { state, api }) {
   const status = $('pb-status'), baseSelect = $('pb-base'), entryRail = $('pb-entry-basis'), exitRail = $('pb-exit-basis');
   const baseGate = baseAfterRange(baseSelect);
   let comboFilter = null;
+  let runTapeErrors = {};
   let chain = new Map(), ua = null, seriesByIns = {}, seriesErrors = {}, seriesSource = {}, baseDates = [], generated = [], census = null, activeWorker = null, selectedStrategyId = '', lastRunStopped = false;
   let settingsEpoch = 0;
   // تاریخچه با فهرست قراردادهای همان لحظه بارگیری می‌شود. اگر سررسیدی هنگام
@@ -1063,6 +1064,24 @@ export async function mount(root, { state, api }) {
 
   // ═══════════════════ رتبه‌بندی ═══════════════════
 
+  // ── علتِ خانه‌های خالیِ «پوشش داده» (۱۴۰۵/۰۷/۱۶) ──
+  // «دیتا نرسیده یا واقعاً معامله نشده؟» فقط علت‌های ناصفر، کوتاه زیرِ عدد؛
+  // شرحِ کامل در `title`. جداکننده «،» است، نه «·» که کنار رقم با «۰» یکی
+  // دیده می‌شود.
+  const GAP_ORDER = [['untraded', 'معامله نشده'], ['failed', 'داده نرسید'], ['expired', 'پس از سررسید'], ['unknown', 'نامعلوم']];
+  const gapParts = (gaps) => GAP_ORDER
+    .filter(([key]) => Number(gaps?.[key]) >= 0.005)
+    .map(([key, label]) => `${label} ${fmt.pct(gaps[key])}٪`);
+  const coverageNote = (gaps) => {
+    const parts = gapParts(gaps);
+    return parts.length ? `<small>${esc(parts.join('، '))}</small>` : '';
+  };
+  const coverageTitle = (row) => {
+    const parts = gapParts(row.coverageGaps);
+    return `از همهٔ «ترکیب × روز»های بازه، ${fmt.pct(row.metrics.coverage)}٪ قیمت معتبر داشتند.${parts.length ? ` خالی‌ها: ${parts.join('، ')}.` : ''}`
+      + ' «معامله نشده»: آن روز برای دست‌کم یک پا ردیف قیمت‌دار نبود. «داده نرسید»: تاریخچه یا ریزمعاملهٔ یک پا دریافت نشد یا پس از هر دو مسیر خالی ماند. «پس از سررسید»: روز بعد از سررسید نزدیک‌ترین پا.';
+  };
+
   function paintRanking() {
     const labels = labelsOf();
     charts.set('bump', $('pb-bump'), (echarts, tokens) => bumpOption(analysis, labels, tokens), {
@@ -1071,7 +1090,7 @@ export async function mount(root, { state, api }) {
     });
     charts.set('race', $('pb-race'), (echarts, tokens) => raceOption(analysis, labels, tokens, { pick: trendPick }));
     $('pb-strategies').innerHTML = `<table class="history-table portfolio-small-table"><thead><tr><th>رتبه</th><th>استراتژی</th><th>خانواده</th><th>ترکیب</th><th>نمره</th><th>بازده</th><th>نرخ برد</th><th>بیشترین افت</th><th>سود به درد</th><th>پوشش داده</th></tr></thead><tbody>${
-      analysis.strategies.map((row) => `<tr data-strategy="${esc(row.strategyId)}" tabindex="0"><td>${fmt.int(row.rank)}</td><td><b>${esc(row.strategyName)}</b>${row.feasible ? '' : '<small>ساختاری؛ غیرقابل اجرا در تابلو</small>'}${row.beyondBasis ? '<small>زیان از مبنا رد شده</small>' : ''}</td><td>${esc(row.groupName)}</td><td>${fmt.int(row.samples)}</td><td><b>${numCellOf(row.score)}</b>${row.scoreCoverage !== null && row.scoreCoverage < 100 ? `<small>${pctCell(row.scoreCoverage)} پوشش سنجه</small>` : ''}</td><td class="${signTone(row.metrics.return)}">${pctCell(row.metrics.return)}</td><td>${pctCell(row.metrics.winPct)}</td><td class="${signTone(row.metrics.drawdown)}">${pctCell(row.metrics.drawdown)}</td><td>${numCellOf(row.metrics.painRatio)}</td><td>${pctCell(row.metrics.coverage)}</td></tr>`).join('')}</tbody></table>`;
+      analysis.strategies.map((row) => `<tr data-strategy="${esc(row.strategyId)}" tabindex="0"><td>${fmt.int(row.rank)}</td><td><b>${esc(row.strategyName)}</b>${row.feasible ? '' : '<small>ساختاری؛ غیرقابل اجرا در تابلو</small>'}${row.beyondBasis ? '<small>زیان از مبنا رد شده</small>' : ''}</td><td>${esc(row.groupName)}</td><td>${fmt.int(row.samples)}</td><td><b>${numCellOf(row.score)}</b>${row.scoreCoverage !== null && row.scoreCoverage < 100 ? `<small>${pctCell(row.scoreCoverage)} پوشش سنجه</small>` : ''}</td><td class="${signTone(row.metrics.return)}">${pctCell(row.metrics.return)}</td><td>${pctCell(row.metrics.winPct)}</td><td class="${signTone(row.metrics.drawdown)}">${pctCell(row.metrics.drawdown)}</td><td>${numCellOf(row.metrics.painRatio)}</td><td title="${esc(coverageTitle(row))}">${pctCell(row.metrics.coverage)}${coverageNote(row.coverageGaps)}</td></tr>`).join('')}</tbody></table>`;
     $('pb-strategies').onclick = (event) => { const row = event.target.closest('[data-strategy]'); if (row) selectStrategy(row.dataset.strategy); };
     $('pb-strategies').onkeydown = (event) => {
       const row = event.target.closest('[data-strategy]');
@@ -1714,7 +1733,11 @@ export async function mount(root, { state, api }) {
   function renderReport(payload) {
     payloadRows = payload.rows;
     payloadMatrix = payload.matrix
-      ? { ...payload.matrix, pnl: payload.matrix.pnl instanceof Float64Array ? payload.matrix.pnl : Float64Array.from(payload.matrix.pnl || []) }
+      ? {
+        ...payload.matrix,
+        pnl: payload.matrix.pnl instanceof Float64Array ? payload.matrix.pnl : Float64Array.from(payload.matrix.pnl || []),
+        ...(payload.matrix.gaps ? { gaps: payload.matrix.gaps instanceof Uint8Array ? payload.matrix.gaps : Uint8Array.from(payload.matrix.gaps) } : {}),
+      }
       : null;
     generated = payload.generatedByStrategy;
     census = payload.census || null;
@@ -2015,6 +2038,7 @@ export async function mount(root, { state, api }) {
     const codes = Object.keys(seriesByIns);
     const tape = {};
     let failed = 0, emptyBoth = 0;
+    const failedIns = {};
     for (const part of chunks(codes, 12)) {
       const settled = await Promise.allSettled(part.map(async (ins) => {
         const { item: payload, verdict } = await fetchTapeOne(ins, date);
@@ -2028,16 +2052,19 @@ export async function mount(root, { state, api }) {
         // نمی‌گیرد، نه قیمتی از نوارِ بریده.
         return [ins, usableRows(payload, verdict), payload.emptyBoth === true];
       }));
-      for (const item of settled) {
-        if (item.status !== 'fulfilled') { failed += 1; continue; }
+      settled.forEach((item, index) => {
+        // ابزاری که نوارش نرسید یا پس از هر دو مسیر خالی ماند، برای علتِ
+        // خانهٔ خالی در «پوشش داده» نگه داشته می‌شود: «داده نرسید»، نه
+        // «معامله نشده».
+        if (item.status !== 'fulfilled') { failed += 1; failedIns[String(part[index])] = 'rejected'; return; }
         const [ins, rows, blank] = item.value;
         if (blank) emptyBoth += 1;
-        if (!rows) { if (!blank) failed += 1; continue; }
+        if (!rows) { if (!blank) failed += 1; failedIns[String(ins)] = blank ? 'empty-both' : 'incomplete'; return; }
         tape[ins] = rows;
-      }
+      });
       setStatus(`دریافت ریزمعاملهٔ روز سنجش: ${fmt.int(Object.keys(tape).length)} از ${fmt.int(codes.length)} ابزار`);
     }
-    return { tape, failed, emptyBoth, total: codes.length };
+    return { tape, failed, emptyBoth, total: codes.length, failedIns };
   }
 
   /**
@@ -2051,10 +2078,12 @@ export async function mount(root, { state, api }) {
     const second = Number($('pb-mark').value);
     if (!Number.isFinite(second) || !second) {
       $('pb-mark-state').textContent = 'پایان روز سنجش';
+      runTapeErrors = {};
       return seriesByIns;
     }
     const label = MARK_MOMENTS.find(([value]) => value === second)?.[1] || '';
-    const { tape, failed, emptyBoth, total } = await fetchTape(endDate);
+    const { tape, failed, emptyBoth, total, failedIns } = await fetchTape(endDate);
+    runTapeErrors = failedIns || {};
     const result = applyIntradayMark(seriesByIns, marksAt(tape, second), { date: endDate, second });
     const note = markNote(result, { label, total });
     // خطا و «پس از هر دو مسیر خالی» دو چیزند و هیچ‌کدام «معامله نشد» نیست.
@@ -2086,6 +2115,9 @@ export async function mount(root, { state, api }) {
       runSeriesByIns = runSeries;
       const payload = await runWorker({
         id: `portfolio-${Date.now()}`, type: 'portfolio', ua, seriesByIns: runSeries, startDate, endDate,
+        // علتِ خانه‌های خالیِ «پوشش داده»: خطای تاریخچه (همهٔ روزها) و خطای
+        // ریزمعاملهٔ روزِ سنجش (فقط همان روز).
+        errors: seriesErrors, tapeErrors: runTapeErrors, markDate: Number($('pb-mark').value) ? endDate : 0,
         entryBasis: entryRail.dataset.value || 'LAST', exitBasis: exitRail.dataset.value || 'LAST',
         units: Math.max(1, Math.trunc(safeNum($('pb-units').value, 1))), fees: feesOf(state.settings), settings: state.settings,
         filtered: true, liquidity: liquidity(),

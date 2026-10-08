@@ -12,7 +12,7 @@
 //     بیرون می‌رود و سهم داده‌اش گزارش می‌شود.
 
 import { RETURN_BASES, DEFAULT_RETURN_BASIS, basisMeta, normalizeBasis } from './portfolio-basis.mjs';
-import { columnsInRange, matrixRow } from './portfolio-matrix.mjs';
+import { columnsInRange, gapTally, matrixRow } from './portfolio-matrix.mjs';
 import { comboSeries, comboWeight } from './portfolio-series.mjs';
 import {
   DEFAULT_STATISTIC, DEFAULT_WEIGHTING, meanOf, medianOf,
@@ -248,11 +248,19 @@ export function analyzePortfolio({
     const painRatio = returnStat.value !== null && drawdownStat.value !== null && drawdownStat.value < -1e-9
       ? returnStat.value / Math.abs(drawdownStat.value)
       : null;
+    // ── پوشش داده، با علتِ هر خانهٔ خالی (۱۴۰۵/۰۷/۱۶) ──
+    // «دیتا نرسیده یا واقعاً معامله نشده؟» درصدِ هر علت از کلِ خانه‌ها؛
+    // جمعِ پوشش و این چهار، صد است. اجرای قدیمیِ بی علت همه را «نامعلوم» دارد.
+    const gap = gapTally(matrix, members.map((combo) => combo.index), columns);
+    const share = (count) => (gap.possible > 0 ? (count / gap.possible) * 100 : null);
+    const coverageGaps = gap.possible > 0
+      ? { untraded: share(gap.untraded), expired: share(gap.expired), failed: share(gap.failed), unknown: share(gap.none) }
+      : null;
     return {
       strategyId: head.strategyId, strategyName: head.strategyName,
       groupId: head.groupId, groupName: head.groupName,
       direction: head.direction, feasible: head.feasible,
-      samples: members.length, wins, losses,
+      samples: members.length, wins, losses, coverageGaps,
       flat: members.length - wins - losses,
       path,
       metrics: {
