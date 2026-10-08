@@ -1386,3 +1386,46 @@ export const CLOSE_REASON = {
   manual: 'بستن دستی', incomplete: 'قیمت روز آخر نبود',
   exitEarly: 'خروج در آخرین روزِ قیمت‌دار', '': '—',
 };
+
+/**
+ * صاحبِ یک «قیمت انتخابی»: نماد، سررسید، قیمت اعمالِ همان سمت و روزِ
+ * ورود یا خروج. عددِ انتخابی فقط برای همین قرارداد در همین روز معنا دارد؛
+ * صاحب که عوض شد، عدد هم باید عوض شود (`ui/tabs/strangle-lab.mjs`،
+ * `syncManual`). گزارش ۱۴۰۵/۰۷/۱۶: ۴۸۹۰ِ کالِ نمادِ قبلی روی کالِ نمادِ
+ * تازه (دامنهٔ ۴۳ تا ۶۹) ماند و آزمایش اجرا نشد.
+ */
+export function manualOwnerKey(draft = {}, side = 'call', date = 0) {
+  const strike = draft.entry?.[side];
+  return [draft.uaIns || '', Number(draft.expiry) || 0, side, strike == null ? '' : Number(strike), Number(date) || 0].join('|');
+}
+
+/**
+ * «قیمت انتخابی»ها را با قراردادِ فعلیِ پیش‌نویس هم‌گام می‌کند.
+ *
+ * `draft.cfg` و `draft.manualOwner` را در جا عوض می‌کند. `days` همان
+ * `market.days` است (روز اول = ورود، روز آخر = خروج؛ هر روز `call`/`put`
+ * به شکلِ قیمت اعمال → قیمت). فیلدی که صاحبش عوض شده پاک می‌شود؛ فیلدِ
+ * خالی، اگر مبنا «انتخابی» است، از پایانیِ همان قرارداد پر می‌شود. فیلدی که
+ * صاحبش هنوز ثبت نشده (پیش‌نویسِ ساخته‌شده از آزمایشِ ذخیره‌شده) فقط ثبت
+ * می‌شود، پاک نه.
+ */
+export function syncManualPrices(draft, days = []) {
+  if (!draft?.cfg) return draft;
+  const first = days[0], last = days[days.length - 1];
+  const owners = draft.manualOwner || (draft.manualOwner = {});
+  const fields = [
+    ['manualEntryCall', 'call', first, draft.cfg.entryBasis], ['manualEntryPut', 'put', first, draft.cfg.entryBasis],
+    ['manualExitCall', 'call', last, draft.cfg.exitBasis], ['manualExitPut', 'put', last, draft.cfg.exitBasis],
+  ];
+  for (const [key, side, day, basis] of fields) {
+    const owner = manualOwnerKey(draft, side, day?.date);
+    if (key in owners && owners[key] !== owner) draft.cfg[key] = 0;
+    owners[key] = owner;
+    const strike = draft.entry?.[side];
+    if (basis === 'manual' && !(draft.cfg[key] > 0) && strike != null) {
+      const v = day?.[side]?.[strike];
+      if (v > 0) draft.cfg[key] = v;
+    }
+  }
+  return draft;
+}

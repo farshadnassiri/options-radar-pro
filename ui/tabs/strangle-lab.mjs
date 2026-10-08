@@ -28,7 +28,7 @@ import {
   labConfig, labBases, labExpiries, pickExpiry, buildLabMarket, pricingContext,
   strikeBoard, pickEntry, openPosition, applyAction, adjustCandidate, defendAction,
   runPath, planDecider, pathStats, labMargin, enumeratePaths, pathsSummary, percentileOf,
-  whatIfMatrix, actionKey, actionImpact, gradeReport, slForced, compareFinals, liquidityNotes, ivAt, deltaAt, weightedBreakevens, BASIS_FA, labReturnBase,
+  whatIfMatrix, actionKey, actionImpact, gradeReport, slForced, compareFinals, liquidityNotes, ivAt, deltaAt, weightedBreakevens, BASIS_FA, labReturnBase, syncManualPrices,
 } from '/core/strangle-lab.mjs';
 import { todayCompact, daysBefore, buildLine, calendarDays } from '/core/history-range.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
@@ -348,6 +348,7 @@ export async function mount(root, { state } = {}) {
   function renderSetup(message = '') {
     const keepY = stageY();
     const d = draft;
+    syncManual(d);
     const cfg = labConfig(d.cfg);
     const bases = universe ? labBases(universe.rows) : [];
     const shownBases = d.search ? bases.filter((b) => b.name.includes(d.search.trim())) : bases;
@@ -1551,6 +1552,22 @@ export async function mount(root, { state } = {}) {
     if (cfg.exitBasis === 'manual') { fill('manualExitCall', last, 'call'); fill('manualExitPut', last, 'put'); }
   }
 
+  /**
+   * ── قیمت انتخابی مالِ یک قرارداد است (۱۴۰۵/۰۷/۱۶) ──
+   *
+   * گزارش صاحب پروژه: «قیمت انتخابی با تغییر نماد ثابت می‌ماند… آزمایش
+   * اجرا نشد: قیمت انتخابی کال (۴۸۹۰) بیرون از دامنهٔ معاملات همان روز
+   * (۴۳ تا ۶۹) است.» `prefillManual` فقط فیلدِ خالی را پر می‌کرد؛ پس عددِ
+   * قراردادِ نمادِ قبلی روی قراردادِ نمادِ تازه می‌ماند و ورود را می‌شکست.
+   *
+   * حالا هر فیلد صاحبش را به خاطر دارد: نماد، سررسید، قیمت اعمالِ همان سمت
+   * و روزِ ورود یا خروج. صاحب که عوض شد، عددِ قبلی پاک و از پایانیِ
+   * قراردادِ تازه پر می‌شود. عددی که کاربر برای همان قرارداد نوشته، دست
+   * نمی‌خورد. پیش‌نویسی که از آزمایشِ ذخیره‌شده ساخته شده، صاحبِ نخستینش را
+   * بی پاک‌کردن ثبت می‌کند.
+   */
+  function syncManual(d) { syncManualPrices(d, market?.days || []); }
+
   function setQty(q) {
     const value = Math.max(1, Math.min(10000, Math.round(Number(q) || 1)));
     if (draft && !exp) { draft.cfg = { ...readRules(main, draft.cfg), qty: value }; makeCtx(); renderSetup(); return; }
@@ -1565,7 +1582,9 @@ export async function mount(root, { state } = {}) {
 
   async function startFromDraft() {
     const d = draft;
-    const cfg = readRules(main, d.cfg);
+    d.cfg = readRules(main, d.cfg);
+    syncManual(d);
+    const cfg = d.cfg;
     exp = {
       id: uid(), name: main.querySelector('#sl-name')?.value?.trim() || `${d.uaName}`,
       created: Date.now(), updated: Date.now(),
