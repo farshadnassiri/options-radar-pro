@@ -7,6 +7,7 @@
 // نقاط تغییر علامت D مرز تصمیم‌اند. همین یک تابع جای ده جدول مقایسه‌ای را
 // می‌گیرد و از همان موتور بازده مشترک می‌آید.
 
+import { patched, fresh } from '/ui/morph.mjs';
 import { rollAnalysis, markToMarket } from '/core/positions.mjs';
 import { fetchQuotes, quoteWarning } from '/ui/quote-intake.mjs';
 import { rollFriction, rollPayback } from '/core/roll-cost.mjs';
@@ -305,7 +306,7 @@ export async function mount(root, { state, api }) {
     const nextGreeks = greeksOfLegs(r.nextLegs, (l, i) => (l.kind === 'underlying' ? spot
       : priceOfQuote(i === closeIdx ? newQuote : quotes[i])));
     const gk = (value) => (Number.isFinite(value) ? fmt.small(value) : '—');
-    el('#roll-greeks').innerHTML = `<table class="mini"><thead><tr><th>حساسیت</th><th>واحد</th><th>الان</th><th>پس از رول</th><th>تغییر</th></tr></thead><tbody>${
+    patched(el('#roll-greeks')).innerHTML = `<table class="mini"><thead><tr><th>حساسیت</th><th>واحد</th><th>الان</th><th>پس از رول</th><th>تغییر</th></tr></thead><tbody>${
       GREEKS.map(({ key, label, unit }) => {
         const before = curGreeks.greeks?.[key], after = nextGreeks.greeks?.[key];
         const change = Number.isFinite(before) && Number.isFinite(after) ? after - before : NaN;
@@ -313,7 +314,7 @@ export async function mount(root, { state, api }) {
       }).join('')}<tr><td>تلاطم ضمنی موقعیت</td><td>درصد سالانه</td><td class="n">${Number.isFinite(curGreeks.meanIvPct) ? `${fmt.pct(curGreeks.meanIvPct)}٪` : '—'}</td><td class="n">${Number.isFinite(nextGreeks.meanIvPct) ? `${fmt.pct(nextGreeks.meanIvPct)}٪` : '—'}</td><td class="n">—</td></tr></tbody></table>
       <p class="note">${curGreeks.incomplete || nextGreeks.incomplete ? 'یکی از دو طرف پایی دارد که تلاطم ضمنی‌اش درنیامده، پس جمعِ آن طرف ساخته نشده — عددِ ناقص با فرض صفر برای آن پا نوشته نمی‌شود.' : 'مثبت شدن «تغییر» یعنی رول آن حساسیت را بالا می‌برد. پارامترهای این محاسبه در تنظیمات، بخش «یونانی‌ها، تلاطم و احتمال» قابل تغییرند.'}</p>`;
 
-    el('#cur').innerHTML = `
+    patched(el('#cur')).innerHTML = `
       <dt>پایه</dt><dd>${baseName(p)}</dd>
       <dt>قیمت پایه</dt><dd>${fmt.money(spot)}</dd>
       <dt>تعداد قرارداد</dt><dd>${fmt.int(p.qty)}</dd>
@@ -338,7 +339,7 @@ export async function mount(root, { state, api }) {
     });
 
     const better = r.atSpot > 0;
-    el('#kpis').innerHTML = [
+    patched(el('#kpis')).innerHTML = [
       ['تفاضل در قیمت فعلی', fmt.money(r.atSpotTotal), better ? 'رول بهتر است' : 'نگه داشتن بهتر است', better ? 'gain' : 'loss'],
       ['خالص نقدی رول', fmt.money(r.netCashChange), r.netCashChange >= 0 ? 'بستانکار' : 'بدهکار', r.netCashChange >= 0 ? 'gain' : 'loss'],
       ['سقف سود فعلی', fmt.money(r.curMaxProfit), '', ''],
@@ -374,7 +375,7 @@ export async function mount(root, { state, api }) {
     // «خبر خوب» را می‌گرفت. signTone همان تابعی است که کارت‌های KPI
     // تب‌های استراتژی/برترین موقعیت‌ها (دور ۱۷) برای همین منظور دارند.
     const bestTone = signTone(best.r.atSpot);
-    root.querySelector('#cand').innerHTML = `
+    patched(root.querySelector('#cand')).innerHTML = `
       <thead><tr>
         <th>اعمال</th>${multiExpiry ? '<th>سررسید</th>' : ''}<th>خالص نقدی رول</th><th>تفاضل در قیمت فعلی</th>
         <th title="کارمزد دو معامله به‌علاوهٔ نیم‌اسپردی که هر طرف از آن عبور می‌کند">اصطکاک اجرا</th>
@@ -390,7 +391,7 @@ export async function mount(root, { state, api }) {
           <td class="n">${fmt.money(x.r.nextBreakevens[0])}</td>
           <td>${x.i === bestIdx ? `<span class="tag ${bestTone}">بهترین تفاضل</span>` : ''}${x.i === candIdx ? '<span class="tag flat">انتخاب‌شده</span>' : ''}</td>
         </tr>`).join('')}</tbody>`;
-    for (const tr of root.querySelectorAll('#cand tbody tr')) {
+    for (const tr of fresh(root.querySelectorAll('#cand tbody tr'))) {
       const pick = () => { el('#new').value = tr.dataset.i; draw(); };
       tr.addEventListener('click', pick);
       tr.addEventListener('keydown', (e) => {
@@ -419,7 +420,7 @@ export async function mount(root, { state, api }) {
       spot, width: 760, height: 240, extra, ...(sameScenario && dRange ? { initRange: dRange } : {}),
     });
     el('#dtitle').textContent = `تفاضل دو موقعیت — ${r.verdict}`;
-    el('#dlegend').innerHTML = `
+    patched(el('#dlegend')).innerHTML = `
       <span>${r.note}</span>
       <span>مرز تصمیم: ${dChart.crossings.map((x) => fmt.money(x)).join(' , ') || 'ندارد'}</span>`;
 

@@ -642,7 +642,10 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
   }
 
   async function setChart(key, el, build) {
-    charts.get(key)?.dispose();
+    // همان ظرف یعنی دادهٔ تازه: `mountChart` همان نمودار را بی انیمیشن
+    // به‌روز می‌کند. دورریختن فقط وقتی ظرف عوض شده.
+    const prev = charts.get(key);
+    if (prev && prev.host !== el) prev.dispose();
     charts.delete(key);
     const handle = await mountChart(el, build, { empty: 'دادهٔ کافی برای این نمودار نیست — پوشش بازه را در خط وضعیت ببین.' });
     if (handle) charts.set(key, handle);

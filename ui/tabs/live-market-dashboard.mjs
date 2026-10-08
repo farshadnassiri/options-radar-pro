@@ -22,6 +22,7 @@ import { logError } from '/ui/errlog.mjs';
 import { fetchLiveTape } from '/ui/quote-intake.mjs';
 import { dashboardClock } from '/core/watch-health.mjs';
 import { busyBlock, attachBusyBar } from '/ui/busy.mjs';
+import { paintInto } from '/ui/morph.mjs';
 import { createOpenViewBaseSyncGate } from '/ui/open-view-selection.mjs';
 import { mountLiveMarketMap } from '/ui/live-market-map.mjs';
 import { pushUaTurnover } from '/ui/scanner.mjs';
@@ -1332,15 +1333,20 @@ export async function mount(root, { state, api }) {
     host.hidden = view[2] === 'open-view'; openHost.hidden = view[2] !== 'open-view';
     if (mode?.board) { paintBoard(panel, view, scoped); return; }
     const tabular = ['table', 'table-asc', 'table-zero', 'tape', 'expiry-leaders'].includes(view[2]);
-    // جدول‌ها نمونه ماندگار دارند، پس فقط وقتی نما جدول نیست پاک می‌شوند.
-    if (!tabular) { for (const entry of tables.values()) entry.el.remove(); host.innerHTML = ''; }
+    // جدول‌ها نمونه ماندگار دارند، پس فقط وقتی نما جدول نیست جدا می‌شوند.
+    if (!tabular) for (const entry of tables.values()) entry.el.remove();
     if (view[2] === 'open-view') { await syncOpenView(); return; }
-    if (view[2] === 'donut') { breadthDonut(host, scopedBreadth(scoped), { unit: 'قرارداد' }); return; }
-    if (view[2] === 'breadth') { breadthBars(host, scopedBreadth(scoped), { unit: 'قرارداد' }); return; }
+    // ── تازه‌شدنِ بی‌صدا (۱۴۰۵/۰۷/۱۶) ──
+    // «وقتی دیتای جدید گرفته می‌شود صفحه انگار ریلود می‌شود.» نما پیش‌تر هر
+    // تیک پاک و از نو نوشته می‌شد. حالا نقاش در یک ظرفِ جدا می‌نویسد و فقط
+    // تفاوت روی نمای موجود وصله می‌شود (`ui/morph.mjs`). نمودارِ زمانی
+    // (`liveChart`) شنوندهٔ خودش را دارد و همان جایگزینیِ یک‌جا را می‌گیرد.
+    if (view[2] === 'donut') { paintInto(host, (into) => breadthDonut(into, scopedBreadth(scoped), { unit: 'قرارداد' })); return; }
+    if (view[2] === 'breadth') { paintInto(host, (into) => breadthBars(into, scopedBreadth(scoped), { unit: 'قرارداد' })); return; }
     if (view[2] === 'timeline') { paintTimeline(host, view, scoped); return; }
     if (tabular) { paintTable(host, view, scoped); return; }
-    if (paintStructural(host, view, scoped)) return;
-    host.innerHTML = barChart(ranked(view, scoped, 16), view[4]);
+    if (paintInto(host, (into) => paintStructural(into, view, scoped))) return;
+    paintInto(host, (into) => { into.innerHTML = barChart(ranked(view, scoped, 16), view[4]); });
   }
 
   // ریزمعامله فقط برای نمایی که آن را نشان می‌دهد.
@@ -1370,10 +1376,19 @@ export async function mount(root, { state, api }) {
     timer = setTimeout(refresh, intervalSec * 1000);
   }
 
-  async function refresh() {
+  // ── دریافتِ پس‌زمینه بی‌صداست (۱۴۰۵/۰۷/۱۶) ──
+  // «می‌خواهم دریافت دیتا را کاربر اصلاً متوجه نشود.» تیکِ خودکار دیگر
+  // «در حال دریافت…» نمی‌نویسد، نوارِ درجریان را روشن نمی‌کند و دکمه را خاموش
+  // نمی‌کند؛ فقط وقتی داده رسید، عددها و خطِ وضعیت عوض می‌شوند. کلیکِ
+  // دستیِ «به‌روزرسانی اکنون» همچنان بازخورد می‌گیرد — آنجا کاربر منتظر است.
+  async function refresh(event) {
     if (loading) return;
-    loading = true; $('dd-refresh').disabled = true; $('dd-status').textContent = 'در حال دریافت عکس تازه بازار…';
-    $('dd-status').className = ''; busyBar?.busy(true);
+    const manual = Boolean(event?.type);
+    loading = true;
+    if (manual) {
+      $('dd-refresh').disabled = true; $('dd-status').textContent = 'در حال دریافت عکس تازه بازار…';
+      $('dd-status').className = ''; busyBar?.busy(true);
+    }
     try {
       const response = await fetch('/api/live-dashboard', { cache: 'no-store' }), next = await response.json();
       if (!response.ok || next.error) throw new Error(next.error || `HTTP ${response.status}`);
@@ -1397,7 +1412,7 @@ export async function mount(root, { state, api }) {
       $('dd-status').className = clock.stale || boardStale ? 'loss' : '';
     } catch (error) {
       $('dd-status').textContent = `به‌روزرسانی ناموفق: ${error.message}`; logError('داشبورد تصمیم‌گیری', error);
-    } finally { loading = false; $('dd-refresh').disabled = false; busyBar?.busy(false); schedule(); }
+    } finally { loading = false; $('dd-refresh').disabled = false; if (manual) busyBar?.busy(false); schedule(); }
   }
 
   // کاشیِ «رتبهٔ تلاطم» روی نقشه (و هر پیوند درونی دیگر) تب خودش را باز می‌کند.

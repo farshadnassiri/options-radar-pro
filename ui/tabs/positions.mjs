@@ -22,6 +22,7 @@
 // الان» داشت و در جمعِ سبد می‌نشست. حالا موقعیتِ سررسیدگذشته نه قیمت
 // می‌گیرد، نه ارزش‌گذاری می‌شود، و در جدول خودش با علتش می‌نشیند.
 
+import { patched, fresh } from '/ui/morph.mjs';
 import { paintVolContext } from '/ui/vol-context.mjs';
 import { markToMarket, captureEntryRisk, blankPosition } from '/core/positions.mjs';
 import {
@@ -604,7 +605,7 @@ export async function mount(root, { state, api }) {
       firingByIndex.set(at, result.firing);
       for (const hit of result.firing) alertHits.push({ ...hit, title: p.title || 'موقعیت' });
     }
-    root.querySelector('#alert-bar').innerHTML = alertBannerHtml(alertHits);
+    patched(root.querySelector('#alert-bar')).innerHTML = alertBannerHtml(alertHits);
     // شمارِ نوارِ خطی، **موقعیت** است نه شرط: یک موقعیت می‌تواند سه شرطِ
     // هم‌زمان برقرار داشته باشد و «۳ شرطِ برقرار» آن را سه موقعیت نشان
     // می‌دهد. ستون «شرط» جدول هم همین را می‌شمارد.
@@ -644,7 +645,7 @@ export async function mount(root, { state, api }) {
       </tr>`;
     }).join('');
 
-    root.querySelector('#list').innerHTML = openRows.length ? `
+    patched(root.querySelector('#list')).innerHTML = openRows.length ? `
       <thead><tr>
         <th>عنوان</th><th>پایه</th><th>پاها</th><th>تعداد</th><th>تاریخ ورود</th><th>روز</th>
         <th>روز تا سررسید</th>
@@ -656,8 +657,8 @@ export async function mount(root, { state, api }) {
     const realized = realizedSummary(closedRows.map((x) => x.p), { fees: feesNow() });
     root.querySelector('#closed-card').style.display = closedRows.length ? '' : 'none';
     if (closedRows.length) {
-      root.querySelector('#closed-kpis').innerHTML = realizedKpisHtml(realized);
-      root.querySelector('#closed-list').innerHTML = `
+      patched(root.querySelector('#closed-kpis')).innerHTML = realizedKpisHtml(realized);
+      patched(root.querySelector('#closed-list')).innerHTML = `
         <thead><tr><th>عنوان</th><th>پایه</th><th>پاها</th><th>تعداد</th><th>تاریخ ورود</th><th>تاریخ خروج</th>
           <th>نگه‌داری</th><th>سود تحقق‌یافته</th><th>بازده ٪</th><th>ماهانه ٪</th><th>یادداشت</th><th></th></tr></thead>
         <tbody>${closedRows.map(({ p, at }) => {
@@ -687,7 +688,7 @@ export async function mount(root, { state, api }) {
     // می‌سازد که هیچ تصمیمی از آن درنمی‌آید.
     root.querySelector('#summary-card').style.display = openRows.length ? '' : 'none';
     if (openRows.length) {
-      root.querySelector('#sum-greeks').innerHTML = portfolioGreeksHtml(portfolioGreeks(
+      patched(root.querySelector('#sum-greeks')).innerHTML = portfolioGreeksHtml(portfolioGreeks(
         evals.map(({ p, greeks }) => ({
           title: p.title || 'موقعیت بی‌عنوان', qty: p.qty,
           greeks: greeks.greeks, incomplete: greeks.incomplete === true,
@@ -719,7 +720,7 @@ export async function mount(root, { state, api }) {
       ].filter(Boolean).join(' ');
 
       const marginByKey = new Map(evals.map(({ p, at, m }) => [posKey(p, at), m.currentMargin * p.qty]));
-      root.querySelector('#sum-calendar').innerHTML = expiryCalendarHtml(expiryCalendar(
+      patched(root.querySelector('#sum-calendar')).innerHTML = expiryCalendarHtml(expiryCalendar(
         openRows.map((x) => x.p),
         {
           today, horizonDays: 90,
@@ -736,7 +737,7 @@ export async function mount(root, { state, api }) {
     // همان چیزی است که کاربر خودش ثبت کرده بود.
     root.querySelector('#gone-card').style.display = goneRows.length ? '' : 'none';
     if (goneRows.length) {
-      root.querySelector('#gone-list').innerHTML = `
+      patched(root.querySelector('#gone-list')).innerHTML = `
         <thead><tr><th>عنوان</th><th>پایه</th><th>پاها</th><th>تعداد</th><th>تاریخ ورود</th><th>سررسید</th><th>وضعیت</th><th></th></tr></thead>
         <tbody>${goneRows.map(({ p, at, state }) => `
           <tr>
@@ -751,7 +752,7 @@ export async function mount(root, { state, api }) {
           </tr>`).join('')}</tbody>`;
     }
 
-    for (const b of root.querySelectorAll('[data-del]')) {
+    for (const b of fresh(root.querySelectorAll('[data-del]'))) {
       b.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (b.disabled) return;
@@ -775,7 +776,7 @@ export async function mount(root, { state, api }) {
         render();
       });
     }
-    for (const b of root.querySelectorAll('[data-alert]')) {
+    for (const b of fresh(root.querySelectorAll('[data-alert]'))) {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         alerting = Number(b.dataset.alert);
@@ -783,14 +784,14 @@ export async function mount(root, { state, api }) {
         drawAlert();
       });
     }
-    for (const b of root.querySelectorAll('[data-roll]')) {
+    for (const b of fresh(root.querySelectorAll('[data-roll]'))) {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         const plan = positionRollPlan(positions[Number(b.dataset.roll)]);
         if (plan) goHandoff(state, plan, 'roll');
       });
     }
-    for (const b of root.querySelectorAll('[data-close]')) {
+    for (const b of fresh(root.querySelectorAll('[data-close]'))) {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         closing = Number(b.dataset.close);
@@ -800,7 +801,7 @@ export async function mount(root, { state, api }) {
         drawClose();
       });
     }
-    for (const b of root.querySelectorAll('[data-reopen]')) {
+    for (const b of fresh(root.querySelectorAll('[data-reopen]'))) {
       b.addEventListener('click', async (e) => {
         e.stopPropagation();
         if (b.disabled) return;
@@ -818,14 +819,14 @@ export async function mount(root, { state, api }) {
         await priceAll();
       });
     }
-    for (const b of root.querySelectorAll('[data-edit]')) {
+    for (const b of fresh(root.querySelectorAll('[data-edit]'))) {
       b.addEventListener('click', (e) => {
         e.stopPropagation();
         editing = Number(b.dataset.edit);
         drawEdit();
       });
     }
-    for (const tr of root.querySelectorAll('#list tbody tr[data-i]')) {
+    for (const tr of fresh(root.querySelectorAll('#list tbody tr[data-i]'))) {
       tr.addEventListener('click', () => { expanded = Number(tr.dataset.i); drawDetail(); });
       // فقط وقتی خودِ ردیف تمرکز دارد، نه وقتی Enter روی دکمه «حذف» تودرتو
       // زده می‌شود — آن دکمه رویداد کلیک خودش را دارد، keydown هم بهش بسنده
@@ -865,7 +866,7 @@ export async function mount(root, { state, api }) {
     // نبود، و سه‌تایشان اصلاً عددِ سنجیدنی نبودند بلکه شمارشِ وضعیت بودند
     // («۱۲ نماد قیمت‌خورده»، «۱ سررسیدگذشته»). آن‌ها به نوارِ خطیِ زیرِ
     // ردیف رفتند: خوانده می‌شوند، ولی وزن نمی‌گیرند. چیزی حذف نشد.
-    root.querySelector('#kpis').innerHTML = [
+    patched(root.querySelector('#kpis')).innerHTML = [
       ['سود و زیان جاری', fmt.money(tot), pnlGain == null ? '' : pnlGain ? 'در سود · ریال' : 'در زیان · ریال', pnlGain],
       ['تغییر امروز', fmt.money(changeSum),
         changeComplete ? 'نسبت به پایانی روز پیش' : 'مبنای روز پیش برای همهٔ موقعیت‌ها نیست',
@@ -879,7 +880,7 @@ export async function mount(root, { state, api }) {
 
     // نوارِ خطی: شمارشِ وضعیت، نه عددِ پولی. هر بخش فقط وقتی می‌آید که
     // چیزی برای گفتن داشته باشد — «صفر سررسیدگذشته» خبر نیست.
-    root.querySelector('#kpi-meta').innerHTML = [
+    patched(root.querySelector('#kpi-meta')).innerHTML = [
       `موقعیت باز <b>${fmt.int(openRows.length)}</b>`,
       quotesByIns.size
         ? `قیمت‌گیری <b>${fmt.int(quotesByIns.size)}</b> نماد`

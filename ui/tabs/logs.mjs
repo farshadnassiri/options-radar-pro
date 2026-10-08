@@ -4,6 +4,7 @@
 // تب یک فهرست دارد نه دو تا — وگرنه کاربر باید خودش دو خط زمانی را کنار هم
 // بگذارد و بفهمد کدام علت کدام است.
 
+import { patched } from '/ui/morph.mjs';
 import { fmt, faDigits } from '/ui/fmt.mjs';
 import { localRows, onError } from '/ui/errlog.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
@@ -111,7 +112,7 @@ export async function mount(root, { state }) {
       .slice(0, 400);
 
     const errors = merged.filter((r) => r.level === 'error').length;
-    $('log-kpis').innerHTML = [
+    patched($('log-kpis')).innerHTML = [
       ['رویداد نگه‌داشته‌شده', fmt.int(merged.length), ''],
       ['خطا', fmt.int(errors), errors ? 'نیازمند بررسی' : 'پاک'],
       ['هشدار', fmt.int(merged.length - errors), ''],

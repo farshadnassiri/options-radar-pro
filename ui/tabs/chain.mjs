@@ -4,6 +4,7 @@
 // است، کدام نماد و کدام سررسید واقعاً مظنه دارد، و کجای بازار قابل کار است.
 // بدون این تب، خالی بودن تب‌های چندپا گیج‌کننده می‌شود.
 
+import { patched, fresh } from '/ui/morph.mjs';
 import { faNum, faDigits, faAgo } from '/ui/fmt.mjs';
 import { makeTable, fmt } from '/ui/table.mjs';
 import { makePicker } from '/ui/picker.mjs';
@@ -212,7 +213,7 @@ export async function mount(root, { state, api }) {
   async function drawFlow() {
     try {
       const h = await (await fetch('/api/health')).json();
-      root.querySelector('#flow').innerHTML = `
+      patched(root.querySelector('#flow')).innerHTML = `
         <dt>دور دیده‌بان</dt><dd>${fmt.int(h.watchTicks)}</dd>
         <dt>زمان آخرین دور</dt><dd>${faDigits(h.lastWatchMs)} میلی‌ثانیه</dd>
         <dt>درخواست کل</dt><dd>${fmt.int(h.requests)}</dd>

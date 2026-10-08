@@ -115,6 +115,65 @@ export function chartBase(tokens) {
  * زده می‌شود — پس عوض‌شدن مبنا یا آماره فقط یک `update()` است، نه ساختن
  * دوبارهٔ نمودار.
  */
+// ═══ تازه‌شدنِ بی‌صدا (۱۴۰۵/۰۷/۱۶) ═══
+//
+// گزارش صاحب پروژه: «وقتی دیتای جدید گرفته می‌شود، صفحه انگار ریلود
+// می‌شود… می‌خواهم کاربر دریافت داده را اصلاً متوجه نشود و فقط دادهٔ تازه
+// دیده شود.» دو ریشه در همین فایل بود:
+//
+// ۱. هر تیکِ داده نمودار را با `notMerge` از نو می‌ساخت و انیمیشنِ ورود
+//    (۴۲۰ میلی‌ثانیه) دوباره پخش می‌شد: میله‌ها از صفر بالا می‌آمدند و
+//    نقشه از نو باز می‌شد. حالا انیمیشن فقط بارِ اول است؛ تازه‌شدن، عدد را
+//    سرِ جایش عوض می‌کند.
+// ۲. همان بازسازی، بزرگ‌نمایی و سری‌هایی را که کاربر از راهنما خاموش کرده
+//    بود به حالت اول برمی‌گرداند. حالا هر دو از نمودارِ پیشین به گزینهٔ
+//    تازه منتقل می‌شوند.
+// ۳. سوارکردنِ دوباره روی همان ظرف، نمودار را دور می‌ریخت و یکی تازه
+//    می‌ساخت — یک قابِ خالی و یک انیمیشنِ کامل در هر تیک. حالا همان نمونه
+//    به‌روز می‌شود.
+
+/** ظرف → دستهٔ نمودارِ زنده‌اش، تا سوارکردنِ دوباره همان را به‌روز کند. */
+const liveHandles = new WeakMap();
+
+/**
+ * وضعیتی که کاربر ساخته، از گزینهٔ پیشین به گزینهٔ تازه: سری‌های خاموشِ
+ * راهنما و پنجرهٔ بزرگ‌نمایی. گزینهٔ تازه دست‌نخورده می‌ماند (کپی).
+ */
+export function carryChartState(prev, option) {
+  if (!prev || !option) return option;
+  const out = { ...option };
+  const prevLegend = Array.isArray(prev.legend) ? prev.legend[0] : prev.legend;
+  const off = Object.fromEntries(Object.entries(prevLegend?.selected || {}).filter(([, on]) => on === false));
+  if (out.legend && Object.keys(off).length) {
+    const apply = (legend) => ({ ...legend, selected: { ...(legend.selected || {}), ...off } });
+    out.legend = Array.isArray(out.legend) ? out.legend.map((legend, i) => (i === 0 ? apply(legend) : legend)) : apply(out.legend);
+  }
+  const prevZoom = Array.isArray(prev.dataZoom) ? prev.dataZoom : prev.dataZoom ? [prev.dataZoom] : [];
+  if (out.dataZoom && prevZoom.length) {
+    const list = Array.isArray(out.dataZoom) ? out.dataZoom : [out.dataZoom];
+    const zoomed = list.map((zoom, i) => {
+      const was = prevZoom[i];
+      if (!was || !Number.isFinite(was.start) || !Number.isFinite(was.end) || (was.start === 0 && was.end === 100)) return zoom;
+      const { startValue, endValue, ...rest } = zoom;
+      return { ...rest, start: was.start, end: was.end };
+    });
+    out.dataZoom = Array.isArray(out.dataZoom) ? zoomed : zoomed[0];
+  }
+  return out;
+}
+
+/**
+ * گزینهٔ بی‌انیمیشن برای تازه‌شدن. خاموش‌کردنِ سراسری بس نیست: برخی سری‌ها
+ * (نقشهٔ درختی) پیش‌فرضِ `animation: true` خودشان را دارند و بر سراسری
+ * می‌چربند — در مرورگر اندازه گرفته شد: ۱۴ قابِ متفاوت پس از هر تیک.
+ */
+export function quiet(option) {
+  if (!option) return option;
+  const off = (series) => ({ ...series, animation: false });
+  const series = Array.isArray(option.series) ? option.series.map(off) : option.series ? off(option.series) : option.series;
+  return { ...option, animation: false, ...(series ? { series } : {}) };
+}
+
 export async function mountChart(host, build, { onClick = null, empty = 'داده‌ای برای نمودار نیست' } = {}) {
   if (!host) return null;
   const echarts = await loadCharts();
@@ -123,17 +182,31 @@ export async function mountChart(host, build, { onClick = null, empty = 'داد�
     return null;
   }
   const previous = echarts.getInstanceByDom(host);
+  const reuse = liveHandles.get(host);
+  if (previous && reuse && reuse.instance === previous && !previous.isDisposed?.()) {
+    // همان نمودار، دادهٔ تازه: بی دورریختن، بی انیمیشنِ ورود.
+    reuse.rebind(onClick);
+    if (reuse.update(build)) return reuse;
+    reuse.dispose();
+    host.innerHTML = `<p class="empty-note">${faDigits(empty)}</p>`;
+    return null;
+  }
   if (previous) previous.dispose();
   host.innerHTML = '';
   const instance = echarts.init(host, null, { renderer: 'canvas' });
 
+  let painted = false;
   const paint = () => {
     const tokens = chartTokens();
-    const option = build(echarts, tokens);
+    let option = build(echarts, tokens);
     if (!option) return false;
+    // بارِ اول با انیمیشن؛ از آن پس عدد سرِ جایش عوض می‌شود و وضعیتِ
+    // کاربر (راهنما، بزرگ‌نمایی) می‌ماند.
+    if (painted) option = quiet(carryChartState(instance.getOption(), option));
     // `notMerge` لازم است: وقتی سری‌ها کم می‌شوند، ادغام، سری قدیمی را
     // روی نمودار نگه می‌دارد و کاربر دادهٔ اجرای قبلی را می‌بیند.
     instance.setOption({ ...chartBase(tokens), ...option }, { notMerge: true });
+    painted = true;
     return true;
   };
   // ترتیب مهم است: `dispose` ظرف را پاک می‌کند. یادداشت اگر پیش از آن
@@ -144,7 +217,8 @@ export async function mountChart(host, build, { onClick = null, empty = 'داد�
     host.innerHTML = `<p class="empty-note">${faDigits(empty)}</p>`;
     return null;
   }
-  if (onClick) instance.on('click', onClick);
+  let clickHandler = onClick;
+  if (clickHandler) instance.on('click', clickHandler);
 
   // ناظرِ اندازه باید **فقط** روی تغییر واقعی کار کند.
   //
@@ -168,17 +242,30 @@ export async function mountChart(host, build, { onClick = null, empty = 'داد�
     : null;
   observer?.observe(host);
 
-  return {
+  const handle = {
     instance,
+    host,
     /** `false` یعنی سازنده گزینه نداد و نمودار قبلی سر جایش ماند. */
     update(next) { if (next) build = next; return paint(); },
+    /** کلیکِ سوارکنندهٔ تازه جای کلیکِ قبلی را می‌گیرد، نه کنارش. */
+    rebind(next) {
+      if (clickHandler) instance.off('click', clickHandler);
+      clickHandler = next || null;
+      if (clickHandler) instance.on('click', clickHandler);
+    },
     resize() {
       const box = host.getBoundingClientRect();
       if (box.width < 2 || box.height < 2) return;
       instance.resize();
     },
-    dispose() { observer?.disconnect(); if (!instance.isDisposed?.()) instance.dispose(); },
+    dispose() {
+      observer?.disconnect();
+      if (liveHandles.get(host) === handle) liveHandles.delete(host);
+      if (!instance.isDisposed?.()) instance.dispose();
+    },
   };
+  liveHandles.set(host, handle);
+  return handle;
 }
 
 /**
@@ -191,7 +278,10 @@ export function chartGroup() {
   const handles = new Map();
   return {
     async set(key, host, build, options) {
-      handles.get(key)?.dispose();
+      // همان کلید روی همان ظرف یعنی «دادهٔ تازه»، نه «نمودارِ تازه»:
+      // `mountChart` همان نمونه را بی انیمیشن به‌روز می‌کند.
+      const prev = handles.get(key);
+      if (prev && prev.host !== host) prev.dispose();
       handles.delete(key);
       const handle = await mountChart(host, build, options);
       if (handle) handles.set(key, handle);

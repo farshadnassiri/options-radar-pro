@@ -3,6 +3,7 @@
 import { fmt, faDigits } from './fmt.mjs';
 import { makeTable } from './table.mjs';
 import { mountChart, chartFormat } from './chart-host.mjs';
+import { patchHTML } from './morph.mjs';
 import { historyDateLabel } from '../core/history.mjs';
 import {
   filterContractsBySide, MARKET_MAP_METRICS, marketMapRows, marketMapSummary,
@@ -143,7 +144,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     const missing = data.missing || {};
     const positiveBases = Number.isFinite(Number(breadth.positive)) ? Number(breadth.positive) : data.positiveBases;
     const negativeBases = Number.isFinite(Number(breadth.negative)) ? Number(breadth.negative) : data.negativeBases;
-    summaryHost.innerHTML = `
+    patchHTML(summaryHost, `
       <div class="section-head"><div><p class="eyebrow">کل بازار در همین عکس</p><h2>ارزش معاملات و وضعیت عمومی</h2></div><span>${fmt.int(baseTraded)} پایه معامله‌شده از ${fmt.int(data.underlyings)}</span></div>
       <div class="lmm-stat-grid">
         ${stat('جمع ارزش اختیار', fmt.rialText(data.optionValue), gap(missing.optionValue) || 'کال و پوت')}
@@ -154,7 +155,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
         ${stat('موقعیت باز (قرارداد)', fmt.int(data.openInterest), gap(missing.openInterest))}
         ${stat('قرارداد معامله‌شده', fmt.int(data.tradedContracts), `از ${fmt.int(data.contracts)} قرارداد`)}
         ${stat('مظنه دوطرفه', fmt.int(data.twoSided), `${fmt.int(positiveBases)} پایه مثبت · ${fmt.int(negativeBases)} پایه منفی`)}
-      </div>`;
+      </div>`);
   }
 
   function paintUnderlying() {
@@ -168,8 +169,8 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     }
     const uaQ = dayQuote(ua);
     root.querySelector('[data-lmm-title]').textContent = ua.name || ua.ins;
-    root.querySelector('[data-lmm-selected]').innerHTML = `نماد انتخاب‌شده: <strong>${esc(ua.name || ua.ins)}</strong> ${pricePairHtml(ua)}`;
-    underlyingHost.innerHTML = `<div class="lmm-stat-grid">
+    patchHTML(root.querySelector('[data-lmm-selected]'), `نماد انتخاب‌شده: <strong>${esc(ua.name || ua.ins)}</strong> ${pricePairHtml(ua)}`);
+    patchHTML(underlyingHost, `<div class="lmm-stat-grid">
       ${stat('آخرین معاملهٔ پایه', fmt.money(uaQ.last), Number.isFinite(uaQ.lastPct) ? `${fmt.pct(uaQ.lastPct)}٪ نسبت به پایانی دیروز` : 'امروز معامله نشده', tone(uaQ.lastPct))}
       ${stat('پایانی پایه', fmt.money(uaQ.close), Number.isFinite(uaQ.closePct) ? `${fmt.pct(uaQ.closePct)}٪ نسبت به پایانی دیروز` : 'تغییر نامعلوم', tone(uaQ.closePct))}
       ${stat('ارزش خودِ پایه', fmt.rialText(ua.uaValue))}
@@ -185,23 +186,23 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
         const [label, value, note] = volTileParts(readVolSummary(ua.ins), { today: tehranDateNumber() });
         return `<button type="button" class="lmm-stat vr-open" data-open-mode="vol-rank"><small>${esc(label)}</small><strong>${value}</strong><span>${esc(note)}</span></button>`;
       })()}
-    </div>`;
+    </div>`);
     expiryStep.hidden = expiries().length === 0;
-    expiryRail.innerHTML = expiries().map((row) => `<button type="button" data-lmm-expiry="${esc(row.endDate)}" aria-pressed="${String(row.endDate) === endDate}"><b>${dateLabel(row.endDate)}</b><small>${fmt.int(row.days)} روز · ارزش ${fmt.rialText(row.value)}</small></button>`).join('');
+    patchHTML(expiryRail, expiries().map((row) => `<button type="button" data-lmm-expiry="${esc(row.endDate)}" aria-pressed="${String(row.endDate) === endDate}"><b>${dateLabel(row.endDate)}</b><small>${fmt.int(row.days)} روز · ارزش ${fmt.rialText(row.value)}</small></button>`).join(''));
     paintExpiry();
   }
 
   function paintExpiry() {
     const ex = selectedExpiry();
     if (!ex) { expiryInfo.innerHTML = ''; chainStep.hidden = true; pairedHost.innerHTML = ''; chainTable.set([]); return; }
-    expiryInfo.innerHTML = `<div class="lmm-scope-title"><h3>سررسید ${dateLabel(ex.endDate)}</h3><span>${fmt.int(ex.days)} روز مانده</span></div><div class="lmm-stat-grid compact">
+    patchHTML(expiryInfo, `<div class="lmm-scope-title"><h3>سررسید ${dateLabel(ex.endDate)}</h3><span>${fmt.int(ex.days)} روز مانده</span></div><div class="lmm-stat-grid compact">
       ${stat('ارزش کل', fmt.rialText(ex.value), `${fmt.int(ex.tradedContracts)} قرارداد معامله‌شده`)}
       ${stat('ارزش کال', fmt.rialText(ex.callValue), Number.isFinite(ex.callValuePct) ? `سهم ${fmt.pct(ex.callValuePct)}٪` : '')}
       ${stat('ارزش پوت', fmt.rialText(ex.putValue), Number.isFinite(ex.putValuePct) ? `سهم ${fmt.pct(ex.putValuePct)}٪` : '')}
       ${stat('حجم', fmt.int(ex.volume), `${fmt.int(ex.trades)} معامله`)}
       ${stat('موقعیت باز', fmt.int(ex.oi), `تغییر ${fmt.int(ex.oiChange)}`)}
       ${stat('IV وزنی', Number.isFinite(ex.ivPct) ? `${fmt.pct(ex.ivPct)}٪` : '—', `میانه فاصله مظنه ${fmt.pct(ex.spreadPct)}٪`)}
-    </div>`;
+    </div>`);
     chainStep.hidden = false;
     paintChain();
   }
@@ -460,14 +461,13 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     const headRow = both ? `${callHead}${strikeHead}${putHead}`
       : sides[0] === 'call' ? `${callHead}${strikeHead}` : `${strikeHead}${putHead}`;
 
-    pairedHost.innerHTML = `<table class="lmm-paired">
+    // وصله، نه بازسازی: زنجیرهٔ دوطرفه جعبهٔ پیمایشِ افقی و عمودی دارد و
+    // بازسازی‌اش در هر تیک کاربر را به ابتدای جدول برمی‌گرداند. کلیک‌ها یک
+    // بار روی میزبان گرفته می‌شوند (پایین‌تر)، چون خانه‌ها حالا می‌مانند.
+    patchHTML(pairedHost, `<table class="lmm-paired">
       <thead>${sideBanner}<tr>${headRow}</tr></thead>
       <tbody>${tableBody}</tbody>
-    </table>`;
-    pairedHost.querySelectorAll('[data-lmm-paired-pick]').forEach((cell) => cell.addEventListener('click', () => selectContract(cell.dataset.lmmPairedPick)));
-    pairedHost.querySelectorAll('[data-lmm-sort-key]').forEach((button) => button.addEventListener('click', () => {
-      setPairedSort(button.dataset.lmmSortKey, button.dataset.lmmSortSide || null);
-    }));
+    </table>`);
   }
 
   const currentMetrics = () => mapMode === 'contracts' ? CONTRACT_MAP_METRICS : MARKET_MAP_METRICS;
@@ -615,6 +615,12 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     if (button) selectExpiry(button.dataset.lmmExpiry);
   });
   pairedBtn.addEventListener('click', () => togglePairedPanel());
+  pairedHost.addEventListener('click', (event) => {
+    const pick = event.target.closest('[data-lmm-paired-pick]');
+    if (pick && pairedHost.contains(pick)) { selectContract(pick.dataset.lmmPairedPick); return; }
+    const sort = event.target.closest('[data-lmm-sort-key]');
+    if (sort && pairedHost.contains(sort)) setPairedSort(sort.dataset.lmmSortKey, sort.dataset.lmmSortSide || null);
+  });
   root.querySelector('[data-lmm-chain-layout]').addEventListener('click', (event) => {
     const button = event.target.closest('[data-lmm-layout]');
     if (!button) return;

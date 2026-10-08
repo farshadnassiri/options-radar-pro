@@ -246,8 +246,8 @@ check('۵. سرور گردش پایه‌ها را پیش از ارسال روی 
 check('۶. واحد نمودار وسعت از صداکننده می‌آید، نه از خودِ تابع',
   lm248.includes("export function breadthDonut(host, summary, { unit = 'نماد' } = {})")
   && lm248.includes('${unit} معامله‌شده')
-  && dash248.includes("breadthDonut(host, scopedBreadth(scoped), { unit: 'قرارداد' })")
-  && dash248.includes("breadthBars(host, scopedBreadth(scoped), { unit: 'قرارداد' })"));
+  && dash248.includes("breadthDonut(into, scopedBreadth(scoped), { unit: 'قرارداد' })")
+  && dash248.includes("breadthBars(into, scopedBreadth(scoped), { unit: 'قرارداد' })"));
 check('۸. نوار وضعیت هر دو زمان را می‌گوید و کهنگی را رنگ می‌کند',
   dash248.includes('dashboardClock({ snapshotAt: next.snapshotAt, at: next.at })')
   && dash248.includes("$('dd-status').className = clock.stale || boardStale ? 'loss' : ''"));

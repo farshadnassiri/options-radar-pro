@@ -19,6 +19,7 @@ let tableA11ySeq = 0;
 // قالب‌بندی یک‌جا در ui/fmt.mjs است تا عدد فارسی همه‌جا یک‌شکل باشد. اینجا
 // دوباره صادر می‌شود چون تب‌ها از قدیم آن را از همین‌جا می‌گیرند.
 export { fmt } from './fmt.mjs';
+import { morphChildren, patchHTML } from './morph.mjs';
 import { fmt, faDigits } from './fmt.mjs';
 import { downloadCsv, stamp } from './export.mjs';
 
@@ -633,35 +634,54 @@ export function makeTable(host, cols, opts = {}) {
         if (c.heat) td.style.cssText = heatStyle(c, v);
         tr.appendChild(td);
       }
-      tr.addEventListener('click', () => { activeIdx = i; opts.onPick?.(r); });
       frag.appendChild(tr);
     }
-    tbody.innerHTML = '';
+    // ── وصله، نه بازسازی (۱۴۰۵/۰۷/۱۶) ──
+    // «وقتی دیتای جدید می‌رسد صفحه انگار ریلود می‌شود.» هر تیک همهٔ ردیف‌ها
+    // دور ریخته و از نو ساخته می‌شدند: هاورِ ردیفِ زیرِ موس می‌پرید و متنِ
+    // انتخاب‌شده از دست می‌رفت. حالا ردیف‌های تازه روی ردیف‌های موجود
+    // وصله می‌شوند و فقط خانه‌ای که عددش عوض شده دست می‌خورد.
+    const out = document.createDocumentFragment();
     if (first > 0) {
       const sp = document.createElement('tr');
+      sp.className = 'tbl-spacer';
       sp.style.height = `${first * rowH}px`;
       sp.innerHTML = `<td colspan="${shown.length}"></td>`;
-      tbody.appendChild(sp);
+      out.appendChild(sp);
     }
-    tbody.appendChild(frag);
+    out.appendChild(frag);
     const rest = view.length - last;
     if (rest > 0) {
       const sp = document.createElement('tr');
+      sp.className = 'tbl-spacer';
       sp.style.height = `${rest * rowH}px`;
       sp.innerHTML = `<td colspan="${shown.length}"></td>`;
-      tbody.appendChild(sp);
+      out.appendChild(sp);
     }
     if (!view.length && loading) {
       // اسکلت بارگذاری: تا داده اول برسد، جدول کاملاً خالی و مبهم نماند
       const skRows = Array.from({ length: 6 }, () => `<tr class="skel-row">${
         shown.map(() => '<td><span class="skel-bar"></span></td>').join('')}</tr>`).join('');
-      tbody.innerHTML = skRows;
+      patchHTML(tbody, skRows);
     } else if (!view.length) {
       const msg = emptyMsg || 'ردیفی نمانده. نوار تشخیص بالا می‌گوید ترکیب‌ها کجا افتادند.';
-      tbody.innerHTML = `<tr><td colspan="${shown.length}" style="padding:18px;color:var(--muted)">${msg}</td></tr>`;
+      patchHTML(tbody, `<tr><td colspan="${shown.length}" style="padding:18px;color:var(--muted)">${msg}</td></tr>`);
+    } else {
+      morphChildren(tbody, out);
     }
     remeasure();
   }
+
+  // یک شنونده برای همهٔ ردیف‌ها: ردیف‌ها حالا وصله می‌شوند و می‌مانند، پس
+  // شنوندهٔ هر ردیف به دادهٔ تیکِ قبلی چسبیده می‌ماند. شمارهٔ ردیف از خودِ
+  // گره خوانده می‌شود، داده از `view` همین لحظه.
+  tbody.addEventListener('click', (event) => {
+    const tr = event.target.closest('tr[data-i]');
+    if (!tr || !tbody.contains(tr)) return;
+    const i = Number(tr.dataset.i), r = view[i];
+    if (!r) return;
+    activeIdx = i; opts.onPick?.(r);
+  });
 
   /**
    * ارتفاعِ مبنا را از یک ردیفِ واقعی می‌گیرد.
