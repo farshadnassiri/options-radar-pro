@@ -73,7 +73,7 @@ group('۳۳۲. سیم‌کشی');
   const track = readSrc('../ui/track-chart.mjs');
   const candles = readSrc('../ui/contract-candles-view.mjs');
   check('یک بار در app.mjs نصب می‌شود (همهٔ تب‌ها، نمودار تازهٔ فردا هم)', app.includes("import { installChartImageSaver } from '/ui/chart-image.mjs';") && app.includes('installChartImageSaver();'));
-  check('هر سه گونهٔ نمودار: ECharts، SVG، میله‌ای HTML', mod.includes('const CHART_SELECTOR = `[_echarts_instance_], svg, ${HTML_CHARTS}`;') && ['.decision-bars', '.live-breadth-bars', '.live-mover-bars', '.market-bars', '.vr-gauges'].every((c) => mod.includes(c)) && mod.includes('getDataURL(') && mod.includes('<foreignObject'));
+  check('هر گونهٔ نمایش داده: ECharts، SVG، میله‌ای HTML و جدول', mod.includes('const CHART_SELECTOR = `[_echarts_instance_], svg, ${HTML_CHARTS}, ${TABLES}`;') && ['.decision-bars', '.live-breadth-bars', '.live-mover-bars', '.market-bars', '.vr-gauges'].every((c) => mod.includes(c)) && mod.includes('getDataURL(') && mod.includes('<foreignObject'));
   check('آیکون‌ها و دکمه‌ها نمودار شمرده نمی‌شوند', mod.includes("node.closest('.chart-cam, button, .ic, .tab-btn, header, nav')") && mod.includes('box.width >= MIN_W && box.height >= MIN_H'));
   // «مسیر عکس و تاریخ و ساعت را ننویس» (۱۴۰۵/۰۷/۱۶).
   check('بالای تصویر نه مسیر تب است نه زمان ذخیره', !mod.includes("].filter(Boolean).join(' › ')") && !/fillText\(new Intl\.DateTimeFormat/.test(mod) && mod.includes("title: chartTitle ? '' : heading || label,"));

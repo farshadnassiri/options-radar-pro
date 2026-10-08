@@ -35,6 +35,8 @@
 // نمی‌خورد.
 
 import { saveBlob } from './save-file.mjs';
+import { tableModelOf } from './table.mjs';
+import { domTableModel, drawTablePages } from './table-image.mjs';
 import { icon } from './icons.mjs';
 import { fmt, faDigits, toEnDigits } from './fmt.mjs';
 
@@ -249,7 +251,7 @@ const NEVER_CHART = (node) => !node || node === document.body || node === docume
 
 /** آیا این عنصر نمودار است (نه آیکون، نه کندل کوچک داخل دکمه، نه خود صفحه)؟ */
 function chartOf(target) {
-  const node = target?.closest?.(CHART_SELECTOR);
+  const node = tableHost(target?.closest?.(CHART_SELECTOR));
   if (NEVER_CHART(node) || node.closest('.chart-cam, button, .ic, .tab-btn, header, nav')) return null;
   if (node.tagName?.toLowerCase() === 'svg') {
     // svgِ داخل یک نمودار ECharts مال خودِ ECharts است.
@@ -260,8 +262,18 @@ function chartOf(target) {
   return box.width >= MIN_W && box.height >= MIN_H ? node : null;
 }
 
-const HTML_CHARTS = '.decision-bars, .live-breadth-bars, .live-breadth-donut, .live-mover-bars, .market-bars, .vr-gauges, [data-chart-image]';
-const CHART_SELECTOR = `[_echarts_instance_], svg, ${HTML_CHARTS}`;
+// ── هر نمایشِ داده، نه فقط نمودار (۱۴۰۵/۰۷/۱۶) ──
+// «هر دیتای نموداری، جدولی، نقشه و … باید قابلیت خروجی تصویر داشته باشد.»
+// نقشه‌ها ECharts‌اند و از پیش پوشیده بودند؛ جدول‌ها (`.tbl-wrap` و هر
+// `<table>`) از داده کشیده می‌شوند (`ui/table-image.mjs`)، و شبکه‌های
+// کاشیِ عدد (جمع‌بندی بازار، شاخص‌های کلیدی) مثل نمودارِ HTML.
+const HTML_CHARTS = '.decision-bars, .live-breadth-bars, .live-breadth-donut, .live-mover-bars, .market-bars, .vr-gauges, .lmm-stat-grid, .history-kpis, .backtest-kpis, .portfolio-detail-kpis, .kpis, [data-chart-image]';
+const TABLES = '.tbl-wrap, table';
+const CHART_SELECTOR = `[_echarts_instance_], svg, ${HTML_CHARTS}, ${TABLES}`;
+
+/** ظرفِ جدول: جدولِ مشترک کلِ `.tbl-wrap` است (داده‌اش از آنجا خوانده می‌شود). */
+const isTable = (node) => node?.matches?.(TABLES);
+const tableHost = (node) => (node?.tagName === 'TABLE' ? node.closest('.tbl-wrap') || node : node);
 
 /** اولین مقدار لاتینِ ویژگی‌های data-* یک عنصر (شناسهٔ نمودار یا نما). */
 const latinData = (el) => [...(el?.attributes || [])]
@@ -539,8 +551,44 @@ function drawAxisTags(ctx, marks, side, { chartX, chartY, chartW, widthOf, font,
   }
 }
 
-/** ذخیرهٔ یک نمودار به PNG. `extraTitle` برای دکمه‌های خودِ تب‌ها. */
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const toBlob = (canvas) => new Promise((resolve, reject) => {
+  try { canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('blob'))), 'image/png'); } catch (error) { reject(error); }
+});
+
+/**
+ * تصویرِ جدول: همهٔ ردیف‌ها و ستون‌ها، از داده (`ui/table-image.mjs`). اگر در
+ * یک تصویر جا نشود، چند تصویر با پسوندِ `-p2`، `-p3`… — با مکثی میانشان تا
+ * مرورگر نشانیِ قبلی را پیش از شروعِ دانلود باطل نکند (`saveBlob`).
+ */
+async function saveTableImage(node, { extraTitle = '' } = {}) {
+  const host = tableHost(node);
+  const model = tableModelOf(host) || domTableModel(host.tagName === 'TABLE' ? host : host.querySelector('table'));
+  if (!model?.columns?.length) throw new Error('این جدول ستونی برای تصویر ندارد');
+  const style = getComputedStyle(document.body);
+  const token = (name) => style.getPropertyValue(name).trim();
+  const font = token('--font') || token('--sans') || 'sans-serif';
+  await fontsReady(font);
+  const info = await describe(host);
+  const theme = {
+    font, bg: token('--panel') || style.backgroundColor, panel2: token('--panel-2'), line: token('--line'),
+    ink: token('--ink'), muted: token('--muted'), gain: token('--gain'), loss: token('--loss'),
+  };
+  const pages = drawTablePages(model, { title: info.title, theme });
+  const base = uniqueName(chartImageName(['table', ...info.parts, extraTitle], jalaliStamp()), usedNames);
+  const names = [];
+  for (let i = 0; i < pages.length; i += 1) {
+    const name = pages.length > 1 ? `${base}-p${i + 1}.png` : `${base}.png`;
+    if (i) await pause(1200);
+    saveBlob(await toBlob(pages[i]), name);
+    names.push(name);
+  }
+  return names.join('، ');
+}
+
+/** ذخیرهٔ یک نمودار (یا جدول) به PNG. `extraTitle` برای دکمه‌های خودِ تب‌ها. */
 export async function saveChartImage(node, { extraTitle = '' } = {}) {
+  if (isTable(tableHost(node))) return saveTableImage(node, { extraTitle });
   const target = node.hasAttribute?.('_echarts_instance_') ? node : (node.querySelector?.('[_echarts_instance_]') || node);
   const style = getComputedStyle(document.body);
   const font = style.getPropertyValue('--font').trim() || style.getPropertyValue('--sans').trim() || style.fontFamily || 'sans-serif';
@@ -620,8 +668,8 @@ export function installChartImageSaver(root = document.body) {
   const cam = document.createElement('button');
   cam.type = 'button';
   cam.className = 'chart-cam';
-  cam.title = 'ذخیرهٔ تصویر این نمودار';
-  cam.setAttribute('aria-label', 'ذخیرهٔ تصویر این نمودار');
+  cam.title = 'ذخیرهٔ تصویر (نمودار، جدول یا نقشه)';
+  cam.setAttribute('aria-label', 'ذخیرهٔ تصویر این بخش');
   cam.innerHTML = icon('camera');
   cam.hidden = true;
   document.body.appendChild(cam);

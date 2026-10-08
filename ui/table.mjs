@@ -32,6 +32,19 @@ const HEAT = {
 const NUM_FMT = new Set(['money', 'mrial', 'pct', 'num', 'int']);
 
 /**
+ * مدلِ دادهٔ هر جدول برای خروجیِ تصویر (`ui/table-image.mjs`).
+ *
+ * جدول مجازی‌سازی‌شده است و فقط پنجاه ردیفِ داخل قاب در DOM هستند؛ تصویری
+ * که از DOM ساخته شود بی‌صدا ناقص است. پس تصویر هم مثل خروجی اکسل از داده
+ * می‌آید: همهٔ ردیف‌ها، به ترتیبِ مرتب‌سازیِ روی صفحه، با ستون‌های انتخابی.
+ */
+const tableModels = new WeakMap();
+export function tableModelOf(el) {
+  const wrap = el?.closest?.('.tbl-wrap') || el?.querySelector?.('.tbl-wrap');
+  return wrap ? tableModels.get(wrap)?.() || null : null;
+}
+
+/**
  * جابه‌جایی یک ستون به جای ستون دیگر.
  *
  * معنی «انداختن» ساده نگه داشته شده: ستون کشیده‌شده دقیقاً جای ستون مقصد
@@ -227,6 +240,7 @@ export function makeTable(host, cols, opts = {}) {
           ستون‌ها <b class="tbl-cols-n"></b>
         </button>
         <button type="button" class="ghost tbl-export-btn">خروجی اکسل</button>
+        <button type="button" class="ghost tbl-image-btn" title="همهٔ ردیف‌ها و ستون‌ها، خوانا؛ جدولِ بزرگ چند بخش یا چند تصویر می‌شود">تصویر</button>
         <span class="tbl-sort" role="status" aria-live="polite"></span>
         <span class="heat-legend" hidden></span>
         <span class="sp"></span>
@@ -284,6 +298,30 @@ export function makeTable(host, cols, opts = {}) {
       : (fmt[c.fmt] || fmt.text)(r[c.key]))));
     return [head, ...body];
   }
+  tableModels.set(wrap, () => {
+    const cols = active();
+    return {
+      columns: cols.map((c) => ({ label: c.label, numeric: NUM_FMT.has(c.fmt) })),
+      rows: view.map((r) => ({
+        cells: cols.map((c) => {
+          const v = r[c.key];
+          const numeric = NUM_FMT.has(c.fmt) && Number.isFinite(v);
+          return {
+            text: String(c.text ? c.text(r, v) : (fmt[c.fmt] || fmt.text)(v)),
+            tone: numeric && v < 0 ? 'neg' : numeric && c.sign && v > 0 ? 'pos' : '',
+          };
+        }),
+      })),
+    };
+  });
+  // بارگذاریِ پویا: `chart-image` خودش `tableModelOf` را از همین فایل می‌خواند.
+  host.querySelector('.tbl-image-btn')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try { await (await import('./chart-image.mjs')).saveChartImage(wrap); }
+    catch (error) { button.title = `تصویر ساخته نشد: ${error.message}`; }
+    finally { button.disabled = false; }
+  });
   exportBtn?.addEventListener('click', () => {
     const rows = exportRows();
     if (rows.length < 2) return;
