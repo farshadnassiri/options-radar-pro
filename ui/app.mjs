@@ -274,6 +274,8 @@ function paintLink() {
     return;
   }
   const age = Date.now() - t;
+  // زمانِ آخرین دادهٔ زنده، پشتوانهٔ «تاریخ داده» در تصویرِ تب‌های زنده.
+  document.body.dataset.asof = String(t);
   fresh.textContent = faClock(new Date(t));
   // بیش از دو دقیقه سکوت، در ساعت بازار یعنی یک جای کار می‌لنگد
   fresh.toggleAttribute('data-stale', age > 120000);
@@ -598,6 +600,8 @@ async function open(id) {
   }
   const stage = el('stage');
   stage.innerHTML = '<div class="empty"><p>در حال باز کردن…</p></div>';
+  // نشانِ بازهٔ تبِ قبلی روی صحنه نمی‌ماند (تصویرِ تبِ تازه را دروغ‌گو می‌کرد).
+  delete stage.dataset.spanFrom; delete stage.dataset.spanTo; delete stage.dataset.asof;
   stage.scrollTop = 0;
   location.hash = id;
   document.title = pageTitle(t.title);

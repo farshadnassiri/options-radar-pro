@@ -39,6 +39,7 @@ import { tableModelOf } from './table.mjs';
 import { domTableModel, drawTablePages } from './table-image.mjs';
 import { icon } from './icons.mjs';
 import { fmt, faDigits, toEnDigits } from './fmt.mjs';
+import { historyDateLabel } from '../core/history.mjs';
 
 // ═══ بخش خالص (آزمون‌پذیر در نود) ═══
 
@@ -167,6 +168,86 @@ export function latestOfOption(option = {}) {
   const kind = isTime ? 'time' : 'category';
   for (const it of items) it.stale = !sameDay(it.x, bestX, kind);
   return items.length ? { x: bestX, kind, items } : null;
+}
+
+// ═══ عنوان و تاریخِ داده در هر تصویر (۱۴۰۵/۰۷/۱۶) ═══
+//
+// خواستهٔ صاحب پروژه: «در خروجی تصویر هر آیتم، عنوان آیتم و اینکه آن آیتم
+// مربوط به چه تاریخ یا چه بازهٔ زمانی است اضافه شود.» این تاریخِ **داده**
+// است، نه زمانِ ذخیره (آن را پیش‌تر خودشان نخواستند). سه منبع، از دقیق به
+// کلی: محورِ زمانیِ خودِ نمودار؛ نشانِ `data-span-from/to` یا `data-asof`
+// نزدیک‌ترین نیا (بازهٔ گام ۱ و زمانِ عکسِ بازار)؛ زمانِ آخرین دادهٔ زنده.
+
+const DATE8 = /^\d{8}$/;
+const CLOCK = /^\d{1,2}:\d{2}/;
+/** برچسبِ یک روزِ محور: میلادیِ ۸رقمی → شمسی؛ متنِ شمسیِ آماده همان. */
+const dayText = (value) => {
+  const t = toEnDigits(String(value ?? '')).trim();
+  if (DATE8.test(t)) return faDigits(historyDateLabel(Number(t)));
+  return /^\d{4}[/-]\d{1,2}[/-]\d{1,2}/.test(t) ? faDigits(t.slice(0, 10).replace(/-/g, '/')) : '';
+};
+const tehranParts = (ms) => {
+  const date = new Date(Number(ms));
+  if (!Number.isFinite(Number(date))) return null;
+  const day = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { timeZone: 'Asia/Tehran', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+  const clock = new Intl.DateTimeFormat('fa-IR', { timeZone: 'Asia/Tehran', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+  return { day, clock };
+};
+
+/**
+ * بازهٔ محورِ افقیِ یک نمودار ECharts: `{ kind: 'days', from, to }` (متنِ
+ * شمسی) یا `{ kind: 'clock', from, to }` (ساعتِ یک جلسه) یا `null`.
+ */
+export function axisSpan(option = {}) {
+  const xAxis = Array.isArray(option.xAxis) ? option.xAxis[0] : option.xAxis;
+  if (!xAxis) return null;
+  if (xAxis.type === 'time') {
+    let lo = Infinity, hi = -Infinity;
+    for (const series of option.series || []) {
+      for (const point of Array.isArray(series?.data) ? series.data : []) {
+        const raw = point && typeof point === 'object' && !Array.isArray(point) ? point.value : point;
+        const t = Number(new Date(Array.isArray(raw) ? raw[0] : NaN));
+        if (Number.isFinite(t)) { lo = Math.min(lo, t); hi = Math.max(hi, t); }
+      }
+    }
+    if (!Number.isFinite(lo)) return null;
+    const a = tehranParts(lo), b = tehranParts(hi);
+    return a.day === b.day ? { kind: 'clock', day: a.day, from: a.clock, to: b.clock } : { kind: 'days', from: a.day, to: b.day };
+  }
+  const cats = (Array.isArray(xAxis.data) ? xAxis.data : []).map((d) => (d && typeof d === 'object' ? d.value : d));
+  if (cats.length < 1) return null;
+  const first = toEnDigits(String(cats[0] ?? '')).trim(), last = toEnDigits(String(cats.at(-1) ?? '')).trim();
+  if (CLOCK.test(first) && CLOCK.test(last)) return { kind: 'clock', from: faDigits(first.slice(0, 5)), to: faDigits(last.slice(0, 5)) };
+  const from = dayText(first), to = dayText(last);
+  return from && to ? { kind: 'days', from, to } : null;
+}
+
+/**
+ * متنِ تاریخِ داده. `span`: بازهٔ محور؛ `scope`: `{ from, to }` (میلادیِ ۸رقمی)
+ * یا `{ at }` (میلی‌ثانیه) از نزدیک‌ترین نیا. محور بر نیا مقدم است؛ ساعتِ
+ * محورِ درون‌روز، روزش را از نیا می‌گیرد.
+ */
+export function spanText(span, scope = {}) {
+  const at = scope?.at ? tehranParts(scope.at) : null;
+  if (span?.kind === 'days') return span.from === span.to ? `تاریخ داده: ${span.from}` : `بازهٔ داده: ${span.from} تا ${span.to}`;
+  if (span?.kind === 'clock') {
+    const day = span.day || at?.day || (scope?.to ? dayText(scope.to) : '');
+    return `${day ? `تاریخ داده: ${day}، ` : ''}ساعت ${span.from} تا ${span.to}`;
+  }
+  if (scope?.from && scope?.to) {
+    const from = dayText(scope.from), to = dayText(scope.to);
+    if (from && to) return from === to ? `تاریخ داده: ${from}` : `بازهٔ داده: ${from} تا ${to}`;
+  }
+  if (at) return `عکس بازار: ${at.day}، ساعت ${at.clock}`;
+  return '';
+}
+
+/** نشانِ تاریخِ نزدیک‌ترین نیا؛ تا بدنه (زمانِ آخرین دادهٔ زنده). */
+function scopeOf(node) {
+  const holder = node?.closest?.('[data-span-from], [data-asof]') || (document.body.dataset.asof ? document.body : null);
+  if (!holder) return {};
+  const d = holder.dataset;
+  return d.spanFrom ? { from: Number(d.spanFrom), to: Number(d.spanTo || d.spanFrom) } : { at: Number(d.asof) };
 }
 
 const numText = (v) => (Number.isInteger(v) ? fmt.int(v) : fmt.num(v));
@@ -347,13 +428,14 @@ function svgMarks(node) {
 /** عنوانِ تصویر و تکه‌های نام فایل. مسیر تب و زمانِ ذخیره در تصویر نمی‌آید. */
 async function describe(node) {
   const tabBtn = document.querySelector('.tab-btn[aria-current="true"]');
+  const tab = textOf(tabBtn?.querySelector('.tab-name') || tabBtn);
   const tabId = tabBtn?.dataset.tab || String(location.hash || '').replace('#', '').split('!')[0];
   const subBtn = document.querySelector('#stage [role="tab"][aria-selected="true"]');
   const section = node.closest('.card, section, article, details, .decision-mode') || node.parentElement;
   const viewBtn = section?.closest('[data-mode-panel]')?.querySelector('[data-view][aria-pressed="true"]');
   const viewId = viewBtn?.dataset.view || '';
   const heading = textOf(section?.querySelector('h1, h2, h3, h4, summary'));
-  let chartTitle = '', marks = [];
+  let chartTitle = '', marks = [], span = null;
   if (node.hasAttribute('_echarts_instance_')) {
     const echarts = await import('/vendor/echarts/echarts.esm.min.js').catch(() => null);
     const chart = echarts?.getInstanceByDom(node);
@@ -361,7 +443,13 @@ async function describe(node) {
     const title = option.title;
     chartTitle = textOf({ textContent: (Array.isArray(title) ? title[0]?.text : title?.text) || '' });
     if (chart) marks = echartsMarks(chart, option);
-  } else marks = svgMarks(node);
+    span = axisSpan(option);
+  } else {
+    marks = svgMarks(node);
+    // نمودارِ SVGِ درون‌روز ساعتِ اول و آخرش را خودش می‌گذارد.
+    const clock = (node.dataset?.spanClock || node.querySelector?.('[data-span-clock]')?.dataset.spanClock || '').split('|');
+    if (clock.length === 2 && clock[0] && clock[1]) span = { kind: 'clock', from: faDigits(clock[0]), to: faDigits(clock[1]) };
+  }
   // شناسهٔ خودِ نمودار یا نزدیک‌ترین نیایی که شناسهٔ لاتین دارد.
   let chartId = latinData(node);
   for (let up = node.parentElement; !chartId && up && up !== section; up = up.parentElement) chartId = latinData(up) || (up.id && /^[a-z][\w-]*$/i.test(up.id) ? up.id : '');
@@ -385,8 +473,11 @@ async function describe(node) {
   return {
     // شناسهٔ نما (مثلاً breadth-pct) خودش نمودار را مشخص می‌کند؛ کد عنوان و ترتیب فقط وقتی هیچ شناسه‌ای نیست.
     parts: [tabId, subBtn?.dataset.mode || latinData(subBtn), viewId, chartId || (viewId ? '' : heading), chartId || viewId ? '' : chartTitle || label, chartId || viewId ? '' : order],
-    // نمودار ECharts عنوانِ خودش را درون تصویر دارد؛ تکرارش لازم نیست.
-    title: chartTitle ? '' : heading || label,
+    // عنوانِ آیتم همیشه (۱۴۰۵/۰۷/۱۶): «عنوان آیتم را اضافه کن.» عنوانِ بخش،
+    // وگرنه عنوانِ خودِ نمودار، وگرنه برچسبِ دسترس‌پذیری‌اش.
+    title: heading || chartTitle || label || tab,
+    // تاریخ یا بازهٔ **داده**، نه زمانِ ذخیره.
+    subtitle: spanText(span, scopeOf(node)),
     marks, legend,
   };
 }
@@ -574,7 +665,7 @@ async function saveTableImage(node, { extraTitle = '' } = {}) {
     font, bg: token('--panel') || style.backgroundColor, panel2: token('--panel-2'), line: token('--line'),
     ink: token('--ink'), muted: token('--muted'), gain: token('--gain'), loss: token('--loss'),
   };
-  const pages = drawTablePages(model, { title: info.title, theme });
+  const pages = drawTablePages(model, { title: info.title, subtitle: info.subtitle, theme });
   const base = uniqueName(chartImageName(['table', ...info.parts, extraTitle], jalaliStamp()), usedNames);
   const names = [];
   for (let i = 0; i < pages.length; i += 1) {
@@ -612,7 +703,7 @@ export async function saveChartImage(node, { extraTitle = '' } = {}) {
     const gutter = (list) => (list.length ? Math.max(...list.map((m) => widthOf(m.text))) + TAG_ARROW + 8 : 0);
     const leftG = gutter(sideMarks.left), rightG = gutter(sideMarks.right);
     const W = leftG + shot.width + rightG;
-    const headH = info.title ? 34 : 0;
+    const headH = (info.title ? 32 : 0) + (info.subtitle ? 22 : 0);
     const legendH = info.legend?.length ? 24 : 0;
     const H = headH + legendH + shot.height + 6;
     const canvas = document.createElement('canvas');
@@ -624,6 +715,10 @@ export async function saveChartImage(node, { extraTitle = '' } = {}) {
     if (info.title) {
       ctx.fillStyle = ink; ctx.font = `700 15px ${font}`;
       ctx.fillText(fitText(ctx, info.title, W - 24), W - 12, 9);
+    }
+    if (info.subtitle) {
+      ctx.fillStyle = muted; ctx.font = `13px ${font}`;
+      ctx.fillText(fitText(ctx, info.subtitle, W - 24), W - 12, info.title ? 33 : 9);
     }
     if (legendH) {
       // راهنما از راست به چپ: مربع رنگ، بعد نام.

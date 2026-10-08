@@ -203,6 +203,8 @@ function contractTable(items, { bucket = false } = {}) {
 }
 
 export async function mount(root, { state }) {
+  // «نگاه باز» بازهٔ خودش را دارد، حتی وقتی درونِ رصدِ زنده سوار است.
+  root.dataset.spanScope = '1';
   const initialModel = {
     rFreePct: (Number.isFinite(state.settings.rFree) ? state.settings.rFree : 0.30) * 100,
     divYieldPct: (Number.isFinite(state.settings.divYield) ? state.settings.divYield : 0) * 100,

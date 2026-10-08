@@ -182,6 +182,13 @@ export function chart(host, points, series, {
   const onNewestDay = (b) => b.index === newest || (dayOf(rows[b.index]) !== null && dayOf(rows[b.index]) === dayOf(rows[newest]));
   const marks = newest >= 0 ? [...lastByLabel.values()].filter(onNewestDay).map((b) => ({ y: y(b.value), text: tipLabel(b.value), color: b.color })) : [];
   if (marks.length) host.querySelector('svg')?.setAttribute('data-chart-marks', JSON.stringify({ side: 'left', top: T, bottom: H - B, marks }));
+  // بازهٔ دادهٔ همین نمودار برای تصویر: نخستین و واپسین روزِ ردیف‌ها.
+  const days = rows.map((row) => Number(row.date)).filter((d) => Number.isFinite(d) && d > 19000000);
+  if (days.length) {
+    const svgEl = host.querySelector('svg');
+    svgEl?.setAttribute('data-span-from', String(Math.min(...days)));
+    svgEl?.setAttribute('data-span-to', String(Math.max(...days)));
+  }
   const svg = host.querySelector('svg'), cursor = host.querySelector('.backtest-cursor'), tip = host.querySelector('.backtest-tip');
   const show = (index, clientX, clientY) => {
     const row = rows[index], px = x(row, index);

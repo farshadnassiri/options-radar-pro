@@ -1403,6 +1403,8 @@ export async function mount(root, { state, api }) {
       // زمانی که پاسخ رسیده؛ پیش از این فقط دومی نشان داده می‌شد و رابط
       // هر پنج ثانیه ادعا می‌کرد داده تازه است.
       const clock = dashboardClock({ snapshotAt: next.snapshotAt, at: next.at });
+      // زمانِ عکسِ بازار برای «تاریخ داده» در تصویرِ هر نمودار و جدولِ این داشبورد.
+      if (!clock.unknown) root.dataset.asof = String(clock.snapshotAt);
       const stamp = clock.unknown
         ? 'زمان عکس نامعلوم'
         : `عکس ${faClock(new Date(clock.snapshotAt))} · ${faDigits(clock.ageSec)} ثانیه پیش`;

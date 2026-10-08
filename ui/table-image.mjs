@@ -193,14 +193,14 @@ export function domTableModel(table) {
  * صفحه‌های تصویر را می‌سازد و بوم‌ها را برمی‌گرداند.
  * `theme`: { font, bg, panel2, line, ink, muted, gain, loss }
  */
-export function drawTablePages(model, { title = '', theme, ratio = 2, options = {} } = {}) {
+export function drawTablePages(model, { title = '', subtitle = '', theme, ratio = 2, options = {} } = {}) {
   const o = { ...TABLE_IMAGE, ...options };
   const probe = document.createElement('canvas').getContext('2d');
   const fontOf = (bold, size = o.fontSize) => `${bold ? 700 : 400} ${size}px ${theme.font}`;
   const measure = (text, bold) => { probe.font = fontOf(bold, bold ? o.headSize : o.fontSize); return probe.measureText(String(text)).width; };
   const layout = layoutTable(model, measure, o);
   const pages = paginateTable(layout, o);
-  const titleH = title ? 40 : 0, footH = 30;
+  const titleH = (title ? 36 : 0) + (subtitle ? 24 : 0) + (title || subtitle ? 6 : 0), footH = 30;
   return pages.map((page, pi) => {
     const W = Math.max(...page.blocks.map((b) => layout.groups[b.group].width)) + o.margin * 2;
     const H = titleH + page.height + footH + o.margin;
@@ -213,6 +213,11 @@ export function drawTablePages(model, { title = '', theme, ratio = 2, options = 
     if (title) {
       ctx.direction = 'rtl'; ctx.textAlign = 'right'; ctx.fillStyle = theme.ink; ctx.font = fontOf(true, 16);
       ctx.fillText(title, W - o.margin, 12);
+    }
+    // تاریخ یا بازهٔ دادهٔ این جدول (نه زمانِ ذخیره)، زیرِ عنوان.
+    if (subtitle) {
+      ctx.direction = 'rtl'; ctx.textAlign = 'right'; ctx.fillStyle = theme.muted; ctx.font = fontOf(false, 13);
+      ctx.fillText(subtitle, W - o.margin, title ? 38 : 12);
     }
     let y = titleH;
     for (const block of page.blocks) {

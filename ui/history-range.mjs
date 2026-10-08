@@ -91,7 +91,16 @@ export function mountHistoryRange(host, { onApply = () => {}, preset = DEFAULT_P
     }
   };
 
-  const apply = () => { paintSpan(); onApply({ ...range }); };
+  // ── بازه روی صحنه نشان گذاشته می‌شود (۱۴۰۵/۰۷/۱۶) ──
+  // تصویرِ هر نمودار و جدولِ این تب «بازهٔ داده» را از همین نشان می‌خواند
+  // (`ui/chart-image.mjs`). ظرفی که `data-span-scope` دارد (مثلاً «نگاه باز»
+  // درونِ رصدِ زنده) بازهٔ خودش را دارد؛ وگرنه کلِ صحنه.
+  const markSpan = () => {
+    const scope = host.closest('[data-span-scope]') || document.getElementById('stage') || host;
+    scope.dataset.spanFrom = String(range.from);
+    scope.dataset.spanTo = String(range.to);
+  };
+  const apply = () => { paintSpan(); markSpan(); onApply({ ...range }); };
 
   function mountCalendars() {
     fromWheel = mountDateWheel($('.hrange-from'), days, range.from, (value) => {
@@ -148,6 +157,7 @@ export function mountHistoryRange(host, { onApply = () => {}, preset = DEFAULT_P
   });
 
   paintSpan();
+  markSpan();
 
   return {
     get range() { return { ...range }; },

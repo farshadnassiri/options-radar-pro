@@ -134,6 +134,8 @@ export function liveChart(host, series, {
   const svg = host.querySelector('svg'), cursor = host.querySelector('.live-market-cursor'), tip = host.querySelector('.live-market-tip');
   // عدد آخرین نقطهٔ هر خط برای تصویر ذخیره‌شده (`ui/chart-image.mjs`)، روی
   // محور عمودی. همهٔ خط‌ها از همین جلسه‌اند، پس همه «روز آخر»ند.
+  // ساعتِ اول و آخرِ همین جلسه برای «تاریخ داده» در تصویر.
+  svg.setAttribute('data-span-clock', `${timeLabel(Math.floor(xMin / 3600) * 10000 + Math.floor((xMin % 3600) / 60) * 100)}|${timeLabel(Math.floor(xMax / 3600) * 10000 + Math.floor((xMax % 3600) / 60) * 100)}`);
   svg.setAttribute('data-chart-marks', JSON.stringify({
     side: 'left', top: P.t, bottom: H - P.b,
     marks: usable.map((item) => ({ y: Y(item.points.at(-1).value), text: valueFmt(item.points.at(-1).value), color: item.color })),
