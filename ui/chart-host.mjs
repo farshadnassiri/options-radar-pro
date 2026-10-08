@@ -69,7 +69,7 @@ export function chartTokens() {
     warnSoft: cssVar(style, '--warn-soft'),
     accentSoft: cssVar(style, '--accent-soft'),
     accentInk: cssVar(style, '--accent-ink'),
-    font: cssVar(style, '--font'),
+    font: cssVar(style, '--font') || cssVar(style, '--sans'),
     shadow: cssVar(style, '--shadow-md'),
     series: [1, 2, 3, 4, 5, 6].map((index) => cssVar(style, `--series-${index}`)),
     palette: ['--series-1', '--series-2', '--series-3', '--series-4', '--series-5', '--series-6',

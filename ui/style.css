@@ -282,6 +282,10 @@
           Vazirmatn, Tahoma, monospace;
   --sans: Vazirmatn, "Vazirmatn RD", "IRANSansX", "IRANSans", Sahel, Shabnam,
           Tahoma, "Segoe UI", system-ui, sans-serif;
+  /* قلمِ نمودارها (ECharts و تصویرِ ذخیره‌شده). نمودارها `--font` را می‌خواندند
+     و این توکن تعریف نشده بود؛ پس ECharts و نوار تصویر به «sans-serif» سیستم
+     می‌افتادند و رقم و حرف فارسی در تصویرها ناخوانا می‌شد. */
+  --font: var(--sans);
 
   /* ——— مقیاس اندازه قلم ———
      دست‌نخورده ماند. مقیاسِ متنِ خودشان برای لاتین تنظیم شده (پایهٔ ۱۴) و
