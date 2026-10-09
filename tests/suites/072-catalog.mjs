@@ -83,9 +83,9 @@ group('۷۱. موقعیت باز و تغییر آن');
   const chain71 = readSrc('../ui/tabs/chain.mjs'), dash71 = readSrc('../ui/tabs/live-market-dashboard.mjs');
   check('جدول دیده‌بان ستون تغییر موقعیت باز دارد و در نمای آماده هم هست',
     /key: 'oiChange'/.test(chain71) && /'oi', 'oiChange', 'oiChangePct'/.test(chain71));
-  check('هر مجموعه ستون داشبورد، تغییر موقعیت باز دارد',
-    ['COLS_CONTRACT', 'COLS_UNDERLYING', 'COLS_EXPIRY', 'COLS_GROUP'].every((name) => {
-      const block = new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash71)?.[1] || '';
-      return /col\('oiChange'/.test(block);
-    }));
+  // جدول‌های نماد/سررسید/گروه با بازچینیِ ۱۴۰۵/۰۷/۱۷ به «تصویر شفاف» رفتند.
+  const cp71 = readSrc('../ui/clear-picture-view.mjs');
+  check('زنجیرهٔ داشبورد و جدولِ «تصویر شفاف» هر دو تغییر موقعیت باز دارند',
+    /col\('oiChange'/.test(new RegExp('const COLS_CONTRACT = \\[((?:.|\\n)*?)\\n\\];').exec(dash71)?.[1] || '')
+    && cp71.includes("col('oiChange', 'تغییر موقعیت باز', 'int'"));
 }

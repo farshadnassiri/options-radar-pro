@@ -93,26 +93,11 @@ group('۷۵. تابلوی اختیارهای پرمعامله');
     dist[0].total === 50 && dist.reduce((sum, b) => sum + b.total, 0) === 450);
 
   // ——— رابط ———
+  // بازچینیِ ۱۴۰۵/۰۷/۱۷: زیرتبِ «اختیارهای پرمعامله» در «تصویر شفاف» خلاصه شد
+  // (پرارزش‌ترین/پرحجم‌ترین/پرمعامله‌ترین در «ترین‌ها»). سربه‌سرِ هر قرارداد
+  // همچنان ستونِ زنجیرهٔ نقشه است؛ توابعِ بالا در هسته ماندند.
   const ui75 = readSrc('../ui/tabs/live-market-dashboard.mjs');
-  const boardViews75 = (/const boardViews = \[((?:.|\n)*?)\n\];/.exec(ui75)?.[1] || '').match(/^\s*\['/gm) || [];
-  // «لبخند تلاطم» تابلو عیناً نمای تب تلاطم بود و «سهم هر قرارداد» همان
-  // ستون `sharePct` جدول؛ هر دو رفتند.
-  check('حالت تابلو نماهای منحصر به خودش را دارد، نه رونوشت',
-    boardViews75.length === 6 && ui75.includes("id: 'board'") && ui75.includes('board: true')
-    && !ui75.includes("'board-smile'"),
-    `${boardViews75.length} نما`);
-  check('سنجه و تفکیک سمت، کنترل کاربر دارند و ذخیره می‌شوند',
-    ui75.includes('id="dd-board-metric"') && ui75.includes('data-board-side')
-    && ui75.includes("localStorage.setItem('options-radar:board-metric'")
-    && ui75.includes("localStorage.setItem('options-radar:board-side'"));
-  // شکل نمودار باید با سؤالش بخواند: هیستوگرام و پراکنش و میله انباشته،
-  // نه اینکه همه‌چیز میله رتبه‌ای شود.
-  check('نمودارهای تازه از شکل‌های متفاوت‌اند، نه همه میله رتبه‌ای',
-    ui75.includes('function stackedBars(') && ui75.includes('function scatterChart(')
-    && ui75.includes('moneynessDistribution(') && ui75.includes("'board-scatter'"));
-  check('جدول تابلو و جدول سررسید، ستون‌های خودشان را دارند',
-    /const COLS_BOARD = \[/.test(ui75) && /const COLS_BOARD_EXPIRY = \[/.test(ui75)
-    && ui75.includes("col('breakevenGapPct'") && ui75.includes("col('callGapPct'"));
-  check('عوض‌شدن سنجه، لنگر مرتب‌سازی تابلو را هم تازه می‌کند',
-    ui75.includes("if (key.startsWith('board:')) entry.table.__seeded = false"));
+  check('زیرتبِ تابلو رفته و سربه‌سر در ستون‌های زنجیره مانده',
+    !ui75.includes("id: 'board'") && !ui75.includes('id="dd-board-metric"')
+    && ui75.includes("col('breakeven', 'سربه‌سر', 'money'") && ui75.includes("col('breakevenGapPct'"));
 }

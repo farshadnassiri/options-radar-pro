@@ -73,16 +73,12 @@ group('۹۰. ستون‌های بیشتر، متناسب با داده هر جد
     const block = new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash90)?.[1] || '';
     return [...block.matchAll(/col\('(\w+)'/g)].map((match) => match[1]);
   };
-  const catalogs90 = ['COLS_CONTRACT', 'COLS_UNDERLYING', 'COLS_EXPIRY', 'COLS_GROUP',
-    'COLS_TAPE', 'COLS_BOARD', 'COLS_BOARD_EXPIRY'].map(keysOf90);
-  check('هر هفت خانواده جدول داشبورد، گزینه‌های قیمت/درصد متناسب خودش را دارد',
+  // بازچینیِ ۱۴۰۵/۰۷/۱۷: از هفت خانواده، زنجیره ماند و جدولِ اجزای «تصویر شفاف» آمد.
+  const parts90 = [...readSrc('../ui/clear-picture-view.mjs').matchAll(/col\('(\w+)'/g)].map((match) => match[1]);
+  const catalogs90 = [keysOf90('COLS_CONTRACT'), parts90];
+  check('زنجیره و جدولِ اجزا، هر کدام گزینه‌های قیمت/درصد متناسب خودش را دارد',
     keysOf90('COLS_CONTRACT').includes('timeValuePctSpot')
-    && keysOf90('COLS_UNDERLYING').includes('callValuePct')
-    && keysOf90('COLS_EXPIRY').includes('tradedPct')
-    && keysOf90('COLS_GROUP').includes('positivePct')
-    && keysOf90('COLS_TAPE').includes('premiumPctBase')
-    && keysOf90('COLS_BOARD').includes('oiChangePct')
-    && keysOf90('COLS_BOARD_EXPIRY').includes('callPremiumPct'));
+    && ['callValuePct', 'tradedPct', 'positivePct', 'sharePct'].every((k) => parts90.includes(k)));
   check('هیچ کاتالوگ ستون، کلید تکراری ندارد',
     catalogs90.every((keys) => keys.length === new Set(keys).size)
     && COLUMNS.length === new Set(COLUMNS.map((column) => column.key)).size);

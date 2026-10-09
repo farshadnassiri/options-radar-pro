@@ -17,3 +17,4 @@ data/logs/
 # ضبط تلاطم زنده و بازسازی روزهای گذشته — محلی (`core/iv-record.mjs`)
 data/iv-live/
 data/iv-intraday/
+data/picture-live/

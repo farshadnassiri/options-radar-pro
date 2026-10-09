@@ -71,47 +71,16 @@ group('۷۶. نماهای سه حالت و سنجه‌های ساختاری');
     termStructure([L({ ivPct: 90, value: 0 })]).length === 0);
 
   // ——— بازبینی نماها ———
+  // بازچینیِ ۱۴۰۵/۰۷/۱۷: سه حالتِ ده‌نمایی («نبض»، «نقدینگی»، «تلاطم») به
+  // خواستهٔ صاحب پروژه رفتند — «خیلی از اطلاعاتشان به درد نمی‌خورد». جای‌شان
+  // یک صفحهٔ از کل به جزء است (دستهٔ ۳۳۹). قاعدهٔ «بی‌تکرار» همان‌جا هم برقرار
+  // است: هر بخشِ «تصویر شفاف» یک سؤال دارد. توابعِ ساختاریِ بالا در هسته ماندند.
   const ui76 = readSrc('../ui/tabs/live-market-dashboard.mjs');
-  const viewsOf = (name) => [...(new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(ui76)?.[1] || '')
-    .matchAll(/\['([^']+)', '[^']*', '([^']+)', '([^']+)', '([^']+)'\]/g)]
-    .map((m) => ({ id: m[1], kind: m[2], source: m[3], metric: m[4] }));
-  const lists = { pulseViews: viewsOf('pulseViews'), liquidityViews: viewsOf('liquidityViews'), volatilityViews: viewsOf('volatilityViews') };
-  for (const [name, views] of Object.entries(lists)) {
-    // عدد ثابت دیگر ادعا نیست. تا ۱۴۰۵/۰۶/۲۳ اینجا نوشته بود «دقیقاً بیست»
-    // و همان عدد باعث شد هشت میلهٔ رتبه‌ایِ بی‌فایده فقط برای پرکردن فهرست
-    // بمانند. حالا کف می‌گذاریم و به‌جای شمارش، **تکرار** را ممنوع می‌کنیم.
-    check(`${name} فهرست معناداری دارد`, views.length >= 10, `${views.length}`);
-    // ═══ نمایی که فقط «همان جدول، مرتب بر ستون دیگر» است ═══
-    //
-    // جدول‌های این تب روی هر ستون مرتب می‌شوند. پس یک نمودار میله‌ای که
-    // همان منبع و همان سنجهٔ یک جدولِ موجود را رتبه می‌کند، نمای تازه‌ای
-    // نیست — یک کلیک روی سرستون است. این ادعا همان را می‌گیرد.
-    const tableKeys = new Set(views.filter((view) => view.kind.startsWith('table'))
-      .map((view) => `${view.source}|${view.metric}`));
-    const echoes = views.filter((view) => view.kind === 'bar' && tableKeys.has(`${view.source}|${view.metric}`));
-    check(`${name} نمودار میله‌ای تکرارِ مرتب‌سازی جدول ندارد`,
-      echoes.length === 0, echoes.map((view) => view.id).join('، '));
-    // دو نما با یک شکل و یک منبع و یک سنجه، یک نما هستند — و چون جدول‌ها
-    // خودشان سورت‌پذیرند، «جدول X» و «میله X» هم دیگر تفاوت واقعی نیستند.
-    const signatures = views.map((view) => `${view.kind}|${view.source}|${view.metric}`);
-    const duplicated = signatures.filter((sig, index) => signatures.indexOf(sig) !== index);
-    check(`${name} نمای تکراری ندارد`, duplicated.length === 0, [...new Set(duplicated)].join('، '));
-  }
-  // تنوع شکل: هر حالت باید بیش از یک شکل نمودار داشته باشد، وگرنه همان
-  // «بیست تب شبیه هم» است.
-  for (const [name, views] of Object.entries(lists)) {
-    check(`${name} از چند شکل نمودار استفاده می‌کند`,
-      new Set(views.map((v) => v.kind)).size >= 5, [...new Set(views.map((v) => v.kind))].join('، '));
-  }
-  // و شکل‌های تازه واقعاً پیاده شده‌اند
-  check('شکل‌های تازه ساخته شده‌اند: گرمانما، نردبان، منحنی درد، هیستوگرام، پراکنش',
-    ['function heatmap(', 'function ladderChart(', 'function painCurve(', 'function histogram(', 'function scatterChart(']
-      .every((needle) => ui76.includes(needle)));
-  check('و هر سه حالت به سنجه‌های ساختاری وصل شده‌اند',
-    ui76.includes("'max-pain'") && ui76.includes("'strike-ladder'")
-    && ui76.includes("'iv-term'") && ui76.includes("'iv-skew'")
-    && ui76.includes("'liquidity-heatmap'") && ui76.includes("'iv-heatmap'"));
-  // گرمانما دو بُعد دسته‌ای دارد؛ رنگش باید طیف تک‌فام باشد نه رنگین‌کمان
-  check('گرمانما طیف تک‌فام دارد، نه رنگین‌کمان',
-    ui76.includes('color-mix(in srgb, var(--series-1)') && !/heatRainbow|hsl\(/.test(ui76));
+  check('فهرست‌های ده‌نمایی رفته‌اند و نمودارهای رتبه‌ای دیگر در این صفحه نیستند',
+    !/const (pulse|liquidity|volatility)Views = \[/.test(ui76) && !ui76.includes('function barChart(')
+    && !ui76.includes('function heatmap('));
+  const cp76 = readSrc('../ui/clear-picture-view.mjs');
+  const headings = [...cp76.matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map((m) => m[1]);
+  check('هر بخشِ «تصویر شفاف» عنوانِ یکتا دارد — یک سؤال، یک جواب',
+    headings.length >= 8 && new Set(headings).size === headings.length, headings.join('، '));
 }

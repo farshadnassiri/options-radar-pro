@@ -51,30 +51,27 @@ group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دا�
 
   const ui70 = readSrc('../ui/tabs/live-market-dashboard.mjs'), app70 = readSrc('../ui/app.mjs');
   const viewCount = (name) => ((new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(ui70)?.[1] || '').match(/^\s*\['/gm) || []).length;
-  // «دقیقاً بیست» هدف نبود، سهمِ عدد گرد بود. هر سه حالت باید فهرست
-  // معناداری داشته باشند؛ تکرارنبودنشان را دستهٔ ۷۶ می‌سنجد.
-  check('هر سه حالت تصمیم‌گیری فهرست معناداری از جدول و نمودار تنبل دارند',
-    viewCount('pulseViews') >= 10 && viewCount('liquidityViews') >= 10 && viewCount('volatilityViews') >= 10,
-    `${viewCount('pulseViews')}/${viewCount('liquidityViews')}/${viewCount('volatilityViews')}`);
+  // بازچینیِ ۱۴۰۵/۰۷/۱۷: سه حالتِ ده‌نمایی رفتند. «نگاه باز» یک نما دارد و
+  // «تصویر شفاف» (دستهٔ ۳۳۹) جای «نبض»، «نقدینگی»، «تابلو»، «مقایسه» و
+  // «دیده‌بان» را گرفت.
+  check('«نگاه باز» تنها نمای خودش را دارد و «تصویر شفاف» جای سه حالت را گرفته',
+    viewCount('openViewViews') === 1 && ui70.includes("{ id: 'clear', title: 'تصویر شفاف'")
+    && !ui70.includes('const pulseViews') && !ui70.includes('const liquidityViews'), viewCount('openViewViews'));
   check('دستگیره زمان، تایمر بازسازی و توقف خودکار هم‌زمان وجود دارند',
     ui70.includes('id="dd-interval" type="range"') && ui70.includes('timer = setTimeout(refresh') && ui70.includes('id="dd-pause"'));
   // سقف چهارصدردیفی برداشته شد چون دلیلش رفت: آن سقف برای روانی DOM بود،
   // وقتی جدول `innerHTML` خام می‌ساخت. جدول مشترک مجازی‌سازی‌شده است و فقط
   // ردیف‌های داخل قاب را رسم می‌کند، پس نوار کامل هم مرتب می‌شود هم صادر.
-  check('نوار ریزمعامله کامل به جدول مجازی‌سازی‌شده می‌رود، نه بریده',
-    ui70.includes('function tapeRows(tape, yday = NaN)') && !ui70.includes('tape.slice(-400)'));
-  // شش توکن، نه ده — و بدون چرخش. جداپذیری خودِ رنگ‌ها را نگهبان ۱۰ در
-  // `tests/guards.mjs` حساب می‌کند؛ اینجا فقط مصرفشان سنجیده می‌شود.
-  check('رنگ سری‌ها از توکن‌های سنجیده می‌آید و میله رتبه‌ای یک فام دارد',
-    ui70.includes('var(--series-${index + 1})') && ui70.includes('length: 6')
-    && ui70.includes("'var(--bar-fill)'")
-    && !ui70.includes('--series:${SERIES[index % SERIES.length]}'));
-  // «رهبران ارزش کل بازار» حذف شد: با جدول سورت‌پذیر، همان «تابلوی
-  // قراردادها»ی مرتب بر ارزش است. رهبر هر سررسید و نگاه باز مانده‌اند،
-  // چون هیچ‌کدام با مرتب‌سازی یک ستون ساخته نمی‌شوند.
-  check('رهبر هر سررسید و نگاه باز درون داشبورد است',
-    ui70.includes("'high-value-expiry'") && ui70.includes("'open-view-history'")
-    && !app70.includes("id: 'open-view'"));
+  const cp70 = readSrc('../ui/clear-picture-view.mjs');
+  check('ریزمعاملهٔ قرارداد کامل رسم می‌شود، نه بریده',
+    cp70.includes('const tape = (deps.getTape() || []).filter(') && !cp70.includes('tape.slice(-') && !ui70.includes('tape.slice(-400)'));
+  // رنگ از توکن، نه رتبه: کال همیشه `--call` و پوت همیشه `--put`.
+  const css70 = readSrc('../ui/style.css');
+  check('کال و پوت رنگِ هویتِ خودشان را دارند، نه رنگِ رتبه',
+    css70.includes('.cp-bar i { flex: none; width: var(--w); height: 100%; background: var(--call); }')
+    && css70.includes('.cp-bar i.put { background: var(--put); }'));
+  check('نگاه باز درون داشبورد است، نه تب مستقل',
+    ui70.includes("'open-view-history'") && !app70.includes("id: 'open-view'"));
   const server70 = readSrc('../server/server.mjs');
   // ادعا از «عکس خام» به «عکس ادغام‌شده» رفت: گردش واقعی پایه‌ها باید
   // پیش از رفتن به رابط روی همان عکس بنشیند، وگرنه «ارزش خود پایه» در کل

@@ -113,10 +113,13 @@ group('۳۰۶. کارنامه و جایگزین‌ها');
 group('۳۰۶. اتصال به رصد لحظه‌ای');
 {
   const dash = readSrc('../ui/tabs/live-market-dashboard.mjs');
-  check('تب «مقایسه در زنجیره» کنار نقشه ثبت شده',
-    dash.includes("{ id: 'compare', title: 'مقایسه در زنجیره'") && dash.includes('if (mode?.compare) { compare().paint(); return; }'));
+  // بازچینیِ ۱۴۰۵/۰۷/۱۷: زیرتبِ «مقایسه در زنجیره» در «تصویر شفاف» خلاصه شد
+  // (جایگاهِ قرارداد: سهم از سررسید و نماد، رتبهٔ ارزش). ماژولِ خودش ماند.
+  check('«مقایسه در زنجیره» دیگر زیرتب نیست؛ جایگاهِ قرارداد در «تصویر شفاف» است',
+    !dash.includes("{ id: 'compare', title: 'مقایسه در زنجیره'")
+    && readSrc('../ui/clear-picture-view.mjs').includes("const standing = contractStanding(c, { siblings: deps.rowsAt('expiry'), family: deps.rowsAt('underlying') });"));
   check('انتخاب از همان نقشه می‌آید و به همان برمی‌گردد (یک منبع انتخاب)',
-    dash.includes('getSelection: () => marketExplorer.selection()') && dash.includes('marketExplorer.pickContract(row)'));
+    dash.includes('getSelection: () => marketExplorer.selection()') && dash.includes('pickContract: (row) => marketExplorer.pickContract(row)'));
   const map = readSrc('../ui/live-market-map.mjs');
   check('نقشه انتخاب بیرونی را بی پرش صفحه می‌پذیرد', map.includes('pickContract(row) {'));
   const table = readSrc('../ui/table.mjs');

@@ -140,10 +140,11 @@ group('۳۰۴. F03 — نامعلوم پس از JSON نامعلوم می‌ما�
   check('حتی بی مرز، علت نبود تلاطم پاک نمی‌شود و یونانی روی IV صفر ساخته نمی‌شود',
     analytics.ivWhyText !== '' && !Number.isFinite(analytics.delta));
   const dash = readSrc('../ui/tabs/live-market-dashboard.mjs');
-  check('لبخند تلاطم و پراکنش‌ها `null` را صفر نمی‌خوانند، و پاسخ پیش از مصرف احیا می‌شود',
-    dash.includes('y: numOrNaN(row.ivPct)') && dash.includes('x: numOrNaN(row[xKey]), y: numOrNaN(row[yKey])')
-    && dash.includes('next.universe = reviveDashboardUniverse(next.universe);')
-    && dash.includes('Number.isFinite(numOrNaN(row.oiYday))'));
+  // لبخند و پراکنش‌ها با بازچینیِ ۱۴۰۵/۰۷/۱۷ رفتند؛ مسیرِ روزِ «تصویر شفاف»
+  // همان قاعده را دارد: `null`ِ JSON نامعلوم است، نه صفر.
+  check('پاسخ داشبورد و مسیر روز `null` را صفر نمی‌خوانند، و پاسخ پیش از مصرف احیا می‌شود',
+    dash.includes('next.universe = reviveDashboardUniverse(next.universe);')
+    && readSrc('../ui/clear-picture-view.mjs').includes('const n = (v) => (v === null || v === undefined ? NaN : Number(v));'));
 }
 
 group('۳۰۴. F04 — «داده نرسید» صفرِ «معامله نشد» نمی‌سازد');

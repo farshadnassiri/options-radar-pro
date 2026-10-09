@@ -60,9 +60,12 @@ group('۶۹. داشبورد تجمعی بازار و رصد زنده موقعی�
     server69.includes("p === '/api/live-dashboard'")
     && server69.includes('marketBreadthTimeline(instruments, tradesByIns')
     && server69.includes('Promise.all(instruments.map(async (item)'));
-  check('داشبورد دایره‌ای، میله‌ای و سه مسیر تجمعی را در کاتالوگ تصمیم نگه می‌دارد',
-    ui69.includes("'breadth-donut'") && ui69.includes("'breadth-bars'")
-    && ui69.includes("'breadth-pct'") && ui69.includes("'base-volume-path'"));
+  // بازچینیِ ۱۴۰۵/۰۷/۱۷: دایره و مسیرِ جهت به «تصویر شفاف» رفتند — حالا
+  // برای قراردادهای اختیار و برای هر دامنه، نه فقط پایه‌های کل بازار.
+  const cp69 = readSrc('../ui/clear-picture-view.mjs');
+  check('«تصویر شفاف» دایرهٔ جهت و مسیرِ روزِ مثبت/منفی و ارزش کال/پوت را دارد',
+    cp69.includes('breadthDonut(into, {') && cp69.includes('درصد قراردادهای مثبت و منفی در طول روز')
+    && cp69.includes('ارزش تجمعی کال و پوت در طول روز') && server69.includes("p === '/api/live-picture'"));
   // این ادعا تا ۱۴۰۵/۰۶/۲۳ سه کشوی جداگانه را قفل کرده بود — یعنی دقیقاً
   // همان دوباره‌پرسیدنی که صاحب پروژه خواست برداشته شود. نقشه حالا تنها
   // منبع انتخاب است، پس ادعا هم همان را قفل می‌کند: نه کشوی موازی بماند،

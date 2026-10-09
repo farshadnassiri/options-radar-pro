@@ -121,7 +121,7 @@ check('۵ و ۷. صفحه نوار تب دارد و بخش تاشوی «تحلی
   dash246.includes('class="dd-tabbar" role="tablist"') && dash246.includes('role="tab"')
   && !dash246.includes('decision-advanced') && css246.includes('.dd-tabbar {'));
 check('۸. تیک خودکار دیگر ریزمعامله و بازهٔ روزانه را بی‌دلیل نمی‌گیرد',
-  dash246.includes('if (!needsTape(pick.level, viewOf()?.[2]))')
+  dash246.includes("if (!needsTape(pick.level, modeOf()?.clear ? 'clear' : viewOf()?.[2]))")
   && readSrc('../ui/contract-candles-view.mjs').includes('if (past || fetching || !isVisible()) return;')
   && readSrc('../ui/contract-candles-view.mjs').includes('staleInfoIds(ids, infoCache, Date.now(), INFO_TTL_MS)')
   && dash246.includes("isVisible: () => activeMode === 'candles' && root.isConnected"));

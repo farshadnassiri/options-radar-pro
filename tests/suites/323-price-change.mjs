@@ -78,9 +78,11 @@ group('۳۲۳-ج. سیم‌کشی رابط');
   const pair = dash.slice(dash.indexOf('const PRICE_PAIR_COLS = '), dash.indexOf('const PRICE_PAIR_COLS_UA'));
   check('جدول‌های داشبورد: آخرین و پایانی و درصد هر دو پیش‌فرض دیده می‌شوند',
     ['tradeLast', 'lastChangePct', 'close', 'closeChangePct'].every((k) => new RegExp(`col\\('${k}'[^)]*base: true`).test(pair)));
-  check('جدول‌های پایه و قرارداد هر دو از همان ستون‌ها', (dash.match(/\.\.\.PRICE_PAIR_COLS\('/g) || []).length === 2);
-  check('ریزمعامله دیگر «از اولین معامله» نمی‌سنجد', !dash.includes('changeFromFirstPct') && dash.includes('changePct: pctVsYesterday(price, yday)'));
-  check('کارت میله‌ای و سرنویس نردبان آخرین و پایانی را نشان می‌دهند', (dash.match(/pricePairHtml\(/g) || []).length >= 2);
+  // جدولِ نمادهای پایه، نوار ریزمعامله و کارت‌های میله‌ای با بازچینیِ ۱۴۰۵/۰۷/۱۷ رفتند.
+  check('زنجیره از همان ستون‌های جفت‌قیمت می‌آید', (dash.match(/\.\.\.PRICE_PAIR_COLS\('/g) || []).length === 1);
+  check('«تصویر شفاف»: آخرین معاملهٔ قرارداد با پایانی دیروز سنجیده می‌شود، نه «از اولین معامله»',
+    !dash.includes('changeFromFirstPct')
+    && readSrc('../ui/clear-picture-view.mjs').includes('pctVsYesterday(Number(c.tradeLast) > 0 ? c.tradeLast : c.last, c.yday)'));
   const map = readSrc('../ui/live-market-map.mjs');
   check('نقشه: راهنمای هاور، کاشی پایه و ردیف پایهٔ زنجیره دو قیمت دارند',
     map.includes('mapTooltipLines(data.row') && map.includes("stat('پایانی پایه'") && map.includes('<i>پایانی</i>'));

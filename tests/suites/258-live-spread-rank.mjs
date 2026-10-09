@@ -36,12 +36,9 @@ group('۲۵۸. صدک فاصله مظنه در تابلوی امروز');
   const ui = readSrc('../ui/tabs/live-market-dashboard.mjs');
   check('ستون صدک اعلام شده و برچسب فارسی دارد',
     ui.includes("col('spreadRankPct'") && ui.includes('صدک فاصله مظنه'));
-  check('نمای تنگ‌ترین‌های تابلو از کم به زیاد مرتب می‌شود',
-    ui.includes("['spread-rank-table', 'تنگ‌ترین‌های تابلوی امروز', 'table-asc', 'contracts', 'spreadRankPct']"));
-  // `tradedPct` از قبل در موتور بود و هیچ نمایی نداشت — سنجه‌ای که دیده
-  // نمی‌شود، سنجه نیست.
-  check('نرخ معامله‌شدن هر سررسید نما دارد',
-    ui.includes("['expiry-traded-pct', 'نرخ معامله‌شدن هر سررسید', 'bar', 'expiries', 'tradedPct']"));
-  check('و برچسبِ راهنمای هر دو سنجه تعریف شده',
-    ui.includes('spreadRankPct: [') && ui.includes('tradedPct: ['));
+  // نماهای «تنگ‌ترین‌ها» و «نرخ معامله‌شدن هر سررسید» با بازچینیِ ۱۴۰۵/۰۷/۱۷
+  // رفتند: صدک ستونِ زنجیره است (مرتب‌شونده) و نرخ معامله‌شدن در جدولِ اجزای
+  // «تصویر شفاف».
+  check('نرخ معامله‌شدنِ هر جزء در جدولِ «تصویر شفاف» دیده می‌شود',
+    readSrc('../ui/clear-picture-view.mjs').includes("col('tradedPct', 'معامله‌شده ٪', 'pct'"));
 }

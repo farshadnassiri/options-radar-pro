@@ -18,48 +18,36 @@ import { fmt as uiFmt } from '../../ui/fmt.mjs';
 // ریشه، یک `innerHTML` خام دوازده‌ستونه بود که برای هر سطحی یک قالب داشت:
 // نه مرتب می‌شد، نه خروجی داشت، و ردیف نماد پایه ستون «سررسید» می‌گرفت که
 // همیشه «—» بود.
+//
+// بازچینیِ ۱۴۰۵/۰۷/۱۷: جدول‌های نماد/سررسید/گروه/ریزمعامله با پنج زیرتب رفتند؛
+// جدولِ «تصویر شفاف» (یک جدول، ستونِ نامش با سطح عوض می‌شود) همان قاعده‌ها را
+// نگه می‌دارد: جدول مشترک، انتخابگر ستون، خروجی، و نمونهٔ ماندگار.
 group('۷۲. جدول‌های داشبورد رصد لحظه‌ای');
 {
   const dash72 = readSrc('../ui/tabs/live-market-dashboard.mjs');
+  const cp72 = readSrc('../ui/clear-picture-view.mjs');
   const setOf = (name) => {
     const block = new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash72)?.[1] || '';
     return [...block.matchAll(/col\('(\w+)'/g)].map((m) => m[1]);
   };
-  const contract = setOf('COLS_CONTRACT'), underlying = setOf('COLS_UNDERLYING');
-  const expiry = setOf('COLS_EXPIRY'), group = setOf('COLS_GROUP'), tape = setOf('COLS_TAPE');
+  const contract = setOf('COLS_CONTRACT');
+  const parts = [...cp72.matchAll(/col\('(\w+)'/g)].map((m) => m[1]);
 
   check('جدول‌ها از جدول مشترک می‌آیند، نه از innerHTML خام',
-    dash72.includes("import { makeTable } from '/ui/table.mjs'")
-    && !dash72.includes('<table class="history-table decision-table"')
-    && !dash72.includes('<table class="history-table decision-tape"'));
-  // جدول مشترک، مرتب‌سازی و انتخابگر ستون و دکمه خروجی اکسل را با هم دارد
-  check('هر جدول، انتخابگر ستون و نام خروجی می‌گیرد',
-    /all: cols, storeKey: `dashboard:\$\{key\}`, exportName: `dashboard-\$\{exportName\}`/.test(dash72));
-  check('و نمونه هر نما نگه داشته می‌شود تا مرتب‌سازی کاربر با هر دریافت پاک نشود',
-    dash72.includes('const tables = new Map()') && dash72.includes('tables.set(key, entry)'));
-  // با پنهان‌کردن به‌جای جداکردن، هر querySelector روی میزبان جدولِ نمای
-  // قبلی را برمی‌گرداند — این را کنترل مرورگر پیدا کرد، نه بازخوانی کد.
-  check('جدول غیرفعال از DOM جدا می‌شود، نه فقط پنهان',
-    dash72.includes('other.el.remove()') && !dash72.includes('other.el.hidden = true'));
-
-  check('هر سطح دامنه مجموعه ستون خودش را دارد', new Set([
-    contract.join(','), underlying.join(','), expiry.join(','), group.join(','), tape.join(','),
-  ]).size === 5);
-  // ستون‌هایی که فقط به یک سطح می‌خورند، به سطح دیگر نشت نکنند
-  check('ستون قرارداد به ردیف نماد پایه نمی‌رود',
-    contract.includes('strike') && contract.includes('kindLabel')
-    && !underlying.includes('strike') && !underlying.includes('kindLabel'));
-  check('ستون گروه ساختگی، قیمت و سررسید ندارد — برای یک گروه معنی نمی‌دهد',
-    !group.includes('last') && !group.includes('expiryText') && !group.includes('strike'));
-  check('ردیف نماد پایه ستون‌های مخصوص خودش را دارد',
-    ['expiries', 'atmIvPct', 'pcRatio', 'uaValue'].every((k) => underlying.includes(k))
-    && !contract.includes('atmIvPct'));
-  check('ردیف سررسید، تفکیک کال و پوت و نسبت‌ها را دارد',
-    ['callValue', 'putValue', 'putCallOi', 'tradedContracts'].every((k) => expiry.includes(k)));
-  check('نوار ریزمعامله ستون‌های تجمعی و مرجع خودش را دارد',
-    ['cumulativeVolume', 'cumulativeValue', 'basePrice', 'sequence'].every((k) => tape.includes(k)));
-  // هر ستونی که اعلام می‌شود باید قالبی داشته باشد که `ui/fmt.mjs` بشناسد
-  const fmts = [...dash72.matchAll(/col\('\w+', '[^']*', '(\w+)'/g)].map((m) => m[1]);
+    cp72.includes("import { makeTable } from '/ui/table.mjs'")
+    && !cp72.includes('<table') && !dash72.includes('<table class="history-table decision-table"'));
+  check('جدولِ اجزا انتخابگر ستون و نام خروجی می‌گیرد',
+    cp72.includes('all: cols, storeKey: `clear-picture:${partLevel}`, exportName: `clear-picture-${partLevel}`'));
+  check('و نمونهٔ هر سطح نگه داشته می‌شود تا مرتب‌سازی کاربر با هر دریافت پاک نشود',
+    cp72.includes('const tables = new Map()') && cp72.includes('tables.set(partLevel, entry)'));
+  check('جدول سطحِ دیگر از DOM جدا می‌شود، نه فقط پنهان',
+    cp72.includes('if (child !== entry.el) child.remove()') && !cp72.includes('el.hidden = true'));
+  check('ستون نام با سطح عوض می‌شود؛ ستون‌های قرارداد به جدول اجزا نشت نمی‌کنند',
+    cp72.includes("col('title', PART_LABEL[partLevel] || 'جزء', 'text'")
+    && !parts.includes('strike') && !parts.includes('kindLabel') && contract.includes('strike'));
+  check('جدولِ اجزا سهم کال و پوت و جهت را دارد',
+    ['sharePct', 'callValue', 'callValuePct', 'putValue', 'putValuePct', 'positivePct', 'negativePct'].every((k) => parts.includes(k)));
+  const fmts = [...`${dash72}\n${cp72}`.matchAll(/col\('\w+', [^,]+, '(\w+)'/g)].map((m) => m[1]);
   check('قالب هر ستون داشبورد در ui/fmt.mjs تعریف شده',
     fmts.length > 0 && fmts.every((f) => typeof uiFmt[f] === 'function'),
     [...new Set(fmts.filter((f) => typeof uiFmt[f] !== 'function'))].join('، '));

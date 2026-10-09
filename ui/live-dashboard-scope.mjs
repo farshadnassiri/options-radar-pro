@@ -47,7 +47,9 @@ export function resolveScope(level, selection = {}) {
  * وقتی کاربر روی نقشه بود و هیچ نوار ریزمعامله‌ای روی صفحه نبود.
  */
 export function needsTape(level, viewKind) {
-  return viewKind === 'tape' && level === 'contract';
+  // «تصویر شفاف» در سطح قرارداد، مسیر قیمت و ارزش تجمعیِ همان قرارداد را
+  // از ریزمعامله می‌کشد؛ در سطح‌های بالاتر نه.
+  return (viewKind === 'tape' || viewKind === 'clear') && level === 'contract';
 }
 
 /**

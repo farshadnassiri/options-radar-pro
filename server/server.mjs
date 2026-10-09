@@ -47,6 +47,7 @@ import {
   breadthInstruments, marketBreadthSnapshot, marketBreadthTimeline, summarizeLiveTrades,
 } from '../core/live-market.mjs';
 import { decisionDashboardSnapshot, mergeUnderlyingTrades } from '../core/decision-dashboard.mjs';
+import { pictureSample, pictureSeries } from '../core/clear-picture.mjs';
 import { makeUpstreamTally } from '../core/upstream-tally.mjs';
 import { makeThrottleWatch, throttleNote } from '../core/throttle-watch.mjs';
 import { JOURNAL_CAP, appendEntry, makeEntry, normalizeJournal } from '../core/journal.mjs';
@@ -898,6 +899,7 @@ async function watchTick() {
     broadcast('watch', { at: watch.at, full: first, count: rows.length, rows: first ? rows : changed });
     archiveToday(rows).catch((e) => logErr('بایگانی دیده‌بان', e));
     recordIv(rows, gate, today).catch((e) => { ivRec.lastError = `${e.name}: ${e.message}`; logErr('ضبط تلاطم', e); });
+    recordPicture(rows, gate, today).catch((e) => logErr('مسیر روز تصویر شفاف', e));
     saveDayOi(rows, gate.phase, today).catch((e) => logErr('موقعیت باز روزانه', e));
     return true;
   } catch (e) {
@@ -942,6 +944,54 @@ async function recordIv(rows, gate, today) {
     ivRec.prev = null;
     throw e;
   }
+}
+
+// ——————————————————————— مسیرِ روزِ «تصویر شفاف» ———————————————————————
+//
+// درصد قراردادهای مثبت/منفی و ارزش کال و پوت در طول روز، برای کل بازار، هر
+// نماد پایه و هر سررسید (`core/clear-picture.mjs`). هر دقیقه یک نمونه از
+// **همان** عکسِ دیده‌بان — بی هیچ درخواستِ اضافه. فقط در جلسهٔ باز. پروندهٔ
+// روز (`data/picture-live/<روز>.jsonl`) خاموش‌وروشن‌شدن را تاب می‌آورد؛
+// فاصلهٔ خاموشی خالی می‌ماند و رابط ساعتِ نخستین نمونه را می‌نویسد.
+const PICTURE_DIR = path.join(ROOT, 'data', 'picture-live');
+const PICTURE_STEP_SEC = 60;
+const PICTURE_KEEP_DAYS = 5;
+const pictureFile = (day) => path.join(PICTURE_DIR, `${day}.jsonl`);
+let pictureRec = { day: 0, samples: null, lastAt: -Infinity };
+
+async function pictureSamples(day) {
+  if (pictureRec.day === day && pictureRec.samples) return pictureRec.samples;
+  let samples = [];
+  try {
+    samples = (await fs.readFile(pictureFile(day), 'utf8')).split('\n').filter(Boolean)
+      .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+      .filter((sample) => sample && Number.isFinite(sample.t) && sample.s);
+  } catch { samples = []; }
+  if (day === tehranDateNumber()) {
+    pictureRec = { day, samples, lastAt: samples.length ? samples.at(-1).t : -Infinity };
+  }
+  return samples;
+}
+
+async function recordPicture(rows, gate, today) {
+  if (!gate.open) return;
+  const second = tehranSecondOfDay();
+  const session = sessionOf(S);
+  if (!(second >= session.open && second <= session.close)) return;
+  const samples = await pictureSamples(today);
+  if (second - pictureRec.lastAt < PICTURE_STEP_SEC) return;
+  const sample = pictureSample(decisionDashboardSnapshot(rows, S).contracts, second);
+  pictureRec.lastAt = second;
+  samples.push(sample);
+  await fs.mkdir(PICTURE_DIR, { recursive: true });
+  if (samples.length === 1) {
+    // روزِ تازه: پرونده‌های کهنه‌تر از چند روز پاک می‌شوند.
+    const names = (await fs.readdir(PICTURE_DIR)).filter((name) => /^\d{8}\.jsonl$/.test(name)).sort();
+    for (const name of names.slice(0, Math.max(0, names.length - PICTURE_KEEP_DAYS))) {
+      await fs.unlink(path.join(PICTURE_DIR, name)).catch(() => {});
+    }
+  }
+  await fs.appendFile(pictureFile(today), `${JSON.stringify(sample)}\n`);
 }
 
 const ivRecStatus = () => ({
@@ -1988,6 +2038,15 @@ async function handleRequest(req, res, u) {
     // داشبورد وسعت بازار پایه از اولین معامله امروز تا همین لحظه. نوار همه
     // پایه‌ها دیده می‌شود تا «بی‌معامله» با «بدون تغییر» اشتباه نشود؛ نماد
     // بی‌معامله در مخرج درصدهای مثبت/منفی وارد نمی‌شود و جدا می‌ماند.
+    // مسیرِ روزِ یک دامنه برای «تصویر شفاف»: فقط کلیدِ خواسته، نه همهٔ نمونه.
+    if (p === '/api/live-picture') {
+      const key = String(u.searchParams.get('key') || 'm').slice(0, 64);
+      const day = tehranDateNumber();
+      const points = pictureSeries(await pictureSamples(day), key);
+      res.setHeader('Cache-Control', 'no-store');
+      return sendJson(res, 200, { day, key, stepSec: PICTURE_STEP_SEC, points });
+    }
+
     if (p === '/api/live-dashboard') {
       const boardPath = BOARD_PATH;
       const fromWatch = watch.rows.length > 0;

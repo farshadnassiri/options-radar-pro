@@ -650,6 +650,17 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       uaIns = String(row.uaIns); endDate = String(row.endDate); contractIns = String(row.ins);
       normalizeSelection(true); paintUnderlying(); emit('contract');
     },
+    // پایین‌رفتن از «تصویر شفاف»: نماد یا سررسید، بی پرش صفحه.
+    pickUnderlying(next) {
+      if (!next) return;
+      uaIns = String(next); endDate = ''; contractIns = '';
+      normalizeSelection(true); paintUnderlying(); paintMapMode(); paintMap(); emit('underlying');
+    },
+    pickExpiry(nextUa, nextEnd) {
+      if (!nextUa || !nextEnd) return;
+      uaIns = String(nextUa); endDate = String(nextEnd); contractIns = '';
+      normalizeSelection(true); paintUnderlying(); emit('expiry');
+    },
     dispose() { mapHandle?.dispose(); },
   };
 }

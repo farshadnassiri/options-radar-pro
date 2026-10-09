@@ -114,9 +114,11 @@ group('۳۳۳. سیم‌کشی در سراسر برنامه');
   check('تیکِ خودکار «در حال دریافت» نمی‌نویسد و نوارِ درجریان را روشن نمی‌کند',
     dash.includes('const manual = Boolean(event?.type);') && /if \(manual\) \{\s*\$\('dd-refresh'\)\.disabled = true; \$\('dd-status'\)\.textContent = 'در حال دریافت عکس تازه بازار…';/.test(dash)
     && dash.includes('if (manual) busyBar?.busy(false);'));
+  // پس از بازچینیِ ۱۴۰۵/۰۷/۱۷ نماهای HTML در «تصویر شفاف»اند؛ همان قاعده.
+  const cp = readSrc('../ui/clear-picture-view.mjs');
   check('نماهای HTML وصله می‌شوند، پاک نمی‌شوند',
-    dash.includes('paintInto(host, (into) => barChart') === false && dash.includes("paintInto(host, (into) => { into.innerHTML = barChart(ranked(view, scoped, 16), view[4]); });")
-    && !dash.includes("if (!tabular) { for (const entry of tables.values()) entry.el.remove(); host.innerHTML = ''; }"));
+    (cp.match(/paintInto\(\$\('/g) || []).length >= 6 && !/\$\('(kpis|parts|leaders|sides)'\)\.innerHTML =/.test(cp)
+    && !dash.includes('function paintTable('));
 
   const map = readSrc('../ui/live-market-map.mjs');
   check('نقشه: جمع‌بندی، نماد، سررسید و زنجیره وصله می‌شوند',

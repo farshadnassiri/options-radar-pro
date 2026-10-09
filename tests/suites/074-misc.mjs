@@ -22,9 +22,11 @@ group('۷۳. ادغام تب‌های نگاه کلی');
   check('دیده‌بان و برترین موقعیت‌ها دیگر تب مستقل نیستند',
     !/id: 'chain'/.test(tabLiteral) && !/id: 'top'/.test(tabLiteral));
   check('و رصد لحظه‌ای سر جایش مانده', /id: 'live-market'/.test(tabLiteral));
-  check('هر دو به‌صورت حالت داخل همان تب اعلام شده‌اند',
-    dash73.includes("{ id: 'chain', title: 'دیده‌بان زنجیره'") && dash73.includes("mod: '/ui/tabs/chain.mjs'")
-    && dash73.includes("{ id: 'top', title: 'برترین موقعیت‌ها'") && dash73.includes("mod: '/ui/tabs/top.mjs'"));
+  // بازچینیِ ۱۴۰۵/۰۷/۱۷: «برترین موقعیت‌ها» به خواستهٔ صاحب پروژه حذف شد و
+  // «دیده‌بان زنجیره» در «تصویر شفاف» خلاصه شد. الگوی ادغام برای «اسکنر آپشن» ماند.
+  check('«برترین موقعیت‌ها» و «دیده‌بان زنجیره» دیگر حالتِ رصد لحظه‌ای نیستند؛ اسکنر همچنان ادغام‌شده است',
+    !dash73.includes("{ id: 'chain', title: 'دیده‌بان زنجیره'") && !dash73.includes("{ id: 'top', title: 'برترین موقعیت‌ها'")
+    && dash73.includes("{ id: 'scanner', title: 'اسکنر آپشن'") && dash73.includes("{ id: 'clear', title: 'تصویر شفاف'"));
   check('ماژول هر دو تنبل بار می‌شود، نه در بارگذاری تب',
     dash73.includes('const module = await import(mode.mod)'));
   // بدون نگه‌داشتن تابع برچیدن، اشتراک دیده‌بان و تایمر اسکنِ تب ادغام‌شده
@@ -38,12 +40,4 @@ group('۷۳. ادغام تب‌های نگاه کلی');
   check('حالت بدون نما، مسیر نمای شماره‌دار را نمی‌رود',
     dash73.includes('if (mode?.mod) { await mountEmbedded(mode); return; }')
     && dash73.includes('(modeOf()?.views || [])'));
-  // ادغام دو تب نباید نماهای سه حالت را ببلعد. عدد ثابت نیست (دستهٔ ۷۶
-  // تکرارنبودن را می‌سنجد)، ولی کف هست.
-  check('ادغام، فهرست نماهای سه حالت را خالی نکرده',
-    DASHBOARD_VIEW_COUNTS73().every((n) => n >= 10), DASHBOARD_VIEW_COUNTS73().join('/'));
-  function DASHBOARD_VIEW_COUNTS73() {
-    return ['pulseViews', 'liquidityViews', 'volatilityViews'].map((name) =>
-      ((new RegExp(`const ${name} = \\[((?:.|\\n)*?)\\n\\];`).exec(dash73)?.[1] || '').match(/^\s*\['/gm) || []).length);
-  }
 }
