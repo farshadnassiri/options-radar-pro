@@ -236,8 +236,57 @@ export function metricValue(record, metricKey, point = 'last') {
  * حداقل ارزش و N قراردادِ پرارزش‌تر. سررسیدِ هر نماد فقط همان نماد را
  * محدود می‌کند: انتخاب دو سررسید از «اهرم» نمادهای دیگر را دست نمی‌زند.
  */
+// ── «پرارزش‌ترین‌های بازار» (۱۴۰۵/۰۷/۱۷) ──────────────────────────────
+//
+// خواستهٔ صاحب پروژه: «قسمتی که صرفاً قراردادهای پرارزش (مثلاً ۲۰ نماد با
+// ارزش معاملات بالا یا چیزی شبیه این، قابل فیلتر توسط کاربر) را بشود با هم
+// در نمودار مادر دید.» «N برترِ» قبلی فقط درون نمادهای انتخابی رتبه می‌داد.
+// منبعِ `top` گزینشِ نماد و سررسید را کنار می‌گذارد و روی کل بازار، با سنجهٔ
+// انتخابی، N قرارداد اول را برمی‌دارد. قراردادِ بی‌عدد در آن سنجه رتبه
+// نمی‌گیرد (صفرِ ساختگی نیست) و نوعِ کال/پوت همچنان اعمال می‌شود.
+export const TOP_RANKS = [['value', 'ارزش معامله'], ['volume', 'حجم'], ['trades', 'تعداد معامله'], ['oi', 'موقعیت باز']];
+
+export function topCandlePool(rows = [], { side = 'all', rankBy = 'value', n = 20 } = {}) {
+  const key = TOP_RANKS.some(([k]) => k === rankBy) ? rankBy : 'value';
+  const limit = Math.max(1, Math.min(500, Math.floor(Number(n) || 20)));
+  return rows
+    .filter((row) => (side === 'call' || side === 'put' ? row.kind === side : true))
+    .filter((row) => fin(Number(row[key])) && Number(row[key]) > 0)
+    .sort((a, b) => Number(b[key]) - Number(a[key]))
+    .slice(0, limit);
+}
+
+/**
+ * سررسیدها برای گزینشگر: هر تاریخ در کل بازار، و هر «پایه:سررسید»، با روز
+ * مانده، ارزش، شمار قرارداد و معامله‌شده — تا انتخاب با دیدنِ وزنِ هر گزینه باشد.
+ */
+export function expiryBook(rows = []) {
+  const byDate = new Map(), byUa = new Map();
+  const bump = (map, key, row, extra = {}) => {
+    if (!map.has(key)) map.set(key, { endDate: String(row.endDate), days: Number(row.days), value: 0, callValue: 0, putValue: 0, contracts: 0, traded: 0, ...extra });
+    const item = map.get(key), value = Number(row.value);
+    item.contracts += 1;
+    if (Number(row.trades) > 0) item.traded += 1;
+    if (fin(value)) { item.value += value; item[row.kind === 'put' ? 'putValue' : 'callValue'] += value; }
+    return item;
+  };
+  for (const row of rows) {
+    const date = bump(byDate, String(row.endDate), row, { uas: new Set() });
+    date.uas.add(String(row.uaIns));
+    const ua = String(row.uaIns);
+    if (!byUa.has(ua)) byUa.set(ua, new Map());
+    bump(byUa.get(ua), String(row.endDate), row, { uaIns: ua });
+  }
+  const order = (a, b) => Number(a.endDate) - Number(b.endDate);
+  return {
+    dates: [...byDate.values()].map((d) => ({ ...d, uas: d.uas.size })).sort(order),
+    byUa: new Map([...byUa].map(([ua, map]) => [ua, [...map.values()].sort(order)])),
+  };
+}
+
 export function filterCandles(rows = [], filter = {}) {
   const side = ['call', 'put'].includes(filter.side) ? filter.side : 'all';
+  if (filter.source === 'top') return topCandlePool(rows.filter((row) => filter.tradedOnly === false || Number(row.trades) > 0), { side, rankBy: filter.rankBy, n: filter.topN });
   const uas = new Set((filter.underlyings || []).map(String));
   const dates = new Set((filter.dates || []).map(String));
   const exp = new Set((filter.expiries || []).map(String));

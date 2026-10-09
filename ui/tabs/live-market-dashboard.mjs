@@ -5,8 +5,8 @@ import { fmt, faDigits, faClock } from '/ui/fmt.mjs';
 import { liveOptionTape } from '/core/live-market.mjs';
 import { dashboardScope, reviveDashboardUniverse } from '/core/decision-dashboard.mjs';
 import { mountClearPicture } from '/ui/clear-picture-view.mjs';
-import { mountVolRank } from '/ui/vol-rank-view.mjs';
 import { mountIvCharts } from '/ui/iv-charts-view.mjs';
+import { mountVolRank } from '/ui/vol-rank-view.mjs';
 import { mountContractCandles } from '/ui/contract-candles-view.mjs';
 import { historyDateLabel } from '/core/history.mjs';
 import { logError } from '/ui/errlog.mjs';
@@ -50,6 +50,8 @@ const EMBEDDED_MODES = [
 // یکپارچه کن». همهٔ حالت‌ها و خودِ نقشه، **هم‌ردیف** در یک نوار تب‌اند. نقشه
 // تب نخست است چون مسیر اصلی تصمیم از آنجا شروع می‌شود و انتخابش، دامنهٔ همه
 // تب‌های دیگر را هم می‌سازد؛ «تصویر شفاف» کنارش، چون نگاهِ کل پیش از جزء است.
+export const IV_SUBTABS = [['charts', 'نمودارهای نوسان ضمنی'], ['rank', 'رتبه و صدک تلاطم']];
+
 export const DASHBOARD_MODES = [
   { id: 'explorer', title: 'نقشه و زنجیره', hint: 'نقشه بازار، سررسید و زنجیره', views: [], explorer: true },
   { id: 'clear', title: 'تصویر شفاف', hint: 'از کل به جزء: ارزش، کال و پوت، جهت در طول روز و ترین‌ها', views: [], clear: true },
@@ -63,9 +65,8 @@ export const DASHBOARD_MODES = [
   // هم، و نمودار بازه در تایم‌فریم دلخواه (`core/iv-chart.mjs`).
   { id: 'iv-charts', title: 'نوسان ضمنی', hint: 'نوسان ضمنی هر نماد و قرارداد در طول زمان، قراردادهای یک سررسید، و بازه در تایم‌فریم دلخواه', views: [], ivCharts: true },
   { id: 'open-view', title: 'نگاه باز', hint: 'تحلیل چندروزهٔ نگاه باز روی نماد انتخابی', views: openViewViews },
-  // خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۰): «IV Rank و IV Percentile… در تبی جدا»،
-  // با مقایسه در برابر تلاطم تاریخی — منطق در `core/vol-rank.mjs`.
-  { id: 'vol-rank', title: 'رتبه و صدک تلاطم', hint: 'IV Rank، IV Percentile و تلاطم تاریخی نماد انتخابی', views: [], volRank: true },
+  // «رتبه و صدک تلاطم» (۱۴۰۵/۰۷/۱۰، منطق در `core/vol-rank.mjs`) از ۱۴۰۵/۰۷/۱۷
+  // زیرتبِ جدای همین «نوسان ضمنی» است، نه تبی در این نوار (`IV_SUBTABS`).
   ...EMBEDDED_MODES.map((mode) => ({ ...mode, views: [] })),
 ];
 
@@ -213,14 +214,12 @@ export async function mount(root, { state, api }) {
       ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div id="dd-market-explorer"></div></section>`
       : mode.clear
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-clear-host></div></section>`
-      : mode.volRank
-        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-vol-rank-host></div></section>`
       : mode.candlesPast
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-candles-past-host></div></section>`
       : mode.candles
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-candles-host></div></section>`
       : mode.ivCharts
-        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-iv-charts-host></div></section>`
+        ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><nav class="cp-tabs dd-subtabs" role="tablist" aria-label="بخش‌های نوسان ضمنی">${IV_SUBTABS.map(([id, label]) => `<button type="button" role="tab" data-iv-sub="${id}" aria-selected="${id === 'charts'}">${label}</button>`).join('')}</nav><div data-iv-sub-panel="charts"><div data-iv-charts-host></div></div><div data-iv-sub-panel="rank" hidden><div data-vol-rank-host></div></div></section>`
       : mode.mod
         ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div data-embedded-host></div></section>`
         : `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div class="section-head"><div><p class="eyebrow">حالت تصمیم‌گیری</p><h2>${mode.title}</h2></div><span>${mode.hint}</span></div><div class="decision-view-buttons" ${mode.views.length < 2 ? 'hidden' : ''}>${mode.views.map((view, index) => `<button type="button" data-view="${view[0]}" aria-pressed="${index === 0}">${fmt.int(index + 1)}. ${view[1]}</button>`).join('')}</div><section class="card decision-view-card"><div class="section-head"><h3 data-view-title>${mode.views[0][1]}</h3><span data-view-scope>کل بازار</span></div><div data-view-host>${busyBlock('در حال دریافت نخستین عکس بازار… این مرحله چند ثانیه طول می‌کشد.', { lines: 4 })}</div><div data-open-view-host class="decision-open-view" hidden></div></section></section>`).join('')}</div>`;
@@ -272,6 +271,7 @@ export async function mount(root, { state, api }) {
         rowsAt: (level) => dashboardScope(payload.universe, { ...selected(), level }).contracts,
         underlyingsAt: () => dashboardScope(payload.universe, selected()).underlyings,
         getTape: () => tape,
+        getSession: () => payload.session,
         pickUnderlying: (uaIns) => marketExplorer.pickUnderlying(uaIns),
         pickExpiry: (uaIns, endDate) => marketExplorer.pickExpiry(uaIns, endDate),
         pickContract: (row) => marketExplorer.pickContract(row),
@@ -281,28 +281,33 @@ export async function mount(root, { state, api }) {
     }
     return clearView;
   };
-  // تب رتبهٔ تلاطم هم تنبل سوار می‌شود؛ تاریخچه فقط وقتی باز شد گرفته می‌شود.
-  let volRankView = null;
+  // تب «نوسان ضمنی» هم تنبل سوار می‌شود و نماد را از همان نقشه می‌گیرد. دو
+  // زیرتب دارد و هر کدام فقط وقتی دیده می‌شود کار می‌کند (دریافت تاریخچه هم).
+  let ivSub = localStorage.getItem('options-radar:iv-subtab') === 'rank' ? 'rank' : 'charts';
+  let ivChartsView = null, volRankView = null;
   const volRank = () => {
     if (!volRankView) {
       volRankView = mountVolRank(root.querySelector('[data-vol-rank-host]'), {
         getSelection: () => marketExplorer.selection(),
         getPayload: () => payload,
         getSettings: () => state.settings,
-        isVisible: () => activeMode === 'vol-rank' && root.isConnected,
+        isVisible: () => activeMode === 'iv-charts' && ivSub === 'rank' && root.isConnected,
       });
     }
     return volRankView;
   };
-  // تب «نوسان ضمنی» هم تنبل سوار می‌شود و نماد را از همان نقشه می‌گیرد.
-  let ivChartsView = null;
+  function paintIvSub() {
+    root.querySelectorAll('[data-iv-sub]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.ivSub === ivSub)));
+    root.querySelectorAll('[data-iv-sub-panel]').forEach((panel) => { panel.hidden = panel.dataset.ivSubPanel !== ivSub; });
+    if (ivSub === 'rank') volRank().paint(); else ivCharts().paint();
+  }
   const ivCharts = () => {
     if (!ivChartsView) {
       ivChartsView = mountIvCharts(root.querySelector('[data-iv-charts-host]'), {
         getSelection: () => marketExplorer.selection(),
         getPayload: () => payload,
         getSettings: () => state.settings,
-        isVisible: () => activeMode === 'iv-charts' && root.isConnected,
+        isVisible: () => activeMode === 'iv-charts' && ivSub === 'charts' && root.isConnected,
       });
     }
     return ivChartsView;
@@ -436,10 +441,9 @@ export async function mount(root, { state, api }) {
       $('dd-scope-note').textContent = scopeLabel(dashboardScope(payload.universe, selected()));
       await clear().paint(); return;
     }
-    if (mode?.volRank) { volRank().paint(); return; }
     if (mode?.candles) { candles().paint(); return; }
     if (mode?.candlesPast) { candlesPast().paint(); return; }
-    if (mode?.ivCharts) { ivCharts().paint(); return; }
+    if (mode?.ivCharts) { paintIvSub(); return; }
     if (mode?.mod) { await mountEmbedded(mode); return; }
     const panel = root.querySelector(`[data-mode-panel="${activeMode}"]`), view = viewOf();
     if (!panel || !view) return;
@@ -511,7 +515,9 @@ export async function mount(root, { state, api }) {
         : `عکس ${faClock(new Date(clock.snapshotAt))} · ${faDigits(clock.ageSec)} ثانیه پیش`;
       // عکس کهنهٔ بالادست (سنجش `boardFreshness` در سرور) بی‌برچسب نمی‌ماند.
       const boardStale = next.session?.stale?.why ? `⚠ ${next.session.stale.why} · ` : '';
-      $('dd-status').textContent = `${boardStale}${stamp} · دریافت ${faClock(new Date(clock.at || Date.now()))} · ${fmt.int(next.universe?.contracts?.length || 0)} قرارداد · ${fmt.int(next.traded || 0)} پایه معامله‌شده`;
+      // جلسهٔ قبل با قراردادهایی که در همان جلسه سررسید شدند (`core/session-board.mjs`).
+      const expiring = Number(next.session?.expiring) > 0 ? ` · شامل ${fmt.int(next.session.expiring)} قرارداد که در همان جلسه سررسید شد` : '';
+      $('dd-status').textContent = `${boardStale}${stamp} · دریافت ${faClock(new Date(clock.at || Date.now()))} · ${fmt.int(next.universe?.contracts?.length || 0)} قرارداد · ${fmt.int(next.traded || 0)} پایه معامله‌شده${expiring}`;
       $('dd-status').className = clock.stale || boardStale ? 'loss' : '';
     } catch (error) {
       $('dd-status').textContent = `به‌روزرسانی ناموفق: ${error.message}`; logError('داشبورد تصمیم‌گیری', error);
@@ -519,9 +525,14 @@ export async function mount(root, { state, api }) {
   }
 
   // کاشیِ «رتبهٔ تلاطم» روی نقشه (و هر پیوند درونی دیگر) تب خودش را باز می‌کند.
+  // «رتبه و صدک تلاطم» زیرتبِ «نوسان ضمنی» است: همان تب، با زیرتبِ رتبه.
   root.addEventListener('click', (event) => {
+    const sub = event.target.closest('[data-iv-sub]');
+    if (sub) { ivSub = sub.dataset.ivSub; localStorage.setItem('options-radar:iv-subtab', ivSub); paintIvSub(); return; }
     const link = event.target.closest('[data-open-mode]');
-    if (link) root.querySelector(`[data-mode="${link.dataset.openMode}"]`)?.click();
+    if (!link) return;
+    if (link.dataset.openMode === 'vol-rank') { ivSub = 'rank'; localStorage.setItem('options-radar:iv-subtab', ivSub); root.querySelector('[data-mode="iv-charts"]')?.click(); return; }
+    root.querySelector(`[data-mode="${link.dataset.openMode}"]`)?.click();
   });
 
   root.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', async () => {

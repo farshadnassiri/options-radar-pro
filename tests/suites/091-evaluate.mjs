@@ -74,7 +74,8 @@ group('۹۰. ستون‌های بیشتر، متناسب با داده هر جد
     return [...block.matchAll(/col\('(\w+)'/g)].map((match) => match[1]);
   };
   // بازچینیِ ۱۴۰۵/۰۷/۱۷: از هفت خانواده، زنجیره ماند و جدولِ اجزای «تصویر شفاف» آمد.
-  const parts90 = [...readSrc('../ui/clear-picture-view.mjs').matchAll(/col\('(\w+)'/g)].map((match) => match[1]);
+  const partsBlock90 = /const partCols = \(\w+\) => \[((?:.|\n)*?)\n\];/.exec(readSrc('../ui/clear-picture-view.mjs'))?.[1] || '';
+  const parts90 = [...partsBlock90.matchAll(/col\('(\w+)'/g)].map((match) => match[1]);
   const catalogs90 = [keysOf90('COLS_CONTRACT'), parts90];
   check('زنجیره و جدولِ اجزا، هر کدام گزینه‌های قیمت/درصد متناسب خودش را دارد',
     keysOf90('COLS_CONTRACT').includes('timeValuePctSpot')

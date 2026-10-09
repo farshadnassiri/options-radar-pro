@@ -48,6 +48,7 @@ import {
 } from '../core/live-market.mjs';
 import { decisionDashboardSnapshot, mergeUnderlyingTrades } from '../core/decision-dashboard.mjs';
 import { pictureSample, pictureSeries } from '../core/clear-picture.mjs';
+import { SESSION_BOARD_KEEP, expiringCount, seedDay, sessionBoardDue, sessionBoardRecord, validSessionBoard } from '../core/session-board.mjs';
 import { makeUpstreamTally } from '../core/upstream-tally.mjs';
 import { makeThrottleWatch, throttleNote } from '../core/throttle-watch.mjs';
 import { JOURNAL_CAP, appendEntry, makeEntry, normalizeJournal } from '../core/journal.mjs';
@@ -871,7 +872,8 @@ async function watchTick() {
         throw new Error(`دور دیده‌بان در ${Math.round(watchDeadlineMs() / 1000)} ثانیه برنگشت`);
       }),
     ]);
-    const first = watch.rows.length === 0;
+    // تابلوی بارشده از دیسک (جلسهٔ قبل) هم «نخستین» است: دورِ تازه کامل پخش می‌شود.
+    const first = watch.rows.length === 0 || Boolean(watch.seeded);
     const fetched = firstList(js);
     const drift = boardFreshness(freshnessSample(fetched, 3), boardCheck.ref).fresh === false;
     const due = first || drift || Boolean(watch.stale) || gate.phase === 'after' || Date.now() - boardCheck.at > BOARD_CHECK_MS;
@@ -901,6 +903,7 @@ async function watchTick() {
     recordIv(rows, gate, today).catch((e) => { ivRec.lastError = `${e.name}: ${e.message}`; logErr('ضبط تلاطم', e); });
     recordPicture(rows, gate, today).catch((e) => logErr('مسیر روز تصویر شفاف', e));
     saveDayOi(rows, gate.phase, today).catch((e) => logErr('موقعیت باز روزانه', e));
+    saveSessionBoard(rows, gate.phase, today).catch((e) => logErr('تابلوی جلسه', e));
     return true;
   } catch (e) {
     logErr('دور دیده‌بان', e);
@@ -944,6 +947,54 @@ async function recordIv(rows, gate, today) {
     ivRec.prev = null;
     throw e;
   }
+}
+
+// ——————————————————————— تابلوی کاملِ آخرین جلسه ———————————————————————
+//
+// عکسِ پس از بستن فقط در حافظه بود؛ سرورِ تازه‌روشن در روز تعطیل تابلوی
+// امروزِ بالادست را می‌گرفت که قراردادِ سررسیدشدهٔ همان جلسه را دیگر ندارد
+// (`core/session-board.mjs`). حالا تابلوی جلسه ذخیره و بیرون از جلسه پیش از
+// نخستین دور بار می‌شود — همهٔ مصرف‌کننده‌های `watch.rows` همان را می‌بینند.
+const SESSION_BOARD_DIR = path.join(ROOT, 'data', 'session-board');
+const sessionBoardFile = (day) => path.join(SESSION_BOARD_DIR, `${day}.json`);
+let sessionBoardAt = { day: 0, at: 0 };
+
+async function saveSessionBoard(rows, phase, today) {
+  if (!rows?.length || !sessionBoardDue({ phase, today, last: sessionBoardAt })) return;
+  // عکسِ کهنهٔ بالادست جای عکسِ درستِ جلسه را نمی‌گیرد.
+  if (watch.rowsStale) return;
+  const fresh = sessionBoardAt.day !== today;
+  sessionBoardAt = { day: today, at: Date.now() };
+  await fs.mkdir(SESSION_BOARD_DIR, { recursive: true });
+  await writeJsonAtomic(sessionBoardFile(today), sessionBoardRecord({
+    day: today, at: watch.at || Date.now(), phase, final: Number(watch.finalDay) === today, rows,
+  }));
+  if (fresh) {
+    const names = (await fs.readdir(SESSION_BOARD_DIR)).filter((name) => /^\d{8}\.json$/.test(name)).sort();
+    for (const name of names.slice(0, Math.max(0, names.length - SESSION_BOARD_KEEP))) {
+      await fs.unlink(path.join(SESSION_BOARD_DIR, name)).catch(() => {});
+    }
+  }
+}
+
+/** بیرون از جلسه، تابلوی کاملِ آخرین جلسه پیش از نخستین دور بار می‌شود. */
+async function seedWatchFromDisk() {
+  const gate = marketOpen();
+  if (gate.open || watch.rows.length) return;
+  let days = [];
+  try { days = (await fs.readdir(SESSION_BOARD_DIR)).filter((name) => /^\d{8}\.json$/.test(name)).map((name) => Number(name.slice(0, 8))); } catch { return; }
+  const day = seedDay({ phase: gate.phase, today: tehranDateNumber(), days });
+  if (!day) return;
+  let record = null;
+  try { record = JSON.parse(await fs.readFile(sessionBoardFile(day), 'utf8')); } catch { return; }
+  if (!validSessionBoard(record) || watch.rows.length) return;
+  const { byKey } = diffWatchRows(record.rows, new Map());
+  watch = {
+    ...watch, at: record.at, rows: record.rows, byKey, day: record.day, phase: record.phase || 'after',
+    afterPulls: 0, finalDay: record.final ? record.day : 0, stale: null, rowsStale: false, seeded: true,
+  };
+  sessionBoardAt = { day: record.day, at: record.at };
+  log(`تابلوی جلسهٔ ${record.day} از دیسک بار شد — ${record.rows.length} ردیف، ${expiringCount(record.rows, record.day)} قرارداد که در همان جلسه سررسید شد`);
 }
 
 // ——————————————————————— مسیرِ روزِ «تصویر شفاف» ———————————————————————
@@ -2106,6 +2157,9 @@ async function handleRequest(req, res, u) {
         at: Date.now(), snapshotAt: boardAt || null,
         session: {
           ...session, final: Number(watch.finalDay) > 0 && Number(watch.finalDay) === session.date && !watch.stale,
+          // تابلوی جلسهٔ قبل از دیسک، و شمارِ قراردادهایی که در همان جلسه سررسید شدند.
+          fromDisk: fromWatch && Boolean(watch.seeded),
+          expiring: session.current ? 0 : expiringCount(sourceRows, session.date),
           stale: fromWatch ? watch.stale || null : fallbackStale,
         },
         count: instruments.length, traded: snapshot.traded,
@@ -3260,4 +3314,4 @@ http.createServer(handle).listen(PORT, '127.0.0.1', () => {
   const g = marketOpen();
   log(g.open ? 'بازار باز است، حلقه دیده‌بان شروع شد' : `حلقه دیده‌بان متوقف: ${g.why}`);
 });
-watchLoop();
+seedWatchFromDisk().catch((e) => logErr('بار کردن تابلوی جلسه', e)).finally(() => watchLoop());

@@ -117,7 +117,7 @@ group('۳۱۶-هـ. نمودارها و سیم‌کشی');
   check('خلاصهٔ نمودار مادر بی رقم لاتین', !/[0-9]/.test(view.masterSummary(rows)), view.masterSummary(rows));
 
   const dash = readSrc('../ui/tabs/live-market-dashboard.mjs');
-  check('تب جدای «نوسان ضمنی» در رصد لحظه‌ای، درست پس از «نقشه و زنجیره»', /id: 'explorer'[\s\S]{0,1200}id: 'iv-charts', title: 'نوسان ضمنی'/.test(dash) && dash.includes('if (mode?.ivCharts) { ivCharts().paint(); return; }'));
+  check('تب جدای «نوسان ضمنی» در رصد لحظه‌ای، درست پس از «نقشه و زنجیره»', /id: 'explorer'[\s\S]{0,1200}id: 'iv-charts', title: 'نوسان ضمنی'/.test(dash) && dash.includes('if (mode?.ivCharts) { paintIvSub(); return; }') && dash.includes("if (ivSub === 'rank') volRank().paint(); else ivCharts().paint();"));
   check('نماد از همان نقشه', dash.includes("ivChartsView = mountIvCharts(root.querySelector('[data-iv-charts-host]'), {\n        getSelection: () => marketExplorer.selection(),"));
   const src = readSrc('../ui/iv-charts-view.mjs');
   check('نمودار مادر پیش‌فرض: قرارداد انتخابی نقشه، وگرنه کالِ نزدیک به پول', src.includes('function defaultContract()') && src.includes("defaultPicks(contracts, { expiry, spot: spotNow(), kind: 'call', perKind: 1 })[0]"));

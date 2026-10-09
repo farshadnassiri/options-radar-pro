@@ -11,7 +11,8 @@
 // کندل، نمودار توزیع دقیق‌تر با آمار کامل، و همین نما برای یک روز گذشته
 // (`mode: 'past'`، داده از `ui/contract-candles-past.mjs`).
 
-import { fmt, faDigits, faClock } from './fmt.mjs';
+import { fmt, faDigits, faClock, toEnDigits } from './fmt.mjs';
+import { patchHTML } from './morph.mjs';
 import { mountChart, chartBase } from './chart-host.mjs';
 import { mountCandlePoints } from './candle-points.mjs';
 import { fetchInfos } from './quote-intake.mjs';
@@ -31,6 +32,7 @@ import {
   metricShape, candleRecord, underlyingDay, filterCandles, underlyingTurnover, orderCandles,
   groupBands, candleStats, flagUnusual, candleNarrative, staleInfoIds, histogram,
   SLIDER_FIELDS, SLIDER_STEPS, sliderScale, candleLossSummary, applyRanges, outlierIds, robustExtent, HIST_WEIGHTS, HIST_GROUPS, candleSummary, chainBreakevens, chainKey,
+  TOP_RANKS, expiryBook,
 } from '../core/contract-candles.mjs';
 import { downloadCandleWorkbook } from './contract-candles-export.mjs';
 
@@ -54,16 +56,19 @@ const BAR_KEYS = [['none', 'بدون میله'], ['value', 'ارزش معامل�
 const SORT_DIRS = [['desc', 'نزولی'], ['asc', 'صعودی']];
 const COMPOSITE_POINTS = [['last', 'آخرین'], ['close', 'پایانی'], ['first', 'اولین'], ['low', 'کمینه'], ['high', 'بیشینه']];
 const TAILS = [[0, 'بی‌برش'], [0.01, '۱٪ هر سر'], [0.02, '۲٪ هر سر'], [0.05, '۵٪ هر سر']];
+const TOP_QUICK = [10, 20, 30, 50, 100];
 
 const DEFAULTS = {
   side: 'all', metric: 'change', log: true, xMode: 'grouped', sortKey: 'strike', sortDir: 'auto', composite: 'value', compositePoint: 'last', colorBy: 'direction',
   underlyings: [], dates: [], expiries: [], top: 0, unusualOnly: false, uaSort: 'value', uaSearch: '',
+  // منبع گزینش: «pick» نماد و سررسید، «top» پرارزش‌ترین‌های کل بازار (۱۴۰۵/۰۷/۱۷).
+  source: 'pick', rankBy: 'value', topN: 20,
   ranges: {}, hidden: [], clickRemove: false, robust: false, bars: 'value', barsLog: true,
   histMetric: 'change', histPoint: 'last', histBins: 12, histWidth: 0, histUnit: 'contract', histWeight: 'count',
   histGroup: 'kind', histTails: 0.02, histPercent: false, histLines: true, histKde: true, histCum: false,
   listSort: 'value', listDir: 'desc',
 };
-const FILTER_KEYS = ['side', 'underlyings', 'dates', 'expiries', 'top', 'unusualOnly', 'ranges', 'metric', 'log', 'xMode', 'sortKey', 'sortDir', 'composite', 'compositePoint', 'colorBy', 'bars'];
+const FILTER_KEYS = ['source', 'rankBy', 'topN', 'side', 'underlyings', 'dates', 'expiries', 'top', 'unusualOnly', 'ranges', 'metric', 'log', 'xMode', 'sortKey', 'sortDir', 'composite', 'compositePoint', 'colorBy', 'bars'];
 
 /** برچسب محور: بی دنبالهٔ «٫۰۰»؛ عدد کوچک یک یا دو رقم اعشار. */
 function axisText(metric, value, decimals = null) {
@@ -146,22 +151,39 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       <div class="section-head"><div><p class="eyebrow">${past ? 'گزینش روی دادهٔ همان روز' : 'گزینش مستقل از نقشه'}</p><h2 data-ccv-title>${past ? 'کندل قیمت قراردادها در گذشته' : 'کندل قیمت امروز قراردادها'}</h2></div>
         <div class="ccv-actions"><button type="button" class="ghost" data-ccv-export="xlsx">خروجی کامل اکسل</button><button type="button" class="ghost" data-ccv-export="png">تصویر نمودار مادر</button></div></div>
       <p class="note" data-ccv-status role="status"></p>
-      <div class="ccv-row">
+      <!-- «قسمتی که صرفاً قراردادهای پرارزش را بشود با هم در نمودار مادر دید» و
+           «نحوهٔ انتخاب نماد و سررسید را حرفه‌ای‌تر کن» (۱۴۰۵/۰۷/۱۷). -->
+      <div class="ccv-source-row">
+        <div class="ccv-source" role="group" aria-label="منبع گزینش"><button type="button" data-ccv-source="pick"><b>گزینش نماد و سررسید</b><small>نمادها و سررسیدهای دلخواه</small></button><button type="button" data-ccv-source="top"><b>پرارزش‌ترین‌های بازار</b><small>N قرارداد برتر کل بازار در یک نگاه</small></button></div>
         <div class="ccv-seg" role="group" aria-label="نوع قرارداد">${[['all', 'کال و پوت'], ['call', 'فقط کال'], ['put', 'فقط پوت']].map(([v, t]) => `<button type="button" data-ccv-side="${v}">${t}</button>`).join('')}</div>
+      </div>
+      <div class="ccv-top-box" data-ccv-top-box>
+        <label>تعداد قرارداد<input type="number" min="1" max="500" step="1" data-ccv="topN" dir="ltr"></label>
+        <span class="ccv-buttons" role="group" aria-label="تعداد آماده">${TOP_QUICK.map((v) => `<button type="button" class="ghost" data-ccv-topn="${v}">${fmt.int(v)}</button>`).join('')}</span>
+        <label>رتبه بر<select data-ccv="rankBy">${opt(TOP_RANKS, opts.rankBy)}</select></label>
+        <p class="note" data-ccv-top-note></p>
+      </div>
+      <div class="ccv-row" data-ccv-pick-only>
         <label>فقط N قرارداد پرارزش‌تر<select data-ccv="top">${[0, 20, 50, 100, 200, 500].map((v) => `<option value="${v}">${v ? fmt.int(v) : 'همه'}</option>`).join('')}</select></label>
         <label class="check"><input type="checkbox" data-ccv="unusualOnly"> فقط غیرعادی‌ها</label>
         <label>پیش‌تنظیم<select data-ccv-preset></select></label>
         <button type="button" class="ghost" data-ccv-preset-save>ذخیرهٔ گزینش</button><button type="button" class="ghost" data-ccv-preset-del>حذف پیش‌تنظیم</button>
       </div>
-      <div class="ccv-pick">
-        <div class="ccv-pick-head"><b>نمادهای پایه</b><input type="search" data-ccv="uaSearch" placeholder="جست‌وجوی نماد"><label>ترتیب<select data-ccv="uaSort"><option value="value">ارزش کل اختیار</option><option value="callValue">ارزش کال</option><option value="putValue">ارزش پوت</option><option value="name">نام</option></select></label>
-          <span class="ccv-buttons"><button type="button" class="ghost" data-ccv-ua="all">همه</button><button type="button" class="ghost" data-ccv-ua="top-callValue">۱۰ نماد برتر ارزش کال</button><button type="button" class="ghost" data-ccv-ua="top-putValue">۱۰ نماد برتر ارزش پوت</button><button type="button" class="ghost" data-ccv-ua="top-value">۱۰ نماد برتر کل</button></span></div>
-        <div class="ccv-chips" data-ccv-uas></div>
-      </div>
-      <div class="ccv-pick">
-        <div class="ccv-pick-head"><b>سررسید</b><span class="note">تاریخ‌های کل بازار؛ اگر نماد انتخاب کنی، سررسیدهای هر نماد جدا هم می‌آید و فقط همان نماد را محدود می‌کند.</span><button type="button" class="ghost" data-ccv-exp-clear>همهٔ سررسیدها</button></div>
-        <div class="ccv-chips" data-ccv-dates></div>
-        <div class="ccv-ua-exp" data-ccv-ua-exp></div>
+      <div class="ccv-picker" data-ccv-pick-box>
+        <div class="ccv-selected" data-ccv-selected></div>
+        <div class="ccv-picker-grid">
+          <div class="ccv-pane">
+            <div class="ccv-pane-head"><b>نمادهای پایه</b><input type="search" data-ccv="uaSearch" placeholder="جست‌وجوی نماد"><label>ترتیب<select data-ccv="uaSort"><option value="value">ارزش کل اختیار</option><option value="callValue">ارزش کال</option><option value="putValue">ارزش پوت</option><option value="name">نام</option></select></label></div>
+            <span class="ccv-buttons"><button type="button" class="ghost" data-ccv-ua="all">همه</button><button type="button" class="ghost" data-ccv-ua="top-value">۱۰ نماد برتر کل</button><button type="button" class="ghost" data-ccv-ua="top-callValue">۱۰ برتر کال</button><button type="button" class="ghost" data-ccv-ua="top-putValue">۱۰ برتر پوت</button></span>
+            <div class="ccv-ua-list" data-ccv-uas></div>
+          </div>
+          <div class="ccv-pane">
+            <div class="ccv-pane-head"><b>سررسیدها</b><button type="button" class="ghost" data-ccv-exp-clear>همهٔ سررسیدها</button></div>
+            <p class="note" data-ccv-exp-note></p>
+            <div class="ccv-exp-list" data-ccv-dates></div>
+            <div class="ccv-ua-exp" data-ccv-ua-exp></div>
+          </div>
+        </div>
       </div>
     </section>
     <section class="card ccv-mother">
@@ -235,7 +257,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   // ── گزینش ─────────────────────────────────────────────────────────
   const filterOf = () => ({
     side: opts.side, underlyings: opts.underlyings, dates: opts.dates, expiries: opts.expiries,
-    top: Number(opts.top) || 0,
+    top: Number(opts.top) || 0, source: opts.source, rankBy: opts.rankBy, topN: Number(opts.topN) || 20,
   });
 
   function uaDayMap() {
@@ -282,6 +304,11 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       fetchError = error?.name === 'AbortError' ? `پاسخ پس از ${fmt.int(INFO_TIMEOUT_MS / 1000)} ثانیه نیامد` : String(error?.message || error);
     } finally {
       fetching = false;
+      // شناسه‌ای که پاسخ نگرفت هم «پرسیده شد» ثبت می‌شود (با همان دادهٔ قبلی‌اش،
+      // اگر بود)؛ وگرنه هر نقاشی دوباره می‌پرسید و شکستِ بالادست به حلقهٔ بی‌وقفهٔ
+      // درخواست و بازنقاشی تبدیل می‌شد. پس از همان مهلتِ کهنگی دوباره پرسیده می‌شود.
+      const tried = Date.now();
+      for (const id of stale) if (staleInfoIds([id], infoCache, tried, INFO_TTL_MS).length) infoCache.set(id, { at: tried, info: infoCache.get(id)?.info || null });
     }
     paint();
   }
@@ -863,7 +890,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   // ── کنترل‌ها ────────────────────────────────────────────────────
   function paintControls(turnover) {
     host.querySelectorAll('[data-ccv-side]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.ccvSide === opts.side)));
-    for (const name of ['top', 'metric', 'xMode', 'sortKey', 'sortDir', 'composite', 'compositePoint', 'colorBy', 'uaSort', 'bars', 'histMetric', 'histPoint', 'histBins', 'histUnit', 'histWeight', 'histGroup', 'histTails']) {
+    for (const name of ['top', 'topN', 'rankBy', 'metric', 'xMode', 'sortKey', 'sortDir', 'composite', 'compositePoint', 'colorBy', 'uaSort', 'bars', 'histMetric', 'histPoint', 'histBins', 'histUnit', 'histWeight', 'histGroup', 'histTails']) {
       const el = field(name);
       if (el && document.activeElement !== el) el.value = String(opts[name]);
     }
@@ -879,25 +906,69 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     q('[data-ccv-barslog-wrap]').hidden = opts.bars === 'none';
     q('[data-ccv-preset]').innerHTML = `<option value="">—</option>${Object.keys(presets).map((name) => `<option>${esc(name)}</option>`).join('')}`;
 
-    const chosen = new Set(opts.underlyings);
-    const needle = String(opts.uaSearch || '').trim();
-    const list = [...turnover].filter((u) => !needle || u.uaName.includes(needle) || chosen.has(u.uaIns))
-      .sort((a, b) => (opts.uaSort === 'name' ? a.uaName.localeCompare(b.uaName, 'fa') : b[opts.uaSort] - a[opts.uaSort]));
-    q('[data-ccv-uas]').innerHTML = list.map((u) => `<label class="ccv-chip"><input type="checkbox" data-ccv-ua-pick="${esc(u.uaIns)}"${chosen.has(u.uaIns) ? ' checked' : ''}> ${esc(u.uaName)} <small>کال ${fmt.rialText(u.callValue)} · پوت ${fmt.rialText(u.putValue)} · ${fmt.int(u.traded)} معامله‌شده</small></label>`).join('') || `<p class="empty-note">${past ? 'داده‌ای بارگذاری نشده.' : 'نمادی نیست.'}</p>`;
-
-    const contracts = universe().contracts || [];
-    const dates = [...new Set(contracts.filter((r) => !chosen.size || chosen.has(String(r.uaIns))).map((r) => String(r.endDate)))].sort();
-    const pickedDates = new Set(opts.dates.map(String));
-    q('[data-ccv-dates]').innerHTML = dates.map((d) => `<label class="ccv-chip"><input type="checkbox" data-ccv-date="${esc(d)}"${pickedDates.has(d) ? ' checked' : ''}> ${dateLabel(d)}</label>`).join('');
-    const pickedExp = new Set(opts.expiries.map(String));
-    const uaRows = turnover.filter((u) => chosen.has(u.uaIns));
-    q('[data-ccv-ua-exp]').innerHTML = uaRows.length && uaRows.length <= 12 ? uaRows.map((u) => `<div class="ccv-ua-exp-row"><b>${esc(u.uaName)}</b>${u.expiries.map((d) => `<label class="ccv-chip"><input type="checkbox" data-ccv-exp="${esc(`${u.uaIns}:${d}`)}"${pickedExp.has(`${u.uaIns}:${d}`) ? ' checked' : ''}> ${dateLabel(d)}</label>`).join('')}</div>`).join('') : '';
+    paintPicker(turnover);
 
     const legend = m.shape === 'candle'
       ? '<span><i class="ccv-l-body"></i>کال بالا/پایین</span><span><i class="ccv-l-put"></i>پوت بالا/پایین</span><span><i class="ccv-l-wick"></i>سایه: کمینه تا بیشینهٔ پنج نقطه</span><span><i class="ccv-l-close"></i>پایانی</span>'
       : m.shape === 'range' ? '<span><i class="ccv-l-box"></i>مظنه خرید تا فروش</span><span><i class="ccv-l-wick"></i>میانه</span><span><i class="ccv-l-dot"></i>آخرین معامله</span>'
         : '<span><i class="ccv-l-dot"></i>کال</span><span><i class="ccv-l-diamond"></i>پوت</span>';
     q('[data-ccv-legend]').innerHTML = `${legend}<span><i class="ccv-l-flag"></i>حاشیهٔ زرد: غیرعادی</span><small>چرخ موس: بزرگ‌نمایی افقی · نوارهای پایین و راست: بازهٔ دید · کلیک: ${opts.clickRemove ? 'حذف کندل' : 'ثابت کردن جزئیات (و دکمهٔ حذف)'}</small>`;
+  }
+
+  // ── گزینشگر ──────────────────────────────────────────────────────
+  //
+  // «نحوهٔ انتخاب نماد و سررسید را حرفه‌ای‌تر کن.» به‌جای ردیفِ تیک‌های هم‌شکل:
+  // فهرستِ نمادها با وزنِ هر کدام (ارزش، میلهٔ کال/پوت، سررسید و معامله‌شده)،
+  // سررسیدها با روزِ مانده و ارزش و شمارِ قرارداد، برچسبِ هر انتخاب با «✕»، و
+  // یک جملهٔ جمع‌بندی که می‌گوید گزینش چند قرارداد است.
+  function paintPicker(turnover) {
+    const top = opts.source === 'top';
+    host.querySelectorAll('[data-ccv-source]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.ccvSource === opts.source)));
+    q('[data-ccv-top-box]').hidden = !top;
+    q('[data-ccv-pick-box]').hidden = top;
+    q('[data-ccv-pick-only]').hidden = top;
+    host.querySelectorAll('[data-ccv-topn]').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.ccvTopn) === Number(opts.topN))));
+    const contracts = universe().contracts || [];
+    const pool = filterCandles(contracts, filterOf());
+    const rankLabel = TOP_RANKS.find(([k]) => k === opts.rankBy)?.[1] || 'ارزش معامله';
+    if (top) {
+      const uaCount = new Set(pool.map((r) => r.uaIns)).size;
+      q('[data-ccv-top-note]').textContent = `${fmt.int(pool.length)} قرارداد با بیشترین ${rankLabel} از ${fmt.int(uaCount)} نماد پایه${past ? '؛ رتبه روی نمادهای دریافت‌شدهٔ همین روز است — برای کل بازار، بالا «همه» را بگیر' : '؛ گزینش نماد و سررسید اینجا اعمال نمی‌شود'}.`;
+      return;
+    }
+    const chosen = new Set(opts.underlyings);
+    const names = new Map(turnover.map((u) => [u.uaIns, u.uaName]));
+    const pickedDates = new Set(opts.dates.map(String));
+    const pickedExp = new Set(opts.expiries.map(String));
+    const tag = (attr, value, label, cls = '') => `<button type="button" class="ccv-tag ${cls}" ${attr}="${esc(value)}" title="برداشتن">${esc(label)} <span aria-hidden="true">✕</span></button>`;
+    const tags = [
+      ...opts.underlyings.map((ua) => tag('data-ccv-ua-toggle', ua, names.get(ua) || ua, 'ua')),
+      ...opts.dates.map((d) => tag('data-ccv-date-toggle', d, `سررسید ${dateLabel(d)}`, 'date')),
+      ...opts.expiries.map((k) => tag('data-ccv-exp-toggle', k, `${names.get(k.split(':')[0]) || ''} ${dateLabel(k.split(':')[1])}`, 'exp')),
+    ];
+    const traded = pool.length;
+    patchHTML(q('[data-ccv-selected]'), `<p><b>گزینش:</b> ${chosen.size ? `${fmt.int(chosen.size)} نماد` : 'همهٔ نمادها'}، ${pickedDates.size || pickedExp.size ? `${fmt.int(pickedDates.size + pickedExp.size)} سررسید` : 'همهٔ سررسیدها'} ← <b>${fmt.int(traded)}</b> قرارداد معامله‌شده</p>${tags.length ? `<div class="ccv-tags">${tags.join('')}<button type="button" class="ghost" data-ccv-clear-all>پاک کردن همه</button></div>` : ''}`);
+
+    const needle = String(opts.uaSearch || '').trim();
+    const list = [...turnover].filter((u) => !needle || u.uaName.includes(needle) || chosen.has(u.uaIns))
+      .sort((a, b) => (opts.uaSort === 'name' ? a.uaName.localeCompare(b.uaName, 'fa') : b[opts.uaSort] - a[opts.uaSort]));
+    const maxValue = Math.max(1, ...list.map((u) => u.value || 0));
+    const w = (v) => `${Math.max(0, (Number(v) || 0) / maxValue * 100)}%`;
+    patchHTML(q('[data-ccv-uas]'), list.map((u) => `<button type="button" class="ccv-ua-row" data-ccv-ua-toggle="${esc(u.uaIns)}" aria-pressed="${chosen.has(u.uaIns)}">
+      <i class="ccv-check" aria-hidden="true"></i><b>${esc(u.uaName)}</b><strong>${fmt.rialText(u.value)}</strong>
+      <span class="ccv-ua-bar" aria-hidden="true"><i class="call" style="width:${w(u.callValue)}"></i><i class="put" style="width:${w(u.putValue)}"></i></span>
+      <small>کال ${fmt.rialText(u.callValue)}، پوت ${fmt.rialText(u.putValue)}، ${fmt.int(u.expiries.length)} سررسید، ${fmt.int(u.traded)} از ${fmt.int(u.contracts)} معامله‌شده</small>
+    </button>`).join('') || `<p class="empty-note">${past ? 'داده‌ای بارگذاری نشده.' : 'نمادی نیست.'}</p>`);
+
+    const book = expiryBook(contracts.filter((r) => !chosen.size || chosen.has(String(r.uaIns))));
+    const pill = (attr, key, d, pressed) => `<button type="button" class="ccv-exp-pill" ${attr}="${esc(key)}" aria-pressed="${pressed}"><b>${dateLabel(d.endDate)}</b><span>${fmt.int(d.days)} روز</span><small>${fmt.rialText(d.value)}، ${fmt.int(d.traded)} از ${fmt.int(d.contracts)} قرارداد${d.uas ? `، ${fmt.int(d.uas)} نماد` : ''}</small></button>`;
+    q('[data-ccv-exp-note]').textContent = chosen.size
+      ? 'تاریخ‌های بالا هر نمادِ انتخابی را محدود می‌کنند؛ سررسیدِ هر نماد (پایین) فقط همان نماد را.'
+      : 'تاریخ‌های کل بازار؛ با انتخاب نماد، سررسیدهای هر نماد جدا هم می‌آید.';
+    patchHTML(q('[data-ccv-dates]'), book.dates.map((d) => pill('data-ccv-date-toggle', d.endDate, d, pickedDates.has(d.endDate))).join('') || '<p class="empty-note">سررسیدی نیست.</p>');
+    const uaRows = turnover.filter((u) => chosen.has(u.uaIns));
+    patchHTML(q('[data-ccv-ua-exp]'), uaRows.length && uaRows.length <= 12 ? uaRows.map((u) => `<div class="ccv-ua-exp-row"><b>${esc(u.uaName)}</b><div class="ccv-exp-list">${(book.byUa.get(u.uaIns) || []).map((d) => pill('data-ccv-exp-toggle', `${u.uaIns}:${d.endDate}`, d, pickedExp.has(`${u.uaIns}:${d.endDate}`))).join('')}</div></div>`).join('')
+      : uaRows.length > 12 ? '<p class="note">سررسیدِ جداگانهٔ هر نماد تا ۱۲ نماد نشان داده می‌شود.</p>' : '');
   }
 
   function paintHidden() {
@@ -1106,6 +1177,30 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   host.addEventListener('click', (event) => {
     const side = event.target.closest('[data-ccv-side]');
     if (side) { set({ side: side.dataset.ccvSide }); return; }
+    const source = event.target.closest('[data-ccv-source]');
+    if (source) { listLimit = LIST_STEP; set({ source: source.dataset.ccvSource === 'top' ? 'top' : 'pick' }); return; }
+    const topN = event.target.closest('[data-ccv-topn]');
+    if (topN) { set({ topN: Number(topN.dataset.ccvTopn) }); return; }
+    const uaToggle = event.target.closest('[data-ccv-ua-toggle]');
+    if (uaToggle) {
+      const id = uaToggle.dataset.ccvUaToggle, chosen = new Set(opts.underlyings);
+      if (chosen.has(id)) chosen.delete(id); else chosen.add(id);
+      set({ underlyings: [...chosen], expiries: opts.expiries.filter((k) => chosen.has(k.split(':')[0])) });
+      return;
+    }
+    const dateToggle = event.target.closest('[data-ccv-date-toggle]');
+    if (dateToggle) {
+      const d = dateToggle.dataset.ccvDateToggle, picked = new Set(opts.dates.map(String));
+      if (picked.has(d)) picked.delete(d); else picked.add(d);
+      set({ dates: [...picked] }); return;
+    }
+    const expToggle = event.target.closest('[data-ccv-exp-toggle]');
+    if (expToggle) {
+      const k = expToggle.dataset.ccvExpToggle, picked = new Set(opts.expiries.map(String));
+      if (picked.has(k)) picked.delete(k); else picked.add(k);
+      set({ expiries: [...picked] }); return;
+    }
+    if (event.target.closest('[data-ccv-clear-all]')) { set({ underlyings: [], dates: [], expiries: [] }); return; }
     const ua = event.target.closest('[data-ccv-ua]');
     if (ua) {
       const act = ua.dataset.ccvUa;
@@ -1206,6 +1301,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     if (el.type === 'checkbox') { set({ [name]: el.checked }); return; }
     if (name === 'listSort' || name === 'listDir') listLimit = LIST_STEP;
     if (['top', 'histBins'].includes(name)) { set({ [name]: Math.max(0, Number(el.value) || 0) }); return; }
+    if (name === 'topN') { set({ topN: Math.max(1, Math.min(500, Math.round(Number(toEnDigits(el.value)) || 20))) }); return; }
     if (['histWidth', 'histTails'].includes(name)) { set({ [name]: Math.max(0, Number(el.value) || 0) }); return; }
     set({ [name]: el.value });
   });
@@ -1244,7 +1340,10 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     const filterLines = [
       ...(past ? [`روز: ${dateLabel(pastState.date)}`] : []),
       `نوع: ${opts.side === 'all' ? 'کال و پوت' : opts.side === 'call' ? 'فقط کال' : 'فقط پوت'}`,
-      `نمادها: ${opts.underlyings.length ? opts.underlyings.map((id) => names.get(id) || id).join('، ') : 'همه'}`,
+      ...(opts.source === 'top'
+        ? [`منبع: ${fmt.int(Number(opts.topN) || 20)} قرارداد با بیشترین ${TOP_RANKS.find(([k]) => k === opts.rankBy)?.[1] || 'ارزش معامله'} در کل بازار`]
+        : []),
+      `نمادها: ${opts.source === 'top' ? 'کل بازار' : opts.underlyings.length ? opts.underlyings.map((id) => names.get(id) || id).join('، ') : 'همه'}`,
       `سررسیدها: ${opts.dates.length ? opts.dates.map((d) => dateLabel(d)).join('، ') : 'همه'}${opts.expiries.length ? ` · سررسید نماد: ${opts.expiries.map((k) => `${names.get(k.split(':')[0]) || ''} ${dateLabel(k.split(':')[1])}`).join('، ')}` : ''}`,
       `N برتر: ${Number(opts.top) || 'همه'}${opts.unusualOnly ? ' · فقط غیرعادی‌ها' : ''}${rangeText ? ` · دستگیره‌ها: ${rangeText}` : ''}${opts.hidden.length ? ` · ${opts.hidden.length} کندل دستی کنار رفته` : ''}`,
       `محور: ${metricOf(opts.metric).label}${useLog(metricOf(opts.metric), opts.log) ? ' (لگاریتمی)' : ''}`,

@@ -109,7 +109,7 @@ group('۳۳۹. سیم‌کشی');
   check('«تلاطم و انتظارات» شد «نگاه باز» با تنها نمای «نگاه باز چندروزه»',
     dash.includes("{ id: 'open-view', title: 'نگاه باز'") && !dash.includes("title: 'تلاطم و انتظارات'")
     && /const openViewViews = \[\s*\['open-view-history', 'نگاه باز چندروزه'/.test(dash));
-  check('«رتبه و صدک تلاطم» سر جایش است', dash.includes("{ id: 'vol-rank', title: 'رتبه و صدک تلاطم'"));
+  check('«رتبه و صدک تلاطم» تبِ نوار نیست؛ زیرتبِ «نوسان ضمنی» است', !dash.includes("{ id: 'vol-rank'") && dash.includes("['rank', 'رتبه و صدک تلاطم']"));
   check('«تصویر شفاف» کنار نقشه، تنبل سوار، با دامنهٔ همان نوار سطح',
     /\{ id: 'explorer'[^\n]*\n\s*\{ id: 'clear', title: 'تصویر شفاف'/.test(dash)
     && dash.includes("rowsAt: (level) => dashboardScope(payload.universe, { ...selected(), level }).contracts")

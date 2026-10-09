@@ -12,6 +12,7 @@
 // تابلو (`NaN`) در جمع شمرده نمی‌شود و شمارش جدا دارد، نه صفرِ ساختگی.
 
 import { pctVsYesterday } from './price-change.mjs';
+import { activeOptionsBoard, BOARD_METRICS, contractBreakeven, breakevenGap, breakevenGapPct } from './decision-dashboard.mjs';
 
 const num = (value) => (value === null || value === undefined || value === '' ? NaN : Number(value));
 const known = (value) => Number.isFinite(value);
@@ -42,6 +43,8 @@ export function pictureTotals(rows = []) {
     contracts: 0, traded: 0, value: 0, callValue: 0, putValue: 0, volume: 0, callVolume: 0, putVolume: 0,
     trades: 0, callTrades: 0, putTrades: 0, oi: 0, callOi: 0, putOi: 0, oiChange: 0,
     positive: 0, negative: 0, flat: 0, untraded: 0, unknown: 0,
+    // جهتِ هر سمت جدا، تا مسیرِ روز هم کال/پوت/هر دو را بپذیرد.
+    callPositive: 0, callNegative: 0, callFlat: 0, putPositive: 0, putNegative: 0, putFlat: 0,
     // شمارِ قراردادهایی که میدانشان از تابلو نیامد؛ جمع بدون آن‌هاست و رابط می‌گوید.
     missingValue: 0, missingOi: 0, _oiChangeKnown: 0,
   };
@@ -57,7 +60,11 @@ export function pictureTotals(rows = []) {
     t.trades = add(t.trades, trades); t[`${side}Trades`] = add(t[`${side}Trades`], trades);
     t.oi = add(t.oi, oi); t[`${side}Oi`] = add(t[`${side}Oi`], oi);
     if (known(num(row.oiChange))) { t.oiChange += num(row.oiChange); t._oiChangeKnown += 1; }
-    t[directionOf(row)] += 1;
+    const direction = directionOf(row);
+    t[direction] += 1;
+    if (direction === 'positive' || direction === 'negative' || direction === 'flat') {
+      t[`${side}${direction[0].toUpperCase()}${direction.slice(1)}`] += 1;
+    }
   }
   const directed = t.positive + t.negative + t.flat;
   const out = {
@@ -224,6 +231,66 @@ export function pictureParts(rows = [], partLevel = 'underlying') {
     || (partLevel === 'strike' ? a.strike - b.strike : String(a.key).localeCompare(String(b.key))));
 }
 
+/** فیلترِ سمت: `both`، `call` یا `put`. */
+export const SIDES = [['both', 'کال و پوت'], ['call', 'فقط کال'], ['put', 'فقط پوت']];
+export const sideOf = (side) => (side === 'call' || side === 'put' ? side : 'both');
+export const bySide = (rows = [], side = 'both') => (sideOf(side) === 'both' ? rows || [] : (rows || []).filter((row) => row.kind === side));
+
+// ════════════════ سربه‌سر — همان منطقِ بقیهٔ برنامه ════════════════
+//
+// خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۷): «آیتم‌های سربه‌سر را با منطق سایر
+// قسمت‌های برنامه به تصویر شفاف اضافه کن: سربه‌سرها و فاصلهٔ نماد پایه از
+// سربه‌سر همراه با درصد، فاصلهٔ سربه‌سر وزنی از هر اعمال و درصدش.»
+//
+// هیچ تعریف تازه‌ای ساخته نمی‌شود: سربه‌سرِ هر قرارداد `contractBreakeven`
+// است (کال اعمال + پریمیوم، پوت اعمال − پریمیوم) و فاصله‌اش از دید همان سمت
+// (`breakevenGap*`: مثبت یعنی پایه هنوز نرسیده). سربه‌سرِ وزنیِ هر سررسید همان
+// `activeOptionsBoard` است — کال و پوت هرگز با هم میانگین نمی‌شوند.
+export const BREAKEVEN_WEIGHTS = [['value', 'ارزش معامله'], ['volume', 'حجم'], ['trades', 'تعداد معامله'], ['oi', 'موقعیت باز']];
+
+/** سربه‌سرِ هر قرارداد و سربه‌سرِ وزنیِ هر «پایه:سررسید». */
+export function breakevenPicture(rows = [], { metric = 'value', side = 'both' } = {}) {
+  const key = BOARD_METRICS.includes(metric) ? metric : 'value';
+  const board = activeOptionsBoard(rows || [], { metric: key, side: sideOf(side), limit: (rows || []).length || 1 });
+  const contracts = bySide(rows, side).map((row) => ({
+    ...row, breakeven: contractBreakeven(row), breakevenGap: breakevenGap(row), breakevenGapPct: breakevenGapPct(row),
+  }));
+  return { metric: key, side: sideOf(side), expiries: board.expiries, contracts };
+}
+
+/**
+ * نردبانِ اعمالِ یک سررسید: سربه‌سرِ کال و پوتِ هر اعمال و فاصلهٔ پایه از
+ * آن‌ها، و فاصلهٔ سربه‌سرِ وزنیِ سررسید از همان اعمال (ریال و ٪ اعمال).
+ * `expiry` یک ردیف از `breakevenPicture().expiries` است.
+ */
+export function breakevenLadder(rows = [], expiry = null) {
+  const strikes = new Map();
+  for (const row of rows || []) {
+    const strike = num(row.strike);
+    if (!(strike > 0)) continue;
+    if (!strikes.has(strike)) strikes.set(strike, { strike, spot: num(row.spot), value: 0 });
+    const item = strikes.get(strike);
+    const side = row.kind === 'put' ? 'put' : 'call';
+    item[`${side}Ins`] = String(row.ins); item[`${side}Name`] = row.name;
+    item[`${side}Premium`] = num(row.last) > 0 ? num(row.last) : NaN;
+    item[`${side}Breakeven`] = contractBreakeven(row);
+    item[`${side}Gap`] = breakevenGap(row);
+    item[`${side}GapPct`] = breakevenGapPct(row);
+    item[`${side}Value`] = num(row.value);
+    item.value = add(item.value, num(row.value));
+  }
+  const wCall = num(expiry?.callBreakeven), wPut = num(expiry?.putBreakeven);
+  return [...strikes.values()].sort((a, b) => a.strike - b.strike).map((item) => ({
+    ...item,
+    moneynessPct: item.spot > 0 ? ((item.strike / item.spot) - 1) * 100 : NaN,
+    // فاصلهٔ سربه‌سرِ وزنی از اعمال: مثبت یعنی سربه‌سر بالای این اعمال است.
+    wCallFromStrike: known(wCall) ? wCall - item.strike : NaN,
+    wCallFromStrikePct: known(wCall) ? ((wCall / item.strike) - 1) * 100 : NaN,
+    wPutFromStrike: known(wPut) ? wPut - item.strike : NaN,
+    wPutFromStrikePct: known(wPut) ? ((wPut / item.strike) - 1) * 100 : NaN,
+  }));
+}
+
 /** همهٔ تصویرِ یک دامنه در یک شیء. `rows` قراردادهای دامنه است. */
 export function clearPicture(rows = [], { level = 'market' } = {}) {
   const partLevel = PART_OF[level] || 'underlying';
@@ -265,7 +332,9 @@ export function contractStanding(contract, { siblings = [], family = [] } = {}) 
 // همین را می‌نویسد؛ دقیقهٔ ثبت‌نشده درون‌یابی نمی‌شود.
 //
 // بردارِ هر کلید: [مثبت، منفی، بدون‌تغییر، معامله‌شده، ارزش کال، ارزش پوت، حجم، تعداد معامله]
-export const SAMPLE_FIELDS = ['positive', 'negative', 'flat', 'traded', 'callValue', 'putValue', 'volume', 'trades'];
+export const SAMPLE_FIELDS = ['positive', 'negative', 'flat', 'traded', 'callValue', 'putValue', 'volume', 'trades',
+  // از ۱۴۰۵/۰۷/۱۷: جهتِ هر سمت جدا (نمونه‌های قدیمی‌تر ندارند و نامعلوم‌اند).
+  'callPositive', 'callNegative', 'callFlat', 'putPositive', 'putNegative', 'putFlat'];
 
 const vectorOf = (t) => SAMPLE_FIELDS.map((key) => (known(t[key]) ? Math.round(t[key]) : null));
 
@@ -300,9 +369,16 @@ export function pictureSeries(samples = [], key = 'm') {
       const v = Object.fromEntries(SAMPLE_FIELDS.map((field, i) => [field, sample.s[key][i] ?? NaN]));
       const directed = v.positive + v.negative + v.flat;
       const value = v.callValue + v.putValue;
+      const sidePct = (sidePrefix) => {
+        const d = v[`${sidePrefix}Positive`] + v[`${sidePrefix}Negative`] + v[`${sidePrefix}Flat`];
+        return [share(v[`${sidePrefix}Positive`], d), share(v[`${sidePrefix}Negative`], d)];
+      };
+      const [callPositivePct, callNegativePct] = sidePct('call');
+      const [putPositivePct, putNegativePct] = sidePct('put');
       return {
         second: sample.t, ...v, value,
         positivePct: share(v.positive, directed), negativePct: share(v.negative, directed),
+        callPositivePct, callNegativePct, putPositivePct, putNegativePct,
         callValuePct: share(v.callValue, value), putValuePct: share(v.putValue, value),
       };
     });

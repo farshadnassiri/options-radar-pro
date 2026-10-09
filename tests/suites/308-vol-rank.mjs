@@ -279,7 +279,12 @@ group('۳۰۸-و. سیم‌کشی: سرور، تب جدا، دفتر');
   check('خط وضعیت روزهای پاسخ‌خالی را جدا می‌گوید', volStatusText({ api: { have: 5, days: 7, missing: 2, contracts: [], build: { running: false, resting: 2 } } }).includes('تعطیل رسمی یا سهمیهٔ بالادست'));
   check('data/day-panels از گیت بیرون است', readSrc('../.gitignore').includes('data/day-panels/'));
   const dash = readSrc('../ui/tabs/live-market-dashboard.mjs');
-  check('تب جدای «رتبه و صدک تلاطم» در رصد لحظه‌ای', dash.includes("{ id: 'vol-rank', title: 'رتبه و صدک تلاطم'") && dash.includes('if (mode?.volRank) { volRank().paint(); return; }'));
+  // از ۱۴۰۵/۰۷/۱۷ زیرتبِ جدای «نوسان ضمنی» است (خواستهٔ صاحب پروژه)، نه تبِ نوار.
+  check('«رتبه و صدک تلاطم» زیرتبِ جدای «نوسان ضمنی» است و فقط وقتی دیده می‌شود کار می‌کند',
+    dash.includes("export const IV_SUBTABS = [['charts', 'نمودارهای نوسان ضمنی'], ['rank', 'رتبه و صدک تلاطم']];")
+    && dash.includes("if (ivSub === 'rank') volRank().paint(); else ivCharts().paint();")
+    && dash.includes("isVisible: () => activeMode === 'iv-charts' && ivSub === 'rank' && root.isConnected,")
+    && !dash.includes("{ id: 'vol-rank'"));
   check('انتخاب نماد از همان نقشه می‌آید و «امروز» از جلسهٔ زنده', dash.includes('getSelection: () => marketExplorer.selection(),')
     && readSrc('../ui/vol-rank-view.mjs').includes('if (!session?.current || !(session.date > 0)) return null;'));
 }
@@ -304,7 +309,7 @@ group('۳۰۸-ز. خلاصه برای جاهای دیگر: انتخابگر نم
   const picker = readSrc('../ui/picker.mjs');
   check('انتخابگر مشترکِ تب‌های استراتژی نشان را دارد', picker.includes('${volChipHtml(readVolSummary(u.ins), { today })}'));
   const map = readSrc('../ui/live-market-map.mjs');
-  check('کاشی نقشه تب رتبهٔ تلاطم را باز می‌کند', map.includes('data-open-mode="vol-rank"')
-    && readSrc('../ui/tabs/live-market-dashboard.mjs').includes("const link = event.target.closest('[data-open-mode]');"));
+  check('کاشی نقشه زیرتبِ رتبهٔ تلاطم را در «نوسان ضمنی» باز می‌کند', map.includes('data-open-mode="vol-rank"')
+    && readSrc('../ui/tabs/live-market-dashboard.mjs').includes("if (link.dataset.openMode === 'vol-rank') { ivSub = 'rank';"));
   check('تب پس از هر ساخت خلاصه را ذخیره می‌کند', readSrc('../ui/vol-rank-view.mjs').includes('saveVolSummary(volSummaryOf(history, { ua, lookback: opts.lookback }));'));
 }

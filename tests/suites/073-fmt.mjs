@@ -31,20 +31,27 @@ group('۷۲. جدول‌های داشبورد رصد لحظه‌ای');
     return [...block.matchAll(/col\('(\w+)'/g)].map((m) => m[1]);
   };
   const contract = setOf('COLS_CONTRACT');
-  const parts = [...cp72.matchAll(/col\('(\w+)'/g)].map((m) => m[1]);
+  const block = (name) => new RegExp(`const ${name} = \\(\\w+\\) => \\[((?:.|\\n)*?)\\n\\];`).exec(cp72)?.[1] || '';
+  const keysIn = (text) => [...text.matchAll(/col\('(\w+)'/g)].map((m) => m[1]);
+  const parts = keysIn(block('partCols')), ladder = keysIn(block('ladderCols')), beExpiry = keysIn(block('beExpiryCols'));
 
   check('جدول‌ها از جدول مشترک می‌آیند، نه از innerHTML خام',
     cp72.includes("import { makeTable } from '/ui/table.mjs'")
     && !cp72.includes('<table') && !dash72.includes('<table class="history-table decision-table"'));
-  check('جدولِ اجزا انتخابگر ستون و نام خروجی می‌گیرد',
-    cp72.includes('all: cols, storeKey: `clear-picture:${partLevel}`, exportName: `clear-picture-${partLevel}`'));
-  check('و نمونهٔ هر سطح نگه داشته می‌شود تا مرتب‌سازی کاربر با هر دریافت پاک نشود',
-    cp72.includes('const tables = new Map()') && cp72.includes('tables.set(partLevel, entry)'));
+  check('جدول‌های «تصویر شفاف» انتخابگر ستون و نام خروجی می‌گیرند',
+    cp72.includes('all: cols, storeKey: `clear-picture:${key}`, exportName: `clear-picture-${key}`, onPick,'));
+  check('و نمونهٔ هر جدول (نوع و سمت) نگه داشته می‌شود تا مرتب‌سازی کاربر با هر دریافت پاک نشود',
+    cp72.includes('const tables = new Map()') && cp72.includes('tables.set(key, entry)')
+    && cp72.includes("tableIn('be-table', `be-ladder-${side}`, ladderCols(side)"));
   check('جدول سطحِ دیگر از DOM جدا می‌شود، نه فقط پنهان',
     cp72.includes('if (child !== entry.el) child.remove()') && !cp72.includes('el.hidden = true'));
   check('ستون نام با سطح عوض می‌شود؛ ستون‌های قرارداد به جدول اجزا نشت نمی‌کنند',
     cp72.includes("col('title', PART_LABEL[partLevel] || 'جزء', 'text'")
     && !parts.includes('strike') && !parts.includes('kindLabel') && contract.includes('strike'));
+  check('هر جدولِ سربه‌سر کلید یکتا دارد و سمتِ انتخاب‌نشده ستون نمی‌گیرد',
+    new Set(ladder).size === ladder.length && new Set(beExpiry).size === beExpiry.length
+    && ladder.includes('wCallFromStrikePct') && ladder.includes('wPutFromStrikePct') && beExpiry.includes('callGapPct')
+    && block('ladderCols').includes("...(side !== 'put' ? [") && block('ladderCols').includes("...(side !== 'call' ? ["));
   check('جدولِ اجزا سهم کال و پوت و جهت را دارد',
     ['sharePct', 'callValue', 'callValuePct', 'putValue', 'putValuePct', 'positivePct', 'negativePct'].every((k) => parts.includes(k)));
   const fmts = [...`${dash72}\n${cp72}`.matchAll(/col\('\w+', [^,]+, '(\w+)'/g)].map((m) => m[1]);
