@@ -519,16 +519,24 @@ const asDataUrl = (blob) => new Promise((resolve, reject) => {
 });
 
 async function fontFaceCss(weights) {
-  const link = [...document.querySelectorAll('link[rel="stylesheet"]')].find((l) => /vazirmatn/i.test(l.href));
+  // قلم‌ها درون پروژه‌اند (`ui/fonts/fonts.css`) و قلمِ برنامه انتخابی است:
+  // فقط پرونده‌های همان قلمِ جاری (و زیرمجموعهٔ عربی/فارسی‌اش) جاسازی می‌شوند.
+  const link = [...document.querySelectorAll('link[rel="stylesheet"]')].find((l) => /fonts\.css|vazirmatn/i.test(l.href));
   if (!link) return '';
   if (!fontCache.has(link.href)) fontCache.set(link.href, fetch(link.href).then((r) => r.text()).catch(() => ''));
   const css = await fontCache.get(link.href);
-  const faces = (css.match(/@font-face\s*\{[^}]*\}/g) || []).map((block) => ({
+  const active = (getComputedStyle(document.documentElement).getPropertyValue('--font-ui').split(',')[0] || '').replace(/["']/g, '').trim();
+  const all = (css.match(/@font-face\s*\{[^}]*\}/g) || []).map((block) => ({
     family: block.match(/font-family:\s*([^;]+);/)?.[1]?.trim(),
+    // وزنِ قلمِ متغیر بازه است («۳۰۰ ۸۰۰»)؛ یک پرونده همهٔ وزن‌ها را دارد.
     weight: Number(block.match(/font-weight:\s*(\d+)/)?.[1]) || 400,
+    weightText: block.match(/font-weight:\s*([\d ]+);/)?.[1]?.trim() || '400',
     url: block.match(/url\(\s*['"]?([^'")]+\.woff2)['"]?\s*\)/)?.[1],
     italic: /font-style:\s*italic/.test(block),
-  })).filter((f) => f.family && f.url && !f.italic);
+    arabic: /U\+0600/.test(block) || !/unicode-range/.test(block),
+  })).filter((f) => f.family && f.url && !f.italic && f.arabic);
+  const own = all.filter((f) => f.family.replace(/["']/g, '') === active);
+  const faces = own.length ? own : all;
   if (!faces.length) return '';
   // برای هر وزنِ به‌کاررفته، نزدیک‌ترین وزنی که پرونده دارد.
   const pick = new Set([...weights].map((w) => faces.reduce((a, b) => (Math.abs(b.weight - w) < Math.abs(a.weight - w) ? b : a))));
@@ -536,7 +544,7 @@ async function fontFaceCss(weights) {
     const url = new URL(face.url, link.href).href;
     if (!fontCache.has(url)) fontCache.set(url, fetch(url).then((r) => (r.ok ? r.blob() : Promise.reject(new Error(r.status)))).then(asDataUrl).catch(() => ''));
     const data = await fontCache.get(url);
-    return data ? `@font-face{font-family:${face.family};font-weight:${face.weight};font-style:normal;src:url(${data}) format("woff2");}` : '';
+    return data ? `@font-face{font-family:${face.family};font-weight:${face.weightText};font-style:normal;src:url(${data}) format("woff2");}` : '';
   }));
   return rules.join('');
 }

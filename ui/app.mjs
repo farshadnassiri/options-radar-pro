@@ -3,6 +3,7 @@
 // قاعده تب تنبل: ماژول هر تب فقط لحظه اولین کلیک وارد می‌شود و اشتراک
 // عکس لحظه‌ای هم فقط برای تب باز برقرار می‌شود. تب بسته، هیچ هزینه‌ای ندارد.
 
+import { FONTS, DEFAULT_FONT, fontOf, fontStack, readFont, applyFont } from '/ui/font-choice.mjs';
 import { fmt, faAgo, faClock, pageTitle, ltr } from '/ui/fmt.mjs';
 import { defaults } from '/core/settings.mjs';
 import { CATALOG, GROUPS as SGROUPS } from '/strategies/catalog.mjs';
@@ -647,8 +648,7 @@ async function open(id) {
 // نام‌ها همان برچسب‌های core/settings.mjs (گزینه theme) هستند — یک منبع
 // برای دو جا. دکمه قبلاً همیشه فقط «پوسته» می‌گفت؛ بدون کلیک هیچ راهی
 // نبود بفهمی الان در کدام پوسته‌ای یا کلیک بعدی کدام را باز می‌کند.
-const THEME_NAME = { ledger: 'دفتر', board: 'تابلو' };
-const THEME_NEXT = { ledger: 'board', board: 'ledger' };
+const THEME_NAME = { ledger: 'روشن', board: 'تیره' };
 
 /**
  * پوسته را اعمال می‌کند؛ `persist` فقط وقتی درست است که **کاربر** انتخاب
@@ -672,14 +672,36 @@ function applyTheme(name, { persist = true } = {}) {
   // بترکد، خط‌های زیرش (به‌روزرسانی برچسب دکمه) هرگز اجرا نمی‌شوند — پوسته
   // بصری عوض می‌شود ولی دکمه همچنان وضعیت قبلی را نشان می‌دهد
   if (persist) try { localStorage.setItem('theme', name); } catch { /* حافظه پر یا قفل */ }
-  const btn = el('theme-btn');
-  btn.textContent = `پوسته: ${THEME_NAME[name] || name}`;
-  btn.title = `تعویض به پوسته ${THEME_NAME[THEME_NEXT[name]] || ''}`;
+  // منوی «ظاهر» (۱۴۰۵/۰۷/۱۷): دو دکمهٔ روشن/تیره جای دکمهٔ چرخشی را گرفت؛
+  // پوستهٔ جاری همیشه روشن‌شده دیده می‌شود.
+  document.querySelectorAll('[data-theme-pick]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themePick === name)));
+  el('appearance-btn').title = `پوسته: ${THEME_NAME[name] || name}، قلم: ${fontOf(document.documentElement.dataset.font).label}`;
 }
 
-el('theme-btn').addEventListener('click', () => {
-  applyTheme(document.body.dataset.theme === 'ledger' ? 'board' : 'ledger');
+el('appearance').addEventListener('click', (event) => {
+  const pick = event.target.closest('[data-theme-pick]');
+  if (pick) { applyTheme(pick.dataset.themePick); return; }
+  const font = event.target.closest('[data-font-pick]');
+  if (font) { applyFont(font.dataset.fontPick); paintFontList(); applyTheme(document.body.dataset.theme, { persist: false }); }
 });
+// بیرون از منو که کلیک شد، بسته می‌شود.
+document.addEventListener('click', (event) => {
+  const menu = el('appearance');
+  if (menu.open && !menu.contains(event.target)) menu.open = false;
+});
+
+/** فهرستِ قلم‌ها، هر کدام با نام و نمونه‌ای از عدد در همان قلم. */
+function paintFontList() {
+  const current = document.documentElement.dataset.font || DEFAULT_FONT;
+  const list = el('font-list');
+  // پس از ساختِ نخست فقط برچسب عوض می‌شود: ساختنِ دوباره، دکمهٔ کلیک‌شده را از
+  // صفحه جدا می‌کرد و «کلیک بیرون از منو» آن را بیرون می‌شمرد و منو را می‌بست.
+  if (list.children.length) {
+    list.querySelectorAll('[data-font-pick]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.fontPick === current)));
+    return;
+  }
+  list.innerHTML = FONTS.map((font) => `<button type="button" role="radio" data-font-pick="${font.id}" aria-checked="${font.id === current}" style="font-family: ${fontStack(font.id).replace(/"/g, "'")}"><b>${font.label}</b><span>${font.note}</span><small>ارزش ۴۲۹٬۵۴۱ میلیون ریال، تغییر ۳٫۱۶٪</small></button>`).join('');
+}
 
 // تنها دکمهٔ جمع/باز پنل — روی نوار جمع‌شده هم همین یکی می‌ماند
 el('rail-toggle-btn').addEventListener('click', () => toggleRail());
@@ -736,11 +758,13 @@ document.addEventListener('wheel', (event) => {
   if (select && document.activeElement === select) select.blur();
 }, { passive: true, capture: true });
 
-applyTheme(getTheme() || 'board', { persist: false });
+applyFont(readFont(), { persist: false });
+paintFontList();
+applyTheme(getTheme() || 'ledger', { persist: false });
 updateRailCollapsed();
 buildRail();
 await loadSettings();
-applyTheme(getTheme() || state.settings.theme || 'board', { persist: false });
+applyTheme(getTheme() || state.settings.theme || 'ledger', { persist: false });
 tickHealth();
 setInterval(tickHealth, 3000);
 

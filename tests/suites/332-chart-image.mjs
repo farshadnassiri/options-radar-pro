@@ -86,7 +86,7 @@ group('۳۳۲. سیم‌کشی');
   check('راهنمای رنگِ بیرون از SVG در تصویر می‌آید', mod.includes('/legend/.test(String(c.className') && mod.includes('const legendH = info.legend?.length ? 24 : 0;'));
   // «فونت‌های فارسی را زیبا کن… ارقام ناخواناست.» توکنِ `--font` تعریف نشده بود.
   const css = readSrc('../ui/style.css');
-  check('توکن --font تعریف شده و به وزیرمتن می‌رسد', /--font:\s*var\(--sans\);/.test(css) && /--sans:\s*Vazirmatn/.test(css));
+  check('توکن --font تعریف شده و به قلمِ انتخابی (با جایگزینِ وزیرمتن) می‌رسد', /--font:\s*var\(--sans\);/.test(css) && /--sans:\s*var\(--font-ui\);/.test(css) && /--font-ui:\s*"IBM Plex Sans Arabic", Vazirmatn/.test(css));
   check('ECharts بی --font هم وزیرمتن می‌گیرد', readSrc('../ui/chart-host.mjs').includes("font: cssVar(style, '--font') || cssVar(style, '--sans'),"));
   check('SVG تصویر فونت را درون خودش دارد و دوبرابر کشیده می‌شود', mod.includes('@font-face{font-family:${face.family}') && mod.includes("clone.setAttribute('width', String(width * 2));") && mod.includes('await fontsReady(font);'));
   check('بوم آلوده: SVG ذخیره می‌شود، نه شکست بی‌صدا', mod.includes("saveBlob(new Blob([shot.svgText], { type: 'image/svg+xml' }), `${name}.svg`);"));

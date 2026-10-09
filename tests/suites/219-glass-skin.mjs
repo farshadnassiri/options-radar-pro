@@ -223,8 +223,11 @@ group('۲۱۹-و. متن فارسی روی فونتِ لاتینِ تک‌عرض
   // پشتیبان **آخرِ** صف بود و هیچ‌وقت به آن نمی‌رسید.
   const root = ruleBody(':root') || '';
   const mono = root.match(/--mono:\s*([^;]+);/)?.[1]?.trim() || '';
+  // از ۱۴۰۵/۰۷/۱۷ قلم انتخابی است (`--font-ui`)؛ نخستینِ پشتهٔ پیش‌فرض باید
+  // فارسی‌دار باشد و جایگزینش وزیرمتن.
+  const ui = /--font-ui:\s*([^;]+);/.exec(noComments)?.[1] || '';
   check('نخستین فونتِ پشتهٔ عدد، فارسی‌دار است',
-    /^Vazirmatn/.test(mono), mono.slice(0, 60));
+    /^var\(--font-ui\)/.test(mono) && /^"IBM Plex Sans Arabic", Vazirmatn/.test(ui), `${mono.slice(0, 30)} | ${ui.slice(0, 50)}`);
   // هم‌عرضیِ رقم از `tabular-nums` می‌آید نه از فونت تک‌عرض.
   check('و هم‌عرضیِ رقم از tabular-nums می‌آید',
     /\.mono,\s*\.num\s*\{[^}]*tabular-nums/.test(noComments));

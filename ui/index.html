@@ -4,13 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>رصد استراتژی آپشن</title>
-<link rel="preconnect" href="https://cdn.jsdelivr.net">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css">
+<!-- قلم‌ها درون پروژه‌اند (ui/fonts)، نه از CDN. قلمِ انتخابیِ کاربر پیش از
+     نخستین رسم روی ریشه می‌نشیند تا صفحه با قلمِ دیگری چشمک نزند. -->
+<link rel="stylesheet" href="/ui/fonts/fonts.css">
+<script>try { var f = localStorage.getItem('font'); if (f) document.documentElement.dataset.font = f; } catch (e) { /* حافظهٔ بسته */ }</script>
 <link rel="stylesheet" href="/ui/style.css">
 <!-- آیکون درون‌خطی: بدون آن مرورگر هر بار favicon.ico می‌خواهد و ۴۰۴ می‌گیرد -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%230b6e6b'/%3E%3Cpath d='M3 11.5 L6.5 8 L9 10 L13 4.5' stroke='%23fff' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
-<body data-theme="board">
+<body data-theme="ledger">
 
 <header class="top">
   <div class="brand">
@@ -44,7 +46,16 @@
       <div class="capacity-panel" data-capacity-panel></div>
     </details>
 
-    <button class="ghost" id="theme-btn" title="پوسته">پوسته</button>
+    <!-- «ظاهر»: پوستهٔ روشن/تیره و قلمِ برنامه (`ui/font-choice.mjs`). -->
+    <details class="appearance" id="appearance">
+      <summary class="ghost" id="appearance-btn" title="پوسته و قلم">ظاهر</summary>
+      <div class="appearance-panel">
+        <h4>پوسته</h4>
+        <div class="theme-switch" role="group" aria-label="پوسته"><button type="button" data-theme-pick="ledger">روشن</button><button type="button" data-theme-pick="board">تیره</button></div>
+        <h4>قلم</h4>
+        <div class="font-list" id="font-list" role="radiogroup" aria-label="قلم برنامه"></div>
+      </div>
+    </details>
   </div>
 </header>
 

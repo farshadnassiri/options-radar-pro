@@ -21,12 +21,14 @@ group('۲۷۴. پوستهٔ پیش‌فرض');
 {
   // ── پیش‌فرض، در هر سه جایی که ادعایش می‌شود ──
   const themeField = SCHEMA.find((f) => f.key === 'theme');
-  check('پیش‌فرضِ تنظیمات «تابلو» است', themeField?.def === 'board', String(themeField?.def));
-  check('و `defaults()` هم همان را می‌دهد', defaults().theme === 'board', String(defaults().theme));
-  check('صفحه از همان پوسته شروع می‌شود تا چشمکِ روشن نخورد',
-    /<body data-theme="board">/.test(readSrc('../ui/index.html')));
+  // از ۱۴۰۵/۰۷/۱۷ پیش‌فرض «روشن» است (نمونهٔ «ج» که صاحب پروژه برگزید روشن
+  // بود). قاعدهٔ این دسته همان است: هر سه جا یک پیش‌فرض.
+  check('پیش‌فرضِ تنظیمات «روشن» است', themeField?.def === 'ledger', String(themeField?.def));
+  check('و `defaults()` هم همان را می‌دهد', defaults().theme === 'ledger', String(defaults().theme));
+  check('صفحه از همان پوسته شروع می‌شود تا چشمک نخورد',
+    /<body data-theme="ledger">/.test(readSrc('../ui/index.html')));
   check('و بازگشتِ هر دو تماسِ بوت هم همان است',
-    [...app.matchAll(/applyTheme\(getTheme\(\)[^)]*\|\| '(\w+)'/g)].every((m) => m[1] === 'board'));
+    [...app.matchAll(/applyTheme\(getTheme\(\)[^)]*\|\| '(\w+)'/g)].every((m) => m[1] === 'ledger'));
 
   // ── قلبِ باگ: نوشتن فقط با انتخابِ کاربر ──
   check('`applyTheme` پارامترِ نوشتن دارد',
@@ -43,7 +45,7 @@ group('۲۷۴. پوستهٔ پیش‌فرض');
 
   // و کلیکِ دکمه — تنها جایی که کاربر واقعاً انتخاب می‌کند — باید بنویسد،
   // وگرنه انتخابش با بستنِ صفحه گم می‌شود.
-  const click = app.match(/el\('theme-btn'\)\.addEventListener\('click',[\s\S]*?\n\}\);/)?.[0] || '';
-  check('کلیکِ دکمه انتخاب را ذخیره می‌کند',
-    /applyTheme\(/.test(click) && !/persist: false/.test(click), click.slice(0, 90));
+  // دکمهٔ چرخشی جایش را به دو دکمهٔ روشن/تیره در منوی «ظاهر» داد.
+  const click = app.match(/if \(pick\) \{ applyTheme\(pick\.dataset\.themePick\); return; \}/)?.[0] || '';
+  check('کلیکِ دکمه انتخاب را ذخیره می‌کند', Boolean(click) && !/persist: false/.test(click), click.slice(0, 90));
 }

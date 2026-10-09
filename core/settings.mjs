@@ -373,7 +373,8 @@ export const SCHEMA = [
   // پیش‌فرض ۱۴۰۵/۰۶/۲۸ «تابلو» شد: صاحب پروژه پوستهٔ تیره را انتخاب کرد.
   // «دفتر» می‌ماند و از همین‌جا یا دکمهٔ هدر برمی‌گردد.
   { key: 'theme', group: 'view', kind: 'pick', scope: 'client',
-    def: 'board', options: [['ledger', 'دفتر — روشن'], ['board', 'تابلو — تیره']], label: 'پوسته' },
+    // پیش‌فرض روشن از ۱۴۰۵/۰۷/۱۷: نمونهٔ «ج» که صاحب پروژه برگزید روشن بود.
+    def: 'ledger', options: [['ledger', 'روشن'], ['board', 'تیره']], label: 'پوسته' },
   { key: 'persianDigits', group: 'view', kind: 'bool', scope: 'client',
     def: false, label: 'ارقام فارسی' },
   { key: 'topN', group: 'view', kind: 'num', scope: 'client',
