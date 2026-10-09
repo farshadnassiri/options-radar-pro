@@ -248,14 +248,43 @@ export const bySide = (rows = [], side = 'both') => (sideOf(side) === 'both' ? r
 // `activeOptionsBoard` است — کال و پوت هرگز با هم میانگین نمی‌شوند.
 export const BREAKEVEN_WEIGHTS = [['value', 'ارزش معامله'], ['volume', 'حجم'], ['trades', 'تعداد معامله'], ['oi', 'موقعیت باز']];
 
+// ── مبنای پریمیوم (۱۴۰۵/۰۷/۱۷) ──
+//
+// «آخرین»: آخرین معاملهٔ امروز، وگرنه پایانی — همان پیش‌فرضِ تابلو. «پایانی»:
+// قیمت پایانیِ رسمی، همان مبنای پیش‌فرضِ «نگاه باز» چندروزه؛ تا دو بخش با
+// یک مبنا مقایسه‌پذیر باشند. قراردادِ بی‌پایانی سربه‌سر نمی‌گیرد.
+export const PREMIUM_BASES = [['last', 'آخرین معامله'], ['close', 'قیمت پایانی']];
+export const premiumBasis = (basis) => (basis === 'close' ? 'close' : 'last');
+
+/** ردیف‌ها با پریمیومِ مبنای خواسته در `last` — همان میدانی که سربه‌سر می‌خواند. */
+export function withPremium(rows = [], basis = 'last') {
+  if (premiumBasis(basis) === 'last') return rows || [];
+  return (rows || []).map((row) => ({ ...row, last: num(row.close) > 0 ? num(row.close) : NaN }));
+}
+
 /** سربه‌سرِ هر قرارداد و سربه‌سرِ وزنیِ هر «پایه:سررسید». */
-export function breakevenPicture(rows = [], { metric = 'value', side = 'both' } = {}) {
+export function breakevenPicture(rows = [], { metric = 'value', side = 'both', premium = 'last' } = {}) {
   const key = BOARD_METRICS.includes(metric) ? metric : 'value';
-  const board = activeOptionsBoard(rows || [], { metric: key, side: sideOf(side), limit: (rows || []).length || 1 });
-  const contracts = bySide(rows, side).map((row) => ({
+  const priced = withPremium(rows, premium);
+  const board = activeOptionsBoard(priced, { metric: key, side: sideOf(side), limit: priced.length || 1 });
+  const contracts = bySide(priced, side).map((row) => ({
     ...row, breakeven: contractBreakeven(row), breakevenGap: breakevenGap(row), breakevenGapPct: breakevenGapPct(row),
   }));
-  return { metric: key, side: sideOf(side), expiries: board.expiries, contracts };
+  return { metric: key, side: sideOf(side), premium: premiumBasis(premium), expiries: board.expiries, contracts };
+}
+
+/**
+ * «همهٔ سررسیدها»ی یک نماد پایه: میانگینِ وزنیِ سربه‌سرِ همهٔ قراردادهای همان
+ * نماد، سررسیدها با هم — هم‌ارزِ شاخصِ کلِ «نگاه باز». فقط برای یک نماد معنا
+ * دارد (قیمت پایهٔ یکسان)؛ دو نماد با دو سطح قیمت میانگین نمی‌شوند.
+ */
+export function allExpiriesBreakeven(rows = [], { metric = 'value', side = 'both', premium = 'last' } = {}) {
+  const uas = new Set((rows || []).map((row) => String(row.uaIns)));
+  if (uas.size !== 1) return null;
+  const merged = withPremium(rows, premium).map((row) => ({ ...row, endDate: 'all', days: NaN }));
+  const key = BOARD_METRICS.includes(metric) ? metric : 'value';
+  const row = activeOptionsBoard(merged, { metric: key, side: sideOf(side), limit: 1 }).expiries[0];
+  return row ? { ...row, key: 'all', all: true, expiries: new Set((rows || []).map((r) => String(r.endDate))).size } : null;
 }
 
 /**

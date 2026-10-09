@@ -208,7 +208,6 @@ export async function mount(root, { state, api }) {
     <section class="card decision-toolbar" id="dd-toolbar" hidden>
       <div class="decision-scope-live"><div><p class="eyebrow">دامنه تحلیل</p><p class="note" id="dd-scope-note">کل بازار اختیار</p></div><div class="decision-level-switch" role="group" aria-label="سطح دامنه">${SCOPE_LEVELS.map(([key, label], index) => `<button type="button" data-dd-level="${key}" aria-pressed="${index === 0}">${label}</button>`).join('')}</div></div>
       <p class="note dd-scope-hint">انتخاب از همان نقشه و زنجیرهٔ تب نخست خوانده می‌شود؛ اینجا دوباره نماد و سررسید نمی‌پرسیم. برای عوض‌کردن نماد به تب «نقشه و زنجیره» برگرد.</p>
-      <div class="decision-refresh-control"><label for="dd-interval">زمان به‌روزرسانی</label><input id="dd-interval" type="range" min="5" max="60" step="5"><output id="dd-interval-label"></output></div>
     </section>
     <div class="decision-main">${DASHBOARD_MODES.map((mode, modeIndex) => mode.explorer
       ? `<section class="decision-mode" data-mode-panel="${mode.id}" ${modeIndex ? 'hidden' : ''}><div id="dd-market-explorer"></div></section>`
@@ -236,11 +235,12 @@ export async function mount(root, { state, api }) {
   let payload = { universe: { underlyings: [], expiries: [], marketExpiries: [], contracts: [] }, timeline: [], snapshot: { rows: [] } };
   let activeMode = DASHBOARD_MODES[0].id;
   const activeViews = Object.fromEntries(DASHBOARD_MODES.filter((mode) => mode.views.length).map((mode) => [mode.id, mode.views[0][0]]));
-  let loading = false, paused = false, timer = null, nextAt = 0, tape = [], openViewMounted = false, openViewController = null;
+  let loading = false, paused = false, timer = null, tape = [], openViewMounted = false, openViewController = null;
   const openViewBaseSync = createOpenViewBaseSyncGate();
   let lastUaIns = '';
-  let intervalSec = Math.max(5, Math.min(60, Number(localStorage.getItem('options-radar:dashboard-interval')) || Number(state.settings.watchIntervalSec) || 15));
-  $('dd-interval').value = String(intervalSec);
+  // دستگیرهٔ «زمان به‌روزرسانی» به خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۷) از
+  // «تصویر شفاف» رفت؛ آهنگ همان انتخابِ ذخیره‌شده یا آهنگِ دیده‌بان در تنظیمات است.
+  const intervalSec = Math.max(5, Math.min(60, Number(localStorage.getItem('options-radar:dashboard-interval')) || Number(state.settings.watchIntervalSec) || 15));
 
   // ── یک انتخاب، نه دو ────────────────────────────────────────────────
   //
@@ -347,10 +347,6 @@ export async function mount(root, { state, api }) {
     return candlesPastView;
   };
 
-  function paintInterval() {
-    $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه`;
-    $('dd-interval').setAttribute('aria-valuetext', `${faDigits(intervalSec)} ثانیه`);
-  }
 
   // سطحی که انتخاب فعلی پشتیبانی نمی‌کند، خاموش می‌ماند: دکمه‌ای که کار
   // نمی‌کند بدتر از دکمه‌ای است که نیست.
@@ -477,7 +473,6 @@ export async function mount(root, { state, api }) {
 
   function schedule() {
     clearTimeout(timer); if (paused) return;
-    nextAt = Date.now() + intervalSec * 1000;
     timer = setTimeout(refresh, intervalSec * 1000);
   }
 
@@ -561,17 +556,12 @@ export async function mount(root, { state, api }) {
   }));
   $('dd-refresh').addEventListener('click', refresh);
   $('dd-pause').addEventListener('click', () => { paused = !paused; $('dd-pause').textContent = paused ? 'ادامه خودکار' : 'توقف خودکار'; if (paused) clearTimeout(timer); else refresh(); });
-  $('dd-interval').addEventListener('input', () => { intervalSec = Number($('dd-interval').value); paintInterval(); });
-  $('dd-interval').addEventListener('change', () => { localStorage.setItem('options-radar:dashboard-interval', String(intervalSec)); schedule(); });
-  const countdown = setInterval(() => {
-    if (!paused && nextAt > Date.now() && !loading) $('dd-interval-label').textContent = `${faDigits(intervalSec)} ثانیه · نوبت بعد ${faDigits(Math.ceil((nextAt - Date.now()) / 1000))} ثانیه`;
-  }, 1000);
   // نوار باریکِ «در جریان» بالای نوار تب: محتوای موجود پاک نمی‌شود، ولی
   // کاربر می‌بیند که چیزی در راه است.
   const busyBar = attachBusyBar(root.querySelector('.dd-tabbar'), { label: 'در حال دریافت عکس تازه بازار…' });
-  paintInterval(); paintLevels(); await refresh();
+  paintLevels(); await refresh();
   return () => {
-    clearTimeout(timer); clearInterval(countdown);
+    clearTimeout(timer);
     busyBar?.dispose();
     openViewController?.dispose?.();
     marketExplorer.dispose();

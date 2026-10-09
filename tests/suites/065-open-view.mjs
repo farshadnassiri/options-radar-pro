@@ -133,7 +133,10 @@ group('۶۴. نگاه باز — سربه‌سر، وزن ارزش، IV و با�
   check('گزینه همه سررسیدها حذف شده و فقط سررسید واقعی انتخاب می‌شود', !ui64.includes('value="all"') && ui64.includes('selectedExpiry'));
   check('جدول روزانه و جزئیات روز از ردیف‌های همان سررسید می‌خوانند', ui64.includes('dailyTable(rows, selectedDate)') && ui64.includes('item.expiry === selectedExpiry()'));
   check('ریزمعامله فقط قراردادهای سررسید انتخابی را دریافت می‌کند', ui64.includes('contractsInView()') && ui64.includes('contracts: viewContracts'));
-  check('پارامترهای مدل IV در خود نگاه باز قابل تنظیم‌اند', ['ov-rfree', 'ov-divyield', 'ov-year-days', 'ov-iv-lo', 'ov-iv-hi', 'ov-apply-iv'].every((id) => ui64.includes(id)) && ui64.includes('toEnDigits'));
+  // ۱۴۰۵/۰۷/۱۷: به خواستهٔ صاحب پروژه بخشِ «فرض‌های مدل بلک–شولز» از نگاه باز
+  // رفت؛ پارامترهای IV همان تنظیماتِ مرکزیِ برنامه‌اند.
+  check('پارامترهای مدل IV از تنظیمات مرکزی، نه از فرمِ جدا', !['ov-rfree', 'ov-apply-iv', 'فرض‌های مدل بلک–شولز'].some((id) => ui64.includes(id))
+    && ui64.includes('rFree: pick(s.rFree, 0.30), divYield: pick(s.divYield, 0),'));
   check('نگاه باز، دامنه روزهای بسته و تا همین لحظه را با مسیر مشترک دارد',
     ui64.includes('id="ov-scope"') && ui64.includes('scopeOptionsMarkup') && ui64.includes('applyLiveScope'));
   // `ui64.includes('liveDayOf')` بود و سبز ماند در حالی که همین نما کاملاً

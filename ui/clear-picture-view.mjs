@@ -19,7 +19,7 @@ import { historyDateLabel } from '/core/history.mjs';
 import { breadthDonut, liveChart } from '/ui/tabs/live-market.mjs';
 import {
   clearPicture, contractStanding, sampleKey, LEADER_LISTS, SIDES, sideOf, bySide, pictureTotals,
-  breakevenPicture, breakevenLadder, BREAKEVEN_WEIGHTS,
+  breakevenPicture, breakevenLadder, BREAKEVEN_WEIGHTS, PREMIUM_BASES, premiumBasis, withPremium, allExpiriesBreakeven,
 } from '/core/clear-picture.mjs';
 import { contractBreakeven, breakevenGap, breakevenGapPct } from '/core/decision-dashboard.mjs';
 import { pctVsYesterday } from '/core/price-change.mjs';
@@ -200,6 +200,8 @@ export function mountClearPicture(host, deps) {
   let side = sideOf(store.get('options-radar:clear-picture-side', 'both'));
   let beMetric = store.get('options-radar:clear-picture-be-metric', 'value');
   if (!BREAKEVEN_WEIGHTS.some(([key]) => key === beMetric)) beMetric = 'value';
+  // مبنای پریمیوم: آخرین معامله یا قیمت پایانی (همان مبنای پیش‌فرضِ «نگاه باز»).
+  let bePremium = premiumBasis(store.get('options-radar:clear-picture-be-premium', 'last'));
 
   host.innerHTML = `<div class="cp">
     <header class="cp-head"><div><p class="eyebrow">تصویر شفاف بازار — از کل به جزء</p><h2 data-cp-title>کل بازار</h2></div><nav class="cp-crumbs" data-cp-crumbs aria-label="مسیر دامنه"></nav></header>
@@ -228,8 +230,8 @@ export function mountClearPicture(host, deps) {
       <section class="card cp-section"><h3>ترین‌ها در یک نگاه</h3><div class="cp-leaders" data-cp-leaders></div></section>
     </section>
     <section data-cp-panel="breakeven" hidden>
-      <section class="card cp-section"><div class="section-head"><h3 data-cp-be-title>سربه‌سر وزنی هر سررسید</h3><label class="cp-select">وزن میانگین<select data-cp-be-metric>${BREAKEVEN_WEIGHTS.map(([key, label]) => `<option value="${key}" ${key === beMetric ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div>
-        <p class="note">سربه‌سر کال = اعمال + پریمیوم و پوت = اعمال − پریمیوم (پریمیوم: آخرین معامله، وگرنه پایانی). فاصله از دید همان سمت است: مثبت یعنی پایه هنوز به سربه‌سر نرسیده. سربه‌سر وزنی، میانگینِ سربه‌سرِ قراردادهای همان سررسید با وزنِ انتخابی است — کال و پوت هرگز با هم میانگین نمی‌شوند.</p>
+      <section class="card cp-section"><div class="section-head"><h3 data-cp-be-title>سربه‌سر وزنی هر سررسید</h3><div class="cp-selects"><label class="cp-select">مبنای پریمیوم<select data-cp-be-premium>${PREMIUM_BASES.map(([key, label]) => `<option value="${key}" ${key === bePremium ? 'selected' : ''}>${label}</option>`).join('')}</select></label><label class="cp-select">وزن میانگین<select data-cp-be-metric>${BREAKEVEN_WEIGHTS.map(([key, label]) => `<option value="${key}" ${key === beMetric ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div></div>
+        <p class="note">سربه‌سر کال = اعمال + پریمیوم و پوت = اعمال − پریمیوم. پریمیوم «آخرین معامله» یعنی آخرین معاملهٔ امروز و اگر نبود پایانی؛ «قیمت پایانی» همان مبنای پیش‌فرضِ «نگاه باز» است. فاصله از دید همان سمت است: مثبت یعنی پایه هنوز به سربه‌سر نرسیده. سربه‌سر وزنی، میانگینِ سربه‌سرِ قراردادهای همان سررسید با وزنِ انتخابی است — کال و پوت هرگز با هم میانگین نمی‌شوند.</p>
         <div class="cp-tiles" data-chart-image data-cp-be-kpis></div><div data-cp-be-visual></div></section>
       <section class="card cp-section"><h3 data-cp-be-table-title>جدول سربه‌سر</h3><div data-cp-be-table></div></section>
     </section>
@@ -306,6 +308,10 @@ export function mountClearPicture(host, deps) {
     const pick = event.target.closest('[data-cp-ins]');
     if (pick) pickIns(pick.dataset.cpIns);
   });
+  $('be-premium').addEventListener('change', (event) => {
+    bePremium = premiumBasis(event.target.value); store.set('options-radar:clear-picture-be-premium', bePremium);
+    paint().catch((error) => logError('تصویر شفاف', error));
+  });
   $('be-metric').addEventListener('change', (event) => {
     beMetric = event.target.value; store.set('options-radar:clear-picture-be-metric', beMetric);
     paint().catch((error) => logError('تصویر شفاف', error));
@@ -365,7 +371,9 @@ export function mountClearPicture(host, deps) {
       const c = deps.rowsAt('contract')[0];
       const standing = contractStanding(c, { siblings: deps.rowsAt('expiry'), family: deps.rowsAt('underlying') });
       const move = c ? pctVsYesterday(Number(c.tradeLast) > 0 ? c.tradeLast : c.last, c.yday) : NaN;
-      const be = c ? contractBreakeven(c) : NaN;
+      // سربه‌سرِ کاشی با همان مبنای پریمیومِ زیرتبِ «سربه‌سر».
+      const cBe = c ? withPremium([c], bePremium)[0] : null;
+      const be = cBe ? contractBreakeven(cBe) : NaN;
       $('kpi-title').textContent = 'عددهای اصلیِ قرارداد';
       paintInto($('kpis'), (into) => {
         into.innerHTML = c ? [
@@ -375,7 +383,7 @@ export function mountClearPicture(host, deps) {
           moneyTile('میانگین ارزش هر معامله', Number(c.trades) > 0 ? Number(c.value) / Number(c.trades) : NaN),
           tile({ label: 'سهم از ارزش سررسید', value: pctText(standing.expirySharePct), share: standing.expirySharePct, note: Number.isFinite(standing.rank) ? `رتبهٔ ${fmt.int(standing.rank)} از ${fmt.int(standing.rankOf)} قرارداد معامله‌شده` : 'بی معامله امروز' }),
           tile({ label: 'سهم از ارزش نماد پایه', value: pctText(standing.familySharePct), share: standing.familySharePct, note: 'همهٔ سررسیدهای همین پایه' }),
-          tile({ label: 'سربه‌سر', value: fmt.money(be), unit: 'ریال', note: Number.isFinite(breakevenGapPct(c)) ? `پایه ${pctText(breakevenGapPct(c))} (${fmt.money(breakevenGap(c))} ریال) تا سربه‌سر` : 'پریمیوم نامعلوم', accent: c.kind }),
+          tile({ label: 'سربه‌سر', value: fmt.money(be), unit: 'ریال', note: Number.isFinite(breakevenGapPct(cBe)) ? `پایه ${pctText(breakevenGapPct(cBe))} (${fmt.money(breakevenGap(cBe))} ریال) تا سربه‌سر، مبنای ${bePremium === 'close' ? 'پایانی' : 'آخرین'}` : 'پریمیوم نامعلوم', accent: c.kind }),
           tile({ label: 'موقعیت باز', value: fmt.int(c.oi), unit: 'قرارداد', note: Number.isFinite(Number(c.oiChange)) ? `تغییر ${fmt.int(c.oiChange)}` : 'تغییر نامعلوم', tone: toneOf(c.oiChange) }),
           tile({ label: 'روز مانده', value: fmt.int(c.days), unit: 'روز', note: `سررسید ${dateLabel(c.endDate)}` }),
         ].join('') : '<p class="empty-note">قرارداد انتخابی در عکس تازه نیست.</p>';
@@ -527,41 +535,47 @@ export function mountClearPicture(host, deps) {
   function paintBreakeven(scope) {
     const deep = scope.level === 'expiry' || scope.level === 'contract';
     const rows = deps.rowsAt(deep ? 'expiry' : scope.level);
-    const be = breakevenPicture(rows, { metric: beMetric, side });
+    const be = breakevenPicture(rows, { metric: beMetric, side, premium: bePremium });
     lastBeExpiries = be.expiries;
+    const basisLabel = PREMIUM_BASES.find(([key]) => key === be.premium)?.[1] || '';
     const weightLabel = BREAKEVEN_WEIGHTS.find(([key]) => key === be.metric)?.[1] || '';
     if (!deep) {
       $('be-title').textContent = `سربه‌سر وزنی هر سررسید${side === 'both' ? '' : ` — ${SIDE_LABEL[side]}`}`;
       const ranked = be.expiries.filter((row) => Number.isFinite(row.callGapPct) || Number.isFinite(row.putGapPct));
-      const shown = ranked.slice(0, PARTS_SHOWN);
+      // در سطح نماد، ردیفِ «همهٔ سررسیدها» — هم‌ارزِ شاخصِ کلِ «نگاه باز».
+      const all = scope.level === 'underlying' ? allExpiriesBreakeven(rows, { metric: beMetric, side, premium: bePremium }) : null;
+      const shown = [...(all ? [all] : []), ...ranked.slice(0, PARTS_SHOWN)];
       const max = Math.max(1, ...shown.flatMap((row) => [Math.abs(row.callGapPct) || 0, Math.abs(row.putGapPct) || 0]));
       const gapBar = (value, cls) => (Number.isFinite(value)
         ? `<div class="cp-gap ${cls}"><i style="--w:${(Math.abs(value) / max) * 100}%"></i><b class="${value < 0 ? 'loss' : ''}">${pctText(value)}</b></div>` : `<div class="cp-gap ${cls}"><b>—</b></div>`);
       paintInto($('be-kpis'), (into) => {
         into.innerHTML = [
-          tile({ label: 'سررسید با سربه‌سر وزنی', value: fmt.int(ranked.length), unit: `از ${fmt.int(be.expiries.length)}`, note: `وزن: ${weightLabel}` }),
+          tile({ label: 'سررسید با سربه‌سر وزنی', value: fmt.int(ranked.length), unit: `از ${fmt.int(be.expiries.length)}`, note: `وزن: ${weightLabel}، پریمیوم: ${basisLabel}` }),
+          ...(all && side !== 'put' ? [tile({ label: 'همهٔ سررسیدها — سربه‌سر وزنی کال', value: fmt.money(all.callBreakeven), unit: 'ریال', note: Number.isFinite(all.callGapPct) ? `پایه ${pctText(all.callGapPct)} تا آن؛ ${fmt.int(all.expiries)} سررسید با هم` : '', accent: 'call' })] : []),
+          ...(all && side !== 'call' ? [tile({ label: 'همهٔ سررسیدها — سربه‌سر وزنی پوت', value: fmt.money(all.putBreakeven), unit: 'ریال', note: Number.isFinite(all.putGapPct) ? `پایه ${pctText(all.putGapPct)} تا آن؛ ${fmt.int(all.expiries)} سررسید با هم` : '', accent: 'put' })] : []),
           ...(side !== 'put' ? [tile({ label: 'نزدیک‌ترین سربه‌سر کال', value: pctText(Math.min(...ranked.map((r) => r.callGapPct).filter(Number.isFinite))), note: 'کمترین فاصلهٔ پایه تا سربه‌سر وزنی کال', accent: 'call' })] : []),
           ...(side !== 'call' ? [tile({ label: 'نزدیک‌ترین سربه‌سر پوت', value: pctText(Math.min(...ranked.map((r) => r.putGapPct).filter(Number.isFinite))), note: 'کمترین فاصلهٔ پایه تا سربه‌سر وزنی پوت', accent: 'put' })] : []),
         ].join('');
       });
       paintInto($('be-visual'), (into) => {
         into.innerHTML = shown.length ? `<p class="cp-legend">${side !== 'put' ? '<span class="call">فاصله تا سربه‌سر کال</span>' : ''}${side !== 'call' ? '<span class="put">فاصله تا سربه‌سر پوت</span>' : ''}<small>با کلیک روی هر سررسید، نردبانِ اعمالش باز می‌شود</small></p><div class="cp-be-list" data-chart-image>${shown.map((row) => `<article>
-          <header><button type="button" class="link" data-cp-be-expiry="${esc(row.key)}">${esc(row.uaName)} — ${dateLabel(row.endDate)}</button><span>${fmt.int(row.days)} روز، پایه ${fmt.money(row.spot)}</span>${side === 'both' && Number.isFinite(row.bandPct) ? `<strong>باند ${pctText(row.bandPct)}</strong>` : ''}</header>
+          <header>${row.all ? `<b>${esc(row.uaName)} — همهٔ سررسیدها</b><span>میانگینِ ${fmt.int(row.expiries)} سررسید با هم (مثل شاخص کلِ «نگاه باز»)، پایه ${fmt.money(row.spot)}</span>` : `<button type="button" class="link" data-cp-be-expiry="${esc(row.key)}">${esc(row.uaName)} — ${dateLabel(row.endDate)}</button><span>${fmt.int(row.days)} روز، پایه ${fmt.money(row.spot)}</span>`}${side === 'both' && Number.isFinite(row.bandPct) ? `<strong>باند ${pctText(row.bandPct)}</strong>` : ''}</header>
           ${side !== 'put' ? `<div class="cp-be-row"><small>کال ${fmt.money(row.callBreakeven)}</small>${gapBar(row.callGapPct, 'call')}</div>` : ''}
           ${side !== 'call' ? `<div class="cp-be-row"><small>پوت ${fmt.money(row.putBreakeven)}</small>${gapBar(row.putGapPct, 'put')}</div>` : ''}
         </article>`).join('')}</div>` : '<p class="empty-note">در این دامنه سربه‌سر وزنی معتبری ساخته نشد (پریمیوم یا وزن نیست).</p>';
       });
-      const table = tableIn('be-table', `be-expiries-${side}`, beExpiryCols(side), { sortKey: 'weight', onPick: (row) => deps.pickExpiry?.(row.uaIns, row.endDate) });
-      $('be-table-title').textContent = 'جدول سربه‌سر وزنی هر سررسید';
+      const table = tableIn('be-table', `be-expiries-${side}`, beExpiryCols(side), { sortKey: 'weight', onPick: (row) => { if (!row.all) deps.pickExpiry?.(row.uaIns, row.endDate); } });
+      $('be-table-title').textContent = all ? 'جدول سربه‌سر وزنی — همهٔ سررسیدها و هر سررسید' : 'جدول سربه‌سر وزنی هر سررسید';
       table.setEmptyMessage('سربه‌سر وزنی معتبری نیست.');
-      table.set(be.expiries.map((row) => ({ ...row, title: dateLabel(row.endDate) })));
+      table.set([...(all ? [{ ...all, title: 'همهٔ سررسیدها (با هم)', days: NaN }] : []), ...be.expiries.map((row) => ({ ...row, title: dateLabel(row.endDate) }))]);
       return;
     }
     // سطح سررسید و قرارداد: خط‌کش و نردبانِ اعمال.
     const expiry = be.expiries[0] || null;
-    const ladder = breakevenLadder(rows, expiry);
+    const ladder = breakevenLadder(withPremium(rows, bePremium), expiry);
     lastLadder = ladder;
     const contract = scope.level === 'contract' ? deps.rowsAt('contract')[0] : null;
+    const pricedContract = contract ? withPremium([contract], bePremium)[0] : null;
     $('be-title').textContent = `سربه‌سر سررسید ${dateLabel(scope.endDate)}${side === 'both' ? '' : ` — ${SIDE_LABEL[side]}`}`;
     const wBe = contract ? (contract.kind === 'put' ? expiry?.putBreakeven : expiry?.callBreakeven) : NaN;
     paintInto($('be-kpis'), (into) => {
@@ -570,9 +584,9 @@ export function mountClearPicture(host, deps) {
         ...(side !== 'put' ? [tile({ label: 'سربه‌سر وزنی کال', value: fmt.money(expiry.callBreakeven), unit: 'ریال', note: Number.isFinite(expiry.callGapPct) ? `پایه ${pctText(expiry.callGapPct)} تا آن (${fmt.money(expiry.callBreakeven - expiry.spot)} ریال)` : '', accent: 'call' })] : []),
         ...(side !== 'call' ? [tile({ label: 'سربه‌سر وزنی پوت', value: fmt.money(expiry.putBreakeven), unit: 'ریال', note: Number.isFinite(expiry.putGapPct) ? `پایه ${pctText(expiry.putGapPct)} تا آن (${fmt.money(expiry.spot - expiry.putBreakeven)} ریال)` : '', accent: 'put' })] : []),
         ...(side === 'both' ? [tile({ label: 'باند سربه‌سر', value: fmt.money(expiry.band), unit: 'ریال', note: Number.isFinite(expiry.bandPct) ? `${pctText(expiry.bandPct)} قیمت جاری، از پوت تا کال` : 'هر دو سمت لازم است' })] : []),
-        ...(contract ? [tile({ label: `سربه‌سر ${contract.name}`, value: fmt.money(contractBreakeven(contract)), unit: 'ریال', accent: contract.kind,
-          note: Number.isFinite(breakevenGapPct(contract)) ? `پایه ${pctText(breakevenGapPct(contract))} تا آن؛ ${Number.isFinite(wBe) ? `${pctText(((contractBreakeven(contract) / wBe) - 1) * 100)} نسبت به سربه‌سر وزنی همین سمت` : ''}` : 'پریمیوم نامعلوم' })] : []),
-        tile({ label: 'وزن میانگین', value: weightLabel, note: `${fmt.int(expiry.callCount)} کال و ${fmt.int(expiry.putCount)} پوت در میانگین` }),
+        ...(pricedContract ? [tile({ label: `سربه‌سر ${pricedContract.name}`, value: fmt.money(contractBreakeven(pricedContract)), unit: 'ریال', accent: pricedContract.kind,
+          note: Number.isFinite(breakevenGapPct(pricedContract)) ? `پایه ${pctText(breakevenGapPct(pricedContract))} تا آن؛ ${Number.isFinite(wBe) ? `${pctText(((contractBreakeven(pricedContract) / wBe) - 1) * 100)} نسبت به سربه‌سر وزنی همین سمت` : ''}` : 'پریمیوم نامعلوم' })] : []),
+        tile({ label: 'وزن میانگین', value: weightLabel, note: `پریمیوم: ${basisLabel}؛ ${fmt.int(expiry.callCount)} کال و ${fmt.int(expiry.putCount)} پوت در میانگین` }),
       ].join('') : '<p class="empty-note">سربه‌سر وزنی برای این سررسید ساخته نشد.</p>';
     });
     paintInto($('be-visual'), (into) => {

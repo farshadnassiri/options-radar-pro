@@ -3343,13 +3343,6 @@ td.gain, dd.gain { color: var(--gain); }
 .open-view-form label { display: grid; gap: 6px; color: var(--muted); font-size: var(--fs-sm); font-weight: 700; }
 .open-view-form select { width: 100%; min-height: var(--control-h, 40px); padding: 8px 12px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background-color: var(--panel); color: var(--ink); font: inherit; }
 .open-view-form button { min-height: var(--control-h, 40px); }
-.open-view-model-settings { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(520px, 2fr) auto; gap: 14px; align-items: end; margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
-.open-view-model-settings h3 { margin: 2px 0 4px; }
-.open-view-model-settings small { color: var(--muted); }
-.open-view-model-grid { display: grid; grid-template-columns: repeat(5, minmax(105px, 1fr)); gap: 9px; }
-.open-view-model-grid label { display: grid; gap: 5px; color: var(--ink-2); font-size: var(--fs-xs); font-weight: 700; }
-.open-view-model-grid input, .open-view-model-grid select { width: 100%; min-height: 40px; padding: 6px 9px; border: 1px solid var(--line-input); border-radius: var(--radius-sm); background-color: var(--panel); color: var(--ink); font: inherit; }
-.open-view-model-grid input { direction: ltr; text-align: start; font-family: var(--mono); }
 .open-view-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 14px 0; }
 .open-view-chart { min-height: 245px; min-width: 0; }
 .open-view-chart-stage { position: relative; z-index: 0; min-width: 0; }
@@ -3408,8 +3401,6 @@ td.gain, dd.gain { color: var(--gain); }
   .open-view-hero { align-items: flex-start; flex-direction: column; }
   .open-view-form { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .open-view-chart-grid { grid-template-columns: 1fr; }
-  .open-view-model-settings { grid-template-columns: 1fr; }
-  .open-view-model-grid { grid-template-columns: repeat(3, minmax(105px, 1fr)); }
   .open-view-formula-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .open-view-intraday-controls { grid-template-columns: 1fr 1fr; }
   .open-view-wide-card { grid-column: auto; }
@@ -3417,7 +3408,6 @@ td.gain, dd.gain { color: var(--gain); }
 
 @media (max-width: 560px) {
   .open-view-form { grid-template-columns: 1fr; }
-  .open-view-model-grid { grid-template-columns: 1fr 1fr; }
   .open-view-formula-grid, .open-view-intraday-controls { grid-template-columns: 1fr; }
 }
 
@@ -3642,10 +3632,6 @@ td.gain, dd.gain { color: var(--gain); }
 
 /* مجموعه داشبورد تصمیم‌گیری */
 .decision-toolbar { display: grid; gap: 14px; margin-bottom: 14px; }
-.decision-refresh-control { display: grid; grid-template-columns: auto minmax(180px, 1fr) minmax(170px, auto); align-items: center; gap: 12px; }
-.decision-refresh-control label { color: var(--ink-2); font-weight: 900; }
-.decision-refresh-control input { width: 100%; accent-color: var(--accent); }
-.decision-refresh-control output { color: var(--accent); font-weight: 900; text-align: end; }
 .decision-main { min-width: 0; }
 .decision-mode > .section-head { margin-bottom: 12px; }
 .decision-view-buttons { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
@@ -3723,6 +3709,7 @@ button.link:hover { text-decoration: underline; }
 [data-cp-panel][hidden] { display: none; }
 .cp-select { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--fs-xs); font-weight: 800; white-space: nowrap; }
 .cp-select select { min-height: 34px; }
+.cp-selects { display: flex; flex-wrap: wrap; gap: 8px 14px; }
 
 /* کاشی: عدد درشت و واحد کوچک کنار هم، هر دو شکستنی؛ هیچ چیز بریده نمی‌شود. */
 .cp-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
@@ -3875,7 +3862,7 @@ button.link:hover { text-decoration: underline; }
   .live-breadth-donut { grid-template-columns: 1fr; }
   .live-mover-bars article { grid-template-columns: minmax(65px, 1fr) minmax(80px, 1.5fr) auto; }
   .live-mover-bars article small { display: none; }
-  .decision-refresh-control, .decision-view-buttons { grid-template-columns: 1fr; }
+  .decision-view-buttons { grid-template-columns: 1fr; }
   .dd-tabbar { grid-template-columns: 1fr 1fr; }
   .decision-scope-live { align-items: stretch; flex-direction: column; }
 }

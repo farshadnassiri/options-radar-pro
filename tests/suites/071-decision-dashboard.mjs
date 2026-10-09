@@ -57,8 +57,11 @@ group('۷۰. مجموعه داشبورد تصمیم‌گیری و چهار دا�
   check('«نگاه باز» تنها نمای خودش را دارد و «تصویر شفاف» جای سه حالت را گرفته',
     viewCount('openViewViews') === 1 && ui70.includes("{ id: 'clear', title: 'تصویر شفاف'")
     && !ui70.includes('const pulseViews') && !ui70.includes('const liquidityViews'), viewCount('openViewViews'));
-  check('دستگیره زمان، تایمر بازسازی و توقف خودکار هم‌زمان وجود دارند',
-    ui70.includes('id="dd-interval" type="range"') && ui70.includes('timer = setTimeout(refresh') && ui70.includes('id="dd-pause"'));
+  // دستگیرهٔ «زمان به‌روزرسانی» به خواستهٔ صاحب پروژه (۱۴۰۵/۰۷/۱۷) رفت؛ آهنگ
+  // همان انتخابِ ذخیره‌شده یا آهنگِ دیده‌بان است. تایمر و توقف خودکار ماندند.
+  check('تایمر بازسازی و توقف خودکار هست، دستگیرهٔ زمان نه',
+    !ui70.includes('id="dd-interval"') && ui70.includes('timer = setTimeout(refresh') && ui70.includes('id="dd-pause"')
+    && ui70.includes("const intervalSec = Math.max(5, Math.min(60, Number(localStorage.getItem('options-radar:dashboard-interval'))"));
   // سقف چهارصدردیفی برداشته شد چون دلیلش رفت: آن سقف برای روانی DOM بود،
   // وقتی جدول `innerHTML` خام می‌ساخت. جدول مشترک مجازی‌سازی‌شده است و فقط
   // ردیف‌های داخل قاب را رسم می‌کند، پس نوار کامل هم مرتب می‌شود هم صادر.

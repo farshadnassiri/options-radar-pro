@@ -5,7 +5,7 @@ import { liveTapeDay } from '/core/live-day.mjs';
 import { liveBaseList, liveOpenViewContracts } from '/core/decision-dashboard.mjs';
 import { busyBlock } from '/ui/busy.mjs';
 import { downloadOpenViewExcel } from '/ui/open-view-export.mjs';
-import { fmt, faDigits, signTone, toEnDigits } from '/ui/fmt.mjs';
+import { fmt, faDigits, signTone } from '/ui/fmt.mjs';
 import { baseAfterRange, clipRangeToDates, loadRange, mountHistoryRange } from '/ui/history-range.mjs';
 import { applyLiveScope, scopeOptionsMarkup, SCOPE_LIVE } from '/ui/live-scope.mjs';
 import { fetchTapeBatch, tapeSummary, tapeWarning, usableRows } from '/ui/tape-intake.mjs';
@@ -205,13 +205,6 @@ function contractTable(items, { bucket = false } = {}) {
 export async function mount(root, { state }) {
   // «نگاه باز» بازهٔ خودش را دارد، حتی وقتی درونِ رصدِ زنده سوار است.
   root.dataset.spanScope = '1';
-  const initialModel = {
-    rFreePct: (Number.isFinite(state.settings.rFree) ? state.settings.rFree : 0.30) * 100,
-    divYieldPct: (Number.isFinite(state.settings.divYield) ? state.settings.divYield : 0) * 100,
-    yearDays: Number.isFinite(state.settings.dayCountYear) ? state.settings.dayCountYear : 365,
-    ivLoPct: (Number.isFinite(state.settings.ivLo) ? state.settings.ivLo : 0.01) * 100,
-    ivHiPct: (Number.isFinite(state.settings.ivHi) ? state.settings.ivHi : 5) * 100,
-  };
   root.innerHTML = `<section class="open-view-hero"><div><p class="eyebrow">نقشه انتظارات بازار اختیار</p><h1>نگاه باز</h1><p>سربه‌سر و نوسان ضمنی همه کال‌ها و پوت‌های یک نماد، جدا برای هر سررسید و با وزن ارزش معامله.</p></div><span>چندروزه ← درون‌روزی ← لحظه‌ای</span></section>
   <section class="card open-view-controls"><div class="section-head"><div><p class="eyebrow">نگاه باز</p><h2 id="ov-mode-title">نمای لحظه‌ای همین نماد</h2></div><b id="ov-status" role="status" aria-live="polite">در حال دریافت نمادها…</b></div>
     <div class="open-view-mode" role="group" aria-label="حالت نگاه باز"><button type="button" data-ov-mode="live">لحظه‌ای</button><button type="button" data-ov-mode="history">تاریخی چندروزه</button></div>
@@ -219,7 +212,6 @@ export async function mount(root, { state }) {
     <div id="ov-range" class="step-first" data-step="۱" data-ov-history></div>
     <div class="open-view-form"><label class="step-next" data-step="۲">نماد پایه<select id="ov-base" disabled><option value="">اول بازه را انتخاب کن</option></select></label><label data-ov-history>دامنه داده<select id="ov-scope">${scopeOptionsMarkup()}</select></label><label data-ov-history>مبنای روزانه<select id="ov-basis"><option value="CLOSE">قیمت پایانی</option><option value="LAST">آخرین معامله</option><option value="FIRST">اولین معامله</option></select></label><input type="hidden" id="ov-from"><input type="hidden" id="ov-to"><span class="open-view-span" id="ov-span" data-ov-history>بازه: از گام ۱</span><label>سررسید انتخابی<select id="ov-expiry" disabled><option value="">پس از دریافت انتخاب می‌شود</option></select></label><button type="button" class="primary" id="ov-load" data-ov-history>ساخت نگاه چندروزه</button><button type="button" class="ghost" id="ov-excel" disabled>خروجی جامع Excel</button></div>
     <p id="ov-live-note" class="note" data-ov-history>حالت بسته فقط روزهای نهایی را می‌سازد؛ حالت «تا همین لحظه» ردیف امروز را فقط در جلسه معتبر بازار اضافه می‌کند.</p>
-    <div class="open-view-model-settings"><div><p class="eyebrow">فرض‌های مدل بلک–شولز</p><h3>پارامترهای محاسبه نوسان ضمنی</h3><small id="ov-iv-current">—</small></div><div class="open-view-model-grid"><label>نرخ بدون ریسک سالانه ٪<input id="ov-rfree" type="number" min="0" max="200" step="0.1" value="${initialModel.rFreePct}"></label><label>بازده نقدی سالانه ٪<input id="ov-divyield" type="number" min="0" max="100" step="0.1" value="${initialModel.divYieldPct}"></label><label>روزهای سال<input id="ov-year-days" type="number" min="1" max="1000" step="1" value="${initialModel.yearDays}"></label><label>کمینه IV ٪<input id="ov-iv-lo" type="number" min="0.01" max="999" step="0.1" value="${initialModel.ivLoPct}"></label><label>بیشینه IV ٪<input id="ov-iv-hi" type="number" min="0.02" max="1000" step="1" value="${initialModel.ivHiPct}"></label></div><button type="button" class="ghost" id="ov-apply-iv">اعمال پارامترها</button></div>
     <p class="portfolio-note" data-ov-history>برای دیدن فرمول، وزن هر قرارداد و نمودار ریز همان روز، روی ردیف روز کلیک کن. قیمت یا ارزش گمشده با مشاهده قبلی پر نمی‌شود.</p>
   </section>
   <section id="ov-report" hidden>
@@ -243,19 +235,19 @@ export async function mount(root, { state }) {
   let liveRefreshBusy = false, lastLiveRefreshAt = 0, disposed = false;
   const tradeCache = new Map(), hiddenSeries = new Set();
   const setStatus = (text, bad = false) => { status.textContent = text; status.className = bad ? 'loss' : ''; };
-  const inputNumber = (id) => Number(toEnDigits($(id).value));
-  const settings = (reportError = true) => {
+  // ── پارامترهای IV از تنظیماتِ مرکزی برنامه (۱۴۰۵/۰۷/۱۷) ──
+  // صاحب پروژه فرمِ جداگانهٔ پارامترهای مدل را از «نگاه باز» برداشت. نرخ،
+  // بازده نقدی، روزهای سال و دامنهٔ IV همان‌هایی‌اند که تب تنظیمات برای همهٔ
+  // برنامه می‌گذارد؛ پس IVِ نگاه باز با بقیهٔ تب‌ها یکی است. هر بار تازه
+  // خوانده می‌شود تا تغییرِ تنظیمات بی بارگذاریِ دوباره اثر کند.
+  const settings = () => {
+    const s = state.settings || {};
+    const pick = (value, fallback) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
     const value = {
-      rFree: inputNumber('ov-rfree') / 100, divYield: inputNumber('ov-divyield') / 100,
-      yearDays: inputNumber('ov-year-days'), ivLo: inputNumber('ov-iv-lo') / 100, ivHi: inputNumber('ov-iv-hi') / 100,
+      rFree: pick(s.rFree, 0.30), divYield: pick(s.divYield, 0),
+      yearDays: pick(s.dayCountYear, 365), ivLo: pick(s.ivLo, 0.01), ivHi: pick(s.ivHi, 5),
     };
-    const valid = Number.isFinite(value.rFree) && value.rFree >= 0 && value.rFree <= 2
-      && Number.isFinite(value.divYield) && value.divYield >= 0 && value.divYield <= 1
-      && Number.isInteger(value.yearDays) && value.yearDays >= 1 && value.yearDays <= 1000
-      && value.ivLo >= 0.0001 && value.ivHi > value.ivLo && value.ivHi <= 10;
-    if (!valid) { if (reportError) setStatus('پارامترهای IV معتبر نیستند؛ بیشینه IV باید از کمینه بزرگ‌تر باشد.', true); return null; }
-    $('ov-iv-current').textContent = `نرخ ${fmt.pct(value.rFree * 100)}٪ · بازده نقدی ${fmt.pct(value.divYield * 100)}٪ · سال ${fmt.int(value.yearDays)} روز · دامنه IV از ${fmt.pct(value.ivLo * 100)}٪ تا ${fmt.pct(value.ivHi * 100)}٪`;
-    return value;
+    return value.ivHi > value.ivLo && value.yearDays >= 1 ? value : { rFree: 0.30, divYield: 0, yearDays: 365, ivLo: 0.01, ivHi: 5 };
   };
   // ── لحظه‌ای، پیش‌فرض ──────────────────────────────────────────────
   //
@@ -276,7 +268,6 @@ export async function mount(root, { state }) {
   const viewRows = () => (daily?.expiryRows || []).filter((row) => row.expiry === selectedExpiry());
   const contractsInView = () => contracts.filter((contract) => normalizeHistoryDate(contract.expiry) === selectedExpiry());
   const toggleSeries = (key) => { if (hiddenSeries.has(key)) hiddenSeries.delete(key); else hiddenSeries.add(key); paintDaily(); };
-  settings(false);
 
   function resetIntraday() {
     intradayRequest += 1;
@@ -633,7 +624,6 @@ export async function mount(root, { state }) {
     selectedDate = viewRows().at(-1)?.date || 0; dailyRelations = relationMatrix(viewRows()); paintDaily();
     if ($('ov-day-source').value === 'live') await loadDayIntraday();
   });
-  $('ov-apply-iv').addEventListener('click', () => { const model = settings(); if (!model) return; if (daily) computeDaily(); else setStatus('پارامترهای IV ثبت شد؛ پس از دریافت تاریخچه اعمال می‌شود.'); });
   $('ov-day-interval').addEventListener('change', async () => {
     resetIntraday();
     if (isLive() || $('ov-day-source').value === 'live') await loadDayIntraday();
