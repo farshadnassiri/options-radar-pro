@@ -2446,19 +2446,32 @@ export async function mount(root, { state, api }) {
   // مرتبط‌ترینشان — اصلاً وارد هیچ ترکیبی نمی‌شدند.
   let rangeUi = null, rangeJob = null;
 
-  function fillBases(payload) {
+  // تیکِ پس‌زمینهٔ `loadRange` (`update: true`، ۱۴۰۵/۰۷/۱۸): کشویی فقط
+  // وقتی دوباره چیده می‌شود که گزینه‌هایش واقعاً عوض شده — بازچیدنِ
+  // بی‌تغییر، کشوییِ بازِ کاربر را می‌بست. خطِ وضعیت هم فقط وقتی بازنویسی
+  // می‌شود که هنوز همان خلاصهٔ بازه را نشان می‌دهد؛ نتیجه یا خطا پاک نمی‌شود.
+  let basesSig = '', rangeLine = '';
+  function fillBases(payload, { update = false } = {}) {
     const keep = baseSelect.value;
     chain = buildChain(payload.rows || []);
-    baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
-    baseGate.ready(chain.size);
-    for (const item of [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'))) {
-      const option = document.createElement('option'); option.value = item.ins; option.textContent = `${nameOf(item, 'نماد پایه')} · ${fmt.int(item.contracts)} قرارداد`; baseSelect.appendChild(option);
+    const items = [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'))
+      .map((item) => [item.ins, `${nameOf(item, 'نماد پایه')} · ${fmt.int(item.contracts)} قرارداد`]);
+    const sig = JSON.stringify(items);
+    if (!update || sig !== basesSig) {
+      basesSig = sig;
+      baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+      baseGate.ready(chain.size);
+      for (const [ins, text] of items) {
+        const option = document.createElement('option'); option.value = ins; option.textContent = text; baseSelect.appendChild(option);
+      }
+      // انتخابِ کاربر با عوض شدن بازه پاک نمی‌شود، اگر همان نماد هنوز در
+      // بازهٔ تازه قرارداد داشته باشد.
+      if (keep && chain.has(keep)) baseSelect.value = keep;
     }
-    // انتخابِ کاربر با عوض شدن بازه پاک نمی‌شود، اگر همان نماد هنوز در
-    // بازهٔ تازه قرارداد داشته باشد.
-    if (keep && chain.has(keep)) baseSelect.value = keep;
     const expired = payload.summary?.expiredInside || 0;
-    setStatus(`${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند. ${fmt.int(CATALOG.filter((item) => item.feasible).length)} استراتژی قابل اجرا.`);
+    const line = `${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند. ${fmt.int(CATALOG.filter((item) => item.feasible).length)} استراتژی قابل اجرا.`;
+    if (!update || status.textContent === rangeLine) setStatus(line);
+    rangeLine = line;
   }
 
   async function loadUniverseForRange(range) {

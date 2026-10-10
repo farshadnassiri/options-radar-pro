@@ -86,6 +86,8 @@ group('۶۹. داشبورد تجمعی بازار و رصد زنده موقعی�
     backtest69.includes('const got = await fetchLiveTape(codes);')
     // `replayDay` همان `replayIntraday` است به‌علاوهٔ مهر تلاطم؛ هر چهار
     // مسیر درون‌روز از همین یکی رد می‌شوند تا هیچ‌کدام بی‌تلاطم نماند.
-    && backtest69.includes('intraday = replayDay({ byIns }, intradayDate);')
+    // ۱۴۰۵/۰۷/۱۸: نتیجه اول در `fresh` می‌نشیند تا دریافتِ ناقص آخرین خطِ
+    // خوب را خالی نکند (آزمون ۳۴۶).
+    && backtest69.includes('const fresh = replayDay({ byIns }, intradayDate);')
     && /function replayDay[\s\S]*replayIntraday\(\{[\s\S]*annotateIntradayIv\(/.test(backtest69));
 }

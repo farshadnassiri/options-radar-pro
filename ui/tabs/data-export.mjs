@@ -130,11 +130,17 @@ export async function mount(root, { state, api }) {
   const blockers = () => exportBlockers(universe, selectedInstruments());
   const warnings = () => exportWarnings(universe, selectedInstruments());
 
-  function paintBlockerStatus() {
+  // آخرین جمله‌ای که همین تابع نوشت. تیکِ پس‌زمینه (`update`) فقط وقتی
+  // خطِ وضعیت را بازنویسی می‌کند که هنوز همین جمله آنجاست؛ نتیجه یا خطای
+  // اجرای کاربر را پرسشِ چهارثانیه‌ای پاک نمی‌کند (۱۴۰۵/۰۷/۱۸).
+  let blockerLine = '';
+  function paintBlockerStatus({ update = false } = {}) {
     if (controller || exporting) return;
+    if (update && $('de-status').textContent !== blockerLine) return;
     const why = blockers();
     if (why.length) {
-      setStatus(`تا تکمیل دفتر، خروجی قفل است — ${faDigits(why.join('؛ '))}.`, true);
+      blockerLine = `تا تکمیل دفتر، خروجی قفل است — ${faDigits(why.join('؛ '))}.`;
+      setStatus(blockerLine, true);
       return;
     }
     // ═══ R4-05: ناقص گفته می‌شود، ولی قفل نمی‌کند ═══
@@ -142,10 +148,11 @@ export async function mount(root, { state, api }) {
     // پیش از این همین حرف‌ها دکمه را می‌بستند و کاربر راهی نداشت. حالا
     // خروجی باز است و کم‌داشته‌اش همین‌جا و داخلِ فایل نوشته می‌شود.
     const soft = warnings();
-    setStatus(soft.length
+    blockerLine = soft.length
       ? `خروجی باز است، ولی پوشش ناقص است — ${faDigits(soft.join('؛ '))}.`
         + ' همین محدودیت در برگ راهنمای فایل هم ثبت می‌شود.'
-      : '');
+      : '';
+    setStatus(blockerLine);
   }
 
   function updateRunState() {
@@ -212,7 +219,7 @@ export async function mount(root, { state, api }) {
    * انتخاب پاک می‌شود — انتخابی که به ابزارِ نبوده اشاره کند، در گام بعد
    * یک جفتِ بی‌جواب می‌سازد و کاربر علتش را نمی‌فهمد.
    */
-  function paintContracts() {
+  function paintContracts({ update = false } = {}) {
     const bases = selectedBases();
     discovered = bases.length
       ? discoverDataExportInstruments(universe?.rows || [], bases, { declaredSize: state.settings.contractSize })
@@ -225,7 +232,7 @@ export async function mount(root, { state, api }) {
     if (!bases.length) {
       contractsHost.innerHTML = '<p class="empty-note">اول یک نماد پایه را از گام دوم انتخاب کن.</p>';
       $('de-contract-note').textContent = '';
-      updateRunState(); paintBlockerStatus();
+      updateRunState(); paintBlockerStatus({ update });
       return;
     }
     const baseNames = new Map(discovered.filter((item) => item.kind === 'underlying').map((item) => [String(item.ins), item.name]));
@@ -257,33 +264,60 @@ export async function mount(root, { state, api }) {
     $('de-contract-note').textContent = picked.size
       ? `${fmt.int(picked.size)} قرارداد انتخاب شده از ${fmt.int(shown)} قراردادِ نمایش‌داده‌شده. برگ پایه‌ها هم خودکار اضافه می‌شود.`
       : `${fmt.int(shown)} قرارداد در دسترس است؛ هیچ‌کدام هنوز انتخاب نشده.`;
-    updateRunState(); paintBlockerStatus();
+    updateRunState(); paintBlockerStatus({ update });
   }
   function invalidatePrepared() {
     prepared = null;
     exportBtn.disabled = true;
   }
-  function paintBases(payload) {
+  /** جست‌وجوی نماد پایه — پس از هر بازچینِ فهرست هم دوباره اعمال می‌شود. */
+  function filterBases() {
+    const q = $('de-search').value.trim();
+    for (const label of basesHost.querySelectorAll('.de-base')) label.hidden = Boolean(q) && !label.dataset.search.includes(q);
+  }
+  // ═══ پرسشِ چهارثانیه‌ایِ ساختِ دفتر، کارِ کاربر را دور نمی‌ریزد (۱۴۰۵/۰۷/۱۸) ═══
+  //
+  // پیش از این هر پرسشِ پس‌زمینه همان مسیرِ دکمه را می‌رفت: خروجیِ آماده
+  // باطل و «خروجی» خاموش می‌شد، «اجرا» خاموش می‌شد، فهرست پایه‌ها از نو
+  // ساخته می‌شد و جست‌وجوی `#de-search` (که فقط با تایپ اعمال می‌شد) از
+  // دست می‌رفت، و یک پرسشِ ناموفق فهرست را با پیامِ خطا عوض می‌کرد. حالا
+  // پرسشِ پس‌زمینه (`poll`) فهرست را فقط وقتی دوباره می‌چیند که چیزی در آن
+  // عوض شده، تیک و اسکرول و جست‌وجو را نگه می‌دارد، و خروجیِ آماده را
+  // فقط وقتی باطل می‌کند که انتخابِ کاربر واقعاً چیزی از دست داده باشد.
+  let basesHtml = '';
+  function paintBases(payload, { update = false } = {}) {
     const keep = new Set(selectedBases());
     const values = [...buildChain(payload?.rows || []).values()]
       .map((item) => ({ ...item }))
       .sort((a, b) => a.name.localeCompare(b.name, 'fa'));
-    basesHost.innerHTML = values.length ? values.map((item) => `
+    const html = values.length ? values.map((item) => `
       <label class="de-base" data-search="${esc(item.name)}"><input type="checkbox" value="${esc(item.ins)}"${keep.has(item.ins) ? ' checked' : ''}><span><b>${esc(item.name)}</b><small>${fmt.int(item.contracts)} قرارداد · کال ${fmt.int(item.callContracts)} · پوت ${fmt.int(item.putContracts)}</small></span></label>`).join('') : '<p class="empty-note">در این بازه نماد پایه‌ای پیدا نشد.</p>';
+    if (!update || html !== basesHtml) {
+      const scroll = basesHost.scrollTop;
+      basesHost.innerHTML = html;
+      basesHtml = html;
+      if (update) basesHost.scrollTop = scroll;
+      filterBases();
+    }
     $('de-universe-note').textContent = payload?.note || '';
     universe = payload;
-    paintContracts();
+    paintContracts({ update });
   }
-  async function loadUniverse(range = rangeUi?.range) {
+  async function loadUniverse(range = rangeUi?.range, { poll = false } = {}) {
     if (!range) return;
     const mine = ++loadSeq;
-    invalidatePrepared();
-    clearTimeout(refreshTimer); runBtn.disabled = true;
-    $('de-universe-note').textContent = 'در حال خواندن دفتر قراردادهای این بازه…';
+    clearTimeout(refreshTimer);
+    if (!poll) {
+      invalidatePrepared();
+      runBtn.disabled = true;
+      $('de-universe-note').textContent = 'در حال خواندن دفتر قراردادهای این بازه…';
+    }
     try {
       const payload = await fetchRangeUniverse(range);
       if (stopped || mine !== loadSeq) return;
-      paintBases(payload);
+      const before = [...selectedBases(), ...picked].join('|');
+      paintBases(payload, { update: poll });
+      if (poll && [...selectedBases(), ...picked].join('|') !== before) { invalidatePrepared(); updateRunState(); }
       if (payload.build?.running) {
         // ═══ چرا این جمله شرطی شد ═══
         //
@@ -298,14 +332,22 @@ export async function mount(root, { state, api }) {
             : 'با پوشش فعلی هم می‌توانید خروجی بگیرید و محدودیت داخل فایل ثبت می‌شود.');
         // ساختِ دفتر ادامه دارد، ولی دیگر دکمه را نمی‌بندد؛ پس وضعیتِ
         // کنارِ دکمه هم باید همین را بگوید، نه قفلِ نبوده را.
-        paintBlockerStatus();
-        refreshTimer = setTimeout(() => loadUniverse(range), 4000);
+        paintBlockerStatus({ update: poll });
+        refreshTimer = setTimeout(() => loadUniverse(range, { poll: true }), 4000);
       } else if (!payload.complete) $('de-universe-note').textContent = `${payload.note || ''} پوشش دفتر کامل نیست؛ خروجی در دسترس است و این محدودیت داخل برگ راهنما ثبت می‌شود.`;
       // قفل باید همان‌جا که دکمه است دیده شود، نه فقط در یادداشت بالا.
-      paintBlockerStatus();
+      paintBlockerStatus({ update: poll });
     } catch (error) {
       if (stopped || mine !== loadSeq) return;
-      universe = null; basesHost.innerHTML = '<p class="empty-note">دفتر قراردادها دریافت نشد.</p>';
+      if (poll) {
+        // پرسشِ پس‌زمینهٔ ناموفق، آخرین فهرستِ خوب را پاک نمی‌کند؛ فقط
+        // خطا گفته می‌شود و چند ثانیه بعد دوباره پرسیده می‌شود.
+        $('de-universe-note').textContent = `${error.message} — فهرستِ قبلی سر جایش است و دوباره پرسیده می‌شود.`;
+        $('de-universe-note').toggleAttribute('data-error', true);
+        refreshTimer = setTimeout(() => loadUniverse(range, { poll: true }), 4000);
+        return;
+      }
+      universe = null; basesHtml = ''; basesHost.innerHTML = '<p class="empty-note">دفتر قراردادها دریافت نشد.</p>';
       $('de-universe-note').textContent = error.message; updateRunState();
     }
   }
@@ -1261,7 +1303,7 @@ export async function mount(root, { state, api }) {
     invalidatePrepared(); paintContracts();
   });
   $('de-pick-none').addEventListener('click', () => { picked.clear(); invalidatePrepared(); paintContracts(); });
-  $('de-search').addEventListener('input', (event) => { const q = event.target.value.trim(); for (const label of basesHost.querySelectorAll('.de-base')) label.hidden = q && !label.dataset.search.includes(q); });
+  $('de-search').addEventListener('input', filterBases);
   $('de-all').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = true; invalidatePrepared(); paintContracts(); });
   $('de-none').addEventListener('click', () => { for (const input of basesHost.querySelectorAll('input')) input.checked = false; invalidatePrepared(); paintContracts(); });
   $('de-refresh').addEventListener('click', () => loadUniverse()); runBtn.addEventListener('click', run); exportBtn.addEventListener('click', exportPrepared); stopBtn.addEventListener('click', () => controller?.abort());

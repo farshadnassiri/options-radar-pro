@@ -256,6 +256,8 @@ export async function mount(root, { state }) {
   let manualEntry = {}, manualExit = {};
   let entryWheel = null, exitWheel = null;
   let liveTimer = null, liveWatching = false, liveLoading = false;
+  // آخرین خط زمانیِ درون‌روزِ خوبِ رصد زنده: `{ date, at, points }` (۱۴۰۵/۰۷/۱۸).
+  let liveGood = null;
   const setStatus = (text, error = false) => { status.textContent = text; status.toggleAttribute('data-error', error); };
 
   for (const [group, title] of Object.entries(GROUPS)) {
@@ -1575,7 +1577,16 @@ export async function mount(root, { state }) {
       const failed = codes.filter((ins) => !got.verdicts[ins]?.usable);
       intradayDate = tehranDateNumber(got.at);
       lastDayFetch = { byIns, failed, date: intradayDate };
-      intraday = replayDay({ byIns }, intradayDate);
+      // ═══ یک دریافتِ ناقص، نمودارهای درون‌روز را خالی نمی‌کند (۱۴۰۵/۰۷/۱۸) ═══
+      //
+      // پیش از این اگر یک پا در یک تیک ردیفی نداشت، `intraday` خالی می‌شد و
+      // همهٔ نمودار و جدول‌های درون‌روز تا تیکِ بعد «یادداشتِ خالی» می‌شدند.
+      // حالا آخرین خط زمانیِ خوبِ **همان روز** می‌ماند و گفته می‌شود که
+      // آخرین دریافتِ کامل است. روزِ دیگر (یا مسیرِ تاریخی) نگه داشته نمی‌شود.
+      const fresh = replayDay({ byIns }, intradayDate);
+      if (fresh.length) liveGood = { date: intradayDate, at: got.at, points: fresh };
+      const kept = !fresh.length && liveGood?.date === intradayDate ? liveGood : null;
+      intraday = kept ? kept.points : fresh;
       $('bt-result').hidden = false;
       paintResult();
       paintPanels();
@@ -1583,8 +1594,16 @@ export async function mount(root, { state }) {
       $('bt-intraday-title').textContent = `رصد زنده موقعیت در ${dateLabel(intradayDate)} · ۹:۰۰ تا ۱۲:۳۰`;
       $('bt-run-note').textContent = 'قیمت ورود از تاریخ انتخابی ثابت است؛ نتیجه زنده فقط با آخرین معاملات واقعی امروز محاسبه و در هر دریافت از نو ساخته می‌شود. این ارزش مشاهده‌شده است و تضمین آفست هم‌زمان نیست.';
       const warning = tradeWarningText(lastDayFetch);
+      if (kept) {
+        const keptNote = `آخرین دریافتِ کامل، ساعت ${faClock(new Date(kept.at))}`;
+        $('bt-intraday-source').textContent = `${$('bt-intraday-source').textContent} — ${keptNote}`;
+        setStatus(`رصد زنده ${faClock(new Date(got.at))}؛ این دریافت ناقص بود و نمودارها ${keptNote} را نشان می‌دهند${warning ? `؛ ${warning}` : ''}.`, true);
+        return;
+      }
+      // `got.at`، نه `payload.at`: `payload` در این دامنه تعریف نشده بود و هر
+      // تیکِ موفق با ReferenceError به شاخهٔ خطا می‌افتاد (۱۴۰۵/۰۷/۱۸).
       setStatus(intraday.length
-        ? `رصد زنده ${faClock(new Date(payload.at))} · ${fmt.int(intraday.length)} نقطه مشترک${warning ? ` · ${warning}` : ''}`
+        ? `رصد زنده ${faClock(new Date(got.at))} · ${fmt.int(intraday.length)} نقطه مشترک${warning ? ` · ${warning}` : ''}`
         : `رصد زنده برقرار است؛ ${warning || 'هنوز همه پاها امروز معامله نشده‌اند'}.`, Boolean(warning));
     } catch (error) {
       setStatus(errorText(error, 'رصد زنده موقعیت به‌روز نشد.'), true);
@@ -1606,6 +1625,7 @@ export async function mount(root, { state }) {
     if (!replay.ok) { setStatus(replay.error || 'موقعیت تاریخی برای رصد ساخته نشد.', true); return; }
     annotateDailyIv(replay, ivP());
     stopAutoFill(); tradesCache.clear(); timeframeDays = []; $('bt-tf-body').hidden = true; $('bt-tf-export').hidden = true;
+    liveGood = null;
     liveWatching = true; $('bt-live').textContent = 'توقف رصد زنده'; $('bt-live').setAttribute('data-active', 'true');
     setStatus('در حال دریافت معاملات امروز برای موقعیت تاریخی…');
     await refreshLivePosition();
@@ -1976,17 +1996,30 @@ export async function mount(root, { state }) {
   // بررسی سررسید شده بودند اصلاً در فهرست نبودند.
   let rangeUi = null, rangeJob = null;
 
-  function fillBases(payload) {
+  // تیکِ پس‌زمینهٔ `loadRange` (`update: true`، ۱۴۰۵/۰۷/۱۸): کشویی فقط
+  // وقتی دوباره چیده می‌شود که گزینه‌هایش واقعاً عوض شده — بازچیدنِ
+  // بی‌تغییر، کشوییِ بازِ کاربر را می‌بست. خطِ وضعیت هم فقط وقتی بازنویسی
+  // می‌شود که هنوز همان خلاصهٔ بازه را نشان می‌دهد؛ نتیجه یا خطا پاک نمی‌شود.
+  let basesSig = '', rangeLine = '';
+  function fillBases(payload, { update = false } = {}) {
     const keep = baseSelect.value;
     chain = buildChain(payload.rows || []);
-    baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
-    baseGate.ready(chain.size);
-    for (const item of [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'))) {
-      const option = document.createElement('option'); option.value = item.ins; option.textContent = `${nameOf(item, 'نماد پایه')} · ${fmt.int(item.contracts)} قرارداد`; baseSelect.appendChild(option);
+    const items = [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'))
+      .map((item) => [item.ins, `${nameOf(item, 'نماد پایه')} · ${fmt.int(item.contracts)} قرارداد`]);
+    const sig = JSON.stringify(items);
+    if (!update || sig !== basesSig) {
+      basesSig = sig;
+      baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+      baseGate.ready(chain.size);
+      for (const [ins, text] of items) {
+        const option = document.createElement('option'); option.value = ins; option.textContent = text; baseSelect.appendChild(option);
+      }
+      if (keep && chain.has(keep)) baseSelect.value = keep;
     }
-    if (keep && chain.has(keep)) baseSelect.value = keep;
     const expired = payload.summary?.expiredInside || 0;
-    setStatus(`${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند.`);
+    const line = `${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند.`;
+    if (!update || status.textContent === rangeLine) setStatus(line);
+    rangeLine = line;
   }
 
   async function loadUniverseForRange(range) {

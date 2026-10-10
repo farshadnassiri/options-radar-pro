@@ -30,6 +30,7 @@ import {
   ladderHtml, execSummary, setText, filterGroups, emptyResultFilter, RESULT_SORTS,
 } from '/ui/combo-scanner-view.mjs';
 import { helpIcon } from '/ui/combo-scanner-help.mjs';
+import { patchHTML } from '/ui/morph.mjs';
 
 const STORE = 'options-radar:combo-scanner';
 const MILLION = 1e6;
@@ -49,6 +50,9 @@ export async function mount(root, { state, api }) {
   let uaPick = stored.uaPick || '';
   let rf = { ...emptyResultFilter(), ...(stored.rf || {}) };
   let live = false, busy = false, timer = null, result = null, picked = null, chart = null, lastAt = 0;
+  // شناسهٔ جزئیاتی که تازه‌سازی‌اش تا بیرون آمدنِ کاربر از کنترلِ درونش عقب افتاد.
+  let pendingId = '';
+  let barMarkup = '';
   // یک نگاه: اول ۲۴ کارت، بقیه با «نمایش بیشتر».
   const PAGE = 24;
   let shown = PAGE;
@@ -120,13 +124,17 @@ export async function mount(root, { state, api }) {
   }
 
   // ── فیلتر نتیجه‌ها (بی اسکن دوباره) ───────────────────────────────
-  function paintResultsBar() {
+  // `quiet`: اسکنِ خودکار (۱۴۰۵/۰۷/۱۸). نوارِ فیلتر هر اسکن از نو ساخته
+  // می‌شد: کشوییِ بازِ «همهٔ نمادها» بسته می‌شد و جست‌وجوی در حال تایپ
+  // فوکوسش را از دست می‌داد. قالبِ یکسان دوباره نوشته نمی‌شود و تیکِ خودکار
+  // زیرِ دستِ کاربر چیزی را عوض نمی‌کند.
+  function paintResultsBar({ quiet = false } = {}) {
     const host = $('cs-results');
     if (!result?.groups?.length) { host.hidden = true; return; }
     host.hidden = false;
     const uas = [...new Map(result.groups.map((g) => [g.best.uaIns, g.best.uaName])).entries()];
     const count = (ua) => result.groups.filter((g) => g.best.uaIns === ua).length;
-    host.innerHTML = `<div class="cs-results-bar">
+    const html = `<div class="cs-results-bar">
       <b>فیلتر نتیجه‌ها ${helpIcon('results')}</b>
       <input type="search" data-cs-rf="q" placeholder="نماد یا قرارداد…" value="${esc(rf.q)}">
       <select data-cs-rf="ua"><option value="">همهٔ نمادها</option>${uas.map(([ins, name]) => `<option value="${esc(ins)}"${rf.ua === ins ? ' selected' : ''}>${esc(faDigits(name))} (${fmt.int(count(ins))})</option>`).join('')}</select>
@@ -137,6 +145,9 @@ export async function mount(root, { state, api }) {
       <select data-cs-rf="sort"><option value="">مرتب: همان مرتب‌سازی اسکن</option>${RESULT_SORTS.map(([v, t]) => `<option value="${v}"${rf.sort === v ? ' selected' : ''}>مرتب: ${t}</option>`).join('')}</select>
       <button type="button" class="ghost cs-mini" data-cs-rf-reset>پاک کردن</button>
     </div>`;
+    if (html === barMarkup || (quiet && host.contains(document.activeElement))) return;
+    host.innerHTML = html;
+    barMarkup = html;
   }
 
   const visibleGroups = () => (result ? filterGroups(result.groups, rf) : []);
@@ -176,8 +187,10 @@ export async function mount(root, { state, api }) {
     const page = list.slice(0, shown);
     for (const g of page) ensureLadder(g.best);
     const left = list.length - shown;
-    grid.innerHTML = page.map((g, i) => cardHtml(g, i)).join('')
-      + (left > 0 ? `<button type="button" class="ghost cs-more" data-cs-more>نمایش ${fmt.int(Math.min(PAGE, left))} گروه دیگر (${fmt.int(left)} مانده)</button>` : '');
+    // وصله، نه جایگزینی (۱۴۰۵/۰۷/۱۸): اسکنِ زنده کارت‌ها را درجا تازه
+    // می‌کند و فوکوس و هاورِ کارت زیرِ دست نمی‌پرد.
+    patchHTML(grid, page.map((g, i) => cardHtml(g, i)).join('')
+      + (left > 0 ? `<button type="button" class="ghost cs-more" data-cs-more>نمایش ${fmt.int(Math.min(PAGE, left))} گروه دیگر (${fmt.int(left)} مانده)</button>` : ''));
   }
 
   function variantsHtml(group) {
@@ -186,13 +199,25 @@ export async function mount(root, { state, api }) {
       ${v.legsCard.map((l) => `${SIDE_FA[l.side]} ${faDigits(String(l.ratio))}`).join(' + ')} · بازده ${pct(v.retStaticMonthPct)} · احتمال ${pct(v.popPct, 0)} · زیان ${shortRial(v.maxLoss)}</button>`).join('')}</div>`;
   }
 
-  function showDetail(id) {
+  // `quiet`: تازه‌سازی پس از اسکن (۱۴۰۵/۰۷/۱۸). گزارش صاحب پروژه: «بعد از
+  // چند ثانیه نمودارها بسته می‌شود و دوباره باید دریافت اطلاعات کنم.» اسکنِ
+  // زنده هر بار جزئیات را از نو می‌ساخت و با `scrollIntoView` کاربر را از هر
+  // جای صفحه — حتی از تبِ دیگرِ رصد لحظه‌ای — به آن برمی‌گرداند. حالا فقط
+  // انتخابِ کاربر پیمایش می‌کند؛ تازه‌سازی همان بزرگ‌نماییِ نمودار و همان جای
+  // لغزنده را نگه می‌دارد، و اگر کاربر وسطِ کار با کنترلی درون جزئیات است، تا
+  // بیرون آمدنش صبر می‌کند.
+  function showDetail(id, { quiet = false } = {}) {
     const r = byId.get(id);
     if (!r) return;
+    const host = $('cs-detail');
+    const same = picked?.id === id && !host.hidden;
+    if (quiet && same && host.contains(document.activeElement) && document.activeElement.matches('input, select, textarea')) { pendingId = id; return; }
+    pendingId = '';
+    const range = same ? chart?.view?.() : null;
+    const slide = same ? host.querySelector('[data-cs-slide]')?.value : undefined;
     picked = r;
     ensureLadder(r);
     const group = result.groups.find((g) => g.key === r.groupKey);
-    const host = $('cs-detail');
     host.hidden = false;
     const fees = { buyStock: s().feeBuyStock, sellStock: s().feeSellStock, option: s().feeOption, exercise: s().feeExercise };
     const ex = execSummary(r);
@@ -235,36 +260,62 @@ export async function mount(root, { state, api }) {
     chart?.destroy();
     chart = mountPayoff(host.querySelector('#cs-chart'), r.chart.legs, r.chart.netCash, {
       fees, spot: r.spot, width: 760, height: 280, sigma: r.sigmaUse, rFree: s().rFree, divYield: s().divYield,
+      ...(range ? { initRange: range } : {}),
     });
+    const slider = slide != null ? host.querySelector('[data-cs-slide]') : null;
+    if (slider) { slider.value = slide; slider.dispatchEvent(new Event('input', { bubbles: true })); }
     root.querySelectorAll('.cs-card').forEach((c) => c.classList.toggle('picked', c.dataset.csId === group?.best?.id));
-    host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!quiet) host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  async function run() {
+  // ترکیبی که در اسکنِ تازه نیامد، جزئیاتش بسته نمی‌شود (۱۴۰۵/۰۷/۱۸): همان
+  // آخرین عددها می‌مانند، با برچسبی که می‌گوید مالِ کدام اسکن‌اند.
+  function markGone() {
+    const host = $('cs-detail');
+    let note = host.querySelector('[data-cs-gone]');
+    if (!note) { host.insertAdjacentHTML('afterbegin', '<p class="note warn" data-cs-gone></p>'); note = host.querySelector('[data-cs-gone]'); }
+    note.textContent = `این ترکیب در اسکن ساعت ${faClock(new Date(lastAt))} دیگر نیامد؛ عددهای زیر مال آخرین اسکنی است که در آن بود.`;
+  }
+
+  // `auto`: تیکِ «زنده» (۱۴۰۵/۰۷/۱۸). اسکنِ خودکار روی نتیجهٔ موجود جملهٔ
+  // «در حال…» نمی‌گذارد، «نمایش بیشتر» را به ۲۴ کارت برنمی‌گرداند، و با خطا
+  // یا پاسخِ خالی آخرین نتیجهٔ خوب را پاک نمی‌کند — فقط می‌گوید این دور چه شد.
+  async function run({ auto = false } = {}) {
     if (busy) return;
-    if (!chainState.list.length) { $('cs-summary').textContent = 'زنجیرهٔ بازار هنوز نرسیده؛ چند ثانیه صبر کن.'; return; }
+    const quiet = auto && Boolean(result);
+    if (!chainState.list.length) { if (!quiet) $('cs-summary').textContent = 'زنجیرهٔ بازار هنوز نرسیده؛ چند ثانیه صبر کن.'; return; }
     busy = true;
     $('cs-run').disabled = true; $('cs-run').textContent = 'در حال اسکن…';
-    $('cs-summary').textContent = 'در حال ترکیب سهم، کال و پوت…';
+    if (!quiet) $('cs-summary').textContent = 'در حال ترکیب سهم، کال و پوت…';
     try {
       const res = await runComboScan({
         uaKeys: uaPick ? [uaPick] : [], settings: s(), scanner: cfg,
         onStage: (stage, info) => {
+          if (quiet) return;
           if (stage === 'one') $('cs-summary').textContent = `گذر اول: ${fmt.int(info.totalGroups)} گروه نامزد روی سرخط دیده‌بان؛ در حال گرفتن دفتر سفارش…`;
           if (stage === 'book') $('cs-summary').textContent = `در حال گرفتن دفتر سفارش زندهٔ ${fmt.int(info.asked)} نماد…`;
         },
       });
-      if (res.error) { $('cs-summary').textContent = `خطا: ${res.error}`; return; }
-      result = res; lastAt = Date.now(); shown = PAGE;
+      const kept = `کارت‌ها همان اسکن ساعت ${faClock(new Date(lastAt))} هستند.`;
+      if (res.error) {
+        $('cs-summary').textContent = quiet ? `${summaryText(result)}؛ اسکن خودکار ساعت ${faClock(new Date())} ناموفق بود (${res.error}). ${kept}` : `خطا: ${res.error}`;
+        return;
+      }
+      if (quiet && !res.groups.length && result.groups.length) {
+        $('cs-summary').textContent = `${summaryText(result)}؛ اسکن خودکار ساعت ${faClock(new Date())} ترکیبی نیافت. ${kept}`;
+        return;
+      }
+      result = res; lastAt = Date.now();
+      if (!auto) shown = PAGE;
       byId.clear();
       for (const g of res.groups) for (const v of [g.best, ...g.variants]) byId.set(v.id, v);
-      paintResultsBar();
+      paintResultsBar({ quiet: auto });
       $('cs-summary').textContent = summaryText(res);
       $('cs-funnel').textContent = funnelText(res);
       $('cs-clock').textContent = faClock(new Date(lastAt));
       paintGrid();
-      if (picked && byId.has(picked.id)) showDetail(picked.id);
-      else { $('cs-detail').hidden = true; picked = null; }
+      if (picked && byId.has(picked.id)) showDetail(picked.id, { quiet: true });
+      else if (picked) markGone();
     } finally {
       busy = false;
       $('cs-run').disabled = false; $('cs-run').textContent = 'اسکن کن';
@@ -276,7 +327,7 @@ export async function mount(root, { state, api }) {
     live = on;
     $('cs-live').setAttribute('aria-pressed', String(on));
     clearInterval(timer);
-    if (on) { run(); timer = setInterval(run, Math.max(15, num(s().watchIntervalSec) * 4) * 1000); }
+    if (on) { run(); timer = setInterval(() => run({ auto: true }), Math.max(15, num(s().watchIntervalSec) * 4) * 1000); }
   }
 
   // ── راهنمای «؟» و خوانش نمودار کوچک ─────────────────────────────
@@ -317,6 +368,13 @@ export async function mount(root, { state, api }) {
     placeTip(`<div class="sl-tip-help">${esc(help.dataset.help)}</div>`, b.left, b.bottom);
   });
   root.addEventListener('focusout', (e) => { if (e.target.closest?.('[data-help]')) hideTip(); });
+  // تازه‌سازیِ عقب‌افتاده همین که کاربر از جزئیات بیرون آمد.
+  $('cs-detail').addEventListener('focusout', (e) => {
+    if (!pendingId || $('cs-detail').contains(e.relatedTarget)) return;
+    const id = pendingId;
+    pendingId = '';
+    if (byId.has(id)) showDetail(id, { quiet: true });
+  });
 
   root.addEventListener('click', (e) => {
     if (e.target.closest('[data-help]')) { e.stopPropagation(); return; }
@@ -348,7 +406,8 @@ export async function mount(root, { state, api }) {
   root.addEventListener('input', (e) => {
     const el = e.target;
     if (el.dataset.csSlide) {
-      const r = byId.get(el.dataset.csSlide);
+      // ترکیبِ «دیگر نیامده» هنوز در جزئیات است و لغزنده‌اش باید کار کند.
+      const r = byId.get(el.dataset.csSlide) || (picked?.id === el.dataset.csSlide ? picked : null);
       const out = el.closest('.cs-ruler')?.querySelector('[data-cs-readout]');
       if (r && out) {
         const rd = readAt(r, Number(el.value));

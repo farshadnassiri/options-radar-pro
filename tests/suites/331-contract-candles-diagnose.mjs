@@ -40,7 +40,7 @@ group('۳۳۱. سیم‌کشی رابط');
   const defined = new Set([...view.matchAll(/(?:function\s+|const\s+|let\s+|var\s+)([a-zA-Z_]\w*)/g)].map((m) => m[1]));
   const imported = new Set([...view.matchAll(/import\s*\{([^}]*)\}/g)].flatMap((m) => m[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop())));
   const params = new Set(['getSettings', 'greekParams', 'isVisible', 'onOpenContract', 'getPayload', 'min', 'dispose']);
-  const builtin = new Set('if for while switch return catch String Number Math JSON Object Array Set Map Date Boolean Promise setTimeout clearTimeout requestAnimationFrame getComputedStyle prompt fetch isFinite parseInt parseFloat encodeURIComponent AbortController'.split(' '));
+  const builtin = new Set('if for while switch return catch String Number Math JSON Object Array Set Map Date Boolean Promise setTimeout clearTimeout requestAnimationFrame getComputedStyle prompt fetch isFinite parseInt parseFloat encodeURIComponent AbortController Event'.split(' '));
   const missing = [...called].filter((n) => !defined.has(n) && !imported.has(n) && !builtin.has(n) && !params.has(n));
   check(`هیچ تابع تعریف‌نشده‌ای صدا زده نمی‌شود${missing.length ? ` (${missing.join('، ')})` : ''}`, missing.length === 0);
   check('پیام خالی‌بودن علت را می‌گوید', view.includes('candleLossSummary(records, m.key, opts.log)') && view.includes('کندلی کشیده نشد —'));

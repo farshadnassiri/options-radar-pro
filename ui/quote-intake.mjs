@@ -219,3 +219,47 @@ export function quoteWarning(summary) {
   return `${parts.join(' · ')} — مظنهٔ این‌ها را نداریم،`
     + ' پس ردیفشان با قیمتِ قدیمی یا خالی نشان داده می‌شود، نه با مظنهٔ حالا.';
 }
+
+/**
+ * مظنهٔ تازه روی مظنهٔ قبلی (۱۴۰۵/۰۷/۱۸). مشترکِ «موقعیت‌های من» و «تحلیل رول».
+ *
+ * پیش‌تر هر قیمت‌گیری یک نقشهٔ نو می‌ساخت و ابزاری که دفتر یا اطلاعاتش
+ * نرسیده بود صفر می‌گرفت: یک تکهٔ ناموفق، پاهای همان تکه را بی‌قیمت
+ * می‌کرد و سود و زیان و نمودار هر پانزده ثانیه بالا و پایین می‌پرید.
+ *
+ * حالا دفتر و اطلاعات جدا سنجیده می‌شوند (دو درخواستِ جدا‌اند): بخشی که
+ * حکمش «قابلِ تکیه» نیست (خطا، نبود، خالیِ بی‌تأیید) از آخرین دریافتِ
+ * موفقِ همان ابزار می‌ماند و `heldAt` زمانِ آن دریافت را می‌گوید. دفترِ
+ * خالیِ تأییدشده یا بازارِ بسته «نرسیدن» نیست و جای قبلی را می‌گیرد. چیزی
+ * که هرگز نرسیده ساخته نمی‌شود؛ همان صفرِ قبلی می‌ماند.
+ *
+ * محض است: ورودی‌ها دست نمی‌خورند و نقشهٔ تازه برمی‌گردد.
+ */
+export function mergeQuotes(prev, codes, quotes, at) {
+  const books = quotes?.books?.byIns || {};
+  const infos = quotes?.infos?.byIns || {};
+  const usable = (part, ins) => quotes?.[part]?.verdicts?.[ins]?.usable !== false;
+  const out = new Map();
+  for (const ins of codes) {
+    const old = prev?.get(ins);
+    const b = books[ins]?.book || [];
+    const i2 = infos[ins] || {};
+    const keepBook = !usable('books', ins) && old?.bookAt > 0;
+    const keepInfo = !usable('infos', ins) && old?.infoAt > 0;
+    const book = keepBook
+      ? { bid: old.bid, bidQty: old.bidQty, ask: old.ask, askQty: old.askQty, book: old.book, bookAt: old.bookAt }
+      : {
+        bid: b[0]?.bid || 0, bidQty: b[0]?.bidQty || 0, ask: b[0]?.ask || 0, askQty: b[0]?.askQty || 0,
+        book: b, bookAt: usable('books', ins) ? at : 0,
+      };
+    const info = keepInfo
+      ? { last: old.last, close: old.close, low: old.low, high: old.high, state: old.state, staleSec: old.staleSec, infoAt: old.infoAt }
+      : {
+        last: i2.last || 0, close: i2.close || 0, low: i2.low || 0, high: i2.high || 0,
+        state: i2.state, staleSec: i2.staleSec, infoAt: usable('infos', ins) ? at : 0,
+      };
+    const heldAt = Math.min(keepBook ? old.bookAt : Infinity, keepInfo ? old.infoAt : Infinity);
+    out.set(ins, { ...book, ...info, heldAt: Number.isFinite(heldAt) ? heldAt : 0 });
+  }
+  return out;
+}

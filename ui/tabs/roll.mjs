@@ -9,14 +9,14 @@
 
 import { patched, fresh } from '/ui/morph.mjs';
 import { rollAnalysis, markToMarket } from '/core/positions.mjs';
-import { fetchQuotes, quoteWarning } from '/ui/quote-intake.mjs';
+import { fetchQuotes, mergeQuotes, quoteWarning } from '/ui/quote-intake.mjs';
 import { rollFriction, rollPayback } from '/core/roll-cost.mjs';
 import { positionStatus } from '/core/position-close.mjs';
 import { tehranDateNumber } from '/core/live-day.mjs';
 import { impliedVol } from '/core/bs.mjs';
 import { mountPayoff, mountDiff } from '/ui/chart.mjs';
 import { fmt } from '/ui/table.mjs';
-import { faDigits, signTone } from '/ui/fmt.mjs';
+import { faDigits, faClock, signTone } from '/ui/fmt.mjs';
 import { onChain, chainState, pushRows, chainDetail } from '/ui/scanner.mjs';
 import { attachExportsIn } from '/ui/export.mjs';
 import { ivParams } from '/core/leg-iv.mjs';
@@ -39,6 +39,8 @@ export async function mount(root, { state, api }) {
   let dChart = null, c1Chart = null, c2Chart = null;
   let dRange = null, c1Range = null, c2Range = null;
   let chartKey = null;
+  // ۱۴۰۵/۰۷/۱۸ — نشانِ ورودی‌های سه نمودار در آخرین سوار کردن (`chartInputs`).
+  let chartSig = '';
 
   root.innerHTML = `
     <div class="page-head">
@@ -229,18 +231,11 @@ export async function mount(root, { state, api }) {
       // دیده می‌شد. یعنی دقیقاً همان حذفِ بی‌صدایی که `slice(0, 180)` به
       // خاطرش برداشته شد، از راهی دیگر برمی‌گشت.
       const quotes = await fetchQuotes(all);
-      const books = quotes.books.byIns;
-      const infos = quotes.infos.byIns;
       quoteNote = quoteWarning(quotes.summary);
-      for (const ins of codes) {
-        const b = books[ins]?.book || [];
-        const i2 = infos[ins] || {};
-        quotesByIns.set(ins, {
-          bid: b[0]?.bid || 0, bidQty: b[0]?.bidQty || 0,
-          ask: b[0]?.ask || 0, askQty: b[0]?.askQty || 0,
-          last: i2.last || 0, close: i2.close || 0, state: i2.state, staleSec: i2.staleSec, book: b,
-        });
-      }
+      // ۱۴۰۵/۰۷/۱۸ — همان قاعدهٔ «موقعیت‌های من»: ابزاری که این دریافت برایش
+      // نرسید صفر نمی‌گیرد و آخرین مظنهٔ موفقش می‌ماند؛ وگرنه یک تکهٔ
+      // ناموفق، نامزدها و تفاضل را هر پانزده ثانیه جابه‌جا می‌کرد.
+      for (const [ins, q] of mergeQuotes(quotesByIns, codes, quotes, Date.now())) quotesByIns.set(ins, q);
       draw();
     } catch { /* نوار بالا خبر می‌دهد */ }
   }
@@ -323,7 +318,12 @@ export async function mount(root, { state, api }) {
 
     // مظنه‌ای که نرسید، پیش از هر عددی گفته می‌شود: این جمله دربارهٔ
     // **اعتبارِ همین ارقام** است، نه یک خبرِ جانبی.
-    el('#newnote').textContent = (quoteNote ? `${quoteNote}\n` : '')
+    // مظنه‌ای که این دریافت برایش نرسید و از دریافتِ قبلی مانده، گفته می‌شود.
+    const held = [...quotes, newQuote].filter((q) => q?.heldAt > 0);
+    const heldNote = held.length
+      ? `${fmt.int(held.length)} پا با مظنهٔ آخرین دریافتِ موفق (ساعت ${faClock(new Date(Math.min(...held.map((q) => q.heldAt))))})، نه همین دریافت.\n`
+      : '';
+    el('#newnote').textContent = (quoteNote ? `${quoteNote}\n` : '') + heldNote
       + `هزینه بستن پای فعلی از عرضه: ${fmt.money(-r.closeCash)} — بستانکار پای تازه از تقاضا: ${fmt.money(r.newCash)}`;
 
     // ——— اصطکاک اجرای رول ———
@@ -415,6 +415,15 @@ export async function mount(root, { state, api }) {
       label: multiExpiry ? `اعمال ${fmt.money(x.strike)} — ${faDigits(x.days)} روز` : `اعمال ${fmt.money(x.strike)}`,
     }));
 
+    // ۱۴۰۵/۰۷/۱۸ — قیمت‌گیریِ پانزده‌ثانیه‌ای هر بار سه نمودار را نابود و از نو
+    // سوار می‌کرد: زوم برمی‌گشت ولی خط راهنمای زیرِ نشانگر می‌رفت، نوارِ
+    // «اگر چه می‌شد» به پیش‌فرض برمی‌گشت و نمودار چشمک می‌زد. `ui/chart.mjs`
+    // راهی برای عوض کردنِ داده روی همان نمودار ندارد، پس وقتی هیچ ورودیِ
+    // نمودار عوض نشده (حالت رایج، به‌ویژه در بازارِ بسته) سوار کردن رد می‌شود.
+    const sig = chartInputs({ p, r, otherCands, spot, sigma, fees, lo, hi, multiExpiry });
+    if (sameScenario && sig === chartSig && dChart && c1Chart && c2Chart) return;
+    chartSig = sig;
+
     dChart?.destroy();
     dChart = mountDiff(el('#dchart'), (S) => r.diff(S) * p.qty, lo, hi, {
       spot, width: 760, height: 240, extra, ...(sameScenario && dRange ? { initRange: dRange } : {}),
@@ -434,6 +443,18 @@ export async function mount(root, { state, api }) {
       fees, spot, sigma, rFree: s().rFree, divYield: s().divYield, width: 480, height: 220,
       ...(sameScenario && c2Range ? { initRange: c2Range } : {}),
     });
+  }
+
+  /**
+   * هر آنچه سه نمودار از آن کشیده می‌شوند، به‌صورت یک رشته. منحنی‌ها تابعِ
+   * پاها، نقدِ خالص، قیمت پایه، تلاطم، نرخ‌ها و کارمزدند؛ بازه از قیمت‌های
+   * اعمال می‌آید. مظنهٔ خام (`staleSec`، عمقِ دفتر) عمداً بیرون است: هر تیک
+   * عوض می‌شود ولی هیچ منحنی‌ای را تکان نمی‌دهد.
+   */
+  function chartInputs({ p, r, otherCands, spot, sigma, fees, lo, hi, multiExpiry }) {
+    return JSON.stringify([p.qty, p.legs, r.curNet, r.nextLegs, r.nextNet, spot, sigma, fees,
+      s().rFree, s().divYield, lo, hi, multiExpiry,
+      otherCands.map((x) => [x.i, x.strike, x.days, x.r.nextLegs, x.r.nextNet])]);
   }
 
   el('#pos').addEventListener('change', () => pickPos(Number(el('#pos').value)));

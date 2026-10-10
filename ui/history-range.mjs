@@ -198,6 +198,10 @@ export function loadRange({ from, to }, ui, { onUpdate = () => {}, tries = 60, w
     const running = ui?.build(payload.build) ?? Boolean(payload.build?.running);
 
     if (running && !stopped) {
+      // مبنای مقایسه، **آخرین** فهرستِ فرستاده است، نه اولی (۱۴۰۵/۰۷/۱۸).
+      // با مقایسه با اولی، پس از نخستین رشد هر پرسشِ چهارثانیه‌ای دوباره
+      // `onUpdate` می‌زد؛ کشویی باز بسته می‌شد و خطِ وضعیت پاک می‌شد.
+      let last = payload.count || 0;
       (async () => {
         for (let n = 0; n < tries && !stopped; n += 1) {
           await new Promise((resolve) => setTimeout(resolve, waitMs));
@@ -210,7 +214,9 @@ export function loadRange({ from, to }, ui, { onUpdate = () => {}, tries = 60, w
           const still = ui?.build(next.build) ?? Boolean(next.build?.running);
           // فقط وقتی فهرست واقعاً بزرگ‌تر شده، تب دوباره چیده می‌شود.
           // بازچینشِ بی‌تغییر، انتخاب کاربر را بی‌دلیل تکان می‌دهد.
-          if ((next.count || 0) > (payload.count || 0)) onUpdate(next);
+          // `update: true` به صداکننده می‌گوید این تیکِ پس‌زمینه است: انتخاب
+          // و پیامِ نتیجه/خطای کاربر را نباید جابه‌جا کند.
+          if ((next.count || 0) > last) { last = next.count || 0; onUpdate(next, { update: true }); }
           if (!still) return;
         }
       })();

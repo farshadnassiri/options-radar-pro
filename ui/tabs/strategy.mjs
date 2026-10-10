@@ -521,12 +521,43 @@ export async function mount(root, { tab, state, api }) {
   // قیمتِ دستیِ هر پا برای ردیفِ انتخاب‌شده. با عوض شدن ردیف پاک می‌شود:
   // «۶۰۰ ریال» برای پای یک ترکیب، برای ترکیب دیگر معنی ندارد.
   let manualPrices = {};
-  function showDetail(r) {
+  // ═══ تازه‌سازیِ همان ردیف، بی بستنِ آنچه کاربر باز کرده (۱۴۰۵/۰۷/۱۸) ═══
+  //
+  // گزارش صاحب پروژه: «بعد از چند ثانیه نمودارها بسته می‌شود… می‌خواهم هر
+  // جا به‌روزرسانی می‌شود… از اول نیاز به تنظیم نباشد.» اسکنِ خودکار هر بار
+  // پانل جزئیات را از نو می‌نوشت: `<details>`ِ «اثر نرخ بدون ریسک» بسته
+  // می‌شد و پایش به اولی برمی‌گشت، فرض‌ها و محورِ پنل حساسیت به پیش‌فرض
+  // برمی‌گشتند، خروجیِ ماشین زمان پاک می‌شد، و کسی که قیمت دستی می‌نوشت
+  // وسطِ تایپ فوکوس را از دست می‌داد. حالا برای همان ردیف فقط کنترلی که
+  // کاربر از پیش‌فرضش عوض کرده برمی‌گردد (پیش‌فرضِ تازه، مثلاً تلاطمِ
+  // امروز، برای بقیه می‌نشیند)، و وقتی فوکوس روی کنترلی درون پانل است،
+  // تازه‌سازی تا بیرون آمدنِ کاربر عقب می‌افتد.
+  let detailDefaults = new Map();
+  let pendingRow = null;
+  let tmRow = null;
+  const controlState = (host) => new Map([...host.querySelectorAll('input[id], select[id], details[id]')]
+    .map((el) => [el.id, el.tagName === 'DETAILS' ? el.open : (el.type === 'checkbox' ? el.checked : el.value)]));
+  const userControls = (host) => new Map([...controlState(host)].filter(([id, v]) => detailDefaults.has(id) && detailDefaults.get(id) !== v));
+  function restoreControls(host, kept) {
+    for (const [id, v] of kept) {
+      const el = host.querySelector(`#${id}`);
+      if (!el) continue;
+      if (el.tagName === 'DETAILS') { el.open = v; continue; }
+      if (el.type === 'checkbox') el.checked = v;
+      else if (el.tagName === 'SELECT' && ![...el.options].some((o) => o.value === v)) continue;
+      else el.value = v;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+  function showDetail(r, { quiet = false } = {}) {
     const sameRow = picked && picked.id === r.id;
+    const card = root.querySelector('#detail-card');
+    if (quiet && sameRow && card.contains(document.activeElement) && document.activeElement.matches('input, select, textarea')) { pendingRow = r; return; }
+    pendingRow = null;
+    const kept = sameRow ? userControls(card) : new Map();
     if (chart) chartRange = chart.view();
     if (!sameRow) { compareIds = new Set(); manualPrices = {}; }
     picked = r;
-    const card = root.querySelector('#detail-card');
     card.style.display = '';
     root.querySelector('#detail-title').textContent = `${r.underlying} — ${r.legsText}`;
     // چرا این ردیف ته جدول بود — همان‌جا که کاربر بازش می‌کند، نه در
@@ -868,10 +899,19 @@ export async function mount(root, { tab, state, api }) {
     trailReady();
 
     // ——— ماشین زمان (قلم پ-۴ بک‌لاگ) ———
+    // برای همان ردیف، خروجیِ قبلی می‌ماند و دکمه ردیفِ تازه را می‌خواند.
+    tmRow = r;
     const tmWrap = root.querySelector('#tm-wrap');
-    tmWrap.innerHTML = `<button class="ghost" type="button" id="tm-btn">ماشین زمان — اگر همین ترکیب را چند روز پیش می‌گرفتم</button>
+    if (!sameRow || !tmWrap.querySelector('#tm-btn')) {
+      tmWrap.innerHTML = `<button class="ghost" type="button" id="tm-btn">ماشین زمان — اگر همین ترکیب را چند روز پیش می‌گرفتم</button>
       <div id="tm-out"></div>`;
-    tmWrap.querySelector('#tm-btn').addEventListener('click', (e) => runTimeMachine(r, tmWrap.querySelector('#tm-out'), e.currentTarget));
+      tmWrap.querySelector('#tm-btn').addEventListener('click', (e) => runTimeMachine(tmRow, tmWrap.querySelector('#tm-out'), e.currentTarget));
+    }
+
+    // پیش‌فرضِ همین ساخت ثبت می‌شود، بعد آنچه کاربر عوض کرده بود برمی‌گردد.
+    const defaults = controlState(card);
+    restoreControls(card, kept);
+    detailDefaults = defaults;
   }
 
   async function runTimeMachine(r, out, btn) {
@@ -976,7 +1016,7 @@ export async function mount(root, { tab, state, api }) {
             table.sortBy(keepSort);
             drawKpis();
             drawFilterReport();
-            if (picked) { const f = byId2.get(picked.id); if (f) showDetail(f); }
+            if (picked) { const f = byId2.get(picked.id); if (f) showDetail(f, { quiet: true }); }
             // «کامل» فقط وقتی نوشته می‌شود که واقعاً اجرا شده باشد. اسکنی که
             // کاندیدایی نداشت هم تمام شده، ولی تمام‌شدنش خبرِ دیگری است.
             setStatus(res.skipped
@@ -1010,6 +1050,13 @@ export async function mount(root, { tab, state, api }) {
   }
 
   runBtn.addEventListener('click', run);
+  // تازه‌سازیِ عقب‌افتادهٔ پانل جزئیات، همین که فوکوس از آن بیرون رفت.
+  root.querySelector('#detail-card').addEventListener('focusout', (e) => {
+    if (!pendingRow || e.currentTarget.contains(e.relatedTarget)) return;
+    const r = pendingRow;
+    pendingRow = null;
+    if (picked && picked.id === r.id) showDetail(r, { quiet: true });
+  });
   const refreshEl = root.querySelector('#c-refresh');
   refreshEl.value = String(refreshSec);
   const armTimer = () => {

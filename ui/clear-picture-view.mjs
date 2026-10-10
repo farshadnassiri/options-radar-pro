@@ -332,7 +332,10 @@ export function mountClearPicture(host, deps) {
         callValue: n(p.callValue), putValue: n(p.putValue), value: n(p.value),
       })) };
     } catch (error) {
-      series = { key, at: Date.now(), points: [], error: error.message };
+      // نقطه‌های قبلیِ همین دامنه می‌مانند (۱۴۰۵/۰۷/۱۸): پیش‌تر یک دریافتِ
+      // ناموفق `points: []` می‌گذاشت و هر دو نمودار درون‌روزی به یادداشتِ
+      // «مسیر روز نرسید» برمی‌گشتند. حالا فقط متنِ خطا کنار همان نمودار می‌آید.
+      series = { key, at: Date.now(), points: series.key === key ? series.points : [], error: error.message };
       logError('مسیر روز تصویر شفاف', error);
     }
   }
@@ -471,7 +474,7 @@ export function mountClearPicture(host, deps) {
     await fetchSeries(key);
     const points = series.key === key ? series.points : [];
     const first = points[0]?.second;
-    const since = Number.isFinite(first) ? `ثبت از ساعت ${clockOf(first)}؛ دقیقه‌ای که سرور روشن نبود خالی می‌ماند.` : '';
+    const since = `${Number.isFinite(first) ? `ثبت از ساعت ${clockOf(first)}؛ دقیقه‌ای که سرور روشن نبود خالی می‌ماند.` : ''}${series.error && points.length ? ` آخرین دریافت ناموفق بود (${faDigits(series.error)})؛ نمودار همان آخرین دریافت موفق است.` : ''}`;
     const sig = `${key}|${side}|${points.length}|${points.at(-1)?.second || ''}|${series.error}`;
     const empty = (slot) => {
       slot.innerHTML = `<p class="empty-note">${series.error ? `مسیر روز نرسید: ${esc(series.error)}` : 'هنوز نمونه‌ای از جلسهٔ امروز ثبت نشده است. سرور در ساعت بازار هر دقیقه یک نمونه از تابلو برمی‌دارد.'}</p>`;

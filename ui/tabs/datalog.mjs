@@ -7,6 +7,7 @@
 // می‌خواند و نشان می‌دهد. خروجیِ دیتا عمداً در این لاگ نیست.
 
 import { faDigits, fmt, ltr } from '/ui/fmt.mjs';
+import { patchHTML } from '/ui/morph.mjs';
 import {
   DL_CAT, DL_PROBLEM, DL_SLOW_LABEL, DL_TONE, buildTree, summarizeLog, tabLabel,
 } from '/core/datalog.mjs';
@@ -121,6 +122,13 @@ export async function mount(root, { standalone = false } = {}) {
   let timer = null;
   let disposed = false;
   const open = new Set();
+  // ۱۴۰۵/۰۷/۱۸ — نشانِ آخرین نقاشی. تیکِ دو‌ونیم‌ثانیه‌ای بی ردیفِ تازه هم
+  // همه را از نو می‌کشید؛ حالا فقط وقتی چیزی عوض شده. بازهٔ زمانی هم در
+  // نشان است (دقیقه‌به‌دقیقه) تا ردیفی که از «۵ دقیقهٔ اخیر» بیرون افتاد،
+  // بی ردیفِ تازه هم برود.
+  let painted = '';
+  const paintMark = () => JSON.stringify([seq, rows.length, info?.enabled, info?.slowMs, info?.files,
+    $('dl-range').value === '0' ? 0 : Math.floor(Date.now() / 60000)]);
 
   async function load({ reset = false } = {}) {
     try {
@@ -135,8 +143,14 @@ export async function mount(root, { standalone = false } = {}) {
         seq = Math.max(seq, ...body.rows.map((row) => row.seq || 0));
       }
       if (body.seq < seq) { rows = []; seq = 0; }
+      const mark = paintMark();
+      if (!reset && mark === painted) return;
+      painted = mark;
       paint();
     } catch (error) {
+      // جدولِ قبلی می‌ماند؛ فقط خطا گفته می‌شود. نشان پاک می‌شود تا دریافتِ
+      // موفقِ بعدی، حتی بی ردیفِ تازه، این جمله را بردارد.
+      painted = '';
       $('dl-state').textContent = `لاگ خوانده نشد: ${error.message}`;
     }
   }
@@ -180,14 +194,16 @@ export async function mount(root, { standalone = false } = {}) {
     const sum = summarizeLog(flat);
     const files = (info?.files || []).slice(0, 7)
       .map((f) => `<a href="/api/datalog/file?day=${f.day}" download>${faDigits(f.day)}</a> (${bytes(f.bytes)})`).join('؛ ');
-    $('dl-state').innerHTML = `${info?.enabled === false
+    // ۱۴۰۵/۰۷/۱۸ — وصله به‌جای `innerHTML`: بازسازیِ هر تیک `<details>`ِ
+    // «به تفکیکِ سرویس» را می‌بست و جای پیمایشِ جدول را صفر می‌کرد.
+    patchHTML($('dl-state'), `${info?.enabled === false
       ? '<b class="loss">ثبت خاموش است</b> — از تنظیمات («ثبت جریان داده») روشنش کنید.'
       : 'ثبت روشن است.'} مرزِ «دیر آمد»: ${ms(info?.slowMs)}؛ ${fmt.int(rows.length)} ردیف در حافظهٔ این صفحه`
-      + `${files ? `؛ فایل‌های روزانه: ${files}` : ''}`;
+      + `${files ? `؛ فایل‌های روزانه: ${files}` : ''}`);
 
     const tabRows = Object.entries(sum.byTab).sort((a, b) => b[1].requests - a[1].requests);
     const pathRows = Object.entries(sum.byPath).sort((a, b) => b[1].count - a[1].count).slice(0, 25);
-    $('dl-summary').innerHTML = `
+    patchHTML($('dl-summary'), `
       <p><b>درخواست‌های برنامه:</b> ${fmt.int(sum.requests)} ${catsChips(sum.cats)}${sum.slow ? ` ${slowChip(true)} ${fmt.int(sum.slow)}` : ''}</p>
       <p><b>درخواست‌ها به TSETMC:</b> ${fmt.int(sum.upstream)} ${catsChips(sum.upCats)}</p>
       <div class="history-table-wrap"><table class="history-table">
@@ -199,14 +215,14 @@ export async function mount(root, { standalone = false } = {}) {
           <thead><tr><th>سرویس</th><th>تعداد</th><th>نتیجه‌ها</th><th>میانگین مدت</th><th>بیشینهٔ مدت</th><th>دیر</th></tr></thead>
           <tbody>${pathRows.map(([p, r]) => `<tr><td dir="ltr">${esc(p)}</td><td>${fmt.int(r.count)}</td><td>${catsChips(r.cats)}</td><td>${ms(r.count ? r.msTotal / r.count : 0)}</td><td>${ms(r.msMax)}</td><td>${r.slow ? fmt.int(r.slow) : '—'}</td></tr>`).join('')}</tbody>
         </table></div>
-      </details>`;
+      </details>`);
 
     const shown = tree.slice(-400).reverse();
     $('dl-count').textContent = `${fmt.int(shown.length)} از ${fmt.int(tree.length)} درخواست`;
-    $('dl-table').innerHTML = shown.length ? `<table class="history-table dl-table">
+    patchHTML($('dl-table'), shown.length ? `<table class="history-table dl-table">
       <thead><tr><th>زمان</th><th>تب</th><th>کار کاربر</th><th>درخواست</th><th>نتیجه</th><th>مدت</th><th>خلاصهٔ پاسخ</th><th>TSETMC</th></tr></thead>
       <tbody>${shown.map(rowHtml).join('')}</tbody></table>`
-      : '<p class="empty-note">در این فیلتر درخواستی ثبت نشده. تبی را باز کنید و کاری انجام دهید؛ ردیف‌ها همین‌جا می‌آیند.</p>';
+      : '<p class="empty-note">در این فیلتر درخواستی ثبت نشده. تبی را باز کنید و کاری انجام دهید؛ ردیف‌ها همین‌جا می‌آیند.</p>');
   }
 
   function rowHtml(node) {

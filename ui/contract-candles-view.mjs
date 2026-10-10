@@ -125,6 +125,9 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   let drawable = [], shapes = [], flags = new Map(), pinned = '', zoom = { sig: '', ranges: null };
   let mother = null, hist = null, motherSeq = 0, histSeq = 0, lastHist = null, lastHistComp = null;
   let sliderSig = '', scales = {}, paintQueued = false;
+  // قالبِ آخرِ کشوییِ پیش‌تنظیم و فهرستِ کندل‌ها، و امضای ورودی‌های آخرین
+  // نقاشیِ تبِ گذشته — تا تیکی که چیزی را عوض نکرده، چیزی را از نو نسازد.
+  let presetMarkup = '', listMarkup = '', tickSig = '';
   // حالت گذشته: روز، فهرست آن روز، و بدنهٔ ساخته‌شده.
   let pastState = { date: 0, universe: null, unders: [], picked: new Set(), loading: false, note: '', payload: null, progress: '' };
 
@@ -831,9 +834,9 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       + (past ? ' · همه از ردیف روزانهٔ همان روز' : ' · ارزش، حجم، موقعیت باز و قیمت‌ها همان عدد زنجیره‌اند')
       + `${lagged ? ` · کمینه/بیشینهٔ ${fmt.int(lagged)} قرارداد از چند ثانیه قبل است و با آخرین قیمت عکس گسترده شد` : ''}`
       + `${other ? ` · ${fmt.int(other)} قرارداد: پاسخ کمینه/بیشینه مال جلسهٔ دیگری بود و کنار گذاشته شد` : ''}`;
-    if (!rows.length) { rangeChart.innerHTML = `<p class="empty-note">${fetching ? 'در حال دریافت…' : 'برای قراردادهای این گزینش بازه معتبر روز نیامد.'}</p>`; return; }
+    if (!rows.length) { listMarkup = ''; rangeChart.innerHTML = `<p class="empty-note">${fetching ? 'در حال دریافت…' : 'برای قراردادهای این گزینش بازه معتبر روز نیامد.'}</p>`; return; }
     const shown = rows.slice(0, listLimit);
-    rangeChart.innerHTML = `<div class="lmm-range-legend"><span>سایه: کمینه تا بیشینه</span><span>بدنه: اولین تا آخرین</span><span>نقاط: پنج قیمت مستقل</span><span>قیمت‌ها: ریال، برای هر واحد دارایی پایه</span><small>موس را روی هر کندل حرکت بده تا همه قیمت‌ها دیده شوند؛ کلیک، جزئیات را باز نگه می‌دارد.</small></div><div class="lmm-range-list">${shown.map((row) => {
+    const html = `<div class="lmm-range-legend"><span>سایه: کمینه تا بیشینه</span><span>بدنه: اولین تا آخرین</span><span>نقاط: پنج قیمت مستقل</span><span>قیمت‌ها: ریال، برای هر واحد دارایی پایه</span><small>موس را روی هر کندل حرکت بده تا همه قیمت‌ها دیده شوند؛ کلیک، جزئیات را باز نگه می‌دارد.</small></div><div class="lmm-range-list">${shown.map((row) => {
       const low = Number(row.low), high = Number(row.high), first = Number(row.first), last = Number(row.last), close = Number(row.close);
       // هر عدد با واحدِ خودش: ارزش ریال، حجم و موقعیت باز «قرارداد» (نه سهم).
       const rankValue = rangeSort === 'value' ? fmt.rialText(row.value)
@@ -847,8 +850,28 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
       const lastPct = pctVsYday(last, row.yday), closePct = pctVsYday(close, row.yday);
       return `<article class="${tone(last - first)}" data-lmm-range-card="${esc(row.ins)}"><header><button type="button" data-lmm-range-contract="${esc(row.ins)}"><b>${esc(row.name)}</b><small>${kindLabel(row.kind)} · ${esc(row.uaName)} · اعمال ${fmt.money(row.strike)} · ${dateLabel(row.endDate)}</small></button><div class="lmm-range-stats"><strong${rangeSort === 'value' && Number.isFinite(Number(row.value)) ? ` title="${fmt.rial(Number(row.value))} ریال"` : ''}>${rankValue}</strong><span class="${tone(lastPct)}">آخرین ${fmt.pct(lastPct)}٪</span><span class="${tone(closePct)}">پایانی ${fmt.pct(closePct)}٪</span></div></header><button type="button" class="lmm-range-track" data-lmm-range-focus="${esc(row.ins)}" aria-expanded="false" aria-label="کندل روزانه ${esc(row.name)}؛ تغییر آخرین ${fmt.pct(lastPct)} درصد و پایانی ${fmt.pct(closePct)} درصد"></button><footer><span>کمینه ${fmt.money(low)}</span><span>اولین ${fmt.money(first)}</span><span>آخرین ${fmt.money(last)}</span><span>پایانی ${fmt.money(close)}</span><span>بیشینه ${fmt.money(high)}</span></footer></article>`;
     }).join('')}</div>${rows.length > shown.length ? `<button type="button" class="ghost ccv-more" data-ccv-more>نمایش ${fmt.int(Math.min(LIST_STEP, rows.length - shown.length))} کندل دیگر (از ${fmt.int(rows.length - shown.length)} باقی‌مانده)</button>` : ''}`;
+    // ═══ تیک، کندلِ باز را نمی‌بندد (۱۴۰۵/۰۷/۱۸) ═══
+    //
+    // گزارش صاحب پروژه: «بعد از چند ثانیه نمودارها بسته می‌شود…». هر تیک
+    // همهٔ فهرست را از نو می‌ساخت: کندلی که کاربر با کلیک باز نگه داشته بود
+    // (`aria-expanded`) بسته می‌شد و قیمتی که زیرِ موس خوانده می‌شد می‌پرید.
+    // فهرستِ یکسان دوباره ساخته نمی‌شود؛ اگر عددی عوض شد، کندل‌های باز و
+    // نقطهٔ خوانده‌شدهٔ هر کندل با کلیدِ قرارداد برمی‌گردند.
+    const sig = html + shown.map((row) => [row.ins, row.low, row.high, row.first, row.last, row.close, row.yday].join(',')).join(';');
+    if (sig === listMarkup && rangeChart.querySelector('.lmm-range-list')) return;
+    const keep = new Map([...rangeChart.querySelectorAll('[data-lmm-range-focus]')]
+      .map((b) => [b.dataset.lmmRangeFocus, { open: b.getAttribute('aria-expanded') === 'true', point: b.querySelector('[data-point].is-active')?.dataset.point || '' }])
+      .filter(([, k]) => k.open || k.point));
+    rangeChart.innerHTML = html;
+    listMarkup = sig;
     rangeChart.querySelectorAll('[data-lmm-range-focus]').forEach((button) => {
       mountCandlePoints(button, shown.find((row) => String(row.ins) === button.dataset.lmmRangeFocus));
+      const k = keep.get(button.dataset.lmmRangeFocus);
+      if (!k) return;
+      if (k.open) button.setAttribute('aria-expanded', 'true');
+      // همان شنوندهٔ حرکتِ موس، با هدفِ همان نقطه: خوانش برمی‌گردد بی آنکه فوکوس جابه‌جا شود.
+      const point = k.point && button.querySelector(`[data-point="${k.point}"]`);
+      if (point) point.dispatchEvent(new Event('pointermove', { bubbles: true }));
     });
   }
 
@@ -904,7 +927,18 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     q('[data-ccv-dir-wrap]').hidden = opts.xMode === 'moneyness';
     q('[data-ccv-comp-point-wrap]').hidden = opts.composite === 'none' || m.shape !== 'candle';
     q('[data-ccv-barslog-wrap]').hidden = opts.bars === 'none';
-    q('[data-ccv-preset]').innerHTML = `<option value="">—</option>${Object.keys(presets).map((name) => `<option>${esc(name)}</option>`).join('')}`;
+    // پیش‌تنظیم (۱۴۰۵/۰۷/۱۸): هر تیک گزینه‌ها را از نو می‌نوشت، کشوییِ باز
+    // بسته می‌شد و انتخاب به «—» برمی‌گشت؛ «حذف پیش‌تنظیم» بعد مقدارِ خالی
+    // می‌خواند و هیچ‌وقت کار نمی‌کرد. گزینه‌ها فقط وقتی خودِ پیش‌تنظیم‌ها
+    // عوض شدند ساخته می‌شوند و انتخابِ قبلی، اگر هنوز هست، می‌ماند.
+    const presetSel = q('[data-ccv-preset]');
+    const presetHtml = `<option value="">—</option>${Object.keys(presets).map((name) => `<option>${esc(name)}</option>`).join('')}`;
+    if (presetHtml !== presetMarkup) {
+      const chosen = presetSel.value;
+      presetSel.innerHTML = presetHtml;
+      presetMarkup = presetHtml;
+      presetSel.value = chosen && presets[chosen] ? chosen : '';
+    }
 
     paintPicker(turnover);
 
@@ -1089,6 +1123,23 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
     paintHist(records.filter((r) => r.valid || metricOf(opts.histMetric).shape !== 'candle'));
     paintList(records);
     ensureInfos(pool);
+    // نقاشیِ پنهان امضا نمی‌گیرد تا تیکِ بعدیِ دیده‌شده واقعاً بکشد.
+    tickSig = past && isVisible() ? inputsSig() : '';
+  }
+
+  // ═══ تبِ گذشته با هر تیک از نو کشیده نمی‌شود (۱۴۰۵/۰۷/۱۸) ═══
+  //
+  // دادهٔ روزِ گذشته با تیکِ زنده عوض نمی‌شود، ولی رصد لحظه‌ای هر تیک
+  // `paint` را صدا می‌زد: فهرستِ نمادهای آن روز، کشویی‌ها و کندل‌های باز از
+  // نو ساخته می‌شدند. هر تغییرِ درونی (گزینش، دستگیره، دریافتِ روز) خودش
+  // `paint()` را مستقیم صدا می‌زند؛ تیکِ بیرونی فقط وقتی می‌کشد که یکی از
+  // ورودی‌ها عوض شده باشد.
+  function inputsSig() {
+    return [pastState.date, infoVersion, pastState.loading, pastState.note, pinned, listLimit, JSON.stringify(opts), JSON.stringify(getSettings() || {})].join('|');
+  }
+  function paintFromTick() {
+    if (past && tickSig && tickSig === inputsSig()) return;
+    paint();
   }
 
   // ── حالت گذشته: انتخاب روز و نماد ──────────────────────────────
@@ -1355,7 +1406,7 @@ export function mountContractCandles(host, { mode = 'live', getPayload, getSetti
   if (past) mountPastCalendar();
 
   return {
-    paint,
+    paint: paintFromTick,
     dispose() { motherSeq += 1; histSeq += 1; mother?.dispose(); hist?.dispose(); mother = null; hist = null; },
   };
 }

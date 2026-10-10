@@ -53,7 +53,7 @@ import { historyDateLabel } from '/core/history.mjs';
 import { todayJalali, gregorianToJalali, parseJalali, daysSinceJalali } from '/core/jalali.mjs';
 import { marginParamsOf } from '/core/settings.mjs';
 import { INS_CAP, insBatches, mergeInsPayloads } from '/core/ins-batches.mjs';
-import { fetchInfos, fetchLiveTape, fetchQuotes, quoteWarning } from '/ui/quote-intake.mjs';
+import { fetchInfos, fetchLiveTape, fetchQuotes, mergeQuotes, quoteWarning } from '/ui/quote-intake.mjs';
 import { mountDateWheel } from '/ui/datewheel.mjs';
 import { mountPayoff } from '/ui/chart.mjs';
 import { fmt } from '/ui/table.mjs';
@@ -323,10 +323,18 @@ export async function mount(root, { state, api }) {
     return emptyReason({ listCount: 0, feedStatus: feed.status, error: feed.error }).text;
   }
 
+  // ۱۴۰۵/۰۷/۱۸ — هر فشارِ زنجیره (هر چند ثانیه) این فهرست را از نو می‌ساخت و
+  // کشوییِ بازِ «نماد پایه» زیرِ دستِ کاربر بسته می‌شد. حالا فقط وقتی
+  // فهرست واقعاً عوض شده، و نه وقتی کاربر رویش است؛ انتخاب هم می‌ماند.
+  let uaMarkup = '';
   function refreshUaOptions() {
+    const markup = `<option value="">${uaPlaceholder()}</option>`
+      + uaList.map((u) => `<option value="${u.ins}">${displayName(u.name, u.ins, 'دارایی پایه بدون نام')}</option>`).join('');
+    if (markup === uaMarkup || (uaMarkup && document.activeElement === F.ua)) return;
     const cur = F.ua.value;
-    F.ua.innerHTML = `<option value="">${uaPlaceholder()}</option>`
-      + uaList.map((u) => `<option value="${u.ins}" ${u.ins === cur ? 'selected' : ''}>${displayName(u.name, u.ins, 'دارایی پایه بدون نام')}</option>`).join('');
+    F.ua.innerHTML = markup;
+    uaMarkup = markup;
+    if (cur && uaList.some((u) => u.ins === cur)) F.ua.value = cur;
   }
 
   let detail = null;
@@ -477,6 +485,14 @@ export async function mount(root, { state, api }) {
         body: JSON.stringify(positions),
       });
     } catch { if (!quiet) flash('ذخیره نشد.', true); }
+  }
+
+  /** نمادهایی که مظنه‌شان از آخرین دریافتِ موفق است، نه از همین دریافت. */
+  function heldQuotes() {
+    const held = [...quotesByIns.values()].filter((q) => q.heldAt > 0);
+    if (!held.length) return '';
+    const since = Math.min(...held.map((q) => q.heldAt));
+    return `<span class="warn" title="این دریافت برایشان نرسید؛ عدد همان آخرین دریافتِ موفق است">${fmt.int(held.length)} نماد از دریافتِ ساعت ${faClock(new Date(since))}</span>`;
   }
 
   // ——————————————— ارزش‌گذاری ———————————————
@@ -885,6 +901,7 @@ export async function mount(root, { state, api }) {
       quotesByIns.size
         ? `قیمت‌گیری <b>${fmt.int(quotesByIns.size)}</b> نماد`
         : '<span class="warn">قیمت‌گیری نشد</span>',
+      heldQuotes(),
       goneRows.length ? `سررسیدگذشته <b>${faDigits(goneRows.length)}</b>` : '',
       firingCount ? `<span class="warn">${faDigits(firingCount)} شرطِ برقرار</span>` : '',
     ].filter(Boolean).join('<i></i>');
@@ -1448,20 +1465,10 @@ export async function mount(root, { state, api }) {
       // یعنی **کلِ** سبد بی‌قیمت می‌شد، درست همان حالتی که کامنتِ بالا
       // برای جلوگیری از نسخهٔ بریده‌اش نوشته شده بود.
       const quotes = await fetchQuotes(all);
-      const books = quotes.books.byIns;
-      const infos = quotes.infos.byIns;
       quoteNote = quoteWarning(quotes.summary);
-      quotesByIns = new Map();
-      for (const ins of codes) {
-        const b = books[ins]?.book || [];
-        const i2 = infos[ins] || {};
-        quotesByIns.set(ins, {
-          bid: b[0]?.bid || 0, bidQty: b[0]?.bidQty || 0,
-          ask: b[0]?.ask || 0, askQty: b[0]?.askQty || 0,
-          last: i2.last || 0, close: i2.close || 0, low: i2.low || 0, high: i2.high || 0,
-          state: i2.state, staleSec: i2.staleSec, book: b,
-        });
-      }
+      // ۱۴۰۵/۰۷/۱۸ — تکهٔ ناموفق پاهایش را صفر نمی‌کند؛ آخرین مظنهٔ موفق
+      // می‌ماند و نوار بالا می‌گوید چند نماد از آن است (`mergeQuotes`).
+      quotesByIns = mergeQuotes(quotesByIns, codes, quotes, Date.now());
       // مهر زمانیِ همین دسته قیمت. دنبالهٔ جلسه با همین کلید نقطه می‌گیرد،
       // پس رندرِ دوباره با قیمت‌های یکسان نقطهٔ تکراری نمی‌سازد.
       quotesAt = Date.now();

@@ -93,6 +93,10 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
   let ua = '', data = null, dailySeq = 0, rangeSeq = 0, dailyCtrl = null, rangeCtrl = null, poll = null, tries = 0;
   let range = null, calendar = null, rangeApi = null, rangePoints = {}, rangePoll = null, liveSeen = '';
   let todayAt = 0, todayBusy = false;
+  // نمادی که دریافت روزانه‌اش هنوز در راه است (۱۴۰۵/۰۷/۱۸): تیکِ داشبورد تا
+  // پاسخ نرسیده دوباره `loadDaily` نمی‌زند. پیش‌تر هر تیکِ ۵ ثانیه‌ای دریافتِ
+  // درجریان را لغو و از نو شروع می‌کرد و نمادِ پرقرارداد هیچ‌وقت بار نمی‌شد.
+  let dailyFor = null;
   const charts = new Map();
   const chartSeq = {};
   const seriesMemo = new Map();
@@ -200,6 +204,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     dailyCtrl?.abort();
     dailyCtrl = typeof AbortController === 'function' ? new AbortController() : null;
     clearTimeout(poll);
+    dailyFor = null;
     if (want !== ua) {
       data = null; seriesMemo.clear(); rangeApi = null; rangePoints = {};
       for (const handle of charts.values()) handle.dispose();
@@ -214,6 +219,7 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
       return;
     }
     q('[data-ivc-status]').textContent = 'در حال دریافت قیمت روزانهٔ قراردادها…';
+    dailyFor = want;
     try {
       const from = range?.from || deskFrom(today(), 120), to = Math.min(range?.to || today(), today());
       const [daily, response] = await Promise.all([
@@ -239,6 +245,8 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     } catch (e) {
       if (my !== dailySeq || e?.name === 'AbortError') return;
       q('[data-ivc-status]').textContent = `دریافت ناموفق بود: ${faDigits(String(e?.message || e))}`;
+    } finally {
+      if (my === dailySeq) dailyFor = null;
     }
   }
 
@@ -249,6 +257,17 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     return fromLive > 0 ? fromLive : Number(data?.baseRows?.at(-1)?.close) || NaN;
   }
 
+  // کشوها فقط وقتی دوباره ساخته می‌شوند که گزینه‌هایشان عوض شده، و کشویی
+  // که فوکوس دارد (شاید باز است) دست نمی‌خورد (۱۴۰۵/۰۷/۱۸): پیش‌تر نظرسنجیِ
+  // ساخت هر ۶ ثانیه هر سه را از نو می‌ساخت و کشوی بازِ کاربر بسته می‌شد.
+  const optionMarkup = {};
+  function setOptions(name, markup) {
+    const el = field(name);
+    if (optionMarkup[name] === markup || (typeof document !== 'undefined' && document.activeElement === el)) return;
+    optionMarkup[name] = markup;
+    el.innerHTML = markup;
+  }
+
   function fillSelects() {
     const contracts = data.contracts;
     const t = data.today;
@@ -256,11 +275,11 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     const valid = (ins) => contracts.some((c) => String(c.ins) === String(ins));
     if (!valid(opts.instrument)) opts.instrument = defaultContract();
     if (!valid(opts.rInstrument)) opts.rInstrument = opts.instrument;
-    field('instrument').innerHTML = instrumentOptionsHtml(contracts, opts.instrument, { today: t });
-    field('rInstrument').innerHTML = instrumentOptionsHtml(contracts, opts.rInstrument, { today: t });
+    setOptions('instrument', instrumentOptionsHtml(contracts, opts.instrument, { today: t }));
+    setOptions('rInstrument', instrumentOptionsHtml(contracts, opts.rInstrument, { today: t }));
     const expiries = expiriesOf(contracts, t);
     if (!expiries.includes(Number(opts.expiry))) opts.expiry = expiries[0] || 0;
-    field('expiry').innerHTML = expiries.map((e) => `<option value="${e}"${e === Number(opts.expiry) ? ' selected' : ''}>${dateLabel(e)}${e < t ? ' (سررسیدشده)' : ''}</option>`).join('');
+    setOptions('expiry', expiries.map((e) => `<option value="${e}"${e === Number(opts.expiry) ? ' selected' : ''}>${dateLabel(e)}${e < t ? ' (سررسیدشده)' : ''}</option>`).join(''));
     const name = uaName();
     q('[data-ivc-title]').textContent = name ? `نوسان ضمنی در طول زمان · ${name}` : 'نوسان ضمنی در طول زمان';
     const b = data.api;
@@ -390,13 +409,16 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     saveOpts(opts);
   }
 
+  let chipsMarkup = '';
   function paintExpiry() {
     if (!data) return;
     const list = expiryContracts().sort((a, b) => (a.kind === b.kind ? a.strike - b.strike : a.kind === 'call' ? -1 : 1));
     const picked = new Set(currentPicks());
-    q('[data-ivc-chips]').innerHTML = list.length
+    // تراشه‌ها هم فقط با تغییرِ نشانه‌گذاری (همان قاعدهٔ کشوها).
+    const chips = list.length
       ? list.map((c) => `<label class="ivc-chip" data-kind="${c.kind}"><input type="checkbox" data-ivc-contract="${esc(c.ins)}"${picked.has(String(c.ins)) ? ' checked' : ''}> ${esc(contractLabel(c))} <small>${c.kind === 'put' ? 'فروش' : 'خرید'} ${esc(faDigits(fmt.int(c.strike)))}</small></label>`).join('')
       : '<p class="empty-note">برای این سررسید قراردادی در بازه نیست.</p>';
+    if (chips !== chipsMarkup) { q('[data-ivc-chips]').innerHTML = chips; chipsMarkup = chips; }
     const lines = list.filter((c) => picked.has(String(c.ins))).map((c) => ({ label: `${contractLabel(c)} (${c.kind === 'put' ? 'فروش' : 'خرید'} ${faDigits(fmt.int(c.strike))})`, rows: contractRows(c.ins) }));
     setChart('expiry', (echarts, tokens) => expiryOption(lines, { indexRows: opts.withIndex ? indexRows() : null }, tokens),
       picked.size ? 'قراردادهای انتخاب‌شده در این بازه نوسان ضمنی نساختند.' : 'دست‌کم یک قرارداد را تیک بزن.',
@@ -624,7 +646,10 @@ export function mountIvCharts(host, { getSelection, getPayload = () => null, get
     /** با هر تیکِ داشبورد یا ورود به تب. */
     paint() {
       const next = String(getSelection()?.uaIns || '');
-      if (next !== ua || !data) { loadDaily(); return; }
+      // نمادِ تازه دریافت را از نو شروع می‌کند (و درجریانِ قبلی را لغو)؛ همان
+      // نماد با دریافتِ درجریان صبر می‌کند تا پاسخ برسد.
+      if (next !== ua) { loadDaily(); return; }
+      if (!data) { if (dailyFor !== next) loadDaily(); return; }
       // نمودار بازه از ضبط می‌آید نه از عکس تابلو (مظنه هم عوض می‌شود)، پس
       // تازه‌سازی امروزش به امضای عکس بسته نیست؛ خودش فاصله را نگه می‌دارد.
       refreshRangeToday();

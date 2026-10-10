@@ -672,20 +672,33 @@ export async function mount(root, { state }) {
   // بررسی سررسید شده بودند اصلاً در فهرست نبودند.
   let rangeUi = null, rangeJob = null;
 
-  function fillBases(payload) {
+  // تیکِ پس‌زمینهٔ `loadRange` (`update: true`، ۱۴۰۵/۰۷/۱۸): کشویی فقط
+  // وقتی دوباره چیده می‌شود که گزینه‌هایش واقعاً عوض شده — بازچیدنِ
+  // بی‌تغییر، کشوییِ بازِ کاربر را می‌بست. خطِ وضعیت هم فقط وقتی بازنویسی
+  // می‌شود که هنوز همان خلاصهٔ بازه را نشان می‌دهد؛ نتیجه یا خطا پاک نمی‌شود.
+  let basesSig = '', rangeLine = '';
+  function fillBases(payload, { update = false } = {}) {
     const keep = baseSelect.value;
     chain = buildChain(payload.rows || []);
-    baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
-    baseGate.ready(chain.size);
-    for (const item of [...chain.values()].sort((a, b) => a.name.localeCompare(b.name, 'fa'))) {
-      const option = document.createElement('option');
-      option.value = item.ins;
-      option.textContent = `${displayName(item, 'دارایی پایه بدون نام')} — ${fmt.int(item.contracts)} قرارداد`;
-      baseSelect.appendChild(option);
+    const items = [...chain.values()].sort((a, b) => a.name.localeCompare(b.name, 'fa'))
+      .map((item) => [item.ins, `${displayName(item, 'دارایی پایه بدون نام')} — ${fmt.int(item.contracts)} قرارداد`]);
+    const sig = JSON.stringify(items);
+    if (!update || sig !== basesSig) {
+      basesSig = sig;
+      baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>';
+      baseGate.ready(chain.size);
+      for (const [ins, text] of items) {
+        const option = document.createElement('option');
+        option.value = ins;
+        option.textContent = text;
+        baseSelect.appendChild(option);
+      }
+      if (keep && chain.has(keep)) baseSelect.value = keep;
     }
-    if (keep && chain.has(keep)) baseSelect.value = keep;
     const expired = payload.summary?.expiredInside || 0;
-    setStatus(`${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند.`);
+    const line = `${fmt.int(chain.size)} نماد پایه در این بازه؛ ${fmt.int(payload.rosterContracts || 0)} قرارداد که ${fmt.int(expired)} تای آن‌ها داخل همین بازه سررسید شده‌اند.`;
+    if (!update || status.textContent === rangeLine) setStatus(line);
+    rangeLine = line;
   }
 
   async function loadUniverse(range = rangeUi?.range) {

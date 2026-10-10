@@ -260,7 +260,8 @@ group('۲۱۰-ه. هر تبِ تاریخ‌دار از همان بازه می‌
   const range = readSrc('../ui/history-range.mjs');
   check('نخستین پاسخ بی‌انتظار برمی‌گردد', /return \{ first, stop\(\) \{ stopped = true; \} \};/.test(range));
   check('تازه‌شدن در پس‌زمینه است، نه در مسیر اصلی',
-    /onUpdate\(next\)/.test(range) && /if \(\(next\.count \|\| 0\) > \(payload\.count \|\| 0\)\)/.test(range));
+    // ۱۴۰۵/۰۷/۱۸: مبنا آخرین فهرستِ فرستاده است، نه اولی (آزمون ۳۴۶).
+    /onUpdate\(next, \{ update: true \}\)/.test(range) && /if \(\(next\.count \|\| 0\) > last\)/.test(range));
   check('بستن تب حلقه را می‌ایستاند',
     /rangeJob\?\.stop\(\)/.test(readSrc('../ui/tabs/portfolio-backtest.mjs')));
   check('حلقه سقف دارد و تا ابد نمی‌پرسد', /n < tries && !stopped/.test(range));

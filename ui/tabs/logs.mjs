@@ -73,6 +73,18 @@ export async function mount(root, { state }) {
   let stats = null;
   let market = null;
   let health = null;
+  let healthFailed = false;
+  // ۱۴۰۵/۰۷/۱۸ — «نمایش»هایی که کاربر باز کرده، به کلیدِ رویداد نه به جایگاه.
+  // ردیفِ تازه بالای جدول می‌نشیند و همه را یک خانه پایین می‌برد؛ وصلهٔ
+  // بی‌کلید `open` را سرِ جایگاه نگه می‌داشت، یعنی روی رویدادِ دیگری.
+  const openDetails = new Set();
+  const rowKey = (r) => `${r.local ? 'l' : 's'}${r.seq}-${r.at}`;
+  // `toggle` حباب نمی‌زند؛ گرفتن در فازِ capture روی ریشه کافی است.
+  root.addEventListener('toggle', (event) => {
+    const key = event.target?.dataset?.log;
+    if (!key) return;
+    if (event.target.open) openDetails.add(key); else openDetails.delete(key);
+  }, true);
 
   async function load() {
     try {
@@ -87,15 +99,20 @@ export async function mount(root, { state }) {
       // سلامت جدا گرفته می‌شود چون دفترِ خطا و شمارندهٔ بار دو چیزند: دفتر
       // می‌گوید چه خطایی رخ داد، شمارنده می‌گوید چقدر بار رفت — و سرویسی
       // که خطا نداده هم بار داشته.
+      //
+      // ۱۴۰۵/۰۷/۱۸ — شکستِ یک تیک جدولِ آخر را پاک نمی‌کند؛ فقط گفته می‌شود
+      // که جدول همان آخرین دریافتِ موفق است.
       try {
         const healthRes = await fetch('/api/health');
         const healthBody = await healthRes.json();
-        health = healthRes.ok && !healthBody.error ? healthBody : null;
-      } catch { health = null; }
+        healthFailed = !(healthRes.ok && !healthBody.error);
+        if (!healthFailed) health = healthBody;
+      } catch { healthFailed = true; }
     } catch (e) {
       // خطای خواندنِ دفتر خطا در خودِ دفتر ثبت نمی‌شود — حلقه می‌سازد.
-      serverRows = [];
-      stats = { readError: e.message };
+      // ۱۴۰۵/۰۷/۱۸ — ردیف‌های قبلی می‌مانند و فقط متنِ خطا می‌آید؛ پیش‌تر
+      // `serverRows = []` هر تیکِ ناموفق جدول را خالی می‌کرد.
+      stats = { ...stats, readError: e.message };
     }
     paint();
   }
@@ -127,19 +144,21 @@ export async function mount(root, { state }) {
           : `بازار بسته است — ${market.why}. بیرون از ساعت بازار، جریان زنده چیزی نمی‌فرستد و برنامه از عکس آخرین جلسه استفاده می‌کند.`)
         : '—';
 
-    $('health-table').innerHTML = health
+    patched($('health-table')).innerHTML = health
       ? healthTableHtml(health.byEndpoint)
       : '<p class="note">وضعیت سلامت گرفته نشد؛ همین یعنی سرور در دسترس نیست یا پاسخش خطا داد.</p>';
     $('health-age').textContent = health
-      ? `${fmt.int(health.upSec)} ثانیه بالا · میانگین پاسخ بالادست ${fmt.int(health.avgUpstreamMs)} میلی‌ثانیه`
+      ? `${healthFailed ? 'دریافتِ تازه نشد، جدول همان آخرین دریافتِ موفق است؛ ' : ''}${fmt.int(health.upSec)} ثانیه بالا · میانگین پاسخ بالادست ${fmt.int(health.avgUpstreamMs)} میلی‌ثانیه`
       : '—';
 
     $('log-count').textContent = `${fmt.int(merged.length)} رویداد`;
     if (!merged.length) {
-      $('log-table').innerHTML = '<p class="empty-note">هیچ خطایی ثبت نشده.</p>';
+      patched($('log-table')).innerHTML = '<p class="empty-note">هیچ خطایی ثبت نشده.</p>';
       return;
     }
-    $('log-table').innerHTML = `<table class="history-table"><thead><tr>
+    // ۱۴۰۵/۰۷/۱۸ — وصله به‌جای `innerHTML`: بازسازیِ هشت‌ثانیه‌ای هر «نمایش»ِ
+    // باز را می‌بست. `open` از کلید می‌آید و پس از وصله دوباره نشانده می‌شود.
+    patched($('log-table')).innerHTML = `<table class="history-table"><thead><tr>
       <th>زمان</th><th>سطح</th><th>منبع</th><th>پیام</th><th>جزئیات</th></tr></thead>
       <tbody>${merged.map((r) => {
         const [label, tone] = LEVEL[r.level] || LEVEL.error;
@@ -148,9 +167,13 @@ export async function mount(root, { state }) {
           <td><span class="tag ${tone}">${label}</span></td>
           <td>${esc(r.where || '—')}</td>
           <td>${esc(r.message || '—')}</td>
-          <td class="log-detail">${r.detail ? `<details><summary>نمایش</summary><pre>${esc(r.detail)}</pre></details>` : '—'}</td>
+          <td class="log-detail">${r.detail ? `<details data-log="${esc(rowKey(r))}"${openDetails.has(rowKey(r)) ? ' open' : ''}><summary>نمایش</summary><pre>${esc(r.detail)}</pre></details>` : '—'}</td>
         </tr>`;
       }).join('')}</tbody></table>`;
+    for (const details of $('log-table').querySelectorAll('details[data-log]')) {
+      const want = openDetails.has(details.dataset.log);
+      if (details.open !== want) details.open = want;
+    }
   }
 
   $('log-refresh').addEventListener('click', load);

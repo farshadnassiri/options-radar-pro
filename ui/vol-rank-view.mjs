@@ -552,6 +552,9 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
   // شماره و لغو دارد، پاسخ کهنه دور ریخته می‌شود، و با عوض‌شدن نماد تاریخچهٔ
   // قبلی همان لحظه کنار می‌رود.
   let loadSeq = 0, controller = null;
+  // کلیدِ آخرین درخواست (نماد و بازه)، تا تلاشِ دوباره پس از شکست اسکلتِ
+  // «در حال دریافت» را روی پیامِ خطا نگذارد (۱۴۰۵/۰۷/۱۸).
+  let askedKey = '';
 
   async function load(force = false) {
     const sel = getSelection() || {};
@@ -559,10 +562,11 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
     const my = ++loadSeq;
     controller?.abort();
     controller = typeof AbortController === 'function' ? new AbortController() : null;
-    clearTimeout(poll);
+    clearTimeout(poll); poll = null;
     if (want !== ua) { api = null; apiKey = ''; history = null; }
     ua = want;
     if (!ua) {
+      loading = false;
       q('[data-vr-status]').textContent = '';
       q('[data-vr-body]').innerHTML = '<p class="empty-note">اول روی تب «نقشه و زنجیره» یک نماد پایه انتخاب کن؛ رتبهٔ تلاطم برای همان ساخته می‌شود.</p>';
       return;
@@ -572,7 +576,8 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
     const key = `${ua}:${range.from}:${range.to}`;
     loading = true;
     error = '';
-    if (key !== apiKey) { tries = 0; history = null; q('[data-vr-body]').innerHTML = '<p class="empty-note">در حال دریافت تاریخچهٔ قیمت قراردادها و پایه…</p>'; }
+    if (key !== apiKey && key !== askedKey) { tries = 0; history = null; q('[data-vr-body]').innerHTML = '<p class="empty-note">در حال دریافت تاریخچهٔ قیمت قراردادها و پایه…</p>'; }
+    askedKey = key;
     try {
       let rows = baseRows;
       if (baseFor !== want || force) {
@@ -590,7 +595,7 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
       // ساخت پرونده‌ها ادامه دارد: تا وقتی تب دیده می‌شود دوباره بپرس.
       if ((body.build?.running || body.build?.queued || body.roster?.build?.running) && tries < 400) {
         tries += 1;
-        poll = setTimeout(() => { if (isVisible()) load(); }, 6000);
+        poll = setTimeout(() => { poll = null; if (isVisible()) load(); }, 6000);
       }
     } catch (e) {
       if (my !== loadSeq || e?.name === 'AbortError') return;
@@ -693,9 +698,16 @@ export function mountVolRank(host, { getSelection, getPayload, getSettings = () 
     /** با هر تیکِ داشبورد یا ورود به تب: اگر نماد عوض شده دریافت، وگرنه فقط بازسازیِ «امروز». */
     paint() {
       const next = String(getSelection()?.uaIns || '');
-      if (next !== ua || !api) { load(); return; }
+      // نمادِ تازه دریافت را از نو شروع می‌کند؛ همان نماد با دریافتِ درجریان
+      // صبر می‌کند (۱۴۰۵/۰۷/۱۸). پیش‌تر هر تیکِ داشبورد تا رسیدنِ `api`
+      // دوباره `load` می‌زد، دریافتِ درجریان را لغو می‌کرد و اسکلتِ «در حال
+      // دریافت» را دوباره می‌گذاشت؛ نمادِ پرقرارداد هیچ‌وقت بار نمی‌شد.
+      if (next !== ua) { load(); return; }
+      if (!api) { if (!loading) load(); return; }
       recompute();
-      if (api && (api.build?.running || api.build?.queued) && !loading) { clearTimeout(poll); poll = setTimeout(() => { if (isVisible()) load(); }, 6000); }
+      // نظرسنجیِ ساخت فقط اگر زمان‌سنجی در راه نیست؛ پیش‌تر هر تیکِ ۵ ثانیه‌ای
+      // زمان‌سنجِ ۶ ثانیه‌ای را از نو می‌گذاشت و هیچ‌وقت نمی‌رسید.
+      if ((api.build?.running || api.build?.queued) && !loading && !poll) poll = setTimeout(() => { poll = null; if (isVisible()) load(); }, 6000);
     },
     resize() { for (const handle of charts.values()) handle.resize(); },
     dispose() { clearTimeout(poll); for (const handle of charts.values()) handle.dispose(); charts.clear(); },

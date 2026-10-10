@@ -73,4 +73,5 @@ group('۳۴۳. سیم‌کشی');
     help.includes('new MutationObserver(soon).observe(stage, { childList: true, subtree: true });') && help.includes(".map((n) => n.textContent.replace(/\\s+/g, ' ').trim())"));
   check('«؟»ِ قدیمیِ استرانگل و اسکنر پر می‌شود، دوتا نمی‌شود', help.includes("const legacy = heading?.querySelector('[data-help]');"));
   check('پنجره با کلیک بیرون و Esc بسته می‌شود', help.includes("if (event.key === 'Escape' && !pop.hidden) close();"));
+  check('«نمایش»ِ ردیف‌های جدول «؟»ِ تنظیمات نمی‌گیرد', help.includes("h.closest('.g-help-pop, table')"));
 }

@@ -111,7 +111,9 @@ export function installHelp(stage = document.getElementById('stage') || document
     for (const note of stage.querySelectorAll(NOTE_SELECTOR)) if (isExplanatory(note)) attach(note);
     // عنوان‌هایی که توضیحِ ساده دارند، حتی بی یادداشت.
     for (const h of stage.querySelectorAll(HEADINGS)) {
-      if (h.querySelector(':scope > .g-help, [data-help]') || h.closest('.g-help-pop')) continue;
+      // عنوانِ درونِ جدول (مثل «نمایش»ِ هر ردیف دفتر خطا) کنترل است، نه سرِ بخش؛
+      // هم‌نامیِ کوتاهش با عنوانِ یک بخش («نمایش» در تنظیمات) نباید «؟» بسازد.
+      if (h.querySelector(':scope > .g-help, [data-help]') || h.closest('.g-help-pop, table')) continue;
       if (helpFor(headingText(h))) iconFor(h);
     }
   }

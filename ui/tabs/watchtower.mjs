@@ -228,15 +228,29 @@ export async function mount(root, { state }) {
 
   // ————————————————————————— گام یک: دامنه —————————————————————————
 
-  function fillBases(payload) {
+  // تیکِ پس‌زمینهٔ `loadRange` (`update: true`، ۱۴۰۵/۰۷/۱۸): فهرست فقط
+  // وقتی دوباره چیده می‌شود که چیزی در آن واقعاً عوض شده، و آن‌وقت هم
+  // تیک‌ها و جای اسکرولِ کاربر می‌مانند. خطِ وضعیت هم فقط وقتی بازنویسی
+  // می‌شود که هنوز همان خلاصهٔ فهرست را نشان می‌دهد؛ پیامِ پیش‌نمایش، رصد
+  // یا خطا را تیکِ پس‌زمینه پاک نمی‌کند.
+  let basesSig = '', rangeLine = '';
+  function fillBases(payload, { update = false } = {}) {
     const keep = new Set(pickedBases());
     chain = buildChain(payload.rows || []);
     const list = [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'));
-    $('wt-bases').innerHTML = list.length
-      ? list.map((item) => `<label class="check"><input type="checkbox" data-base="${esc(item.ins)}"${keep.has(String(item.ins)) ? ' checked' : ''}> ${esc(nameOf(item))} <small>${fmt.int(item.contracts)} قرارداد</small></label>`).join('')
-      : '<p class="empty-note">در این بازه نمادی نبود.</p>';
+    const sig = JSON.stringify(list.map((item) => [item.ins, nameOf(item), item.contracts]));
+    if (!update || sig !== basesSig) {
+      basesSig = sig;
+      const box = $('wt-bases'), scroll = box.scrollTop;
+      box.innerHTML = list.length
+        ? list.map((item) => `<label class="check"><input type="checkbox" data-base="${esc(item.ins)}"${keep.has(String(item.ins)) ? ' checked' : ''}> ${esc(nameOf(item))} <small>${fmt.int(item.contracts)} قرارداد</small></label>`).join('')
+        : '<p class="empty-note">در این بازه نمادی نبود.</p>';
+      if (update) box.scrollTop = scroll;
+    }
     paintCounts();
-    setStatus(`${fmt.int(chain.size)} نماد پایه آمادهٔ انتخاب است.`);
+    const line = `${fmt.int(chain.size)} نماد پایه آمادهٔ انتخاب است.`;
+    if (!update || $('wt-status').textContent === rangeLine) setStatus(line);
+    rangeLine = line;
   }
 
   async function loadUniverseForRange(range) {
@@ -248,7 +262,7 @@ export async function mount(root, { state }) {
     const current = () => mounted && version === universeVersion;
     const rangeStatus = { note: (...args) => { if (current()) rangeUi?.note(...args); },
       build: (value) => (current() ? rangeUi?.build(value) : false) };
-    rangeJob = loadRange(range, rangeStatus, { onUpdate: (payload) => { if (current()) fillBases(payload); } });
+    rangeJob = loadRange(range, rangeStatus, { onUpdate: (payload, how) => { if (current()) fillBases(payload, how); } });
     try { const payload = await rangeJob.first; if (current()) fillBases(payload); }
     catch (error) {
       if (!current()) return;

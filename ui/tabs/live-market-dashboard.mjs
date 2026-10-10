@@ -455,10 +455,17 @@ export async function mount(root, { state, api }) {
   // پیش از این هر تیکِ خودکار یک `live-trades` می‌زد، حتی وقتی کاربر روی
   // نقشه بود؛ روی بازهٔ ۵ ثانیه‌ای یعنی ۷۲۰ درخواست در ساعت برای داده‌ای که
   // هیچ‌جا رسم نمی‌شد.
+  //
+  // نوارِ قبلی تا رسیدنِ نوارِ تازهٔ **همان قرارداد** می‌ماند (۱۴۰۵/۰۷/۱۸):
+  // پیش‌تر هر تیک اول `tape = []` می‌کرد و یک دریافتِ ناموفق دو نمودار
+  // درون‌روزیِ «تصویر شفاف» را به یادداشتِ «ریزمعامله نرسیده» برمی‌گرداند.
+  // فقط عوض‌شدنِ قرارداد نوار را خالی می‌کند.
+  let tapeFor = '';
   async function fetchTape() {
     const pick = selected();
-    if (!needsTape(pick.level, modeOf()?.clear ? 'clear' : viewOf()?.[2])) { tape = []; return; }
-    tape = [];
+    if (!needsTape(pick.level, modeOf()?.clear ? 'clear' : viewOf()?.[2])) { tape = []; tapeFor = ''; return; }
+    const key = `${pick.uaIns}|${pick.contractIns}`;
+    if (key !== tapeFor) { tape = []; tapeFor = key; }
     const contract = activeContract(); if (!contract) return;
     try {
       const got = await fetchLiveTape([pick.uaIns, contract.ins]);
@@ -467,7 +474,9 @@ export async function mount(root, { state, api }) {
       // نوارِ خامِ پایه با نامِ درستِ پارامتر. پیش از این `underlyingTape`
       // می‌رفت که تابع اصلاً نمی‌خواند؛ هر ۳٬۰۱۶ معاملهٔ ضفزر729 بی قیمت پایه
       // و بی IV می‌ماند. تابع حالا کلیدِ ناشناخته را رد می‌کند.
-      tape = liveOptionTape({ trades: optionRows, baseTrades: baseRows, contract, settings: state.settings });
+      const fresh = liveOptionTape({ trades: optionRows, baseTrades: baseRows, contract, settings: state.settings });
+      // پاسخِ دیررسیدهٔ قراردادِ قبلی روی نوارِ قرارداد تازه نمی‌نشیند.
+      if (tapeFor === key) tape = fresh;
     } catch (error) { logError('ریزمعامله داشبورد تصمیم‌گیری', error); }
   }
 
@@ -494,6 +503,14 @@ export async function mount(root, { state, api }) {
       if (!response.ok || next.error) throw new Error(next.error || `HTTP ${response.status}`);
       // `NaN`ِ سرور پس از JSON `null` است و `Number(null)` صفر؛ مرز همین‌جاست.
       next.universe = reviveDashboardUniverse(next.universe);
+      // عکسِ خالی یا بی‌قرارداد شکست است، نه داده (۱۴۰۵/۰۷/۱۸): پیش‌تر یک
+      // پاسخِ خالی انتخابِ نقشه را به نخستین نماد می‌پراند و همهٔ نمودارها
+      // بسته می‌شدند. آخرین عکسِ سالم می‌ماند و فقط خطِ وضعیت خطا را می‌گوید.
+      // تا عکسِ سالمی نرسیده، همان پاسخ پذیرفته می‌شود (چیزی برای نگه‌داشتن نیست).
+      const hadGood = payload.universe.underlyings.length > 0;
+      if (hadGood && (!next.universe?.underlyings?.length || !next.universe?.contracts?.length)) {
+        throw new Error('عکس تازهٔ بازار خالی یا ناقص بود؛ آخرین عکس سالم نگه داشته شد');
+      }
       payload = next; openViewController?.updateLive?.(payload);
       // همان گردش پایه به زنجیرهٔ ریسه (دیده‌بان زنجیره و اسکنرها) — یک عدد در همه‌جا.
       pushUaTurnover(payload.universe?.underlyings || [], next.at).catch?.(() => {});

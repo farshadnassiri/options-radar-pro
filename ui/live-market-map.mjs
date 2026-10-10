@@ -55,6 +55,26 @@ function contractRow(row, greekParams = {}) {
   };
 }
 
+// ── انتخابِ کاربر با یک عکسِ ناقص پاک نمی‌شود (۱۴۰۵/۰۷/۱۸) ──
+//
+// گزارش صاحب پروژه: «بعد از چند ثانیه نمودارها بسته می‌شود و دوباره باید
+// دریافت کنم.» یکی از علت‌ها همین‌جا بود: اگر یک عکسِ خالی یا ناقص نمادِ
+// انتخابی را نداشت، انتخاب بی‌صدا به «نخستین نماد» می‌پرید و نوسان ضمنی،
+// رتبهٔ تلاطم و تصویر شفاف همه نمادِ تازه‌ای می‌دیدند و نمودارها را از نو
+// می‌ساختند. حالا با `preserve` فقط جای خالی پر می‌شود؛ انتخابِ ناموجود در
+// این عکس می‌ماند تا عکسِ بعد (یا کلیکِ خودِ کاربر) — نه نخستین ردیف.
+/** انتخاب نقشه پس از عکس تازه. خالص، تا آزمون بسنجدش. */
+export function normalizeMapSelection(universe, { uaIns = '', endDate = '', contractIns = '' } = {}, preserve = true) {
+  const unders = universe?.underlyings || [];
+  let ua = String(uaIns || ''), end = String(endDate || ''), ins = String(contractIns || '');
+  if (!preserve || !ua) { ua = String(unders[0]?.ins || ''); end = ''; ins = ''; }
+  if (!end) {
+    const ex = (universe?.expiries || []).filter((row) => String(row.uaIns) === ua).sort((a, b) => Number(a.days) - Number(b.days));
+    end = String(ex[0]?.endDate || ''); ins = '';
+  }
+  return { uaIns: ua, endDate: end, contractIns: ins };
+}
+
 /** سوارکردن کاوشگر؛ خروجی scope فقط برای همگام‌کردن تحلیل‌های قدیمی است. */
 export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns = [], greekParams = () => ({}) } = {}) {
   root.innerHTML = `
@@ -118,12 +138,7 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
   const selectedExpiry = () => expiries().find((row) => String(row.endDate) === endDate);
 
   function normalizeSelection(preserve = true) {
-    if (!preserve || !underlyings().some((row) => String(row.ins) === uaIns)) {
-      uaIns = String(underlyings()[0]?.ins || ''); endDate = ''; contractIns = '';
-    }
-    const ex = expiries();
-    if (!ex.some((row) => String(row.endDate) === endDate)) { endDate = String(ex[0]?.endDate || ''); contractIns = ''; }
-    if (!contracts().some((row) => String(row.ins) === contractIns)) contractIns = '';
+    ({ uaIns, endDate, contractIns } = normalizeMapSelection(universe, { uaIns, endDate, contractIns }, preserve));
   }
 
   function paintSummary() {
@@ -157,15 +172,22 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
       </div>`);
   }
 
-  function paintUnderlying() {
+  // تیکِ پس‌زمینه (`quiet`) خروجیِ موجود را با اسکلتِ «در انتظار» یا خالی
+  // عوض نمی‌کند (۱۴۰۵/۰۷/۱۸): اگر نمادِ نگه‌داشته در این عکس نیست، همان
+  // آخرین نمای سالم می‌ماند تا عکسِ بعد. کلیکِ کاربر همچنان حالتِ خالی را می‌بیند.
+  let shownUa = false;
+  function paintUnderlying(quiet = false) {
     const ua = selectedUa();
     if (!ua) {
+      if (quiet && shownUa) return;
+      shownUa = false;
       root.querySelector('[data-lmm-title]').textContent = 'داده‌ای برای انتخاب نماد پایه نیست';
       root.querySelector('[data-lmm-selected]').textContent = 'هنوز عکس معتبر بازار دریافت نشده است.';
       underlyingHost.innerHTML = busyBlock('در انتظار نخستین عکس بازار؛ پس از دریافت، همه نمادهای پایه اینجا ظاهر می‌شوند.', { lines: 3 });
       expiryStep.hidden = true; chainStep.hidden = true; expiryInfo.innerHTML = ''; pairedHost.innerHTML = ''; chainTable.set([]);
       return;
     }
+    shownUa = true;
     const uaQ = dayQuote(ua);
     root.querySelector('[data-lmm-title]').textContent = ua.name || ua.ins;
     patchHTML(root.querySelector('[data-lmm-selected]'), `نماد انتخاب‌شده: <strong>${esc(ua.name || ua.ins)}</strong> ${pricePairHtml(ua)}`);
@@ -188,11 +210,12 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     </div>`);
     expiryStep.hidden = expiries().length === 0;
     patchHTML(expiryRail, expiries().map((row) => `<button type="button" data-lmm-expiry="${esc(row.endDate)}" aria-pressed="${String(row.endDate) === endDate}"><b>${dateLabel(row.endDate)}</b><small>${fmt.int(row.days)} روز · ارزش ${fmt.rialText(row.value)}</small></button>`).join(''));
-    paintExpiry();
+    paintExpiry(quiet);
   }
 
-  function paintExpiry() {
+  function paintExpiry(quiet = false) {
     const ex = selectedExpiry();
+    if (!ex && quiet && !chainStep.hidden) return;
     if (!ex) { expiryInfo.innerHTML = ''; chainStep.hidden = true; pairedHost.innerHTML = ''; chainTable.set([]); return; }
     patchHTML(expiryInfo, `<div class="lmm-scope-title"><h3>سررسید ${dateLabel(ex.endDate)}</h3><span>${fmt.int(ex.days)} روز مانده</span></div><div class="lmm-stat-grid compact">
       ${stat('ارزش کل', fmt.rialText(ex.value), `${fmt.int(ex.tradedContracts)} قرارداد معامله‌شده`)}
@@ -486,10 +509,16 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     return rows.map((row) => ({ ...row, mapWeight: row.sizeValue > 0 ? row.sizeValue : floor }));
   }
 
+  // دکمه‌های سنجه فقط وقتی دوباره ساخته می‌شوند که نشانه‌گذاری‌شان عوض شده
+  // (۱۴۰۵/۰۷/۱۸)؛ پیش‌تر هر تیک همه را از نو می‌ساخت و فوکوسِ صفحه‌کلید می‌پرید.
+  let metricMarkup = '';
   function paintMetricControls() {
     const host = root.querySelector('[data-lmm-metrics]');
     const active = currentMetric();
-    host.innerHTML = currentMetrics().map((item) => `<button type="button" data-lmm-metric="${item.key}" aria-pressed="${item.key === active}">${item.label}</button>`).join('');
+    const markup = currentMetrics().map((item) => `<button type="button" data-lmm-metric="${item.key}" aria-pressed="${item.key === active}">${item.label}</button>`).join('');
+    if (markup === metricMarkup) return;
+    metricMarkup = markup;
+    host.innerHTML = markup;
     host.querySelectorAll('[data-lmm-metric]').forEach((button) => button.addEventListener('click', () => {
       if (mapMode === 'contracts') {
         contractMetric = button.dataset.lmmMetric;
@@ -520,11 +549,13 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     paintMetricControls();
   }
 
-  async function paintMap() {
+  async function paintMap(quiet = false) {
     const metric = currentMetric();
     const info = currentMetrics().find((item) => item.key === metric) || currentMetrics()[0];
     const rows = mapMode === 'contracts' ? weightedContracts(metric) : marketMapRows(universe, metric);
     if (!rows.length) {
+      // تیکِ پس‌زمینه نقشهٔ موجود را با یک عکسِ ناقص دور نمی‌ریزد.
+      if (quiet && mapHandle) return;
       mapHandle?.dispose(); mapHandle = null;
       mapHost.innerHTML = `<p class="empty-note">${mapMode === 'contracts' ? 'برای نماد انتخابی قرارداد معتبری دریافت نشده است.' : 'هنوز نماد پایه‌ای برای نقشه دریافت نشده است.'}</p>`;
       return;
@@ -639,7 +670,8 @@ export function mountLiveMarketMap(root, { onScopeChange = null, contractColumns
     async setUniverse(next, preserve = true, context = {}) {
       universe = next || { underlyings: [], expiries: [], contracts: [] };
       marketContext = context || {};
-      normalizeSelection(preserve); paintSummary(); paintUnderlying(); paintMapMode(); await paintMap();
+      // تیکِ خودکار: بی اسکلت و بی دورریختنِ نقشه (`quiet`).
+      normalizeSelection(preserve); paintSummary(); paintUnderlying(true); paintMapMode(); await paintMap(true);
     },
     selection: () => ({ uaIns, endDate, contractIns }),
     // انتخاب از بیرونِ نقشه (تب «مقایسه در زنجیره»)، بی پرش صفحه. انتخاب
