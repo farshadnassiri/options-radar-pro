@@ -91,8 +91,6 @@ function chart(host, sourceRows, series, {
   const bars = visible.filter((item) => item.kind === 'bar'), lines = visible.filter((item) => item.kind !== 'bar');
   const values = rows.flatMap((row) => visible.map((item) => row[item.key]).filter(Number.isFinite));
   let low = Math.min(...values), high = Math.max(...values);
-  // R5-13: جملهٔ کم‌داشتهٔ نوار، تا جدول و نمودار بی‌اعلام روی دادهٔ ناقص ساخته نشوند.
-  let tapeNote = '';
   if (bars.length) { low = Math.min(low, 0); high = Math.max(high, 0); }
   if (!(high > low)) { low -= 1; high += 1; }
   const padding = (high - low) * 0.08; low -= padding; high += padding;
@@ -363,29 +361,39 @@ export async function mount(root, { state }) {
     return Boolean(span);
   }
 
-  function computeDaily() {
+  // `quiet`: تازه‌سازیِ پس‌زمینه (۱۴۰۵/۰۷/۱۸). گزارش: «بعد از چند ثانیه
+  // نمودارها بسته می‌شود و دوباره باید دریافت کنم.» هر تیک، نمودارهای
+  // درون‌روزی را پاک و روزِ انتخابی را به روز آخر برمی‌گرداند. حالا تیک فقط
+  // عددها را عوض می‌کند: نمودار، روز و سررسیدِ انتخابی و پیام وضعیت می‌مانند.
+  function computeDaily({ quiet = false } = {}) {
     const from = normalizeHistoryDate($('ov-from').value), to = normalizeHistoryDate($('ov-to').value);
     if (!from || !to || from > to) { setStatus('تاریخ شروع باید پیش از تاریخ پایان یا برابر آن باشد.', true); return; }
     const model = settings(); if (!model) return;
-    daily = analyzeDailyOpenView({ ua, contracts, seriesByIns, from, to, settings: model, basis: $('ov-basis').value });
-    resetIntraday();
+    const next = analyzeDailyOpenView({ ua, contracts, seriesByIns, from, to, settings: model, basis: $('ov-basis').value });
+    // تیکی که چیزی نساخت (شبکه، بازار بسته) جای نتیجهٔ موجود را نمی‌گیرد.
+    if (quiet && daily && !next.expiryRows.length) return;
+    daily = next;
+    if (!quiet) resetIntraday();
     const expiries = [...new Set(daily.expiryRows.map((row) => row.expiry))].sort((a, b) => a - b), previous = $('ov-expiry').value;
     $('ov-expiry').innerHTML = expiries.map((expiry) => `<option value="${expiry}">${dateLabel(expiry)}</option>`).join('');
     $('ov-expiry').disabled = !expiries.length;
     if (!expiries.length) { selectedDate = 0; $('ov-report').hidden = true; setStatus('در این بازه برای هیچ سررسیدی قرارداد معتبر پیدا نشد.', true); return; }
     if (expiries.some((expiry) => String(expiry) === previous)) $('ov-expiry').value = previous;
-    selectedDate = viewRows().at(-1)?.date || 0;
+    const keepDay = quiet && String(previous) === $('ov-expiry').value && viewRows().some((row) => row.date === selectedDate);
+    if (!keepDay) selectedDate = viewRows().at(-1)?.date || 0;
     dailyRelations = relationMatrix(viewRows());
-    paintDaily(); setStatus(`${fmt.int(viewRows().length)} روز برای سررسید ${dateLabel(selectedExpiry())} محاسبه شد؛ برای ریزمحاسبه روی هر روز کلیک کن.`);
+    paintDaily();
+    if (quiet) return;
+    setStatus(`${fmt.int(viewRows().length)} روز برای سررسید ${dateLabel(selectedExpiry())} محاسبه شد؛ برای ریزمحاسبه روی هر روز کلیک کن.`);
   }
 
-  async function applySelectedScope() {
+  async function applySelectedScope({ quiet = false } = {}) {
     seriesByIns = closedSeriesByIns;
     if ($('ov-scope').value !== SCOPE_LIVE) {
       $('ov-live-note').textContent = 'فقط روزهای بسته‌شده و نهایی در نمودار چندروزه هستند.';
       return;
     }
-    $('ov-live-note').textContent = 'در حال افزودن عکس معتبر امروز به نمودار چندروزه…';
+    if (!quiet) $('ov-live-note').textContent = 'در حال افزودن عکس معتبر امروز به نمودار چندروزه…';
     // ریزمعاملهٔ قراردادهای همین نماد هم خلاصه می‌شود، وگرنه ردیف
     // امروزشان «اولین/کمترین/بیشترین» ندارد و با آن مبناها روز جاری
     // اصلاً پیشنهاد نمی‌شود. اینجا امن است: یک نماد، و با دکمهٔ خودِ کاربر.
@@ -475,7 +483,15 @@ export async function mount(root, { state }) {
     finally { $('ov-load').disabled = false; }
   }
 
-  async function loadDayIntraday() {
+  async function loadDayIntraday({ quiet = false } = {}) {
+    // `quiet`: تیکِ پس‌زمینه. نمودارِ موجود تا رسیدنِ دادهٔ تازه همان‌جا
+    // می‌ماند (نه اسکلتِ «در حال دریافت»)، و اگر تیک شکست خورد یا چیزی
+    // نیاورد، نمودارِ آخرین دریافتِ موفق پاک نمی‌شود.
+    const keepOld = () => quiet && intraday?.rows?.length;
+    // R5-13: جملهٔ کم‌داشتهٔ نوار، تا جدول و نمودار بی‌اعلام روی دادهٔ ناقص
+    // ساخته نشوند. پیش‌تر درونِ `chart()` تعریف شده بود و اینجا دیده نمی‌شد:
+    // هر دریافتِ درون‌روزی با «tapeNote is not defined» می‌شکست.
+    let tapeNote = '';
     const live = isLive() || $('ov-day-source').value === 'live';
     // روزِ تحلیل در حالت لحظه‌ای از خودِ عکس بازار می‌آید، نه از جدول
     // چندروزه؛ پس `daily` فقط شرطِ مسیر تاریخی است.
@@ -490,12 +506,14 @@ export async function mount(root, { state }) {
     const request = ++intradayRequest, requestedExpiry = selectedExpiry();
     let marketCoverage = null;
     const model = settings(); if (!model) return;
-    $('ov-day-intraday').disabled = true;
-    dayStatus.textContent = live ? 'در حال دریافت همه ریزمعامله‌های امروز تا این لحظه…' : 'در حال دریافت ریزمعامله‌های همین روز…';
-    // پنج نمودار درون‌روزی تا رسیدن داده خالی می‌ماندند و کاربر نمی‌دانست
-    // کاری در جریان است یا چیزی نیامده.
-    for (const id of ['ov-day-price', 'ov-day-gap', 'ov-day-strike', 'ov-day-premium', 'ov-day-iv']) {
-      $(id).innerHTML = busyBlock(dayStatus.textContent, { lines: 3 });
+    if (!keepOld()) {
+      $('ov-day-intraday').disabled = true;
+      dayStatus.textContent = live ? 'در حال دریافت همه ریزمعامله‌های امروز تا این لحظه…' : 'در حال دریافت ریزمعامله‌های همین روز…';
+      // پنج نمودار درون‌روزی تا رسیدن داده خالی می‌ماندند و کاربر نمی‌دانست
+      // کاری در جریان است یا چیزی نیامده.
+      for (const id of ['ov-day-price', 'ov-day-gap', 'ov-day-strike', 'ov-day-premium', 'ov-day-iv']) {
+        $(id).innerHTML = busyBlock(dayStatus.textContent, { lines: 3 });
+      }
     }
     try {
       let analysisDate = selectedDate, tradesByKey = live ? null : tradeCache.get(cacheKey);
@@ -558,10 +576,12 @@ export async function mount(root, { state }) {
         if (!tapeNote && Object.values(tradesByKey).some((rows) => rows.length)) tradeCache.set(cacheKey, tradesByKey);
       }
       if (request !== intradayRequest || requestedExpiry !== selectedExpiry()) return;
-      intraday = analyzeIntradayOpenView({
+      const fresh = analyzeIntradayOpenView({
         ua, contracts: viewContracts, dates: [analysisDate], tradesByKey, intervalMinutes: minutes,
         settings: model, priceBasis: live ? 'latest' : 'vwap',
       });
+      if (keepOld() && !fresh.rows.length) return;
+      intraday = fresh;
       intradayRelations = relationMatrix(intraday.rows); paintIntraday();
       // ═══ R5-13: کم‌داشتهٔ نوار پیش از جدول گفته می‌شود ═══
       //
@@ -577,7 +597,12 @@ export async function mount(root, { state }) {
         : live
         ? `${fmt.int(intraday.rows.length)} سطل زنده ${faDigits(minutes)} دقیقه‌ای از اولین معامله تا اکنون ساخته شد${coverage}.`
         : `${fmt.int(intraday.rows.length)} سطل ${faDigits(minutes)} دقیقه‌ای ساخته شد.`;
-    } catch (error) { if (request === intradayRequest) dayStatus.textContent = errorText(error, 'ریزمعامله دریافت نشد.'); }
+    } catch (error) {
+      if (request !== intradayRequest) return;
+      dayStatus.textContent = keepOld()
+        ? `${errorText(error, 'ریزمعامله دریافت نشد.')} — نمودار همان آخرین دریافت موفق است.`
+        : errorText(error, 'ریزمعامله دریافت نشد.');
+    }
     finally { if (request === intradayRequest) $('ov-day-intraday').disabled = false; }
   }
 
@@ -587,8 +612,10 @@ export async function mount(root, { state }) {
     if (!isLive() && $('ov-scope').value !== SCOPE_LIVE && $('ov-day-source').value !== 'live') return;
     liveRefreshBusy = true;
     try {
-      if ($('ov-scope').value === SCOPE_LIVE) { await applySelectedScope(); computeDaily(); }
-      if ($('ov-day-source').value === 'live') await loadDayIntraday();
+      // حالت لحظه‌ای تاریخچهٔ چندروزه ندارد؛ پیش‌تر همین خط در آن حالت با
+      // تاریخچهٔ خالی «نگاه چندروزه» می‌ساخت و کل گزارش را پنهان می‌کرد.
+      if (!isLive() && daily && $('ov-scope').value === SCOPE_LIVE) { await applySelectedScope({ quiet: true }); computeDaily({ quiet: true }); }
+      if (isLive() || $('ov-day-source').value === 'live') await loadDayIntraday({ quiet: true });
       lastLiveRefreshAt = Date.now();
     } finally { liveRefreshBusy = false; }
   }
@@ -667,6 +694,7 @@ export async function mount(root, { state }) {
     chain = buildChain(payload.rows || []);
     baseGate.ready(chain.size);
     const list = [...chain.values()].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'fa'));
+    liveBaseMarkup = '';
     baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>' + list.map((item) => `<option value="${esc(item.ins)}">${esc(nameOf(item))} · ${fmt.int(item.contracts)} قرارداد · ${fmt.int(item.expiryList.length)} سررسید</option>`).join('');
     if (keep && chain.has(keep)) baseSelect.value = keep;
     const expired = payload.summary?.expiredInside || 0;
@@ -692,17 +720,19 @@ export async function mount(root, { state }) {
   // حالا حالت لحظه‌ای از همان عکسی تغذیه می‌شود که داشبورد از قبل دارد و
   // **هیچ درخواست تازه‌ای نمی‌زند**. دفتر تاریخی فقط با رفتن به «تاریخی
   // چندروزه» بار می‌شود.
-  let liveUniverse = null, historyLoaded = false;
+  let liveUniverse = null, historyLoaded = false, liveBaseMarkup = '';
 
-  function fillLiveBases(universe) {
+  function fillLiveBases(universe, { quiet = false } = {}) {
     liveUniverse = universe || null;
     const list = liveBaseList(liveUniverse || {});
     const keep = baseSelect.value;
     baseGate.ready(list.length);
-    baseSelect.innerHTML = '<option value="">نماد پایه را انتخاب کن</option>'
+    // فهرستِ یکسان دوباره ساخته نمی‌شود: بازسازی، کشوییِ بازِ کاربر را می‌بست.
+    const markup = '<option value="">نماد پایه را انتخاب کن</option>'
       + list.map((item) => `<option value="${esc(item.ins)}">${esc(item.name)} · ${fmt.int(item.contracts)} قرارداد · ${fmt.int(item.expiries)} سررسید</option>`).join('');
+    if (markup !== liveBaseMarkup) { baseSelect.innerHTML = markup; liveBaseMarkup = markup; }
     if (keep && list.some((item) => String(item.ins) === keep)) baseSelect.value = keep;
-    setStatus(`${fmt.int(list.length)} نماد پایه در تابلوی امروز؛ فهرست از همان عکس زندهٔ بالای صفحه می‌آید و درخواست تازه‌ای ندارد.`);
+    if (!quiet) setStatus(`${fmt.int(list.length)} نماد پایه در تابلوی امروز؛ فهرست از همان عکس زندهٔ بالای صفحه می‌آید و درخواست تازه‌ای ندارد.`);
     return list;
   }
 
@@ -736,7 +766,7 @@ export async function mount(root, { state }) {
       // عکسی که داشبورد از قبل گرفته، بدون یک درخواست اضافه.
       if (isLive() && payload?.universe?.contracts?.length) {
         const before = baseSelect.value;
-        fillLiveBases(payload.universe);
+        fillLiveBases(payload.universe, { quiet: Boolean(before) });
         if (!before && baseSelect.value) void loadLive();
       }
       if (Date.now() - lastLiveRefreshAt < 12_000) return;

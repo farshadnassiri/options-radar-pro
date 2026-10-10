@@ -236,7 +236,7 @@ check('۲. دفتر تاریخی فقط یک بار و فقط در حالت تا
   && (ov248.match(/loadUniverseForRange\(rangeUi\.range\)/g) || []).length === 1
   && /async function ensureHistoryUniverse\(\) \{[\s\S]*?loadUniverseForRange\(rangeUi\.range\)/.test(ov248));
 check('۱. حالت لحظه‌ای فهرست نماد را از عکس زندهٔ داشبورد می‌گیرد',
-  ov248.includes('function fillLiveBases(universe)') && ov248.includes('liveBaseList(liveUniverse || {})')
+  ov248.includes('function fillLiveBases(universe, { quiet = false } = {})') && ov248.includes('liveBaseList(liveUniverse || {})')
   && ov248.includes('liveOpenViewContracts(liveUniverse || {}, pick)')
   && ov248.includes('updateLive(payload)'));
 check('۱. داشبورد عکس فعلی را همان لحظهٔ سوارکردن به نگاه باز می‌دهد',
