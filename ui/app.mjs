@@ -3,6 +3,7 @@
 // قاعده تب تنبل: ماژول هر تب فقط لحظه اولین کلیک وارد می‌شود و اشتراک
 // عکس لحظه‌ای هم فقط برای تب باز برقرار می‌شود. تب بسته، هیچ هزینه‌ای ندارد.
 
+import { installHelp } from '/ui/help.mjs';
 import { FONTS, DEFAULT_FONT, fontOf, fontStack, readFont, applyFont } from '/ui/font-choice.mjs';
 import { fmt, faAgo, faClock, pageTitle, ltr } from '/ui/fmt.mjs';
 import { defaults } from '/core/settings.mjs';
@@ -750,6 +751,8 @@ const getTheme = () => { try { return localStorage.getItem('theme'); } catch { r
 installGlobalCapture();
 // دکمهٔ «ذخیرهٔ تصویر» روی هر نمودار برنامه (ECharts، SVG، میله‌ای HTML).
 installChartImageSaver();
+// «؟» برای همهٔ بخش‌ها و پنهان‌کردنِ توضیحِ ایستا (`ui/help.mjs`).
+installHelp();
 // پیش از هر درخواستِ دیگری: هر `fetch` به `/api/` از این پوشش می‌گذرد.
 installDataLog({ currentTab: () => current || '' });
 

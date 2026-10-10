@@ -62,9 +62,10 @@ check('نمودار بازه، هر پنج قیمت و سه مبنای مرتب�
 check('بازه امروز به کندل تعاملی تبدیل شده و درصد آخرین و پایانی را جدا نشان می‌دهد',
   candleUi245.includes('کندل قیمت امروز قراردادها') && candleUi245.includes('mountCandlePoints')
   && candleUi245.includes('آخرین ${fmt.pct(lastPct)}٪') && candleUi245.includes('پایانی ${fmt.pct(closePct)}٪'));
-check('نقشه و زنجیره دیگر کندل ندارد و به تب کندل راه می‌دهد',
-  !mapUi245.includes('mountCandlePoints') && !mapUi245.includes('fetchInfos')
-  && mapUi245.includes('data-open-mode="candles"'));
+// یادداشتِ «کندل به تب جدا رفت» (۱۴۰۵/۰۷/۱۵) در پاک‌سازیِ توضیح‌ها (۱۴۰۵/۰۷/۱۷)
+// رفت؛ تب کندل خودش در نوار است.
+check('نقشه و زنجیره دیگر کندل ندارد',
+  !mapUi245.includes('mountCandlePoints') && !mapUi245.includes('fetchInfos') && !mapUi245.includes('lmm-candle-moved'));
 check('زنجیره از کاتالوگ ستون مشترک استفاده می‌کند و انتخاب قرارداد دارد',
   mapUi245.includes('contractColumns.filter') && mapUi245.includes('onPick: (row) => selectContract(row.ins)')
   && dashboard245.includes('contractColumns: COLS_CONTRACT'));

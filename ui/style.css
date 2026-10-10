@@ -5779,6 +5779,26 @@ button.lmm-stat.vr-open:hover { border-color: var(--accent-line); }
 :root[data-font="noto-kufi"] { --font-ui: "Noto Kufi Arabic", Vazirmatn, Tahoma, "Segoe UI", system-ui, sans-serif; }
 :root[data-font="noto-naskh"] { --font-ui: "Noto Naskh Arabic", Vazirmatn, Tahoma, "Segoe UI", system-ui, sans-serif; }
 
+/* ——— راهنمای «؟» برای همهٔ بخش‌ها (`ui/help.mjs`) ———
+   توضیحِ ایستا پنهان و در «؟» کنار عنوان است؛ آیکون متن ندارد (فقط ::before)
+   تا عنوانِ تصویرِ ذخیره‌شده «؟» نگیرد. */
+[data-help-moved] { display: none !important; }
+.g-help { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-inline-start: 8px; padding: 0; border: 1px solid var(--line); border-radius: 50%; background: var(--panel); color: var(--muted); font: inherit; font-size: var(--fs-3xs); font-weight: 700; line-height: 1; vertical-align: middle; cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast), border-color var(--motion-fast); }
+.g-help::before { content: "؟"; }
+.g-help:hover, .g-help:focus-visible, .g-help[aria-expanded="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); outline: none; }
+.g-help.inline { margin: 2px 0; }
+.g-help-pop { position: fixed; z-index: 80; width: min(420px, calc(100vw - 16px)); max-height: min(70vh, 560px); overflow: auto; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--panel); color: var(--ink); box-shadow: var(--shadow-xl); font-size: var(--fs-sm); line-height: var(--lh-relaxed); }
+.g-help-pop header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.g-help-pop header b { font-size: var(--fs-md); }
+.g-help-close { flex: none; width: 26px; height: 26px; border: 0; border-radius: 50%; background: var(--panel-2); color: var(--ink-2); font-size: var(--fs-lg); line-height: 1; cursor: pointer; }
+.g-help-body p { margin: 0 0 8px; }
+.g-help-example { margin: 4px 0 8px; padding: 10px 12px; border-inline-start: 3px solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-soft); }
+.g-help-example b { display: block; margin-bottom: 2px; color: var(--accent-ink); font-size: var(--fs-xs); }
+.g-help-example p { margin: 0; font-variant-numeric: tabular-nums; }
+.g-help-more { margin-top: 6px; color: var(--ink-2); font-size: var(--fs-xs); }
+.g-help-more summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.g-help-more p { margin: 6px 0 0; }
+
 /* ——— منوی «ظاهر»: پوسته و قلم ——— */
 .appearance { position: relative; }
 .appearance > summary { list-style: none; cursor: pointer; }
